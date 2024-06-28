@@ -1,0 +1,6 @@
+# Flag to enable remote config
+common --experimental_repo_remote_exec
+
+# By default, build in C++ 17 mode.
+build --cxxopt=-std=c++17
+build --host_cxxopt=-std=c++17
