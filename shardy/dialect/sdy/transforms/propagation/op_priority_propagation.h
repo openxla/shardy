@@ -23,21 +23,22 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "shardy/dialect/sdy/transforms/propagation/aggressive_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 
 namespace mlir {
 namespace sdy {
 
 // The implementation class for the op-priority propagation pass.
-class OpPriorityPropagationPassImpl : public BasicPropagationPassImpl {
+class OpPriorityPropagationPassImpl : public AggressivePropagationPassImpl {
  public:
-  using BasicPropagationPassImpl::BasicPropagationPassImpl;
+  using AggressivePropagationPassImpl::AggressivePropagationPassImpl;
 
   OpPriorityPropagationPassImpl(const OpPriorityPropagationPassImpl& other)
-      : BasicPropagationPassImpl(other) {}
+      : AggressivePropagationPassImpl(other) {}
 
  protected:
-  // See `BasicPropagationPassImpl::propagate` for documentation.
+  // See `AggressivePropagationPassImpl::propagate` for documentation.
   //
   // This override will take the intersection of what `getDirectionToPropagate`
   // returns, and the current direction for a given op and op-priority based on

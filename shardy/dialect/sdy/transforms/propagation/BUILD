@@ -31,6 +31,7 @@ gentbl_cc_library(
 cc_library(
     name = "passes",
     srcs = [
+        "aggressive_propagation.cc",
         "basic_propagation.cc",
         "op_priority_propagation.cc",
         "populate_op_sharding_rules.cc",
@@ -38,14 +39,17 @@ cc_library(
         "user_priority_propagation.cc",
     ],
     hdrs = [
+        "aggressive_propagation.h",
         "basic_propagation.h",
         "op_priority_propagation.h",
         "passes.h",
         "user_priority_propagation.h",
     ],
     deps = [
+        ":aggressive_factor_propagation",
         ":auto_partitioner_registry",
         ":basic_factor_propagation",
+        ":factor_propagation",
         ":op_sharding_rule_builder",
         ":op_sharding_rule_registry",
         ":passes_inc",
@@ -135,6 +139,7 @@ cc_library(
     hdrs = ["auto_partitioner_registry.h"],
     deps = [
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
     ],
 )
@@ -145,6 +150,7 @@ cc_test(
     deps = [
         ":auto_partitioner_registry",
         "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
     ],
 )
@@ -175,10 +181,24 @@ cc_library(
 )
 
 cc_library(
+    name = "factor_propagation",
+    hdrs = ["factor_propagation.h"],
+    deps = [
+        ":sharding_projection",
+        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:macros",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_library(
     name = "basic_factor_propagation",
     srcs = ["basic_factor_propagation.cc"],
     hdrs = ["basic_factor_propagation.h"],
     deps = [
+        ":factor_propagation",
         ":sharding_projection",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:macros",
@@ -211,6 +231,7 @@ cc_library(
     hdrs = ["aggressive_factor_propagation.h"],
     deps = [
         ":basic_factor_propagation",
+        ":factor_propagation",
         ":sharding_projection",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:macros",

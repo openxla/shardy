@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
+#include "shardy/dialect/sdy/transforms/propagation/aggressive_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -129,14 +130,14 @@ struct OpPriorityPropagationPass
 LogicalResult OpPriorityPropagationPassImpl::propagate(
     ModuleOp moduleOp, GetDirectionToPropagateFn getDirectionToPropagate) {
   if (!runOpPriorityPropagation) {
-    return BasicPropagationPassImpl::propagate(moduleOp,
-                                               getDirectionToPropagate);
+    return AggressivePropagationPassImpl::propagate(moduleOp,
+                                                    getDirectionToPropagate);
   }
   // Reset currentOpPriority to 0. Before running the pass. This same instance
   // could have been run earlier already (e.g. with a different user priority).
   for (int64_t currentOpPriority = 0;
        currentOpPriority < opPropagationSchedule.size(); currentOpPriority++) {
-    if (BasicPropagationPassImpl::propagate(
+    if (AggressivePropagationPassImpl::propagate(
             moduleOp, getOpBasedDirectionToPropagate(currentOpPriority,
                                                      getDirectionToPropagate))
             .failed()) {

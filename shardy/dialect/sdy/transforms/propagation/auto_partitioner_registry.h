@@ -19,6 +19,7 @@ limitations under the License.
 #include <functional>
 
 #include "mlir/Pass/PassOptions.h"
+#include "mlir/IR/DialectRegistry.h"  // from @llvm-project
 
 namespace mlir {
 namespace sdy {
@@ -32,21 +33,33 @@ namespace sdy {
 // attributes, but should NOT modify the module itself (replace ops, etc).
 using AutoPartitionerCallback = std::function<void(OpPassManager&)>;
 
+// A callback that takes a `DialectRegistry`, and registers the dialects
+// required for automatic partitioning.
+using RegisterDependantDialectsCallback = std::function<void(DialectRegistry&)>;
+
 // A registry for an auto-partitioner callback that Shardy propagation
 // should use in case auto-partitioning is enabled.
 //
 // The registry is thread-safe, and a callback can only be set once.
 class AutoPartitionerRegistry {
  public:
-  // Registers the given `callback`.
+  // Registers the given `callback` and its required dependencies.
   //
   // Assumes no callback has been registered yet.
-  static void setCallback(AutoPartitionerCallback callback);
+  static void setCallback(
+      AutoPartitionerCallback callback,
+      RegisterDependantDialectsCallback dialectsDependenciesCallback);
 
   // Adds passes to the given `pm` to invoke AutomaticPartitioner.
   //
   // Assumes a callback has been registered.
   static void addPasses(OpPassManager& pm);
+
+  // Registers the dependencies of the auto-partitioner passes that needs
+  // to exist before calling the auto-partitioner pipeline.
+  //
+  // Assumes a callback has been registered.
+  static void getDependentDialects(DialectRegistry& registry);
 
   // Clears the registered callback.
   static void clear();

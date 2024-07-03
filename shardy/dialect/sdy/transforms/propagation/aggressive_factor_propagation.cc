@@ -24,6 +24,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
@@ -137,6 +138,30 @@ AggressiveFactorPropagation::getCompatibleMajorShardingAxesForAllFactors(
           },
           mesh);
     }
+  }
+
+  return result;
+}
+
+UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
+    ShardingProjection& projection, PropagationDirection direction,
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+    bool conservativePropagation) const {
+  UpdateTensorShardings result{
+      .updateOperands = BitVector(projection.getNumOperands()),
+      .updateResults = BitVector(projection.getNumResults())};
+
+  // We get the compatible major sharding axes for all factors.
+  AxesPerFactor axesPerFactor = getCompatibleMajorShardingAxesForAllFactors(
+      projection, direction, factorSizes, mesh, op, conservativePropagation);
+
+  for (auto [factorIndex, axesToPropagate] : llvm::enumerate(axesPerFactor)) {
+    // Update all shardings along this factor if possible.
+    auto [updateOperandForFactor, updateResultForFactor] =
+        projection.updateSharding(factorIndex, axesToPropagate);
+
+    result.updateOperands |= updateOperandForFactor;
+    result.updateResults |= updateResultForFactor;
   }
 
   return result;

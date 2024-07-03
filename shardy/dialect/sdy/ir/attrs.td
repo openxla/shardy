@@ -45,12 +45,26 @@ def Sdy_MeshAxis : AttrDef<Sdy_Dialect, "MeshAxis"> {
 
 def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   let mnemonic = "mesh";
-  let summary = "Mesh of named axes";
+  let summary = "Mesh of named axes or a device id";
+  let description = [{
+    "A mesh is either a list of axes or a single device id but can't have both."
+  }];
   let parameters = (ins
-      ArrayRefParameter<"MeshAxisAttr">:$axes
+      OptionalArrayRefParameter<"MeshAxisAttr">:$axes,
+      OptionalParameter<"std::optional<int64_t>">: $device_id
   );
-  let assemblyFormat = "`<` $axes `>`";
+  let assemblyFormat = "`<`(`device_id````=```$device_id^):($axes)?`>`";
+
   let genVerifyDecl = 1;
+
+  let builders = [
+    AttrBuilder<(ins "mlir::ArrayRef<MeshAxisAttr>":$axes), [{
+      return $_get($_ctxt, axes, /*device_id=*/std::nullopt);
+    }]>,
+    AttrBuilder<(ins "int64_t":$device_id), [{
+      return $_get($_ctxt, /*axes=*/ArrayRef<MeshAxisAttr>(), device_id);
+    }]>,
+  ];
 
   let extraClassDeclaration = [{
     int64_t getAxisSize(StringRef axisName) const;

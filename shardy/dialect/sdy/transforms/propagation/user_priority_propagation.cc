@@ -300,6 +300,16 @@ struct UserPriorityPropagationPass
     this->dumpDirectory = dumpDirectory.str();
     this->conservativePropagation = conservativePropagation;
   }
+
+  void getDependentDialects(mlir::DialectRegistry& registry) const override {
+    UserPriorityPropagationPassImpl::getDependentDialects(registry);
+    // If we have a dynamically loaded pipeline, we need to add their dependency
+    // ahead of executing this pass, to avoid multi-threading issues within the
+    // pass.
+    if (AutoPartitionerRegistry::isRegistered()) {
+      AutoPartitionerRegistry::getDependentDialects(registry);
+    }
+  }
 };
 
 void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
