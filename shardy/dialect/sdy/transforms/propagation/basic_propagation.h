@@ -27,6 +27,8 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 
 namespace mlir {
 namespace sdy {
@@ -58,15 +60,29 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
   // producing value before this method is called, and propagating the updated
   // sharding back to the function outputs afterwards.
   //
-  // The `getDirectionToPropagate` is used to determine in which direction
-  // propagation should happen on a given operation.
+  // The `factorPropagation` determines how we propagate shardings along
+  // factors.
+  //
+  // The `getDirectionToPropagate` determines in which direction propagation
+  // should happen on a given operation.
   //
   // NOTE: there is no propagation between call ops and their called functions
   // (e.g. pushing the sharding of an operand in a call op to the function's
   // argument) as we assume the inliner pass was called.
+  LogicalResult propagate(
+      ModuleOp moduleOp, const FactorPropagation& factorPropagation,
+      GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
+
+  // Same as `propagate` above, but uses the strategy in private member
+  // `basicFactorPropagation`. Sub-classes should override this method to
+  // extend the propagation algorithm and define higher level strategies.
   virtual LogicalResult propagate(
       ModuleOp moduleOp,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
+
+  const BasicFactorPropagation& getBasicFactorPropagation() const {
+    return basicFactorPropagation;
+  };
 
   void runOnOperation() override;
 
@@ -87,6 +103,10 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
       llvm::cl::desc("whether to disallow split axes and non-divisible "
                      "sharding axes during propagation"),
       llvm::cl::init(false)};
+
+ private:
+  // This class owns the basic factor propagation strategy.
+  BasicFactorPropagation basicFactorPropagation;
 };
 
 // Runs the basic sharding propagation algorithm (see

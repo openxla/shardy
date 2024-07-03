@@ -61,8 +61,8 @@ EmitErrorFn getEmitErrorFn(Operation* op) {
   return [op](StringRef msg) { return op->emitOpError(msg); };
 }
 
-EmitErrorFn getEmitValueInRangeErrorFn(EmitErrorFn emitError,
-                                       int64_t numValues, int64_t index) {
+EmitErrorFn getEmitValueInRangeErrorFn(EmitErrorFn emitError, int64_t numValues,
+                                       int64_t index) {
   return [=](StringRef msg) {
     if (numValues == 1) {
       return emitError("- ") << msg;
@@ -273,9 +273,8 @@ LogicalResult verifyTensorShardingAttr(
   if (!llvm::is_sorted(replicatedAxes, axisRefComparator)) {
     return emitError("replicated axes are not ordered w.r.t. mesh");
   }
-  if (failed(verifyAxisRefList(replicatedAxes, axisNameToSize,
-                               seenAxisRefs, axisNameToSubAxes,
-                               emitError))) {
+  if (failed(verifyAxisRefList(replicatedAxes, axisNameToSize, seenAxisRefs,
+                               axisNameToSubAxes, emitError))) {
     return failure();
   }
 
@@ -339,8 +338,8 @@ LogicalResult verifyTensorShardingPerValueAttr(
       shardingPerValueAttr.getShardings();
   if (shardingsPerValue.size() != types.size()) {
     return emitError("shardings don't match number of values: ")
-           << shardingsPerValue.size() << " shardings"
-           << " vs " << types.size() << " values";
+           << shardingsPerValue.size() << " shardings" << " vs " << types.size()
+           << " values";
   }
 
   MeshAttr mesh;
@@ -375,9 +374,8 @@ LogicalResult verifyTensorShardingPerValueAttr(
 }
 
 // Verifies an attribute of either a function argument or result.
-LogicalResult verifyFuncAttribute(FuncOp funcOp, NamedAttribute attr,
-                                  Type type, int64_t index,
-                                  StringRef valueKindStr) {
+LogicalResult verifyFuncAttribute(FuncOp funcOp, NamedAttribute attr, Type type,
+                                  int64_t index, StringRef valueKindStr) {
   EmitErrorFn emitError = [=](StringRef msg) {
     return funcOp->emitOpError(valueKindStr) << " " << index << " - " << msg;
   };
@@ -525,12 +523,18 @@ LogicalResult MeshAxisAttr::verify(
 
 LogicalResult MeshAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError,
-    ArrayRef<MeshAxisAttr> axes) {
+    ArrayRef<MeshAxisAttr> axes, std::optional<int64_t> deviceId) {
+  if (deviceId && !axes.empty()) {
+    emitError() << "mesh cannot have both axes and device id";
+  }
   SmallDenseSet<StringRef> seenAxisNames;
   for (MeshAxisAttr axis : axes) {
     if (!seenAxisNames.insert(axis.getName()).second) {
       emitError() << "duplicate axis name: \"" << axis.getName() << "\"";
     }
+  }
+  if (deviceId && *deviceId < 0) {
+    emitError() << "device id must be non-negative, got: " << *deviceId;
   }
   return success();
 }
@@ -588,8 +592,8 @@ int64_t accumulatedManualAxesSize(Operation* op,
                                   MeshAttr mesh) {
   int64_t axesFactor = 1;
   for (AxisRefAttr axisRef : dimShardingAxes) {
-    if (std::find(manualAxes.begin(), manualAxes.end(),
-                  axisRef.getName()) != manualAxes.end()) {
+    if (std::find(manualAxes.begin(), manualAxes.end(), axisRef.getName()) !=
+        manualAxes.end()) {
       axesFactor *= axisRef.getSize(mesh);
     }
   }
@@ -651,10 +655,9 @@ LogicalResult verifyManualComputationValue(
   //    region match.
   if (globalTypes.size() != localTypes.size()) {
     return op->emitOpError("number of op ")
-           << valueKindStr << "s and region "
-           << valueKindStr << "s must match. Op has "
-           << globalTypes.size() << " op " << valueKindStr
-           << "s and " << localTypes.size() << " region "
+           << valueKindStr << "s and region " << valueKindStr
+           << "s must match. Op has " << globalTypes.size() << " op "
+           << valueKindStr << "s and " << localTypes.size() << " region "
            << valueKindStr << "s";
   }
 

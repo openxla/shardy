@@ -23,6 +23,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
@@ -38,7 +39,7 @@ using AxesPerFactorRef = ArrayRef<SmallVector<AxisRefAttr>>;
 //
 // Aggressive strategies should extend this class, and override one or more of
 // the virtual methods that this class provides.
-class BasicFactorPropagation {
+class BasicFactorPropagation : public FactorPropagation {
  public:
   virtual ~BasicFactorPropagation() = default;
 
@@ -79,6 +80,8 @@ class BasicFactorPropagation {
   //   - Given factor shardings ["a":(1)2] and ["a":(1)4], returns ["a":(1)4].
   //   - Given factor shardings ["a":(1)2, "b"] and ["a":(1)4], returns
   //     ["a":(1)2].
+  //
+  // TODO(b/350563653). Mark the following two methods as protected or private.
   virtual SmallVector<AxisRefAttr> getCompatibleMajorShardingAxes(
       const ShardingProjection& projection, int64_t factorIndex,
       PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
@@ -90,6 +93,12 @@ class BasicFactorPropagation {
       const ShardingProjection& projection, PropagationDirection direction,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const;
+
+  // Propagates the factor shardings in `projection`.
+  UpdateTensorShardings propagateFactorShardings(
+      ShardingProjection& projection, PropagationDirection direction,
+      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+      bool conservativePropagation) const override;
 
  protected:
   // Finds the longest prefix of axes that shard the given factor, such that all

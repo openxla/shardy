@@ -21,6 +21,7 @@ limitations under the License.
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
 #include "mlir/Pass/PassOptions.h"
+#include "mlir/IR/DialectRegistry.h"  // from @llvm-project
 
 namespace mlir {
 namespace sdy {
@@ -30,11 +31,15 @@ namespace {
 // The registered callback.
 static llvm::ManagedStatic<std::optional<AutoPartitionerCallback>>
     registeredCallback;
+static llvm::ManagedStatic<std::optional<RegisterDependantDialectsCallback>>
+    registeredDependenciesCallback;
 static llvm::ManagedStatic<llvm::sys::Mutex> mutex;
 
 }  // namespace
 
-void AutoPartitionerRegistry::setCallback(AutoPartitionerCallback callback) {
+void AutoPartitionerRegistry::setCallback(
+    AutoPartitionerCallback callback,
+    RegisterDependantDialectsCallback dialectsDependenciesCallback) {
   llvm::sys::ScopedLock scopedLock(*mutex);
 
   // TODO(tomnatan): find a better way to fail in this case, and consider
@@ -42,6 +47,7 @@ void AutoPartitionerRegistry::setCallback(AutoPartitionerCallback callback) {
   // by the user to sdy).
   assert(!isRegistered() && "auto-partitioner callback already registered");
   *registeredCallback = callback;
+  *registeredDependenciesCallback = dialectsDependenciesCallback;
 }
 
 void AutoPartitionerRegistry::addPasses(OpPassManager& pm) {
@@ -50,13 +56,19 @@ void AutoPartitionerRegistry::addPasses(OpPassManager& pm) {
   registeredCallback->value()(pm);
 }
 
+void AutoPartitionerRegistry::getDependentDialects(DialectRegistry& registry) {
+  assert(isRegistered() && "auto-partitioner callback wasn't registered");
+  registeredDependenciesCallback->value()(registry);
+}
+
 void AutoPartitionerRegistry::clear() {
   llvm::sys::ScopedLock scopedLock(*mutex);
   registeredCallback->reset();
 }
 
 bool AutoPartitionerRegistry::isRegistered() {
-  return registeredCallback->has_value();
+  return registeredCallback->has_value() &&
+         registeredDependenciesCallback->has_value();
 }
 
 }  // namespace sdy

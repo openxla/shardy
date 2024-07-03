@@ -33,7 +33,8 @@ def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
   let summary = "Named mesh";
   let description = [{
     Defines a new named mesh. All meshes in a module must have the same number
-    of devices. The mesh is a `Symbol` operation that appears in the module's
+    of devices (except for meshes with a single device_id).
+    The mesh is a `Symbol` operation that appears in the module's
     `SymbolTable` and can be referenced by its `name`.
   }];
 

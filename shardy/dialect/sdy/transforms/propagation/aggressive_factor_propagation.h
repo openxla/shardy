@@ -55,6 +55,11 @@ class AggressiveFactorPropagation : public BasicFactorPropagation {
       const ShardingProjection& projection, PropagationDirection direction,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const override;
+
+  UpdateTensorShardings propagateFactorShardings(
+      ShardingProjection& projection, PropagationDirection direction,
+      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+      bool conservativePropagation) const override;
 };
 
 }  // namespace sdy

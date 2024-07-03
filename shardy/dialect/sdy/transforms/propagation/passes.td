@@ -33,6 +33,21 @@ def BasicPropagationPass : PassBase<"sdy-basic-propagate", "BasicPropagationPass
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def AggressivePropagationPass : PassBase<"sdy-aggressive-propagate", "AggressivePropagationPassImpl"> {
+  let summary = "Runs the aggressive sharding propagation algorithm.";
+  let description = [{
+    Propagate shardings with an aggressive factor propagation strategy. The
+    basic strategy only propagates shardings without conflicts, while the
+    aggressive strategy resolves conflicts. Higher aggressiveness can reduce the
+    memory footprint at the cost of potential communication.
+
+    Options:
+      * All options from `BasicPropagationPass`.
+      * `propagation-strategy` - which factor propagation strategy to use.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def OpPriorityPropagationPass : PassBase<"sdy-op-priority-propagate", "OpPriorityPropagationPassImpl"> {
   let summary = "Runs the op-priority propagation algorithm.";
   let description = [{
@@ -49,12 +64,12 @@ def OpPriorityPropagationPass : PassBase<"sdy-op-priority-propagate", "OpPriorit
     `FORWARD`/`BACKWARD` is seen first then `BACKWARD`/`FORWARD` is seen, the
      direction is `BOTH`.
 
-    This propagation strategy extends the basic propagation strategy, which
-    means that at each op-priority iteration, a full basic propagation is
-    applied (see `BasicPropagationPass`).
+    This propagation strategy extends the aggressive propagation strategy, which
+    means that at each op-priority iteration, a full aggressive propagation is
+    applied (see `AggressivePropagationPass`).
 
     Options:
-      * All options from `BasicPropagationPass`.
+      * All options from `AggressivePropagationPass`.
       * `run-op-priority-propagation` - whether to run (or skip) op-priority
         propagation.
   }];

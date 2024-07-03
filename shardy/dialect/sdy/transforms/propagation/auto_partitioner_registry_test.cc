@@ -15,24 +15,17 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
 
-#include "mlir/Pass/PassManager.h"
 #include <gtest/gtest.h>
 
 namespace mlir {
 namespace sdy {
 
-namespace {
-
-AutoPartitionerCallback noOpCallback() {
-  return [](OpPassManager&) {};
-}
-
-}  // namespace
-
 TEST(AutoPartitionerRegistryTest, RegisterAutoPartitioner) {
   AutoPartitionerRegistry registry;
   ASSERT_FALSE(registry.isRegistered());
-  registry.setCallback(noOpCallback());
+  // Set NoOp callbacks.
+  registry.setCallback(AutoPartitionerCallback(),
+                       RegisterDependantDialectsCallback());
   EXPECT_TRUE(registry.isRegistered());
   registry.clear();
   EXPECT_FALSE(registry.isRegistered());
