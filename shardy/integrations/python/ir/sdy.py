@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Python bindings for Shardy."""
+"""Python bindings for the SDY dialect."""
 
-# pylint: disable=unused-import
-from . import ir
+# pylint: disable=wildcard-import
+from .._mlir_libs._sdy import *
+from ._sdy_ops_gen import *

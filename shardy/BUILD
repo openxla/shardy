@@ -5,7 +5,11 @@ package(default_visibility = ["//visibility:public"])
 # Allow visibility from the mlir language server.
 package_group(
     name = "friends",
-    packages = ["//third_party/py/openxla/sdy/..."],
+    packages = [
+        "//third_party/py/mlir/...",
+        "//third_party/py/openxla/sdy/...",
+        "//third_party/tensorflow/compiler/xla/service/spmd/shardy/...",
+    ],
 )
 
 # Generates lit config input file by applying path placeholder substitutions

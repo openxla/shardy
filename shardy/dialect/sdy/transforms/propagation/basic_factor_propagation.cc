@@ -121,7 +121,7 @@ void BasicFactorPropagation::truncateAxesByRemovingConflicts(
     std::function<std::optional<AxisRefAttr>(AxisRefAttr curAxis,
                                              int64_t shardedSize)>
         removeConflicts,
-    MeshAttr mesh) const {
+    MeshAttr mesh, bool conservativePropagation) const {
   int64_t shardedSize = 1;
   for (const auto [axisIndex, curAxis] : llvm::enumerate(axes)) {
     // This check is only for tests. For convenience we can pass a `MeshAttr()`
@@ -131,7 +131,7 @@ void BasicFactorPropagation::truncateAxesByRemovingConflicts(
     }
 
     std::optional<AxisRefAttr> newAxis = removeConflicts(curAxis, shardedSize);
-    if (!newAxis) {
+    if (!newAxis || (conservativePropagation && newAxis->getSubAxisInfo())) {
       axes.truncate(axisIndex);
       return;
     }
@@ -325,11 +325,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
 
 std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     AxisRefAttr axisRef, const TensorFactorShardings& tensorFactorSharding,
-    int64_t factorIndex, int64_t shardedSize, int64_t factorSize,
-    bool conservativePropagation) const {
-  if (conservativePropagation && axisRef.getSubAxisInfo()) {
-    return std::nullopt;
-  }
+    int64_t factorIndex, int64_t shardedSize, int64_t factorSize) const {
   const FactorIndexToSharding& factorIndexToSharding =
       tensorFactorSharding.factorIndexToSharding;
 
@@ -356,16 +352,14 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
 
 std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     AxisRefAttr axisRef, const ShardingProjection& projection,
-    int64_t factorIndex, int64_t shardedSize, int64_t factorSize,
-    bool conservativePropagation) const {
+    int64_t factorIndex, int64_t shardedSize, int64_t factorSize) const {
   AxisRefAttr result = axisRef;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
     ASSIGN_OR_RETURN_IF_NULLOPT(
-        result,
-        compatiblePrefix(result, tensorFactorSharding, factorIndex, shardedSize,
-                         factorSize, conservativePropagation));
+        result, compatiblePrefix(result, tensorFactorSharding, factorIndex,
+                                 shardedSize, factorSize));
   }
   return result;
 }
@@ -388,9 +382,9 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
       resultAxes,
       [&](AxisRefAttr axisRef, int64_t shardedSize) {
         return compatiblePrefix(axisRef, projection, factorIndex, shardedSize,
-                                factorSize, conservativePropagation);
+                                factorSize);
       },
-      mesh);
+      mesh, conservativePropagation);
 
   return resultAxes;
 }

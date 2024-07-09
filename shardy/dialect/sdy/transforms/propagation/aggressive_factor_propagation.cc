@@ -60,7 +60,7 @@ AggressiveFactorPropagation::getCompatibleMajorShardingAxesForAllFactors(
                 axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
                 shardedSize, factorSizes[factorIndex]);
           },
-          mesh);
+          mesh, conservativePropagation);
     }
   }
 
@@ -136,7 +136,7 @@ AggressiveFactorPropagation::getCompatibleMajorShardingAxesForAllFactors(
                 axisRef, tensorFactorSharding.factorIndexToSharding,
                 factorIndex, resultSnapshot);
           },
-          mesh);
+          mesh, conservativePropagation);
     }
   }
 

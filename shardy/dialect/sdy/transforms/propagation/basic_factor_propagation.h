@@ -145,8 +145,9 @@ class BasicFactorPropagation : public FactorPropagation {
 
   // For each axis in `axes`, call `removeConflicts` to get the compatible
   // prefix.
-  // 1. If `removeConflicts` returns `std::nullopt`, remove the current axis and
-  //    the following ones.
+  // 1. If (1) `removeConflicts` returns `std::nullopt`, or (2)
+  //    `conservativePropagation` is true and `removeConflicts` returns a
+  //    sub-axis, remove the current axis and the following ones.
   // 2. If `removeConflicts` returns a prefix that is different from the current
   //    axis, replace the current axis with the returned one and remove the
   //    following axes.
@@ -156,7 +157,7 @@ class BasicFactorPropagation : public FactorPropagation {
       std::function<std::optional<AxisRefAttr>(AxisRefAttr curAxis,
                                                int64_t shardedSize)>
           removeConflicts,
-      MeshAttr mesh) const;
+      MeshAttr mesh, bool conservativePropagation) const;
 
  private:
   // Returns the largest compatible prefix of `axisRef` by removing conflicts in
@@ -169,15 +170,13 @@ class BasicFactorPropagation : public FactorPropagation {
   // by removing conflicts with other factors and within the factor itself.
   std::optional<AxisRefAttr> compatiblePrefix(
       AxisRefAttr axisRef, const TensorFactorShardings& tensorFactorSharding,
-      int64_t factorIndex, int64_t shardedSize, int64_t factorSize,
-      bool conservativePropagation) const;
+      int64_t factorIndex, int64_t shardedSize, int64_t factorSize) const;
 
   // Returns the largest compatible prefix of `axisRef` by removing conflicts
   // with every `TensorFactorShardings` in `projection`.
   std::optional<AxisRefAttr> compatiblePrefix(
       AxisRefAttr axisRef, const ShardingProjection& projection,
-      int64_t factorIndex, int64_t shardedSize, int64_t factorSize,
-      bool conservativePropagation) const;
+      int64_t factorIndex, int64_t shardedSize, int64_t factorSize) const;
 };
 
 }  // namespace sdy
