@@ -545,10 +545,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           })
       .Case<stablehlo::DynamicUpdateSliceOp>(
           [](stablehlo::DynamicUpdateSliceOp dynamicUpdateSlice) {
-            return createMismatchedDimSizeShardingRule(
-                dynamicUpdateSlice, dynamicUpdateSlice.getOperand().getType(),
-                dynamicUpdateSlice.getUpdate().getType(),
-                /*addFactorForMismatchedSize=*/false);
+            OpShardingRuleBuilder builder(dynamicUpdateSlice);
+            ArrayRef<int64_t> operandShape =
+                dynamicUpdateSlice.getOperand().getType().getShape();
+            ArrayRef<int64_t> updateShape =
+                dynamicUpdateSlice.getUpdate().getType().getShape();
+
+            SmallVector<int64_t> operandDims(
+                dynamicUpdateSlice->getNumOperands(), kNullDim);
+            for (auto [dim, dimSizes] :
+                 llvm::enumerate(llvm::zip_equal(operandShape, updateShape))) {
+              auto [operandDimSize, updateDimSize] = dimSizes;
+              operandDims[0] = dim;
+              operandDims[1] = operandDimSize == updateDimSize ? dim : kNullDim;
+              builder.addFactor(operandDims, dim, operandDimSize);
+            }
+
+            return builder.build();
           })
       .Case<stablehlo::FftOp>([](stablehlo::FftOp fft) {
         ArrayRef<int64_t> inShape = getTensorShape(fft.getOperand());

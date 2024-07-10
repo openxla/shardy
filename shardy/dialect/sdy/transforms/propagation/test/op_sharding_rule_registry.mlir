@@ -298,7 +298,7 @@ func.func @dynamic_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<i32>, %arg2: t
 
 // CHECK-LABEL: func @dynamic_update_slice
 func.func @dynamic_update_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2xf32>, %arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>) -> tensor<32x4x8xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, l, m], [], [], [])->([i, n, o]) {i=32, j=1, k=1, l=1, m=1, n=1, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, l, m], [], [], [])->([i, j, k]) {i=32, j=4, k=8, l=1, m=1}>
   %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3, %arg4 : (tensor<32x4x8xf32>, tensor<32x1x2xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x4x8xf32>
   return %0 : tensor<32x4x8xf32>
 }
