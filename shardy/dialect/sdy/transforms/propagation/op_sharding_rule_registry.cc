@@ -558,7 +558,6 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         // reductions are performed across those dimensions, the other
         // dimensions are batch dimensions. We still want to propagate through
         // the trailing dimensions even though that would require communication.
-        // TODO(tomnatan): consider also adding a factor fo truncated last dim.
         bool isLastDimTruncated = inShape.back() != outShape.back();
         return OpShardingRuleBuilder(fft)
             .addPointwise(inShape.drop_back(isLastDimTruncated ? 1 : 0))
