@@ -319,7 +319,7 @@ func.func @fft_truncated_result(%arg0: tensor<8x32x64xf32>) -> tensor<8x32x33xco
 
 // CHECK-LABEL: @gather
 func.func @gather(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([k, l, n], [i, j, o])->([i, j, m, n]) {i=2, j=3, k=3, l=4, m=2, n=2, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([l, m, k], [i, j, n])->([i, j, o, k]) {i=2, j=3, k=2, l=1, m=1, n=1, o=1}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [2, 3],
@@ -330,6 +330,40 @@ func.func @gather(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<
     indices_are_sorted = false
   } : (tensor<3x4x2xf32>, tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32>
   return %0 : tensor<2x3x2x2xf32>
+}
+
+// CHECK-LABEL: @gather_batching_dims
+func.func @gather_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x2xi64>) -> tensor<7x5x3x2xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, l, i, m], [i, j, k, n])->([i, j, k, o]) {i=7, j=5, k=3, l=1, m=1, n=1, o=1}>
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [3],
+      collapsed_slice_dims = [1],
+      operand_batching_dims = [0, 2],
+      start_indices_batching_dims = [1, 0],
+      start_index_map = [1, 3],
+      index_vector_dim = 3>,
+    slice_sizes = array<i64: 1, 1, 1, 2>,
+    indices_are_sorted = false
+  } : (tensor<5x3x7x4xf32>, tensor<7x5x3x2xi64>) -> tensor<7x5x3x2xf32>
+  return %0 : tensor<7x5x3x2xf32>
+}
+
+// CHECK-LABEL: @gather_index_vector_dim_before_batching_dim
+func.func @gather_index_vector_dim_before_batching_dim(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x2x5x3xi64>) -> tensor<7x5x3x2xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, l, i, m], [i, n, j, k])->([i, j, k, o]) {i=7, j=5, k=3, l=1, m=1, n=1, o=1}>
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [3],
+      collapsed_slice_dims = [1],
+      operand_batching_dims = [0, 2],
+      start_indices_batching_dims = [2, 0],
+      start_index_map = [1, 3],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 1, 1, 2>,
+    indices_are_sorted = false
+  } : (tensor<5x3x7x4xf32>, tensor<7x2x5x3xi64>) -> tensor<7x5x3x2xf32>
+  return %0 : tensor<7x5x3x2xf32>
 }
 
 // CHECK-LABEL: func @pad
@@ -510,7 +544,7 @@ func.func @reverse(%arg0: tensor<4x32x8x2xf32>) -> tensor<4x32x8x2xf32> {
 
 // CHECK-LABEL: @scatter_single_input
 func.func @scatter_single_input(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>, %arg2: tensor<2x3x2x2xf32>) -> tensor<3x4x2xf32>{
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([k, l, n], [i, j, o], [i, j, m, n])->([k, l, n]) {i=2, j=3, k=3, l=4, m=2, n=2, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([l, m, k], [i, j, n], [i, j, o, k])->([p, q, k]) {i=2, j=3, k=2, l=1, m=1, n=1, o=1, p=1, q=1}>
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
@@ -527,6 +561,27 @@ func.func @scatter_single_input(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi6
   return %0 : tensor<3x4x2xf32>
 }
 
+// CHECK-LABEL: @scatter_batching_dims
+func.func @scatter_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x2xi64>, %arg2: tensor<7x5x3x2xf32>) -> tensor<5x3x7x4xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, l, i, m], [i, j, k, n], [i, j, k, o])->([j, p, i, q]) {i=7, j=5, k=3, l=1, m=1, n=1, o=1, p=1, q=1}>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+    ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+      %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
+      stablehlo.return %1 : tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [3],
+      inserted_window_dims = [1],
+      input_batching_dims = [0, 2],
+      scatter_indices_batching_dims = [1, 0],
+      scatter_dims_to_operand_dims = [1, 3],
+      index_vector_dim = 3>,
+    indices_are_sorted = false,
+    unique_indices = false
+  } : (tensor<5x3x7x4xf32>, tensor<7x5x3x2xi64>, tensor<7x5x3x2xf32>) -> tensor<5x3x7x4xf32>
+  return %0 : tensor<5x3x7x4xf32>
+}
+
 // CHECK-LABEL: @scatter_multiple_input
 func.func @scatter_multiple_input(%arg0: tensor<3x4x2xi32>,
                                   %arg1: tensor<3x4x2xf32>,
@@ -534,7 +589,7 @@ func.func @scatter_multiple_input(%arg0: tensor<3x4x2xi32>,
                                   %arg3: tensor<2x3x2x2xi32>,
                                   %arg4: tensor<2x3x2x2xf32>)
     -> (tensor<3x4x2xi32>, tensor<3x4x2xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([k, l, n], [k, l, n], [i, j, o], [i, j, m, n], [i, j, m, n])->([k, l, n], [k, l, n]) {i=2, j=3, k=3, l=4, m=2, n=2, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([l, m, k], [n, o, k], [i, j, p], [i, j, q, k], [i, j, r, k])->([s, t, k], [u, v, k]) {i=2, j=3, k=2, l=1, m=1, n=1, o=1, p=1, q=1, r=1, s=1, t=1, u=1, v=1}>
   %0:2 = "stablehlo.scatter"(%arg0, %arg1, %arg2, %arg3, %arg4) ({
     ^bb0(%arg5: tensor<i32>, %arg6: tensor<f32>, %arg7: tensor<i32>, %arg8: tensor<f32>):
       %1 = stablehlo.add %arg5, %arg7 : tensor<i32>

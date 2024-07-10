@@ -58,17 +58,27 @@ using func::FuncOp;
 struct ValueSharding {
   Value value;
   TensorShardingAttr sharding;
+
+  ValueSharding(Value value, TensorShardingAttr sharding)
+      : value(value), sharding(sharding) {}
 };
 
 // A function result number and its original sharding.
 struct FuncResultSharding {
   int64_t resNum;
   TensorShardingAttr sharding;
+
+  FuncResultSharding(int64_t resNum, TensorShardingAttr sharding)
+      : resNum(resNum), sharding(sharding) {}
 };
 
 struct FuncOpAndResultShardings {
   FuncOp funcOp;
   SmallVector<FuncResultSharding> funcResultShardings;
+
+  explicit FuncOpAndResultShardings(
+      FuncOp funcOp, ArrayRef<FuncResultSharding> funcResultShardings = {})
+      : funcOp(funcOp), funcResultShardings(funcResultShardings) {}
 };
 
 // References to a subset of value and function result shardings of a function.
@@ -193,8 +203,8 @@ void addValueShardingToPriorityMapAndInitialize(
   }
   clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
   for (int64_t priority : prioritiesInSharding) {
-    priorityToShardingReferences[priority].valueShardings.push_back(
-        ValueSharding{value, sharding});
+    priorityToShardingReferences[priority].valueShardings.emplace_back(
+        value, sharding);
   }
   setSharding(value, getInitializedSharding(sharding, getOwningOp(value)));
 }
@@ -211,7 +221,7 @@ SmallVector<FuncResultSharding>& getFuncResultShardings(
   // 2. this is a new `funcOp` that this function is running on
   if (funcOpAndResultShardingsVec.empty() ||
       funcOpAndResultShardingsVec.back().funcOp != funcOp) {
-    funcOpAndResultShardingsVec.push_back(FuncOpAndResultShardings{funcOp, {}});
+    funcOpAndResultShardingsVec.emplace_back(funcOp);
   }
   return funcOpAndResultShardingsVec.back().funcResultShardings;
 }
@@ -234,7 +244,7 @@ void addFuncResultShardingToPriorityMapAndInitialize(
     getFuncResultShardings(
         priorityToShardingReferences[priority].funcOpAndResultShardingsVec,
         funcOp)
-        .push_back(FuncResultSharding{resNum, sharding});
+        .emplace_back(resNum, sharding);
   }
   funcOp.setResultAttr(resNum, kShardingAttr,
                        getInitializedSharding(sharding, funcOp));

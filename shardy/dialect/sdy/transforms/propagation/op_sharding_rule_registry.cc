@@ -99,6 +99,8 @@ void addGatherScatterFactors(RankedTensorType inputType,
                              int64_t indexVectorDim,
                              ArrayRef<int64_t> offsetDims,
                              ArrayRef<int64_t> collapsedSliceDims,
+                             ArrayRef<int64_t> inputBatchingDims,
+                             ArrayRef<int64_t> indicesBatchingDims,
                              GatherScatterAddFactorFn addFactorFn) {
   int64_t inputDim = 0;
   int64_t batchDimPos = 0;
@@ -106,25 +108,16 @@ void addGatherScatterFactors(RankedTensorType inputType,
        llvm::enumerate(slicesType.getShape())) {
     if (llvm::is_contained(offsetDims, slicesDim)) {
       // `dim` is an offset dimension.
-      // We must now look up the next non-collapsed input dimension that
-      // corresponds to this slices offset dimension.
-      while (llvm::is_contained(collapsedSliceDims, inputDim)) {
-        addFactorFn(inputDim, /*indicesDim=*/kNullDim, /*slicesDim=*/kNullDim,
-                    inputType.getDimSize(inputDim));
+      // We must now look up the next non-collapsed/batching input dimension
+      // that corresponds to this slices offset dimension.
+      while (llvm::is_contained(collapsedSliceDims, inputDim) ||
+             llvm::is_contained(inputBatchingDims, inputDim)) {
         ++inputDim;
       }
       assert(inputDim < inputType.getRank());
       if (inputType.getDimSize(inputDim) == slicesDimSize) {
         // We only propagate through unsliced dimensions.
         addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim,
-                    slicesDimSize);
-      } else {
-        // Instead of letting the builder add a size 1 factor for this
-        // dimension, we add a unique factor for inputs and slices (there are
-        // multiple for scatter).
-        addFactorFn(inputDim, /*indicesDim=*/kNullDim, /*slicesDim=*/kNullDim,
-                    inputType.getDimSize(inputDim));
-        addFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim, slicesDim,
                     slicesDimSize);
       }
       ++inputDim;
@@ -133,9 +126,17 @@ void addGatherScatterFactors(RankedTensorType inputType,
       // We must now look up which one it is in `indicesType`.
       auto indicesDim =
           batchDimPos < indexVectorDim ? batchDimPos : batchDimPos + 1;
-
       assert(indicesDim < indicesRank);
-      addFactorFn(/*inputDim=*/kNullDim, indicesDim, slicesDim, slicesDimSize);
+
+      // If `indicesDim` is in `indicesBatchingDims`, This is an explicit batch
+      // dimension across input, indices, and result. Otherwise, it is an
+      // implicit batch dimension across input and result only.
+      const auto* batchingDimIt = llvm::find(indicesBatchingDims, indicesDim);
+      int64_t inputBatchDim =
+          batchingDimIt == indicesBatchingDims.end()
+              ? kNullDim
+              : inputBatchingDims[batchingDimIt - indicesBatchingDims.begin()];
+      addFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize);
       ++batchDimPos;
     }
   }
@@ -575,6 +576,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         addGatherScatterFactors(
             inputType, slicesType, indicesRank, dimNums.getIndexVectorDim(),
             dimNums.getOffsetDims(), dimNums.getCollapsedSliceDims(),
+            dimNums.getOperandBatchingDims(),
+            dimNums.getStartIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                 int64_t factorSize) {
               builder.addFactor({inputDim, indicesDim}, slicesDim, factorSize);
@@ -750,6 +753,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             inputType, slicesType, indicesRank, dimNums.getIndexVectorDim(),
             /*offsetDims=*/dimNums.getUpdateWindowDims(),
             /*collapsedSliceDims=*/dimNums.getInsertedWindowDims(),
+            dimNums.getInputBatchingDims(),
+            dimNums.getScatterIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                 int64_t factorSize) {
               builder.addFactor(
