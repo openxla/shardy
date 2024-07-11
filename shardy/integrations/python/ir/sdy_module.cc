@@ -193,7 +193,8 @@ PYBIND11_MODULE(_sdy, m) {
                 replicatedAxes.data()));
           },
           py::arg("cls"), py::arg("mesh_name"), py::arg("dimension_shardings"),
-          py::arg("replicated_axes"), py::arg("context") = py::none(),
+          py::arg("replicated_axes") = std::vector<MlirAttribute>(),
+          py::arg("context") = py::none(),
           "Creates a TensorShardingAttr with the mesh name, dimension "
           "shardings, and replicated axes.")
       .def_property_readonly(
