@@ -703,7 +703,7 @@ LogicalResult verifyManualComputationValue(
              << ", actual local shape " << localRankedType;
     }
 
-    auto emitManualAxesError = [valueIndex, &valueKindStr, &op](
+    auto emitManualAxesError = [&, valueIndex = valueIndex](
                                    AxisRefAttr axis, StringRef manualAxisName) {
       return op->emitOpError(valueKindStr)
              << " sharding at index " << valueIndex
