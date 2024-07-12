@@ -314,8 +314,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             int64_t numWindows = outType.getDimSize(outDim);
             int64_t windowSize = rhsType.getDimSize(rhsDim);
             int64_t remainingLhsSize = lhsType.getDimSize(lhsDim);
-            auto addSpatialFactor = [&](int64_t factorSize, bool addRhs,
-                                        bool addOut) {
+            auto addSpatialFactor = [&, lhsDim = lhsDim, rhsDim = rhsDim,
+                                     outDim = outDim](int64_t factorSize,
+                                                      bool addRhs,
+                                                      bool addOut) {
               if (factorSize = std::min(remainingLhsSize, factorSize);
                   factorSize > 1) {
                 builder.addFactor({lhsDim, addRhs ? rhsDim : kNullDim},
