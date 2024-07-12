@@ -703,7 +703,8 @@ LogicalResult verifyManualComputationValue(
              << ", actual local shape " << localRankedType;
     }
 
-    auto emitManualAxesError = [&](AxisRefAttr axis, StringRef manualAxisName) {
+    auto emitManualAxesError = [valueIndex, &valueKindStr, &op](
+                                   AxisRefAttr axis, StringRef manualAxisName) {
       return op->emitOpError(valueKindStr)
              << " sharding at index " << valueIndex
              << " cannot refer to the sub/split axes " << axis.toString()
