@@ -25,6 +25,7 @@ def SinkDataFlowEdgesPass : Pass<"sdy-sink-data-flow-edges", "func::FuncOp"> {
   let description = [{
     Moves the sharding of each `DataFlowEdgeOp` to its input (the root target of
     the edge), and replaces the op with its input.
+
     TODO(tomnatan): consider moving the sharding to all targets that can have a
     sharding attached.
   }];

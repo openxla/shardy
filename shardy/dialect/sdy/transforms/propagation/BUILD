@@ -22,6 +22,10 @@ gentbl_cc_library(
             ],
             "passes.h.inc",
         ),
+        (
+            ["-gen-pass-doc"],
+            "g3doc/sdy_propagation_passes.md",
+        ),
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "passes.td",

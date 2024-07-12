@@ -24,6 +24,7 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
 
     The inserted `DataFlowEdgeOp` will take the existing sharding of the root
     target if it exists.
+
     TODO(b/330339693): update this doc when `getDataFlowEdgeRoots` is removed.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
@@ -35,8 +36,8 @@ def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "func:
     Copies the sharding of a `ShardingConstraintOp` to its input if it satisfies
     all of the following:
 
-    - The input doesn't have an existing sharding.
-    - The input is either only used by the `ShardingConstraintOp` or the latter
+    * The input doesn't have an existing sharding.
+    * The input is either only used by the `ShardingConstraintOp` or the latter
       doesn't have any uses (dangling) and the input doesn't have any other
       users of type `ShardingConstraintOp`.
 
@@ -63,8 +64,8 @@ def ConstantSplitterPass : Pass<"sdy-constant-splitter", "func::FuncOp"> {
     propagate in isolation to its own copy of the constant sub-computation.
 
     A constant sub-computation is either:
-    - a constant or iota op (no operands)
-    - a broadcast, slice, or pure element-wise op, whose operands are all
+    * a constant or iota op (no operands)
+    * a broadcast, slice, or pure element-wise op, whose operands are all
       defined by constant sub-computations (recursively), along with the entire
       sub-computations that define its operands.
 

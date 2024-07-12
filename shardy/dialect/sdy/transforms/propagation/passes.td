@@ -23,12 +23,12 @@ def BasicPropagationPass : PassBase<"sdy-basic-propagate", "BasicPropagationPass
     axes that are compatible between all operands and results.
 
     Options:
-      * `keep-sharding-rules` - whether to keep existing and created op sharding
-        rules.
-      * `module-dump-directory` - where to dump any rewritten modules for
-        debugging.
-      * `conservative-propagation` - whether to disallow split axes and
-        non-divisible sharding axes during propagation.
+      * `-keep-sharding-rules` : whether to keep existing and created op
+        sharding rules
+      * `-module-dump-directory` : where to dump any rewritten modules for
+        debugging
+      * `-conservative-propagation` : whether to disallow split axes and
+        non-divisible sharding axes during propagation
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -42,8 +42,8 @@ def AggressivePropagationPass : PassBase<"sdy-aggressive-propagate", "Aggressive
     memory footprint at the cost of potential communication.
 
     Options:
-      * All options from `BasicPropagationPass`.
-      * `propagation-strategy` - which factor propagation strategy to use.
+      * All options from `BasicPropagationPass`
+      * `-propagation-strategy` : which factor propagation strategy to use
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -69,9 +69,9 @@ def OpPriorityPropagationPass : PassBase<"sdy-op-priority-propagate", "OpPriorit
     applied (see `AggressivePropagationPass`).
 
     Options:
-      * All options from `AggressivePropagationPass`.
-      * `run-op-priority-propagation` - whether to run (or skip) op-priority
-        propagation.
+      * All options from `AggressivePropagationPass`
+      * `-run-op-priority-propagation` : whether to run (or skip) op-priority
+        propagation
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -89,7 +89,7 @@ def UserPriorityPropagationPass : PassBase<"sdy-user-priority-propagate", "UserP
     propagation is applied (see `OpPriorityPropagationPass`).
 
     Options:
-      * All options from `OpPriorityPropagationPass`.
+      * All options from `OpPriorityPropagationPass`
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -100,10 +100,6 @@ def PopulateOpShardingRulesPass : Pass<"sdy-populate-op-sharding-rules", "func::
     Populates all registered ops with an `OpShardingRuleAttr`, which is used for
     debugging/testing the registered sharding rules. Propagation already does
     this just-in-time, but this pass does it all at once.
-
-    Options:
-      * `conservative-propagation` - whether to disallow non-divisible sharding
-        axes in the rules
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 
