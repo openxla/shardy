@@ -95,50 +95,18 @@ gentbl_cc_library(
 )
 
 gentbl_filegroup(
-    name = "ops_doc_gen",
+    name = "dialect_doc_gen",
     tbl_outs = [
         (
             [
                 "-gen-dialect-doc",
                 "-dialect=sdy",
             ],
-            "g3doc/sdy_ops.md",
+            "g3doc/sdy_dialect.md",
         ),
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "ops.td",
-    deps = [":sdy_td_files"],
-)
-
-gentbl_filegroup(
-    name = "attrs_doc_gen",
-    tbl_outs = [
-        (
-            [
-                "-gen-dialect-doc",
-                "-dialect=sdy",
-            ],
-            "g3doc/sdy_attrs.md",
-        ),
-    ],
-    tblgen = "@llvm-project//mlir:mlir-tblgen",
-    td_file = "attrs.td",
-    deps = [":sdy_td_files"],
-)
-
-gentbl_filegroup(
-    name = "enums_doc_gen",
-    tbl_outs = [
-        (
-            [
-                "-gen-dialect-doc",
-                "-dialect=sdy",
-            ],
-            "g3doc/sdy_enums.md",
-        ),
-    ],
-    tblgen = "@llvm-project//mlir:mlir-tblgen",
-    td_file = "enums.td",
     deps = [":sdy_td_files"],
 )
 
