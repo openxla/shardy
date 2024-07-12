@@ -47,7 +47,7 @@ def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
 }
 
 def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
-  [Pure, Elementwise, SameOperandsAndResultType]> {
+  [Elementwise, SameOperandsAndResultType]> {
   let summary = "Constrains a tensor to the specified sharding";
   let description = [{
     Attaches a sharding to an intermediate tensor (e.g. the result of a matmul)

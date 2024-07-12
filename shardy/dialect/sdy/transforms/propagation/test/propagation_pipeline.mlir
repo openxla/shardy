@@ -39,13 +39,20 @@ func.func @user_priorities(
   return %2 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @sharding_constraint_applied
+func.func @sharding_constraint_applied(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
+    -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
 // This test verifies that there is no sharding_constraint in the result.
-// CHECK-LABEL: func @sharding_constraint(
-// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
-// CHECK-SMAE:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
-func.func @sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {"b"}]> : tensor<8x8xf32>
-  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a", ?}p1, {"b"}p1]> : tensor<8x8xf32>
-  // CHECK-NEXT: return %0 : tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
+// CHECK-LABEL: func @sharding_constraint_replaced_with_reshard
+func.func @sharding_constraint_replaced_with_reshard(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %arg0, %0
+  return %arg0, %0 : tensor<8x8xf32>, tensor<8x8xf32>
 }

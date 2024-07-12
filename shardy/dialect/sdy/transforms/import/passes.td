@@ -29,6 +29,28 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "func::FuncOp"> {
+  let summary = "Applies constraints that dictate the sharding of their input.";
+  let description = [{
+    Copies the sharding of a `ShardingConstraintOp` to its input if it satisfies
+    all of the following:
+
+    - The input doesn't have an existing sharding.
+    - The input is either only used by the `ShardingConstraintOp` or the latter
+      doesn't have any uses (dangling) and the input doesn't have any other
+      users of type `ShardingConstraintOp`.
+
+    Which indicates that the `ShardingConstraintOp` dictates the sharding of
+    its input.
+
+    Note that the sharding of a `ShardingConstraintOp` will propagate to its
+    input or users during propagation regardless of this pass, but since the
+    closed property of a dimension doesn't propagate, it's important to copy the
+    sharding to fully respect the constraint in the above cases.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def ConstantSplitterPass : Pass<"sdy-constant-splitter", "func::FuncOp"> {
   let summary = "Splits constant sub-computations so each has a single use.";
   let description = [{

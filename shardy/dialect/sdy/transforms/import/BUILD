@@ -32,6 +32,7 @@ cc_library(
     name = "passes",
     srcs = [
         "add_data_flow_edges.cc",
+        "apply_sharding_constraints.cc",
         "constant_splitter.cc",
         "import_pipeline.cc",
     ],

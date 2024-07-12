@@ -30,6 +30,7 @@ void addImportPipeline(OpPassManager& pm) {
   pm.addPass(createSymbolDCEPass());
   pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
+  pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
 }
 
 void registerImportPipeline() {
