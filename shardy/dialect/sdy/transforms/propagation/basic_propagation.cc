@@ -273,7 +273,7 @@ LogicalResult propagateTensorShardings(
 
   bool anyUpdated = updateOperand.any() || updateResult.any();
   if (rewriter && !anyUpdated) {
-    return rewriter->notifyMatchFailure(op, [&](Diagnostic& diag) {
+    return rewriter->notifyMatchFailure(op, [](Diagnostic& diag) {
       diag << "Couldn't update any of the factor shardings";
     });
   }
@@ -393,7 +393,7 @@ class PropagateRegisteredOp : public RewritePattern {
         getOrCreateShardingRule(op, conservativePropagation);
     if (!shardingRule) {
       // Rule doesn't exist for ops that aren't known/registered.
-      return rewriter.notifyMatchFailure(op, [&](Diagnostic& diag) {
+      return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
         diag << "op doesn't have a registered sharding rule";
       });
     }
@@ -401,7 +401,7 @@ class PropagateRegisteredOp : public RewritePattern {
     if (direction == PropagationDirection::NONE) {
       // No need to continue to propagate if the direction is `NONE`, as
       // neither operands nor results can be updated.
-      return rewriter.notifyMatchFailure(op, [&](Diagnostic& diag) {
+      return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
         diag << "propagation direction on op is NONE";
       });
     }

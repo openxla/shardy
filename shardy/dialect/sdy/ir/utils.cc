@@ -195,7 +195,7 @@ TensorShardingAttr getSharding(Value value) {
         return funcOp.getArgAttrOfType<TensorShardingAttr>(
             cast<BlockArgument>(value).getArgNumber(), kShardingAttr);
       })
-      .Case<DataFlowEdgeOp>([&](DataFlowEdgeOp dataFlowEdgeOp) {
+      .Case<DataFlowEdgeOp>([](DataFlowEdgeOp dataFlowEdgeOp) {
         return dataFlowEdgeOp.getShardingAttr();
       })
       .Case<ShardingConstraintOp>([](ShardingConstraintOp shardingConstraint) {

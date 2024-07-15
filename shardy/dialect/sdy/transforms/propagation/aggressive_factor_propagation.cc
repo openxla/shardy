@@ -55,7 +55,7 @@ AggressiveFactorPropagation::getCompatibleMajorShardingAxesForAllFactors(
          tensorFactorShardings.factorIndexToSharding) {
       truncateAxesByRemovingConflicts(
           result[factorIndex],
-          [&, factorIndex = factorIndex, factorSharding = factorSharding](
+          [&, factorIndex = factorIndex, &factorSharding = factorSharding](
               AxisRefAttr axisRef, int64_t shardedSize) {
             return compatiblePrefixNoConflictsWithinFactor(
                 axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
@@ -132,7 +132,7 @@ AggressiveFactorPropagation::getCompatibleMajorShardingAxesForAllFactors(
          tensorFactorSharding.factorIndexToSharding) {
       truncateAxesByRemovingConflicts(
           result[factorIndex],
-          [&](AxisRefAttr axisRef, int64_t) {
+          [&, factorIndex = factorIndex](AxisRefAttr axisRef, int64_t) {
             return compatiblePrefixNoConflictsAcrossFactors(
                 axisRef, tensorFactorSharding.factorIndexToSharding,
                 factorIndex, resultSnapshot);

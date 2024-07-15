@@ -58,7 +58,7 @@ struct ApplyShardingConstraintsPass
   using ApplyShardingConstraintsPassBase::ApplyShardingConstraintsPassBase;
 
   void runOnOperation() final {
-    getOperation().walk([&](ShardingConstraintOp shardingConstraintOp) {
+    getOperation().walk([](ShardingConstraintOp shardingConstraintOp) {
       Value input = shardingConstraintOp.getInput();
       if (shouldApply(input, shardingConstraintOp)) {
         setSharding(input, shardingConstraintOp.getSharding());
