@@ -187,6 +187,31 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   }];
 }
 
+def Sdy_ShardingGroupOp : Sdy_Op<"sharding_group",
+  // Op is non-pure since it modifies the internal representation of the
+  // sharding group.
+  []>{
+  let summary = "Sharding group operation";
+  let description = [{
+    This op provides an interface to assign tensors to sharding groups (
+    groups of tensors that will be enforced to have identical shardings).
+    During propagation, as soon as one group element is sharded, all other
+    members will be sharded in exactly the same way. This operation takes the
+    argument group ID and returns no result, but instead modifies the internal
+    sharding group representation to add the input tensor to the group with the
+    given ID.
+  }];
+
+  let arguments = (ins
+    AnyRankedTensor:$input,
+    I64Attr:$group_id);
+
+  // Dangling op has no results.
+  let results = (outs);
+
+  let assemblyFormat = "$input `group_id````=```$group_id attr-dict `:` type($input)";
+}
+
 def Sdy_ConstantOp : Sdy_Op<"constant",
   [Pure, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "Constant operation";
