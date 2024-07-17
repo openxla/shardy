@@ -407,11 +407,9 @@ This op can either:
   tensor might have a different sharding (if the input tensor has no other
   uses then the behavior is the same as the no uses case).
 
-Traits: `AlwaysSpeculatableImplTrait`, `Elementwise`, `SameOperandsAndResultType`
+Traits: `Elementwise`, `SameOperandsAndResultType`
 
-Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
-
-Effects: `MemoryEffects::Effect{}`
+Interfaces: `InferTypeOpInterface`
 
 #### Attributes:
 
@@ -697,4 +695,19 @@ Syntax:
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
 | shardings | `::llvm::ArrayRef<TensorShardingAttr>` |  |
+
+## Enums
+
+### PropagationDirection
+
+propagation direction enum
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| NONE | `0` | NONE |
+| FORWARD | `1` | FORWARD |
+| BACKWARD | `2` | BACKWARD |
+| BOTH | `3` | BOTH |
 
