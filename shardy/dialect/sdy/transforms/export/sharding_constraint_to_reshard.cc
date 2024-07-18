@@ -24,7 +24,6 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -43,18 +42,8 @@ class ShardingConstraintPattern
   LogicalResult matchAndRewrite(
       ShardingConstraintOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
-    Value input = adaptor.getInput();
-    if (TensorShardingAttr sharding = getSharding(input)) {
-      if (sharding != op.getShardingAttr()) {
-        rewriter.replaceOpWithNewOp<ReshardOp>(op, input)
-            .setShardingAttr(op.getShardingAttr());
-      } else {
-        rewriter.replaceOp(op, input);
-      }
-    } else {
-      setSharding(input, op.getShardingAttr());
-      rewriter.replaceOp(op, input);
-    }
+    rewriter.replaceOpWithNewOp<ReshardOp>(op, adaptor.getInput())
+        .setShardingAttr(adaptor.getSharding());
     return success();
   }
 };
