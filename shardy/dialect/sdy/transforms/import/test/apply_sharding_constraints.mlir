@@ -47,8 +47,8 @@ func.func @dangling_and_no_other_sharding_constraint_users(%arg0: tensor<8x8xf32
   return %0, %2 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
-// CHECK-LABEL: func @dangling_and_has_other_sharding_constraint_users
-func.func @dangling_and_has_other_sharding_constraint_users(%arg0: tensor<8x8xf32>)
+// CHECK-LABEL: func @dangling_and_has_other_sharding_constraint_user
+func.func @dangling_and_has_other_sharding_constraint_user(%arg0: tensor<8x8xf32>)
     -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add %arg0, %arg0
   // CHECK-NOT: sdy.sharding
@@ -59,3 +59,33 @@ func.func @dangling_and_has_other_sharding_constraint_users(%arg0: tensor<8x8xf3
   return %0 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @dangling_and_has_other_manual_computation_user
+func.func @dangling_and_has_other_manual_computation_user(%arg0: tensor<8x8xf32>)
+    -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: sdy.sharding_constraint
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %2 = sdy.manual_computation(%0) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>]
+      manual_axes={"a"} (%arg2: tensor<4x8xf32>) {
+    sdy.return %arg2 : tensor<4x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0, %2 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @manual_computation
+func.func @manual_computation(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", "a"}, {}]>]>}
+  // CHECK-NEXT: sdy.manual_computation
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = stablehlo.add %arg1, %arg1 :  tensor<8x8xf32>
+  %2 = sdy.manual_computation(%0, %1) in_shardings=[<@mesh, [{"a", "b"}, {}]>, <@mesh, [{"b", "a"}, {}]>] out_shardings=[<@mesh, [{"a", "b"}, {}]>]
+      manual_axes={"a", "b"} (%arg2: tensor<2x8xf32>, %arg3: tensor<2x8xf32>) {
+    %3 = stablehlo.add %arg2, %arg3 : tensor<2x8xf32>
+    sdy.return %3 : tensor<2x8xf32>
+  } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %0, %2: tensor<8x8xf32>, tensor<8x8xf32>
+}
