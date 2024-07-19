@@ -154,6 +154,7 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   }];
 
   let hasVerifier = 1;
+  let hasCanonicalizer = 1;
 
   let extraClassDeclaration = [{
     TensorShardingAttr getInSharding(int64_t operandIndex) {

@@ -113,6 +113,7 @@ gentbl_filegroup(
 cc_library(
     name = "dialect",
     srcs = [
+        "canonicalization.cc",
         "data_flow_utils.cc",
         "dialect.cc",
         "parsers.cc",
