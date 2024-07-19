@@ -55,23 +55,6 @@ bool isTranspose(stablehlo::Transpose transpose) {
   llvm_unreachable("unknown stablehlo::Transpose");
 }
 
-// If `addFactorForMismatchedSize` is true, we add a factor for all dimensions
-// with the corresponding size in `inType`, otherwise we only add a factor for
-// dimensions with the same input and output size, letting the builder add size
-// 1 factors for other dimensions.
-OpShardingRuleAttr createMismatchedDimSizeShardingRule(
-    Operation* op, RankedTensorType inType, RankedTensorType outType,
-    bool addFactorForMismatchedSize) {
-  return OpShardingRuleBuilder(op)
-      .addPointwiseIf(inType.getShape(),
-                      [&](int64_t dim) {
-                        return addFactorForMismatchedSize ||
-                               inType.getDimSize(dim) ==
-                                   outType.getDimSize(dim);
-                      })
-      .build();
-}
-
 // Returns a vector with `numInputs` copies of `inputDim`, followed by a single
 // `indicesDim`, then `numInputs` copies of `updateDim`, which matches the order
 // and quantity of scatter operands.
@@ -450,11 +433,30 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           //
           // Operands: [operand, iota, init_val (scalar), init_arg (scalar)]
           // Results: [values, indices]
-          return createMismatchedDimSizeShardingRule(
-              customCall,
-              cast<RankedTensorType>(customCall.getOperand(0).getType()),
-              cast<RankedTensorType>(customCall.getResult(0).getType()),
-              /*addFactorForMismatchedSize=*/false);
+          ArrayRef<int64_t> inputShape =
+              getTensorShape(customCall.getOperand(0));
+          ArrayRef<int64_t> resultShape =
+              getTensorShape(customCall.getResult(0));
+          int64_t numInputs = 2, numResults = 2;
+          SmallVector<int64_t> operandDims(customCall->getNumOperands(),
+                                           kNullDim);
+          SmallVector<int64_t> resultDims(customCall->getNumResults(),
+                                          kNullDim);
+          return OpShardingRuleBuilder(customCall)
+              .addPointwiseIfDimSizesMatch(
+                  inputShape, resultShape,
+                  /*alwaysAddFactor=*/false,
+                  /*onMismatchFn=*/
+                  [&](int64_t dim, OpShardingRuleBuilder& builder) {
+                    std::fill_n(operandDims.begin(), numInputs, dim);
+                    resultDims.assign(numResults, kNullDim);
+                    builder.addFactor(operandDims, resultDims, inputShape[dim]);
+                    resultDims.assign(numResults, dim);
+                    std::fill_n(operandDims.begin(), numInputs, kNullDim);
+                    builder.addFactor(operandDims, resultDims,
+                                      resultShape[dim]);
+                  })
+              .build();
         }
         // TODO(b/327191011): output unregistered op stats instead.
         unreachableFormatv(
@@ -540,30 +542,30 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       })
       .Case<stablehlo::DynamicSliceOp>(
           [](stablehlo::DynamicSliceOp dynamicSlice) {
-            return createMismatchedDimSizeShardingRule(
-                dynamicSlice, dynamicSlice.getOperand().getType(),
-                dynamicSlice.getType(),
-                /*addFactorForMismatchedSize=*/false);
+            return OpShardingRuleBuilder(dynamicSlice)
+                .addPointwiseIfDimSizesMatch(
+                    getTensorShape(dynamicSlice.getOperand()),
+                    getTensorShape(dynamicSlice.getResult()))
+                .build();
           })
       .Case<stablehlo::DynamicUpdateSliceOp>(
           [](stablehlo::DynamicUpdateSliceOp dynamicUpdateSlice) {
-            OpShardingRuleBuilder builder(dynamicUpdateSlice);
             ArrayRef<int64_t> operandShape =
-                dynamicUpdateSlice.getOperand().getType().getShape();
+                getTensorShape(dynamicUpdateSlice.getOperand());
             ArrayRef<int64_t> updateShape =
-                dynamicUpdateSlice.getUpdate().getType().getShape();
-
+                getTensorShape(dynamicUpdateSlice.getUpdate());
             SmallVector<int64_t> operandDims(
                 dynamicUpdateSlice->getNumOperands(), kNullDim);
-            for (auto [dim, dimSizes] :
-                 llvm::enumerate(llvm::zip_equal(operandShape, updateShape))) {
-              auto [operandDimSize, updateDimSize] = dimSizes;
-              operandDims[0] = dim;
-              operandDims[1] = operandDimSize == updateDimSize ? dim : kNullDim;
-              builder.addFactor(operandDims, dim, operandDimSize);
-            }
-
-            return builder.build();
+            return OpShardingRuleBuilder(dynamicUpdateSlice)
+                .addPointwiseIfDimSizesMatch(
+                    operandShape, updateShape,
+                    /*alwaysAddFactor=*/false,
+                    /*onMismatchFn=*/
+                    [&](int64_t dim, OpShardingRuleBuilder& builder) {
+                      operandDims[0] = dim;
+                      builder.addFactor(operandDims, dim, operandShape[dim]);
+                    })
+                .build();
           })
       .Case<stablehlo::FftOp>([](stablehlo::FftOp fft) {
         ArrayRef<int64_t> inShape = getTensorShape(fft.getOperand());
@@ -602,9 +604,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case<stablehlo::PadOp>([conservativePropagation](stablehlo::PadOp pad) {
         // If `conservativePropagation` is false, we propagate through padded
         // dimensions, even though that would require communication.
-        return createMismatchedDimSizeShardingRule(
-            pad, pad.getOperand().getType(), pad.getType(),
-            /*addFactorForMismatchedSize=*/!conservativePropagation);
+        return OpShardingRuleBuilder(pad)
+            .addPointwiseIfDimSizesMatch(
+                getTensorShape(pad.getOperand()),
+                getTensorShape(pad.getResult()),
+                /*alwaysAddFactor=*/!conservativePropagation)
+            .build();
       })
       .Case<stablehlo::ReduceOp>([](stablehlo::ReduceOp reduce) {
         OpShardingRuleBuilder builder(reduce);
@@ -657,12 +662,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // In conservative mode, we only add a factor if the input and
             // output dimension sizes are equal.
             // TODO(tomnatan): should the reduced factor be compound?
-            return createMismatchedDimSizeShardingRule(
-                reduceWindow,
-                cast<RankedTensorType>(reduceWindow.getResult(0).getType()),
-                cast<RankedTensorType>(
-                    reduceWindow.getInputs().front().getType()),
-                /*addFactorForMismatchedSize=*/!conservativePropagation);
+            return OpShardingRuleBuilder(reduceWindow)
+                .addPointwiseIfDimSizesMatch(
+                    getTensorShape(reduceWindow.getResult(0)),
+                    getTensorShape(reduceWindow.getInputs().front()),
+                    /*alwaysAddFactor=*/!conservativePropagation)
+                .build();
           })
       .Case<stablehlo::ReshapeOp>([](stablehlo::ReshapeOp reshape) {
         RankedTensorType inType = reshape.getOperand().getType();
@@ -790,10 +795,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // In conservative mode, we only add a factor if the input and
             // source dimension sizes are equal.
             // TODO(tomnatan): should the reduced factor be compound?
-            return createMismatchedDimSizeShardingRule(
-                selectAndScatter, selectAndScatter.getSource().getType(),
-                selectAndScatter.getOperand().getType(),
-                /*addFactorForMismatchedSize=*/!conservativePropagation);
+            return OpShardingRuleBuilder(selectAndScatter)
+                .addPointwiseIfDimSizesMatch(
+                    getTensorShape(selectAndScatter.getSource()),
+                    getTensorShape(selectAndScatter.getOperand()),
+                    /*alwaysAddFactor=*/!conservativePropagation)
+                .build();
           })
       .Case<stablehlo::SelectOp>([](stablehlo::SelectOp select) {
         // Case 1: `pred` is a scalar in which case it is broadcasted and must
@@ -815,9 +822,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // `conservativePropagation`, and the reason is that for `SliceOp`
             // the start indices are static, so we know how to shift the data
             // to keep the sliced dimension sharded.
-            return createMismatchedDimSizeShardingRule(
-                slice, slice.getOperand().getType(), slice.getType(),
-                /*addFactorForMismatchedSize=*/!conservativePropagation);
+            return OpShardingRuleBuilder(slice)
+                .addPointwiseIfDimSizesMatch(
+                    getTensorShape(slice.getOperand()),
+                    getTensorShape(slice.getResult()),
+                    /*alwaysAddFactor=*/!conservativePropagation)
+                .build();
           })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);

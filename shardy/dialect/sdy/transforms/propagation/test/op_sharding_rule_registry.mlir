@@ -194,43 +194,43 @@ func.func @custom_call_householder_product(%arg0: tensor<8x12x16xf32>, %arg1: te
 }
 
 // CHECK-LABEL: func @custom_call_approx_topk
-func.func @custom_call_approx_topk(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x1xf32>, tensor<16x1xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, k], [], [])->([i, l], [i, m]) {i=16, j=1, k=1, l=1, m=1}>
+func.func @custom_call_approx_topk(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, k], [i, k]) {i=16, j=4, k=2}>
   %0:2 = stablehlo.custom_call @ApproxTopK(%arg0, %arg1, %arg2, %arg3) {
     mhlo.backend_config = {
       aggregate_to_topk = true,
       recall_target = 0.9 : f32,
       reduction_dim = 1 : i64,
       reduction_input_size_override = -1 : i64,
-      top_k = 1 : i64},
+      top_k = 2 : i64},
     called_computations = [@top_k_gt_f32_comparator]} :
-    (tensor<16x4xf32>, tensor<16x4xf32>, tensor<f32>, tensor<i32>) -> (tensor<16x1xf32>, tensor<16x1xf32>)
-  return %0#0, %0#1 : tensor<16x1xf32>, tensor<16x1xf32>
+    (tensor<16x4xf32>, tensor<16x4xf32>, tensor<f32>, tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>)
+  return %0#0, %0#1 : tensor<16x2xf32>, tensor<16x2xf32>
 }
 
 // CHECK-LABEL: func @custom_call_partial_reduce
-func.func @custom_call_partial_reduce(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x1xf32>, tensor<16x1xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, k], [], [])->([i, l], [i, m]) {i=16, j=1, k=1, l=1, m=1}>
+func.func @custom_call_partial_reduce(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, k], [i, k]) {i=16, j=4, k=2}>
   %0:2 = stablehlo.custom_call @PartialReduce(%arg0, %arg1, %arg2, %arg3) {
     mhlo.backend_config = {
       aggregate_to_topk = true,
       recall_target = 0.9 : f32,
       reduction_dim = 1 : i64,
       reduction_input_size_override = -1 : i64,
-      top_k = 1 : i64},
+      top_k = 2 : i64},
     called_computations = [@top_k_gt_f32_comparator]} :
-    (tensor<16x4xf32>, tensor<16x4xf32>, tensor<f32>, tensor<i32>) -> (tensor<16x1xf32>, tensor<16x1xf32>)
-  return %0#0, %0#1 : tensor<16x1xf32>, tensor<16x1xf32>
+    (tensor<16x4xf32>, tensor<16x4xf32>, tensor<f32>, tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>)
+  return %0#0, %0#1 : tensor<16x2xf32>, tensor<16x2xf32>
 }
 
 // CHECK-LABEL: func @custom_call_partial_reduce_string_backend_config
-func.func @custom_call_partial_reduce_string_backend_config(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x1xf32>, tensor<16x1xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, k], [], [])->([i, l], [i, m]) {i=16, j=1, k=1, l=1, m=1}>
+func.func @custom_call_partial_reduce_string_backend_config(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, k], [i, k]) {i=16, j=4, k=2}>
   %0:2 = stablehlo.custom_call @PartialReduce(%arg0, %arg1, %arg2, %arg3) {
-    backend_config = "{\22log2_reduction\22: 5, \22reduction_dim\22: 1, \22to_apply_type\22: \22comparator\22, \22top_k\22: 64, \22recall_target\22: 0.950000}",
+    backend_config = "{\22log2_reduction\22: 5, \22reduction_dim\22: 1, \22to_apply_type\22: \22comparator\22, \22top_k\22: 2, \22recall_target\22: 0.950000}",
     called_computations = [@top_k_gt_f32_comparator]} :
-    (tensor<16x4xf32>, tensor<16x4xf32>, tensor<f32>, tensor<i32>) -> (tensor<16x1xf32>, tensor<16x1xf32>)
-  return %0#0, %0#1 : tensor<16x1xf32>, tensor<16x1xf32>
+    (tensor<16x4xf32>, tensor<16x4xf32>, tensor<f32>, tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>)
+  return %0#0, %0#1 : tensor<16x2xf32>, tensor<16x2xf32>
 }
 
 // CHECK-LABEL: func @unregisterd_custom_call_with_existing_rule

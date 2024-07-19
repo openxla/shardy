@@ -88,11 +88,19 @@ class OpShardingRuleBuilder {
 
   // Adds a pointwise factor for all dimensions that satisfy `pred` of all
   // operands/results that have rank at least 1.
-  //
-  // Adds a factor of size 1 to all other dimensions, which would block any
-  // propagation along these dimensions.
   OpShardingRuleBuilder& addPointwiseIf(ArrayRef<int64_t> shape,
                                         std::function<bool(int64_t)> pred);
+
+  // Adds a pointwise factor for all dimensions, whose input and output sizes
+  // match, of all operands/results that have rank at least 1.
+  //
+  // If `alwaysAddFactor` is true, we add a factor for all dimensions with the
+  // corresponding size in `inType`, otherwise we only
+  OpShardingRuleBuilder& addPointwiseIfDimSizesMatch(
+      ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
+      bool alwaysAddFactor = false,
+      std::function<void(int64_t dim, OpShardingRuleBuilder& builder)>
+          onMismatchFn = [](int64_t dim, OpShardingRuleBuilder& builder) {});
 
  private:
   MLIRContext* context;

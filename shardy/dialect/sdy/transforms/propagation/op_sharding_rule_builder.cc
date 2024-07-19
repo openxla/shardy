@@ -184,6 +184,22 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIf(
   return *this;
 }
 
+OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIfDimSizesMatch(
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape, bool alwaysAddFactor,
+    std::function<void(int64_t dim, OpShardingRuleBuilder& builder)>
+        onMismatchFn) {
+  for (auto [dim, dimSizes] :
+       llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
+    auto [inDimSize, outDimSize] = dimSizes;
+    if (alwaysAddFactor || inDimSize == outDimSize) {
+      addFactor(dim, inDimSize);
+    } else {
+      onMismatchFn(dim, *this);
+    }
+  }
+  return *this;
+}
+
 OpShardingRuleAttr createIdentityShardingRule(RankedTensorType type,
                                               size_t numOperands,
                                               size_t numResults) {
