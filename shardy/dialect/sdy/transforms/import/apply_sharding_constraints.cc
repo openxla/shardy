@@ -24,6 +24,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "third_party/openxla/shardy/src/shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir {
 namespace sdy {
@@ -34,8 +35,8 @@ namespace sdy {
 namespace {
 
 bool shouldApply(Value input, Operation* op) {
-  if (getSharding(input)) {
-    // `input` already has a sharding.
+  if (getSharding(input) || input.getDefiningOp<DataFlowEdgeOp>()) {
+    // `input` already has a sharding or is produced by a `DataFlowEdgeOp`.
     return false;
   }
 

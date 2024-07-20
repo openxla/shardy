@@ -1,5 +1,6 @@
-// RUN: sdy_opt %s -sdy-import-pipeline 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-import-pipeline 2>&1 | FileCheck %s
 
+// Verifies that function `-inliner` pass is applied
 // CHECK-LABEL: func @main
 func.func @main(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
@@ -18,4 +19,21 @@ func.func private @add_matmul_to_lhs(%arg0: tensor<8x16xf32>, %arg1: tensor<16x1
   %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
   %1 = stablehlo.add %arg0, %0 : tensor<8x16xf32>
   return %1 : tensor<8x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <"a"=2>
+
+// Verifies that `-apply-sharding-constraints` pass is applied after
+// `-add-data_flow_edges` pass
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
+  // CHECK-NEXT: %[[OPT_BARRIER:.*]] = stablehlo.optimization_barrier %arg0
+  // CHECK-NEXT: sdy.data_flow_edge %[[OPT_BARRIER]] : tensor<32x96xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: sdy.sharding_constraint
+  %0 = stablehlo.optimization_barrier %arg0 : tensor<32x96xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"a"}]> :  tensor<32x96xf32>
+  return %1 : tensor<32x96xf32>
 }

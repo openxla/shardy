@@ -18,6 +18,16 @@ func.func @input_has_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   return %1 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @input_produced_by_data_flow_edge
+func.func @input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: sdy.sharding_constraint
+  %0 = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
 // CHECK-LABEL: func @input_is_func_input_with_one_use(
 // CHECK-SAMEL    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"b"}]>})
 func.func @input_is_func_input_with_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
