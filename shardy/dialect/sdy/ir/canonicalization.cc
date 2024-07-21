@@ -27,6 +27,8 @@ namespace sdy {
 
 namespace {
 
+#include "shardy/dialect/sdy/ir/canonicalization.cc.inc"
+
 // Pattern to remove unused block arguments and their corresponding operands
 // from  a `ManualComputationOp`.
 class ManualComputationUnusedInputsPattern
@@ -67,6 +69,11 @@ class ManualComputationUnusedInputsPattern
 void ManualComputationOp::getCanonicalizationPatterns(
     RewritePatternSet& results, MLIRContext* context) {
   results.add<ManualComputationUnusedInputsPattern>(context);
+}
+
+void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                            MLIRContext* context) {
+  results.add<ReshardOfReshardPattern>(context);
 }
 
 }  // namespace sdy

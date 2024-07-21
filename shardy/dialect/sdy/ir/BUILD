@@ -8,6 +8,7 @@ td_library(
     name = "sdy_td_files",
     srcs = [
         "attrs.td",
+        "canonicalization.td",
         "dialect.td",
         "enums.td",
         "ops.td",
@@ -94,6 +95,19 @@ gentbl_cc_library(
     deps = [":sdy_td_files"],
 )
 
+gentbl_cc_library(
+    name = "canonicalization_inc",
+    tbl_outs = [
+        (
+            ["-gen-rewriters"],
+            "canonicalization.cc.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "canonicalization.td",
+    deps = [":sdy_td_files"],
+)
+
 gentbl_filegroup(
     name = "dialect_doc_gen",
     tbl_outs = [
@@ -131,6 +145,7 @@ cc_library(
     ],
     deps = [
         ":attrs_inc",
+        ":canonicalization_inc",
         ":dialect_inc",
         ":enums_inc",
         ":ops_inc",

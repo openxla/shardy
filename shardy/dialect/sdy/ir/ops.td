@@ -104,6 +104,7 @@ def Sdy_ReshardOp : Sdy_Op<"reshard",
 
   let assemblyFormat = "$input $sharding attr-dict `:` type($result)";
   let hasVerifier = 1;
+  let hasCanonicalizer = 1;
 }
 
 def Sdy_ReturnOp : Sdy_Op<"return", [Pure, Terminator]> {
