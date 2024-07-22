@@ -24,7 +24,6 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "third_party/openxla/shardy/src/shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir {
 namespace sdy {
