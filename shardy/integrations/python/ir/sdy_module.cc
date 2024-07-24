@@ -104,6 +104,16 @@ PYBIND11_MODULE(_sdy, m) {
           },
           py::arg("cls"), py::arg("meshAxes"), py::arg("context") = py::none(),
           "Creates a MeshAttr with the given mesh axes.")
+      .def_classmethod(
+          "get_device_id",
+          [](py::object cls, int64_t id, MlirContext ctx) {
+            return cls(sdyMeshAttrDeviceIdGet(ctx, id));
+          },
+          py::arg("cls"), py::arg("meshAxes"), py::arg("context") = py::none(),
+          "Creates a MeshAttr with a single device ID.")
+      .def_property_readonly("device_id", [](MlirAttribute self) {
+        return sdyMeshAttrGetDeviceId(self);
+      })
       .def_property_readonly("axes", [](MlirAttribute self) {
         return propertyVector<MlirAttribute>(self, sdyMeshAttrGetAxesSize,
                                              sdyMeshAttrGetAxesElem);
