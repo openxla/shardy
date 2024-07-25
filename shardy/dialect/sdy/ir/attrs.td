@@ -291,6 +291,10 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
     // must return a new instance.
     DimensionShardingAttr getSharded(StringRef axisName) const;
 
+    // Returns the sharded size of this dimension,
+    // i.e., the product of sharding axis sizes.
+    int64_t getShardedSize(MeshAttr mesh) const;
+
     // Drops the first `N` sharding axes, and keeps `M` sharding axes.
     DimensionShardingAttr sliceShardingAxes(size_t N, size_t M) const;
 

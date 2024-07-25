@@ -294,6 +294,19 @@ TEST_F(DialectTest, DimensionShardingAttrGetShardedCannotShardClosed) {
   EXPECT_DEBUG_DEATH(dimSharding.getSharded("x"),
                      HasSubstr("cannot shard a closed dimension"));
 }
+
+TEST_F(DialectTest, DimensionShardingAttrGetShardedSize) {
+  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 4),
+                                       MeshAxisAttr::get(&context, "y", 2),
+                                       MeshAxisAttr::get(&context, "z", 3)});
+
+  SmallVector<DimensionShardingAttr> dimShardings = {
+      createDimSharding({createAxis("x"), createAxis("y")}),
+      createDimSharding({createAxis("z")})};
+
+  EXPECT_EQ(dimShardings[0].getShardedSize(mesh), 8);
+  EXPECT_EQ(dimShardings[1].getShardedSize(mesh), 3);
+}
 }  // namespace
 
 }  // namespace sdy

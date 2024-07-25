@@ -258,6 +258,13 @@ DimensionShardingAttr DimensionShardingAttr::getSharded(
   return DimensionShardingAttr::get(getContext(), newAxes, /*is_closed=*/false);
 }
 
+int64_t DimensionShardingAttr::getShardedSize(MeshAttr mesh) const {
+  return std::accumulate(axis_begin(), axis_end(), 1,
+                         [mesh](int64_t cur, AxisRefAttr axis) {
+                           return cur * axis.getSize(mesh);
+                         });
+}
+
 DimensionShardingAttr DimensionShardingAttr::sliceShardingAxes(
     // NOLINTNEXTLINE(readability-identifier-naming)
     size_t N, size_t M) const {
