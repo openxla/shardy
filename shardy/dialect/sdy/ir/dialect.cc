@@ -183,6 +183,10 @@ bool AxisRefAttr::prefixOf(AxisRefAttr other) const {
          getSubAxisPreSize() == other.getSubAxisPreSize();
 }
 
+bool AxisRefAttr::strictPrefixOf(AxisRefAttr other) const {
+  return prefixOf(other) && *this != other;
+}
+
 bool AxisRefAttr::overlaps(AxisRefAttr other) const {
   if (other.getName() != getName()) {
     return false;

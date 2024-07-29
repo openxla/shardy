@@ -102,18 +102,36 @@ TEST_F(DialectTest, AxisRefAttrContains) {
 }
 
 TEST_F(DialectTest, AxisRefAttrPrefixOf) {
-  EXPECT_TRUE(createAxis("x").prefixOf(createAxis("x")));
-  EXPECT_TRUE(createSubAxis("x", 1, 4).prefixOf(createAxis("x")));
-  EXPECT_TRUE(createSubAxis("x", 1, 2).prefixOf(createSubAxis("x", 1, 4)));
-  EXPECT_TRUE(createSubAxis("x", 2, 4).prefixOf(createSubAxis("x", 2, 4)));
-  EXPECT_TRUE(createSubAxis("x", 2, 2).prefixOf(createSubAxis("x", 2, 8)));
+  auto strictPrefixOf = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_TRUE(a.strictPrefixOf(b));
+    EXPECT_TRUE(a.prefixOf(b));
+    EXPECT_FALSE(b.prefixOf(a));
+    EXPECT_FALSE(b.strictPrefixOf(a));
+  };
+  strictPrefixOf(createSubAxis("x", 1, 4), createAxis("x"));
+  strictPrefixOf(createSubAxis("x", 1, 2), createSubAxis("x", 1, 4));
+  strictPrefixOf(createSubAxis("x", 2, 2), createSubAxis("x", 2, 8));
 
-  EXPECT_FALSE(createAxis("x").prefixOf(createAxis("y")));
-  EXPECT_FALSE(createSubAxis("x", 1, 2).prefixOf(createAxis("y")));
-  EXPECT_FALSE(createAxis("x").prefixOf(createSubAxis("x", 1, 2)));
-  EXPECT_FALSE(createSubAxis("x", 1, 4).prefixOf(createSubAxis("x", 1, 2)));
-  EXPECT_FALSE(createSubAxis("x", 1, 4).prefixOf(createSubAxis("x", 4, 2)));
-  EXPECT_FALSE(createSubAxis("x", 1, 4).prefixOf(createSubAxis("x", 2, 4)));
+  auto equals = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_TRUE(a == b);
+    EXPECT_TRUE(a.prefixOf(b));
+    EXPECT_TRUE(b.prefixOf(a));
+    EXPECT_FALSE(a.strictPrefixOf(b));
+    EXPECT_FALSE(b.strictPrefixOf(a));
+  };
+  equals(createAxis("x"), createAxis("x"));
+  equals(createSubAxis("x", 2, 4), createSubAxis("x", 2, 4));
+
+  auto isNotPrefix = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_FALSE(a.prefixOf(b));
+    EXPECT_FALSE(b.prefixOf(a));
+    EXPECT_FALSE(a.strictPrefixOf(b));
+    EXPECT_FALSE(b.strictPrefixOf(a));
+  };
+  isNotPrefix(createAxis("x"), createAxis("y"));
+  isNotPrefix(createSubAxis("x", 1, 2), createAxis("y"));
+  isNotPrefix(createSubAxis("x", 1, 4), createSubAxis("x", 4, 2));
+  isNotPrefix(createSubAxis("x", 1, 4), createSubAxis("x", 2, 4));
 }
 
 TEST_F(DialectTest, AxisRefAttrOverlaps) {

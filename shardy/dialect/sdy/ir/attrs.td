@@ -181,11 +181,25 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     // For example:
     //  "a":(1)2, "a"      -> true
     //  "a":(2)2, "a":(2)4 -> true
+    //  "a", "a"           -> true
     //  "a":(2)4, "a":(2)4 -> true
     //  "a":(1)4, "a":(1)2 -> false
     //  "a":(1)4, "a":(2)8 -> false
     //  "a":(1)2, "b"      -> false
     bool prefixOf(AxisRefAttr other) const;
+
+    // Returns whether this axis or sub-axis is a strict prefix of `other`.
+    // "a.strictPrefixOf(b)" is equivalent to "a.prefixOf(b) && a != b".
+    //
+    // For example:
+    //  "a":(1)2, "a"      -> true
+    //  "a":(2)2, "a":(2)4 -> true
+    //  "a", "a"           -> false
+    //  "a":(2)4, "a":(2)4 -> false
+    //  "a":(1)4, "a":(1)2 -> false
+    //  "a":(1)4, "a":(2)8 -> false
+    //  "a":(1)2, "b"      -> false
+    bool strictPrefixOf(AxisRefAttr other) const;
 
     // Returns whether this axis or sub-axis overlaps with `other`, i.e., they
     // are equal or there is a sub-axis that is contained in both axis refs.
