@@ -388,7 +388,7 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection, PropagationDirection direction,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
-  UpdateTensorShardings result{
+  UpdateTensorShardings result_2{
       .updateOperands = BitVector(projection.getNumOperands()),
       .updateResults = BitVector(projection.getNumResults())};
 
@@ -405,11 +405,11 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     auto [updateOperandForFactor, updateResultForFactor] =
         projection.updateSharding(factorIndex, axesToPropagate);
 
-    result.updateOperands |= updateOperandForFactor;
-    result.updateResults |= updateResultForFactor;
+    result_2.updateOperands |= updateOperandForFactor;
+    result_2.updateResults |= updateResultForFactor;
   }
 
-  return result;
+  return result_2;
 }
 
 }  // namespace sdy
