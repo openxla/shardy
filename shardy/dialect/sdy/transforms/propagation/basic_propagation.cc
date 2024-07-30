@@ -244,12 +244,12 @@ LogicalResult propagateTensorShardings(
   MeshAttr mesh = getMeshAttr(op, meshName);
   assert(mesh && "unknown mesh");
 
-  ShardingProjection shardingProjection = ShardingProjection::build(
+  ShardingProjection sharding_projection = ShardingProjection::build(
       operandShardings, resultsShardings, shardingRule, mesh);
 
   auto [updateOperand, updateResult] =
       factorPropagation.propagateFactorShardings(
-          shardingProjection, direction, shardingRule.getFactorSizes(), mesh,
+          sharding_projection, direction, shardingRule.getFactorSizes(), mesh,
           op, conservativePropagation);
 
   // We need to update the tensor sharding attributes explicitly, as we have
@@ -268,7 +268,7 @@ LogicalResult propagateTensorShardings(
   }
   updateTensorShardings(operands, results, operandShardings, resultsShardings,
                         setOperandShardingCallback, setResultShardingCallback,
-                        shardingRule, shardingProjection, updateOperand,
+                        shardingRule, sharding_projection, updateOperand,
                         updateResult, meshName, mesh, notifyOpModified);
 
   bool anyUpdated = updateOperand.any() || updateResult.any();
