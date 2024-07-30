@@ -6,7 +6,7 @@ sdy.mesh @mesh = <"a"=2, "b"=2>
 // have been propagated first.
 // CHECK-LABEL: func @element_wise_over_dot_general(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32>)
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
 func.func @element_wise_over_dot_general(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
   // CHECK:      %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
@@ -22,11 +22,11 @@ func.func @element_wise_over_dot_general(%arg0: tensor<8x8xf32> {sdy.sharding = 
 // Same as `element_wise_over_dot_general` but the dot_general is the last op.
 // CHECK-LABEL: func @element_wise_over_dot_general_flipped_op_order(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32>)
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
 func.func @element_wise_over_dot_general_flipped_op_order(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
   // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<8x8xf32>
-  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %arg1, %arg1 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} : tensor<8x8xf32>
   // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[ADD_1]], %[[ADD_2]], contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
   // CHECK-NEXT: return %[[DOT]] : tensor<8x8xf32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
@@ -41,7 +41,7 @@ func.func @element_wise_over_dot_general_flipped_op_order(%arg0: tensor<8x8xf32>
 // first instead.
 // CHECK-LABEL: func @sharding_constraint_propagated(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32>)
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
 func.func @sharding_constraint_propagated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK:      %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}

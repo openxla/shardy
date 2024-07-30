@@ -637,6 +637,44 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
 }
 
 //===----------------------------------------------------------------------===//
+// Tests for shouldUpdate
+//===----------------------------------------------------------------------===//
+
+class ShouldUpdateTest : public PropagationTestBase {};
+
+TEST_F(ShouldUpdateTest, ShouldUpdateTest) {
+  // One of the input arguments is empty.
+  EXPECT_FALSE(shouldUpdate({}, {}));
+  EXPECT_FALSE(shouldUpdate({createAxis("a")}, {}));
+  EXPECT_TRUE(shouldUpdate({}, {createAxis("a")}));
+
+  // The two input arguments are the same.
+  EXPECT_FALSE(shouldUpdate({createAxis("a")}, {createAxis("a")}));
+  SmallVector<AxisRefAttr> axes = {createAxis("a"), createSubAxis("b", 2, 4)};
+  EXPECT_FALSE(shouldUpdate(axes, axes));
+
+  EXPECT_FALSE(shouldUpdate({createAxis("a")}, {createAxis("b")}));
+  EXPECT_FALSE(shouldUpdate({createAxis("a"), createAxis("b")},
+                            {createAxis("b"), createAxis("a")}));
+  EXPECT_FALSE(
+      shouldUpdate({createAxis("a"), createSubAxis("b", 2, 4)},
+                   {createAxis("a"), createAxis("b"), createAxis("c")}));
+  EXPECT_FALSE(
+      shouldUpdate({createAxis("a"), createAxis("b"), createAxis("c")},
+                   {createAxis("a"), createAxis("b"), createAxis("d")}));
+
+  auto expectTrue = [&](ArrayRef<AxisRefAttr> oldAxes,
+                        ArrayRef<AxisRefAttr> newAxes) {
+    EXPECT_TRUE(shouldUpdate(oldAxes, newAxes));
+    EXPECT_FALSE(shouldUpdate(newAxes, oldAxes));
+  };
+  expectTrue({createAxis("a"), createAxis("b")},
+             {createAxis("a"), createAxis("b"), createAxis("c")});
+  expectTrue({createAxis("a"), createSubAxis("b", 1, 4)},
+             {createAxis("a"), createAxis("b")});
+}
+
+//===----------------------------------------------------------------------===//
 // Tests for TensorFactorShardings::createTensorShardingAttr
 //
 // Since ShardingProjectionBuildTest also tests this method indirectly in each

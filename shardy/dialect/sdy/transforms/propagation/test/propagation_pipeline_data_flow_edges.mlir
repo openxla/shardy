@@ -172,7 +172,7 @@ func.func @case_multiple_results_different_sharding_conflicts(
 // CHECK-SAME:      %arg0: tensor<i32>,
 // CHECK-SAME:      %arg1: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}]>},
 // CHECK-SAME:      %arg2: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", "b"}]>}
-// CHECK-SAME:      -> (tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}]>}
+// CHECK-SAME:      -> (tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", "b", ?}]>}
 func.func @case_closed_sharding(
   %arg0: tensor<i32>,
   %arg1: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}]>},
@@ -182,7 +182,7 @@ func.func @case_closed_sharding(
     stablehlo.return %arg1 : tensor<8xi64>
   }, {
     stablehlo.return %arg2 : tensor<8xi64>
-  // CHECK: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}]>]>} :
+  // CHECK: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", "b", ?}]>]>} :
   }) : (tensor<i32>) -> tensor<8xi64>
   return %0 : tensor<8xi64>
 }

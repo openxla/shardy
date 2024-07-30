@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <numeric>
@@ -34,24 +35,31 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-namespace {
-
-// Returns if `oldAxes` should be updated by `newAxes`.
 bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
                   ArrayRef<AxisRefAttr> newAxes) {
   if (newAxes.empty()) {
     return false;
   }
+  if (oldAxes.empty()) {
+    return true;
+  }
+
+  int64_t minSize = std::min(oldAxes.size(), newAxes.size());
+  for (int64_t i = 0; i < minSize - 1; ++i) {
+    if (oldAxes[i] != newAxes[i]) {
+      return false;
+    }
+  }
+
   if (newAxes.size() < oldAxes.size()) {
     return false;
   }
   if (newAxes.size() > oldAxes.size()) {
-    return true;
+    return oldAxes[minSize - 1].prefixOf(newAxes[minSize - 1]);
   }
-  return newAxes.back().strictlyContains(oldAxes.back());
-}
 
-}  // namespace
+  return oldAxes.back().strictPrefixOf(newAxes.back());
+}
 
 bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,
                                                ArrayRef<AxisRefAttr> newAxes) {
