@@ -22,40 +22,53 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
 
-// An aggressive strategy of propagating sharding axes along factors.
+// An aggressive strategy of propagating sharding axes along factors. There are
+// two main differences from `BasicFactorPropagation`.
 //
-// This strategy is the same as `BasicFactorPropagation` on the conflicts within
-// a factor. They are different on the conflicts across factors.
+// `BasicFactorPropagation` propagates the same sharding axes to all tensors
+// along a factor. This strategy can propagate different sharding axes to
+// different tensors along the same factor. For example, Tensors T0, T1, T2
+// contain Factor F0. T0/F0 is already sharded along ["a", "b"], and "b" is
+// already used by T2 ("b" can be explicitly replicated, or it is used to shard
+// another factor). `BasicFactorPropagation` propagates ["a"] to both T1/F0 and
+// T2/F0, while this strategy propagates ["a", "b"] to T1/F0 and ["a"] to T2/F0,
+// respectively. If T2/F0 is closed, `BasicFactorPropagation` propagates
+// nothing, while this strategy propagates nothing to T2/F0 and still propagates
+// ["a", "b"] to T1/F0.
 //
-// `BasicFactorPropagation` considers the conflicts across factors with a strict
-// criterion. The result cannot overlap with the sharded axes or overflow axes
-// related to all other factors. This aggressive strategy ignores "fake
-// conflicts", which are propagation choices that can co-exist. This aggressive
-// strategy ensures that the resultant axes can be propagated to all tensors
-// containing the factor. Several examples of fake conflicts:
+// `BasicFactorPropagation` is conservative in terms of conflicts across
+// factors. The overlapped axis between factors cannot be propagated. This
+// strategy is more aggressive by allowing the overlapped axis being propagated
+// along different factors if there is no overlapped axis in the result
+// shardings.
 //
-// 1. An axis is in factors Fi and Fj. If it is infeasible to propagate that
-// axis along factor Fi, we may propagate that axis along factor Fj if all the
-// destination tensors have not used that axis.
+// Let us take C = dot(A, B) as an example. F0 is the factor corresponding to a
+// non-contracting dimension of A. F1 corresponds to a non-contracting dimension
+// of B. F2 corresponds to a contracting dimension. "-" means that the tensor
+// does not contain the factor.
 //
-// 2. Two factors Fi and Fj do not co-exist in any tensor, so they never
-// interfere with each other. If Fi and Fj are sharded along the same axis, we
-// can propagate that axis along both factors.
+//     F0    F1    F2
+// A  "a"    -
+// B   -
+// C        "a"    -
+// Case 1. Fake conflict. `BasicFactorPropagation` propagates nothing, while
+// this strategy propagates "a" to B/F1.
 //
-// Although fake conflicts can co-exist without inference, we may still need to
-// all-gather some tensors.
+//     F0    F1    F2
+// A  "a"    -
+// B   -    "a"
+// C               -
+// Case 2. Real conflict. Both `BasicFactorPropagation` and this strategy
+// propagate nothing. We can propagate "a" to C/F0 or C/F1, which is illegal
+// since "a" cannot be used twice in C.
 class AggressiveFactorPropagation : public BasicFactorPropagation {
  public:
-  AxesPerFactor getCompatibleMajorShardingAxesForAllFactors(
-      const ShardingProjection& projection, PropagationDirection direction,
-      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
-      bool conservativePropagation) const override;
-
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, PropagationDirection direction,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,

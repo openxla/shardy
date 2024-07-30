@@ -59,7 +59,7 @@ std::optional<AxisRefAttr> getPrefixWithoutOverlap(
 std::optional<AxisRefAttr>
 BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
     AxisRefAttr axisRef, const FactorIndexToSharding& factorIndexToSharding,
-    int64_t factorIndex, AxesPerFactorRef newAxesPerFactor) const {
+    int64_t factorIndex) const {
   AxisRefAttr result = axisRef;
   for (const auto& [otherFactorIndex, shardings] : factorIndexToSharding) {
     if (otherFactorIndex != factorIndex) {
@@ -67,11 +67,6 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
           result, getPrefixWithoutOverlap(result, shardings.overflowAxes));
       ASSIGN_OR_RETURN_IF_NULLOPT(
           result, getPrefixWithoutOverlap(result, shardings.axisRefs));
-      if (!newAxesPerFactor.empty()) {
-        ASSIGN_OR_RETURN_IF_NULLOPT(
-            result, getPrefixWithoutOverlap(
-                        result, newAxesPerFactor[otherFactorIndex]));
-      }
     }
   }
   return result;
@@ -387,21 +382,6 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
       mesh, conservativePropagation);
 
   return resultAxes;
-}
-
-AxesPerFactor
-BasicFactorPropagation::getCompatibleMajorShardingAxesForAllFactors(
-    const ShardingProjection& projection, PropagationDirection direction,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
-    bool conservativePropagation) const {
-  AxesPerFactor result;
-  result.reserve(factorSizes.size());
-  for (auto [factorIndex, factorSize] : llvm::enumerate(factorSizes)) {
-    result.push_back(getCompatibleMajorShardingAxes(
-        projection, factorIndex, direction, factorSize, mesh, op,
-        conservativePropagation));
-  }
-  return result;
 }
 
 UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(

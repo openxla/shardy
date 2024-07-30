@@ -17,14 +17,14 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
-#include <utility>
 
-#include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -35,42 +35,37 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 
-class GetCompatibleMajorShardingAxesTest : public PropagationTestBase {
+class AggressiveFactorPropagationTest : public PropagationTestBase {
  protected:
-  AxesPerFactor getCompatibleMajorShardingAxesForAllFactors(
-      ShardingProjection projection,
-      const BasicFactorPropagation& factorPropagation, int64_t numFactors) {
-    AxesPerFactor result =
-        factorPropagation.getCompatibleMajorShardingAxesForAllFactors(
-            projection, PropagationDirection::BOTH,
-            SmallVector<int64_t>(numFactors, 1), /*mesh=*/nullptr,
-            /*op=*/nullptr, /*conservativePropagation=*/false);
-    EXPECT_EQ(result.size(), numFactors);
-    return result;
+  UpdateTensorShardings propagateFactorShardings(
+      ShardingProjection& projection, int64_t numFactors,
+      PropagationDirection direction = PropagationDirection::BOTH,
+      MeshAttr mesh = nullptr, bool conservativePropagation = false,
+      Operation* op = nullptr) {
+    return AggressiveFactorPropagation().propagateFactorShardings(
+        projection, direction, SmallVector<int64_t>(numFactors, 1), mesh, op,
+        conservativePropagation);
   }
 
-  bool basicAndAggressiveFactorPropagationSameResult(
-      ShardingProjection projection, int64_t numFactors,
+  UpdateTensorShardings propagateFactorShardings(
+      ShardingProjection& projection, ArrayRef<int64_t> factorSizes,
       PropagationDirection direction = PropagationDirection::BOTH,
-      ArrayRef<int64_t> factorSizes = ArrayRef<int64_t>(),
-      ArrayRef<std::pair<StringRef, int64_t>> meshAxes = {}) {
-    const AxesPerFactor result1 = getCompatibleMajorShardingAxesForAllFactors(
-        projection, BasicFactorPropagation(), numFactors);
-    const AxesPerFactor result2 = getCompatibleMajorShardingAxesForAllFactors(
-        projection, AggressiveFactorPropagation(), numFactors);
-    return result1 == result2;
+      MeshAttr mesh = nullptr, Operation* op = nullptr,
+      bool conservativePropagation = false) {
+    return AggressiveFactorPropagation().propagateFactorShardings(
+        projection, direction, factorSizes, mesh, op, conservativePropagation);
   }
 };
 
-TEST_F(GetCompatibleMajorShardingAxesTest, RealAndFakeConflicts) {
+TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
   ShardingProjection projection(
       /*operands=*/
       {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {createAxis("a")}}},
-                   {2, {.axisRefs = {createAxis("b")}}},
-                   {4, {.axisRefs = {createAxis("c")}}},
+                   {2, {.axisRefs = {createAxis("c")}}},
+                   {4, {.axisRefs = {createAxis("b")}}},
                    {6, {.axisRefs = {createAxis("e")}}},
                    {7, {.axisRefs = {}}},
                    {8, {.axisRefs = {createAxis("f")}}},
@@ -80,9 +75,9 @@ TEST_F(GetCompatibleMajorShardingAxesTest, RealAndFakeConflicts) {
                {
                    {1, {.axisRefs = {createAxis("a")}}},
                    {2, {.axisRefs = {}}},
-                   {3, {.axisRefs = {createAxis("b")}}},
+                   {3, {.axisRefs = {createAxis("c")}}},
                    {4, {.axisRefs = {}}},
-                   {5, {.axisRefs = {createAxis("c")}}},
+                   {5, {.axisRefs = {createAxis("b")}}},
                    {6, {.axisRefs = {}}},
                    {7, {.axisRefs = {createAxis("e")}}},
                    {9, {.axisRefs = {createAxis("g")}}},
@@ -94,9 +89,9 @@ TEST_F(GetCompatibleMajorShardingAxesTest, RealAndFakeConflicts) {
                {
                    {0, {.axisRefs = {}}},
                    {1, {.axisRefs = {}}},
-                   {2, {.axisRefs = {}, .isClosed = true}},
+                   {2, {.axisRefs = {}, .overflowAxes = {createAxis("d")}}},
                    {3, {.axisRefs = {}}},
-                   {4, {.axisRefs = {}, .overflowAxes = {createAxis("d")}}},
+                   {4, {.axisRefs = {}, .isClosed = true}},
                    {5, {.axisRefs = {}}},
                    {6, {.axisRefs = {}, .isClosed = true}},
                    {7, {.axisRefs = {}}},
@@ -104,94 +99,68 @@ TEST_F(GetCompatibleMajorShardingAxesTest, RealAndFakeConflicts) {
                    {9, {.axisRefs = {}}},
                }},
       });
-
-  // Basic strategy does not propagate anything for this case.
-  AxesPerFactor resultWithBasicStrategy =
-      getCompatibleMajorShardingAxesForAllFactors(projection,
-                                                  BasicFactorPropagation(), 11);
-  for (ArrayRef<AxisRefAttr> element : resultWithBasicStrategy) {
-    EXPECT_THAT(element, IsEmpty());
-  }
-
-  AxesPerFactor resultWithAggressiveStrategy =
-      getCompatibleMajorShardingAxesForAllFactors(
-          projection, AggressiveFactorPropagation(), 11);
-
-  // Axis "a" is in factors 0 and 1, which co-exists in the result. We can
-  // propagate "a" along factor 0 or 1 to the result. The real conflicts
-  // prohibit further propagation along these two factors.
-  EXPECT_THAT(resultWithAggressiveStrategy[0], IsEmpty());
-  EXPECT_THAT(resultWithAggressiveStrategy[1], IsEmpty());
-
-  // Axis "b" is in factors 2 and 3. Since we cannot propagate "b" along
-  // factor 2 (the factor sharding is closed in the result), we can propagate
-  // "b" along factor 3.
-  EXPECT_THAT(resultWithAggressiveStrategy[2], IsEmpty());
-  EXPECT_THAT(resultWithAggressiveStrategy[3], ElementsAre(AxisRefIs("b")));
-
-  // Axis "c" is in factors 4 and 5. Since we cannot propagate "c" along
-  // factor 4 (the factor sharding has overflow axes in the result), we can
-  // propagate "c" along factor 5.
-  EXPECT_THAT(resultWithAggressiveStrategy[4], IsEmpty());
-  EXPECT_THAT(resultWithAggressiveStrategy[5], ElementsAre(AxisRefIs("c")));
-
-  // Axis "e" is in factors 6 and 7. We cannot propagate "e" along factor 6
-  // since the factor sharding is closed in the result. We cannot propagate
-  // "e" along factor 7 since operand 0 contains factor 7 and is already
-  // sharded along factor 7.
-  EXPECT_THAT(resultWithAggressiveStrategy[6], IsEmpty());
-  EXPECT_THAT(resultWithAggressiveStrategy[7], IsEmpty());
-
-  // Factor 10 already contains axes "f" and "g". Factor does not appear in
-  // the result. Hence, we can propagate "f" and "g" to result along factor 8
-  // and 9, respectively.
-  EXPECT_THAT(resultWithAggressiveStrategy[8], ElementsAre(AxisRefIs("f")));
-  EXPECT_THAT(resultWithAggressiveStrategy[9], ElementsAre(AxisRefIs("g")));
-  EXPECT_THAT(resultWithAggressiveStrategy[10], IsEmpty());
-}
-
-TEST_F(GetCompatibleMajorShardingAxesTest, TwoFactorsDoNotCoExistInAnyTensor) {
-  ShardingProjection projection(
-      /*operands=*/
-      {
-          {.factorIndexToSharding =
-               {
-                   {0, {.axisRefs = {createAxis("a")}}},
-               }},
-          {.factorIndexToSharding =
-               {
-                   {1, {.axisRefs = {createAxis("a")}}},
-               }},
-      },
+  ShardingProjection projectionExpected(
+      /*operands=*/{projection.getOperand(0), projection.getOperand(1)},
       /*results=*/{
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {}}},
-               }},
-          {.factorIndexToSharding =
-               {
                    {1, {.axisRefs = {}}},
+                   {2, {.axisRefs = {}, .overflowAxes = {createAxis("d")}}},
+                   {3, {.axisRefs = {createAxis("c")}}},
+                   {4, {.axisRefs = {}, .isClosed = true}},
+                   {5, {.axisRefs = {createAxis("b")}}},
+                   {6, {.axisRefs = {}, .isClosed = true}},
+                   {7, {.axisRefs = {createAxis("e")}}},
+                   {8, {.axisRefs = {createAxis("f")}}},
+                   {9, {.axisRefs = {createAxis("g")}}},
                }},
       });
 
-  // Basic strategy does not propagate anything for this case.
-  AxesPerFactor resultWithBasicStrategy =
-      getCompatibleMajorShardingAxesForAllFactors(projection,
-                                                  BasicFactorPropagation(), 2);
-  for (ArrayRef<AxisRefAttr> element : resultWithBasicStrategy) {
-    EXPECT_THAT(element, IsEmpty());
-  }
-
-  // Factors 0 and 1 do not co-exist in any tensor. Hence, we can propagate
-  // axis "a" along both factors.
-  AxesPerFactor resultWithAggressiveStrategy =
-      getCompatibleMajorShardingAxesForAllFactors(
-          projection, AggressiveFactorPropagation(), 2);
-  EXPECT_THAT(resultWithAggressiveStrategy[0], ElementsAre(AxisRefIs("a")));
-  EXPECT_THAT(resultWithAggressiveStrategy[1], ElementsAre(AxisRefIs("a")));
+  // Axis "a" may be propagated to the result along factors 0 or 1, which forms
+  // a real conflict. Thus, we do not apply either of propagation choices.
+  //
+  // Other conflicts are fake. We can propagate other axes as much as possible.
+  // Axes "c", "b", "e", "f", "g" can be propagated to the result along factors
+  // 3, 5, 7, 8, 9, respectively, since these axes cannot propagated to the
+  // result along other factors. Also the sharding after propagation is valid
+  // (sharding axes are not overlapped with each other).
+  //
+  // Propagation on different factors are independent. Although we cannot
+  // propagate "e" to the Operand 0 along factor 7, we still propagate "e" to
+  // the result along factor 7.
+  auto [updateOperands, updateResults] =
+      propagateFactorShardings(projection, 11);
+  EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
+  EXPECT_EQ(projection, projectionExpected);
 }
 
-TEST_F(GetCompatibleMajorShardingAxesTest,
+TEST_F(AggressiveFactorPropagationTest, TwoFactorsDoNotCoExistInAnyTensor) {
+  ShardingProjection projection(
+      /*operands=*/
+      {
+          {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}}}},
+          {.factorIndexToSharding = {{1, {.axisRefs = {createAxis("a")}}}}},
+      },
+      /*results=*/{
+          {.factorIndexToSharding = {{0, {.axisRefs = {}}}}},
+          {.factorIndexToSharding = {{1, {.axisRefs = {}}}}},
+      });
+  ShardingProjection projectionExpected(
+      /*operands=*/{projection.getOperand(0), projection.getOperand(1)},
+      /*results=*/{projection.getOperand(0), projection.getOperand(1)});
+
+  // We can propagate axis "a" along both factors since the two factors do not
+  // co-exist in any tensor.
+  auto [updateOperands, updateResults] =
+      propagateFactorShardings(projection, 2);
+  EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
+  EXPECT_EQ(projection, projectionExpected);
+}
+
+TEST_F(AggressiveFactorPropagationTest,
        ConflictsBetweenDifferentFactorsAndReplicated) {
   ShardingProjection projection(
       /*operands=*/
@@ -242,124 +211,149 @@ TEST_F(GetCompatibleMajorShardingAxesTest,
                }},
       });
 
-  int64_t numFactors = 6;
-  AxesPerFactor resultWithBasicStrategy =
-      getCompatibleMajorShardingAxesForAllFactors(
-          projection, BasicFactorPropagation(), numFactors);
-  AxesPerFactor resultWithAggressiveStrategy =
-      getCompatibleMajorShardingAxesForAllFactors(
-          projection, AggressiveFactorPropagation(), numFactors);
-
-  // The compatible major axes for factor 0 are ["a", "b", "c"], but the 2nd
-  // operand, which isn't mapped to factor 0, has a different factor (1) that
-  // is sharded along "b".
-  EXPECT_THAT(resultWithBasicStrategy[0], ElementsAre(AxisRefIs("a")));
-  // Since factors 0 and 1 does not co-exist in the same operand, we can
-  // ignore their conflicts.
-  EXPECT_THAT(resultWithAggressiveStrategy[0],
-              ElementsAre(AxisRefIs("a"), AxisRefIs("b"), AxisRefIs("c")));
-
-  // Axis "b" appears in factors 0 and 1, which does not co-exist in the same
-  // operand. Hence, we can propagate axis "b" along factors 0 and 1,
-  // respectively. `getAxesWithConservativeStrategy` treat it as a conflict,
-  // while `getAxesWithAggressiveStrategy` ignore
-  // this fake conflict.
-  EXPECT_THAT(resultWithBasicStrategy[1], IsEmpty());
-  EXPECT_THAT(resultWithAggressiveStrategy[1], ElementsAre(AxisRefIs("b")));
-
-  // For other factors, the results are the same.
-  for (int64_t i = 2; i < numFactors; i++) {
-    EXPECT_TRUE(resultWithBasicStrategy[i] == resultWithAggressiveStrategy[i]);
-  }
-}
-
-TEST_F(GetCompatibleMajorShardingAxesTest, FullAxesConflictsOnlyForSameFactor) {
-  ShardingProjection projection(
+  ShardingProjection projectionExpected(
       /*operands=*/
       {
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a")}}},
-                   {3, {.axisRefs = {createAxis("h")}}},
+                   {0,
+                    {.axisRefs = {createAxis("a"), createAxis("b"),
+                                  createAxis("c")}}},
+                   {3,
+                    {.axisRefs = {createSubAxis("h", 1, 2), createAxis("i")}}},
                }},
+          projection.getOperand(1),
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {}}},
-                   {2, {.axisRefs = {createAxis("g")}}},
-                   {3, {.axisRefs = {createAxis("i")}}},
+                   {0,
+                    {.axisRefs = {createAxis("a"), createAxis("b"),
+                                  createAxis("c")}}},
+                   {4,
+                    {.axisRefs = {createSubAxis("j", 1, 8),
+                                  createSubAxis("k", 2, 4)}}},
                }},
-          {.factorIndexToSharding = {{1, {.axisRefs = {createAxis("e")}}}}},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
                    {0,
                     {.axisRefs = {createAxis("a"), createAxis("b"),
+                                  createAxis("c"), createAxis("d")}}},
+                   {3,
+                    {.axisRefs = {createSubAxis("h", 1, 2),
+                                  createSubAxis("i", 1, 2)}}},
+               },
+           .replicatedAxes = {createSubAxis("h", 2, 4),
+                              createSubAxis("i", 2, 2)}},
+          projection.getResult(1),
+          {.factorIndexToSharding =
+               {
+                   {4, {.axisRefs = {createSubAxis("j", 1, 8)}}},
+                   {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
+               }},
+      });
+
+  auto [updateOperands, updateResults] =
+      propagateFactorShardings(projection, 6);
+  EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 2));
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 2));
+  EXPECT_EQ(projection, projectionExpected);
+}
+
+TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
+  ShardingProjection projection(
+      /*operands=*/
+      {
+          {.factorIndexToSharding =
+               {
+                   {0,
+                    {.axisRefs = {createAxis("a"), createAxis("b"),
                                   createAxis("c")}}},
-                   {1, {.axisRefs = {createAxis("e"), createAxis("f")}}},
+                   {1, {.axisRefs = {}}},
+                   {2, {.axisRefs = {}, .isClosed = true}},
+                   {3, {.axisRefs = {}}},
+               },
+           .replicatedAxes = {createAxis("d")}},
+          {.factorIndexToSharding =
+               {
+                   {0, {.axisRefs = {}}},
+                   {1, {.axisRefs = {createAxis("b"), createAxis("a")}}},
+                   {2, {.axisRefs = {}}},
+                   {3, {.axisRefs = {createAxis("d")}}},
+               }},
+          {.factorIndexToSharding =
+               {
+                   {0, {.axisRefs = {}, .isClosed = true}},
+                   {1, {.axisRefs = {}}},
+                   {2, {.axisRefs = {createAxis("c"), createAxis("a")}}},
+                   {3, {.axisRefs = {}}},
+               }},
+      },
+      /*results=*/{
+          {.factorIndexToSharding =
+               {
+                   {0, {.axisRefs = {}}},
+                   {1, {.axisRefs = {}, .isClosed = true}},
+                   {2, {.axisRefs = {}}},
+                   {3, {.axisRefs = {}}},
                }},
           {.factorIndexToSharding =
                {
                    {0,
                     {.axisRefs = {createAxis("a"), createAxis("b"),
                                   createAxis("d")}}},
+                   {1, {.axisRefs = {}}},
                    {2, {.axisRefs = {}}},
-                   {3, {.axisRefs = {createAxis("i"), createAxis("j")}}},
+                   {3, {.axisRefs = {}}},
                }},
       });
-  // Two strategies have the same criterion on the conflicts within a single
-  // factor.
-  EXPECT_TRUE(basicAndAggressiveFactorPropagationSameResult(projection, 4));
-}
 
-TEST_F(GetCompatibleMajorShardingAxesTest, SubAxesConflictsOnlyForSameFactor) {
-  ShardingProjection projection(
+  ShardingProjection projectionExpected(
       /*operands=*/
       {
-          {.factorIndexToSharding =
-               {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-                   {1,
-                    {.axisRefs = {createSubAxis("c", 2, 2), createAxis("d")}}},
-                   {4, {.axisRefs = {createSubAxis("i", 1, 4)}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 8)}}},
-               }},
+          projection.getOperand(0),
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {}}},
-                   {1, {.axisRefs = {createSubAxis("c", 2, 4)}}},
-                   {3,
-                    {.axisRefs = {createAxis("g"), createSubAxis("h", 1, 8)}}},
-                   {5,
-                    {.axisRefs = {createSubAxis("k", 1, 4)}, .isClosed = true}},
+                   {1, {.axisRefs = {createAxis("b"), createAxis("a")}}},
+                   {2, {.axisRefs = {createAxis("c")}}},
+                   {3, {.axisRefs = {createAxis("d")}}},
+               }},
+          {.factorIndexToSharding =
+               {
+                   {0, {.axisRefs = {}, .isClosed = true}},
+                   {1, {.axisRefs = {createAxis("b")}}},
+                   {2, {.axisRefs = {createAxis("c"), createAxis("a")}}},
+                   {3, {.axisRefs = {createAxis("d")}}},
                }},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createSubAxis("a", 1, 2)}}},
-                   {2,
-                    {.axisRefs = {createSubAxis("e", 2, 4),
-                                  createSubAxis("f", 4, 2)}}},
-                   {3,
-                    {.axisRefs = {createAxis("g"), createSubAxis("h", 1, 4),
-                                  createAxis("i")}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 2)}}},
+                   {0, {.axisRefs = {}}},
+                   {1, {.axisRefs = {}, .isClosed = true}},
+                   {2, {.axisRefs = {createAxis("c")}}},
+                   {3, {.axisRefs = {createAxis("d")}}},
                }},
           {.factorIndexToSharding =
                {
-                   {1,
-                    {.axisRefs = {createSubAxis("c", 2, 4), createAxis("d")}}},
-                   {2,
-                    {.axisRefs = {createSubAxis("e", 2, 4),
-                                  createSubAxis("f", 4, 8)}}},
-                   {4, {.axisRefs = {createSubAxis("j", 2, 4)}}},
-                   {5, {.axisRefs = {}}},
+                   {0,
+                    {.axisRefs = {createAxis("a"), createAxis("b"),
+                                  createAxis("d")}}},
+                   {1, {.axisRefs = {}}},
+                   {2, {.axisRefs = {createAxis("c")}}},
+                   {3, {.axisRefs = {}}},
                }},
       });
-  // Two strategies have the same criterion on the conflicts within a single
-  // factor.
-  EXPECT_TRUE(basicAndAggressiveFactorPropagationSameResult(projection, 6));
+
+  // “a” can be propagated to the Result 0 along either Factor 0 or Factor 2.
+  // This strategy truncate “a” for both F0 and F2 in Result 0. Namely, this
+  // strategy does not resolve real conflicts across factors.
+  auto [updateOperands, updateResults] =
+      propagateFactorShardings(projection, 4);
+  EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(1, 2));
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
+  EXPECT_EQ(projection, projectionExpected);
 }
 
 }  // namespace

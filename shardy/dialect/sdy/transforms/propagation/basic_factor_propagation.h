@@ -29,9 +29,6 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-using AxesPerFactor = SmallVector<SmallVector<AxisRefAttr>>;
-using AxesPerFactorRef = ArrayRef<SmallVector<AxisRefAttr>>;
-
 // A conservative strategy of propagating sharding axes along the factor.
 //
 // Refer to the documentation of `getCompatibleMajorShardingAxes` for the
@@ -81,18 +78,11 @@ class BasicFactorPropagation : public FactorPropagation {
   //   - Given factor shardings ["a":(1)2, "b"] and ["a":(1)4], returns
   //     ["a":(1)2].
   //
-  // TODO(b/350563653). Mark the following two methods as protected or private.
-  virtual SmallVector<AxisRefAttr> getCompatibleMajorShardingAxes(
+  // TODO(b/350563653). Mark the following method as protected or private.
+  SmallVector<AxisRefAttr> getCompatibleMajorShardingAxes(
       const ShardingProjection& projection, int64_t factorIndex,
       PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
       Operation* op, bool conservativePropagation) const;
-
-  // Similar to `getCompatibleMajorShardingAxes`, but returns the compatible
-  // major axes for all factors.
-  virtual AxesPerFactor getCompatibleMajorShardingAxesForAllFactors(
-      const ShardingProjection& projection, PropagationDirection direction,
-      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
-      bool conservativePropagation) const;
 
   // Propagates the factor shardings in `projection`.
   UpdateTensorShardings propagateFactorShardings(
@@ -112,20 +102,18 @@ class BasicFactorPropagation : public FactorPropagation {
       const ShardingProjection& projection, int64_t factorIndex,
       PropagationDirection direction, Operation* op) const;
 
-  // Returns the largest prefix of `axisRef`, which does not overlap with (1)
-  // overflow axes, (2) existing sharding axes, and (3) potential new sharding
-  // axes in `newAxesPerFactor` for all other factors.
+  // Returns the largest prefix of `axisRef`, which does not overlap with
+  // sharding axes and overflow axes for all other factors.
   //
   // This function does not consider the conflicts within the factor itself,
   // which are considered in `compatiblePrefixNoConflictsWithinFactor`. The
-  // returned prefix can be overlapped with (1) overflow axes, (2) existing
-  // sharding axes, and (3) potential new sharding axes of the factor itself.
+  // returned prefix can be overlapped with sharding axes and overflow axes of
+  // the factor itself.
   //
   // Returns std::nullopt if the prefix does not exist.
   std::optional<AxisRefAttr> compatiblePrefixNoConflictsAcrossFactors(
       AxisRefAttr axisRef, const FactorIndexToSharding& factorIndexToSharding,
-      int64_t factorIndex,
-      AxesPerFactorRef newAxesPerFactor = AxesPerFactorRef()) const;
+      int64_t factorIndex) const;
 
   // Returns the largest compatible prefix of `axisRef` by removing conflicts
   // with `replicatedAxes` and `factorSharding`.

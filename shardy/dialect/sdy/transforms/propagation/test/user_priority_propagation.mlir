@@ -18,7 +18,7 @@ func.func @no_priorities(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@m
 
 // CHECK-LABEL: func @skipped_priorities(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}]>}) {
 func.func @skipped_priorities(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}p4]>},
@@ -32,7 +32,7 @@ func.func @skipped_priorities(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shardi
 
 // CHECK-LABEL: func @arg_lower_priority_than_return_value(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b"}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>}) {
@@ -50,9 +50,9 @@ func.func @arg_lower_priority_than_return_value(
 
 // CHECK-LABEL: func @arg_lower_priority_than_return_value_with_replicated(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
-// CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>})
+// CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>}) {
 func.func @arg_lower_priority_than_return_value_with_replicated(
       %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}p1, {"b"}p1]>},
@@ -71,7 +71,7 @@ func.func @arg_lower_priority_than_return_value_with_replicated(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
-// CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+// CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>}) {
 func.func @arg_higher_priority_than_return_value(
       %arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}p0, {"b"}p0]>},
@@ -107,7 +107,7 @@ func.func @result_lower_priority_than_arg(
 
 // CHECK-LABEL: func @result_higher_priority_than_arg(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
@@ -126,7 +126,7 @@ func.func @result_higher_priority_than_arg(
 
 // CHECK-LABEL: func @dim_with_lower_priority_gets_further_sharded_by_higher(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32>,
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>},
 // CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>})
 func.func @dim_with_lower_priority_gets_further_sharded_by_higher(
@@ -145,7 +145,7 @@ func.func @dim_with_lower_priority_gets_further_sharded_by_higher(
 // CHECK-LABEL: func @different_priorities_with_closed_empty_dim(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
-// CHECK-SAME:      %arg2: tensor<8x8xf32>,
+// CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>}) {
 func.func @different_priorities_with_closed_empty_dim(
@@ -163,7 +163,7 @@ func.func @different_priorities_with_closed_empty_dim(
 // CHECK-LABEL: func @open_empty_dim_with_priority(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
-// CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:      %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}]>},
 // CHECK-SAME:      %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c"}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}]>}) {
 func.func @open_empty_dim_with_priority(
@@ -199,7 +199,8 @@ func.func @different_priorities_from_args(
 
 // CHECK-LABEL: func @different_priorities_from_ops(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32>, %arg2: tensor<8x16xf32>)
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:      %arg2: tensor<8x16xf32>)
 // CHECK-SAME:  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}) {
 func.func @different_priorities_from_ops(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>,
                                          %arg2: tensor<8x16xf32>) -> tensor<8x16xf32> {
@@ -238,7 +239,7 @@ func.func @propagate_to_multi_result_op_with_priorities(
   // CHECK-NEXT: %[[CONST:.*]] = stablehlo.constant dense<0.000000e+00>
   // CHECK-NEXT: %[[REDUCE:.*]]:2 = stablehlo.reduce(%arg0 init: %[[CONST]]), (%arg1 init: %[[CONST]]) across dimensions = [1]
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>, <@mesh, [{?}, {"a", ?}]>]>}
-  // CHECK:      stablehlo.add %[[REDUCE]]#1, %arg2 :
+  // CHECK:      stablehlo.add %[[REDUCE]]#1, %arg2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} :
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1] :
     (tensor<4x64x8xf32>, tensor<4x64x8xf32>, tensor<f32>, tensor<f32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
@@ -252,7 +253,8 @@ func.func @propagate_to_multi_result_op_with_priorities(
 }
 
 // CHECK-LABEL: func @propagate_from_multi_result_op_with_priorities(
-// CHECK-SAME:      %arg0: tensor<4x64x8xf32>, %arg1: tensor<4x64x8xf32>)
+// CHECK-SAME:      %arg0: tensor<4x64x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}, {"b", ?}]>},
+// CHECK-SAME:      %arg1: tensor<4x64x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}, {"b", ?}]>})
 func.func @propagate_from_multi_result_op_with_priorities(
     %arg0: tensor<4x64x8xf32>, %arg1: tensor<4x64x8xf32>) -> tensor<4x8xf32> {
   // CHECK-NEXT: %[[CONST:.*]] = stablehlo.constant dense<0.000000e+00>
@@ -320,7 +322,7 @@ func.func @user_based_and_op_based(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}p1, {?}]>},
     %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}p0, {"b", ?}p0]>})
     -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}p0, {?}]>}) {
-  // CHECK:      %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} : tensor<8x8xf32>
+  // CHECK:      %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", ?}, {"a", ?}]>]>} : tensor<8x8xf32>
   // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[ADD_0]], %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", ?}, {?}]>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[DOT]], %[[DOT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", ?}, {?}]>]>} : tensor<8x8xf32>
   // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[ADD_1]], %[[ADD_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", ?}, {?}]>]>} : tensor<8x8xf32>

@@ -27,6 +27,9 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+// Returns true if the `oldAxes` is a strict prefix of `newAxes`,
+bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
+
 // The axes along which a factor is sharded, and whether the factor can be
 // further sharded (unless it's fully sharded already).
 struct FactorSharding {
@@ -40,6 +43,12 @@ struct FactorSharding {
   // We need to store these axes so that we can add them when projecting back to
   // dimension shardings.
   SmallVector<AxisRefAttr> overflowAxes;
+
+  bool operator==(const FactorSharding& other) const {
+    return axisRefs == other.axisRefs && isClosed == other.isClosed &&
+           isMinorMost == other.isMinorMost &&
+           overflowAxes == other.overflowAxes;
+  }
 };
 
 using FactorIndexToSharding = llvm::DenseMap<int64_t, FactorSharding>;
@@ -50,6 +59,11 @@ struct TensorFactorShardings {
   // TODO(tomnatan): consider using a vector with null for unmapped factors.
   FactorIndexToSharding factorIndexToSharding;
   SmallVector<AxisRefAttr> replicatedAxes;
+
+  bool operator==(const TensorFactorShardings& other) const {
+    return factorIndexToSharding == other.factorIndexToSharding &&
+           replicatedAxes == other.replicatedAxes;
+  }
 
   // Updates the sharding axes of the given `factorIndex` to `newAxes` if
   // 1. this tensor is associated with that factor, and
@@ -119,6 +133,7 @@ class ShardingProjection {
 
   int64_t getNumOperands() const { return operands.size(); }
   int64_t getNumResults() const { return results.size(); }
+  int64_t getNumTensors() const { return getNumOperands() + getNumResults(); }
 
   ArrayRef<TensorFactorShardings> getOperands() const { return operands; }
   ArrayRef<TensorFactorShardings> getResults() const { return results; }
@@ -128,6 +143,15 @@ class ShardingProjection {
   }
   const TensorFactorShardings& getResult(int64_t resultNum) const {
     return results[resultNum];
+  }
+
+  bool updateOperandSharding(int64_t operandIndex, int64_t factorIndex,
+                             ArrayRef<AxisRefAttr> newAxes) {
+    return operands[operandIndex].updateShardingAxes(factorIndex, newAxes);
+  }
+  bool updateResultSharding(int64_t resultIndex, int64_t factorIndex,
+                            ArrayRef<AxisRefAttr> newAxes) {
+    return results[resultIndex].updateShardingAxes(factorIndex, newAxes);
   }
 
   // Updates the shardings of all tensors that are associated with
@@ -148,6 +172,10 @@ class ShardingProjection {
   static ShardingProjection build(Operation* op,
                                   OpShardingRuleAttr shardingRule,
                                   MeshAttr mesh);
+
+  bool operator==(const ShardingProjection& other) const {
+    return operands == other.operands && results == other.results;
+  }
 
  private:
   SmallVector<TensorFactorShardings> operands;
