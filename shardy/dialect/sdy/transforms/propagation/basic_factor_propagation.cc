@@ -392,6 +392,14 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
       .updateOperands = BitVector(projection.getNumOperands()),
       .updateResults = BitVector(projection.getNumResults())};
 
+  UpdateTensorShardings result2{
+      .updateOperands = BitVector(projection.getNumOperands()),
+      .updateResults = BitVector(projection.getNumResults())};
+
+  if (result2.updateOperands.any()) {
+
+  }
+
   // We propagate each factor separately.
   for (auto [factorIndex, factorSize] : llvm::enumerate(factorSizes)) {
     // For each factor, find the compatible major sharding axes that can shard
