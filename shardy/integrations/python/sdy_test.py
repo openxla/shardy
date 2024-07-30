@@ -30,49 +30,49 @@ class SdyAttributeTest(unittest.TestCase):
   def run(self, result=None):
     with ir.Context() as ctx:
       print("HELLO"*100)
-      sdy.ir.register_dialect(ctx)
+      sdy.register_dialect(ctx)
       print("AFTERREGISTER"*100)
       super().run(result)
 
   def test_mesh_axis_attr(self):
-    axis = sdy.ir.MeshAxisAttr.get('data', 42)
+    axis = sdy.MeshAxisAttr.get('data', 42)
     self.assertEqual(str(axis), '#sdy<mesh_axis"data"=42>')
     self.assertEqual(axis.name, 'data')
     self.assertEqual(axis.size, 42)
 
   def test_mesh_attr(self):
     axes = [
-        sdy.ir.MeshAxisAttr.get('data', 42),
-        sdy.ir.MeshAxisAttr.get('model', 123),
+        sdy.MeshAxisAttr.get('data', 42),
+        sdy.MeshAxisAttr.get('model', 123),
     ]
-    mesh = sdy.ir.MeshAttr.get(axes)
+    mesh = sdy.MeshAttr.get(axes)
     self.assertEqual(str(mesh), '#sdy.mesh<"data"=42, "model"=123>')
     self.assertEqual(mesh.axes, axes)
 
   def test_sub_axis_info_attr(self):
-    info = sdy.ir.SubAxisInfoAttr.get(1, 2)
+    info = sdy.SubAxisInfoAttr.get(1, 2)
     self.assertEqual(str(info), '#sdy<sub_axis_info(1)2>')
     self.assertEqual(info.pre_size, 1)
     self.assertEqual(info.size, 2)
 
   def test_axis_ref_attr(self):
-    axis_ref = sdy.ir.AxisRefAttr.get('data')
+    axis_ref = sdy.AxisRefAttr.get('data')
     self.assertEqual(str(axis_ref), '#sdy<axis_ref"data">')
     self.assertEqual(axis_ref.name, 'data')
     self.assertIsNone(axis_ref.sub_axis_info)
 
   def test_axis_ref_attr_with_sub_axis_info(self):
-    info = sdy.ir.SubAxisInfoAttr.get(4, 2)
-    axis_ref = sdy.ir.AxisRefAttr.get('data', info)
+    info = sdy.SubAxisInfoAttr.get(4, 2)
+    axis_ref = sdy.AxisRefAttr.get('data', info)
     self.assertEqual(str(axis_ref), '#sdy<axis_ref"data":(4)2>')
     self.assertEqual(axis_ref.name, 'data')
     self.assertEqual(axis_ref.sub_axis_info, info)
 
   def test_dimension_sharding_attr_open_p0(self):
     axes = [
-        sdy.ir.AxisRefAttr.get('model'),
+        sdy.AxisRefAttr.get('model'),
     ]
-    dimension_sharding = sdy.ir.DimensionShardingAttr.get(
+    dimension_sharding = sdy.DimensionShardingAttr.get(
         axes, is_closed=False, priority=0
     )
     self.assertEqual(
@@ -84,9 +84,9 @@ class SdyAttributeTest(unittest.TestCase):
 
   def test_dimension_sharding_attr_open_no_priority(self):
     axes = [
-        sdy.ir.AxisRefAttr.get('model'),
+        sdy.AxisRefAttr.get('model'),
     ]
-    dimension_sharding = sdy.ir.DimensionShardingAttr.get(axes, is_closed=False)
+    dimension_sharding = sdy.DimensionShardingAttr.get(axes, is_closed=False)
     self.assertEqual(
         str(dimension_sharding), '#sdy<dimension_sharding{"model", ?}>'
     )
@@ -96,10 +96,10 @@ class SdyAttributeTest(unittest.TestCase):
 
   def test_dimension_sharding_attr_closed_p1(self):
     axes = [
-        sdy.ir.AxisRefAttr.get('data', sdy.ir.SubAxisInfoAttr.get(4, 2)),
-        sdy.ir.AxisRefAttr.get('model'),
+        sdy.AxisRefAttr.get('data', sdy.SubAxisInfoAttr.get(4, 2)),
+        sdy.AxisRefAttr.get('model'),
     ]
-    dimension_sharding = sdy.ir.DimensionShardingAttr.get(
+    dimension_sharding = sdy.DimensionShardingAttr.get(
         axes, is_closed=True, priority=1
     )
     self.assertEqual(
@@ -111,7 +111,7 @@ class SdyAttributeTest(unittest.TestCase):
     self.assertEqual(dimension_sharding.priority, 1)
 
   def test_dimension_sharding_attr_empty_closed(self):
-    dimension_sharding = sdy.ir.DimensionShardingAttr.get([], is_closed=True)
+    dimension_sharding = sdy.DimensionShardingAttr.get([], is_closed=True)
     self.assertEqual(
         str(dimension_sharding),
         '#sdy<dimension_sharding{}>',
@@ -121,7 +121,7 @@ class SdyAttributeTest(unittest.TestCase):
     self.assertIsNone(dimension_sharding.priority)
 
   def test_dimension_sharding_attr_empty_open_p2(self):
-    dimension_sharding = sdy.ir.DimensionShardingAttr.get(
+    dimension_sharding = sdy.DimensionShardingAttr.get(
         [], is_closed=False, priority=2
     )
     self.assertEqual(
@@ -134,18 +134,18 @@ class SdyAttributeTest(unittest.TestCase):
 
   def test_tensor_sharding_attr_only_dim_shardings(self):
     dimension_shardings = [
-        sdy.ir.DimensionShardingAttr.get(
-            [sdy.ir.AxisRefAttr.get('data', sdy.ir.SubAxisInfoAttr.get(4, 2))],
+        sdy.DimensionShardingAttr.get(
+            [sdy.AxisRefAttr.get('data', sdy.SubAxisInfoAttr.get(4, 2))],
             is_closed=True,
             priority=1,
         ),
-        sdy.ir.DimensionShardingAttr.get(
-            [sdy.ir.AxisRefAttr.get('model')],
+        sdy.DimensionShardingAttr.get(
+            [sdy.AxisRefAttr.get('model')],
             is_closed=False,
             priority=0,
         ),
     ]
-    tensor_sharding = sdy.ir.TensorShardingAttr.get(
+    tensor_sharding = sdy.TensorShardingAttr.get(
         'my_mesh', dimension_shardings, replicated_axes=[]
     )
     self.assertEqual(
@@ -158,10 +158,10 @@ class SdyAttributeTest(unittest.TestCase):
 
   def test_tensor_sharding_attr_only_replicated_axes(self):
     replicated_axes = [
-        sdy.ir.AxisRefAttr.get('data', sdy.ir.SubAxisInfoAttr.get(4, 2)),
-        sdy.ir.AxisRefAttr.get('model'),
+        sdy.AxisRefAttr.get('data', sdy.SubAxisInfoAttr.get(4, 2)),
+        sdy.AxisRefAttr.get('model'),
     ]
-    tensor_sharding = sdy.ir.TensorShardingAttr.get(
+    tensor_sharding = sdy.TensorShardingAttr.get(
         'my_mesh', dimension_shardings=[], replicated_axes=replicated_axes
     )
     self.assertEqual(
@@ -174,16 +174,16 @@ class SdyAttributeTest(unittest.TestCase):
 
   def test_tensor_sharding_attr_dim_sharding_and_replicated(self):
     dimension_shardings = [
-        sdy.ir.DimensionShardingAttr.get([], is_closed=True),
-        sdy.ir.DimensionShardingAttr.get([], is_closed=False),
-        sdy.ir.DimensionShardingAttr.get(
-            [sdy.ir.AxisRefAttr.get('model')], is_closed=True
+        sdy.DimensionShardingAttr.get([], is_closed=True),
+        sdy.DimensionShardingAttr.get([], is_closed=False),
+        sdy.DimensionShardingAttr.get(
+            [sdy.AxisRefAttr.get('model')], is_closed=True
         ),
     ]
     replicated_axes = [
-        sdy.ir.AxisRefAttr.get('data', sdy.ir.SubAxisInfoAttr.get(4, 2)),
+        sdy.AxisRefAttr.get('data', sdy.SubAxisInfoAttr.get(4, 2)),
     ]
-    tensor_sharding = sdy.ir.TensorShardingAttr.get(
+    tensor_sharding = sdy.TensorShardingAttr.get(
         'my_mesh',
         dimension_shardings,
         replicated_axes,
@@ -198,25 +198,25 @@ class SdyAttributeTest(unittest.TestCase):
     self.assertEqual(tensor_sharding.replicated_axes, replicated_axes)
 
   def test_tensor_sharding_per_value(self):
-    tensor_sharding_1 = sdy.ir.TensorShardingAttr.get(
+    tensor_sharding_1 = sdy.TensorShardingAttr.get(
         'my_mesh',
         dimension_shardings=[
-            sdy.ir.DimensionShardingAttr.get([], is_closed=True),
+            sdy.DimensionShardingAttr.get([], is_closed=True),
         ],
         replicated_axes=[
-            sdy.ir.AxisRefAttr.get('data', sdy.ir.SubAxisInfoAttr.get(4, 2)),
+            sdy.AxisRefAttr.get('data', sdy.SubAxisInfoAttr.get(4, 2)),
         ],
     )
-    tensor_sharding_2 = sdy.ir.TensorShardingAttr.get(
+    tensor_sharding_2 = sdy.TensorShardingAttr.get(
         'my_mesh',
         dimension_shardings=[
-            sdy.ir.DimensionShardingAttr.get(
-                [sdy.ir.AxisRefAttr.get('model')], is_closed=True
+            sdy.DimensionShardingAttr.get(
+                [sdy.AxisRefAttr.get('model')], is_closed=True
             ),
         ],
         replicated_axes=[],
     )
-    tensor_sharding_per_value = sdy.ir.TensorShardingPerValueAttr.get(
+    tensor_sharding_per_value = sdy.TensorShardingPerValueAttr.get(
         shardings=[tensor_sharding_1, tensor_sharding_2],
     )
     self.assertEqual(
@@ -242,17 +242,18 @@ class SdyOperationTest(unittest.TestCase):
 
   def run(self, result=None):
     with ir.Context() as ctx, ir.Location.unknown(ctx):
-      sdy.ir.register_dialect(ctx)
+      sdy.register_dialect(ctx)
+      ctx.allow_unregistered_dialects = True
       module = ir.Module.create()
       with ir.InsertionPoint(module.body):
         super().run(result)
 
   def test_mesh(self):
-    mesh_attr = sdy.ir.MeshAttr.get([
-        sdy.ir.MeshAxisAttr.get('data', 42),
-        sdy.ir.MeshAxisAttr.get('model', 123),
+    mesh_attr = sdy.MeshAttr.get([
+        sdy.MeshAxisAttr.get('data', 42),
+        sdy.MeshAxisAttr.get('model', 123),
     ])
-    mesh = sdy.ir.MeshOp('my_mesh', mesh_attr)
+    mesh = sdy.MeshOp('my_mesh', mesh_attr)
     self.assertEqual(str(mesh), 'sdy.mesh @my_mesh = <"data"=42, "model"=123>')
     self.assertEqual(mesh.sym_name.value, 'my_mesh')
     self.assertEqual(mesh.mesh, mesh_attr)
@@ -263,18 +264,18 @@ class SdyOperationTest(unittest.TestCase):
         'tensor.empty',
         results=[ir.RankedTensorType.get((16, 32), ir.F32Type.get())],
     )
-    sharding = sdy.ir.TensorShardingAttr.get(
+    sharding = sdy.TensorShardingAttr.get(
         'my_mesh',
         [
-            sdy.ir.DimensionShardingAttr.get(
-                [sdy.ir.AxisRefAttr.get('model')], is_closed=True
+            sdy.DimensionShardingAttr.get(
+                [sdy.AxisRefAttr.get('model')], is_closed=True
             ),
         ],
         [
-            sdy.ir.AxisRefAttr.get('data', sdy.ir.SubAxisInfoAttr.get(4, 2)),
+            sdy.AxisRefAttr.get('data', sdy.SubAxisInfoAttr.get(4, 2)),
         ],
     )
-    sharding_constraint = sdy.ir.ShardingConstraintOp(
+    sharding_constraint = sdy.ShardingConstraintOp(
         custom_call.result,
         sharding,
     )
@@ -302,7 +303,7 @@ class SdyOperationTest(unittest.TestCase):
     # to the MLIR python package resolver:
     # `_cext.globals.append_dialect_search_prefix('openxla')`
     m = ir.Operation.parse('sdy.mesh @mesh = <"c"=4>')
-    self.assertIsInstance(m, sdy.ir.MeshOp)
+    self.assertIsInstance(m, sdy.MeshOp)
 
 
 if __name__ == '__main__':
