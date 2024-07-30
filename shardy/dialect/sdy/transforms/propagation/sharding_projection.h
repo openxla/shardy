@@ -49,6 +49,10 @@ struct FactorSharding {
            isMinorMost == other.isMinorMost &&
            overflowAxes == other.overflowAxes;
   }
+
+  bool operator!=(const FactorSharding& other) const {
+    return !(*this == other);
+  }
 };
 
 using FactorIndexToSharding = llvm::DenseMap<int64_t, FactorSharding>;
@@ -63,6 +67,10 @@ struct TensorFactorShardings {
   bool operator==(const TensorFactorShardings& other) const {
     return factorIndexToSharding == other.factorIndexToSharding &&
            replicatedAxes == other.replicatedAxes;
+  }
+
+  bool operator!=(const TensorFactorShardings& other) const {
+    return !(*this == other);
   }
 
   // Updates the sharding axes of the given `factorIndex` to `newAxes` if
@@ -175,6 +183,10 @@ class ShardingProjection {
 
   bool operator==(const ShardingProjection& other) const {
     return operands == other.operands && results == other.results;
+  }
+
+  bool operator!=(const ShardingProjection& other) const {
+    return !(*this == other);
   }
 
  private:
