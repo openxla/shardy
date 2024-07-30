@@ -82,7 +82,8 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
       SmallVector<AxisRefAttr> newAxes = axesPerFactor[factorIndex];
       truncateAxesByRemovingConflicts(
           newAxes,
-          [&, factorIndex = factorIndex, &factorSharding = factorSharding](
+          [&, factorIndex = factorIndex, &factorSharding = factorSharding,
+           &tensorFactorShardings = tensorFactorShardings](
               AxisRefAttr axisRef, int64_t shardedSize) {
             return compatiblePrefixNoConflictsWithinFactor(
                 axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
