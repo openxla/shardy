@@ -409,8 +409,8 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
   UpdateTensorShardings result{
-      .updateOperands = BitVector(projection.getNumOperands()),
-      .updateResults = BitVector(projection.getNumResults())};
+      /* .updateOperands = */ BitVector(projection.getNumOperands()),
+      /* .updateResults = */ BitVector(projection.getNumResults())};
 
   // We propagate each factor separately.
   for (auto [factorIndex, factorSize] : llvm::enumerate(factorSizes)) {

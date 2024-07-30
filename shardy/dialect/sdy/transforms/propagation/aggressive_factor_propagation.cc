@@ -149,8 +149,8 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
   UpdateTensorShardings result{
-      .updateOperands = BitVector(projection.getNumOperands()),
-      .updateResults = BitVector(projection.getNumResults())};
+      /* .updateOperands = */ BitVector(projection.getNumOperands()),
+      /* .updateResults = */ BitVector(projection.getNumResults())};
 
   // We get the compatible major sharding axes for all factors.
   AxesPerFactor axesPerFactor = getCompatibleMajorShardingAxesForAllFactors(
