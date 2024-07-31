@@ -585,7 +585,7 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
   // - The RHS is not mapped to factor 0, so it will be skipped.
   // - The result is mapped to factor 0. The old sharding axes ["a", "b":(1)2]
   //   are smaller than the new one, so the sharding axes are updated.
-  UpdateShardings ifUpdated = projection.updateSharding(
+  UpdateTensorShardings ifUpdated = projection.updateSharding(
       /*factorIndex=*/0, {createAxis("a"), createAxis("b")});
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), ElementsAre(0));

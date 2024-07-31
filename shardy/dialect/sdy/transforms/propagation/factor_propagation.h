@@ -26,12 +26,6 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-// A struct that specifies which operands and results are updated.
-struct UpdateTensorShardings {
-  BitVector updateOperands;
-  BitVector updateResults;
-};
-
 // An interface for propagating factor shardings.
 class FactorPropagation {
  public:

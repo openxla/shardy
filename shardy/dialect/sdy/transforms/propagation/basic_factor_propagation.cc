@@ -34,7 +34,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/macros.h"
-#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
@@ -388,9 +387,8 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection, PropagationDirection direction,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
-  UpdateTensorShardings result{
-      .updateOperands = BitVector(projection.getNumOperands()),
-      .updateResults = BitVector(projection.getNumResults())};
+  UpdateTensorShardings result(projection.getNumOperands(),
+                               projection.getNumResults());
 
   // We propagate each factor separately.
   for (auto [factorIndex, factorSize] : llvm::enumerate(factorSizes)) {

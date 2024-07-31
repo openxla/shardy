@@ -94,10 +94,14 @@ struct TensorFactorShardings {
                                               MeshAttr mesh) const;
 };
 
-// Holds two BitVectors indicating which tensors have new shardings.
-struct UpdateShardings {
+// A struct that specifies which operands and results are updated.
+struct UpdateTensorShardings {
   BitVector updateOperands;
   BitVector updateResults;
+
+  UpdateTensorShardings(int64_t numOperands, int64_t numResults)
+      : updateOperands(BitVector(numOperands)),
+        updateResults(BitVector(numResults)) {}
 };
 
 // The sharding projection holds information about how factors (rather than
@@ -165,8 +169,8 @@ class ShardingProjection {
   // Updates the shardings of all tensors that are associated with
   // `factorIndex` to be `newAxes` for that factor. Returns two BitVectors
   // indicating whether the operands and results have been updated.
-  UpdateShardings updateSharding(int64_t factorIndex,
-                                 ArrayRef<AxisRefAttr> newAxes);
+  UpdateTensorShardings updateSharding(int64_t factorIndex,
+                                       ArrayRef<AxisRefAttr> newAxes);
 
   // Builds a `ShardingProjection` for the given operand and result shardings,
   // w.r.t. the given `shardingRule`.

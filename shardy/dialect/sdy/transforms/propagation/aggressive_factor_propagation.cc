@@ -23,7 +23,6 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
@@ -46,9 +45,8 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection, PropagationDirection direction,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
-  UpdateTensorShardings result{
-      .updateOperands = BitVector(projection.getNumOperands()),
-      .updateResults = BitVector(projection.getNumResults())};
+  UpdateTensorShardings result(projection.getNumOperands(),
+                               projection.getNumResults());
   if (direction == PropagationDirection::NONE) {
     return result;
   }

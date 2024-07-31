@@ -611,9 +611,9 @@ LogicalResult BasicPropagationPassImpl::propagate(
   // Note that we only need a single iteration (and another to confirm
   // convergence), since we make sure ops whose sharding changes are
   // added back to the worklist.
-  GreedyRewriteConfig config{
-      .useTopDownTraversal = true,
-      .enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled};
+  GreedyRewriteConfig config;
+  config.useTopDownTraversal = true;
+  config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;
   if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns),
                                           config))) {
     return failure();
