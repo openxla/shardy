@@ -154,8 +154,8 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
 
 UpdateShardings ShardingProjection::updateSharding(
     int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes) {
-  UpdateShardings result{.updateOperands = BitVector(getNumOperands()),
-                         .updateResults = BitVector(getNumResults())};
+  UpdateShardings result{/* .updateOperands = */ BitVector(getNumOperands()),
+                         /* .updateResults = */ BitVector(getNumResults())};
   for (auto [i, tensor] : llvm::enumerate(operands)) {
     result.updateOperands[i] = tensor.updateShardingAxes(factorIndex, newAxes);
   }
@@ -188,8 +188,8 @@ std::optional<AxisRefInfo> getAxisRefInfo(ArrayRef<AxisRefAttr> axes,
   AxisRefAttr axisRef = axes[axisIndex];
   SubAxisInfoAttr splitInfo = axisRef.getSubAxisInfo();
   return AxisRefInfo{
-      .size = axisRef.getSize(mesh),
-      .splitPreSize = splitInfo ? std::make_optional(splitInfo.getPreSize())
+      /* .size = */ axisRef.getSize(mesh),
+      /* .splitPreSize = */ splitInfo ? std::make_optional(splitInfo.getPreSize())
                                 : std::nullopt};
 }
 
