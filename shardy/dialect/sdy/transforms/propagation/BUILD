@@ -264,3 +264,33 @@ cc_test(
         "@llvm-project//mlir:Support",
     ],
 )
+
+cc_library(
+    name = "custom_call_sharding_registry",
+    srcs = ["custom_call_sharding_registry.cc"],
+    hdrs = ["custom_call_sharding_registry.h"],
+    deps = [
+        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:macros",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_test(
+    name = "custom_call_sharding_registry_test",
+    srcs = ["custom_call_sharding_registry_test.cc"],
+    deps = [
+        ":custom_call_sharding_registry",
+        ":op_sharding_rule_registry",
+        "//shardy/dialect/sdy/ir:dialect",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Support",
+        "@stablehlo//:stablehlo_ops",
+    ],
+)
