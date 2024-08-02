@@ -84,3 +84,17 @@ def ConstantSplitterPass : Pass<"sdy-constant-splitter", "func::FuncOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def GroupCanonicalizationPass : Pass<"sdy-group-canonicalization", "ModuleOp"> {
+  let summary = "Combines shard groups to reduce them to a minimal set of canonical groups ids.";
+  let description = [{
+    Combines shard groups using the transitivive property of group membership.
+
+    Any time that a tensor T is in a sharding group G1 AND a sharding group G2,
+    then we can infer that all members in G1 and G2 should be sharded in the
+    same way. Thus we can combine G1 and G2 into a single group.
+
+    The set of canonical group ids will be ids for the minimal set of groups.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

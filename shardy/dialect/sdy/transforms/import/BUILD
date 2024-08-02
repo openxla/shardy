@@ -38,6 +38,7 @@ cc_library(
         "add_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
         "constant_splitter.cc",
+        "group_canonicalization.cc",
         "import_pipeline.cc",
     ],
     hdrs = [
