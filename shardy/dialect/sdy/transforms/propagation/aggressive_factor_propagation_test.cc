@@ -21,7 +21,6 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
@@ -45,15 +44,6 @@ class AggressiveFactorPropagationTest : public PropagationTestBase {
     return AggressiveFactorPropagation().propagateFactorShardings(
         projection, direction, SmallVector<int64_t>(numFactors, 1), mesh, op,
         conservativePropagation);
-  }
-
-  UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, ArrayRef<int64_t> factorSizes,
-      PropagationDirection direction = PropagationDirection::BOTH,
-      MeshAttr mesh = nullptr, Operation* op = nullptr,
-      bool conservativePropagation = false) {
-    return AggressiveFactorPropagation().propagateFactorShardings(
-        projection, direction, factorSizes, mesh, op, conservativePropagation);
   }
 };
 

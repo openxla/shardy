@@ -250,7 +250,6 @@ cc_test(
     srcs = ["aggressive_factor_propagation_test.cc"],
     deps = [
         ":aggressive_factor_propagation",
-        ":factor_propagation",
         ":sharding_projection",
         ":testing_utils",
         ":utils",
