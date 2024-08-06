@@ -30,12 +30,13 @@ namespace {
 
 namespace py = pybind11;
 
-// Returns a vector containing MlirAttribute elements extracted from an
-// attribute using the two provided callbacks.
-std::vector<MlirAttribute> attributePropertyVector(
+// Returns a vector containing elements with type T extracted from an attribute
+// using the two provided callbacks.
+template <typename T>
+std::vector<T> propertyVector(
     MlirAttribute attr, llvm::function_ref<intptr_t(MlirAttribute)> sizeFn,
-    llvm::function_ref<MlirAttribute(MlirAttribute, intptr_t)> getFn) {
-  std::vector<MlirAttribute> result;
+    llvm::function_ref<T(MlirAttribute, intptr_t)> getFn) {
+  std::vector<T> result;
   intptr_t size = sizeFn(attr);
   result.reserve(size);
   for (intptr_t i = 0; i < size; ++i) {
@@ -104,8 +105,8 @@ PYBIND11_MODULE(_sdy, m) {
           py::arg("cls"), py::arg("meshAxes"), py::arg("context") = py::none(),
           "Creates a MeshAttr with the given mesh axes.")
       .def_property_readonly("axes", [](MlirAttribute self) {
-        return attributePropertyVector(self, sdyMeshAttrGetAxesSize,
-                                       sdyMeshAttrGetAxesElem);
+        return propertyVector<MlirAttribute>(self, sdyMeshAttrGetAxesSize,
+                                             sdyMeshAttrGetAxesElem);
       });
 
   mlir::python::adaptors::mlir_attribute_subclass(
@@ -166,7 +167,7 @@ PYBIND11_MODULE(_sdy, m) {
           "closed, and priority.")
       .def_property_readonly("axes",
                              [](MlirAttribute self) {
-                               return attributePropertyVector(
+                               return propertyVector<MlirAttribute>(
                                    self, sdyDimensionShardingAttrGetAxesSize,
                                    sdyDimensionShardingAttrGetAxesElem);
                              })
@@ -204,13 +205,13 @@ PYBIND11_MODULE(_sdy, m) {
           })
       .def_property_readonly("dimension_shardings",
                              [](MlirAttribute self) {
-                               return attributePropertyVector(
+                               return propertyVector<MlirAttribute>(
                                    self,
                                    sdyTensorShardingAttrGetDimShardingsSize,
                                    sdyTensorShardingAttrGetDimShardingsElem);
                              })
       .def_property_readonly("replicated_axes", [](MlirAttribute self) {
-        return attributePropertyVector(
+        return propertyVector<MlirAttribute>(
             self, sdyTensorShardingAttrGetReplicatedAxesSize,
             sdyTensorShardingAttrGetReplicatedAxesElem);
       });
@@ -228,10 +229,93 @@ PYBIND11_MODULE(_sdy, m) {
           py::arg("cls"), py::arg("shardings"), py::arg("context") = py::none(),
           "Creates a TensorShardingPerValueAttr with the tensor shardings.")
       .def_property_readonly("shardings", [](MlirAttribute self) {
-        return attributePropertyVector(
+        return propertyVector<MlirAttribute>(
             self, sdyTensorShardingPerValueAttrGetShardingsSize,
             sdyTensorShardingPerValueAttrGetShardingsElem);
       });
+
+  mlir::python::adaptors::mlir_attribute_subclass(m, "DimMappingAttr",
+                                                  sdyAttributeIsADimMappingAttr)
+      .def_classmethod(
+          "get",
+          [](py::object cls, const std::vector<int64_t>& factorIndices,
+             MlirContext ctx) {
+            return cls(sdyDimMappingAttrGet(ctx, factorIndices.size(),
+                                            factorIndices.data()));
+          },
+          py::arg("cls"), py::arg("factor_indices"),
+          py::arg("context") = py::none(),
+          "Creates a DimMappingAttr with the factor indices.")
+      .def_property_readonly("factor_indices", [](MlirAttribute self) {
+        return propertyVector<intptr_t>(self,
+                                        sdyDimMappingAttrGetFactorIndicesSize,
+                                        sdyDimMappingAttrGetFactorIndicesElem);
+      });
+
+  mlir::python::adaptors::mlir_attribute_subclass(
+      m, "TensorMappingAttr", sdyAttributeIsATensorMappingAttr)
+      .def_classmethod(
+          "get",
+          [](py::object cls, const std::vector<MlirAttribute>& mappings,
+             MlirContext ctx) {
+            return cls(
+                sdyTensorMappingAttrGet(ctx, mappings.size(), mappings.data()));
+          },
+          py::arg("cls"), py::arg("dim_mappings"),
+          py::arg("context") = py::none(),
+          "Creates a TensorMappingAttr with the dim mappings.")
+      .def_property_readonly("dim_mappings",
+                             [](MlirAttribute self) {
+                               return propertyVector<MlirAttribute>(
+                                   self, sdyTensorMappingAttrGetDimMappingsSize,
+                                   sdyTensorMappingAttrGetDimMappingsElem);
+                             })
+      .def_property_readonly("rank", [](MlirAttribute self) {
+        return sdyTensorMappingAttrGetRank(self);
+      });
+
+  mlir::python::adaptors::mlir_attribute_subclass(
+      m, "OpShardingRuleAttr", sdyAttributeIsAOpShardingRuleAttr)
+      .def_classmethod(
+          "get",
+          [](py::object cls, const std::vector<int64_t>& factorSizes,
+             const std::vector<MlirAttribute>& operandMappings,
+             const std::vector<MlirAttribute>& resultMappings, bool isCustom,
+             MlirContext ctx) {
+            return cls(sdyOpShardingRuleAttrGet(
+                ctx, factorSizes.size(), factorSizes.data(),
+                operandMappings.size(), operandMappings.data(),
+                resultMappings.size(), resultMappings.data(), isCustom));
+          },
+          py::arg("cls"), py::arg("factor_sizes"), py::arg("operand_mappings"),
+          py::arg("result_mappings"), py::arg("is_custom") = false,
+          py::arg("context") = py::none(),
+          "Creates a OpShardingRuleAttr with the factor sizes and mappings for "
+          "operands and results.")
+      .def_property_readonly("is_custom",
+                             [](MlirAttribute self) {
+                               return sdyOpShardingRuleAttrGetIsCustom(self);
+                             })
+      .def_property_readonly("factor_sizes",
+                             [](MlirAttribute self) {
+                               return propertyVector<intptr_t>(
+                                   self,
+                                   sdyOpShardingRuleAttrGetFactorSizesSize,
+                                   sdyOpShardingRuleAttrGetFactorSizesElem);
+                             })
+      .def_property_readonly("operand_mappings",
+                             [](MlirAttribute self) {
+                               return propertyVector<MlirAttribute>(
+                                   self,
+                                   sdyOpShardingRuleAttrGetOperandMappingsSize,
+                                   sdyOpShardingRuleAttrGetOperandMappingsElem);
+                             })
+      .def_property_readonly("result_mappings", [](MlirAttribute self) {
+        return propertyVector<MlirAttribute>(
+            self, sdyOpShardingRuleAttrGetResultMappingsSize,
+            sdyOpShardingRuleAttrGetResultMappingsElem);
+      });
+  ;
 }
 
 }  // namespace

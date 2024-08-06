@@ -188,15 +188,12 @@ MlirAttribute sdyTensorShardingAttrGet(MlirContext ctx, MlirStringRef meshName,
 }
 
 MlirStringRef sdyTensorShardingAttrGetMeshName(MlirAttribute attr) {
-  return wrap(mlir::cast<sdy::TensorShardingAttr>(unwrap(attr))
-                  .getMeshSymName()
-                  .getValue());
+  return wrap(
+      unwrapAttr<sdy::TensorShardingAttr>(attr).getMeshSymName().getValue());
 }
 
 intptr_t sdyTensorShardingAttrGetDimShardingsSize(MlirAttribute attr) {
-  return mlir::cast<sdy::TensorShardingAttr>(unwrap(attr))
-      .getDimShardings()
-      .size();
+  return unwrapAttr<sdy::TensorShardingAttr>(attr).getDimShardings().size();
 }
 
 MlirAttribute sdyTensorShardingAttrGetDimShardingsElem(MlirAttribute attr,
@@ -206,15 +203,13 @@ MlirAttribute sdyTensorShardingAttrGetDimShardingsElem(MlirAttribute attr,
 }
 
 intptr_t sdyTensorShardingAttrGetReplicatedAxesSize(MlirAttribute attr) {
-  return mlir::cast<sdy::TensorShardingAttr>(unwrap(attr))
-      .getReplicatedAxes()
-      .size();
+  return unwrapAttr<sdy::TensorShardingAttr>(attr).getReplicatedAxes().size();
 }
 
 MlirAttribute sdyTensorShardingAttrGetReplicatedAxesElem(MlirAttribute attr,
                                                          intptr_t pos) {
-  return wrap(mlir::cast<sdy::TensorShardingAttr>(unwrap(attr))
-                  .getReplicatedAxes()[pos]);
+  return wrap(
+      unwrapAttr<sdy::TensorShardingAttr>(attr).getReplicatedAxes()[pos]);
 }
 
 //===----------------------------------------------------------------------===//
@@ -236,13 +231,126 @@ MlirAttribute sdyTensorShardingPerValueAttrGet(MlirContext ctx,
 }
 
 intptr_t sdyTensorShardingPerValueAttrGetShardingsSize(MlirAttribute attr) {
-  return mlir::cast<sdy::TensorShardingPerValueAttr>(unwrap(attr))
+  return unwrapAttr<sdy::TensorShardingPerValueAttr>(attr)
       .getShardings()
       .size();
 }
 
 MlirAttribute sdyTensorShardingPerValueAttrGetShardingsElem(MlirAttribute attr,
                                                             intptr_t pos) {
-  return wrap(mlir::cast<sdy::TensorShardingPerValueAttr>(unwrap(attr))
-                  .getShardings()[pos]);
+  return wrap(
+      unwrapAttr<sdy::TensorShardingPerValueAttr>(attr).getShardings()[pos]);
+}
+
+//===----------------------------------------------------------------------===//
+// DimMappingAttr
+//===----------------------------------------------------------------------===//
+
+bool sdyAttributeIsADimMappingAttr(MlirAttribute attr) {
+  return mlir::isa<sdy::DimMappingAttr>(unwrap(attr));
+}
+
+MlirAttribute sdyDimMappingAttrGet(MlirContext ctx, intptr_t nFactorIndices,
+                                   const intptr_t* factorIndices) {
+  return wrap(sdy::DimMappingAttr::get(
+      unwrap(ctx), mlir::ArrayRef(factorIndices, nFactorIndices)));
+}
+
+intptr_t sdyDimMappingAttrGetFactorIndicesSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::DimMappingAttr>(attr).getFactorIndices().size();
+}
+
+int64_t sdyDimMappingAttrGetFactorIndicesElem(MlirAttribute attr,
+                                              intptr_t pos) {
+  return unwrapAttr<sdy::DimMappingAttr>(attr).getFactorIndices()[pos];
+}
+
+//===----------------------------------------------------------------------===//
+// TensorMappingAttr
+//===----------------------------------------------------------------------===//
+
+bool sdyAttributeIsATensorMappingAttr(MlirAttribute attr) {
+  return mlir::isa<sdy::TensorMappingAttr>(unwrap(attr));
+}
+
+MlirAttribute sdyTensorMappingAttrGet(MlirContext ctx, intptr_t nMappings,
+                                      const MlirAttribute* mappings) {
+  return wrap(sdy::TensorMappingAttr::get(
+      unwrap(ctx),
+      mlir::ArrayRef(reinterpret_cast<const sdy::DimMappingAttr*>(mappings),
+                     nMappings)));
+}
+
+intptr_t sdyTensorMappingAttrGetRank(MlirAttribute attr) {
+  return unwrapAttr<sdy::TensorMappingAttr>(attr).getRank();
+}
+
+intptr_t sdyTensorMappingAttrGetDimMappingsSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::TensorMappingAttr>(attr).getDimMappings().size();
+}
+
+MlirAttribute sdyTensorMappingAttrGetDimMappingsElem(MlirAttribute attr,
+                                                     intptr_t pos) {
+  return wrap(unwrapAttr<sdy::TensorMappingAttr>(attr).getDimMappings()[pos]);
+}
+
+//===----------------------------------------------------------------------===//
+// OpShardingRuleAttr
+//===----------------------------------------------------------------------===//
+
+bool sdyAttributeIsAOpShardingRuleAttr(MlirAttribute attr) {
+  return mlir::isa<sdy::OpShardingRuleAttr>(unwrap(attr));
+}
+
+MlirAttribute sdyOpShardingRuleAttrGet(MlirContext ctx, intptr_t nFactorSizes,
+                                       const intptr_t* factorSizes,
+                                       intptr_t nOperandMappings,
+                                       const MlirAttribute* operandMappings,
+                                       intptr_t nResultMappings,
+                                       const MlirAttribute* resultMappings,
+                                       bool isCustomRule) {
+  return wrap(sdy::OpShardingRuleAttr::get(
+      unwrap(ctx),
+      mlir::ArrayRef(reinterpret_cast<const int64_t*>(factorSizes),
+                     nFactorSizes),
+      mlir::ArrayRef(
+          reinterpret_cast<const sdy::TensorMappingAttr*>(operandMappings),
+          nOperandMappings),
+      mlir::ArrayRef(
+          reinterpret_cast<const sdy::TensorMappingAttr*>(resultMappings),
+          nResultMappings),
+      isCustomRule));
+}
+
+bool sdyOpShardingRuleAttrGetIsCustom(MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).isCustom();
+}
+
+intptr_t sdyOpShardingRuleAttrGetFactorSizesSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getFactorSizes().size();
+}
+
+int64_t sdyOpShardingRuleAttrGetFactorSizesElem(MlirAttribute attr,
+                                                intptr_t pos) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getFactorSizes()[pos];
+}
+
+intptr_t sdyOpShardingRuleAttrGetOperandMappingsSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getOperandMappings().size();
+}
+
+MlirAttribute sdyOpShardingRuleAttrGetOperandMappingsElem(MlirAttribute attr,
+                                                          intptr_t pos) {
+  return wrap(
+      unwrapAttr<sdy::OpShardingRuleAttr>(attr).getOperandMappings()[pos]);
+}
+
+intptr_t sdyOpShardingRuleAttrGetResultMappingsSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getResultMappings().size();
+}
+
+MlirAttribute sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr,
+                                                         intptr_t pos) {
+  return wrap(
+      unwrapAttr<sdy::OpShardingRuleAttr>(attr).getResultMappings()[pos]);
 }

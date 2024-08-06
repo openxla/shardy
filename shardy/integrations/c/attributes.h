@@ -151,6 +151,70 @@ sdyTensorShardingPerValueAttrGetShardingsSize(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute
 sdyTensorShardingPerValueAttrGetShardingsElem(MlirAttribute attr, intptr_t pos);
 
+//===----------------------------------------------------------------------===//
+// DimMappingAttr
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED bool sdyAttributeIsADimMappingAttr(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute sdyDimMappingAttrGet(
+    MlirContext ctx, intptr_t nFactorIndices, const intptr_t* factorIndices);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyDimMappingAttrGetFactorIndicesSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+sdyDimMappingAttrGetFactorIndicesElem(MlirAttribute attr, intptr_t pos);
+
+//===----------------------------------------------------------------------===//
+// TensorMappingAttr
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED bool sdyAttributeIsATensorMappingAttr(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute sdyTensorMappingAttrGet(
+    MlirContext ctx, intptr_t nMappings, const MlirAttribute* mappings);
+
+MLIR_CAPI_EXPORTED intptr_t sdyTensorMappingAttrGetRank(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyTensorMappingAttrGetDimMappingsSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute
+sdyTensorMappingAttrGetDimMappingsElem(MlirAttribute attr, intptr_t pos);
+
+//===----------------------------------------------------------------------===//
+// OpShardingRuleAttr
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED bool sdyAttributeIsAOpShardingRuleAttr(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute sdyOpShardingRuleAttrGet(
+    MlirContext ctx, intptr_t nFactorSizes, const intptr_t* factorSizes,
+    intptr_t nOperandMappings, const MlirAttribute* operandMappings,
+    intptr_t nResultMappings, const MlirAttribute* resultMappings,
+    bool isCustomRule);
+
+MLIR_CAPI_EXPORTED bool sdyOpShardingRuleAttrGetIsCustom(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyOpShardingRuleAttrGetFactorSizesSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+sdyOpShardingRuleAttrGetFactorSizesElem(MlirAttribute attr, intptr_t pos);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyOpShardingRuleAttrGetOperandMappingsSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute
+sdyOpShardingRuleAttrGetOperandMappingsElem(MlirAttribute attr, intptr_t pos);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyOpShardingRuleAttrGetResultMappingsSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute
+sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr, intptr_t pos);
+
 #ifdef __cplusplus
 }
 #endif
