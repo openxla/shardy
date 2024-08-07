@@ -127,49 +127,13 @@ Interfaces: `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | ranked tensor of any type values
+| `input` | shaped of any type values
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | ranked tensor of any type values
-
-
-### `sdy.identity` (sdy::IdentityOp)
-
-_Identity operation_
-
-
-Syntax:
-
-```
-operation ::= `sdy.identity` attr-dict $input `:` type($input)
-```
-
-An identity op that outputs the same value that it takes as input. This is
-useful, to break a pattern where a block argument is directly used in the
-block's terminator, which could result in canonicalization removing that
-block argument, e.g., a block argument of a while op that could be replaced
-with the corresponding operand as a free variable.
-
-Traits: `AlwaysSpeculatableImplTrait`, `Elementwise`, `SameOperandsAndResultType`
-
-Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
-
-Effects: `MemoryEffects::Effect{}`
-
-#### Operands:
-
-| Operand | Description |
-| :-----: | ----------- |
-| `input` | tensor of any type values
-
-#### Results:
-
-| Result | Description |
-| :----: | ----------- |
-| `result` | tensor of any type values
+| `result` | shaped of any type values
 
 
 ### `sdy.manual_computation` (sdy::ManualComputationOp)
@@ -213,13 +177,13 @@ Traits: `IsolatedFromAbove`, `RecursiveMemoryEffects`, `SingleBlockImplicitTermi
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of tensor of any type values
+| `tensors` | variadic of ranked tensor of any type values
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `results` | variadic of tensor of any type values
+| `results` | variadic of ranked tensor of any type values
 
 
 ### `sdy.mesh` (sdy::MeshOp)
@@ -291,13 +255,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | tensor of any type values
+| `input` | ranked tensor of any type values
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values
+| `result` | ranked tensor of any type values
 
 
 ### `sdy.reshard` (sdy::ReshardOp)
