@@ -12,6 +12,15 @@ func.func @invalid_sharding(%arg0 : tensor<8xf32>) -> tensor<8xf32> {
 
 // -----
 
+func.func @dynamic_shaped_type(%arg0: tensor<?x?xf32>)
+    -> (tensor<?x?xf32>, tensor<?x?xf32>) {
+  // expected-error @+1 {{expected sdy.data_flow_edge to have a static-shaped result}}
+  %0 = sdy.data_flow_edge %arg0 : tensor<?x?xf32>
+  return %arg0, %0 : tensor<?x?xf32>, tensor<?x?xf32>
+}
+
+// -----
+
 func.func @input_has_multiple_users(%arg0: tensor<32x96xf32>)
     -> (tensor<32x96xf32>, tensor<32x96xf32>) {
   // expected-error @+1 {{expected input of sdy.data_flow_edge to have a single user}}

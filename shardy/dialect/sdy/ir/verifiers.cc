@@ -30,6 +30,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/SymbolTable.h"
@@ -199,11 +200,11 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 
 // Verifies the following for `shardingAttr`:
 //
-// If `type` isn't a `RankedTensorType`, the sharding must have rank 0 and no
+// If `type` isn't a `ShapedType`, the sharding must have rank 0 and no
 // replicated axes.
 //
-// - The number of dimension shardings is equal to the rank of the tensor
-//   (specified by `type`, which should be a `RankedTensorType`).
+// - The tensor should have a rank and static shape.
+// - The number of dimension shardings is equal to the rank of the tensor.
 // - Dimensions of size 0 aren't sharded.
 // - Replicated axes are ordered w.r.t. `mesh` (see
 //   AxisRefAttr::getMeshComparator).
@@ -220,16 +221,21 @@ LogicalResult verifyTensorShardingAttr(
     TensorShardingAttr shardingAttr, Type type, MeshAttr mesh,
     EmitErrorFn emitError,
     ManualAxisToOwner alreadyManualAxes = ManualAxisToOwner()) {
-  auto tensorType = dyn_cast<RankedTensorType>(type);
+  auto tensorType = dyn_cast<ShapedType>(type);
   if (!tensorType) {
     if (shardingAttr.getRank() != 0 ||
         !shardingAttr.getReplicatedAxes().empty()) {
       return emitError(
-                 "non-ranked tensors can only have a sharding with rank 0 ")
+                 "non-shaped tensors can only have a sharding with rank 0 ")
              << "and no replicated axes. type: " << type
              << ", sharding: " << shardingAttr;
     }
     return success();
+  }
+  if (!tensorType.hasStaticShape()) {
+    return emitError(
+               "only ranked tensors with a static shape can have a sharding. ")
+           << "type: " << type;
   }
   int64_t rank = tensorType.getRank();
   if (shardingAttr.getRank() != rank) {
@@ -426,13 +432,19 @@ LogicalResult verifyShardingRuleMapping(Operation* op, TypeRange types,
     // doesn't reuse the same factor.
     BitVector valueSeenFactorIndices(factorSizes.size());
     auto [type, mapping] = typeAndMapping;
-    auto tensorType = cast<RankedTensorType>(type);
 
     EmitErrorFn valueEmitError = getEmitValueInRangeErrorFn(
         [op, valueKindStr](StringRef msg) {
           return op->emitOpError(valueKindStr) << " " << msg;
         },
         types.size(), index);
+
+    auto tensorType = dynCastStaticShapedType(type);
+    if (!tensorType) {
+      return valueEmitError(
+                 "expected a ranked tensor with a static shape. type: ")
+             << type;
+    }
 
     if (mapping.getRank() != tensorType.getRank()) {
       return valueEmitError("mapping rank must match: ")
@@ -559,6 +571,11 @@ LogicalResult ReshardOp::verify() {
 }
 
 LogicalResult DataFlowEdgeOp::verify() {
+  if (!getType().hasStaticShape()) {
+    return emitOpError(
+               "expected sdy.data_flow_edge to have a static-shaped result. ")
+           << "type: " << getType();
+  }
   if (!getInput().hasOneUse()) {
     return emitOpError(
         "expected input of sdy.data_flow_edge to have a single user");
@@ -665,8 +682,8 @@ LogicalResult verifyManualComputationValue(
   for (auto [valueIndex, valueEntry] : llvm::enumerate(llvm::zip_equal(
            globalTypes, localTypes, shardingPerValueAttr.getShardings()))) {
     auto [globalType, localType, sharding] = valueEntry;
-    auto globalRankedType = globalType.template cast<RankedTensorType>();
-    auto localRankedType = localType.template cast<RankedTensorType>();
+    auto globalRankedType = cast<RankedTensorType>(globalType);
+    auto localRankedType = cast<RankedTensorType>(localType);
 
     // 5. Verify the manual axes come before any free axes in each dim sharding.
     for (auto [dim, dimSharding] :
@@ -693,7 +710,7 @@ LogicalResult verifyManualComputationValue(
                             accumulatedManualAxesSize(op, dimSharding.getAxes(),
                                                       manualAxes, mesh));
     }
-    RankedTensorType expectedLocalRankedType =
+    auto expectedLocalRankedType =
         RankedTensorType::get(newDimSizes, globalRankedType.getElementType());
     if (expectedLocalRankedType != localRankedType) {
       return op->emitOpError(valueKindStr)

@@ -66,6 +66,16 @@ func.func @optimization_barrier(%arg0: tensor<32x96xf32>, %arg1: tensor<32x96xf3
   return %0#0, %0#1 : tensor<32x96xf32>, tensor<32x96xf32>
 }
 
+// CHECK-LABEL: func @optimization_barrier
+func.func @optimization_barrier_dynamic_shaped_tensor_skipped(%arg0: tensor<32x96xf32>, %arg1: tensor<?x?xf32>)
+    -> (tensor<32x96xf32>, tensor<?x?xf32>) {
+  // CHECK-NEXT: %[[OPT_BARRIER:.*]]:2 = stablehlo.optimization_barrier %arg0, %arg1
+  // CHECK:      %[[EDGE_1:.*]] = sdy.data_flow_edge %[[OPT_BARRIER]]#0
+  // CHECK-NEXT: return %[[EDGE_1]], %[[OPT_BARRIER]]#1
+  %0:2 = stablehlo.optimization_barrier %arg0, %arg1 : tensor<32x96xf32>, tensor<?x?xf32>
+  return %0#0, %0#1 : tensor<32x96xf32>, tensor<?x?xf32>
+}
+
 // CHECK-LABEL: func @while_unused_result
 func.func @while_unused_result(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
   // CHECK:      %[[C0:.*]] = stablehlo.constant dense<0>

@@ -2,7 +2,7 @@
 
 sdy.mesh @mesh = <"a"=2>
 
-// expected-error @+1 {{'func.func' op arg 0 - non-ranked tensors can only have a sharding with rank 0 and no replicated axes}}
+// expected-error @+1 {{'func.func' op arg 0 - non-shaped tensors can only have a sharding with rank 0 and no replicated axes}}
 func.func @token_sharding_rank_non_zero(%arg0: !stablehlo.token {sdy.sharding=#sdy.sharding<@mesh, [{}]>}) -> !stablehlo.token {
   return %arg0 : !stablehlo.token
 }
@@ -11,9 +11,27 @@ func.func @token_sharding_rank_non_zero(%arg0: !stablehlo.token {sdy.sharding=#s
 
 sdy.mesh @mesh = <"a"=2>
 
-// expected-error @+1 {{'func.func' op arg 0 - non-ranked tensors can only have a sharding with rank 0 and no replicated axes}}
+// expected-error @+1 {{'func.func' op arg 0 - non-shaped tensors can only have a sharding with rank 0 and no replicated axes}}
 func.func @token_sharding_with_replicated_axes(%arg0: !stablehlo.token {sdy.sharding=#sdy.sharding<@mesh, [], replicated={"a"}>}) -> !stablehlo.token {
   return %arg0 : !stablehlo.token
+}
+
+// -----
+
+sdy.mesh @mesh = <"a"=2>
+
+// expected-error @+1 {{'func.func' op arg 0 - only ranked tensors with a static shape can have a sharding}}
+func.func @unranked_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy.sharding<@mesh, []>}) -> tensor<*xf32> {
+  return %arg0 : tensor<*xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <"a"=2>
+
+// expected-error @+1 {{'func.func' op arg 0 - only ranked tensors with a static shape can have a sharding}}
+func.func @dynamic_shaped_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<?x?xf32> {
+  return %arg0 : tensor<*xf32>
 }
 
 // -----

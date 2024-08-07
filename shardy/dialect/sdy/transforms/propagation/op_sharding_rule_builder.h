@@ -22,6 +22,7 @@ limitations under the License.
 #include <functional>
 #include <optional>
 
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
@@ -118,7 +119,7 @@ class OpShardingRuleBuilder {
 // i.e., all operands/results have the same mapping.
 //
 // NOTE: an empty rule {([])->([])} will be created for scalar ops.
-OpShardingRuleAttr createIdentityShardingRule(RankedTensorType type,
+OpShardingRuleAttr createIdentityShardingRule(ShapedType type,
                                               size_t numOperands = 1,
                                               size_t numResults = 1);
 

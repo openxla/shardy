@@ -26,6 +26,7 @@ limitations under the License.
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -65,12 +66,23 @@ std::string operationToString(Operation* op);
 // Converts `value` to string with location information.
 std::string valueToString(Value value);
 
-// Returns the shape of the given `value` if its type is a `RankedTensorType`,
+// If the given `type` is a `ShapedType` with a static shape, returns it,
+// otherwise returns nullptr.
+ShapedType dynCastStaticShapedType(Type type);
+
+// Returns true if the given `type` is a `ShapedType` with a static shape.
+bool isStaticShapedType(Type type);
+
+// Returns the shape of the given `value` if its type is a `ShapeTensor`,
 // otherwise returns an empty array.
+//
+// Assumes the `ShapeTensor` has a rank.
 ArrayRef<int64_t> getTensorShape(Value value);
 
-// Returns the rank of the given `value` if its type is a `RankedTensorType`,
+// Returns the rank of the given `value` if its type is a `ShapeTensor`,
 // otherwise returns 0.
+//
+// Assumes the `ShapeTensor` has a rank.
 int64_t getTensorRank(Value value);
 
 // Returns true if the value is a tensor with rank 0.

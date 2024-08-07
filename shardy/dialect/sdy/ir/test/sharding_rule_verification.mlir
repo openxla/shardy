@@ -16,6 +16,22 @@ func.func @sharding_rule_wrong_attr_type(%arg0: tensor<8xf32>) -> tensor<8xf32> 
 
 // -----
 
+func.func @unranked_tensor_type(%arg0: tensor<*xf32>) -> tensor<*xf32> {
+  // expected-error@+1 {{operand 0 - expected a ranked tensor with a static shape}}
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j]) {i=2, j=4}>} : tensor<*xf32>
+  return %0 : tensor<*xf32>
+}
+
+// -----
+
+func.func @dynamic_shaped_tensor_type(%arg0: tensor<?x?xf32>) -> tensor<?x?xf32> {
+  // expected-error@+1 {{operand 0 - expected a ranked tensor with a static shape}}
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j]) {i=2, j=4}>} : tensor<?x?xf32>
+  return %0 : tensor<?x?xf32>
+}
+
+// -----
+
 func.func @operand_mappings_wrong_rank(%arg0: tensor<2x4xf32>) -> tensor<2x4xf32> {
   // expected-error@+1 {{operand 1 - mapping rank must match: 1 != 2}}
   %0 = stablehlo.add %arg0, %arg0 {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i])->([i, j]) {i=2, j=4}>} : tensor<2x4xf32>

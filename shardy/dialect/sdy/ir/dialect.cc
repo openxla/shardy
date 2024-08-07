@@ -28,6 +28,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
@@ -430,7 +431,8 @@ TensorShardingPerValueAttr TensorShardingPerValueAttr::getFullyOpen(
   for (Type type : types) {
     int64_t rank = 0;
     // TODO(tomnatan): remove mlir:: once Attribute::dyn_cast is removed.
-    if (auto tensorType = mlir::dyn_cast<RankedTensorType>(type)) {
+    if (auto tensorType = mlir::dyn_cast<ShapedType>(type)) {
+      assert(tensorType.hasStaticShape());
       rank = tensorType.getRank();
     }
     shardingPerResult.push_back(

@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
@@ -91,26 +92,37 @@ std::string operationToString(Operation* op) {
   return mlirToString(op);
 }
 
-std::string valueToString(Value value) {
-  return mlirToString(&value);
+std::string valueToString(Value value) { return mlirToString(&value); }
+
+ShapedType dynCastStaticShapedType(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type);
+      shapedType && shapedType.hasStaticShape()) {
+    return shapedType;
+  }
+  return nullptr;
+}
+
+bool isStaticShapedType(Type type) {
+  return dynCastStaticShapedType(type) != nullptr;
 }
 
 ArrayRef<int64_t> getTensorShape(Value value) {
-  if (auto tensorType = dyn_cast<RankedTensorType>(value.getType())) {
+  if (auto tensorType = dyn_cast<ShapedType>(value.getType())) {
     return tensorType.getShape();
   }
   return {};
 }
 
 int64_t getTensorRank(Value value) {
-  if (auto tensorType = dyn_cast<RankedTensorType>(value.getType())) {
+  if (auto tensorType = dyn_cast<ShapedType>(value.getType())) {
     return tensorType.getRank();
   }
   return 0;
 }
 
 int64_t isScalar(Value value) {
-  if (auto tensorType = dyn_cast<RankedTensorType>(value.getType())) {
+  if (auto tensorType = dyn_cast<ShapedType>(value.getType());
+      tensorType && tensorType.hasRank()) {
     return tensorType.getRank() == 0;
   }
   return false;

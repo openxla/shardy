@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
@@ -45,7 +46,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
@@ -328,9 +328,9 @@ LogicalResult propagateFuncResults(FuncOp funcOp,
                                    const FactorPropagation& factorPropagation) {
   for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
     Value returnValue = returnOperand.get();
-    auto tensorType = dyn_cast<RankedTensorType>(returnValue.getType());
+    auto tensorType = dynCastStaticShapedType(returnValue.getType());
     if (!tensorType) {
-      // Skip non-tensor values, e.g., tokens.
+      // Skip non-static-shaped tensors, e.g., tokens.
       continue;
     }
     int64_t resNum = returnOperand.getOperandNumber();
@@ -436,7 +436,7 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
     return propagateTensorShardings(
         sources, dataFlowEdgeOp.getResult(),
         createIdentityShardingRule(
-            cast<RankedTensorType>(dataFlowEdgeOp.getType()), sources.size()),
+            cast<ShapedType>(dataFlowEdgeOp.getType()), sources.size()),
         dataFlowEdgeOp, rewriter, factorPropagation);
   }
 

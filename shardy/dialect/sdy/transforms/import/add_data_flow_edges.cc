@@ -47,8 +47,8 @@ struct AddDataFlowEdgesPass
       ValueRange edgeRoots = getDataFlowEdgeRoots(op);
       rewriter.setInsertionPointAfter(op);
       for (Value edgeRoot : edgeRoots) {
-        if (!isa<RankedTensorType>(edgeRoot.getType())) {
-          // Skip non-tensor values, e.g., tokens.
+        if (!isStaticShapedType(edgeRoot.getType())) {
+          // Skip non-static-shaped tensors, e.g., tokens.
           continue;
         }
         TensorShardingAttr sharding = nullptr;

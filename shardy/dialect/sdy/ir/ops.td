@@ -135,12 +135,12 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   }];
 
   let arguments = (ins
-    Variadic<AnyTensor>:$tensors,
+    Variadic<AnyRankedTensor>:$tensors,
     Sdy_TensorShardingPerValue:$in_shardings,
     Sdy_TensorShardingPerValue:$out_shardings,
     Sdy_ManualAxes:$manual_axes
   );
-  let results = (outs Variadic<AnyTensor>:$results);
+  let results = (outs Variadic<AnyRankedTensor>:$results);
   let regions = (region SizedRegion<1>:$body);
 
   let assemblyFormat = [{
@@ -337,10 +337,10 @@ def DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
   }];
 
   let arguments = (ins
-    AnyRankedTensor:$input,
+    AnyShaped:$input,
     OptionalAttr<Sdy_TensorSharding>:$sharding);
 
-  let results = (outs AnyRankedTensor:$result);
+  let results = (outs AnyShaped:$result);
 
   let assemblyFormat = "$input (`sharding````=``` $sharding^)? attr-dict `:` type($result)";
 
@@ -381,10 +381,10 @@ def PropagationBarrierOp : Sdy_Op<"propagation_barrier",
   }];
 
   let arguments = (ins
-    AnyTensor:$input,
+    AnyRankedTensor:$input,
     Sdy_PropagationDirection:$allowed_direction
   );
-  let results = (outs AnyTensor:$result);
+  let results = (outs AnyRankedTensor:$result);
   let assemblyFormat = "$input `allowed_direction````=```$allowed_direction attr-dict `:` type($input)";
   let hasVerifier = 1;
 }

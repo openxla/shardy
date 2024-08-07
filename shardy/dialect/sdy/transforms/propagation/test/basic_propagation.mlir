@@ -581,15 +581,26 @@ func.func @func_out_sharding(%arg0: tensor<8x8xf32>, %arg1: tensor<8x16xf32>)
   return %0 : tensor<8x16xf32>
 }
 
-// CHECK-LABEL: func @token_func_output_token_skipped(
+// CHECK-LABEL: func @token_func_output_skipped(
 // CHECK-SAME:      %arg0: !stablehlo.token,
 // CHECK-SAME:      %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (!stablehlo.token, tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}) {
-func.func @token_func_output_token_skipped(%arg0: !stablehlo.token, %arg1: tensor<8x16xf32>)
+func.func @token_func_output_skipped(%arg0: !stablehlo.token, %arg1: tensor<8x16xf32>)
     -> (!stablehlo.token, tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}) {
   // CHECK-NEXT: stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>]>}
   %0 = stablehlo.add %arg1, %arg1 : tensor<8x16xf32>
   return %arg0, %0 : !stablehlo.token, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func @dynamic_shaped_func_output_skipped(
+// CHECK-SAME:      %arg0: tensor<?x?xf32>,
+// CHECK-SAME:      %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>})
+// CHECK-SAME:  -> (tensor<?x?xf32>, tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}) {
+func.func @dynamic_shaped_func_output_skipped(%arg0: tensor<?x?xf32>, %arg1: tensor<8x16xf32>)
+    -> (tensor<?x?xf32>, tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}) {
+  // CHECK-NEXT: stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>]>}
+  %0 = stablehlo.add %arg1, %arg1 : tensor<8x16xf32>
+  return %arg0, %0 : tensor<?x?xf32>, tensor<8x16xf32>
 }
 
 // CHECK-LABEL: func @func_result_intermediate_op_both_updated(

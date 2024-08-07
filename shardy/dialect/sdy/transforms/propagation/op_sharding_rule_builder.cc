@@ -23,6 +23,7 @@ limitations under the License.
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
@@ -87,12 +88,12 @@ OpShardingRuleBuilder::OpShardingRuleBuilder(
   resultMappings.reserve(resultTypes.size());
   int64_t maxRank = 0;
   for (Type operandType : operandTypes) {
-    int64_t rank = cast<RankedTensorType>(operandType).getRank();
+    int64_t rank = cast<ShapedType>(operandType).getRank();
     maxRank = std::max(maxRank, rank);
     operandMappings.push_back(TensorMapping(rank));
   }
   for (Type resultType : resultTypes) {
-    int64_t rank = cast<RankedTensorType>(resultType).getRank();
+    int64_t rank = cast<ShapedType>(resultType).getRank();
     maxRank = std::max(maxRank, rank);
     resultMappings.push_back(TensorMapping(rank));
   }
@@ -125,7 +126,7 @@ OpShardingRuleAttr OpShardingRuleBuilder::build() {
 OpShardingRuleAttr OpShardingRuleBuilder::buildPointwise(Operation* op) {
   // All results should have the same shape, so we look at the first.
   ArrayRef<int64_t> shape =
-      cast<RankedTensorType>(op->getResultTypes().front()).getShape();
+      cast<ShapedType>(op->getResultTypes().front()).getShape();
 
   OpShardingRuleBuilder builder(op);
 
@@ -200,7 +201,7 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIfDimSizesMatch(
   return *this;
 }
 
-OpShardingRuleAttr createIdentityShardingRule(RankedTensorType type,
+OpShardingRuleAttr createIdentityShardingRule(ShapedType type,
                                               size_t numOperands,
                                               size_t numResults) {
   return OpShardingRuleBuilder(SmallVector<Type>(numOperands, type),

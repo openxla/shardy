@@ -23,6 +23,7 @@ limitations under the License.
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
@@ -58,8 +59,7 @@ namespace {
 //   - [{"y","x"}] : tensor<4xf32> -> [{"y","x":(1)2}] : tensor<4xf32>
 // See update_non_divisible_input_output_shardings.mlir for more examples.
 TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
-                                    RankedTensorType type,
-                                    func::FuncOp funcOp) {
+                                    ShapedType type, func::FuncOp funcOp) {
   StringRef meshName = sharding.getMeshName();
   MeshAttr mesh = getMeshAttr(funcOp, meshName);
   assert(mesh && "unknown mesh");
@@ -130,7 +130,7 @@ void updateValueShardings(
     func::FuncOp funcOp) {
   for (auto [index, type] : llvm::enumerate(types)) {
     TensorShardingAttr sharding = getSharding(index);
-    if (auto tensorType = dyn_cast<RankedTensorType>(type);
+    if (auto tensorType = dynCastStaticShapedType(type);
         sharding && tensorType) {
       setSharding(index, getEvenlySharded(sharding, tensorType, funcOp));
     }
