@@ -431,6 +431,39 @@ Interfaces: `InferTypeOpInterface`
 | `result` | tensor of any type values
 
 
+### `sdy.sharding_group` (sdy::ShardingGroupOp)
+
+_Sharding group operation_
+
+
+Syntax:
+
+```
+operation ::= `sdy.sharding_group` $input `group_id````=```$group_id attr-dict `:` type($input)
+```
+
+This op provides an interface to assign tensors to sharding groups (
+groups of tensors that will be enforced to have identical shardings).
+During propagation, as soon as one group element is sharded, all other
+members will be sharded in exactly the same way. This operation takes the
+argument group ID and returns no result, but instead modifies the internal
+sharding group representation to add the input tensor to the group with the
+given ID.
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>group_id</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `input` | ranked tensor of any type values
+
+
 ## Attributes
 
 ### AxisRefAttr

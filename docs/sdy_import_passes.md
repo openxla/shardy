@@ -19,9 +19,11 @@ Copies the sharding of a `ShardingConstraintOp` to its input if it satisfies
 all of the following:
 
 * The input doesn't have an existing sharding.
+* The input isn't produced by a `DataFlowEdgeOp`, which holds the sharding
+  of all targets of the edge.
 * The input is either only used by the `ShardingConstraintOp` or the latter
   doesn't have any uses (dangling) and the input doesn't have any other
-  users of type `ShardingConstraintOp`.
+  users of type `ShardingConstraintOp` or `ManualComputationOp`.
 
 Which indicates that the `ShardingConstraintOp` dictates the sharding of
 its input.
@@ -30,6 +32,11 @@ Note that the sharding of a `ShardingConstraintOp` will propagate to its
 input or users during propagation regardless of this pass, but since the
 closed property of a dimension doesn't propagate, it's important to copy the
 sharding to fully respect the constraint in the above cases.
+
+The `in_shardings` of a `ManualComputationOp` are in essense sharding
+constraints on the corresponding operands, so this pass will also apply
+their sharding if the above conditions are satisfied (expect for the
+dangling case).
 ### `-sdy-constant-splitter`
 
 _Splits constant sub-computations so each has a single use._
