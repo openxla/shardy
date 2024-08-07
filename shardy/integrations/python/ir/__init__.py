@@ -17,7 +17,6 @@
 # pylint: disable=g-multiple-import,g-importing-member,unused-import,useless-import-alias
 from ._sdy_ops_gen import (
     ConstantOp as ConstantOp,
-    IdentityOp as IdentityOp,
     ManualComputationOp as ManualComputationOp,
     MeshOp as MeshOp,
     ReshardOp as ReshardOp,

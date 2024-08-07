@@ -144,8 +144,8 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
 OpShardingRuleAttr createOpShardingRule(Operation* op,
                                         const bool conservativePropagation) {
   return TypeSwitch<Operation*, OpShardingRuleAttr>(op)
-      .Case<IdentityOp, ShardingConstraintOp, stablehlo::AbsOp,
-            stablehlo::AddOp, stablehlo::AllGatherOp, stablehlo::AllReduceOp,
+      .Case<ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
+            stablehlo::AllGatherOp, stablehlo::AllReduceOp,
             stablehlo::AllToAllOp, stablehlo::AndOp, stablehlo::Atan2Op,
             stablehlo::CbrtOp, stablehlo::CeilOp, stablehlo::ClzOp,
             stablehlo::CollectivePermuteOp, stablehlo::CompareOp,

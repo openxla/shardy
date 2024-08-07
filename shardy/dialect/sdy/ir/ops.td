@@ -250,27 +250,6 @@ def Sdy_ConstantOp : Sdy_Op<"constant",
 }
 
 //===----------------------------------------------------------------------===//
-// IdentityOp
-//===----------------------------------------------------------------------===//
-
-def IdentityOp : Sdy_Op<"identity",
-  [Pure, Elementwise, SameOperandsAndResultType]> {
-  let summary = "Identity operation";
-
-  let description = [{
-    An identity op that outputs the same value that it takes as input. This is
-    useful, to break a pattern where a block argument is directly used in the
-    block's terminator, which could result in canonicalization removing that
-    block argument, e.g., a block argument of a while op that could be replaced
-    with the corresponding operand as a free variable.
-  }];
-
-  let arguments = (ins AnyTensor:$input);
-  let results = (outs AnyTensor:$result);
-  let assemblyFormat = "attr-dict $input `:` type($input)";
-}
-
-//===----------------------------------------------------------------------===//
 // DataFlowEdgeOp
 //===----------------------------------------------------------------------===//
 
