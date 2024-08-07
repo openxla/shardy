@@ -12,3 +12,12 @@ the edge), and replaces the op with its input.
 
 TODO(tomnatan): consider moving the sharding to all targets that can have a
 sharding attached.
+### `-sdy-update-non-divisible-input-output-shardings`
+
+_Makes FuncOp inputs/outputs evenly sharded, removing any need for padding due to non-divisible shardings._
+
+Users of Shardy expect the function inputs/outputs to be evenly
+divisible/shardable to avoid requiring padding their tensors. Propagation
+may make inputs/outputs have non-divisible shardings, so this pass updates
+them to the largest dimension sharding prefix of the original sharding that
+is evenly sharded.
