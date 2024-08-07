@@ -24,6 +24,8 @@ namespace sdy {
 void addExportPipeline(OpPassManager& pm) {
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
+  pm.addNestedPass<func::FuncOp>(
+      createUpdateNonDivisibleInputOutputShardingsPass());
 }
 
 void registerExportPipeline() {

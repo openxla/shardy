@@ -31,3 +31,15 @@ def SinkDataFlowEdgesPass : Pass<"sdy-sink-data-flow-edges", "func::FuncOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-input-output-shardings", "func::FuncOp"> {
+  let summary = "Makes FuncOp inputs/outputs evenly sharded, removing any need for padding due to non-divisible shardings.";
+  let description = [{
+    Users of Shardy expect the function inputs/outputs to be evenly
+    divisible/shardable to avoid requiring padding their tensors. Propagation
+    may make inputs/outputs have non-divisible shardings, so this pass updates
+    them to the largest dimension sharding prefix of the original sharding that
+    is evenly sharded.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

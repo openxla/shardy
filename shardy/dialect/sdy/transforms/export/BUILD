@@ -38,6 +38,7 @@ cc_library(
         "export_pipeline.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
+        "update_non_divisible_input_output_shardings.cc",
     ],
     hdrs = [
         "passes.h",
