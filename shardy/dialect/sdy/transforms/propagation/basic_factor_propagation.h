@@ -40,6 +40,13 @@ class BasicFactorPropagation : public FactorPropagation {
  public:
   virtual ~BasicFactorPropagation() = default;
 
+  // Propagates the factor shardings in `projection`.
+  UpdateTensorShardings propagateFactorShardings(
+      ShardingProjection& projection, PropagationDirection direction,
+      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+      bool conservativePropagation) const override;
+
+ protected:
   // Finds all compatible major axes that can shard the given factor for all
   // tensors.
   //
@@ -77,20 +84,11 @@ class BasicFactorPropagation : public FactorPropagation {
   //   - Given factor shardings ["a":(1)2] and ["a":(1)4], returns ["a":(1)4].
   //   - Given factor shardings ["a":(1)2, "b"] and ["a":(1)4], returns
   //     ["a":(1)2].
-  //
-  // TODO(b/350563653). Mark the following method as protected or private.
   SmallVector<AxisRefAttr> getCompatibleMajorShardingAxes(
       const ShardingProjection& projection, int64_t factorIndex,
       PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
       Operation* op, bool conservativePropagation) const;
 
-  // Propagates the factor shardings in `projection`.
-  UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, PropagationDirection direction,
-      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
-      bool conservativePropagation) const override;
-
- protected:
   // Finds the longest prefix of axes that shard the given factor, such that all
   // tensors either:
   // - Have the same prefix of axes sharding the given factor.

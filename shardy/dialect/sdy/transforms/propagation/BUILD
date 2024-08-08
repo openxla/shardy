@@ -219,6 +219,7 @@ cc_test(
         ":basic_factor_propagation",
         ":sharding_projection",
         ":testing_utils",
+        ":utils",
         "//shardy/dialect/sdy/ir:dialect",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
