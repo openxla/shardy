@@ -37,6 +37,8 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "stablehlo/dialect/StablehloOps.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/Threading.h"
 
 namespace mlir {
 namespace sdy {
@@ -180,19 +182,21 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       //===----------------------------------------------------------------===//
       // NOTE: Please keep the order of cases alphabetical.
       //===----------------------------------------------------------------===//
-      .Case<stablehlo::BitcastConvertOp>([](stablehlo::BitcastConvertOp
-                                                bitcastConvert) {
-        ArrayRef<int64_t> inShape = getTensorShape(bitcastConvert.getOperand());
-        ArrayRef<int64_t> outShape = getTensorShape(bitcastConvert.getResult());
-        // Can shard on any dimension other than the additional
-        // innermost dimension of the shape with the smaller element
-        // bitwidth.
-        ArrayRef<int64_t> shape =
-            inShape.size() < outShape.size() ? inShape : outShape;
-        return OpShardingRuleBuilder(bitcastConvert)
-            .addPointwise(shape)
-            .build();
-      })
+      .Case<stablehlo::BitcastConvertOp>(
+          [](stablehlo::BitcastConvertOp bitcastConvert) {
+            ArrayRef<int64_t> inShape =
+                getTensorShape(bitcastConvert.getOperand());
+            ArrayRef<int64_t> outShape =
+                getTensorShape(bitcastConvert.getResult());
+            // Can shard on any dimension other than the additional
+            // innermost dimension of the shape with the smaller element
+            // bitwidth.
+            ArrayRef<int64_t> shape =
+                inShape.size() < outShape.size() ? inShape : outShape;
+            return OpShardingRuleBuilder(bitcastConvert)
+                .addPointwise(shape)
+                .build();
+          })
       .Case<stablehlo::BroadcastInDimOp>(
           [](stablehlo::BroadcastInDimOp broadcast) {
             OpShardingRuleBuilder builder(broadcast);
@@ -297,17 +301,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             int64_t numWindows = outType.getDimSize(outDim);
             int64_t windowSize = rhsType.getDimSize(rhsDim);
             int64_t remainingLhsSize = lhsType.getDimSize(lhsDim);
-            auto addSpatialFactor = [&, lhsDim = lhsDim, rhsDim = rhsDim,
-                                     outDim = outDim](int64_t factorSize,
-                                                      bool addRhs,
-                                                      bool addOut) {
-              if (factorSize = std::min(remainingLhsSize, factorSize);
-                  factorSize > 1) {
-                builder.addFactor({lhsDim, addRhs ? rhsDim : kNullDim},
-                                  addOut ? outDim : kNullDim, factorSize);
-                remainingLhsSize /= factorSize;
-              }
-            };
+            auto addSpatialFactor =
+                [&, lhsDim = lhsDim, rhsDim = rhsDim, outDim = outDim](
+                    int64_t factorSize, bool addRhs, bool addOut) {
+                  if (factorSize = std::min(remainingLhsSize, factorSize);
+                      factorSize > 1) {
+                    builder.addFactor({lhsDim, addRhs ? rhsDim : kNullDim},
+                                      addOut ? outDim : kNullDim, factorSize);
+                    remainingLhsSize /= factorSize;
+                  }
+                };
             auto addNumWindowsFactor = [&]() {
               addSpatialFactor(numWindows, /*addRhs=*/false, /*addOut=*/true);
             };
@@ -893,8 +896,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             stablehlo::RngBitGeneratorOp, stablehlo::WhileOp>(
           [](Operation*) { return OpShardingRuleAttr(); })
       .Default([](Operation* op) {
-        unreachableFormatv("op '{0}' is unknown to SDY sharding rule registry",
-                           op->getName());
+        static llvm::once_flag onceFlag;
+        emitOpWarningOnce(
+            onceFlag, op,
+            llvm::formatv("op '{0}' is unknown to SDY sharding rule registry",
+                          op->getName())
+                .str());
         return OpShardingRuleAttr();
       });
 }
