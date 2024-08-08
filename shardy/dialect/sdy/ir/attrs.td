@@ -432,6 +432,20 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // must return a new instance.
     TensorShardingAttr getReplicated(StringRef axisName, MeshAttr mesh) const;
 
+
+    // Verifies that this `TensorShardingAttr` is valid w.r.t the given
+    // tensor type and mesh.
+    //
+    // If `type` isn't a `RankedTensorType`, the sharding must have rank 0
+    // and no replicated axes.
+    //
+    // If `checkDivisibility` is true, verifies that each dimension size
+    // is divisible by its sharded size.
+    mlir::LogicalResult verifyForType(
+        Type type, MeshAttr mesh,
+        std::function<InFlightDiagnostic(StringRef)> emitError,
+        bool checkDivisibility = true);
+
     // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
     // being marked closed (cannot be further replicated/sharded).
     static TensorShardingAttr getFullyClosed(

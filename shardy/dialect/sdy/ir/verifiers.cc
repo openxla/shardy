@@ -217,10 +217,13 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 // - If a dimension sharding has a priority:
 //     -- The priority is greater than or equal to 0.
 //     -- The dimension has at least one axis if it is closed.
-LogicalResult verifyTensorShardingAttr(
-    TensorShardingAttr shardingAttr, Type type, MeshAttr mesh,
-    EmitErrorFn emitError,
-    ManualAxisToOwner alreadyManualAxes = ManualAxisToOwner()) {
+// - If `checkDivisibility` is true, verifies that each dimension size
+//   is divisible by its sharded size.
+LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
+                                       Type type, MeshAttr mesh,
+                                       EmitErrorFn emitError,
+                                       bool checkDivisibility,
+                                       ManualAxisToOwner alreadyManualAxes) {
   auto tensorType = dyn_cast<ShapedType>(type);
   if (!tensorType) {
     if (shardingAttr.getRank() != 0 ||
@@ -270,6 +273,14 @@ LogicalResult verifyTensorShardingAttr(
     }
     if (dimSize == 0 && !dimSharding.emptyAxes()) {
       return emitError("dim ") << dim << " of size 0 is sharded";
+    }
+    if (checkDivisibility) {
+      int64_t shardedSize = dimSharding.getShardedSize(mesh);
+      if (dimSize % shardedSize != 0) {
+        return emitError("dim ")
+               << dim << " with size " << dimSize
+               << " is not divisible by its sharded size " << shardedSize;
+      }
     }
   }
 
@@ -327,6 +338,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   }
 
   return verifyTensorShardingAttr(shardingAttr, type, mesh, emitError,
+                                  /*checkDivisibility=*/false,
                                   getParentManualComputationOps(op));
 }
 
@@ -369,9 +381,9 @@ LogicalResult verifyTensorShardingPerValueAttr(
       }
     }
 
-    if (failed(verifyTensorShardingAttr(shardingAttr, resultType, mesh,
-                                        valueEmitError,
-                                        getParentManualComputationOps(op)))) {
+    if (failed(verifyTensorShardingAttr(
+            shardingAttr, resultType, mesh, valueEmitError,
+            /*checkDivisibility=*/false, getParentManualComputationOps(op)))) {
       return failure();
     }
   }
@@ -771,6 +783,15 @@ LogicalResult verifyManualComputationValue(
 }
 
 }  // namespace
+
+mlir::LogicalResult TensorShardingAttr::verifyForType(
+    Type type, MeshAttr mesh,
+    std::function<InFlightDiagnostic(StringRef)> emitError,
+    bool checkDivisibility) {
+  return verifyTensorShardingAttr(*this, type, mesh, emitError,
+                                  checkDivisibility,
+                                  /*alreadyManualAxes=*/ManualAxisToOwner());
+}
 
 LogicalResult ManualComputationOp::verify() {
   ManualAxisToOwner alreadyManualAxes =
