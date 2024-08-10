@@ -60,3 +60,15 @@ within that sub-computation.
 
 NOTE: This pass is the MLIR equivalent of xla::HloConstantSplitter,
 needed for the purpose of Shardy Propagation.
+### `-sdy-sharding-group-unification`
+
+_Combines sharding groups to reduce them to a minimum set of canonical group ids._
+
+Combines sharding groups using the transitive property of group membership.
+
+Any time that a tensor T is in a sharding group G1 *and* sharding group G2,
+then we can infer that all members in G1 and G2 should be sharded in the
+same way. Thus we can combine G1 and G2 into a single group.
+
+The set of canonical group ids after merging will be 0,1,...N-1 for the
+minimum set of groups.
