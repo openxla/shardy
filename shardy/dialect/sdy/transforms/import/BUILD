@@ -39,6 +39,7 @@ cc_library(
         "apply_sharding_constraints.cc",
         "constant_splitter.cc",
         "import_pipeline.cc",
+        "sharding_group_unification.cc",
     ],
     hdrs = [
         "passes.h",

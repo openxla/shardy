@@ -31,6 +31,7 @@ void addImportPipeline(OpPassManager& pm) {
   pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
+  pm.addPass(createShardingGroupUnificationPass());
 }
 
 void registerImportPipeline() {
