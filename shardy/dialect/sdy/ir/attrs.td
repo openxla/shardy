@@ -370,6 +370,13 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
       return getDimSharding(dim).getIsClosed();
     }
 
+    bool isFullyClosed() const {
+      return llvm::all_of(getDimShardings(),
+                      [](const DimensionShardingAttr dimSharding) {
+                         return dimSharding.getIsClosed();
+                      });
+    }
+
     bool isFullyReplicated() const {
       return llvm::all_of(getDimShardings(),
                       [](const DimensionShardingAttr dimSharding) {

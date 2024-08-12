@@ -33,9 +33,17 @@ namespace sdy {
 
 namespace {
 
-bool shouldApply(Value input, Operation* op) {
+bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
   if (getSharding(input) || input.getDefiningOp<DataFlowEdgeOp>()) {
     // `input` already has a sharding or is produced by a `DataFlowEdgeOp`.
+    return false;
+  }
+
+  // This condition isn't fundamentally needed, but is here for parity with
+  // GSPMD, we should revisit in the future.
+  // TODO(b/358627707): revisit this condition.
+  if (!sharding.isFullyClosed()) {
+    // `sharding` has an open dimension.
     return false;
   }
 
@@ -70,8 +78,10 @@ struct ApplyShardingConstraintsPass
           .Case<ShardingConstraintOp>(
               [](ShardingConstraintOp shardingConstraintOp) {
                 Value input = shardingConstraintOp.getInput();
-                if (shouldApply(input, shardingConstraintOp)) {
-                  setSharding(input, shardingConstraintOp.getSharding());
+                TensorShardingAttr sharding =
+                    shardingConstraintOp.getSharding();
+                if (shouldApply(input, sharding, shardingConstraintOp)) {
+                  setSharding(input, sharding);
                 }
               })
           .Case<ManualComputationOp>(
@@ -79,7 +89,7 @@ struct ApplyShardingConstraintsPass
                 for (auto [operand, sharding] : llvm::zip_equal(
                          manualComputationOp.getOperands(),
                          manualComputationOp.getInShardings().getShardings())) {
-                  if (shouldApply(operand, manualComputationOp)) {
+                  if (shouldApply(operand, sharding, manualComputationOp)) {
                     setSharding(operand, sharding);
                   }
                 }
