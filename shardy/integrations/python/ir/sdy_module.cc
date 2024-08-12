@@ -278,7 +278,7 @@ PYBIND11_MODULE(_sdy, m) {
       m, "OpShardingRuleAttr", sdyAttributeIsAOpShardingRuleAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<int64_t>& factorSizes,
+          [](py::object cls, const std::vector<intptr_t>& factorSizes,
              const std::vector<MlirAttribute>& operandMappings,
              const std::vector<MlirAttribute>& resultMappings, bool isCustom,
              MlirContext ctx) {
