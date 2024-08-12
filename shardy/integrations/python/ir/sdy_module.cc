@@ -238,7 +238,7 @@ PYBIND11_MODULE(_sdy, m) {
                                                   sdyAttributeIsADimMappingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<int64_t>& factorIndices,
+          [](py::object cls, const std::vector<intptr_t>& factorIndices,
              MlirContext ctx) {
             return cls(sdyDimMappingAttrGet(ctx, factorIndices.size(),
                                             factorIndices.data()));
