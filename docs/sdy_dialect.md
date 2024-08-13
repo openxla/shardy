@@ -507,15 +507,6 @@ Syntax:
 
 Mesh of named axes or a device id
 
-Syntax:
-
-```
-#sdy.mesh<
-  ::llvm::ArrayRef<MeshAxisAttr>,   # axes
-  std::optional<int64_t>   # device_id
->
-```
-
 "A mesh is either a list of axes or a single device id but can't have both."
 
 #### Parameters:
