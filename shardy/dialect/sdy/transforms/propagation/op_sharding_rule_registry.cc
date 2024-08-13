@@ -356,7 +356,9 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "tpu_custom_call") {
           return OpShardingRuleAttr();
         }
-        if (callTargetName == "X64Combine") {
+        if (callTargetName == "X64Combine" ||
+            callTargetName == "MoveToDevice" ||
+            callTargetName == "MoveToHost") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         if (callTargetName == "Eigh") {
