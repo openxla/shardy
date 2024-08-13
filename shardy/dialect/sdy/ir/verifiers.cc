@@ -540,7 +540,7 @@ LogicalResult MeshAxisAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError, StringRef name,
     int64_t size) {
   if (size <= 0) {
-    emitError() << "axis size must be at least 1, got: " << size;
+    return emitError() << "axis size must be at least 1, got: " << size;
   }
   return success();
 }
@@ -549,23 +549,23 @@ LogicalResult MeshAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError,
     ArrayRef<MeshAxisAttr> axes, std::optional<int64_t> deviceId) {
   if (deviceId && !axes.empty()) {
-    emitError() << "mesh cannot have both axes and device id";
+    return emitError() << "mesh cannot have both axes and device id";
   }
   SmallDenseSet<StringRef> seenAxisNames;
   for (MeshAxisAttr axis : axes) {
     if (!seenAxisNames.insert(axis.getName()).second) {
-      emitError() << "duplicate axis name: \"" << axis.getName() << "\"";
+      return emitError() << "duplicate axis name: \"" << axis.getName() << "\"";
     }
   }
   if (deviceId && *deviceId < 0) {
-    emitError() << "device id must be non-negative, got: " << *deviceId;
+    return emitError() << "device id must be non-negative, got: " << *deviceId;
   }
   return success();
 }
 
 LogicalResult MeshOp::verify() {
   if (!SymbolTable::lookupNearestSymbolFrom(*this, getSymNameAttr())) {
-    emitError() << "Mesh not in symbol table: @" << getSymName();
+    return emitError() << "Mesh not in symbol table: @" << getSymName();
   }
   // No need to check for duplicate mesh names as this will be verified by the
   // symbol table.

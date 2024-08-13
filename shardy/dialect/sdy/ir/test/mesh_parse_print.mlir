@@ -8,3 +8,6 @@ sdy.mesh @mesh2 = <"a"=2>
 
 // CHECK: sdy.mesh @mesh3 = <"a"=2, "b"=1>
 sdy.mesh @mesh3 = <"a"=2, "b"=1>
+
+// CHECK: sdy.mesh @mesh4 = <>
+sdy.mesh @mesh4 = <>

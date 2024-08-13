@@ -53,7 +53,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
       OptionalArrayRefParameter<"MeshAxisAttr">:$axes,
       OptionalParameter<"std::optional<int64_t>">: $device_id
   );
-  let assemblyFormat = "`<`(`device_id````=```$device_id^):($axes)?`>`";
+  let hasCustomAssemblyFormat = 1;
 
   let genVerifyDecl = 1;
 

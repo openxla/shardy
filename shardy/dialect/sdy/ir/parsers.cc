@@ -22,12 +22,14 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpImplementation.h"
@@ -43,6 +45,41 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
+
+Attribute MeshAttr::parse(AsmParser& parser, Type type) {
+  MLIRContext* context = parser.getContext();
+  SMLoc location = parser.getCurrentLocation();
+  llvm::SmallVector<MeshAxisAttr> axes;
+  std::optional<int64_t> optDeviceId;
+  if (parser.parseLess()) {
+    return MeshAttr();
+  }
+  if (!parser.parseOptionalKeyword("device_id")) {
+    if (parser.parseEqual()) {
+      return MeshAttr();
+    }
+    int64_t deviceId;
+    if (parser.parseInteger(deviceId) || parser.parseGreater()) {
+      return MeshAttr();
+    }
+    optDeviceId = deviceId;
+  } else if (parser.parseOptionalGreater()) {
+    auto parseElementFn = [&]() -> ParseResult {
+      if (auto meshAxis = MeshAxisAttr::parse(parser, type)) {
+        axes.push_back(mlir::cast<MeshAxisAttr>(meshAxis));
+        return success();
+      }
+      return failure();
+    };
+    if (parser.parseCommaSeparatedList(AsmParser::Delimiter::None,
+                                       parseElementFn) ||
+        parser.parseGreater()) {
+      return MeshAttr();
+    }
+  }
+  return parser.getChecked<MeshAttr>(
+      location, context, llvm::ArrayRef<MeshAxisAttr>(axes), optDeviceId);
+}
 
 Attribute DimensionShardingAttr::parse(AsmParser& parser, Type type) {
   if (parser.parseLBrace()) {

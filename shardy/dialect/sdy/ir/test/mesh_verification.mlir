@@ -15,5 +15,4 @@ sdy.mesh @mesh = <device_id=-1>
 // -----
 // expected-error @below {{custom op 'sdy.mesh' expected string}}
 // expected-error @below {{custom op 'sdy.mesh' failed to parse Sdy_MeshAxis parameter 'name' which is to be a `::llvm::StringRef`}}
-// expected-error @below {{custom op 'sdy.mesh' failed to parse Sdy_Mesh parameter 'axes' which is to be a `::llvm::ArrayRef<MeshAxisAttr>`}}
 sdy.mesh @mesh = <"a"=2, "b"=2, device_id=2>
