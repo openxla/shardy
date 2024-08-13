@@ -13,8 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <grp.h>
-
 #include <cstdint>
 #include <memory>  // IWYU pragma: keep
 
