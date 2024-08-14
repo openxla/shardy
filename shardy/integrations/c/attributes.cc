@@ -251,7 +251,7 @@ bool sdyAttributeIsADimMappingAttr(MlirAttribute attr) {
 }
 
 MlirAttribute sdyDimMappingAttrGet(MlirContext ctx, intptr_t nFactorIndices,
-                                   const intptr_t* factorIndices) {
+                                   const int64_t* factorIndices) {
   return wrap(sdy::DimMappingAttr::get(
       unwrap(ctx), mlir::ArrayRef(factorIndices, nFactorIndices)));
 }
@@ -303,16 +303,14 @@ bool sdyAttributeIsAOpShardingRuleAttr(MlirAttribute attr) {
 }
 
 MlirAttribute sdyOpShardingRuleAttrGet(MlirContext ctx, intptr_t nFactorSizes,
-                                       const intptr_t* factorSizes,
+                                       const int64_t* factorSizes,
                                        intptr_t nOperandMappings,
                                        const MlirAttribute* operandMappings,
                                        intptr_t nResultMappings,
                                        const MlirAttribute* resultMappings,
                                        bool isCustomRule) {
   return wrap(sdy::OpShardingRuleAttr::get(
-      unwrap(ctx),
-      mlir::ArrayRef(reinterpret_cast<const int64_t*>(factorSizes),
-                     nFactorSizes),
+      unwrap(ctx), mlir::ArrayRef(factorSizes, nFactorSizes),
       mlir::ArrayRef(
           reinterpret_cast<const sdy::TensorMappingAttr*>(operandMappings),
           nOperandMappings),

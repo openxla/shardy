@@ -158,7 +158,7 @@ sdyTensorShardingPerValueAttrGetShardingsElem(MlirAttribute attr, intptr_t pos);
 MLIR_CAPI_EXPORTED bool sdyAttributeIsADimMappingAttr(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute sdyDimMappingAttrGet(
-    MlirContext ctx, intptr_t nFactorIndices, const intptr_t* factorIndices);
+    MlirContext ctx, intptr_t nFactorIndices, const int64_t* factorIndices);
 
 MLIR_CAPI_EXPORTED intptr_t
 sdyDimMappingAttrGetFactorIndicesSize(MlirAttribute attr);
@@ -190,7 +190,7 @@ sdyTensorMappingAttrGetDimMappingsElem(MlirAttribute attr, intptr_t pos);
 MLIR_CAPI_EXPORTED bool sdyAttributeIsAOpShardingRuleAttr(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute sdyOpShardingRuleAttrGet(
-    MlirContext ctx, intptr_t nFactorSizes, const intptr_t* factorSizes,
+    MlirContext ctx, intptr_t nFactorSizes, const int64_t* factorSizes,
     intptr_t nOperandMappings, const MlirAttribute* operandMappings,
     intptr_t nResultMappings, const MlirAttribute* resultMappings,
     bool isCustomRule);

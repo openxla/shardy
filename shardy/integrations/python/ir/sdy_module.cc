@@ -238,7 +238,7 @@ PYBIND11_MODULE(_sdy, m) {
                                                   sdyAttributeIsADimMappingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<intptr_t>& factorIndices,
+          [](py::object cls, const std::vector<int64_t>& factorIndices,
              MlirContext ctx) {
             return cls(sdyDimMappingAttrGet(ctx, factorIndices.size(),
                                             factorIndices.data()));
@@ -278,7 +278,7 @@ PYBIND11_MODULE(_sdy, m) {
       m, "OpShardingRuleAttr", sdyAttributeIsAOpShardingRuleAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<intptr_t>& factorSizes,
+          [](py::object cls, const std::vector<int64_t>& factorSizes,
              const std::vector<MlirAttribute>& operandMappings,
              const std::vector<MlirAttribute>& resultMappings, bool isCustom,
              MlirContext ctx) {
