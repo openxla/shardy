@@ -252,7 +252,7 @@ LogicalResult propagateTensorShardings(
     // the sharding attributes use different meshes.
     if (rewriter) {
       return rewriter->notifyMatchFailure(
-          op, [](Diagnostic& diag) { diag << "no unique mesh name found"; });
+          op, [](Diagnostic& diag) { diag << "no common mesh name found"; });
     }
     return failure();
   }
