@@ -23,6 +23,7 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Threading.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -208,17 +209,25 @@ void updateTensorShardings(
                         mesh, notifyOpModified);
 }
 
-// Returns the mesh name of the first `TensorShardingAttr` that is present.
-StringRef getFirstMeshName(ArrayRef<TensorShardingAttr> operandShardings,
-                           ArrayRef<TensorShardingAttr> resultsShardings) {
+// Returns the common mesh name used by all the `TensorShardingAttr` or
+// std::nullopt if there is none.
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings) {
+  StringRef meshName;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
            operandShardings, resultsShardings)) {
     if (sharding) {
-      return sharding.getMeshName();
+      if (meshName.empty()) {
+        meshName = sharding.getMeshName();
+      } else if (meshName != sharding.getMeshName()) {
+        // Found more than one mesh name.
+        return std::nullopt;
+      }
     }
   }
 
-  return StringRef();
+  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
 }
 
 // Propagates tensor shardings of the given `operands` and `results` according
@@ -236,12 +245,18 @@ LogicalResult propagateTensorShardings(
     OpShardingRuleAttr shardingRule, PropagationDirection direction,
     const FactorPropagation& factorPropagation, bool conservativePropagation,
     Operation* op, PatternRewriter* rewriter) {
-  StringRef meshName = getFirstMeshName(operandShardings, resultsShardings);
-  if (meshName.empty()) {
-    // This means none of the operands or results have a sharding attribute.
+  std::optional<StringRef> meshName =
+      getCommonMeshName(operandShardings, resultsShardings);
+  if (!meshName.has_value()) {
+    // This means none of the operands or results have a sharding attribute or
+    // the sharding attributes use different meshes.
+    if (rewriter) {
+      return rewriter->notifyMatchFailure(
+          op, [](Diagnostic& diag) { diag << "no unique mesh name found"; });
+    }
     return failure();
   }
-  MeshAttr mesh = getMeshAttr(op, meshName);
+  MeshAttr mesh = getMeshAttr(op, meshName.value());
   assert(mesh && "unknown mesh");
 
   ShardingProjection shardingProjection = ShardingProjection::build(
@@ -269,7 +284,7 @@ LogicalResult propagateTensorShardings(
   updateTensorShardings(operands, results, operandShardings, resultsShardings,
                         setOperandShardingCallback, setResultShardingCallback,
                         shardingRule, shardingProjection, updateOperand,
-                        updateResult, meshName, mesh, notifyOpModified);
+                        updateResult, meshName.value(), mesh, notifyOpModified);
 
   bool anyUpdated = updateOperand.any() || updateResult.any();
   if (rewriter && !anyUpdated) {

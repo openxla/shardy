@@ -15,6 +15,7 @@ sdy.mesh @mesh_a_2_b_2_c_2 = <"a"=2, "b"=2, "c"=2>
 sdy.mesh @mesh_a_4_b_2_c_2 = <"a"=4, "b"=2, "c"=2>
 sdy.mesh @mesh_a_2_b_3_c_2 = <"a"=2, "b"=3, "c"=2>
 sdy.mesh @mesh_a_2_b_3_c_2_d_2 = <"a"=2, "b"=3, "c"=2, "d"=2>
+sdy.mesh @mesh_a_3_another = <"a"=3>
 
 // CHECK-LABEL: func @simple(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
@@ -606,7 +607,7 @@ func.func @dynamic_shaped_func_output_skipped(%arg0: tensor<?x?xf32>, %arg1: ten
 // CHECK-LABEL: func @func_result_intermediate_op_both_updated(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>}) {
-func.func @func_result_intermediate_op_both_updated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{?}, {"b", ?}]>}) {
+func.func @func_result_intermediate_op_both_updated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}, {"b", ?}]>}) {
   // CHECK: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>]>}
   // CHECK-NEXT: return %[[ADD]]
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
@@ -620,4 +621,24 @@ func.func @func_result_intermediate_op_both_updated(%arg0: tensor<8x8xf32> {sdy.
 // CHECK-SAME:      tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}, {"b", ?}]>}) {
 func.func @multiple_func_results(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>}, %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}, {"b", ?}]>}) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   return %arg0, %arg1 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @source_result_two_meshes_not_propagated(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a", ?}, {?}]>})
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{?}, {?}]>}) {
+// CHECK-NEXT: stablehlo.tanh %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_3, [{"a", ?}, {?}]>]>}
+func.func @source_result_two_meshes_not_propagated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a", ?}, {?}]>})
+   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{?}, {?}]>}) {
+  %0 = stablehlo.tanh %arg0 : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+// CHECK-LABEL: func @operands_two_meshes_not_propagated(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a"}, {?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{"a"}, {?}]>})
+// CHECK-SAME:  -> tensor<8x8xf32> {
+// CHECK-NEXT: %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
+func.func @operands_two_meshes_not_propagated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a"}, {?}]>},
+   %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{"a"}, {?}]>}) -> tensor<8x8xf32> {
+  %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
 }
