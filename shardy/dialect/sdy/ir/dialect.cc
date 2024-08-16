@@ -619,5 +619,7 @@ DataFlowEdgeOp DataFlowEdgeOp::getDataFlowEdgeUser(Value root) {
 #include "shardy/dialect/sdy/ir/dialect.cc.inc"
 #define GET_ATTRDEF_CLASSES
 #include "shardy/dialect/sdy/ir/attrs.cc.inc"
+#define GET_OP_INTERFACE_CLASSES
+#include "shardy/dialect/sdy/ir/op_interface.cc.inc"
 #define GET_OP_CLASSES
 #include "shardy/dialect/sdy/ir/ops.cc.inc"

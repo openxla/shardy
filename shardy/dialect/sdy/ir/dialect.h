@@ -49,6 +49,8 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/attrs.h.inc"
 // ODS-generated enum classes.
 #include "shardy/dialect/sdy/ir/enums.h.inc"
+// ODS-generated op-interface classes.
+#include "shardy/dialect/sdy/ir/op_interface.h.inc"
 // ODS-generated op classes.
 #define GET_OP_CLASSES
 #include "shardy/dialect/sdy/ir/ops.h.inc"

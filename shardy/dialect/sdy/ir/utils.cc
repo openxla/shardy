@@ -88,9 +88,7 @@ std::string attributeToString(Attribute attr) {
   return out;
 }
 
-std::string operationToString(Operation* op) {
-  return mlirToString(op);
-}
+std::string operationToString(Operation* op) { return mlirToString(op); }
 
 std::string valueToString(Value value) { return mlirToString(&value); }
 
@@ -182,7 +180,8 @@ Value getShardableValue(Value value) {
   auto arg = cast<BlockArgument>(value);
 
   return TypeSwitch<Operation*, Value>(arg.getOwner()->getParentOp())
-      .Case<ManualComputationOp, FuncOp>([&](Operation*) { return value; })
+      .Case<ManualComputationOp, FuncOp, ShardableRegionOpInterface>(
+          [&](Operation*) { return value; })
       .Default([&](Operation* op) {
         // We only fail if the value isn't scalar. Scalar block arguments, such
         // as the arguments of a reduction function, don't have a shardable
@@ -229,6 +228,15 @@ TensorShardingAttr getSharding(Value value) {
         return manualComputationOp.getOutSharding(
             cast<OpResult>(value).getResultNumber());
       })
+      // TODO: b/360076171 - Add tests for ShardableRegionOpInterface,
+      // potentially with a test dialect.
+      .Case<ShardableRegionOpInterface>(
+          [value](ShardableRegionOpInterface shardableRegionOp) {
+            if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+              return shardableRegionOp.getArgSharding(blockArg.getArgNumber());
+            }
+            return TensorShardingAttr();
+          })
       .Default([value](Operation* op) {
         if (auto shardingPerResult =
                 op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr)) {
@@ -281,12 +289,23 @@ void setSharding(Value value, TensorShardingAttr sharding) {
               cast<OpResult>(value).getResultNumber(), sharding);
         }
       })
+      .Case<ShardableRegionOpInterface>(
+          [&](ShardableRegionOpInterface shardableRegionOp) {
+            if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+              shardableRegionOp.setArgSharding(blockArg.getArgNumber(),
+                                               sharding);
+            } else {
+              unreachableFormatv(
+                  "calling setArgSharding on a ShardableRegionOpInterface op "
+                  "'{0}' with a value that is not a block argument",
+                  shardableRegionOp->getName());
+            }
+          })
       .Default([&](Operation* op) {
-        op->setAttr(
-            kShardingAttr,
-            getOrCreateShardingPerResult(op, sharding.getMeshName())
-                .replaceValueSharding(cast<OpResult>(value).getResultNumber(),
-                                      sharding));
+        op->setAttr(kShardingAttr,
+                    getOrCreateShardingPerResult(op, sharding.getMeshName())
+                        .replaceValueSharding(
+                            cast<OpResult>(value).getResultNumber(), sharding));
       });
 }
 

@@ -11,6 +11,7 @@ td_library(
         "canonicalization.td",
         "dialect.td",
         "enums.td",
+        "op_interface.td",
         "ops.td",
     ],
     deps = [
@@ -20,6 +21,25 @@ td_library(
         "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
         "@llvm-project//mlir:OpBaseTdFiles",
         "@llvm-project//mlir:SideEffectInterfacesTdFiles",
+    ],
+)
+
+gentbl_cc_library(
+    name = "op_interface_inc",
+    tbl_outs = [
+        (
+            ["-gen-op-interface-decls"],
+            "op_interface.h.inc",
+        ),
+        (
+            ["-gen-op-interface-defs"],
+            "op_interface.cc.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "op_interface.td",
+    deps = [
+        ":sdy_td_files",
     ],
 )
 
@@ -148,6 +168,7 @@ cc_library(
         ":canonicalization_inc",
         ":dialect_inc",
         ":enums_inc",
+        ":op_interface_inc",
         ":ops_inc",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:BytecodeOpInterface",
