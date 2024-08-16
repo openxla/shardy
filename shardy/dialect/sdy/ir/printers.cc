@@ -33,7 +33,7 @@ namespace sdy {
 void MeshAttr::print(AsmPrinter& printer) const {
   printer << "<";
   if (getDeviceId().has_value()) {
-    printer << "device_id=" << *getDeviceId();
+    printer << "device_ids=[" << *getDeviceId() << "]";
   } else {
     llvm::interleaveComma(getAxes(), printer,
                           [&](MeshAxisAttr axis) { axis.print(printer); });

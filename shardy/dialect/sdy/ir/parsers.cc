@@ -54,15 +54,21 @@ Attribute MeshAttr::parse(AsmParser& parser, Type type) {
   if (parser.parseLess()) {
     return MeshAttr();
   }
-  if (!parser.parseOptionalKeyword("device_id")) {
+  if (!parser.parseOptionalKeyword("device_ids")) {
     if (parser.parseEqual()) {
       return MeshAttr();
     }
     int64_t deviceId;
-    if (parser.parseInteger(deviceId) || parser.parseGreater()) {
+    if (parser.parseLSquare()) {
+      return MeshAttr();
+    }
+    if (parser.parseInteger(deviceId)) {
       return MeshAttr();
     }
     optDeviceId = deviceId;
+    if (parser.parseRSquare() || parser.parseGreater()) {
+      return MeshAttr();
+    }
   } else if (parser.parseOptionalGreater()) {
     auto parseElementFn = [&]() -> ParseResult {
       if (auto meshAxis = MeshAxisAttr::parse(parser, type)) {
