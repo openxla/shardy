@@ -16,14 +16,17 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <numeric>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
+#include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -547,19 +550,55 @@ LogicalResult MeshAxisAttr::verify(
 
 LogicalResult MeshAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError,
-    ArrayRef<MeshAxisAttr> axes, std::optional<int64_t> deviceId) {
-  if (deviceId && !axes.empty()) {
-    return emitError() << "mesh cannot have both axes and device id";
-  }
+    ArrayRef<MeshAxisAttr> axes, ArrayRef<int64_t> deviceIds) {
   SmallDenseSet<StringRef> seenAxisNames;
   for (MeshAxisAttr axis : axes) {
     if (!seenAxisNames.insert(axis.getName()).second) {
       return emitError() << "duplicate axis name: \"" << axis.getName() << "\"";
     }
   }
-  if (deviceId && *deviceId < 0) {
-    return emitError() << "device id must be non-negative, got: " << *deviceId;
+
+  if (deviceIds.empty()) {
+    // The default device ids are iota(product(axes)).
+    return success();
   }
+
+  for (int64_t deviceId : deviceIds) {
+    if (deviceId < 0) {
+      return emitError() << "device id must be non-negative, got: " << deviceId;
+    }
+  }
+
+  // Verify that the product of axis sizes matches the number of explicit device
+  // ids.
+  int64_t totalDeviceIds = deviceIds.size();
+  int64_t totalProductOfAxes = std::accumulate(
+      axes.begin(), axes.end(), 1,
+      [](int64_t cur, MeshAxisAttr axis) { return cur * axis.getSize(); });
+
+  if (totalProductOfAxes != totalDeviceIds) {
+    return emitError() << "total product of axis sizes must match total number "
+                          "of device ids, got: "
+                       << totalProductOfAxes << " != " << totalDeviceIds;
+  }
+
+  if (axes.empty()) {
+    return success();
+  }
+
+  std::vector<int64_t> sortedDeviceIds(deviceIds.begin(), deviceIds.end());
+  llvm::sort(sortedDeviceIds);
+  if (!llvm::equal(sortedDeviceIds, llvm::seq<int64_t>(0, totalDeviceIds))) {
+    return emitError() << "sorted device ids must be iota(product(axes)), got: "
+                       << sortedDeviceIds;
+  }
+
+  if (llvm::is_sorted(deviceIds)) {
+    return emitError() << "if the ordered device ids are the same as "
+                          "iota(product(axes)), no need to specify them for "
+                          "simplicity";
+  }
+
   return success();
 }
 

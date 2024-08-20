@@ -30,23 +30,6 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-void MeshAttr::print(AsmPrinter& printer) const {
-  printer << "<";
-  if (getDeviceId().has_value()) {
-    printer << "device_ids=[" << *getDeviceId() << "]";
-  } else {
-    if (!getAxes().empty()) {
-      printer << "[";
-    }
-    llvm::interleaveComma(getAxes(), printer,
-                          [&](MeshAxisAttr axis) { axis.print(printer); });
-    if (!getAxes().empty()) {
-      printer << "]";
-    }
-  }
-  printer << ">";
-}
-
 void DimensionShardingAttr::print(AsmPrinter& printer) const {
   printer << "{";
   printer.printStrippedAttrOrType(getAxes());
