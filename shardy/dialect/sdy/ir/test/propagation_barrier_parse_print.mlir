@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -- 2>&1 | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2,"b"=2>
+sdy.mesh @mesh = <["a"=2,"b"=2]>
 
 // CHECK-LABEL: func @backward
 func.func @backward(%arg0: tensor<8xf32>) -> tensor<8xf32> {

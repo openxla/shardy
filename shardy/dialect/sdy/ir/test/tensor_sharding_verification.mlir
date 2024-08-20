@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // expected-error @+1 {{'func.func' op arg 0 - non-shaped tensors can only have a sharding with rank 0 and no replicated axes}}
 func.func @token_sharding_rank_non_zero(%arg0: !stablehlo.token {sdy.sharding=#sdy.sharding<@mesh, [{}]>}) -> !stablehlo.token {
@@ -9,7 +9,7 @@ func.func @token_sharding_rank_non_zero(%arg0: !stablehlo.token {sdy.sharding=#s
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // expected-error @+1 {{'func.func' op arg 0 - non-shaped tensors can only have a sharding with rank 0 and no replicated axes}}
 func.func @token_sharding_with_replicated_axes(%arg0: !stablehlo.token {sdy.sharding=#sdy.sharding<@mesh, [], replicated={"a"}>}) -> !stablehlo.token {
@@ -18,7 +18,7 @@ func.func @token_sharding_with_replicated_axes(%arg0: !stablehlo.token {sdy.shar
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // expected-error @+1 {{'func.func' op arg 0 - only ranked tensors with a static shape can have a sharding}}
 func.func @unranked_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy.sharding<@mesh, []>}) -> tensor<*xf32> {
@@ -27,7 +27,7 @@ func.func @unranked_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // expected-error @+1 {{'func.func' op arg 0 - only ranked tensors with a static shape can have a sharding}}
 func.func @dynamic_shaped_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<?x?xf32> {
@@ -36,7 +36,7 @@ func.func @dynamic_shaped_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.shardin
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 func.func @dim_shardings_rank_mismatch(%arg0: tensor<8xf32>, %arg1: tensor<8xf32>) -> tensor<8xf32> {
   // expected-error @+1 {{op result - sharding doesn't match tensor rank: 2 != 1}}
@@ -46,7 +46,7 @@ func.func @dim_shardings_rank_mismatch(%arg0: tensor<8xf32>, %arg1: tensor<8xf32
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @op_with_unknown_mesh(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{op result - unknown mesh: @other_mesh}}
@@ -56,7 +56,7 @@ func.func @op_with_unknown_mesh(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) 
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // expected-error @+1 {{'func.func' op arg 0 - unknown mesh: @other_mesh}}
 func.func @func_arg_unknown_mesh(%arg0: tensor<8x8xf32> {sdy.sharding=#sdy.sharding<@other_mesh, [{}, {"a"}]>},
@@ -67,7 +67,7 @@ func.func @func_arg_unknown_mesh(%arg0: tensor<8x8xf32> {sdy.sharding=#sdy.shard
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // CHECK-LABEL: func @op_with_tensor_sharding_attr
 func.func @op_with_tensor_sharding_attr(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
@@ -78,7 +78,7 @@ func.func @op_with_tensor_sharding_attr(%arg0: tensor<8x8xf32>, %arg1: tensor<8x
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // expected-error @+1 {{'func.func' op arg 1 - should have a sharding attribute of type TensorShardingAttr}}
 func.func @func_arg_with_tensor_sharding_per_value_attr(
@@ -91,7 +91,7 @@ func.func @func_arg_with_tensor_sharding_per_value_attr(
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @num_shardings_does_not_match_num_results
 func.func @num_shardings_does_not_match_num_results(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
@@ -112,8 +112,8 @@ func.func @num_shardings_does_not_match_num_results(%arg0: tensor<2x64x13xf32>, 
 
 // -----
 
-sdy.mesh @mesh1 = <"a"=2>
-sdy.mesh @mesh2 = <"b"=2>
+sdy.mesh @mesh1 = <["a"=2]>
+sdy.mesh @mesh2 = <["b"=2]>
 
 // CHECK-LABEL: func @op_shardings_refers_to_multiples_meshes
 func.func @op_shardings_refers_to_multiples_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
@@ -132,7 +132,7 @@ func.func @op_shardings_refers_to_multiples_meshes(%arg0: tensor<2x64x13xf32>, %
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // The purpose of this test is to check the error msg prefix for a func arg.
 // expected-error @+1 {{'func.func' op arg 0 - unknown axis name: "c"}}
@@ -145,7 +145,7 @@ func.func @func_arg_failure(%arg0: tensor<8x8xf32> {sdy.sharding=#sdy.sharding<@
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // The purpose of this test is to check the error msg prefix for a func result.
 // expected-error @+1 {{'func.func' op result 2 - unknown axis name: "c"}}
@@ -157,7 +157,7 @@ func.func @func_result_failure(%arg0: tensor<8x8xf32> {sdy.sharding=#sdy.shardin
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // The purpose of this test is to check the error msg prefix for a single-result
 // op.
@@ -169,7 +169,7 @@ func.func @single_result_op_failure(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf3
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // The purpose of this test is to check the error msg prefix for a multi-result
 // op.
@@ -189,7 +189,7 @@ func.func @multi_result_op_failure(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x6
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @unknown_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{unknown axis name: "c"}}
@@ -199,7 +199,7 @@ func.func @unknown_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tenso
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @unknown_replicated_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{unknown axis name: "c"}}
@@ -209,7 +209,7 @@ func.func @unknown_replicated_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @duplicate_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "a"}}
@@ -219,7 +219,7 @@ func.func @duplicate_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> ten
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @duplicate_replicated_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "a"}}
@@ -229,7 +229,7 @@ func.func @duplicate_replicated_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @duplicate_sharded_axis_same_dim(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "a"}}
@@ -239,7 +239,7 @@ func.func @duplicate_sharded_axis_same_dim(%arg0: tensor<8x8xf32>, %arg1: tensor
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @duplicate_sharded_axis_different_dims(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "a"}}
@@ -249,7 +249,7 @@ func.func @duplicate_sharded_axis_different_dims(%arg0: tensor<8x8xf32>, %arg1: 
 
 // -----
 
-sdy.mesh @mesh = <"c"=2, "a"=2, "b"=2>
+sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
 
 func.func @unordered_replicated_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{replicated axes are not ordered w.r.t. mesh}}
@@ -259,7 +259,7 @@ func.func @unordered_replicated_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf
 
 // -----
 
-sdy.mesh @mesh = <"a"=2,"b"=4>
+sdy.mesh @mesh = <["a"=2,"b"=4]>
 
 func.func @empty_closed_dim_sharding_with_priority(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error@+1 {{dim 1 is empty and closed but has a priority}}
@@ -269,7 +269,7 @@ func.func @empty_closed_dim_sharding_with_priority(%arg0: tensor<8x8xf32>, %arg1
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @size_zero_dim_sharded(%arg0: tensor<8x0xf32>, %arg1: tensor<8x0xf32>) -> tensor<8x0xf32> {
   // expected-error @+1 {{dim 1 of size 0 is sharded}}
@@ -279,7 +279,7 @@ func.func @size_zero_dim_sharded(%arg0: tensor<8x0xf32>, %arg1: tensor<8x0xf32>)
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @unknown_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{unknown axis name: "c"}}
@@ -289,7 +289,7 @@ func.func @unknown_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> t
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @duplicate_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "a":(2)2}}
@@ -299,7 +299,7 @@ func.func @duplicate_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) ->
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @both_full_axis_and_sub_axis_used(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{both sub-axis and full-axis are used for axis name: "a"}}
@@ -309,7 +309,7 @@ func.func @both_full_axis_and_sub_axis_used(%arg0: tensor<8x8xf32>, %arg1: tenso
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @unordered_replicated_sub_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{replicated axes are not ordered w.r.t. mesh}}
@@ -319,7 +319,7 @@ func.func @unordered_replicated_sub_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @redundant_sub_axis_in_dim(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{two consecutive sub-axes can be merged: "a":(2)2, "a":(4)4}}
@@ -329,7 +329,7 @@ func.func @redundant_sub_axis_in_dim(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @redundant_replicated_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{two consecutive sub-axes can be merged: "a":(2)2, "a":(4)4}}
@@ -339,7 +339,7 @@ func.func @redundant_replicated_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @sub_axis_non_positive_pre_size(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{sub-axis pre-size must be at least 1: "a":(-1)2}}
@@ -349,7 +349,7 @@ func.func @sub_axis_non_positive_pre_size(%arg0: tensor<8x8xf32>, %arg1: tensor<
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @sub_axis_size_one(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{sub-axis sizes must be greater than 1: "a":(2)1}}
@@ -359,7 +359,7 @@ func.func @sub_axis_size_one(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> 
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @sub_axis_pre_size_does_not_divide(%arg0: tensor<6x6xf32>, %arg1: tensor<6x6xf32>) -> tensor<6x6xf32> {
   // expected-error @+1 {{sub-axis next pre-size 6 doesn't divide the size of the full axis 8: "a":(3)2}}
@@ -369,7 +369,7 @@ func.func @sub_axis_pre_size_does_not_divide(%arg0: tensor<6x6xf32>, %arg1: tens
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @sub_axis_size_does_not_divide(%arg0: tensor<6x6xf32>, %arg1: tensor<6x6xf32>) -> tensor<6x6xf32> {
   // expected-error @+1 {{sub-axis next pre-size 6 doesn't divide the size of the full axis 8: "a":(2)3}}
@@ -379,7 +379,7 @@ func.func @sub_axis_size_does_not_divide(%arg0: tensor<6x6xf32>, %arg1: tensor<6
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @sub_axis_next_pre_size_beyond_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{sub-axis next pre-size 16 doesn't divide the size of the full axis 8: "a":(4)4}}
@@ -389,7 +389,7 @@ func.func @sub_axis_next_pre_size_beyond_axis(%arg0: tensor<8x8xf32>, %arg1: ten
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=2>
+sdy.mesh @mesh = <["a"=8, "b"=2]>
 
 func.func @sub_axis_size_equals_full_size(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{sub-axis size is equal to the full axis size: "a":(1)8}}
@@ -399,7 +399,7 @@ func.func @sub_axis_size_equals_full_size(%arg0: tensor<8x8xf32>, %arg1: tensor<
 
 // -----
 
-sdy.mesh @mesh = <"a"=8, "b"=4>
+sdy.mesh @mesh = <["a"=8, "b"=4]>
 
 func.func @sub_axes_overlap(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{overlapping sub-axes: "a":(1)4, "a":(2)4}}
@@ -409,7 +409,7 @@ func.func @sub_axes_overlap(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> t
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @sharding_bound_manual_computation(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a",?}, {?}]>] out_shardings=[<@mesh, [{"a",?}, {?}]>] manual_axes={"a"} (%arg1: tensor<8x32xf32>) { // expected-note  {{parent bounding this axis as manual}}

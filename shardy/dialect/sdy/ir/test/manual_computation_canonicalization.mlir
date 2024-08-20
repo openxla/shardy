@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -canonicalize | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // CHECK-LABEL: func @unused_args
 func.func @unused_args(%arg0: tensor<8xf32>, %arg1: tensor<32x32xf32>, %arg2: tensor<16xf32>) -> tensor<32x32xf32> {

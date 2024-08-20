@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
-sdy.mesh @foo = <"a"=2,"b"=4>
+sdy.mesh @foo = <["a"=2,"b"=4]>
 
 func.func @priority_without_numbers(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error@+3 {{expecting priority in format 'p<number>', got: phigh}}
@@ -13,7 +13,7 @@ func.func @priority_without_numbers(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8x
 
 // -----
 
-sdy.mesh @foo = <"a"=2,"b"=4>
+sdy.mesh @foo = <["a"=2,"b"=4]>
 
 func.func @priority_integer_overflow(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error@+3 {{expecting integer priority, got: p9999999999999999999}}
@@ -25,7 +25,7 @@ func.func @priority_integer_overflow(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8
 
 // -----
 
-sdy.mesh @foo = <"a"=2,"b"=4>
+sdy.mesh @foo = <["a"=2,"b"=4]>
 
 // expected-error@+2{{priorities with leading zeros are not allowed, got: p01}}
 // expected-error@+1{{failed to parse Sdy_TensorSharding parameter 'dim_shardings' which is to be a `::llvm::ArrayRef<DimensionShardingAttr>`}}

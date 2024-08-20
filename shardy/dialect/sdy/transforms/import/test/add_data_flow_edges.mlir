@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-add-data-flow-edges | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @case
 func.func @case(%arg0: tensor<i32>, %arg1: tensor<8xi64>, %arg2: tensor<8xi64>,

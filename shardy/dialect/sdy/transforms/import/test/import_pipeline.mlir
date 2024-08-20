@@ -23,7 +23,7 @@ func.func private @add_matmul_to_lhs(%arg0: tensor<8x16xf32>, %arg1: tensor<16x1
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // Verifies that `-apply-sharding-constraints` pass is applied after
 // `-add-data_flow_edges` pass

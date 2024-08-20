@@ -2,8 +2,8 @@
 
 // Propagation tests for ops with data-flow edges like CaseOp and WhileOp
 
-sdy.mesh @mesh_a_2_b_2 = <"a"=2, "b"=2>
-sdy.mesh @mesh_a_2_b_2_c_2 = <"a"=2, "b"=2, "c"=2>
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @case_single_result_func_args_single_sharding(
 // CHECK-SAME:      %arg0: tensor<i32>,

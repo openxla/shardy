@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
-sdy.mesh @mesh = <"a"=2,"b"=2>
+sdy.mesh @mesh = <["a"=2,"b"=2]>
 
 // Since ShardingConstraintOp::verify has the same verification as any
 // TensorShardingAttr, there is no need to check different types of failures.
@@ -12,7 +12,7 @@ func.func @invalid_sharding(%arg0 : tensor<8xf32>) -> tensor<8xf32> {
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @constraint_sharding_inside_bound_manual_computation(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a",?}, {?}]>] out_shardings=[<@mesh, [{"a",?}, {?}]>] manual_axes={"a"} (%arg1: tensor<8x32xf32>) { // expected-note  {{parent bounding this axis as manual}}
@@ -24,7 +24,7 @@ func.func @constraint_sharding_inside_bound_manual_computation(%arg0: tensor<16x
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @constraint_replication_inside_bound_manual_computation(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a",?}, {?}]>] out_shardings=[<@mesh, [{"a",?}, {?}]>] manual_axes={"a"} (%arg1: tensor<8x32xf32>) { // expected-note  {{parent bounding this axis as manual}}

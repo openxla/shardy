@@ -1,8 +1,8 @@
 // RUN: sdy_opt %s -sdy-basic-propagate="conservative-propagation=true" 2>&1 | FileCheck %s
 
-sdy.mesh @mesh_a_4_b_2 = <"a"=4, "b"=2>
-sdy.mesh @mesh_a_2_b_8 = <"a"=2, "b"=8>
-sdy.mesh @mesh_a_16_b_2 = <"a"=16, "b"=2>
+sdy.mesh @mesh_a_4_b_2 = <["a"=4, "b"=2]>
+sdy.mesh @mesh_a_2_b_8 = <["a"=2, "b"=8]>
+sdy.mesh @mesh_a_16_b_2 = <["a"=16, "b"=2]>
 
 // CHECK-LABEL: func @reshape_split_dim
 func.func @reshape_split_dim(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4_b_2, [{"a"}]>}) -> tensor<2x4xf32> {

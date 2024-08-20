@@ -1,7 +1,7 @@
 // RUN: sdy_opt %s -sdy-aggressive-propagate="propagation-strategy=aggressive" -verify-diagnostics 2>&1 | FileCheck %s
 
-sdy.mesh @mesh_a_2_b_2 = <"a"=2, "b"=2>
-sdy.mesh @mesh_a_2_b_2_c_2 = <"a"=2, "b"=2, "c"=2>
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @no_conflict(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},

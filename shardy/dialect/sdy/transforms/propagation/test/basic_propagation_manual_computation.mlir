@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-basic-propagate 2>&1 | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // -----------------------------------------------------------------------------
 // Basic tests without manual axes

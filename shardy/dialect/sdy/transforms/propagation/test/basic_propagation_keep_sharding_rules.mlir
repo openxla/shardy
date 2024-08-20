@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-basic-propagate='keep-sharding-rules=true' 2>&1 | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @existing_and_created_rules_remain
 func.func @existing_and_created_rules_remain(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},

@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-user-priority-propagate 2>&1 | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2, "c"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @no_priorities(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},

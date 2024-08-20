@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-sharding-constraint-to-reshard | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @sharding_constraint_to_reshard
 func.func @sharding_constraint_to_reshard(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {

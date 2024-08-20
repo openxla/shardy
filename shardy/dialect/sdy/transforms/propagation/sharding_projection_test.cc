@@ -113,7 +113,7 @@ class ShardingProjectionBuildTest : public PropagationTestBase {};
 
 TEST_F(ShardingProjectionBuildTest, DotGeneralSimple) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=4, "b"=2, "c"=2, "d"=2, "e"=2>
+    sdy.mesh @mesh = <["a"=4, "b"=2, "c"=2, "d"=2, "e"=2]>
 
     func.func @main(%arg0: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {"a", ?}]>},
                     %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c"}, {"d", ?}], replicated={"b"}>})
@@ -163,7 +163,7 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimple) {
 
 TEST_F(ShardingProjectionBuildTest, ReshapeSplitDim) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=4, "b"=2, "c"=3>
+    sdy.mesh @mesh = <["a"=4, "b"=2, "c"=3]>
 
     func.func @main(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b"}], replicated={"c"}>})
         -> tensor<2x4xf32> {
@@ -199,7 +199,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeSplitDim) {
 
 TEST_F(ShardingProjectionBuildTest, ReshapeSplitDimAxisAlreadySplit) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=16, "b"=8, "c"=4>
+    sdy.mesh @mesh = <["a"=16, "b"=8, "c"=4]>
 
     func.func @main(%arg0: tensor<16x8xf32>
         {sdy.sharding = #sdy.sharding<@mesh, [{"a":(1)2, "b"}, {"a":(2)8}], replicated={"c":(2)2}>})
@@ -231,7 +231,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeSplitDimAxisAlreadySplit) {
 
 TEST_F(ShardingProjectionBuildTest, ReshapeMergeDim) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2, "b"=2>
+    sdy.mesh @mesh = <["a"=2, "b"=2]>
 
     func.func @main(%arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b"}]>})
         -> tensor<16xf32> {
@@ -262,7 +262,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMergeDim) {
 
 TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2>
+    sdy.mesh @mesh = <["a"=2]>
 
     func.func @main(%arg0: tensor<4x2x1xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}, {}]>})
         -> tensor<8xf32> {
@@ -288,7 +288,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
 
 TEST_F(ShardingProjectionBuildTest, AddSingleFactorNonDivisible) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=3>
+    sdy.mesh @mesh = <["a"=3]>
 
     func.func @main(%arg0: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>},
                     %arg1: tensor<2x4xf32>)
@@ -314,7 +314,7 @@ TEST_F(ShardingProjectionBuildTest, AddSingleFactorNonDivisible) {
 
 TEST_F(ShardingProjectionBuildTest, SingleFactorOverflows) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2, "b"=4>
+    sdy.mesh @mesh = <["a"=2, "b"=4]>
 
     func.func @main(%arg0: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a", "b"}]>},
                     %arg1: tensor<2x4xf32>)
@@ -340,7 +340,7 @@ TEST_F(ShardingProjectionBuildTest, SingleFactorOverflows) {
 
 TEST_F(ShardingProjectionBuildTest, FactorWithSmallerSizeThanDimOverflows) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2, "b"=4, "c"=2, "d"=4, "e"=2>
+    sdy.mesh @mesh = <["a"=2, "b"=4, "c"=2, "d"=4, "e"=2]>
 
     func.func @main(%arg0: tensor<32x4x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}, {"b", "d":(2)2, "e"}]>})
         -> tensor<32x1x2xf32> {
@@ -371,7 +371,7 @@ TEST_F(ShardingProjectionBuildTest, FactorWithSmallerSizeThanDimOverflows) {
 
 TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorNonDivisible) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=6>
+    sdy.mesh @mesh = <["a"=6]>
 
     func.func @main(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
         -> tensor<2x4xf32> {
@@ -397,7 +397,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorNonDivisible) {
 
 TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorOverflows) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=16>
+    sdy.mesh @mesh = <["a"=16]>
 
     func.func @main(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
         -> tensor<2x4xf32> {
@@ -424,7 +424,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorOverflows) {
 TEST_F(ShardingProjectionBuildTest,
        ReshapeMinorMostFactorOverflowsSizeOneAxes) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=16, "b"=1, "c"=1>
+    sdy.mesh @mesh = <["a"=16, "b"=1, "c"=1]>
 
     func.func @main(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", "c"}]>})
         -> tensor<2x4xf32> {
@@ -451,7 +451,7 @@ TEST_F(ShardingProjectionBuildTest,
 
 TEST_F(ShardingProjectionBuildTest, ReshapeNonMinorMostFactorNonDivisible) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=3>
+    sdy.mesh @mesh = <["a"=3]>
 
     func.func @main(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>})
         -> tensor<4x4xf32> {
@@ -478,7 +478,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeNonMinorMostFactorNonDivisible) {
 TEST_F(ShardingProjectionBuildTest,
        ReshapeNonMinorMostFactorNonDivisibleSubAxis) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=6>
+    sdy.mesh @mesh = <["a"=6]>
 
     func.func @main(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
         -> tensor<4x4xf32> {
@@ -505,7 +505,7 @@ TEST_F(ShardingProjectionBuildTest,
 TEST_F(ShardingProjectionBuildTest,
        ReshapeNonMinorMostFactorNonDivisibleMultipleAxes) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2, "b"=3>
+    sdy.mesh @mesh = <["a"=2, "b"=3]>
 
     func.func @main(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b"}]>})
         -> tensor<4x4xf32> {
@@ -531,7 +531,7 @@ TEST_F(ShardingProjectionBuildTest,
 
 TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorSizeOneAxes) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=1, "b"=2, "c"=1>
+    sdy.mesh @mesh = <["a"=1, "b"=2, "c"=1]>
 
     func.func @main(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", "c"}]>})
         -> tensor<2x4xf32> {
@@ -563,7 +563,7 @@ class ShardingProjectionUpdateShardingTest : public PropagationTestBase {};
 
 TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=4, "b"=4, "c"=4, "d"=4, "e"=4, "f"=4>
+    sdy.mesh @mesh = <["a"=4, "b"=4, "c"=4, "d"=4, "e"=4, "f"=4]>
 
     func.func @main(%arg0: tensor<256x512xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b"}, {"c", ?}]>},
                     %arg1: tensor<512x128xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"e"}, {"d", ?}], replicated={"f":(2)2}>})
@@ -701,7 +701,7 @@ class CreateTensorShardingAttrTest : public PropagationTestBase {
 
 TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=8, "b"=2, "c"=2>
+    sdy.mesh @mesh = <["a"=8, "b"=2, "c"=2]>
 
     func.func @main(%arg0: tensor<4x4xf32>) -> tensor<16xf32> {
       %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
@@ -732,7 +732,7 @@ TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
 
 TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=6, "b"=2>
+    sdy.mesh @mesh = <["a"=6, "b"=2]>
 
     func.func @main(%arg0: tensor<8xf32>) -> tensor<2x4xf32> {
       %0 = stablehlo.reshape %arg0 : (tensor<8xf32>) -> tensor<2x4xf32>
@@ -763,7 +763,7 @@ TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
 
 TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2, "b"=2, "c"=4, "d"=2>
+    sdy.mesh @mesh = <["a"=2, "b"=2, "c"=4, "d"=2]>
 
     func.func @main(%arg0: tensor<4x4xf32>) -> tensor<16xf32> {
       %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
@@ -795,7 +795,7 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
 
 TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=2, "b"=2>
+    sdy.mesh @mesh = <["a"=2, "b"=2]>
 
     func.func @main(%arg0: tensor<4x4xf32>) -> tensor<16xf32> {
       %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
@@ -823,7 +823,7 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
 
 TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
   const std::string program = R"mlir(
-    sdy.mesh @mesh = <"a"=3, "b"=4>
+    sdy.mesh @mesh = <["a"=3, "b"=4]>
 
     func.func @main(%arg0: tensor<4x4xf32>) -> tensor<16xf32> {
       %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>

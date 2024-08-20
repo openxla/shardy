@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-propagation-pipeline 2>&1 | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2, "c"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @split_constants_different_sharding
 func.func @split_constants_different_sharding(

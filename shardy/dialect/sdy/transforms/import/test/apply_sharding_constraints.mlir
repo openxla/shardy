@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-apply-sharding-constraints | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @input_already_has_sharding
 func.func @input_already_has_sharding(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {

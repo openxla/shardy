@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 // Since DataFlowEdgeOp::verify has the same verification as any
 // TensorShardingAttr, there is no need to check different types of failures.
@@ -30,7 +30,7 @@ func.func @input_has_multiple_users(%arg0: tensor<32x96xf32>)
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @input_defined_by_sdy_op(%arg0: tensor<32x96xf32>)
     -> tensor<32x96xf32> {

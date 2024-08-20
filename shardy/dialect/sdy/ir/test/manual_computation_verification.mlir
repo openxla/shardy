@@ -1,7 +1,7 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
-sdy.mesh @meshA = <"a"=2>
-sdy.mesh @meshB = <"a"=2>
+sdy.mesh @meshA = <["a"=2]>
+sdy.mesh @meshB = <["a"=2]>
 
 func.func @man_comp_different_meshes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op result shardings can only refer to one mesh: @meshB vs @meshA}}
@@ -24,7 +24,7 @@ func.func @manual_computation_no_inputs_or_outputs_with_manual_axes() {
 
 // -----
 
-sdy.mesh @mesh = <"a"=4>
+sdy.mesh @mesh = <["a"=4]>
 
 func.func @man_comp_split_axes_sharding(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand sharding at index 0 cannot refer to the sub/split axes "a":(1)2 as the axis "a" is a manual axis}}
@@ -37,7 +37,7 @@ func.func @man_comp_split_axes_sharding(%arg0: tensor<16x32xf32>) -> tensor<16x3
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=4>
+sdy.mesh @mesh = <["a"=2, "b"=4]>
 
 func.func @man_comp_split_axes_sharding_two_axes_sharding(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand sharding at index 0 cannot refer to the sub/split axes "b":(1)2 as the axis "b" is a manual axis}}
@@ -50,7 +50,7 @@ func.func @man_comp_split_axes_sharding_two_axes_sharding(%arg0: tensor<16x32xf3
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=4>
+sdy.mesh @mesh = <["a"=2, "b"=4]>
 
 func.func @man_comp_split_axes_sharding_two_axes_replicated(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand sharding at index 0 cannot refer to the sub/split axes "b":(1)2 as the axis "b" is a manual axis}}
@@ -63,7 +63,7 @@ func.func @man_comp_split_axes_sharding_two_axes_replicated(%arg0: tensor<16x32x
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_more_arg_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand shardings don't match number of values: 2 shardings vs 1 values}}
@@ -76,7 +76,7 @@ func.func @man_comp_more_arg_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_less_arg_specs(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand shardings don't match number of values: 1 shardings vs 2 values}}
@@ -89,7 +89,7 @@ func.func @man_comp_less_arg_specs(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_more_result_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op result shardings don't match number of values: 2 shardings vs 1 values}}
@@ -102,7 +102,7 @@ func.func @man_comp_more_result_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32x
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_less_result_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op result shardings don't match number of values: 1 shardings vs 2 values}}
@@ -115,7 +115,7 @@ func.func @man_comp_less_result_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32x
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_operand_rank_mistmatch(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand - sharding doesn't match tensor rank: 3 != 2}}
@@ -128,7 +128,7 @@ func.func @man_comp_operand_rank_mistmatch(%arg0: tensor<16x32xf32>) -> tensor<1
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_result_rank_mistmatch(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{sharding doesn't match tensor rank: 1 != 2}}
@@ -141,7 +141,7 @@ func.func @man_comp_result_rank_mistmatch(%arg0: tensor<16x32xf32>) -> tensor<16
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_operand_shape_mismatch_replicated(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand shape, corresponding sharding, and region operand shape at index 0 must match. Expected local shape 'tensor<16x32xf32>', actual local shape 'tensor<8x32xf32>'}}
@@ -154,7 +154,7 @@ func.func @man_comp_operand_shape_mismatch_replicated(%arg0: tensor<16x32xf32>) 
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_operand_shape_mismatch_sharded(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op operand shape, corresponding sharding, and region operand shape at index 0 must match. Expected local shape 'tensor<8x32xf32>', actual local shape 'tensor<16x32xf32>'}}
@@ -167,7 +167,7 @@ func.func @man_comp_operand_shape_mismatch_sharded(%arg0: tensor<16x32xf32>) -> 
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_result_shape_mismatch_sharded(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op result shape, corresponding sharding, and region result shape at index 0 must match. Expected local shape 'tensor<8x32xf32>', actual local shape 'tensor<16x32xf32>'}}
@@ -180,7 +180,7 @@ func.func @man_comp_result_shape_mismatch_sharded(%arg0: tensor<16x32xf32>) -> t
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_results_number_mismatch(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{number of op results and region results must match. Op has 1 op results and 2 region results}}
@@ -193,7 +193,7 @@ func.func @man_comp_results_number_mismatch(%arg0: tensor<16x32xf32>) -> tensor<
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_operands_number_mismatch(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{number of op operands and region operands must match. Op has 1 op operands and 2 region operands}}
@@ -206,7 +206,7 @@ func.func @man_comp_operands_number_mismatch(%arg0: tensor<16x32xf32>) -> tensor
 
 // -----
 
-sdy.mesh @mesh = <"a"=2>
+sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_free_variables(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-note @+1 {{required by region isolation constraints}}
@@ -220,7 +220,7 @@ func.func @man_comp_free_variables(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32
 
 // -----
 
-sdy.mesh @foo = <"a"=2, "b"=2>
+sdy.mesh @foo = <["a"=2, "b"=2]>
 
 func.func @manual_computation_nested_same_manual_axis(%arg0: tensor<16x32xf32>) -> tensor<8x32xf32> {
   // expected-note @+1  {{parent bounding this axis as manual}}
@@ -240,7 +240,7 @@ func.func @manual_computation_nested_same_manual_axis(%arg0: tensor<16x32xf32>) 
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 func.func @unused_manual_axis(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{op result sharding at index 0 must refer to all manual_axes: {"a", "b"}}}
@@ -253,7 +253,7 @@ func.func @unused_manual_axis(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 func.func @unsorted_manual_axes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // expected-error @+1 {{manual axes are not ordered w.r.t. mesh}}
@@ -266,7 +266,7 @@ func.func @unsorted_manual_axes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
 
 // -----
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 func.func @free_axes_before_manual_dim_sharding(%arg0: tensor<16x32xf32>) -> tensor<16x16xf32> {
   // expected-error @+1 {{op operand sharding at index 0 must have all manual axes come before free axes in its dimension sharding at index 1. Saw manual axis "b" after free axis "a"}}

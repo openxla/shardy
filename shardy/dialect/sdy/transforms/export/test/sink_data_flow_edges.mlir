@@ -1,7 +1,7 @@
 // RUN: sdy_opt %s -sdy-sink-data-flow-edges | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
-sdy.mesh @other_mesh = <"c"=4>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+sdy.mesh @other_mesh = <["c"=4]>
 
 // TODO(tomnatan): once ops like while are allowed to have shardings with
 // different meshes, add a test that verifies that the first mesh name is used

@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-op-priority-propagate 2>&1 | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // Without prioritizing element-wise ops first, the sharding on dim 0 would
 // have been propagated first.

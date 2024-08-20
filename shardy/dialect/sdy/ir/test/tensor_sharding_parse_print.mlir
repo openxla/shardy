@@ -1,10 +1,10 @@
 // RUN: sdy_opt %s 2>&1 | FileCheck %s
 
-// CHECK: sdy.mesh @foo = <"a"=2, "b"=4>
-sdy.mesh @foo = <"a"=2, "b"=4>
+// CHECK: sdy.mesh @foo = <["a"=2, "b"=4]>
+sdy.mesh @foo = <["a"=2, "b"=4]>
 
-// CHECK: sdy.mesh @bar = <"a"=4, "b"=2>
-sdy.mesh @bar = <"a"=4, "b"=2>
+// CHECK: sdy.mesh @bar = <["a"=4, "b"=2]>
+sdy.mesh @bar = <["a"=4, "b"=2]>
 
 // CHECK-LABEL: func @no_results
 func.func @no_results(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {

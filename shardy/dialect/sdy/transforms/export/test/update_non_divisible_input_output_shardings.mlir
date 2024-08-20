@@ -1,9 +1,9 @@
 // RUN: sdy_opt %s -sdy-update-non-divisible-input-output-shardings | FileCheck %s
 
-sdy.mesh @mesh_x_4_y_2 = <"x"=4, "y"=2>
-sdy.mesh @mesh_x_8_y_3 = <"x"=8, "y"=3>
-sdy.mesh @mesh_x_16 = <"x"=16>
-sdy.mesh @mesh_x_24 = <"x"=24>
+sdy.mesh @mesh_x_4_y_2 = <["x"=4, "y"=2]>
+sdy.mesh @mesh_x_8_y_3 = <["x"=8, "y"=3]>
+sdy.mesh @mesh_x_16 = <["x"=16]>
+sdy.mesh @mesh_x_24 = <["x"=24]>
 
 // CHECK-LABEL: func @only_one_dim_modified
 // CHECK-SAME:    %arg0: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh_x_4_y_2, [{"x":(1)2}, {"y"}]>}

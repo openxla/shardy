@@ -1,21 +1,21 @@
 // RUN: sdy_opt %s -sdy-basic-propagate -verify-diagnostics 2>&1 | FileCheck %s
 
-sdy.mesh @mesh_a_3 = <"a"=3>
-sdy.mesh @mesh_a_6 = <"a"=6>
-sdy.mesh @mesh_a_2_b_2 = <"a"=2, "b"=2>
-sdy.mesh @mesh_a_2_b_3 = <"a"=2, "b"=3>
-sdy.mesh @mesh_a_3_b_3 = <"a"=3, "b"=3>
-sdy.mesh @mesh_a_4_b_2 = <"a"=4, "b"=2>
-sdy.mesh @mesh_a_4_b_4 = <"a"=4, "b"=4>
-sdy.mesh @mesh_a_6_b_2 = <"a"=6, "b"=2>
-sdy.mesh @mesh_a_16_b_2 = <"a"=16, "b"=2>
-sdy.mesh @mesh_a_1_b_2_c_1 = <"a"=1, "b"=2, "c"=1>
-sdy.mesh @mesh_a_1_b_2_c_1_d_2 = <"a"=1, "b"=2, "c"=1, "d"=2>
-sdy.mesh @mesh_a_2_b_2_c_2 = <"a"=2, "b"=2, "c"=2>
-sdy.mesh @mesh_a_4_b_2_c_2 = <"a"=4, "b"=2, "c"=2>
-sdy.mesh @mesh_a_2_b_3_c_2 = <"a"=2, "b"=3, "c"=2>
-sdy.mesh @mesh_a_2_b_3_c_2_d_2 = <"a"=2, "b"=3, "c"=2, "d"=2>
-sdy.mesh @mesh_a_3_another = <"a"=3>
+sdy.mesh @mesh_a_3 = <["a"=3]>
+sdy.mesh @mesh_a_6 = <["a"=6]>
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_3 = <["a"=2, "b"=3]>
+sdy.mesh @mesh_a_3_b_3 = <["a"=3, "b"=3]>
+sdy.mesh @mesh_a_4_b_2 = <["a"=4, "b"=2]>
+sdy.mesh @mesh_a_4_b_4 = <["a"=4, "b"=4]>
+sdy.mesh @mesh_a_6_b_2 = <["a"=6, "b"=2]>
+sdy.mesh @mesh_a_16_b_2 = <["a"=16, "b"=2]>
+sdy.mesh @mesh_a_1_b_2_c_1 = <["a"=1, "b"=2, "c"=1]>
+sdy.mesh @mesh_a_1_b_2_c_1_d_2 = <["a"=1, "b"=2, "c"=1, "d"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+sdy.mesh @mesh_a_4_b_2_c_2 = <["a"=4, "b"=2, "c"=2]>
+sdy.mesh @mesh_a_2_b_3_c_2 = <["a"=2, "b"=3, "c"=2]>
+sdy.mesh @mesh_a_2_b_3_c_2_d_2 = <["a"=2, "b"=3, "c"=2, "d"=2]>
+sdy.mesh @mesh_a_3_another = <["a"=3]>
 
 // CHECK-LABEL: func @simple(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},

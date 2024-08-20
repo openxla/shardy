@@ -35,8 +35,14 @@ void MeshAttr::print(AsmPrinter& printer) const {
   if (getDeviceId().has_value()) {
     printer << "device_ids=[" << *getDeviceId() << "]";
   } else {
+    if (!getAxes().empty()) {
+      printer << "[";
+    }
     llvm::interleaveComma(getAxes(), printer,
                           [&](MeshAxisAttr axis) { axis.print(printer); });
+    if (!getAxes().empty()) {
+      printer << "]";
+    }
   }
   printer << ">";
 }

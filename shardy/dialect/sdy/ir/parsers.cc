@@ -77,9 +77,15 @@ Attribute MeshAttr::parse(AsmParser& parser, Type type) {
       }
       return failure();
     };
+    if (parser.parseLSquare()) {
+      return MeshAttr();
+    }
     if (parser.parseCommaSeparatedList(AsmParser::Delimiter::None,
                                        parseElementFn) ||
-        parser.parseGreater()) {
+        parser.parseRSquare()) {
+      return MeshAttr();
+    }
+    if (parser.parseGreater()) {
       return MeshAttr();
     }
   }

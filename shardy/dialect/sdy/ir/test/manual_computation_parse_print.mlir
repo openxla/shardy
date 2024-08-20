@@ -1,8 +1,8 @@
 // RUN: sdy_opt %s 2>&1 | FileCheck %s
 
 // CHECK: sdy.mesh
-sdy.mesh @meshA = <"a"=2, "b"=2>
-sdy.mesh @meshB = <"a"=4>
+sdy.mesh @meshA = <["a"=2, "b"=2]>
+sdy.mesh @meshB = <["a"=4]>
 
 // CHECK-LABEL: func @manual_computation_no_inputs_or_outputs
 func.func @manual_computation_no_inputs_or_outputs() {

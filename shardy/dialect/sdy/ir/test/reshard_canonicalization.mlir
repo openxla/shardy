@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -canonicalize | FileCheck %s
 
-sdy.mesh @mesh = <"a"=2, "b"=2>
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @reshard_of_reshard_no_other_uses
 // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]>
