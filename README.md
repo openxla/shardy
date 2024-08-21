@@ -10,7 +10,7 @@ For more information see the rfcs directory.
 ## Status
 
 Shardy is a work in progress. Currently the core dialect and c bindings are
-fully functionality. The python bindings are under development.
+fully functional. The python bindings are under development.
 
 ## Contacts
 
