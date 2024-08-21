@@ -45,15 +45,42 @@ def Sdy_MeshAxis : AttrDef<Sdy_Dialect, "MeshAxis"> {
 
 def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   let mnemonic = "mesh";
-  let summary = "Mesh of named axes or a device id";
+  let summary = "Mesh of axes and a list of devices";
   let description = [{
-    "A mesh is either a list of axes or a single device id but can't have both."
+    A mesh is a list of axes and an optional list of device IDs specifying the
+    device ordering.
+
+    If the list of axes is empty, the mesh has an implicit unnamed axis of
+    size 1. In this case, if a device ID list is not provided, the implicit
+    device ID list is [0]; if a device ID list is provided, it must
+    contains a single integer of any non-negative value. We call this
+    maximal-sharding case.
+
+    For all non-maximal-sharding cases, if a device ID list is specified, the
+    product of the axis sizes should match the number of devices. If a device ID
+    list is not specified, the implicit device ID list is iota(product(axes)).
+    For simplicity, we also disallow specifying a device ID list that is the
+    same as iota(product(axes)); in this case, a device ID list shouldn't be
+    specified.
+
+  Here are some examples of meshes:
+
+    - An empty mesh represents a mesh with an unnamed axis of size 1 and device
+      ID 0: <>
+    - A mesh with an unnamed axis and an explicit device ID, which is typically
+      used to represent maximal sharding: <device_ids=[3]>
+    - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
+    - A mesh with two axes and explicit device IDs specifying the device
+      ordering: <["a"=3, "b"=2] device_ids=[0, 2, 4, 1, 3, 5]>
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr">:$axes,
-      OptionalParameter<"std::optional<int64_t>">: $device_id
+      OptionalArrayRefParameter<"int64_t">: $device_ids
   );
-  let hasCustomAssemblyFormat = 1;
+
+  let assemblyFormat = [{
+    `<` (`[` $axes^ `]`)? (`device_ids` `` `=` `` `[` $device_ids^ `]` )? `>`
+  }];
 
   let genVerifyDecl = 1;
 
@@ -62,7 +89,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
       return $_get($_ctxt, axes, /*device_id=*/std::nullopt);
     }]>,
     AttrBuilder<(ins "int64_t":$device_id), [{
-      return $_get($_ctxt, /*axes=*/ArrayRef<MeshAxisAttr>(), device_id);
+      return $_get($_ctxt, /*axes=*/ArrayRef<MeshAxisAttr>(), ArrayRef<int64_t>(device_id));
     }]>,
   ];
 

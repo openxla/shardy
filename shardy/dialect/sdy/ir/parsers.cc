@@ -46,53 +46,6 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-Attribute MeshAttr::parse(AsmParser& parser, Type type) {
-  MLIRContext* context = parser.getContext();
-  SMLoc location = parser.getCurrentLocation();
-  llvm::SmallVector<MeshAxisAttr> axes;
-  std::optional<int64_t> optDeviceId;
-  if (parser.parseLess()) {
-    return MeshAttr();
-  }
-  if (!parser.parseOptionalKeyword("device_ids")) {
-    if (parser.parseEqual()) {
-      return MeshAttr();
-    }
-    int64_t deviceId;
-    if (parser.parseLSquare()) {
-      return MeshAttr();
-    }
-    if (parser.parseInteger(deviceId)) {
-      return MeshAttr();
-    }
-    optDeviceId = deviceId;
-    if (parser.parseRSquare() || parser.parseGreater()) {
-      return MeshAttr();
-    }
-  } else if (parser.parseOptionalGreater()) {
-    auto parseElementFn = [&]() -> ParseResult {
-      if (auto meshAxis = MeshAxisAttr::parse(parser, type)) {
-        axes.push_back(mlir::cast<MeshAxisAttr>(meshAxis));
-        return success();
-      }
-      return failure();
-    };
-    if (parser.parseLSquare()) {
-      return MeshAttr();
-    }
-    if (parser.parseCommaSeparatedList(AsmParser::Delimiter::None,
-                                       parseElementFn) ||
-        parser.parseRSquare()) {
-      return MeshAttr();
-    }
-    if (parser.parseGreater()) {
-      return MeshAttr();
-    }
-  }
-  return parser.getChecked<MeshAttr>(
-      location, context, llvm::ArrayRef<MeshAxisAttr>(axes), optDeviceId);
-}
-
 Attribute DimensionShardingAttr::parse(AsmParser& parser, Type type) {
   if (parser.parseLBrace()) {
     return DimensionShardingAttr();
