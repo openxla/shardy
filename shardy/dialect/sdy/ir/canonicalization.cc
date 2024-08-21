@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "llvm/ADT/STLExtras.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
@@ -64,6 +65,35 @@ class ManualComputationUnusedInputsPattern
   }
 };
 
+// Pattern to remove duplicate (same input and group id) ShardingGroupOps within
+// the same block.
+class DedupShardingGroupPattern : public OpRewritePattern<ShardingGroupOp> {
+ public:
+  using OpRewritePattern<ShardingGroupOp>::OpRewritePattern;
+  void initialize() { setDebugName("DedupShardingGroupPattern"); }
+
+ private:
+  LogicalResult matchAndRewrite(ShardingGroupOp shardingGroupOp,
+                                PatternRewriter& rewriter) const override {
+    // Loop over all ShardingGroupOps with the same input. IF there are any
+    // ShardingGroupOps with the same group id, THEN delete the current op.
+    bool anyDeduped = false;
+    for (Operation* otherOp :
+         llvm::make_early_inc_range(shardingGroupOp.getInput().getUsers())) {
+      if (otherOp == shardingGroupOp) {
+        continue;
+      }
+      if (auto otherShardingGroupOp = dyn_cast<ShardingGroupOp>(otherOp);
+          otherShardingGroupOp != nullptr &&
+          otherShardingGroupOp.getGroupId() == shardingGroupOp.getGroupId()) {
+        rewriter.eraseOp(otherOp);
+        anyDeduped = true;
+      }
+    }
+    return success(anyDeduped);
+  }
+};
+
 }  // namespace
 
 void ManualComputationOp::getCanonicalizationPatterns(
@@ -74,6 +104,11 @@ void ManualComputationOp::getCanonicalizationPatterns(
 void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                             MLIRContext* context) {
   results.add<ReshardOfReshardPattern>(context);
+}
+
+void ShardingGroupOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                                  MLIRContext* context) {
+  results.add<DedupShardingGroupPattern>(context);
 }
 
 }  // namespace sdy

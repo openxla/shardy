@@ -16,6 +16,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
 
@@ -32,6 +33,13 @@ void addImportPipeline(OpPassManager& pm) {
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
   pm.addPass(createShardingGroupUnificationPass());
+
+  GreedyRewriteConfig config;
+  config.useTopDownTraversal = true;
+  config.enableRegionSimplification = GreedySimplifyRegionLevel::Disabled;
+  pm.addPass(createCanonicalizerPass(
+      /*config=*/config, /*disabledPatterns=*/{},
+      /*enabledPatterns=*/{"DedupShardingGroupPattern"}));
 }
 
 void registerImportPipeline() {

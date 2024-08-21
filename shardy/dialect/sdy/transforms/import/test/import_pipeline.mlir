@@ -37,3 +37,19 @@ func.func @main(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
   %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"a"}]> :  tensor<32x96xf32>
   return %1 : tensor<32x96xf32>
 }
+
+// -----
+
+// Verifies that both the -sdy-sharding-group-unification pass and sharding
+// group canonicalizer pass are applied in order. This is checked by asserting
+// group merging, reindexing and deduplication of ops are all applied.
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) {
+  // CHECK-DAG: sdy.sharding_group %arg0 group_id=0 : tensor<8x8xf32>
+  // CHECK-DAG: sdy.sharding_group %arg1 group_id=0 : tensor<8x8xf32>
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  sdy.sharding_group %arg0 group_id = 2345 : tensor<8x8xf32>
+  sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+  sdy.sharding_group %arg1 group_id = 3456 : tensor<8x8xf32>
+  func.return
+}
