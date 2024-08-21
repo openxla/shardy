@@ -211,7 +211,7 @@ Interfaces: `Symbol`
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
 <tr><td><code>sym_name</code></td><td>::mlir::StringAttr</td><td>string attribute</td></tr>
-<tr><td><code>mesh</code></td><td>::mlir::sdy::MeshAttr</td><td>Mesh of named axes or a device id</td></tr>
+<tr><td><code>mesh</code></td><td>::mlir::sdy::MeshAttr</td><td>Mesh of axes and a list of devices</td></tr>
 </table>
 
 
@@ -505,16 +505,49 @@ Syntax:
 
 ### MeshAttr
 
-Mesh of named axes or a device id
+Mesh of axes and a list of devices
 
-"A mesh is either a list of axes or a single device id but can't have both."
+Syntax:
+
+```
+#sdy.mesh<
+  ::llvm::ArrayRef<MeshAxisAttr>,   # axes
+  ::llvm::ArrayRef<int64_t>   # device_ids
+>
+```
+
+  A mesh is a list of axes and an optional list of device IDs specifying the
+  device ordering.
+
+  If the list of axes is empty, the mesh has an implicit unnamed axis of
+  size 1. In this case, if a device ID list is not provided, the implicit
+  device ID list is [0]; if a device ID list is provided, it must
+  contains a single integer of any non-negative value. We call this
+  maximal-sharding case.
+
+  For all non-maximal-sharding cases, if a device ID list is specified, the
+  product of the axis sizes should match the number of devices. If a device ID
+  list is not specified, the implicit device ID list is iota(product(axes)).
+  For simplicity, we also disallow specifying a device ID list that is the
+  same as iota(product(axes)); in this case, a device ID list shouldn't be
+  specified.
+
+Here are some examples of meshes:
+
+  - An empty mesh represents a mesh with an unnamed axis of size 1 and device
+    ID 0: <>
+  - A mesh with an unnamed axis and an explicit device ID, which is typically
+    used to represent maximal sharding: <device_ids=[3]>
+  - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
+  - A mesh with two axes and explicit device IDs specifying the device
+    ordering: <["a"=3, "b"=2] device_ids=[0, 2, 4, 1, 3, 5]>
 
 #### Parameters:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
 | axes | `::llvm::ArrayRef<MeshAxisAttr>` |  |
-| device_id | `std::optional<int64_t>` |  |
+| device_ids | `::llvm::ArrayRef<int64_t>` |  |
 
 ### MeshAxisAttr
 
