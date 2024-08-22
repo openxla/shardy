@@ -55,10 +55,6 @@ using func::FuncOp;
 using ::llvm::SmallDenseMap;
 using ::llvm::SmallDenseSet;
 
-// Mapping between an axis name to the ManualComputationOp whose body is manual
-// on.
-using ManualAxisToOwner = SmallDenseMap<StringRef, ManualComputationOp>;
-
 using EmitErrorFn = std::function<InFlightDiagnostic(StringRef)>;
 
 EmitErrorFn getEmitErrorFn(Operation* op) {
@@ -172,22 +168,6 @@ LogicalResult verifySubAxes(ArrayRef<AxisRefAttr> subAxes, StringRef axisName,
   }
 
   return success();
-}
-
-// ManualComputations op are allowed to be nested within each other. However,
-// they cannot operate on the same manual axes. This function creates a mapping
-// from a manual mesh axis name to the corresponding ManualComputationOp that
-// operates on it to help with verifying this is the case.
-ManualAxisToOwner getParentManualComputationOps(Operation* op) {
-  ManualAxisToOwner alreadyManualAxes;
-  auto parent = op->getParentOfType<ManualComputationOp>();
-  while (parent) {
-    for (StringRef axisName : parent.getManualAxes()) {
-      alreadyManualAxes[axisName] = parent;
-    }
-    parent = parent->getParentOfType<ManualComputationOp>();
-  }
-  return alreadyManualAxes;
 }
 
 LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,

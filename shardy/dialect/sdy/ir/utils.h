@@ -17,9 +17,12 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
@@ -259,6 +262,26 @@ void cloneRegionAndConvertTerminatorOp(Region& src, Region& dst) {
   IRRewriter rewriter(src.getContext());
   cloneRegionAndConvertTerminatorOp<TerminatorOpTy>(src, dst, rewriter);
 }
+
+// Returns the common mesh name used by all the `TensorShardingAttr` or
+// `std::nullopt` if there is none.
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings);
+
+// Mapping between an axis name to the `ManualComputationOp` whose body is
+// manual on.
+using ManualAxisToOwner = llvm::SmallDenseMap<StringRef, ManualComputationOp>;
+
+// Creates a mapping from axis name to the corresponding `ManualComputationOp`.
+//
+// ManualComputations op are allowed to be nested within each other, and this
+// gives what manual axis was introduced by what `ManualComputationOp`.
+ManualAxisToOwner getParentManualComputationOps(Operation* op);
+
+// Gets the axes that are manual from a `ManualComputationOp` that has `op`
+// inside.
+llvm::SmallDenseSet<StringRef> getParentManualAxes(Operation* op);
 
 }  // namespace sdy
 }  // namespace mlir
