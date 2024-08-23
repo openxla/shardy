@@ -31,6 +31,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -893,16 +894,18 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       // (e.g., `stablehlo::WhileOp`) or don't require any propagation
       // (`stablehlo::ConstantOp`).
       // TODO(b/327191011): output unregistered op stats instead.
-      .Case<ModuleOp, func::FuncOp, func::ReturnOp, ConstantOp, DataFlowEdgeOp,
-            ManualComputationOp, MeshOp, PropagationBarrierOp, ReturnOp,
+      .Case<ModuleOp, func::FuncOp, ConstantOp, DataFlowEdgeOp,
+            ManualComputationOp, MeshOp, PropagationBarrierOp,
             ShardableRegionOpInterface, stablehlo::CaseOp,
             stablehlo::ConstantOp, stablehlo::CreateTokenOp,
             stablehlo::GetTupleElementOp, stablehlo::IotaOp,
             stablehlo::OutfeedOp, stablehlo::OptimizationBarrierOp,
-            stablehlo::PartitionIdOp, stablehlo::ReturnOp,
-            stablehlo::RngBitGeneratorOp, stablehlo::WhileOp>(
-          [](Operation*) { return OpShardingRuleAttr(); })
+            stablehlo::PartitionIdOp, stablehlo::RngBitGeneratorOp,
+            stablehlo::WhileOp>([](Operation*) { return OpShardingRuleAttr(); })
       .Default([](Operation* op) {
+        if (op->hasTrait<OpTrait::IsTerminator>()) {
+          return OpShardingRuleAttr();
+        }
         static llvm::once_flag onceFlag;
         emitOpWarningOnce(
             onceFlag, op,
