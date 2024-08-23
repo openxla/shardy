@@ -22,9 +22,8 @@ all of the following:
 * The input isn't produced by a `DataFlowEdgeOp`, which holds the sharding
   of all targets of the edge.
 * The sharding of the `ShardingConstraintOp` is fully closed.
-* The input is either only used by the `ShardingConstraintOp` or the latter
-  doesn't have any uses (dangling) and the input doesn't have any other
-  users of type `ShardingConstraintOp` or `ManualComputationOp`.
+* The input doesn't have any other users of type `ShardingConstraintOp` or
+  `ManualComputationOp`.
 
 Which indicates that the `ShardingConstraintOp` dictates the sharding of
 its input.
