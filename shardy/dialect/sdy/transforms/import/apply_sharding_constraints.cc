@@ -47,21 +47,10 @@ bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
     return false;
   }
 
-  if (input.hasOneUse()) {
-    // `op` is the only use of `input`.
-    return true;
-  }
-
-  if (!isa<ShardingConstraintOp>(op)) {
-    // `op` is a `ManualComputationOp` and `input` has other uses.
-    assert(isa<ManualComputationOp>(op));
-    return false;
-  }
-
-  // `op` is dangling `ShardingConstraintOp`, and `input` has no other uses of
-  // type `ShardingConstraintOp` or `ManualComputationOp`.
-  return op->use_empty() &&
-         llvm::none_of(input.getUsers(), [op](Operation* user) {
+  // TODO(b/358627707): revisit restricting to a single use if not dangling.
+  // Return true if `input` has no other uses of type `ShardingConstraintOp` or
+  // `ManualComputationOp`
+  return llvm::none_of(input.getUsers(), [op](Operation* user) {
            return user != op &&
                   isa<ShardingConstraintOp, ManualComputationOp>(user);
          });
