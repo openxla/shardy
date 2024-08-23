@@ -35,6 +35,10 @@ gentbl_cc_library(
             ["-gen-op-interface-defs"],
             "op_interface.cc.inc",
         ),
+        (
+            ["-gen-op-interface-docs"],
+            "g3doc/sdy_op_interfaces.md",
+        ),
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "op_interface.td",
