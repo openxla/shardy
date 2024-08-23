@@ -99,11 +99,19 @@ PYBIND11_MODULE(_sdy, m) {
       .def_classmethod(
           "get",
           [](py::object cls, const std::vector<MlirAttribute>& meshAxes,
+             const std::vector<int64_t>& deviceIds,
              MlirContext ctx) {
-            return cls(sdyMeshAttrGet(ctx, meshAxes.size(), meshAxes.data()));
+            return cls(sdyMeshAttrGet(ctx, meshAxes.size(), meshAxes.data(),
+                                      deviceIds.size(), deviceIds.data()));
           },
-          py::arg("cls"), py::arg("meshAxes"), py::arg("context") = py::none(),
+          py::arg("cls"), py::arg("mesh_axes"),
+          py::arg("device_ids") = std::vector<int64_t>(),
+          py::arg("context") = py::none(),
           "Creates a MeshAttr with the given mesh axes.")
+      .def_property_readonly("device_ids", [](MlirAttribute self) {
+        return propertyVector<int64_t>(self, sdyMeshAttrGetDeviceIdsSize,
+                                             sdyMeshAttrGetDeviceIdsElem);
+      })
       .def_property_readonly("axes", [](MlirAttribute self) {
         return propertyVector<MlirAttribute>(self, sdyMeshAttrGetAxesSize,
                                              sdyMeshAttrGetAxesElem);

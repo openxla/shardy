@@ -274,8 +274,12 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                  seenAxisRefs, axisNameToSubAxes, emitError))) {
       return failure();
     }
-    if (dimSize == 0 && !dimSharding.emptyAxes()) {
-      return emitError("dim ") << dim << " of size 0 is sharded";
+    if (dimSize == 0 &&
+        llvm::any_of(dimSharding.getAxes(), [&](AxisRefAttr axisRef) {
+          return axisNameToSize[axisRef.getName()] > 1;
+        })) {
+      return emitError("dim ")
+          << dim << " of size 0 is sharded on an axis of size > 1";
     }
     if (checkDivisibility) {
       int64_t shardedSize = dimSharding.getShardedSize(mesh);

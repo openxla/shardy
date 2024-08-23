@@ -66,10 +66,20 @@ bool sdyAttributeIsAMeshAttr(MlirAttribute attr) {
 }
 
 MlirAttribute sdyMeshAttrGet(MlirContext ctx, intptr_t nAxes,
-                             const MlirAttribute* axes) {
+                             const MlirAttribute* axes, intptr_t nDeviceIds,
+                             const int64_t* deviceIds) {
   return wrap(sdy::MeshAttr::get(
       unwrap(ctx),
-      mlir::ArrayRef(reinterpret_cast<const sdy::MeshAxisAttr*>(axes), nAxes)));
+      mlir::ArrayRef(reinterpret_cast<const sdy::MeshAxisAttr*>(axes), nAxes),
+      mlir::ArrayRef(deviceIds, nDeviceIds)));
+}
+
+int64_t sdyMeshAttrGetDeviceIdsSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::MeshAttr>(attr).getDeviceIds().size();
+}
+
+int64_t sdyMeshAttrGetDeviceIdsElem(MlirAttribute attr, int64_t pos) {
+  return unwrapAttr<sdy::MeshAttr>(attr).getDeviceIds()[pos];
 }
 
 intptr_t sdyMeshAttrGetAxesSize(MlirAttribute attr) {

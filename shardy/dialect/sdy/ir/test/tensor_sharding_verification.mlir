@@ -272,7 +272,7 @@ func.func @empty_closed_dim_sharding_with_priority(%arg0: tensor<8x8xf32>, %arg1
 sdy.mesh @mesh = <["a"=2]>
 
 func.func @size_zero_dim_sharded(%arg0: tensor<8x0xf32>, %arg1: tensor<8x0xf32>) -> tensor<8x0xf32> {
-  // expected-error @+1 {{dim 1 of size 0 is sharded}}
+  // expected-error @+1 {{dim 1 of size 0 is sharded on an axis of size > 1}}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : tensor<8x0xf32>
   return %0 : tensor<8x0xf32>
 }

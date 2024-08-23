@@ -47,7 +47,14 @@ MLIR_CAPI_EXPORTED int64_t sdyMeshAxisAttrGetSize(MlirAttribute attr);
 MLIR_CAPI_EXPORTED bool sdyAttributeIsAMeshAttr(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute sdyMeshAttrGet(MlirContext ctx, intptr_t nAxes,
-                                                const MlirAttribute* axes);
+                                                const MlirAttribute* axes,
+                                                intptr_t nDeviceIds,
+                                                const int64_t* deviceIds);
+
+MLIR_CAPI_EXPORTED int64_t sdyMeshAttrGetDeviceIdsSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t sdyMeshAttrGetDeviceIdsElem(MlirAttribute attr,
+                                                        int64_t pos);
 
 MLIR_CAPI_EXPORTED intptr_t sdyMeshAttrGetAxesSize(MlirAttribute attr);
 

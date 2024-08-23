@@ -42,6 +42,15 @@ func.func @pointwise_size_zero_dim(%arg0: tensor<8x0xf32> {sdy.sharding = #sdy.s
   return %0 : tensor<8x0xf32>
 }
 
+// CHECK-LABEL: func @pointwise_size_zero_dim_axis_size_1(
+// CHECK-SAME:      %arg0: tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh_a_1_b_2_c_1, [{}, {"a"}]>})
+// CHECK-SAME:  -> (tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh_a_1_b_2_c_1, [{?}, {"a", ?}]>}) {
+func.func @pointwise_size_zero_dim_axis_size_1(%arg0: tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh_a_1_b_2_c_1, [{}, {"a"}]>}) -> tensor<8x0xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_1_b_2_c_1, [{?}, {"a", ?}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x0xf32>
+  return %0 : tensor<8x0xf32>
+}
+
 // CHECK-LABEL: func @propagate_to_multi_result_op
 func.func @propagate_to_multi_result_op(%arg0: tensor<4x64x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{}, {}, {"b"}]>},
                                         %arg1: tensor<4x64x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{}, {}, {"b"}]>})
