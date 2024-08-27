@@ -21,7 +21,7 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/ir/register.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

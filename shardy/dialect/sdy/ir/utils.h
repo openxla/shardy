@@ -178,8 +178,6 @@ SmallVector<TensorShardingAttr> getShardings(ValueRange values);
 // ones.
 void removeShardingRules(Operation* rootOp);
 
-void loadAllRequiredDialects(MLIRContext* context);
-
 // Gets the `op` body's terminator.
 template <typename RegionOpTy>
 Operation* getBodyTerminator(RegionOpTy op) {
