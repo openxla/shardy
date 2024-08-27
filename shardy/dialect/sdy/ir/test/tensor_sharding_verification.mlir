@@ -418,3 +418,18 @@ func.func @sharding_bound_manual_computation(%arg0: tensor<16x32xf32>) -> tensor
   } : (tensor<16x32xf32>) -> tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
 }
+
+// -----
+
+// expected-error @+1 {{'func.func' op arg 0 - should have a sharding attribute of type TensorShardingAttr}}
+func.func @maximal_sharding_func_input(%arg0: tensor<8x8xf32> {sdy.sharding = 3}) -> tensor<8x8xf32> {
+  return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+func.func @maximal_sharding_negative_device_id(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // expected-error @+1 {{'stablehlo.add' op should have a non-negative device ID}}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = -1} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
