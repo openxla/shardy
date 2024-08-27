@@ -25,7 +25,7 @@ cc_test(
     srcs = ["op_properties_test.cc"],
     deps = [
         ":op_properties",
-        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/ir:register",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",

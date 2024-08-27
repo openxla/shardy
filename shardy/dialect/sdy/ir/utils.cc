@@ -24,7 +24,6 @@ limitations under the License.
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
-#include "mlir/Dialect/Func/Extensions/AllExtensions.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -40,7 +39,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -323,14 +321,6 @@ void removeShardingRules(Operation* rootOp) {
       }
     }
   });
-}
-
-void loadAllRequiredDialects(MLIRContext* context) {
-  DialectRegistry registry;
-  func::registerAllExtensions(registry);
-  registry.insert<SdyDialect, func::FuncDialect, stablehlo::StablehloDialect>();
-  context->appendDialectRegistry(registry);
-  context->loadAllAvailableDialects();
 }
 
 }  // namespace sdy

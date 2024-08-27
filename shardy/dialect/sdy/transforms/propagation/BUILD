@@ -177,6 +177,7 @@ cc_library(
         ":sharding_projection",
         ":utils",
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/ir:register",
         "@com_google_googletest//:gtest",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",

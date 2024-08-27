@@ -24,7 +24,7 @@ limitations under the License.
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/ir/register.h"
 #include "stablehlo/dialect/StablehloOps.h"
 #include <gtest/gtest.h>
 

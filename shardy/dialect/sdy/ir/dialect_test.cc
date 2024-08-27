@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/ir/dialect.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -33,7 +33,7 @@ using ::testing::HasSubstr;
 
 class DialectTest : public ::testing::Test {
  protected:
-  void SetUp() override { loadAllRequiredDialects(&context); }
+  void SetUp() override { context.loadDialect<SdyDialect>(); }
 
   MeshAttr createMesh(ArrayRef<StringRef> axisNames) {
     SmallVector<MeshAxisAttr> meshAxisAttrs;
