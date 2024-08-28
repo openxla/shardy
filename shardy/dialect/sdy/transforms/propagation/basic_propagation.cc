@@ -19,13 +19,8 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <utility>
 
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/Threading.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -43,14 +38,13 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/common/file_utils.h"
-#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
-#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_propagation_context.h"
 
 namespace mlir {
 namespace sdy {
@@ -59,8 +53,6 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/propagation/passes.h.inc"
 
 namespace {
-
-using func::FuncOp;
 
 // Sets the sharding of a tensor at a given index to the given
 // `TensorShardingAttr`.
@@ -72,335 +64,19 @@ using SetTensorShardingCallback = std::function<void(TensorShardingAttr)>;
 
 using NotifyOpModifiedCallback = std::function<void(Operation*)>;
 
-// Calls `notifyOpModified` on all users of `value`, so they will be added back
-// to the worklist.
-//
-// Special cases:
-// - If a use is a source of an `sdy.data_flow_edge` (e.g. while operand), add
-//   the latter back to the worklist.
-// - If a user is a terminator, the parent op will be added back to the worklist
-//   instead of the terminator.
-void notifyUsersModified(Value value,
-                         NotifyOpModifiedCallback notifyOpModified) {
-  for (OpOperand& use : value.getUses()) {
-    Operation* user = use.getOwner();
-
-    if (DataFlowEdgeOp dataFlowEdge = getDataFlowEdge(use)) {
-      notifyOpModified(dataFlowEdge);
-    } else if (user->hasTrait<OpTrait::IsTerminator>()) {
-      notifyOpModified(user->getParentOp());
-    } else {
-      notifyOpModified(user);
-    }
-  }
-}
-
-// Calls `notifyOpModified` on all ops that are affected by changing the
-// sharding of `value`, so that they will be added back to the worklist.
-void notifyShardingModified(Value value,
-                            NotifyOpModifiedCallback notifyOpModified) {
-  if (auto dataFlowEdge = value.getDefiningOp<DataFlowEdgeOp>()) {
-    forEachNonRootDataFlowTarget(dataFlowEdge, [&](Value value) {
-      notifyUsersModified(value, notifyOpModified);
-    });
-  }
-
-  if (auto opResult = dyn_cast<OpResult>(value)) {
-    // If the value has a defining op, add it back to the worklist.
-    notifyOpModified(opResult.getOwner());
-  } else {
-    // Otherwise, the value is a block argument with an attached sharding, so
-    // we need to add its parent op (e.g. manual computation) back to the
-    // worklist.
-    notifyOpModified(value.getParentBlock()->getParentOp());
-  }
-
-  // Notify that all users of `value` are being modified, so they will be
-  // added back to the worklist as well.
-  notifyUsersModified(value, notifyOpModified);
-}
-
-// Update the sharding of `value` to the sharding in `tensorFactorShardings`.
-//
-// Returns true if it's possible to update the sharding, i.e., if strided view
-// isn't needed and all non-minor-most factors are divisible by sharding axes.
-bool updateTensorSharding(
-    TensorShardingAttr oldTensorSharding,
-    SetTensorShardingCallback setTensorShardingCallback,
-    const TensorFactorShardings& tensorFactorShardings,
-    TensorMappingAttr tensorMapping, ArrayRef<int64_t> factorSizes,
-    StringRef meshName, MeshAttr mesh, Value modifiedValue,
-    std::optional<NotifyOpModifiedCallback> notifyOpModified) {
-  // We can assume `modifiedValue` exists since we are updating its sharding.
-  assert(modifiedValue && "modified value should exist");
-  TensorShardingAttr newSharding =
-      tensorFactorShardings.createTensorShardingAttr(
-          mesh.getContext(), tensorMapping, factorSizes, meshName, mesh);
-  // `oldTensorSharding` may be null if there is no sharding, in which case we
-  // check if `newSharding` is empty.
-  // TODO(tomnatan): remove this checking if the new sharding equals the old
-  // sharding once strides is supported and divisibility is checked when finding
-  // the compatible axes.
-  if ((!oldTensorSharding && newSharding.emptyAxes()) ||
-      newSharding == oldTensorSharding) {
-    // This means no update can be done to the sharding.
-    // TODO(tomnatan): find a way to warn about this silently.
-    static llvm::once_flag flag;
-    emitOpWarningOnce(flag, getOwningOp(modifiedValue),
-                      "can't propagate sharding as strided view is needed");
-    return false;
-  }
-
-  setTensorShardingCallback(newSharding);
-
-  if (notifyOpModified) {
-    notifyShardingModified(modifiedValue, *notifyOpModified);
-  }
-
-  return true;
-}
-
-// Updates the sharding of all tensors according to `tensorFactorShardings`.
-//
-// Skips tensors for which `updateTensor` is set to false.
-//
-// If an operand or result couldn't be updated to the corresponding sharding in
-// `tensorFactorShardings`, e.g., if strided view is required, sets the
-// respective bit in `updateTensor` or `updateResult` to false.
-void updateTensorShardings(
-    ValueRange tensors, ArrayRef<TensorShardingAttr> tensorShardings,
-    SetShardingPerTensorCallback setTensorShardingCallback,
-    ArrayRef<TensorFactorShardings> tensorFactorShardings,
-    ArrayRef<TensorMappingAttr> tensorMappings, ArrayRef<int64_t> factorSizes,
-    BitVector& updateTensor, StringRef meshName, MeshAttr mesh,
-    std::optional<NotifyOpModifiedCallback> notifyOpModified) {
-  for (int64_t index : updateTensor.set_bits()) {
-    if (!updateTensorSharding(
-            tensorShardings[index],
-            std::bind(setTensorShardingCallback, std::placeholders::_1, index),
-            tensorFactorShardings[index], tensorMappings[index], factorSizes,
-            meshName, mesh, getShardableValue(tensors[index]),
-            notifyOpModified)) {
-      updateTensor.reset(index);
-    }
-  }
-}
-
-// Same as the overload above, except operates on both operands and results.
-void updateTensorShardings(
-    ValueRange operands, ValueRange results,
-    ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings,
-    SetShardingPerTensorCallback setOperandShardingCallback,
-    SetShardingPerTensorCallback setResultShardingCallback,
-    OpShardingRuleAttr shardingRule,
-    const ShardingProjection& shardingProjection, BitVector& updateOperand,
-    BitVector& updateResult, StringRef meshName, MeshAttr mesh,
-    std::optional<NotifyOpModifiedCallback> notifyOpModified) {
-  updateTensorShardings(operands, operandShardings, setOperandShardingCallback,
-                        shardingProjection.getOperands(),
-                        shardingRule.getOperandMappings(),
-                        shardingRule.getFactorSizes(), updateOperand, meshName,
-                        mesh, notifyOpModified);
-  updateTensorShardings(results, resultsShardings, setResultShardingCallback,
-                        shardingProjection.getResults(),
-                        shardingRule.getResultMappings(),
-                        shardingRule.getFactorSizes(), updateResult, meshName,
-                        mesh, notifyOpModified);
-}
-
-// Returns the common mesh name used by all the `TensorShardingAttr` or
-// std::nullopt if there is none.
-std::optional<StringRef> getCommonMeshName(
-    ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings) {
-  StringRef meshName;
-  for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
-           operandShardings, resultsShardings)) {
-    if (sharding) {
-      if (meshName.empty()) {
-        meshName = sharding.getMeshName();
-      } else if (meshName != sharding.getMeshName()) {
-        // Found more than one mesh name.
-        return std::nullopt;
-      }
-    }
-  }
-
-  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
-}
-
-// Propagates tensor shardings of the given `operands` and `results` according
-// to `shardingRule`.
-//
-// NOTE: the `operands`/`results` can be any sort of ValueRange associated to
-// the Operation. For example, for CaseOp, an op with no operands, it's called
-// with the return values of each branch/region.
-LogicalResult propagateTensorShardings(
-    ValueRange operands, ValueRange results,
-    ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings,
-    SetShardingPerTensorCallback setOperandShardingCallback,
-    SetShardingPerTensorCallback setResultShardingCallback,
-    OpShardingRuleAttr shardingRule, PropagationDirection direction,
-    const FactorPropagation& factorPropagation, bool conservativePropagation,
-    Operation* op, PatternRewriter* rewriter) {
-  std::optional<StringRef> meshName =
-      getCommonMeshName(operandShardings, resultsShardings);
-  if (!meshName.has_value()) {
-    // This means none of the operands or results have a sharding attribute or
-    // the sharding attributes use different meshes.
-    if (rewriter) {
-      return rewriter->notifyMatchFailure(
-          op, [](Diagnostic& diag) { diag << "no common mesh name found"; });
-    }
-    return failure();
-  }
-  MeshAttr mesh = getMeshAttr(op, meshName.value());
-  assert(mesh && "unknown mesh");
-
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      operandShardings, resultsShardings, shardingRule, mesh);
-
-  auto [updateOperand, updateResult] =
-      factorPropagation.propagateFactorShardings(
-          shardingProjection, direction, shardingRule.getFactorSizes(), mesh,
-          op, conservativePropagation);
-
-  // We need to update the tensor sharding attributes explicitly, as we have
-  // been modifying our internal `shardingProjection` so far.
-  std::optional<NotifyOpModifiedCallback> notifyOpModified = std::nullopt;
-  if (rewriter) {
-    notifyOpModified = [op, rewriter](Operation* modifiedOp) {
-      // We don't want to add `op` itself back to the worklist since we have
-      // just propagated through it, i.e., applying this method again on the
-      // same op, without additional sharding changes, wouldn't do anything
-      // other than redundant work.
-      if (modifiedOp != op) {
-        rewriter->modifyOpInPlace(modifiedOp, []() {});
-      }
-    };
-  }
-  updateTensorShardings(operands, results, operandShardings, resultsShardings,
-                        setOperandShardingCallback, setResultShardingCallback,
-                        shardingRule, shardingProjection, updateOperand,
-                        updateResult, meshName.value(), mesh, notifyOpModified);
-
-  bool anyUpdated = updateOperand.any() || updateResult.any();
-  if (rewriter && !anyUpdated) {
-    return rewriter->notifyMatchFailure(op, [](Diagnostic& diag) {
-      diag << "Couldn't update any of the factor shardings";
-    });
-  }
-  return success(anyUpdated);
-}
-
-// Same as the overload above, except there is a single operand and result.
-LogicalResult propagateTensorShardings(
-    Value operand, Value result, TensorShardingAttr operandSharding,
-    TensorShardingAttr resultsSharding,
-    SetTensorShardingCallback setOperandShardingCallback,
-    SetTensorShardingCallback setResultShardingCallback,
-    OpShardingRuleAttr shardingRule, Operation* op, PatternRewriter* rewriter,
-    const FactorPropagation& factorPropagation,
-    PropagationDirection direction = PropagationDirection::BOTH,
-    bool conservativePropagation = false) {
-  return propagateTensorShardings(
-      operand, result, operandSharding, resultsSharding,
-      [&](TensorShardingAttr sharding, int64_t) {
-        setOperandShardingCallback(sharding);
-      },
-      [&](TensorShardingAttr sharding, int64_t) {
-        setResultShardingCallback(sharding);
-      },
-      shardingRule, direction, factorPropagation, conservativePropagation, op,
-      rewriter);
-}
-
-// Same as the overload above, except the operand and result shardings are
-// extracted using `getSharding` and set using `setSharding`.
-LogicalResult propagateTensorShardings(
-    ValueRange operands, ValueRange results, OpShardingRuleAttr shardingRule,
-    Operation* op, PatternRewriter& rewriter,
-    const FactorPropagation& factorPropagation,
-    PropagationDirection direction = PropagationDirection::BOTH,
-    bool conservativePropagation = false) {
-  return propagateTensorShardings(
-      operands, results, getShardings(operands), getShardings(results),
-      [&](TensorShardingAttr sharding, int64_t index) {
-        setSharding(operands[index], sharding);
-      },
-      [&](TensorShardingAttr sharding, int64_t index) {
-        setSharding(results[index], sharding);
-      },
-      shardingRule, direction, factorPropagation, conservativePropagation, op,
-      &rewriter);
-}
-
-// Propagates the shardings between the operands of the `funcOp`'s terminator
-// and the `funcOp`'s result type attrs.
-LogicalResult propagateFuncResults(FuncOp funcOp,
-                                   const FactorPropagation& factorPropagation) {
-  for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
-    Value returnValue = returnOperand.get();
-    auto tensorType = dynCastStaticShapedType(returnValue.getType());
-    if (!tensorType) {
-      // Skip non-static-shaped tensors, e.g., tokens.
-      continue;
-    }
-    int64_t resNum = returnOperand.getOperandNumber();
-    // NOTE: we void the returned `LogicalResult` since function updates aren't
-    // done through a rewriter, can ignore whether operands/results were
-    // updated.
-    (void)propagateTensorShardings(
-        // The operand/result function arguments are used to:
-        // - invoke the rewriter (if specified) that a value was updated. But
-        //   a rewriter isn't used here.
-        // - log warnings on the defining op. In this case it would either be on
-        //   the defining op of `returnValue` or `funcOp` if it's a function
-        //   argument. Here it will be okay to log the warning on the defining
-        //   op of `returnValue`.
-        // As such, we pass `returnValue` as both the operand and result.
-        returnValue, returnValue, getSharding(returnValue),
-        funcOp.getResultAttrOfType<TensorShardingAttr>(resNum, kShardingAttr),
-        [&](TensorShardingAttr sharding) {
-          setSharding(returnValue, sharding);
-        },
-        [&](TensorShardingAttr sharding) {
-          funcOp.setResultAttr(resNum, kShardingAttr, sharding);
-        },
-        // Treat the sharding data flow b/w the `funcOp` terminator and func
-        // result attrs as an identity op. Create an equivalent sharding
-        // rule.
-        createIdentityShardingRule(tensorType), funcOp, /*rewriter=*/nullptr,
-        factorPropagation);
-  }
-  return success();
-}
-
-// Overload of `propagateFuncResults` to propagate operand/result shardings of
-// every `FuncOp` in `moduleOp`.
-LogicalResult propagateFuncResults(ModuleOp moduleOp,
-                                   const FactorPropagation& factorPropagation) {
-  for (auto funcOp : moduleOp.getOps<FuncOp>()) {
-    if (failed(propagateFuncResults(funcOp, factorPropagation))) {
-      return failure();
-    }
-  }
-  return success();
-}
-
 // Propagates the sharding of an operation (between operands and results) that
 // has a registered or custom `OpShardingRuleAttr`.
 class PropagateRegisteredOp : public RewritePattern {
  public:
   explicit PropagateRegisteredOp(
       MLIRContext* context, GetDirectionToPropagateFn getDirectionToPropagate,
-      bool conservativePropagation, const FactorPropagation& factorPropagation)
+      bool conservativePropagation, const FactorPropagation& factorPropagation,
+      const ShardingPropagationContext& shardingPropagationContext)
       : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context),
         getDirectionToPropagate(getDirectionToPropagate),
         conservativePropagation(conservativePropagation),
-        factorPropagation(factorPropagation) {}
+        factorPropagation(factorPropagation),
+        shardingPropagationContext(shardingPropagationContext) {}
 
   LogicalResult matchAndRewrite(Operation* op,
                                 PatternRewriter& rewriter) const override {
@@ -421,15 +97,17 @@ class PropagateRegisteredOp : public RewritePattern {
       });
     }
 
-    return propagateTensorShardings(
-        op->getOperands(), op->getResults(), shardingRule, op, rewriter,
-        factorPropagation, direction, conservativePropagation);
+    return shardingPropagationContext
+        .propagateTensorShardingsWithDefaultCallbacks(
+            op->getOperands(), op->getResults(), shardingRule, op, rewriter,
+            factorPropagation, direction, conservativePropagation);
   }
 
  private:
   GetDirectionToPropagateFn getDirectionToPropagate;
   bool conservativePropagation;
   const FactorPropagation& factorPropagation;
+  const ShardingPropagationContext& shardingPropagationContext;
 };
 
 // Propagates shardings between the sources and targets of an
@@ -438,25 +116,29 @@ class PropagateRegisteredOp : public RewritePattern {
 // The `sdy.data_flow_edge` holds the updateable sharding of all targets.
 class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
  public:
-  explicit PropagateDataFlowEdgeOp(MLIRContext* context,
-                                   const FactorPropagation& factorPropagation)
+  explicit PropagateDataFlowEdgeOp(
+      MLIRContext* context, const FactorPropagation& factorPropagation,
+      const ShardingPropagationContext& shardingPropagationContext)
       : OpRewritePattern<DataFlowEdgeOp>(context),
-        factorPropagation(factorPropagation) {}
+        factorPropagation(factorPropagation),
+        shardingPropagationContext(shardingPropagationContext) {}
 
   LogicalResult matchAndRewrite(DataFlowEdgeOp dataFlowEdgeOp,
                                 PatternRewriter& rewriter) const override {
     SmallVector<Value> sources = getDataFlowSources(dataFlowEdgeOp);
     // The sharding of `dataFlowEdgeOp.getResult()` is the sharding of all
     // targets.
-    return propagateTensorShardings(
-        sources, dataFlowEdgeOp.getResult(),
-        createIdentityShardingRule(
-            cast<ShapedType>(dataFlowEdgeOp.getType()), sources.size()),
-        dataFlowEdgeOp, rewriter, factorPropagation);
+    return shardingPropagationContext
+        .propagateTensorShardingsWithDefaultCallbacks(
+            sources, dataFlowEdgeOp.getResult(),
+            createIdentityShardingRule(
+                cast<ShapedType>(dataFlowEdgeOp.getType()), sources.size()),
+            dataFlowEdgeOp, rewriter, factorPropagation);
   }
 
  private:
   const FactorPropagation& factorPropagation;
+  const ShardingPropagationContext& shardingPropagationContext;
 };
 
 // The `ManualComputationOp` has no sharding rule, and also has a body, so like
@@ -487,9 +169,11 @@ class PropagateManualComputationOp
     : public OpRewritePattern<ManualComputationOp> {
  public:
   explicit PropagateManualComputationOp(
-      MLIRContext* context, const FactorPropagation& factorPropagation)
+      MLIRContext* context, const FactorPropagation& factorPropagation,
+      const ShardingPropagationContext& shardingPropagationContext)
       : OpRewritePattern<ManualComputationOp>(context),
-        factorPropagation(factorPropagation) {}
+        factorPropagation(factorPropagation),
+        shardingPropagationContext(shardingPropagationContext) {}
 
   LogicalResult matchAndRewrite(ManualComputationOp manualComputationOp,
                                 PatternRewriter& rewriter) const override {
@@ -503,28 +187,30 @@ class PropagateManualComputationOp
       const int64_t argNumber = blockArg.getArgNumber();
       Value operand = manualComputationOp->getOperand(argNumber);
       updated |=
-          propagateTensorShardings(
-              operand, blockArg,
-              // Since this is propagating outside of the region of the
-              // `ManualComputationOp`, make sure we keep the manual axes
-              // as we may be able to propagate those backwards.
-              // `getSharding` on the block arg would remove them, so
-              // need to get the right `in_shardings` explicitly using
-              // `getInSharding`.
-              getSharding(operand),
-              manualComputationOp.getInSharding(argNumber),
-              [&operand](TensorShardingAttr sharding) {
-                setSharding(operand, sharding);
-              },
-              // Similarly as above, since `setSharding` will add the
-              // manual axes back, but they already exist, we set the
-              // `in_shardings` explicitly using `setInSharding`.
-              [&manualComputationOp, argNumber](TensorShardingAttr sharding) {
-                manualComputationOp.setInSharding(argNumber, sharding);
-              },
-              createIdentityShardingRule(
-                  cast<RankedTensorType>(operand.getType())),
-              manualComputationOp, &rewriter, factorPropagation)
+          shardingPropagationContext
+              .propagateSingleTensorSharding(
+                  operand, blockArg,
+                  // Since this is propagating outside of the region of the
+                  // `ManualComputationOp`, make sure we keep the manual axes
+                  // as we may be able to propagate those backwards.
+                  // `getSharding` on the block arg would remove them, so
+                  // need to get the right `in_shardings` explicitly using
+                  // `getInSharding`.
+                  getSharding(operand),
+                  manualComputationOp.getInSharding(argNumber),
+                  [&operand](TensorShardingAttr sharding) {
+                    setSharding(operand, sharding);
+                  },
+                  // Similarly as above, since `setSharding` will add the
+                  // manual axes back, but they already exist, we set the
+                  // `in_shardings` explicitly using `setInSharding`.
+                  [&manualComputationOp,
+                   argNumber](TensorShardingAttr sharding) {
+                    manualComputationOp.setInSharding(argNumber, sharding);
+                  },
+                  createIdentityShardingRule(
+                      cast<RankedTensorType>(operand.getType())),
+                  manualComputationOp, &rewriter, factorPropagation)
               .succeeded();
     }
 
@@ -538,20 +224,21 @@ class PropagateManualComputationOp
       // axes and global program, only use shardings without the manual axes.
       // `setSharding` will add them back for `out_shardings`.
       updated |=
-          propagateTensorShardings(
-              returnValue.get(), opResult, getSharding(returnValue.get()),
-              manualComputationOp.getOutShardingWithoutManualAxes(
-                  operandNumber),
-              [&returnValue](TensorShardingAttr sharding) {
-                setSharding(returnValue.get(), sharding);
-              },
-              [&](TensorShardingAttr sharding) {
-                manualComputationOp.setOutShardingAddingManualAxes(
-                    operandNumber, sharding);
-              },
-              createIdentityShardingRule(
-                  cast<RankedTensorType>(opResult.getType())),
-              manualComputationOp, &rewriter, factorPropagation)
+          shardingPropagationContext
+              .propagateSingleTensorSharding(
+                  returnValue.get(), opResult, getSharding(returnValue.get()),
+                  manualComputationOp.getOutShardingWithoutManualAxes(
+                      operandNumber),
+                  [&returnValue](TensorShardingAttr sharding) {
+                    setSharding(returnValue.get(), sharding);
+                  },
+                  [&](TensorShardingAttr sharding) {
+                    manualComputationOp.setOutShardingAddingManualAxes(
+                        operandNumber, sharding);
+                  },
+                  createIdentityShardingRule(
+                      cast<RankedTensorType>(opResult.getType())),
+                  manualComputationOp, &rewriter, factorPropagation)
               .succeeded();
     }
 
@@ -560,6 +247,7 @@ class PropagateManualComputationOp
 
  private:
   const FactorPropagation& factorPropagation;
+  const ShardingPropagationContext& shardingPropagationContext;
 };
 
 // Propagates through a `PropagationBarrierOp` accounting for the direction in
@@ -568,22 +256,26 @@ class PropagatePropagationBarrier
     : public OpRewritePattern<PropagationBarrierOp> {
  public:
   explicit PropagatePropagationBarrier(
-      MLIRContext* context, const FactorPropagation& factorPropagation)
+      MLIRContext* context, const FactorPropagation& factorPropagation,
+      const ShardingPropagationContext& shardingPropagationContext)
       : OpRewritePattern<PropagationBarrierOp>(context),
-        factorPropagation(factorPropagation) {}
+        factorPropagation(factorPropagation),
+        shardingPropagationContext(shardingPropagationContext) {}
 
   LogicalResult matchAndRewrite(PropagationBarrierOp propagationBarrierOp,
                                 PatternRewriter& rewriter) const override {
-    return propagateTensorShardings(
-        propagationBarrierOp.getInput(), propagationBarrierOp.getResult(),
-        createIdentityShardingRule(
-            cast<RankedTensorType>(propagationBarrierOp.getType())),
-        propagationBarrierOp, rewriter, factorPropagation,
-        propagationBarrierOp.getAllowedDirection());
+    return shardingPropagationContext
+        .propagateTensorShardingsWithDefaultCallbacks(
+            propagationBarrierOp.getInput(), propagationBarrierOp.getResult(),
+            createIdentityShardingRule(
+                cast<RankedTensorType>(propagationBarrierOp.getType())),
+            propagationBarrierOp, rewriter, factorPropagation,
+            propagationBarrierOp.getAllowedDirection());
   }
 
  private:
   const FactorPropagation& factorPropagation;
+  const ShardingPropagationContext& shardingPropagationContext;
 };
 
 // The basic propagation pass that uses the default implementation of
@@ -613,16 +305,19 @@ LogicalResult BasicPropagationPassImpl::propagate(
     GetDirectionToPropagateFn getDirectionToPropagate) {
   // Pushes any shardings that exist on the `funcOp` result type attrs to the
   // corresponding values returned in the terminator of the body of `funcOp`.
-  if (failed(propagateFuncResults(moduleOp, factorPropagation))) {
+  if (failed(shardingPropagationContext.propagateAllFuncResultsInModule(
+          moduleOp, factorPropagation))) {
     return failure();
   }
+
   MLIRContext* context = moduleOp.getContext();
   RewritePatternSet patterns(context);
   patterns.add<PropagateDataFlowEdgeOp, PropagateManualComputationOp,
-               PropagatePropagationBarrier>(context, factorPropagation);
-  patterns.add<PropagateRegisteredOp>(context, getDirectionToPropagate,
-                                      conservativePropagation,
-                                      factorPropagation);
+               PropagatePropagationBarrier>(context, factorPropagation,
+                                            shardingPropagationContext);
+  patterns.add<PropagateRegisteredOp>(
+      context, getDirectionToPropagate, conservativePropagation,
+      factorPropagation, shardingPropagationContext);
   // Note that we only need a single iteration (and another to confirm
   // convergence), since we make sure ops whose sharding changes are
   // added back to the worklist.
@@ -636,7 +331,8 @@ LogicalResult BasicPropagationPassImpl::propagate(
 
   // Pushes any shardings from the values returned in the terminator of the body
   // of `funcOp` to the corresponding `funcOp` result type attrs.
-  if (failed(propagateFuncResults(moduleOp, factorPropagation))) {
+  if (failed(shardingPropagationContext.propagateAllFuncResultsInModule(
+          moduleOp, factorPropagation))) {
     return failure();
   }
   return success();

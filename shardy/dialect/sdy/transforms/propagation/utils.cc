@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <iterator>
+#include <optional>
 
 #include "llvm/ADT/BitVector.h"  // IWYU pragma: keep
 #include "llvm/ADT/STLExtras.h"
@@ -59,6 +60,25 @@ PropagationDirection intersectionOfPropagationDirections(
     PropagationDirection d1, PropagationDirection d2) {
   return bothForwardAndBackward(d1, d2) ? PropagationDirection::NONE
                                         : std::min(d2, d1);
+}
+
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings) {
+  StringRef meshName;
+  for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
+           operandShardings, resultsShardings)) {
+    if (sharding) {
+      if (meshName.empty()) {
+        meshName = sharding.getMeshName();
+      } else if (meshName != sharding.getMeshName()) {
+        // Found more than one mesh name.
+        return std::nullopt;
+      }
+    }
+  }
+
+  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
 }
 
 }  // namespace sdy

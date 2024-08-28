@@ -58,6 +58,7 @@ cc_library(
         ":op_sharding_rule_registry",
         ":passes_inc",
         ":sharding_projection",
+        ":sharding_propagation_context",
         ":utils",
         "//shardy/common:file_utils",
         "//shardy/dialect/sdy/ir:dialect",
@@ -167,6 +168,31 @@ cc_library(
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_library(
+    name = "sharding_propagation_context",
+    srcs = ["sharding_propagation_context.cc"],
+    hdrs = ["sharding_propagation_context.h"],
+    deps = [
+        ":factor_propagation",
+        ":op_sharding_rule_builder",
+        ":op_sharding_rule_registry",
+        ":sharding_projection",
+        ":utils",
+        "//shardy/common:file_utils",
+        "//shardy/dialect/sdy/ir:dialect",
+        "//third_party/openxla/shardy/src:defs",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:BufferizationDialect",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Rewrite",
+        "@llvm-project//mlir:SideEffectInterfaces",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
     ],
 )
 

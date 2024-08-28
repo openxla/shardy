@@ -29,6 +29,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_propagation_context.h"
 
 namespace mlir {
 namespace sdy {
@@ -107,6 +108,7 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
  private:
   // This class owns the basic factor propagation strategy.
   BasicFactorPropagation basicFactorPropagation;
+  ShardingPropagationContext shardingPropagationContext;
 };
 
 // Runs the basic sharding propagation algorithm (see

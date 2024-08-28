@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_UTILS_H_
 #define SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_UTILS_H_
 
+#include <optional>
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -41,6 +42,12 @@ PropagationDirection unionOfPropagationDirections(PropagationDirection d1,
 // - (Any, BOTH)         -> Any
 PropagationDirection intersectionOfPropagationDirections(
     PropagationDirection d1, PropagationDirection d2);
+
+// Returns the common mesh name used by all the `TensorShardingAttr` or
+// std::nullopt if there is none.
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings);
 
 }  // namespace sdy
 }  // namespace mlir
