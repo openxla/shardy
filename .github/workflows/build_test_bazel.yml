@@ -17,21 +17,40 @@ name: Build/Test Bazel
 permissions: read-all
 on:
   pull_request:
-env:
-  # Have `go install` place binaries in $PATH
-  GOBIN: "/usr/local/bin"
+
+# Ensure that only a single job or workflow using the same
+# concurrency group will run at a time. This would cancel
+# any in-progress jobs in the same github workflow and github
+# ref (e.g. refs/heads/main or refs/pull/<pr_number>/merge).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test-bazel:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+    runs-on: ${{ github.repository == 'openxla/shardy' && 'ubuntu-22.04-64core' ||  'ubuntu-22.04'  }}
     defaults:
       run:
         shell: bash
     steps:
-      - name: "Checking out repository"
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-      - name: "Install bazelisk"
-        run: go install github.com/bazelbuild/bazelisk@24651ab # v1.20.0
-      - name: "Run bazel build"
+      - name: Checkout Shardy
+        uses: actions/checkout@v4
+
+      - name: Setup Bazelisk
+        uses: bazelbuild/setup-bazelisk@v2
+
+      - name: Mount Bazel Cache
+        uses: actions/cache@v3
+        with:
+          path: "~/.cache/bazel"
+          key: ${{ runner.os }}-shardy_bazelbuild-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE', 'WORKSPACE.bazel', 'MODULE.bazel') }}
+          restore-keys: |
+            ${{ runner.os }}-shardy_bazelbuild-
+
+      - name: "Build Shardy"
         run: bazel build -c opt --lockfile_mode=error shardy/...
-      - name: "Run bazel test"
+
+      - name: "Test Shardy"
         run: bazel test -c opt --test_output=errors shardy/...
