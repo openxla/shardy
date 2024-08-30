@@ -178,7 +178,7 @@ Value getShardableValue(Value value) {
   auto arg = cast<BlockArgument>(value);
 
   return TypeSwitch<Operation*, Value>(arg.getOwner()->getParentOp())
-      .Case<ManualComputationOp, FuncOp, ShardableRegionOpInterface>(
+      .Case<ManualComputationOp, FuncOp, ShardableDataFlowOpInterface>(
           [&](Operation*) { return value; })
       .Default([&](Operation* op) {
         // We only fail if the value isn't scalar. Scalar block arguments, such
@@ -226,12 +226,13 @@ TensorShardingAttr getSharding(Value value) {
         return manualComputationOp.getOutSharding(
             cast<OpResult>(value).getResultNumber());
       })
-      // TODO: b/360076171 - Add tests for ShardableRegionOpInterface,
+      // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.
-      .Case<ShardableRegionOpInterface>(
-          [value](ShardableRegionOpInterface shardableRegionOp) {
+      .Case<ShardableDataFlowOpInterface>(
+          [value](ShardableDataFlowOpInterface shardableRegionOp) {
             if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-              return shardableRegionOp.getArgSharding(blockArg.getArgNumber());
+              return shardableRegionOp.getBlockArgumentEdgeOwnerSharding(
+                  blockArg.getArgNumber());
             }
             return TensorShardingAttr();
           })
@@ -287,14 +288,14 @@ void setSharding(Value value, TensorShardingAttr sharding) {
               cast<OpResult>(value).getResultNumber(), sharding);
         }
       })
-      .Case<ShardableRegionOpInterface>(
-          [&](ShardableRegionOpInterface shardableRegionOp) {
+      .Case<ShardableDataFlowOpInterface>(
+          [&](ShardableDataFlowOpInterface shardableRegionOp) {
             if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-              shardableRegionOp.setArgSharding(blockArg.getArgNumber(),
-                                               sharding);
+              shardableRegionOp.setBlockArgumentEdgeOwnerSharding(
+                  blockArg.getArgNumber(), sharding);
             } else {
               unreachableFormatv(
-                  "calling setArgSharding on a ShardableRegionOpInterface op "
+                  "calling setArgSharding on a ShardableDataFlowOpInterface op "
                   "'{0}' with a value that is not a block argument",
                   shardableRegionOp->getName());
             }

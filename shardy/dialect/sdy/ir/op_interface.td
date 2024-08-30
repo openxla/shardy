@@ -20,10 +20,10 @@ include "mlir/IR/OpBase.td"
 include "shardy/dialect/sdy/ir/attrs.td"
 
 //===----------------------------------------------------------------------===//
-// ShardableRegionOpInterface
+// ShardableDataFlowOpInterface
 //===----------------------------------------------------------------------===//
 
-def ShardableRegionOpInterface : OpInterface<"ShardableRegionOpInterface"> {
+def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   let description = [{
     An op interface that allows shardy to get and set the op argument shardings.
   }];
@@ -32,21 +32,39 @@ def ShardableRegionOpInterface : OpInterface<"ShardableRegionOpInterface"> {
   let methods = [
     InterfaceMethod<
       /*desc=*/[{
-        Returns the sharding of the argument with the given index.
+        Returns the shardings of all block argument data flow edge owners.
       }],
-      /*retType=*/"mlir::sdy::TensorShardingAttr",
-      /*methodName=*/"getArgSharding",
-      /*args=*/(ins "unsigned":$index)
+      /*retType=*/"mlir::ArrayRef<mlir::sdy::TensorShardingAttr>",
+      /*methodName=*/"getBlockArgumentEdgeOwnerShardings"
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Sets the shardings of the argument with the given index.
+        Sets the shardings of the block argument edge owner with the given index.
       }],
       /*retType=*/"void",
-      /*methodName=*/"setArgSharding",
+      /*methodName=*/"setBlockArgumentEdgeOwnerSharding",
       /*args=*/(ins "unsigned":$index, "mlir::sdy::TensorShardingAttr":$sharding)
     >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Sets shardings of all block argument edge owners.
+      }],
+      /*retType=*/"void",
+      /*methodName=*/"setBlockArgumentEdgeOwnerShardings",
+      /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings)
+    >,
   ];
+
+  let extraClassDeclaration = [{
+    // Gets the sharding of the block argument edge owner with the given index.
+    mlir::sdy::TensorShardingAttr getBlockArgumentEdgeOwnerSharding(unsigned index){
+      mlir::ArrayRef<mlir::sdy::TensorShardingAttr> argSharding = getBlockArgumentEdgeOwnerShardings();
+      if(!argSharding.empty()) {
+        return argSharding[index];
+      }
+      return nullptr;
+    }
+  }];
 }
 
 #endif  // SDY_OP_INTERFACE

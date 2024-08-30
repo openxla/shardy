@@ -896,7 +896,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       // TODO(b/327191011): output unregistered op stats instead.
       .Case<ModuleOp, func::FuncOp, ConstantOp, DataFlowEdgeOp,
             ManualComputationOp, MeshOp, PropagationBarrierOp,
-            ShardableRegionOpInterface, stablehlo::CaseOp,
+            ShardableDataFlowOpInterface, stablehlo::CaseOp,
             stablehlo::ConstantOp, stablehlo::CreateTokenOp,
             stablehlo::GetTupleElementOp, stablehlo::IotaOp,
             stablehlo::OutfeedOp, stablehlo::OptimizationBarrierOp,
