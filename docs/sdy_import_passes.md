@@ -60,6 +60,16 @@ within that sub-computation.
 
 NOTE: This pass is the MLIR equivalent of xla::HloConstantSplitter,
 needed for the purpose of Shardy Propagation.
+### `-sdy-import-maximal-sharding`
+
+_Convert sdy.sharding=n to maximal sharding._
+
+Convert `sdy.sharding=n` to maximal sharding as follows:
+
+```mlir
+@sdy.mesh @maximal_mesh_n = <device_ids=[n]>
+sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
+```
 ### `-sdy-sharding-group-unification`
 
 _Combines sharding groups to reduce them to a minimum set of canonical group ids._
