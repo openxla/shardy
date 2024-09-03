@@ -38,6 +38,7 @@ cc_library(
         "add_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
         "constant_splitter.cc",
+        "import_maximal_sharding.cc",
         "import_pipeline.cc",
         "sharding_group_unification.cc",
     ],

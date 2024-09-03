@@ -99,3 +99,16 @@ def ShardingGroupUnificationPass : Pass<"sdy-sharding-group-unification", "Modul
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def ImportMaximalShardingPass : Pass<"sdy-import-maximal-sharding", "ModuleOp"> {
+  let summary = "Convert sdy.sharding=n to maximal sharding.";
+  let description = [{
+    Convert `sdy.sharding=n` to maximal sharding as follows:
+
+    ```mlir
+    @sdy.mesh @maximal_mesh_n = <device_ids=[n]>
+    sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
+    ```
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

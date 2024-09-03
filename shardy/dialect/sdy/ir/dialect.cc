@@ -82,6 +82,10 @@ int64_t MeshAttr::getTotalSize() const {
       [](int64_t cur, MeshAxisAttr axis) { return cur * axis.getSize(); });
 }
 
+bool MeshAttr::isMaximal(int64_t deviceId) const {
+  return getAxes().empty() && getDeviceIds() == ArrayRef<int64_t>(deviceId);
+}
+
 std::function<bool(StringRef lhs, StringRef rhs)>
 MeshAttr::getAxisNameComparator() const {
   ArrayRef<MeshAxisAttr> axes = getAxes();

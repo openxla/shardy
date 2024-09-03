@@ -100,6 +100,12 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     // number of devices.
     int64_t getTotalSize() const;
 
+    // Returns whether this mesh is a maximal-sharding mesh with `deviceId`.
+    //
+    // A maximal-sharding mesh is a mesh with an empty axis list and a single
+    // device ID.
+    bool isMaximal(int64_t deviceId) const;
+
     // Returns a comparator that orders axis names w.r.t. their order in this
     // mesh.
     std::function<bool(StringRef lhs, StringRef rhs)> getAxisNameComparator()

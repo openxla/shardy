@@ -33,6 +33,7 @@ void addImportPipeline(OpPassManager& pm) {
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
   pm.addPass(createShardingGroupUnificationPass());
+  pm.addPass(createImportMaximalShardingPass());
 
   GreedyRewriteConfig config;
   config.useTopDownTraversal = true;
