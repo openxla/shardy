@@ -25,7 +25,16 @@ include "shardy/dialect/sdy/ir/attrs.td"
 
 def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   let description = [{
-    An op interface that allows shardy to get and set the op argument shardings.
+    An op interface that allows shardy to add data flow edges to propagate
+    shardings for:
+      1. Between ops that extend this op interface and other ops and
+      2. Within the region (if any) of ops that extend this op interface.
+
+    Each data flow edge has an owner, a set of targets and a set of sources.
+    If the sharding of the targets change, the sharding of the sources should
+    be updated accordingly and vice versa.
+    An owner is a user specified target of the data flow edge used by shardy's
+    propagation. The user can choose it arbitrarily but it needs to be static.
   }];
   let cppNamespace = "::mlir::sdy";
 
@@ -52,6 +61,44 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
       /*retType=*/"void",
       /*methodName=*/"setBlockArgumentEdgeOwnerShardings",
       /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings)
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Gets all block argument edge owners.
+      }],
+      /*retType=*/"mlir::ValueRange",
+      /*methodName=*/"getBlockArgumentEdgeOwners"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Gets all op result edge owners.
+      }],
+      /*retType=*/"mlir::ValueRange",
+      /*methodName=*/"getOpResultEdgeOwners"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Gets the data flow edge sources given a target value.
+      }],
+      /*retType=*/"mlir::SmallVector<mlir::Value>",
+      /*methodName=*/"getSources",
+      /*args=*/(ins "mlir::Value":$target)
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Gets the owner target of a data flow edge given a target that may or may not be the owner.
+      }],
+      /*retType=*/"mlir::Value",
+      /*methodName=*/"getEdgeOwner",
+      /*args=*/(ins "mlir::Value":$target)
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Gets the owner target of a data flow edge given a source.
+      }],
+      /*retType=*/"mlir::Value",
+      /*methodName=*/"getEdgeOwnerFromSource",
+      /*args=*/(ins "mlir::OpOperand&":$source)
     >,
   ];
 
