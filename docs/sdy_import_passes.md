@@ -3,14 +3,14 @@
 
 _Inserts `DataFlowEdgeOp` for every data-flow edge._
 
-Inserts `DataFlowEdgeOp` for every value that is the root target of a
-data-flow edge, i.e., all values returned by `getDataFlowEdgeRoots` on every
-op in the module.
+Inserts `DataFlowEdgeOp` for every value that is the owner of a data-flow
+edge, i.e., all values returned by `getDataFlowEdgeOwners` on every op in
+the module.
 
-The inserted `DataFlowEdgeOp` will take the existing sharding of the root
+The inserted `DataFlowEdgeOp` will take the existing sharding of the owner
 target if it exists.
 
-TODO(b/330339693): update this doc when `getDataFlowEdgeRoots` is removed.
+TODO(b/330339693): update this doc when `getDataFlowEdgeOwners` is removed.
 ### `-sdy-apply-sharding-constraints`
 
 _Applies constraints that dictate the sharding of their input._

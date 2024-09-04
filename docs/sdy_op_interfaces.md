@@ -2,7 +2,16 @@
 # OpInterface definitions
 ## ShardableDataFlowOpInterface (`ShardableDataFlowOpInterface`)
 
-An op interface that allows shardy to get and set the op argument shardings.
+An op interface that allows shardy to add data flow edges to propagate
+shardings for:
+  1. Between ops that extend this op interface and other ops and
+  2. Within the region (if any) of ops that extend this op interface.
+
+Each data flow edge has an owner, a set of targets and a set of sources.
+If the sharding of the targets change, the sharding of the sources should
+be updated accordingly and vice versa.
+An owner is a user specified target of the data flow edge used by shardy's
+propagation. The user can choose it arbitrarily but it needs to be static.
 
 ### Methods:
 #### `getBlockArgumentEdgeOwnerShardings`
@@ -29,6 +38,51 @@ NOTE: This method *must* be implemented by the user.
 void setBlockArgumentEdgeOwnerShardings(mlir::ArrayRef<mlir::sdy::TensorShardingAttr> shardings);
 ```
 Sets shardings of all block argument edge owners.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getBlockArgumentEdgeOwners`
+
+```c++
+mlir::ValueRange getBlockArgumentEdgeOwners();
+```
+Gets all block argument edge owners.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getOpResultEdgeOwners`
+
+```c++
+mlir::ValueRange getOpResultEdgeOwners();
+```
+Gets all op result edge owners.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getSources`
+
+```c++
+mlir::SmallVector<mlir::Value> getSources(mlir::Value target);
+```
+Gets the data flow edge sources given a target value.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getEdgeOwner`
+
+```c++
+mlir::Value getEdgeOwner(mlir::Value target);
+```
+Gets the owner target of a data flow edge given a target that may or may not be the owner.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getEdgeOwnerFromSource`
+
+```c++
+mlir::Value getEdgeOwnerFromSource(mlir::OpOperand&source);
+```
+Gets the owner target of a data flow edge given a source.
 
 NOTE: This method *must* be implemented by the user.
 
