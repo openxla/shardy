@@ -36,7 +36,7 @@ bool isDataFlowOp(Operation* op) {
              stablehlo::WhileOp>(op);
 }
 
-Value getDataFlowEdgeRoot(Value target) {
+Value getDataFlowEdgeOwner(Value target) {
   if (auto opResult = dyn_cast<OpResult>(target);
       opResult && isDataFlowOp(opResult.getOwner())) {
     return opResult;
@@ -49,7 +49,7 @@ Value getDataFlowEdgeRoot(Value target) {
   return nullptr;
 }
 
-Value getDataFlowEdgeRoot(OpOperand& source) {
+Value getDataFlowEdgeOwner(OpOperand& source) {
   Operation* op = source.getOwner();
   if (isDataFlowOp(op)) {
     return op->getResult(source.getOperandNumber());
@@ -64,7 +64,7 @@ Value getDataFlowEdgeRoot(OpOperand& source) {
 
 }  // namespace
 
-ValueRange getDataFlowEdgeRoots(Operation* op) {
+ValueRange getDataFlowEdgeResultOwners(Operation* op) {
   if (isDataFlowOp(op)) {
     return op->getResults();
   }
@@ -72,11 +72,11 @@ ValueRange getDataFlowEdgeRoots(Operation* op) {
 }
 
 DataFlowEdgeOp getDataFlowEdge(Value target) {
-  return DataFlowEdgeOp::getDataFlowEdgeUser(getDataFlowEdgeRoot(target));
+  return DataFlowEdgeOp::getDataFlowEdgeUser(getDataFlowEdgeOwner(target));
 }
 
 DataFlowEdgeOp getDataFlowEdge(OpOperand& source) {
-  return DataFlowEdgeOp::getDataFlowEdgeUser(getDataFlowEdgeRoot(source));
+  return DataFlowEdgeOp::getDataFlowEdgeUser(getDataFlowEdgeOwner(source));
 }
 
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
@@ -104,8 +104,8 @@ SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
           });
 }
 
-void forEachNonRootDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
-                                std::function<void(Value)> fn) {
+void forEachNonEdgeOwnerDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
+                                       std::function<void(Value)> fn) {
   auto opResult = dyn_cast<OpResult>(dataFlowEdge.getInput());
   assert(opResult && isDataFlowOp(opResult.getOwner()));
   if (auto whileOp = dyn_cast<stablehlo::WhileOp>(opResult.getOwner())) {

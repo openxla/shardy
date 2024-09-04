@@ -100,7 +100,7 @@ void notifyUsersModified(Value value,
 void notifyShardingModified(Value value,
                             NotifyOpModifiedCallback notifyOpModified) {
   if (auto dataFlowEdge = value.getDefiningOp<DataFlowEdgeOp>()) {
-    forEachNonRootDataFlowTarget(dataFlowEdge, [&](Value value) {
+    forEachNonEdgeOwnerDataFlowTarget(dataFlowEdge, [&](Value value) {
       notifyUsersModified(value, notifyOpModified);
     });
   }

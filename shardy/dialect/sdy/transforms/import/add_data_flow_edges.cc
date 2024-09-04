@@ -44,7 +44,7 @@ struct AddDataFlowEdgesPass
 
     IRRewriter rewriter(funcOp);
     funcOp.walk([&](Operation* op) {
-      ValueRange edgeRoots = getDataFlowEdgeRoots(op);
+      ValueRange edgeRoots = getDataFlowEdgeResultOwners(op);
       rewriter.setInsertionPointAfter(op);
       for (Value edgeRoot : edgeRoots) {
         if (!isStaticShapedType(edgeRoot.getType())) {

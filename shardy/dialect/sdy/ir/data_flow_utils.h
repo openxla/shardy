@@ -35,9 +35,9 @@ namespace sdy {
 
 // See `DataFlowEdgeOp` documentation for more information on data-flow edges.
 
-// If `op` has data-flow edges, returns their roots (e.g., all results of a
-// while/case op), otherwise returns an empty range.
-ValueRange getDataFlowEdgeRoots(Operation* op);
+// If `op` has data-flow edges, returns their op result edge owners (e.g., all
+// results of a while/case op), otherwise returns an empty range.
+ValueRange getDataFlowEdgeResultOwners(Operation* op);
 
 // If `target` is a target of a data-flow edge, returns the corresponding
 // `DataFlowEdgeOp`, otherwise returns `nullptr`.
@@ -50,9 +50,9 @@ DataFlowEdgeOp getDataFlowEdge(OpOperand& source);
 // Returns all sources of the given `dataFlowEdge`.
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge);
 
-// Calls `fn` on all non-root targets of the given `dataFlowEdge`.
-void forEachNonRootDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
-                                  std::function<void(Value)> fn);
+// Calls `fn` on all non-edge-owner targets of the given `dataFlowEdge`.
+void forEachNonEdgeOwnerDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
+                                       std::function<void(Value)> fn);
 
 }  // namespace sdy
 }  // namespace mlir
