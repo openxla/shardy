@@ -66,14 +66,14 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
       /*desc=*/[{
         Gets all block argument edge owners.
       }],
-      /*retType=*/"mlir::ValueRange",
+      /*retType=*/"mlir::ArrayRef<mlir::BlockArgument>",
       /*methodName=*/"getBlockArgumentEdgeOwners"
     >,
     InterfaceMethod<
       /*desc=*/[{
         Gets all op result edge owners.
       }],
-      /*retType=*/"mlir::ValueRange",
+      /*retType=*/"mlir::ResultRange",
       /*methodName=*/"getOpResultEdgeOwners"
     >,
     InterfaceMethod<

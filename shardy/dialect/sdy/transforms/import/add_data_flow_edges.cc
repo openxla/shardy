@@ -15,12 +15,12 @@ limitations under the License.
 
 #include <memory>  // IWYU pragma: keep
 
+#include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
-#include "mlir/IR/ValueRange.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/data_flow_utils.h"
@@ -39,25 +39,38 @@ struct AddDataFlowEdgesPass
     : public impl::AddDataFlowEdgesPassBase<AddDataFlowEdgesPass> {
   using AddDataFlowEdgesPassBase::AddDataFlowEdgesPassBase;
 
+  void addDataFlowEdges(Value edgeOwner, IRRewriter& rewriter) {
+    rewriter.setInsertionPointAfterValue(edgeOwner);
+    if (!isStaticShapedType(edgeOwner.getType())) {
+      // Skip non-static-shaped tensors, e.g., tokens.
+      return;
+    }
+    TensorShardingAttr sharding = nullptr;
+    sharding = getSharding(edgeOwner);
+    auto dataFlowEdge = rewriter.create<DataFlowEdgeOp>(edgeOwner.getLoc(),
+                                                        edgeOwner, sharding);
+    rewriter.replaceAllUsesExcept(edgeOwner, dataFlowEdge, dataFlowEdge);
+  }
+
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
 
     IRRewriter rewriter(funcOp);
     funcOp.walk([&](Operation* op) {
-      ValueRange edgeRoots = getDataFlowEdgeResultOwners(op);
-      rewriter.setInsertionPointAfter(op);
-      for (Value edgeRoot : edgeRoots) {
-        if (!isStaticShapedType(edgeRoot.getType())) {
-          // Skip non-static-shaped tensors, e.g., tokens.
-          continue;
+      // Add the data flow edges for result owners and block argument owners.
+      // We are iterating the owners in a reversed order because
+      // `addDataFlowEdges()` sets the insertion point after each value and we
+      // would like to keep the data flow edges for the arguments/results in the
+      // same order as they appear.
+      for (Value edgeOwner : llvm::reverse(getDataFlowEdgeResultOwners(op))) {
+        addDataFlowEdges(edgeOwner, rewriter);
+      }
+      if (auto shardableDataFlowOpInterface =
+              dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        for (Value edgeOwner : llvm::reverse(
+                 shardableDataFlowOpInterface.getBlockArgumentEdgeOwners())) {
+          addDataFlowEdges(edgeOwner, rewriter);
         }
-        TensorShardingAttr sharding = nullptr;
-        if (isa<OpResult>(edgeRoot)) {
-          sharding = getSharding(edgeRoot);
-        }
-        auto dataFlowEdge = rewriter.create<DataFlowEdgeOp>(edgeRoot.getLoc(),
-                                                            edgeRoot, sharding);
-        rewriter.replaceAllUsesExcept(edgeRoot, dataFlowEdge, dataFlowEdge);
       }
     });
   }

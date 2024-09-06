@@ -36,7 +36,16 @@ bool isDataFlowOp(Operation* op) {
              stablehlo::WhileOp>(op);
 }
 
+// Gets the owning op if it is a shardable data flow op interface op.
+ShardableDataFlowOpInterface getOwningShardableDataFlowOp(Value value) {
+  return dyn_cast<ShardableDataFlowOpInterface>(getOwningOp(value));
+}
+
 Value getDataFlowEdgeOwner(Value target) {
+  if (ShardableDataFlowOpInterface owningShardableDataFlowOp =
+          getOwningShardableDataFlowOp(target)) {
+    return owningShardableDataFlowOp.getEdgeOwner(target);
+  }
   if (auto opResult = dyn_cast<OpResult>(target);
       opResult && isDataFlowOp(opResult.getOwner())) {
     return opResult;
@@ -50,6 +59,10 @@ Value getDataFlowEdgeOwner(Value target) {
 }
 
 Value getDataFlowEdgeOwner(OpOperand& source) {
+  if (auto shardableDataFlowOp =
+          dyn_cast<ShardableDataFlowOpInterface>(source.getOwner())) {
+    return shardableDataFlowOp.getEdgeOwnerFromSource(source);
+  }
   Operation* op = source.getOwner();
   if (isDataFlowOp(op)) {
     return op->getResult(source.getOperandNumber());
@@ -63,12 +76,15 @@ Value getDataFlowEdgeOwner(OpOperand& source) {
 }
 
 }  // namespace
-
-ValueRange getDataFlowEdgeResultOwners(Operation* op) {
+ResultRange getDataFlowEdgeResultOwners(Operation* op) {
+  if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+    return shardableDataFlowOp.getOpResultEdgeOwners();
+  }
   if (isDataFlowOp(op)) {
     return op->getResults();
   }
-  return ValueRange();
+  // There is no constructor for an empty ResultRange so this is a workaround.
+  return ResultRange(nullptr, 0);
 }
 
 DataFlowEdgeOp getDataFlowEdge(Value target) {
@@ -80,7 +96,12 @@ DataFlowEdgeOp getDataFlowEdge(OpOperand& source) {
 }
 
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
-  auto opResult = dyn_cast<OpResult>(dataFlowEdge.getInput());
+  Value input = dataFlowEdge.getInput();
+  if (ShardableDataFlowOpInterface owningShardableDataFlowOp =
+          getOwningShardableDataFlowOp(input)) {
+    return owningShardableDataFlowOp.getSources(input);
+  }
+  auto opResult = dyn_cast<OpResult>(input);
   assert(opResult && isDataFlowOp(opResult.getOwner()));
   int resNum = opResult.getResultNumber();
   return TypeSwitch<Operation*, SmallVector<Value>>(opResult.getOwner())
@@ -106,7 +127,14 @@ SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
 
 void forEachNonEdgeOwnerDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
                                        std::function<void(Value)> fn) {
-  auto opResult = dyn_cast<OpResult>(dataFlowEdge.getInput());
+  // For now the ops that extends from the shardable data flow op doesn't have
+  // non-edge-owner target.
+  Value input = dataFlowEdge.getInput();
+  if (auto owningShardingableDataFlowOp = getOwningShardableDataFlowOp(input)) {
+    return;
+  }
+
+  auto opResult = dyn_cast<OpResult>(input);
   assert(opResult && isDataFlowOp(opResult.getOwner()));
   if (auto whileOp = dyn_cast<stablehlo::WhileOp>(opResult.getOwner())) {
     int resNum = opResult.getResultNumber();

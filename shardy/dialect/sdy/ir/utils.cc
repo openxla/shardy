@@ -228,14 +228,22 @@ TensorShardingAttr getSharding(Value value) {
       })
       // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.
-      .Case<ShardableDataFlowOpInterface>(
-          [value](ShardableDataFlowOpInterface shardableRegionOp) {
-            if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-              return shardableRegionOp.getBlockArgumentEdgeOwnerSharding(
-                  blockArg.getArgNumber());
-            }
-            return TensorShardingAttr();
-          })
+      // TODO: b/360076171 - Move the cases to the interface.
+      .Case<ShardableDataFlowOpInterface>([value](ShardableDataFlowOpInterface
+                                                      shardableRegionOp) {
+        if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+          return shardableRegionOp.getBlockArgumentEdgeOwnerSharding(
+              blockArg.getArgNumber());
+        }
+        // TODO: b/360076171 - Add a `getOpResultEdgeOwnerSharding`.
+        if (auto shardingPerResult =
+                getOwningOp(value)->getAttrOfType<TensorShardingPerValueAttr>(
+                    kShardingAttr)) {
+          return shardingPerResult
+              .getShardings()[cast<OpResult>(value).getResultNumber()];
+        }
+        return TensorShardingAttr();
+      })
       .Default([value](Operation* op) {
         if (auto shardingPerResult =
                 op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr)) {
@@ -293,11 +301,15 @@ void setSharding(Value value, TensorShardingAttr sharding) {
             if (auto blockArg = dyn_cast<BlockArgument>(value)) {
               shardableRegionOp.setBlockArgumentEdgeOwnerSharding(
                   blockArg.getArgNumber(), sharding);
-            } else {
-              unreachableFormatv(
-                  "calling setArgSharding on a ShardableDataFlowOpInterface op "
-                  "'{0}' with a value that is not a block argument",
-                  shardableRegionOp->getName());
+            }
+            // TODO: b/360076171 - Add a `setOpResultEdgeOwnerSharding`.
+            if (auto opResult = dyn_cast<OpResult>(value)) {
+              Operation* op = opResult.getOwner();
+              op->setAttr(
+                  kShardingAttr,
+                  getOrCreateShardingPerResult(op, sharding.getMeshName())
+                      .replaceValueSharding(
+                          cast<OpResult>(value).getResultNumber(), sharding));
             }
           })
       .Default([&](Operation* op) {

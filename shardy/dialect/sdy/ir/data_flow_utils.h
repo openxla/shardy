@@ -37,7 +37,7 @@ namespace sdy {
 
 // If `op` has data-flow edges, returns their op result edge owners (e.g., all
 // results of a while/case op), otherwise returns an empty range.
-ValueRange getDataFlowEdgeResultOwners(Operation* op);
+ResultRange getDataFlowEdgeResultOwners(Operation* op);
 
 // If `target` is a target of a data-flow edge, returns the corresponding
 // `DataFlowEdgeOp`, otherwise returns `nullptr`.
