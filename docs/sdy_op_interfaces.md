@@ -44,7 +44,7 @@ NOTE: This method *must* be implemented by the user.
 #### `getBlockArgumentEdgeOwners`
 
 ```c++
-mlir::ValueRange getBlockArgumentEdgeOwners();
+mlir::ArrayRef<mlir::BlockArgument> getBlockArgumentEdgeOwners();
 ```
 Gets all block argument edge owners.
 
@@ -53,7 +53,7 @@ NOTE: This method *must* be implemented by the user.
 #### `getOpResultEdgeOwners`
 
 ```c++
-mlir::ValueRange getOpResultEdgeOwners();
+mlir::ResultRange getOpResultEdgeOwners();
 ```
 Gets all op result edge owners.
 
