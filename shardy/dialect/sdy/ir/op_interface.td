@@ -114,4 +114,28 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// ShardingRuleOpInterface
+//===----------------------------------------------------------------------===//
+
+def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
+  let description = [{
+    An op interface that allows the op to define its own sharding rule.
+    A sharding rule specifies how an operation can be partitioned according to
+    various properties on the op - any attributes, the shape of operands,
+    the shape of the results, etc. See `OpShardingRuleAttr` for more
+    details.
+  }];
+  let cppNamespace = "::mlir::sdy";
+    let methods = [
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns the sharding rule of the op.
+      }],
+      /*retType=*/"mlir::sdy::OpShardingRuleAttr",
+      /*methodName=*/"getShardingRule"
+    >,
+  ];
+}
+
 #endif  // SDY_OP_INTERFACE

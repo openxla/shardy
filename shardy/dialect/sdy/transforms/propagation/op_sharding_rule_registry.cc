@@ -902,6 +902,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             stablehlo::OutfeedOp, stablehlo::OptimizationBarrierOp,
             stablehlo::PartitionIdOp, stablehlo::RngBitGeneratorOp,
             stablehlo::WhileOp>([](Operation*) { return OpShardingRuleAttr(); })
+      .Case<ShardingRuleOpInterface>(
+          [](ShardingRuleOpInterface shardingRuleOp) {
+            return shardingRuleOp.getShardingRule();
+          })
       .Default([](Operation* op) {
         if (op->hasTrait<OpTrait::IsTerminator>()) {
           return OpShardingRuleAttr();
