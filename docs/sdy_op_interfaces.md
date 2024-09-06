@@ -86,3 +86,21 @@ Gets the owner target of a data flow edge given a source.
 
 NOTE: This method *must* be implemented by the user.
 
+## ShardingRuleOpInterface (`ShardingRuleOpInterface`)
+
+An op interface that allows the op to define its own sharding rule.
+A sharding rule specifies how an operation can be partitioned according to
+various properties on the op - any attributes, the shape of operands,
+the shape of the results, etc. See `OpShardingRuleAttr` for more
+details.
+
+### Methods:
+#### `getShardingRule`
+
+```c++
+mlir::sdy::OpShardingRuleAttr getShardingRule();
+```
+Returns the sharding rule of the op.
+
+NOTE: This method *must* be implemented by the user.
+
