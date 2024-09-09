@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "llvm/ADT/STLExtras.h"
@@ -334,6 +335,36 @@ void removeShardingRules(Operation* rootOp) {
       }
     }
   });
+}
+
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings) {
+  StringRef meshName;
+  for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
+           operandShardings, resultsShardings)) {
+    if (sharding) {
+      if (meshName.empty()) {
+        meshName = sharding.getMeshName();
+      } else if (meshName != sharding.getMeshName()) {
+        // Found more than one mesh name.
+        return std::nullopt;
+      }
+    }
+  }
+  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
+}
+
+ManualAxisToOwner getParentManualComputationOps(Operation* op) {
+  ManualAxisToOwner alreadyManualAxes;
+  auto parent = op->getParentOfType<ManualComputationOp>();
+  while (parent) {
+    for (StringRef axisName : parent.getManualAxes()) {
+      alreadyManualAxes[axisName] = parent;
+    }
+    parent = parent->getParentOfType<ManualComputationOp>();
+  }
+  return alreadyManualAxes;
 }
 
 }  // namespace sdy
