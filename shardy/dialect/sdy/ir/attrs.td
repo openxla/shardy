@@ -476,8 +476,10 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // Verifies that this `TensorShardingAttr` is valid w.r.t the given
     // tensor type and mesh.
     //
-    // If `type` isn't a `RankedTensorType`, the sharding must have rank 0
-    // and no replicated axes.
+    // If `type` isn't a `ShapedType`, the sharding must have rank 0
+    // and no replicated axes. Otherwise, the `ShapedType` must have a static
+    // shape.
+
     //
     // If `checkDivisibility` is true, verifies that each dimension size
     // is divisible by its sharded size.
