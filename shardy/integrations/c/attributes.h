@@ -222,6 +222,20 @@ sdyOpShardingRuleAttrGetResultMappingsSize(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute
 sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr, intptr_t pos);
 
+//===----------------------------------------------------------------------===//
+// ManualAxesAttr
+//===----------------------------------------------------------------------===//
+
+MLIR_CAPI_EXPORTED bool sdyAttributeIsAManualAxesAttr(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute sdyManualAxesAttrGet(
+    MlirContext ctx, intptr_t nAxes, const MlirAttribute* axes);
+
+MLIR_CAPI_EXPORTED intptr_t sdyManualAxesAttrGetAxesSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirStringRef sdyManualAxesAttrGetAxesElem(
+  MlirAttribute attr, intptr_t pos);
+
 #ifdef __cplusplus
 }
 #endif

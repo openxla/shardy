@@ -20,6 +20,7 @@ cc_library(
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:CAPIIR",
+        "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
     ],
 )

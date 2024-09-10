@@ -45,11 +45,11 @@ std::vector<T> propertyVector(
   return result;
 }
 
-auto toPyString(MlirStringRef mlirStringRef) {
+py::str toPyString(MlirStringRef mlirStringRef) {
   return py::str(mlirStringRef.data, mlirStringRef.length);
 }
 
-auto toStringRef(const std::string& s) {
+MlirStringRef toStringRef(const std::string& s) {
   return mlirStringRefCreate(s.c_str(), s.size());
 }
 
@@ -323,7 +323,28 @@ PYBIND11_MODULE(_sdy, m) {
             self, sdyOpShardingRuleAttrGetResultMappingsSize,
             sdyOpShardingRuleAttrGetResultMappingsElem);
       });
-  ;
+
+  mlir::python::adaptors::mlir_attribute_subclass(m, "ManualAxesAttr",
+                                                  sdyAttributeIsAManualAxesAttr)
+      .def_classmethod(
+          "get",
+          [](py::object cls, const std::vector<MlirAttribute>& meshAxes,
+             MlirContext ctx) {
+            return cls(sdyManualAxesAttrGet(ctx, meshAxes.size(),
+                                            meshAxes.data()));
+          },
+          py::arg("cls"), py::arg("manual_axes"),
+          py::arg("context") = py::none(),
+          "Creates a ManualAxesAttr with the given manual axes.")
+      .def("__getitem__", [](MlirAttribute &self, unsigned index) {
+        if (index >= sdyManualAxesAttrGetAxesSize(self)) {
+          throw py::index_error();
+        }
+        return toPyString(sdyManualAxesAttrGetAxesElem(self, index));
+      })
+      .def("__len__", [](MlirAttribute &self) {
+        return sdyManualAxesAttrGetAxesSize(self);
+      });
 }
 
 }  // namespace

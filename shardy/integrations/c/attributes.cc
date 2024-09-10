@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir-c/Support.h"
 #include "mlir/CAPI/IR.h"
 #include "mlir/CAPI/Support.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
@@ -361,4 +362,27 @@ MlirAttribute sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr,
                                                          intptr_t pos) {
   return wrap(
       unwrapAttr<sdy::OpShardingRuleAttr>(attr).getResultMappings()[pos]);
+}
+
+//===----------------------------------------------------------------------===//
+// ManualAxesAttr
+//===----------------------------------------------------------------------===//
+
+bool sdyAttributeIsAManualAxesAttr(MlirAttribute attr) {
+  return mlir::isa<sdy::ManualAxesAttr>(unwrap(attr));
+}
+
+MlirAttribute sdyManualAxesAttrGet(
+    MlirContext ctx, intptr_t nAxes, const MlirAttribute* axes) {
+  return wrap(sdy::ManualAxesAttr::get(unwrap(ctx), mlir::ArrayRef(
+      reinterpret_cast<const mlir::StringAttr*>(axes), nAxes)));
+}
+
+intptr_t sdyManualAxesAttrGetAxesSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::ManualAxesAttr>(attr).size();
+}
+
+MlirStringRef sdyManualAxesAttrGetAxesElem(
+  MlirAttribute attr, intptr_t pos) {
+  return wrap(unwrapAttr<sdy::ManualAxesAttr>(attr)[pos].getValue());
 }
