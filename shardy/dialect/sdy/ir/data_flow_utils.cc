@@ -44,7 +44,7 @@ ShardableDataFlowOpInterface getOwningShardableDataFlowOp(Value value) {
 Value getDataFlowEdgeOwner(Value target) {
   if (ShardableDataFlowOpInterface owningShardableDataFlowOp =
           getOwningShardableDataFlowOp(target)) {
-    return owningShardableDataFlowOp.getEdgeOwner(target);
+    return owningShardableDataFlowOp.getEdgeOwnerFromTarget(target);
   }
   if (auto opResult = dyn_cast<OpResult>(target);
       opResult && isDataFlowOp(opResult.getOwner())) {
@@ -99,7 +99,7 @@ SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
   Value input = dataFlowEdge.getInput();
   if (ShardableDataFlowOpInterface owningShardableDataFlowOp =
           getOwningShardableDataFlowOp(input)) {
-    return owningShardableDataFlowOp.getSources(input);
+    return owningShardableDataFlowOp.getEdgeSources(input);
   }
   auto opResult = dyn_cast<OpResult>(input);
   assert(opResult && isDataFlowOp(opResult.getOwner()));

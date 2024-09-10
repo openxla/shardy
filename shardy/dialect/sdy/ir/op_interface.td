@@ -25,16 +25,45 @@ include "shardy/dialect/sdy/ir/attrs.td"
 
 def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   let description = [{
-    An op interface that allows shardy to add data flow edges to propagate
-    shardings for:
-      1. Between ops that extend this op interface and other ops and
-      2. Within the region (if any) of ops that extend this op interface.
+    An op interface that allows shardy to propagate shardings through data flow
+    edges of ops that extend this interface.
 
-    Each data flow edge has an owner, a set of targets and a set of sources.
-    If the sharding of the targets change, the sharding of the sources should
-    be updated accordingly and vice versa.
+    A data flow edge of some op X defines a bridge between a set of sources
+    (each is either an operand of X or an operand of X's block terminator) and
+    a set of targets (each is either a result of X or a block argument of X),
+    such that all sources and targets should be sharded in the same way.
+    An op can have multiple data flow edges that are orthogonal to one another.
+
     An owner is a user specified target of the data flow edge used by shardy's
     propagation. The user can choose it arbitrarily but it needs to be static.
+
+    For example:
+
+    ```mlir
+      y_1, ..., y_n = custom_op (x_1, ..., x_n)
+                      ((body_arg_1,..., body_arg_n) {
+                        ...
+                        return return_value_1, ..., return_value_n
+                      })
+    ```
+    This custom_op has two types for data flow edges, n edges each between
+    `return_value_i` (sources) and `y_i` (targets) and n edges between
+    `x_i`(sources) and `body_arg_i`(targets). In this case the edge owners are
+    the same as the targets.
+
+    Here is an example of an op with multiple targets:
+    ```mlir
+      y_0, ..., y_n = while (x_0, ..., x_n)
+                      ((pred_arg_0,... , pred_arg_n) { ... })
+                      ((body_arg_0,..., body_arg_n) {
+                        ...
+                        return return_value_0, ..., return_value_n
+                      })
+    ```
+
+    This while op has n data flow edges, the i-th data flow edges is between
+    sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`,
+    `body_arg_i`.
   }];
   let cppNamespace = "::mlir::sdy";
 
@@ -81,7 +110,7 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
         Gets the data flow edge sources given a target value.
       }],
       /*retType=*/"mlir::SmallVector<mlir::Value>",
-      /*methodName=*/"getSources",
+      /*methodName=*/"getEdgeSources",
       /*args=*/(ins "mlir::Value":$target)
     >,
     InterfaceMethod<
@@ -89,7 +118,7 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
         Gets the owner target of a data flow edge given a target that may or may not be the owner.
       }],
       /*retType=*/"mlir::Value",
-      /*methodName=*/"getEdgeOwner",
+      /*methodName=*/"getEdgeOwnerFromTarget",
       /*args=*/(ins "mlir::Value":$target)
     >,
     InterfaceMethod<
