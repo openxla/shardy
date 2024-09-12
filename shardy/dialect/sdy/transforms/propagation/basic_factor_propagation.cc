@@ -47,8 +47,8 @@ std::optional<AxisRefAttr> getPrefixWithoutOverlap(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs) {
   AxisRefAttr result = axisRef;
   for (AxisRefAttr otherAxisRef : otherAxisRefs) {
-    ASSIGN_OR_RETURN_IF_NULLOPT(result,
-                                result.getPrefixWithoutOverlap(otherAxisRef));
+    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+        result, result.getPrefixWithoutOverlap(otherAxisRef));
   }
   return result;
 }
@@ -62,9 +62,9 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
   AxisRefAttr result = axisRef;
   for (const auto& [otherFactorIndex, shardings] : factorIndexToSharding) {
     if (otherFactorIndex != factorIndex) {
-      ASSIGN_OR_RETURN_IF_NULLOPT(
+      SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
           result, getPrefixWithoutOverlap(result, shardings.overflowAxes));
-      ASSIGN_OR_RETURN_IF_NULLOPT(
+      SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
           result, getPrefixWithoutOverlap(result, shardings.axisRefs));
     }
   }
@@ -78,8 +78,8 @@ BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
     int64_t factorSize) const {
   AxisRefAttr result = axisRef;
 
-  ASSIGN_OR_RETURN_IF_NULLOPT(result,
-                              getPrefixWithoutOverlap(result, replicatedAxes));
+  SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+      result, getPrefixWithoutOverlap(result, replicatedAxes));
 
   ArrayRef<AxisRefAttr> factorAxes = factorSharding.axisRefs;
   if (llvm::any_of(factorAxes, [&](AxisRefAttr shardingAxis) {
@@ -323,9 +323,9 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
   const FactorIndexToSharding& factorIndexToSharding =
       tensorFactorSharding.factorIndexToSharding;
 
-  ASSIGN_OR_RETURN_IF_NULLOPT(AxisRefAttr result,
-                              compatiblePrefixNoConflictsAcrossFactors(
-                                  axisRef, factorIndexToSharding, factorIndex));
+  SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+      AxisRefAttr result, compatiblePrefixNoConflictsAcrossFactors(
+                              axisRef, factorIndexToSharding, factorIndex));
 
   auto factorShardingIt = factorIndexToSharding.find(factorIndex);
   if (factorShardingIt == factorIndexToSharding.end()) {
@@ -351,7 +351,7 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
-    ASSIGN_OR_RETURN_IF_NULLOPT(
+    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
         result, compatiblePrefix(result, tensorFactorSharding, factorIndex,
                                  shardedSize, factorSize));
   }

@@ -199,7 +199,7 @@ FailureOr<int64_t> parseFactorSymbolIndex(AsmParser& parser,
 ParseResult parseSymbolIndices(AsmParser& parser, StringRef factorsStr,
                                SmallVector<int64_t>& indices) {
   while (!factorsStr.empty()) {
-    // TODO(bartchr): Add ASSIGN_OR_RETURN_FAILURE macro for re-returning
+    // TODO(bartchr): Add SDY_ASSIGN_OR_RETURN_FAILURE macro for re-returning
     // failures. Or check if there already is one in MLIR.
     FailureOr<int64_t> index = parseFactorSymbolIndex(parser, factorsStr);
     if (failed(index)) {

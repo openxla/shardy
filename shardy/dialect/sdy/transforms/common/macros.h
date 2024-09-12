@@ -17,8 +17,9 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_MACROS_H_
 
 // Macro to assign value from std::optional<T> or return std::nullopt.
-#define ASSIGN_OR_RETURN_IF_NULLOPT(lhs, expr) \
-  ASSIGN_OR_RETURN_IF_NULLOPT_IMPL(CONCAT_(_expr_result, __LINE__), lhs, expr)
+#define SDY_ASSIGN_OR_RETURN_IF_NULLOPT(lhs, expr)                           \
+  SDY_ASSIGN_OR_RETURN_IF_NULLOPT_IMPL(CONCAT_(_expr_result, __LINE__), lhs, \
+                                       expr)
 
 // =================================================================
 // == Implementation details, do not rely on anything below here. ==
@@ -27,11 +28,11 @@ limitations under the License.
 #define CONCAT_INNER_(x, y) x##y
 #define CONCAT_(x, y) CONCAT_INNER_(x, y)
 
-#define ASSIGN_OR_RETURN_IF_NULLOPT_IMPL(result, lhs, expr) \
-  auto result = expr;                                       \
-  if (!result.has_value()) {                                \
-    return std::nullopt;                                    \
-  }                                                         \
+#define SDY_ASSIGN_OR_RETURN_IF_NULLOPT_IMPL(result, lhs, expr) \
+  auto result = expr;                                           \
+  if (!result.has_value()) {                                    \
+    return std::nullopt;                                        \
+  }                                                             \
   lhs = std::move(result).value();
 
 #endif  // SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_MACROS_H_
