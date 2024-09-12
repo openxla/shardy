@@ -103,7 +103,7 @@ func.func @all_edges_have_sharding(%arg0: tensor<32x96xf32>, %arg1: tensor<32x96
 func.func @missing_edge(%arg0: tensor<32x96xf32>, %arg1: tensor<32x96xf32>)
     -> (tensor<32x96xf32>, tensor<32x96xf32>) {
   // CHECK-NEXT: %[[OPT_BARRIER:.*]]:2 = stablehlo.optimization_barrier
-  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {?}]>, <@mesh, [{"a", ?}, {}]>]>}
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {?}]>, <@mesh, [{"a", ?}, {}]>]>}
   // CHECK-NEXT: return %[[OPT_BARRIER]]#0, %[[OPT_BARRIER]]#1
   %0:2 = stablehlo.optimization_barrier
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {?}]>, <@mesh, [{?}, {}]>]>}
@@ -134,7 +134,7 @@ func.func @sharding_overrided(%arg0: tensor<32x96xf32>, %arg1: tensor<32x96xf32>
 func.func @edge_missing_sharding(%arg0: tensor<32x96xf32>, %arg1: tensor<32x96xf32>)
     -> (tensor<32x96xf32>, tensor<32x96xf32>) {
   // CHECK-NEXT: %[[OPT_BARRIER:.*]]:2 = stablehlo.optimization_barrier
-  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {?}]>, <@mesh, [{"a", ?}, {}]>]>}
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {?}]>, <@mesh, [{"a", ?}, {}]>]>}
   // CHECK-NEXT: return %[[OPT_BARRIER]]#0, %[[OPT_BARRIER]]#1
   %0:2 = stablehlo.optimization_barrier
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {?}]>, <@mesh, [{?}, {}]>]>}

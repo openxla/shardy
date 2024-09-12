@@ -63,12 +63,7 @@ struct AddDataFlowEdgesPass
     funcOp.walk([&](Operation* op) {
       // Add the data flow edges for result owners and block argument owners.
       addDataFlowEdges(getDataFlowEdgeResultOwners(op), rewriter);
-      if (auto shardableDataFlowOpInterface =
-              dyn_cast<ShardableDataFlowOpInterface>(op)) {
-        addDataFlowEdges(
-            shardableDataFlowOpInterface.getBlockArgumentEdgeOwners(),
-            rewriter);
-      }
+      addDataFlowEdges(getDataFlowEdgeBlockArgumentOwners(op), rewriter);
     });
   }
 };

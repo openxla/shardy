@@ -31,11 +31,6 @@ namespace sdy {
 
 namespace {
 
-bool isDataFlowOp(Operation* op) {
-  return isa<stablehlo::CaseOp, stablehlo::OptimizationBarrierOp,
-             stablehlo::WhileOp>(op);
-}
-
 // Gets the owning op if it is a shardable data flow op interface op.
 ShardableDataFlowOpInterface getOwningShardableDataFlowOp(Value value) {
   return dyn_cast<ShardableDataFlowOpInterface>(getOwningOp(value));
@@ -76,6 +71,12 @@ Value getDataFlowEdgeOwner(OpOperand& source) {
 }
 
 }  // namespace
+
+bool isDataFlowOp(Operation* op) {
+  return isa<stablehlo::CaseOp, stablehlo::OptimizationBarrierOp,
+             stablehlo::WhileOp, ShardableDataFlowOpInterface>(op);
+}
+
 ResultRange getDataFlowEdgeResultOwners(Operation* op) {
   if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
     return shardableDataFlowOp.getOpResultEdgeOwners();
@@ -85,6 +86,19 @@ ResultRange getDataFlowEdgeResultOwners(Operation* op) {
   }
   // There is no constructor for an empty ResultRange so this is a workaround.
   return ResultRange(nullptr, 0);
+}
+
+ArrayRef<BlockArgument> getDataFlowEdgeBlockArgumentOwners(Operation* op) {
+  if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+    return shardableDataFlowOp.getBlockArgumentEdgeOwners();
+  }
+  return {};
+}
+
+void setBlockArgumentEdgeOwnerShardings(
+    Operation* op, ArrayRef<TensorShardingAttr> shardings) {
+  cast<ShardableDataFlowOpInterface>(op).setBlockArgumentEdgeOwnerShardings(
+      shardings);
 }
 
 DataFlowEdgeOp getDataFlowEdge(Value target) {
