@@ -16,7 +16,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/data_flow_utils.h"
 
 #include <cassert>
-#include <functional>
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/OpDefinition.h"
@@ -38,9 +37,9 @@ ShardableDataFlowOpInterface getOwningShardableDataFlowOp(Value value) {
 }
 
 Value getDataFlowEdgeOwner(Value target) {
-  if (ShardableDataFlowOpInterface owningShardableDataFlowOp =
+  if (ShardableDataFlowOpInterface shardableDataFlowOp =
           getOwningShardableDataFlowOp(target)) {
-    return owningShardableDataFlowOp.getEdgeOwnerFromTarget(target);
+    return shardableDataFlowOp.getEdgeOwnerFromTarget(target);
   }
   if (auto opResult = dyn_cast<OpResult>(target);
       opResult && isDataFlowOp(opResult.getOwner())) {
@@ -108,9 +107,9 @@ DataFlowEdgeOp getDataFlowEdge(OpOperand& source) {
 
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
   Value input = dataFlowEdge.getInput();
-  if (ShardableDataFlowOpInterface owningShardableDataFlowOp =
+  if (ShardableDataFlowOpInterface shardableDataFlowOp =
           getOwningShardableDataFlowOp(input)) {
-    return owningShardableDataFlowOp.getEdgeSources(input);
+    return shardableDataFlowOp.getEdgeSources(input);
   }
   auto opResult = dyn_cast<OpResult>(input);
   assert(opResult && isDataFlowOp(opResult.getOwner()));
@@ -136,22 +135,20 @@ SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
           });
 }
 
-void forEachNonEdgeOwnerDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
-                                       std::function<void(Value)> fn) {
-  // For now the ops that extends from the shardable data flow op doesn't have
-  // non-edge-owner target.
+SmallVector<Value> getNonEdgeOwnerTargets(DataFlowEdgeOp dataFlowEdge) {
   Value input = dataFlowEdge.getInput();
-  if (auto owningShardingableDataFlowOp = getOwningShardableDataFlowOp(input)) {
-    return;
+  if (auto shardableDataFlowOp = getOwningShardableDataFlowOp(input)) {
+    return shardableDataFlowOp.getNonEdgeOwnerTargets(input);
   }
 
   auto opResult = dyn_cast<OpResult>(input);
   assert(opResult && isDataFlowOp(opResult.getOwner()));
   if (auto whileOp = dyn_cast<stablehlo::WhileOp>(opResult.getOwner())) {
     int resNum = opResult.getResultNumber();
-    fn(whileOp.getCond().getArgument(resNum));
-    fn(whileOp.getBody().getArgument(resNum));
+    return {whileOp.getCond().getArgument(resNum),
+            whileOp.getBody().getArgument(resNum)};
   }
+  return {};
 }
 
 }  // namespace sdy

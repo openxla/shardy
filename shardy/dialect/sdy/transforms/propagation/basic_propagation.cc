@@ -100,9 +100,9 @@ void notifyUsersModified(Value value,
 void notifyShardingModified(Value value,
                             NotifyOpModifiedCallback notifyOpModified) {
   if (auto dataFlowEdge = value.getDefiningOp<DataFlowEdgeOp>()) {
-    forEachNonEdgeOwnerDataFlowTarget(dataFlowEdge, [&](Value value) {
-      notifyUsersModified(value, notifyOpModified);
-    });
+    for (Value nonEdgeOwnerTarget : getNonEdgeOwnerTargets(dataFlowEdge)) {
+      notifyUsersModified(nonEdgeOwnerTarget, notifyOpModified);
+    }
   }
 
   if (auto opResult = dyn_cast<OpResult>(value)) {

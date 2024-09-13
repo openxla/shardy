@@ -129,6 +129,16 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
       /*methodName=*/"getEdgeOwnerFromSource",
       /*args=*/(ins "mlir::OpOperand&":$source)
     >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Gets the non-owner targets of a data flow edge given the edge owner.
+      }],
+      /*retType=*/"mlir::SmallVector<mlir::Value>",
+      /*methodName=*/"getNonEdgeOwnerTargets",
+      /*args=*/(ins "mlir::Value":$owner),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/"return {};"
+    >,
   ];
 
   let extraClassDeclaration = [{

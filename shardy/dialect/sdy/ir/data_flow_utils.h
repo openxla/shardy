@@ -58,9 +58,8 @@ DataFlowEdgeOp getDataFlowEdge(OpOperand& source);
 // Returns all sources of the given `dataFlowEdge`.
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge);
 
-// Calls `fn` on all non-edge-owner targets of the given `dataFlowEdge`.
-void forEachNonEdgeOwnerDataFlowTarget(DataFlowEdgeOp dataFlowEdge,
-                                       std::function<void(Value)> fn);
+// Returns all non-edge-owner targets of the given `dataFlowEdge`.
+SmallVector<Value> getNonEdgeOwnerTargets(DataFlowEdgeOp dataFlowEdge);
 
 // Sets the block argument edge owner shardings if the `op` is a
 // `ShardableDataFlowOpInterface`.
