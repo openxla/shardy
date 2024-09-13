@@ -23,6 +23,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 // IWYU pragma: end_keep
@@ -36,7 +37,7 @@ namespace sdy {
 
 // Adds a sequence of export passes needed as a post-processing step for SDY
 // propagation.
-void addExportPipeline(OpPassManager& pm);
+void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory = "");
 
 // Register the sdy-export-pipeline.
 void registerExportPipeline();

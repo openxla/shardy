@@ -16,16 +16,20 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
+#include "mlir/Support/LLVM.h"
+#include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 
 namespace mlir {
 namespace sdy {
 
-void addExportPipeline(OpPassManager& pm) {
+void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   pm.addNestedPass<func::FuncOp>(
       createUpdateNonDivisibleInputOutputShardingsPass());
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
+                                               "sdy_module_after_sdy_export"));
 }
 
 void registerExportPipeline() {

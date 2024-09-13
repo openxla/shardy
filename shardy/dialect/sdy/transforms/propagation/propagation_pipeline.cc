@@ -26,10 +26,10 @@ namespace sdy {
 
 void addPropagationPipeline(OpPassManager& pm, StringRef dumpDirectory,
                             bool conservativePropagation) {
-  addImportPipeline(pm);
+  addImportPipeline(pm, dumpDirectory);
   pm.addPass(createUserPriorityPropagationPass(
       /*keepShardingRules=*/false, dumpDirectory, conservativePropagation));
-  addExportPipeline(pm);
+  addExportPipeline(pm, dumpDirectory);
 }
 
 void registerPropagationPipeline() {

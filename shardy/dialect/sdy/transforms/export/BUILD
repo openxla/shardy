@@ -45,6 +45,7 @@ cc_library(
     ],
     deps = [
         ":passes_inc",
+        "//shardy/common:file_utils",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
         "@llvm-project//llvm:Support",
