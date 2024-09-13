@@ -19,6 +19,7 @@ limitations under the License.
 #include <functional>
 
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
@@ -54,17 +55,13 @@ Value getDataFlowEdgeOwner(Value target) {
 }
 
 Value getDataFlowEdgeOwner(OpOperand& source) {
-  if (auto shardableDataFlowOp =
-          dyn_cast<ShardableDataFlowOpInterface>(source.getOwner())) {
+  Operation* op = source.getOwner();
+  op = op->hasTrait<OpTrait::IsTerminator>() ? op->getParentOp() : op;
+  if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
     return shardableDataFlowOp.getEdgeOwnerFromSource(source);
   }
-  Operation* op = source.getOwner();
   if (isDataFlowOp(op)) {
     return op->getResult(source.getOperandNumber());
-  }
-
-  if (isa<stablehlo::ReturnOp>(op) && isDataFlowOp(op->getParentOp())) {
-    return op->getParentOp()->getResult(source.getOperandNumber());
   }
 
   return nullptr;
