@@ -115,6 +115,15 @@ Gets the owner target of a data flow edge given a source.
 
 NOTE: This method *must* be implemented by the user.
 
+#### `getNonEdgeOwnerTargets`
+
+```c++
+mlir::SmallVector<mlir::Value> getNonEdgeOwnerTargets(mlir::Value owner);
+```
+Gets the non-owner targets of a data flow edge given the edge owner.
+
+NOTE: This method *must* be implemented by the user.
+
 ## ShardingRuleOpInterface (`ShardingRuleOpInterface`)
 
 An op interface that allows the op to define its own sharding rule.
