@@ -70,15 +70,24 @@ Convert `sdy.sharding=n` to maximal sharding as follows:
 @sdy.mesh @maximal_mesh_n = <device_ids=[n]>
 sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
 ```
-### `-sdy-sharding-group-unification`
+### `-sdy-sharding-group-import`
 
-_Combines sharding groups to reduce them to a minimum set of canonical group ids._
+_Canonicalization and validation pass for sharding groups._
 
-Combines sharding groups using the transitive property of group membership.
+Applies canonicalization and validation to sharding groups upon import.
+Namely these are:
 
-Any time that a tensor T is in a sharding group G1 *and* sharding group G2,
-then we can infer that all members in G1 and G2 should be sharded in the
-same way. Thus we can combine G1 and G2 into a single group.
+1) Sharding Group Unification -
+   Combines sharding groups using the transitive property of group
+   membership. Any time that a tensor T is in a sharding group G1 *and*
+   sharding group G2, then we can infer that all members in G1 and G2 should
+   be sharded in the same way. Thus we can combine G1 and G2 into a single
+   group. The set of canonical group ids after merging will be 0,1,...N-1
+   for the minimum set of groups.
 
-The set of canonical group ids after merging will be 0,1,...N-1 for the
-minimum set of groups.
+2) Sharding Group Validation
+   Validates that sharding groups are well formed and conform to assumptions
+   within the implementation. This currently asserts that if a sharding
+   group contains a `Value` defined inside the block of a
+   `ManualComputationOp`, then all other values in that group must reside in
+   the same block.
