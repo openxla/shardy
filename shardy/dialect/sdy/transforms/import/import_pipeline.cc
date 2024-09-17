@@ -36,7 +36,7 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
   pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
-  pm.addPass(createShardingGroupUnificationPass());
+  pm.addPass(createShardingGroupImportPass());
   pm.addPass(createImportMaximalShardingPass());
 
   GreedyRewriteConfig config;

@@ -1,4 +1,4 @@
-// RUN: sdy_opt -split-input-file %s -sdy-sharding-group-unification | FileCheck %s
+// RUN: sdy_opt -split-input-file %s -sdy-sharding-group-import | FileCheck %s
 
 // CHECK-LABEL: sharding_groups_no_overlap
 func.func @sharding_groups_no_overlap(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) {

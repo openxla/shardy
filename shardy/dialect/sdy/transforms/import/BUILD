@@ -40,7 +40,7 @@ cc_library(
         "constant_splitter.cc",
         "import_maximal_sharding.cc",
         "import_pipeline.cc",
-        "sharding_group_unification.cc",
+        "sharding_group_import.cc",
     ],
     hdrs = [
         "passes.h",
