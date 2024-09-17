@@ -207,6 +207,56 @@ func.func @custom_call_householder_product(%arg0: tensor<8x12x16xf32>, %arg1: te
   return %0 : tensor<8x12x16xf32>
 }
 
+// CHECK-LABEL: func @custom_call_tan
+func.func @custom_call_tan(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>
+  %0 = stablehlo.custom_call @mhlo.tan (%arg0) {backend_config = ""} : (tensor<8x4xf32>) -> tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
+// CHECK-LABEL: func @custom_call_erf
+func.func @custom_call_erf(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>
+  %0 = stablehlo.custom_call @mhlo.erf (%arg0) {backend_config = ""} : (tensor<8x4xf32>) -> tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
+// CHECK-LABEL: func @custom_call_topk_of_1d
+func.func @custom_call_topk_of_1d(%arg0: tensor<16xf32>) -> (tensor<16xf32>, tensor<16xi32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i], [i]) {i=16}>
+  %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
+    mhlo.attributes = {
+        k = 1 : i64,
+        largest = true},
+    mhlo.version = 1 : i64}
+    : (tensor<16xf32>) -> (tensor<16xf32>, tensor<16xi32>)
+  return %0#0, %0#1 : tensor<16xf32>, tensor<16xi32>
+}
+
+// CHECK-LABEL: func @custom_call_topk_of_2d
+func.func @custom_call_topk_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x1xf32>, tensor<16x1xi32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, k], [i, l]) {i=16, j=1, k=1, l=1}>
+  %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
+    mhlo.attributes = {
+        k = 1 : i64,
+        largest = true},
+    mhlo.version = 1 : i64}
+    : (tensor<16x8xf32>) -> (tensor<16x1xf32>, tensor<16x1xi32>)
+  return %0#0, %0#1 : tensor<16x1xf32>, tensor<16x1xi32>
+}
+
+// CHECK-LABEL: func @custom_call_top2_of_2d
+func.func @custom_call_top2_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x2xf32>, tensor<16x2xi32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, k], [i, l]) {i=16, j=1, k=1, l=1}>
+  %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
+    mhlo.attributes = {
+        k = 2 : i64,
+        largest = true},
+    mhlo.version = 1 : i64}
+    : (tensor<16x8xf32>) -> (tensor<16x2xf32>, tensor<16x2xi32>)
+  return %0#0, %0#1 : tensor<16x2xf32>, tensor<16x2xi32>
+}
+
 // CHECK-LABEL: func @custom_call_approx_topk
 func.func @custom_call_approx_topk(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, k], [i, k]) {i=16, j=4, k=2}>

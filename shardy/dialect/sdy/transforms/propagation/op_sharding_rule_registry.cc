@@ -362,7 +362,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         }
         if (callTargetName == "X64Combine" ||
             callTargetName == "MoveToDevice" ||
-            callTargetName == "MoveToHost") {
+            callTargetName == "MoveToHost" || callTargetName == "mhlo.tan" ||
+            callTargetName == "mhlo.erf") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         if (callTargetName == "Eigh") {
@@ -429,6 +430,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          inShape[nonBatchDim1])
               .addFactor({nonBatchDim2, kNullDim}, nonBatchDim2,
                          inShape[nonBatchDim2])
+              .build();
+        }
+        if (callTargetName == "mhlo.topk") {
+          assert(customCall.getNumOperands() == 1 &&
+                 customCall.getNumResults() == 2);
+          // See `jax.lax.top_k` for more information.
+          //
+          // Operands: [operand (array like)]
+          // Results: [values, indices]
+          return OpShardingRuleBuilder(customCall)
+              .addPointwiseIfDimSizesMatch(
+                  getTensorShape(customCall.getOperand(0)),
+                  getTensorShape(customCall.getResult(0)))
               .build();
         }
         if (callTargetName == "ApproxTopK" ||
