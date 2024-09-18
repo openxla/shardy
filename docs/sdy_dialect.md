@@ -535,12 +535,12 @@ Syntax:
 Here are some examples of meshes:
 
   - An empty mesh represents a mesh with an unnamed axis of size 1 and device
-    ID 0: <>
+    ID 0: <[]>
   - A mesh with an unnamed axis and an explicit device ID, which is typically
-    used to represent maximal sharding: <device_ids=[3]>
+    used to represent maximal sharding: <[], device_ids=[3]>
   - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
   - A mesh with two axes and explicit device IDs specifying the device
-    ordering: <["a"=3, "b"=2] device_ids=[0, 2, 4, 1, 3, 5]>
+    ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
 
 #### Parameters:
 
