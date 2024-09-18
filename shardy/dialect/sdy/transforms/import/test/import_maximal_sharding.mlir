@@ -1,6 +1,6 @@
 // RUN: sdy_opt  -split-input-file %s -sdy-import-maximal-sharding | FileCheck %s
 
-// CHECK: sdy.mesh @maximal_mesh_3 = <device_ids=[3]>
+// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
 // CHECK-LABEL: func @maximal_sharding_static_shaped_type_result
 func.func @maximal_sharding_static_shaped_type_result(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add
@@ -12,7 +12,7 @@ func.func @maximal_sharding_static_shaped_type_result(%arg0 : tensor<8x8xf32>) -
 
 // -----
 
-// CHECK: sdy.mesh @maximal_mesh_3 = <device_ids=[3]>
+// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
 // CHECK-LABEL: func @maximal_sharding_non_shaped_type_result
 func.func @maximal_sharding_non_shaped_type_result(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.custom_call
@@ -24,7 +24,7 @@ func.func @maximal_sharding_non_shaped_type_result(%arg0 : tensor<8x8xf32>) -> t
 
 // -----
 
-// CHECK: sdy.mesh @maximal_mesh_3 = <device_ids=[3]>
+// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
 // CHECK-LABEL: func @maximal_sharding_multiple_results
 func.func @maximal_sharding_multiple_results(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.custom_call
@@ -36,9 +36,9 @@ func.func @maximal_sharding_multiple_results(%arg0 : tensor<8x8xf32>) -> tensor<
 
 // -----
 
-sdy.mesh @maximal_mesh_3 = <device_ids=[3]>
+sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
 
-// CHECK: sdy.mesh @maximal_mesh_3 = <device_ids=[3]>
+// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
 // CHECK-LABEL: func @maximal_sharding_maximal_mesh_exists
 func.func @maximal_sharding_maximal_mesh_exists(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add
@@ -50,7 +50,7 @@ func.func @maximal_sharding_maximal_mesh_exists(%arg0 : tensor<8x8xf32>) -> tens
 
 // -----
 
-// CHECK: sdy.mesh @maximal_mesh_0 = <device_ids=[0]>
+// CHECK: sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
 // CHECK-LABEL: func @maximal_sharding_repeated_mesh
 func.func @maximal_sharding_repeated_mesh(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK: stablehlo.custom_call
@@ -65,8 +65,8 @@ func.func @maximal_sharding_repeated_mesh(%arg0 : tensor<8x8xf32>) -> tensor<8x8
 
 // -----
 
-// CHECK: sdy.mesh @maximal_mesh_5 = <device_ids=[5]>
-// CHECK-NEXT: sdy.mesh @maximal_mesh_0 = <device_ids=[0]>
+// CHECK: sdy.mesh @maximal_mesh_5 = <[], device_ids=[5]>
+// CHECK-NEXT: sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
 // CHECK-LABEL: func @maximal_sharding_two_different_meshes
 func.func @maximal_sharding_two_different_meshes(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK: stablehlo.custom_call
