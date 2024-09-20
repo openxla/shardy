@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "llvm/ADT/STLExtras.h"
@@ -148,6 +149,25 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
   }
 
   return nullptr;
+}
+
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings) {
+  StringRef meshName;
+  for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
+           operandShardings, resultsShardings)) {
+    if (sharding) {
+      if (meshName.empty()) {
+        meshName = sharding.getMeshName();
+      } else if (meshName != sharding.getMeshName()) {
+        // Found more than one mesh name.
+        return std::nullopt;
+      }
+    }
+  }
+
+  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
 }
 
 std::string factorSymbolString(int64_t factor) {

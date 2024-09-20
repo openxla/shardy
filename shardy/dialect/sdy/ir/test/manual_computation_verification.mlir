@@ -14,6 +14,17 @@ func.func @man_comp_different_meshes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf
 
 // -----
 
+func.func @unknown_mesh(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op operand - unknown mesh: @meshA}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@meshA, [{?}, {?}]>] out_shardings=[<@meshA, [{?}, {?}]>] manual_axes={} (%arg1: tensor<16x32xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
+    sdy.return %1 : tensor<16x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// -----
+
 func.func @manual_computation_no_inputs_or_outputs_with_manual_axes() {
   // expected-error @+1 {{op cannot have manual_axes when there are no input/output shardings.}}
   sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={"a"} () {

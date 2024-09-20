@@ -861,9 +861,11 @@ LogicalResult ManualComputationOp::verify() {
       return emitOpError(
           "cannot have manual_axes when there are no input/output shardings.");
     }
-    if (!llvm::is_sorted(
-            getManualAxes(),
-            getMeshAttr(*this, meshName).getAxisNameComparator())) {
+    MeshAttr mesh = getMeshAttr(*this, meshName);
+    if (!mesh) {
+      return emitError("unknown mesh: ") << meshName;
+    }
+    if (!llvm::is_sorted(getManualAxes(), mesh.getAxisNameComparator())) {
       return emitOpError("manual axes are not ordered w.r.t. mesh");
     }
   }

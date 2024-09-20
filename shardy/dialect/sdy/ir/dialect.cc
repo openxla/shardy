@@ -38,6 +38,7 @@ limitations under the License.
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "mlir/Transforms/InliningUtils.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/enums.cc.inc"
 #include "shardy/dialect/sdy/ir/parsers.h"   // IWYU pragma: keep
@@ -49,7 +50,36 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+namespace {
+
+struct ShardyDialectInlinerInterface : public DialectInlinerInterface {
+  using DialectInlinerInterface::DialectInlinerInterface;
+  // All non-region based ops are inlinable.
+  bool isLegalToInline(Operation*, Region*, bool, IRMapping&) const final {
+    return true;
+  }
+
+  // ManualComputationOp is an op with a region, and it should be allowed to be
+  // inlined into another op.
+  bool isLegalToInline(Region*, Region*, bool, IRMapping&) const final {
+    return true;
+  }
+
+  void handleTerminator(Operation* op, ValueRange valuesToReplace) const final {
+    auto sdyReturnOp = dyn_cast<ReturnOp>(op);
+    if (!sdyReturnOp) return;
+
+    for (auto [valueToReplace, newValue] :
+         llvm::zip_equal(valuesToReplace, sdyReturnOp.getOperands())) {
+      valueToReplace.replaceAllUsesWith(newValue);
+    }
+  }
+};
+
+}  // namespace
+
 void SdyDialect::initialize() {
+  addInterface<ShardyDialectInlinerInterface>();
   addAttributes<
 #define GET_ATTRDEF_LIST
 #include "shardy/dialect/sdy/ir/attrs.cc.inc"

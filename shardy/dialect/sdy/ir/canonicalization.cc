@@ -13,15 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cassert>
 #include <cstdint>
+#include <optional>
 
 #include "llvm/ADT/STLExtras.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Region.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/InliningUtils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -65,6 +71,48 @@ class ManualComputationUnusedInputsPattern
   }
 };
 
+// Pattern to inline a ManualComputationOp when the product of all manual axes
+// is 1.
+class RedundantManualComputationPattern
+    : public OpRewritePattern<ManualComputationOp> {
+ public:
+  using OpRewritePattern<ManualComputationOp>::OpRewritePattern;
+
+ private:
+  LogicalResult matchAndRewrite(ManualComputationOp manualComputationOp,
+                                PatternRewriter& rewriter) const override {
+    std::optional<StringRef> meshName =
+        getCommonMeshName(manualComputationOp.getInShardings().getShardings(),
+                          manualComputationOp.getOutShardings().getShardings());
+
+    int64_t manualAxesProduct = 1;
+    if (meshName.has_value()) {
+      MeshAttr mesh = getMeshAttr(manualComputationOp, *meshName);
+      assert(mesh && "unknown mesh");
+      for (StringAttr manualAxis : manualComputationOp.getManualAxes()) {
+        manualAxesProduct *= mesh.getAxisSize(manualAxis);
+      }
+    }
+
+    if (manualAxesProduct != 1) {
+      return failure();
+    }
+
+    mlir::InlinerInterface inliner(manualComputationOp.getContext());
+    if (inlineRegion(
+            inliner, &manualComputationOp.getRegion(),
+            manualComputationOp->getBlock(), manualComputationOp->getIterator(),
+            manualComputationOp.getOperands(), manualComputationOp.getResults())
+            .failed()) {
+      manualComputationOp.emitOpError(
+          "failed to inline redundant ManualComputationOp.");
+      return failure();
+    }
+    rewriter.eraseOp(manualComputationOp);
+    return success();
+  }
+};
+
 // Pattern to remove duplicate (same input and group id) ShardingGroupOps within
 // the same block.
 class DedupShardingGroupPattern : public OpRewritePattern<ShardingGroupOp> {
@@ -98,7 +146,8 @@ class DedupShardingGroupPattern : public OpRewritePattern<ShardingGroupOp> {
 
 void ManualComputationOp::getCanonicalizationPatterns(
     RewritePatternSet& results, MLIRContext* context) {
-  results.add<ManualComputationUnusedInputsPattern>(context);
+  results.add<ManualComputationUnusedInputsPattern,
+              RedundantManualComputationPattern>(context);
 }
 
 void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,

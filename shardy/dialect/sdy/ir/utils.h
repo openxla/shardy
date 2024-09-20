@@ -17,6 +17,7 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -105,6 +106,12 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // the enclosing module of `op`, and returns its `MeshAttr` if it exists in the
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
+
+// Returns the common mesh name used by all the `TensorShardingAttr` or
+// std::nullopt if there is none.
+std::optional<StringRef> getCommonMeshName(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings);
 
 // Creates the symbol equivalent of a factor index:
 //   -  0 -> 'i'

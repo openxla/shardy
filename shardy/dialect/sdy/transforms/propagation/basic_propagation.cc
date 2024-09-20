@@ -209,27 +209,6 @@ void updateTensorShardings(
                         mesh, notifyOpModified);
 }
 
-// Returns the common mesh name used by all the `TensorShardingAttr` or
-// std::nullopt if there is none.
-std::optional<StringRef> getCommonMeshName(
-    ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings) {
-  StringRef meshName;
-  for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
-           operandShardings, resultsShardings)) {
-    if (sharding) {
-      if (meshName.empty()) {
-        meshName = sharding.getMeshName();
-      } else if (meshName != sharding.getMeshName()) {
-        // Found more than one mesh name.
-        return std::nullopt;
-      }
-    }
-  }
-
-  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
-}
-
 // Propagates tensor shardings of the given `operands` and `results` according
 // to `shardingRule`.
 //
