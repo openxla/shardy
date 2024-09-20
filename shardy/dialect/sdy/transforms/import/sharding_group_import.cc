@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -83,6 +84,7 @@ LogicalResult buildShardingGroupMappingAndValidateGroups(
     ModuleOp module, ValueToShardingGroup& tensorToGroups) {
   // Map to hold validation info for shard groups within manual computations.
   DenseMap<int64_t, ManualComputationOp> groupToManualComp;
+  DenseMap<int64_t, ArrayRef<int64_t>> groupToTensorShape;
 
   // While walking the graph we simultaneously build up the tensorToGroups
   // mapping (which will be used for unification) while also validating the
@@ -90,7 +92,7 @@ LogicalResult buildShardingGroupMappingAndValidateGroups(
   WalkResult result = module.walk([&](ShardingGroupOp op) {
     tensorToGroups[op.getInput()].push_back(op);
 
-    // Validate sharding groups. All values in a group should have either:
+    // All values in a sharding group should have either:
     // 1) No manual computation op parent
     // 2) The same manual computation op parent.
     // If a group has no manual computation op parent, 'groupToManualComp'
@@ -104,6 +106,17 @@ LogicalResult buildShardingGroupMappingAndValidateGroups(
       op.emitError(
           "ShardingGroupOps values cannot cross ManualComputationOp "
           "boundaries for groupId: ")
+          << groupId;
+      return WalkResult::interrupt();
+    }
+
+    // All values in a sharding group should have the same shape.
+    ArrayRef<int64_t> tensorShape = getTensorShape(op.getInput());
+    auto [itTensorShape, tensorShapeInserted] =
+        groupToTensorShape.try_emplace(groupId, tensorShape);
+    if (!tensorShapeInserted && itTensorShape->getSecond() != tensorShape) {
+      op.emitError(
+          "ShardingGroupOps values must have the same shape for groupId: ")
           << groupId;
       return WalkResult::interrupt();
     }

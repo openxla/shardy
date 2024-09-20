@@ -168,3 +168,19 @@ func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   sdy.sharding_group %0 group_id = 7331 : tensor<8x8xf32>
   func.return %0: tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// Disallow creation of sharding groups which have values with different shapes.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.constant dense<0.0> : tensor<8x8x1xf32>
+  sdy.sharding_group %arg0 group_id = 23 : tensor<8x8xf32>
+  sdy.sharding_group %0 group_id = 23 : tensor<8x8xf32>
+  // expected-error@below {{ShardingGroupOps values must have the same shape for groupId: 23}}
+  sdy.sharding_group %1 group_id = 23 : tensor<8x8x1xf32>
+  func.return %0: tensor<8x8xf32>
+}
+
