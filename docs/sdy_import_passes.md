@@ -33,7 +33,22 @@ input or users during propagation regardless of this pass, but since the
 closed property of a dimension doesn't propagate, it's important to copy the
 sharding to fully respect the constraint in the above cases.
 
-The `in_shardings` of a `ManualComputationOp` are in essense sharding
+In addition, if a tensor is used by a chain of `ShardingConstraintOp`s that
+satisfy all of the following:
+
+* The tensor isn't produced by a `ShardingConstraintOp` and doesn't have any
+  other users of type `ShardingConstraintOp` or `ManualComputationOp`.
+* None of the `ShardingConstraintOp`s in the chain have more than one use
+  except the last one.
+* The last `ShardingConstraintOp` in the chain doesn't have any users of
+  type `ShardingConstraintOp` or `ManualComputationOp` (otherwise it's not
+  the last in the chain).
+
+then this pass replaces all other uses of the input of the chain with the
+result of the last `ShardingConstraintOp` in the chain, as it should
+dictate the sharding of those uses.
+
+NOTE: The `in_shardings` of a `ManualComputationOp` are in essense sharding
 constraints on the corresponding operands, so this pass will also apply
 their sharding if the above conditions are satisfied (expect for the
 dangling case).
