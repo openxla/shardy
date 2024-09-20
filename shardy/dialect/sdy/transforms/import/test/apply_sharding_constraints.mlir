@@ -134,3 +134,94 @@ func.func @manual_computation(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) ->
   } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   func.return %0, %2: tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// CHECK-LABEL: func @chain_of_two_sharding_constraints
+func.func @chain_of_two_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD_0]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[WSC_1]], %[[WSC_1]]
+  // CHECK-NEXT: return %[[WSC_1]], %[[ADD_1]]
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @chain_of_three_sharding_constraints
+func.func @chain_of_three_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.sharding_constraint %[[WSC_1]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC_2]], %[[WSC_2]]
+  // CHECK-NEXT: return %[[WSC_2]], %[[ADD]]
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @first_constraint_in_chain_has_multiple_uses
+func.func @first_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.sharding_constraint %[[WSC_1]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-NEXT: return %[[WSC_0]], %[[WSC_2]], %[[ADD]]
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  return %0, %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @second_constraint_in_chain_has_multiple_uses
+func.func @second_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.sharding_constraint %[[WSC_1]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-NEXT: return %[[WSC_1]], %[[WSC_2]], %[[ADD]]
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  return %1, %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @chain_input_used_by_other_constraint
+func.func @chain_input_used_by_other_constraint(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD_0]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[ADD_0]], %[[ADD_0]]
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.sharding_constraint %[[ADD_0]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[WSC_1]], %[[ADD_1]], %[[WSC_2]]
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  %4 = sdy.sharding_constraint %0 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  return %2, %3, %4 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @last_constraint_in_chain_used_by_manual_computation
+func.func @last_constraint_in_chain_used_by_manual_computation(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD_0]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[ADD_0]], %[[ADD_0]]
+  // CHECK-NEXT: sdy.manual_computation(%[[WSC_1]]
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  %4 = sdy.manual_computation(%2) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>]
+      manual_axes={"a"} (%arg2: tensor<4x8xf32>) {
+    sdy.return %arg2 : tensor<4x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %4, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}

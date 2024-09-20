@@ -33,6 +33,19 @@ namespace sdy {
 
 namespace {
 
+// Returns true if `input` is used by any `ShardingConstraintOp` or
+// `ManualComputationOp`, that isn't `optionalShardingConstraint` if provided.
+bool isUsedByOtherShardingConstraint(
+    Value input, Operation* optionalShardingConstraint = nullptr) {
+  return llvm::any_of(
+      input.getUsers(), [optionalShardingConstraint](Operation* user) {
+        return user != optionalShardingConstraint &&
+               isa<ShardingConstraintOp, ManualComputationOp>(user);
+      });
+}
+
+// Returns true if `input` should have its sharding set to `sharding` of the
+// sharding constraint `op`.
 bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
   if (getSharding(input) || input.getDefiningOp<DataFlowEdgeOp>()) {
     // `input` already has a sharding or is produced by a `DataFlowEdgeOp`.
@@ -50,10 +63,46 @@ bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
   // TODO(b/358627707): revisit restricting to a single use if not dangling.
   // Return true if `input` has no other uses of type `ShardingConstraintOp` or
   // `ManualComputationOp`
-  return llvm::none_of(input.getUsers(), [op](Operation* user) {
-           return user != op &&
-                  isa<ShardingConstraintOp, ManualComputationOp>(user);
-         });
+  return !isUsedByOtherShardingConstraint(input, op);
+}
+
+// If `curShardingConstraintOp` is the last `ShardingConstraintOp` in a chain
+// of `ShardingConstraintOp`s that holds the following constraints:
+//
+// 1. `curShardingConstraintOp` isn't used by any `ShardingConstraintOp` or
+//    `ManualComputationOp` (otherwise it's not the last in the chain).
+// 2. None of the other ops in the chain have more than one use.
+//
+// returns the first ShardingConstraintOp in that chain. Otherwise, returns
+// nullptr.
+//
+// For example:
+//
+//   ```mlir
+//   y = sdy.sharding_constraint(x)
+//   z = sdy.sharding_constraint(y)
+//   w = sdy.sharding_constraint(z)
+//   ```
+// Such that `w` isn't used by any other `ShardingConstraintOp` or
+// `ManualComputationOp`, and `y` & `z` have a single use, in which case this
+// method returns `y`.
+ShardingConstraintOp getFirstShardingConstraintInChain(
+    ShardingConstraintOp curShardingConstraintOp) {
+  if (isUsedByOtherShardingConstraint(curShardingConstraintOp)) {
+    return nullptr;
+  }
+
+  ShardingConstraintOp prevShardingConstraintOp = curShardingConstraintOp;
+  while ((curShardingConstraintOp =
+              curShardingConstraintOp.getInput()
+                  .getDefiningOp<ShardingConstraintOp>())) {
+    if (!curShardingConstraintOp->hasOneUse()) {
+      return nullptr;
+    }
+    prevShardingConstraintOp = curShardingConstraintOp;
+  }
+
+  return prevShardingConstraintOp;
 }
 
 struct ApplyShardingConstraintsPass
@@ -71,6 +120,19 @@ struct ApplyShardingConstraintsPass
                     shardingConstraintOp.getSharding();
                 if (shouldApply(input, sharding, shardingConstraintOp)) {
                   setSharding(input, sharding);
+                }
+
+                // If `shardingConstraintOp` is the last op in a chain of at
+                // least two sharding constraints, and the input of the chain
+                // isn't used by any other sharding constraint, then replace
+                // all uses of the input with `shardingConstraintOp`.
+                if (ShardingConstraintOp firstInChain =
+                        getFirstShardingConstraintInChain(shardingConstraintOp);
+                    firstInChain && firstInChain != shardingConstraintOp &&
+                    !isUsedByOtherShardingConstraint(firstInChain.getInput(),
+                                                     firstInChain)) {
+                  firstInChain.getInput().replaceAllUsesExcept(
+                      shardingConstraintOp.getResult(), firstInChain);
                 }
               })
           .Case<ManualComputationOp>(
