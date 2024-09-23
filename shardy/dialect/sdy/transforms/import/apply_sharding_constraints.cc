@@ -105,6 +105,26 @@ ShardingConstraintOp getFirstShardingConstraintInChain(
   return prevShardingConstraintOp;
 }
 
+void moveAfterValue(Operation* op, Value value) {
+  if (Operation* defOp = value.getDefiningOp()) {
+    op->moveAfter(defOp);
+  } else {
+    Block* block = cast<BlockArgument>(value).getOwner();
+    op->moveBefore(block, block->begin());
+  }
+}
+
+// Moves a chain of `ShardingConstraintOp`s ending with `shardingConstraintOp`
+// after `value`.
+void moveChainAfterValue(ShardingConstraintOp shardingConstraintOp,
+                         Value value) {
+  while (shardingConstraintOp) {
+    moveAfterValue(shardingConstraintOp, value);
+    shardingConstraintOp =
+        shardingConstraintOp.getInput().getDefiningOp<ShardingConstraintOp>();
+  }
+}
+
 struct ApplyShardingConstraintsPass
     : public impl::ApplyShardingConstraintsPassBase<
           ApplyShardingConstraintsPass> {
@@ -131,6 +151,10 @@ struct ApplyShardingConstraintsPass
                     firstInChain && firstInChain != shardingConstraintOp &&
                     !isUsedByOtherShardingConstraint(firstInChain.getInput(),
                                                      firstInChain)) {
+                  // We need to move the chain right after its input, to make
+                  // sure all other uses of the input are after the chain.
+                  moveChainAfterValue(shardingConstraintOp,
+                                      firstInChain.getInput());
                   firstInChain.getInput().replaceAllUsesExcept(
                       shardingConstraintOp.getResult(), firstInChain);
                 }

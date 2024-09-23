@@ -163,6 +163,38 @@ func.func @chain_of_three_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tenso
   return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @chain_on_block_arg_after_other_user
+func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.sharding_constraint %[[WSC_1]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC_2]], %[[WSC_2]]
+  // CHECK-NEXT: return %[[ADD]], %[[WSC_2]]
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %1 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  return %1, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @chain_on_op_result_after_other_user
+func.func @chain_on_op_result_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.sharding_constraint %[[WSC_1]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[DIV:.*]] = stablehlo.divide %[[WSC_2]], %[[WSC_2]]
+  // CHECK-NEXT: %[[MUL:.*]] = stablehlo.multiply %[[WSC_2]], %[[DIV]]
+  // CHECK-NEXT: return %[[MUL]], %[[WSC_2]]
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = stablehlo.divide %0, %0 :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %4 = stablehlo.multiply %0, %1 :  tensor<8x8xf32>
+  %5 = sdy.sharding_constraint %3 <@mesh, [{}, {}]> :  tensor<8x8xf32>
+  return %4, %5 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
 // CHECK-LABEL: func @first_constraint_in_chain_has_multiple_uses
 func.func @first_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
