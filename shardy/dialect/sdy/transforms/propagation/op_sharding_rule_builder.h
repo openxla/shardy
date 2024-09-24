@@ -92,11 +92,12 @@ class OpShardingRuleBuilder {
   OpShardingRuleBuilder& addPointwiseIf(ArrayRef<int64_t> shape,
                                         std::function<bool(int64_t)> pred);
 
-  // Adds a pointwise factor for all dimensions, whose input and output sizes
-  // match, of all operands/results that have rank at least 1.
+  // Adds a pointwise factor for the matching dimensions and calls
+  // `onMismatchFn` for the mismatching ones. A dimension is matching if (1)
+  // the dimension size in `inShape` and `outShape` is the same, OR (2)
+  // `alwaysAddFactor` is true.
   //
-  // If `alwaysAddFactor` is true, we add a factor for all dimensions with the
-  // corresponding size in `inType`, otherwise we only
+  // If `inShape` and `outShape` are empty, this method does nothing.
   OpShardingRuleBuilder& addPointwiseIfDimSizesMatch(
       ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
       bool alwaysAddFactor = false,
