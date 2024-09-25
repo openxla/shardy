@@ -40,6 +40,7 @@ cc_library(
         "constant_splitter.cc",
         "import_maximal_sharding.cc",
         "import_pipeline.cc",
+        "manual_axes_cleanup.cc",
         "sharding_group_import.cc",
     ],
     hdrs = [

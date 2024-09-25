@@ -64,8 +64,7 @@ class ManualComputationUnusedInputsPattern
     for (int64_t index : unusedArgs.flip().set_bits()) {
       inShardings.push_back(manualComputationOp.getInSharding(index));
     }
-    manualComputationOp.setInShardingsAttr(TensorShardingPerValueAttr::get(
-        manualComputationOp.getContext(), inShardings));
+    manualComputationOp.setInShardings(inShardings);
 
     return success();
   }

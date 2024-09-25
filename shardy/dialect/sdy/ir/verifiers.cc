@@ -658,14 +658,12 @@ namespace {
 // If an axis in dimShardingAxes belongs to manualAxes, it's an axis
 // the user is doing a manual computation on, thus the ManualComputationOp's
 // body will have tensors smaller wrt this manual axis.
-int64_t accumulatedManualAxesSize(Operation* op,
-                                  ArrayRef<AxisRefAttr> dimShardingAxes,
-                                  ArrayRef<StringAttr> manualAxes,
-                                  MeshAttr mesh) {
+int64_t accumulatedManualAxesSize(
+    Operation* op, ArrayRef<AxisRefAttr> dimShardingAxes,
+    const llvm::SmallDenseSet<StringRef>& manualAxes, MeshAttr mesh) {
   int64_t axesFactor = 1;
   for (AxisRefAttr axisRef : dimShardingAxes) {
-    if (std::find(manualAxes.begin(), manualAxes.end(), axisRef.getName()) !=
-        manualAxes.end()) {
+    if (manualAxes.contains(axisRef.getName())) {
       axesFactor *= axisRef.getSize(mesh);
     }
   }
@@ -676,9 +674,11 @@ int64_t accumulatedManualAxesSize(Operation* op,
 // Returns an iterator to a manual axis that comes after a free axis in `axes`.
 // If no such axis exists, returns `axes.end()`.
 ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
-    ArrayRef<AxisRefAttr> axes, ArrayRef<StringAttr> manualAxes) {
+    ArrayRef<AxisRefAttr> axes,
+    const llvm::SmallDenseSet<StringRef>& manualAxes) {
   auto isManualAxis = [&](AxisRefAttr axisRef) {
-    return llvm::is_contained(manualAxes, axisRef.getName());
+    return manualAxes.contains(axisRef.getName());
+    ;
   };
   return std::find_if(llvm::find_if_not(axes, isManualAxis), axes.end(),
                       isManualAxis);
@@ -695,7 +695,7 @@ ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
 // 5. the manual axes come before any free axes in each dim sharding,
 // 6. the global shape and local shapes of the op regions arguments/results
 //    match, and
-// 7. all manual axes are used in the value's sharding.
+// 7. No manual axes are split.
 //
 // `valueKindStr` is a string included in any verification error message
 // specifying whether the values we are verifying are the operands or results.
@@ -704,7 +704,8 @@ template <typename GlobalRangeT, typename LocalRangeT>
 LogicalResult verifyManualComputationValue(
     ManualComputationOp op, GlobalRangeT globalTypes, LocalRangeT localTypes,
     TensorShardingPerValueAttr shardingPerValueAttr, SymbolRefAttr meshName,
-    ArrayRef<StringAttr> manualAxes, StringRef valueKindStr) {
+    const llvm::SmallDenseSet<StringRef>& manualAxesSet,
+    StringRef valueKindStr) {
   if (globalTypes.empty() && localTypes.empty() &&
       shardingPerValueAttr.getShardings().empty()) {
     // Nothing to verify since there are no values.
@@ -745,7 +746,7 @@ LogicalResult verifyManualComputationValue(
          llvm::enumerate(sharding.getDimShardings())) {
       ArrayRef<AxisRefAttr> axes = dimSharding.getAxes();
       if (ArrayRef<AxisRefAttr>::iterator manualAxisItr =
-              findManualAxisAfterFreeAxis(axes, manualAxes);
+              findManualAxisAfterFreeAxis(axes, manualAxesSet);
           manualAxisItr != axes.end()) {
         return op->emitOpError(valueKindStr)
                << " sharding at index " << valueIndex
@@ -763,7 +764,7 @@ LogicalResult verifyManualComputationValue(
              globalRankedType.getShape(), sharding.getDimShardings())) {
       newDimSizes.push_back(dimensionSize /
                             accumulatedManualAxesSize(op, dimSharding.getAxes(),
-                                                      manualAxes, mesh));
+                                                      manualAxesSet, mesh));
     }
     auto expectedLocalRankedType =
         RankedTensorType::get(newDimSizes, globalRankedType.getElementType());
@@ -775,50 +776,16 @@ LogicalResult verifyManualComputationValue(
              << ", actual local shape " << localRankedType;
     }
 
-    auto emitManualAxesError = [&, valueIndex = valueIndex](
-                                   AxisRefAttr axis, StringRef manualAxisName) {
+    // 7. No manual axes are split.
+    if (sharding.anyOfAxisRef([&](AxisRefAttr axis) {
+          return axis.getSubAxisInfo() &&
+                 manualAxesSet.contains(axis.getName());
+        })) {
       return op->emitOpError(valueKindStr)
              << " sharding at index " << valueIndex
-             << " cannot refer to the sub/split axes " << axis.toString()
-             << " as the axis \"" << manualAxisName << "\" is a manual axis";
-    };
-
-    // 7. Verify every manual axis is used in each sharding.
-    for (StringRef manualAxisName : manualAxes) {
-      bool foundManualAxis = false;
-      // First check replicated axes
-      for (AxisRefAttr axis : sharding.getReplicatedAxes()) {
-        if (axis.getName() == manualAxisName) {
-          if (axis.getSubAxisInfo()) {
-            return emitManualAxesError(axis, manualAxisName);
-          }
-          foundManualAxis = true;
-          break;
-        }
-      }
-      if (foundManualAxis) {
-        continue;
-      }
-      // Not in replicated axes. Now check dim shardings.
-      for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
-        for (AxisRefAttr axis : dimSharding.getAxes()) {
-          if (axis.getName() == manualAxisName) {
-            if (axis.getSubAxisInfo()) {
-              return emitManualAxesError(axis, manualAxisName);
-            }
-            foundManualAxis = true;
-            break;
-          }
-        }
-        if (foundManualAxis) {
-          break;
-        }
-      }
-      if (!foundManualAxis) {
-        return op->emitOpError(valueKindStr)
-               << " sharding at index " << valueIndex
-               << " must refer to all manual_axes: {" << manualAxes << "}";
-      }
+             << " cannot use a manual axis as a sub/split axis. Saw manual "
+                "axes {"
+             << manualAxesSet << "} and sharding " << sharding << ".";
     }
   }
 
@@ -861,20 +828,15 @@ LogicalResult ManualComputationOp::verify() {
       return emitOpError(
           "cannot have manual_axes when there are no input/output shardings.");
     }
-    MeshAttr mesh = getMeshAttr(*this, meshName);
-    if (!mesh) {
-      return emitError("unknown mesh: ") << meshName;
-    }
-    if (!llvm::is_sorted(getManualAxes(), mesh.getAxisNameComparator())) {
-      return emitOpError("manual axes are not ordered w.r.t. mesh");
-    }
   }
+  llvm::SmallDenseSet<StringRef> manualAxesSet(
+      getManualAxes().begin(), getManualAxes().end());
   if (failed(verifyManualComputationValue(
           *this, getOperandTypes(), getBody().getArgumentTypes(),
-          getInShardings(), meshName, getManualAxes(), "operand")) ||
+          getInShardings(), meshName, manualAxesSet, "operand")) ||
       failed(verifyManualComputationValue(
           *this, getResultTypes(), getBodyTerminatorOpOperandTypes(*this),
-          getOutShardings(), meshName, getManualAxes(), "result"))) {
+          getOutShardings(), meshName, manualAxesSet, "result"))) {
     return failure();
   }
 

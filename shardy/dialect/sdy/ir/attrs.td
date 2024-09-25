@@ -430,6 +430,10 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // sharding and replicated `AxisRefAttr`s.
     bool anyOfAxisRef(std::function<bool(AxisRefAttr)> predicate) const;
 
+    // Like `llvm::for_each` but applies the `callback` against all dimension
+    // sharding and replicated `AxisRefAttr`s.
+    void forEachAxisRef(std::function<void(AxisRefAttr)> callback) const;
+
     // Returns true if `axisName` or a sub-axis of it is used to shard any
     // dimension or is replicated.
     bool isBound(StringRef axisName) const;

@@ -136,3 +136,14 @@ def ImportMaximalShardingPass : Pass<"sdy-import-maximal-sharding", "ModuleOp"> 
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def ManualAxesCleanupPass : Pass<"sdy-manual-axes-cleanup", "ModuleOp"> {
+  let summary = "Cleans up the use of manual axes in `ManualComputationOp`s";
+  let description = [{
+    1) For any in/out sharding that hasn't specified a manual axis, add that
+       manual axis to its replicated_axes. This is to ensure manual axes are
+       always fully specified.
+    2) Sorts the manual axes in mesh axis declaration order.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

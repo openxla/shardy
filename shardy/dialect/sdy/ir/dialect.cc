@@ -368,6 +368,14 @@ bool TensorShardingAttr::anyOfAxisRef(
   return llvm::any_of(getReplicatedAxes(), predicate);
 }
 
+void TensorShardingAttr::forEachAxisRef(
+    std::function<void(AxisRefAttr)> callback) const {
+  for (DimensionShardingAttr dimSharding : getDimShardings()) {
+    llvm::for_each(dimSharding.getAxes(), callback);
+  }
+  llvm::for_each(getReplicatedAxes(), callback);
+}
+
 bool TensorShardingAttr::isBound(StringRef axisName) const {
   return anyOfAxisRef([axisName](AxisRefAttr axisRef) {
     return axisName == axisRef.getName();
@@ -624,6 +632,16 @@ void ManualComputationOp::setOutShardingAddingManualAxes(
   setOutSharding(resultIndex,
                  addFreeAxesToManualComputationSharding(
                      getOutSharding(resultIndex), sharding, getManualAxes()));
+}
+
+void ManualComputationOp::setInShardings(
+    ArrayRef<TensorShardingAttr> shardings) {
+  setInShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
+}
+
+void ManualComputationOp::setOutShardings(
+    ArrayRef<TensorShardingAttr> shardings) {
+  setOutShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
 }
 
 void ManualComputationOp::setInSharding(int64_t operandIndex,

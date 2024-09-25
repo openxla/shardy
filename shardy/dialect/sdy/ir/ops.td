@@ -165,6 +165,9 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
       return getOutShardings().getSharding(resultIndex);
     }
 
+    void setInShardings(ArrayRef<TensorShardingAttr> shardings);
+    void setOutShardings(ArrayRef<TensorShardingAttr> sharding);
+
     void setInSharding(int64_t operandIndex, TensorShardingAttr sharding);
     void setOutSharding(int64_t resultIndex, TensorShardingAttr sharding);
 
