@@ -85,6 +85,14 @@ Convert `sdy.sharding=n` to maximal sharding as follows:
 @sdy.mesh @maximal_mesh_n = <device_ids=[n]>
 sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
 ```
+### `-sdy-manual-axes-cleanup`
+
+_Cleans up the use of manual axes in `ManualComputationOp`s_
+
+1) For any in/out sharding that hasn't specified a manual axis, add that
+   manual axis to its replicated_axes. This is to ensure manual axes are
+   always fully specified.
+2) Sorts the manual axes in mesh axis declaration order.
 ### `-sdy-sharding-group-import`
 
 _Canonicalization and validation pass for sharding groups._
