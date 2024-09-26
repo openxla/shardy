@@ -852,6 +852,46 @@ LogicalResult PropagationBarrierOp::verify() {
   return success();
 }
 
+namespace {
+
+LogicalResult AllInnerAndOuterTypesMatchInNamedComputation(
+    NamedComputationOp op, TypeRange innerTypes, TypeRange outerTypes,
+    StringRef innerName, StringRef outerName) {
+  if (innerTypes.size() != outerTypes.size()) {
+    return op.emitError("number of ")
+           << innerName << "s must match the number of " << outerName
+           << "s: " << innerTypes.size() << " != " << outerTypes.size();
+  }
+
+  for (auto [i, types] :
+       llvm::enumerate(llvm::zip_equal(innerTypes, outerTypes))) {
+    auto [innerType, outerType] = types;
+    if (innerType != outerType) {
+      return op.emitError("expected the type of the ")
+             << i << "'th " << innerName
+             << " to match the type of the corresponding " << outerName << ": "
+             << innerType << " vs " << outerType;
+    }
+  }
+
+  return success();
+}
+
+}  // namespace
+
+LogicalResult NamedComputationOp::verify() {
+  if (failed(AllInnerAndOuterTypesMatchInNamedComputation(
+          *this, getBody().getArgumentTypes(), getOperandTypes(),
+          "block argument", "operand")) ||
+      failed(AllInnerAndOuterTypesMatchInNamedComputation(
+          *this, getBodyTerminatorOpOperandTypes(*this), getResultTypes(),
+          "returned value", "result"))) {
+    return failure();
+  }
+
+  return success();
+}
+
 LogicalResult SdyDialect::verifyRegionArgAttribute(Operation* op,
                                                    unsigned regionIndex,
                                                    unsigned argIndex,
