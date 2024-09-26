@@ -518,10 +518,16 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
   let assemblyFormat = "`<` `[` (`]`):($shardings^ `]`)? `>`";
 
   let extraClassDeclaration = [{
-    // Builds a `TensorShardingPerValue` for each type in `types`, with all
-    // dimension shardings marked open (can be further replicated/sharded).
+    // Builds a `TensorSharding` for each type in `types`, with all dimension
+    // shardings marked open (can be further replicated/sharded).
     static TensorShardingPerValueAttr getFullyOpen(
         MLIRContext* context, TypeRange types, StringRef meshName);
+
+    // Builds an open `TensorSharding` for each type in `types`, but
+    // with the sharding at `index` replaced with `sharding`.
+    static TensorShardingPerValueAttr getOpenWithShardingAtIndex(
+        MLIRContext* context, TypeRange types, int64_t index,
+        TensorShardingAttr sharding);
 
     // Returns whether there are no values.
     bool empty() const { return getShardings().empty(); }

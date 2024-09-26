@@ -34,9 +34,12 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/ValueRange.h"
+#include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 
 // IWYU pragma: end_keep
 
@@ -49,6 +52,31 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/attrs.h.inc"
 // ODS-generated enum classes.
 #include "shardy/dialect/sdy/ir/enums.h.inc"
+
+// Below are methods that are the bodies of ODS-generated op-interface classes
+// which cannot be inlined due to cyclic dependencies on helper functions.
+namespace mlir {
+namespace sdy {
+namespace details {
+
+// Default implementation of the `getOpResultEdgeOwnerShardings` method of
+// `ShardableDataFlowOpInterface`.
+ArrayRef<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(Operation* op);
+
+// Default implementation of the `setOpResultEdgeOwnerSharding` method of
+// `ShardableDataFlowOpInterface`.
+void setOpResultEdgeOwnerShardingImpl(Operation* op, unsigned index,
+                                      TensorShardingAttr sharding);
+
+// Default implementation of the `setOpResultEdgeOwnerShardings` method of
+// `ShardableDataFlowOpInterface`.
+void setOpResultEdgeOwnerShardingsImpl(Operation* op,
+                                       ArrayRef<TensorShardingAttr> shardings);
+
+}  // namespace details
+}  // namespace sdy
+}  // namespace mlir
+
 // ODS-generated op-interface classes.
 #include "shardy/dialect/sdy/ir/op_interface.h.inc"
 // ODS-generated op classes.

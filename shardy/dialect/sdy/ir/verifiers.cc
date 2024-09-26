@@ -356,6 +356,8 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
 // - All shardings reference the same mesh name, and that name is present in the
 //   module's symbol table.
 // - All shardings are valid (see `verifyTensorShardingAttr`).
+// TODO(bartchr): relax this to allow different meshes when the op is a dataflow
+// op
 LogicalResult verifyTensorShardingPerValueAttr(
     TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
     Operation* op, EmitErrorFn emitError, SymbolRefAttr meshName) {
@@ -636,10 +638,11 @@ LogicalResult DataFlowEdgeOp::verify() {
         "expected input of sdy.data_flow_edge to have a single user");
   }
   if (Operation* depOp = getInput().getDefiningOp();
-      depOp && inDialect<SdyDialect>(depOp)) {
+      depOp && inDialect<SdyDialect>(depOp) &&
+      !mlir::isa<ShardableDataFlowOpInterface>(depOp)) {
     return emitOpError(
                "expected input of sdy.data_flow_edge to not be defined by an "
-               "SdyDialect op")
+               "SdyDialect op (other than an sdy.named_computation).")
                .attachNote(depOp->getLoc())
            << "sdy op defining the input of the sdy.data_flow_edge";
   }
@@ -849,6 +852,69 @@ LogicalResult PropagationBarrierOp::verify() {
         "cannot specify `BOTH` as the direction. Not blocking propagation "
         "direction makes the op redundant.");
   }
+  return success();
+}
+
+namespace {
+
+LogicalResult AllInnerAndOuterTypesMatchInNamedComputation(
+    NamedComputationOp op, TypeRange innerTypes, TypeRange outerTypes,
+    StringRef innerName, StringRef outerName) {
+  if (innerTypes.size() != outerTypes.size()) {
+    return op.emitError("number of ")
+           << innerName << "s must match the number of " << outerName
+           << "s: " << innerTypes.size() << " != " << outerTypes.size();
+  }
+
+  for (auto [i, types] :
+       llvm::enumerate(llvm::zip_equal(innerTypes, outerTypes))) {
+    auto [innerType, outerType] = types;
+    if (innerType != outerType) {
+      return op.emitError("expected the type of the ")
+             << i << "'th " << innerName
+             << " to match the type of the corresponding " << outerName << ": "
+             << innerType << " vs " << outerType;
+    }
+  }
+
+  return success();
+}
+
+}  // namespace
+
+LogicalResult NamedComputationOp::verify() {
+  if (failed(AllInnerAndOuterTypesMatchInNamedComputation(
+          *this, getBody().getArgumentTypes(), getOperandTypes(),
+          "block argument", "operand")) ||
+      failed(AllInnerAndOuterTypesMatchInNamedComputation(
+          *this, getBodyTerminatorOpOperandTypes(*this), getResultTypes(),
+          "returned value", "result"))) {
+    return failure();
+  }
+
+  std::optional<TensorShardingPerValueAttr> inShardings = getInShardings();
+  std::optional<TensorShardingPerValueAttr> outShardings = getOutShardings();
+  if (!(inShardings || outShardings)) {
+    return success();
+  }
+
+  // Verify the in/out shardings.
+  if (inShardings &&
+      failed(verifyTensorShardingPerValueAttr(
+          *inShardings, getOperandTypes(), *this,
+          [this](StringRef msg) { return emitOpError("in_shardings ") << msg; },
+          /*meshName=*/nullptr))) {
+    return failure();
+  }
+  if (outShardings && failed(verifyTensorShardingPerValueAttr(
+                          *outShardings, getResultTypes(), *this,
+                          [this](StringRef msg) {
+                            return emitOpError("out_shardings ") << msg;
+                          },
+                          /*meshName=*/nullptr))) {
+    return failure();
+  }
+
   return success();
 }
 

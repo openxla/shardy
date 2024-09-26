@@ -18,10 +18,11 @@ limitations under the License.
 #include <cassert>
 #include <optional>
 
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
+#include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/PassOptions.h"
-#include "mlir/IR/DialectRegistry.h"  // from @llvm-project
 
 namespace mlir {
 namespace sdy {
@@ -41,23 +42,29 @@ void AutoPartitionerRegistry::setCallback(
     AutoPartitionerCallback callback,
     RegisterDependantDialectsCallback dialectsDependenciesCallback) {
   llvm::sys::ScopedLock scopedLock(*mutex);
-
   // TODO(tomnatan): find a better way to fail in this case, and consider
   // allowing registring multiple callbacks with different keys (that are passed
   // by the user to sdy).
-  assert(!isRegistered() && "auto-partitioner callback already registered");
+
+  if (isRegistered()) {
+    llvm::report_fatal_error("auto-partitioner callback already registered");
+  }
   *registeredCallback = callback;
   *registeredDependenciesCallback = dialectsDependenciesCallback;
 }
 
 void AutoPartitionerRegistry::addPasses(OpPassManager& pm) {
   // TODO(tomnatan): find a better way to fail in this case.
-  assert(isRegistered() && "auto-partitioner callback wasn't registered");
+  if (!isRegistered()) {
+    llvm::report_fatal_error("auto-partitioner callback wasn't registered");
+  }
   registeredCallback->value()(pm);
 }
 
 void AutoPartitionerRegistry::getDependentDialects(DialectRegistry& registry) {
-  assert(isRegistered() && "auto-partitioner callback wasn't registered");
+  if (!isRegistered()) {
+    llvm::report_fatal_error("auto-partitioner callback wasn't registered");
+  }
   registeredDependenciesCallback->value()(registry);
 }
 
