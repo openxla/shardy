@@ -587,3 +587,73 @@ func.func @while_func_operand(%arg0: tensor<32x96xf32> {sdy.sharding = #sdy.shar
   %5 = sdy.data_flow_edge %3#1 : tensor<i32>
   return %4 : tensor<32x96xf32>
 }
+
+// Check we can propagate forward from outside into the NC, then back out.
+// CHECK-LABEL: func @named_computation_argument_sharding_propagation(
+// CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>})
+func.func @named_computation_argument_sharding_propagation(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {?}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"my_func">(%0) (%arg1: tensor<8x2xi32>) {
+  // CHECK-NEXT:   %[[DATA_FLOW_EDGE_1:.*]] = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2, [{"a", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT:   sdy.return %[[DATA_FLOW_EDGE_1]] : tensor<8x2xi32>
+  // CHECK-NEXT: } : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE_2:.*]] = sdy.data_flow_edge %[[NC]] sharding=<@mesh_a_2_b_2, [{"a", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT: return %[[DATA_FLOW_EDGE_2]] : tensor<8x2xi32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
+  %1 = sdy.named_computation<"my_func">(%0) (%arg1: tensor<8x2xi32>) {
+    %3 = sdy.data_flow_edge %arg1 : tensor<8x2xi32>
+    sdy.return %3 : tensor<8x2xi32>
+  } : (tensor<8x2xi32>) -> (tensor<8x2xi32>)
+  %2 = sdy.data_flow_edge %1 : tensor<8x2xi32>
+  return %2 : tensor<8x2xi32>
+}
+
+
+// Check we can propagate backwards from outside into the NC, then back out.
+// CHECK-LABEL: func @named_computation_result_sharding_propagation(
+// CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
+func.func @named_computation_result_sharding_propagation(%arg0: tensor<8x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {?}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"my_func">(%0) (%arg1: tensor<8x2xi32>) {
+  // CHECK-NEXT:   %[[DATA_FLOW_EDGE_1:.*]] = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2, [{"a", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[SUB:.*]] = stablehlo.subtract %3, %3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {?}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT:   sdy.return %[[SUB]] : tensor<8x2xi32>
+  // CHECK-NEXT: } : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE_2:.*]] = sdy.data_flow_edge %[[NC]] sharding=<@mesh_a_2_b_2, [{"a", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT: return %[[DATA_FLOW_EDGE_2]] : tensor<8x2xi32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
+  %1 = sdy.named_computation<"my_func">(%0) (%arg1: tensor<8x2xi32>) {
+    %3 = sdy.data_flow_edge %arg1 : tensor<8x2xi32>
+    %4 = stablehlo.subtract %3, %3 : tensor<8x2xi32>
+    sdy.return %4 : tensor<8x2xi32>
+  } : (tensor<8x2xi32>) -> (tensor<8x2xi32>)
+  %2 = sdy.data_flow_edge %1 : tensor<8x2xi32>
+  return %2 : tensor<8x2xi32>
+}
+
+// Check we can propagate in both directions from inside out.
+// CHECK-LABEL: func @named_computation_inside_out_propagation(
+// CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b", ?}, {?}]>})
+func.func @named_computation_inside_out_propagation(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {?}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"my_func">(%0) (%arg1: tensor<8x2xi32>) {
+  // CHECK-NEXT:   %[[DATA_FLOW_EDGE_1:.*]] = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2, [{"a", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[SC_1:.*]] = sdy.sharding_constraint %[[DATA_FLOW_EDGE_1]] <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[SC_2:.*]] = sdy.sharding_constraint %[[SC_1]] <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:  sdy.return %[[SC_2]] : tensor<8x2xi32>
+  // CHECK-NEXT: } : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE_2:.*]] = sdy.data_flow_edge %[[NC]] sharding=<@mesh_a_2_b_2, [{"b", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT: return %[[DATA_FLOW_EDGE_2]] : tensor<8x2xi32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
+  %1 = sdy.named_computation<"my_func">(%0) (%arg1: tensor<8x2xi32>) {
+    %3 = sdy.data_flow_edge %arg1 : tensor<8x2xi32>
+    %4 = sdy.sharding_constraint %3 <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
+    %5 = sdy.sharding_constraint %4 <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
+    sdy.return %5 : tensor<8x2xi32>
+  } : (tensor<8x2xi32>) -> (tensor<8x2xi32>)
+  %2 = sdy.data_flow_edge %1 : tensor<8x2xi32>
+  return %2 : tensor<8x2xi32>
+}

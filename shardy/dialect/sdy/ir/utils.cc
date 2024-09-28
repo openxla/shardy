@@ -48,17 +48,6 @@ namespace {
 
 using func::FuncOp;
 
-TensorShardingPerValueAttr getOrCreateShardingPerResult(Operation* op,
-                                                        StringRef meshName) {
-  if (auto shardingPerResult =
-          op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr)) {
-    return shardingPerResult;
-  }
-
-  return TensorShardingPerValueAttr::getFullyOpen(
-      op->getContext(), op->getResultTypes(), meshName);
-}
-
 template <typename T>
 std::string mlirToString(T* mlirVal) {
   std::string out;
@@ -70,6 +59,23 @@ std::string mlirToString(T* mlirVal) {
 }
 
 }  // namespace
+
+TensorShardingPerValueAttr getOrCreateShardingPerValue(Operation* op,
+                                                       StringRef meshName) {
+  if (auto shardingPerResult =
+          op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr)) {
+    return shardingPerResult;
+  }
+
+  return TensorShardingPerValueAttr::getFullyOpen(
+      op->getContext(), op->getResultTypes(), meshName);
+}
+
+TensorShardingPerValueAttr replaceShardingPerValue(
+    Operation* op, unsigned index, TensorShardingAttr sharding) {
+  return getOrCreateShardingPerValue(op, sharding.getMeshName())
+      .replaceValueSharding(index, sharding);
+}
 
 void emitOpWarningOnce(llvm::once_flag& flag, Operation* op, StringRef msg) {
   llvm::call_once(flag, [=]() {
@@ -248,22 +254,10 @@ TensorShardingAttr getSharding(Value value) {
       })
       // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.
-      // TODO: b/360076171 - Move the cases to the interface.
-      .Case<ShardableDataFlowOpInterface>([value](ShardableDataFlowOpInterface
-                                                      shardableRegionOp) {
-        if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-          return shardableRegionOp.getBlockArgumentEdgeOwnerSharding(
-              blockArg.getArgNumber());
-        }
-        // TODO: b/360076171 - Add a `getOpResultEdgeOwnerSharding`.
-        if (auto shardingPerResult =
-                getOwningOp(value)->getAttrOfType<TensorShardingPerValueAttr>(
-                    kShardingAttr)) {
-          return shardingPerResult
-              .getShardings()[cast<OpResult>(value).getResultNumber()];
-        }
-        return TensorShardingAttr();
-      })
+      .Case<ShardableDataFlowOpInterface>(
+          [value](ShardableDataFlowOpInterface shardableRegionOp) {
+            return shardableRegionOp.getEdgeOwnerSharding(value);
+          })
       .Default([value](Operation* op) {
         if (auto shardingPerResult =
                 op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr)) {
@@ -318,25 +312,12 @@ void setSharding(Value value, TensorShardingAttr sharding) {
       })
       .Case<ShardableDataFlowOpInterface>(
           [&](ShardableDataFlowOpInterface shardableRegionOp) {
-            if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-              shardableRegionOp.setBlockArgumentEdgeOwnerSharding(
-                  blockArg.getArgNumber(), sharding);
-            }
-            // TODO: b/360076171 - Add a `setOpResultEdgeOwnerSharding`.
-            if (auto opResult = dyn_cast<OpResult>(value)) {
-              Operation* op = opResult.getOwner();
-              op->setAttr(
-                  kShardingAttr,
-                  getOrCreateShardingPerResult(op, sharding.getMeshName())
-                      .replaceValueSharding(
-                          cast<OpResult>(value).getResultNumber(), sharding));
-            }
+            shardableRegionOp.setEdgeOwnerSharding(value, sharding);
           })
       .Default([&](Operation* op) {
         op->setAttr(kShardingAttr,
-                    getOrCreateShardingPerResult(op, sharding.getMeshName())
-                        .replaceValueSharding(
-                            cast<OpResult>(value).getResultNumber(), sharding));
+                    replaceShardingPerValue(
+                        op, cast<OpResult>(value).getResultNumber(), sharding));
       });
 }
 
