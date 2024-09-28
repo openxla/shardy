@@ -372,4 +372,50 @@ def PropagationBarrierOp : Sdy_Op<"propagation_barrier",
   let hasVerifier = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// NamedComputationOp
+//===----------------------------------------------------------------------===//
+
+def NamedComputationOp : Sdy_Op<"named_computation",
+    [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
+     RecursivelySpeculatable, IsolatedFromAbove]> {
+  let summary = "named computation operation";
+  let description = [{
+    Groups a computation, i.e. a block of operations, and gives it a name.
+    Propagation will flow in/out of the region as if everything was inlined.
+
+    This can be used to handle propagating through call instructions to other
+    functions. Any users of Shardy should write an import/export pass that
+    converts their call ops to `sdy.named_computation` ops, duplicating/copying
+    the body of the called function into the body of the `named_computation`.
+
+    The type of each block arguments and returned values in the region must be
+    the same as the type of the operands and results type of the op.
+
+    Example:
+
+    ```mlir
+    %1 = sdy.named_computation<"foo">(%0) (%arg1: tensor<16x32xf32>) {
+      sdy.return %arg1 : tensor<16x32xf32>
+    } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+    ```
+  }];
+
+  let arguments = (ins
+    StrAttr:$name,
+    Variadic<AnyType>:$operands
+  );
+  let results = (outs Variadic<AnyType>);
+  let regions = (region SizedRegion<1>:$body);
+
+  let assemblyFormat = [{
+    `<`$name`>` `` `(` $operands `)`
+    custom<SingleBlockRegionNoBlockId>($body)
+    attr-dict
+    `:` functional-type($operands, results)
+  }];
+
+  let hasVerifier = 1;
+}
+
 #endif  // SDY_OPS

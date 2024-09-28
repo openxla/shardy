@@ -59,8 +59,8 @@ struct ShardyDialectInlinerInterface : public DialectInlinerInterface {
     return true;
   }
 
-  // ManualComputationOp is an op with a region, and it should be allowed to be
-  // inlined into another op.
+  // `ManualComputationOp` and `NamedComputationOp` are ops with a region, and
+  // it should be allowed to be inlined into another op.
   bool isLegalToInline(Region*, Region*, bool, IRMapping&) const final {
     return true;
   }
