@@ -31,10 +31,12 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
@@ -59,8 +61,8 @@ struct ShardyDialectInlinerInterface : public DialectInlinerInterface {
     return true;
   }
 
-  // ManualComputationOp is an op with a region, and it should be allowed to be
-  // inlined into another op.
+  // `ManualComputationOp` and `NamedComputationOp` are ops with a region, and
+  // it should be allowed to be inlined into another op.
   bool isLegalToInline(Region*, Region*, bool, IRMapping&) const final {
     return true;
   }
@@ -88,6 +90,72 @@ void SdyDialect::initialize() {
 #define GET_OP_LIST
 #include "shardy/dialect/sdy/ir/ops.cc.inc"
       >();
+}
+
+namespace details {
+
+ArrayRef<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(Operation* op) {
+  if (auto shardingPerResult =
+          op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr)) {
+    return shardingPerResult.getShardings();
+  }
+  return {};
+}
+
+void setOpResultEdgeOwnerShardingImpl(Operation* op, unsigned index,
+                                      TensorShardingAttr sharding) {
+  op->setAttr(kShardingAttr, replaceShardingPerValue(op, index, sharding));
+}
+
+void setOpResultEdgeOwnerShardingsImpl(Operation* op,
+                                       ArrayRef<TensorShardingAttr> shardings) {
+  op->setAttr(kShardingAttr,
+              TensorShardingPerValueAttr::get(op->getContext(), shardings));
+}
+
+}  // namespace details
+
+//===----------------------------------------------------------------------===//
+// ShardableDataFlowOpInterface
+//===----------------------------------------------------------------------===//
+
+mlir::sdy::TensorShardingAttr
+ShardableDataFlowOpInterface::getBlockArgumentEdgeOwnerSharding(
+    unsigned index) {
+  if (mlir::ArrayRef<mlir::sdy::TensorShardingAttr> argSharding =
+          getBlockArgumentEdgeOwnerShardings();
+      !argSharding.empty()) {
+    return argSharding[index];
+  }
+  return nullptr;
+}
+
+mlir::sdy::TensorShardingAttr
+ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(unsigned index) {
+  if (mlir::ArrayRef<mlir::sdy::TensorShardingAttr> resultSharding =
+          getOpResultEdgeOwnerShardings();
+      !resultSharding.empty()) {
+    return resultSharding[index];
+  }
+  return nullptr;
+}
+
+mlir::sdy::TensorShardingAttr
+ShardableDataFlowOpInterface::getEdgeOwnerSharding(Value value) {
+  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    return getBlockArgumentEdgeOwnerSharding(blockArg.getArgNumber());
+  }
+  return getOpResultEdgeOwnerSharding(cast<OpResult>(value).getResultNumber());
+}
+
+void ShardableDataFlowOpInterface::setEdgeOwnerSharding(
+    Value value, mlir::sdy::TensorShardingAttr sharding) {
+  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    setBlockArgumentEdgeOwnerSharding(blockArg.getArgNumber(), sharding);
+  } else {
+    setOpResultEdgeOwnerSharding(cast<OpResult>(value).getResultNumber(),
+                                 sharding);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -663,6 +731,111 @@ DataFlowEdgeOp DataFlowEdgeOp::getDataFlowEdgeUser(Value root) {
   // We assume the input of a DataFlowEdgeOp has exactly one user.
   return dyn_cast_or_null<DataFlowEdgeOp>(
       root && root.hasOneUse() ? *root.user_begin() : nullptr);
+}
+
+//===----------------------------------------------------------------------===//
+// NamedComputationOp
+//===----------------------------------------------------------------------===//
+
+void NamedComputationOp::setOpResultEdgeOwnerSharding(
+    unsigned resultIndex, TensorShardingAttr sharding) {
+  TensorShardingPerValueAttr outShardings =
+      getOutShardings().value_or(TensorShardingPerValueAttr::getFullyOpen(
+          getContext(), getResultTypes(), sharding.getMeshName()));
+  setOutShardingsAttr(outShardings.replaceValueSharding(resultIndex, sharding));
+}
+
+void NamedComputationOp::setOpResultEdgeOwnerShardings(
+    ArrayRef<TensorShardingAttr> shardings) {
+  setOutShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
+}
+
+ArrayRef<TensorShardingAttr>
+NamedComputationOp::getBlockArgumentEdgeOwnerShardings() {
+  if (std::optional<TensorShardingPerValueAttr> inShardings =
+          getInShardings()) {
+    return inShardings->getShardings();
+  }
+  return {};
+}
+
+ArrayRef<TensorShardingAttr>
+NamedComputationOp::getOpResultEdgeOwnerShardings() {
+  if (std::optional<TensorShardingPerValueAttr> outShardings =
+          getOutShardings()) {
+    return outShardings->getShardings();
+  }
+  return {};
+}
+
+void NamedComputationOp::setBlockArgumentEdgeOwnerSharding(
+    unsigned index, TensorShardingAttr sharding) {
+  TensorShardingPerValueAttr inShardings =
+      getInShardings().value_or(TensorShardingPerValueAttr::getFullyOpen(
+          getContext(), getOperandTypes(), sharding.getMeshName()));
+  setInShardingsAttr(inShardings.replaceValueSharding(index, sharding));
+}
+
+void NamedComputationOp::setBlockArgumentEdgeOwnerShardings(
+    ArrayRef<TensorShardingAttr> shardings) {
+  setInShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
+}
+
+ArrayRef<BlockArgument> NamedComputationOp::getBlockArgumentEdgeOwners() {
+  return getBody().getArguments();
+}
+
+ResultRange NamedComputationOp::getOpResultEdgeOwners() { return getResults(); }
+
+// Gets the sources given a target value.
+//
+// Note that the return value is a vector, for `NamedComputationOp`s there can
+// only be one value but sdy's interface expects a vector.
+//
+// For example, given the following:
+// ```
+// %r = sdy.named_computation<"my_tan">(%operand0) (%arg0)
+//   %a = tanh(%arg0)
+//   sdy.return %a
+// }
+// ```
+// If the target is a block argument (e.g., `%operand0`), return `%arg0`.
+// If the target is a result (e.g., `%r`), return `%a`.
+SmallVector<Value> NamedComputationOp::getEdgeSources(Value target) {
+  assert(getOwningOp(target) == getOperation());
+  return mlir::TypeSwitch<Value, SmallVector<Value>>(target)
+      .Case<BlockArgument>(
+          [this](BlockArgument blockArg) -> SmallVector<Value> {
+            return {getOperand(blockArg.getArgNumber())};
+          })
+      .Case<mlir::OpResult>([this](
+                                mlir::OpResult opResult) -> SmallVector<Value> {
+        return {getBodyTerminatorOperand(*this, opResult.getResultNumber())};
+      })
+      .Default([](Value _) -> SmallVector<Value> { return {}; });
+}
+
+// Returns the edge owner value given a `target`.
+//
+// For `NamedComputationOp`s, there is only one target per data flow edge which
+// is also the edge owner.
+Value NamedComputationOp::getEdgeOwnerFromTarget(Value target) {
+  assert(getOwningOp(target) == getOperation());
+  return target;
+}
+
+// Returns the edge owner given a `source`.
+//
+// If the `source` is an operand of a terminator, return the corresponding
+// result. Otherwise it should be an operand of the `NamedComputationOp`, return
+// the `BlockArgument` with the same index.
+Value NamedComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
+  Operation* sourceOwner = source.getOwner();
+  if (sourceOwner->hasTrait<mlir::OpTrait::IsTerminator>()) {
+    return getResult(source.getOperandNumber());
+  }
+  assert(sourceOwner == getOperation());
+  return getOperand(source.getOperandNumber());
 }
 
 }  // namespace sdy

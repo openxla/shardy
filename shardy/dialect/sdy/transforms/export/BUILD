@@ -36,6 +36,7 @@ cc_library(
     name = "passes",
     srcs = [
         "export_pipeline.cc",
+        "insert_explicit_reshards.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
         "update_non_divisible_input_output_shardings.cc",

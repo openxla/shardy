@@ -61,10 +61,15 @@ SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge);
 // Returns all non-edge-owner targets of the given `dataFlowEdge`.
 SmallVector<Value> getNonEdgeOwnerTargets(DataFlowEdgeOp dataFlowEdge);
 
-// Sets the block argument edge owner shardings if the `op` is a
+// Sets the block argument edge owner `shardings` if the `op` is a
 // `ShardableDataFlowOpInterface`.
 void setBlockArgumentEdgeOwnerShardings(Operation* op,
                                         ArrayRef<TensorShardingAttr> shardings);
+
+// Sets the op result edge owner `shardings` if the `op` is a
+// `ShardableDataFlowOpInterface`.
+void setOpResultEdgeOwnerShardings(Operation* op,
+                                   ArrayRef<TensorShardingAttr> shardings);
 
 }  // namespace sdy
 }  // namespace mlir

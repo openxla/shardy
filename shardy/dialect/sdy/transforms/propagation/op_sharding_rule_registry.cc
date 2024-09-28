@@ -93,17 +93,25 @@ void addGatherScatterFactors(RankedTensorType inputType,
   for (auto [slicesDim, slicesDimSize] :
        llvm::enumerate(slicesType.getShape())) {
     if (llvm::is_contained(offsetDims, slicesDim)) {
-      // `dim` is an offset dimension.
-      // We must now look up the next non-collapsed/batching input dimension
-      // that corresponds to this slices offset dimension.
+      // `slicesDim` is an offset dimension.
+      // We look up the non-collapsed/batching input dimension that corresponds
+      // to this slices offset dimension in the input.
       while (llvm::is_contained(collapsedSliceDims, inputDim) ||
              llvm::is_contained(inputBatchingDims, inputDim)) {
         ++inputDim;
       }
       assert(inputDim < inputType.getRank());
-      if (inputType.getDimSize(inputDim) == slicesDimSize) {
-        // We only propagate through unsliced dimensions.
-        addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim,
+      int64_t inputDimSize = inputType.getDimSize(inputDim);
+
+      // If this dimension is unsliced, we add a common factor for `inputDim`
+      // and `slicesDim`. Otherwise, we add a unique factor for `inputDim` and
+      // `slicesDim` respectively.
+      if (inputDimSize == slicesDimSize) {
+        addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize);
+      } else {
+        addFactorFn(inputDim, /*indicesDim=*/kNullDim, /*slicesDim=*/kNullDim,
+                    inputDimSize);
+        addFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim, slicesDim,
                     slicesDimSize);
       }
       ++inputDim;
@@ -125,6 +133,13 @@ void addGatherScatterFactors(RankedTensorType inputType,
       addFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize);
       ++batchDimPos;
     }
+  }
+
+  // We add factors for all collapsed slice dimensions.
+  for (int64_t collapsedSliceDim : collapsedSliceDims) {
+    addFactorFn(collapsedSliceDim, /*indicesDim=*/kNullDim,
+                /*slicesDim=*/kNullDim,
+                inputType.getDimSize(collapsedSliceDim));
   }
 }
 
