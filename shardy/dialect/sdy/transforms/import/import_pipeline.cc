@@ -36,6 +36,9 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
   pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
+  // The sharding group import pass must run after applying sharding
+  // constraints. This ensures we can detect sharding conflicts between group
+  // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
   pm.addPass(createImportMaximalShardingPass());
 
