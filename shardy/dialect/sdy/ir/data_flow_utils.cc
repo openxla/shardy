@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -95,6 +96,15 @@ void setBlockArgumentEdgeOwnerShardings(
     Operation* op, ArrayRef<TensorShardingAttr> shardings) {
   cast<ShardableDataFlowOpInterface>(op).setBlockArgumentEdgeOwnerShardings(
       shardings);
+}
+
+void setOpResultEdgeOwnerShardings(Operation* op,
+                                   ArrayRef<TensorShardingAttr> shardings) {
+  if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+    return shardableDataFlowOp.setOpResultEdgeOwnerShardings(shardings);
+  }
+  op->setAttr(kShardingAttr,
+              TensorShardingPerValueAttr::get(op->getContext(), shardings));
 }
 
 DataFlowEdgeOp getDataFlowEdge(Value target) {

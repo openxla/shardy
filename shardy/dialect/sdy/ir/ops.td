@@ -25,6 +25,7 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 include "shardy/dialect/sdy/ir/attrs.td"
 include "shardy/dialect/sdy/ir/dialect.td"
 include "shardy/dialect/sdy/ir/enums.td"
+include "shardy/dialect/sdy/ir/op_interface.td"
 
 class Sdy_Op<string mnemonic, list<Trait> traits = []> :
    Op<Sdy_Dialect, mnemonic, traits>;
@@ -166,7 +167,7 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
     }
 
     void setInShardings(ArrayRef<TensorShardingAttr> shardings);
-    void setOutShardings(ArrayRef<TensorShardingAttr> sharding);
+    void setOutShardings(ArrayRef<TensorShardingAttr> shardings);
 
     void setInSharding(int64_t operandIndex, TensorShardingAttr sharding);
     void setOutSharding(int64_t resultIndex, TensorShardingAttr sharding);
@@ -369,6 +370,58 @@ def PropagationBarrierOp : Sdy_Op<"propagation_barrier",
   );
   let results = (outs AnyRankedTensor:$result);
   let assemblyFormat = "$input `allowed_direction````=```$allowed_direction attr-dict `:` type($input)";
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// NamedComputationOp
+//===----------------------------------------------------------------------===//
+
+def NamedComputationOp : Sdy_Op<"named_computation",
+    [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
+     RecursivelySpeculatable, IsolatedFromAbove,
+     DeclareOpInterfaceMethods<
+         ShardableDataFlowOpInterface,
+         /*methodOverrides=*/["getOpResultEdgeOwnerShardings", "setOpResultEdgeOwnerSharding", "setOpResultEdgeOwnerShardings"]>]> {
+  let summary = "named computation operation";
+  let description = [{
+    Groups a computation, i.e. a block of operations, and gives it a name.
+    Propagation will flow in/out of the region as if everything was inlined.
+
+    This can be used to handle propagating through call instructions to other
+    functions. Any users of Shardy should write an import/export pass that
+    converts their call ops to `sdy.named_computation` ops, duplicating/copying
+    the body of the called function into the body of the `named_computation`.
+
+    The type of each block arguments and returned values in the region must be
+    the same as the type of the operands and results type of the op.
+
+    Example:
+
+    ```mlir
+    %1 = sdy.named_computation<"foo">(%0) (%arg1: tensor<16x32xf32>) {
+      sdy.return %arg1 : tensor<16x32xf32>
+    } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+    ```
+  }];
+
+  let arguments = (ins
+    StrAttr:$name,
+    Variadic<AnyType>:$operands,
+    OptionalAttr<Sdy_TensorShardingPerValue>:$in_shardings,
+    OptionalAttr<Sdy_TensorShardingPerValue>:$out_shardings
+  );
+  let results = (outs Variadic<AnyType>);
+  let regions = (region SizedRegion<1>:$body);
+  let assemblyFormat = [{
+    `<`$name`>` `` `(` $operands `)`
+    (`in_shardings````=```custom<StrippedTensorShardingPerValueAttr>($in_shardings)^)?
+    (`out_shardings````=```custom<StrippedTensorShardingPerValueAttr>($out_shardings)^)?
+    custom<SingleBlockRegionNoBlockId>($body)
+    attr-dict
+    `:` functional-type($operands, results)
+  }];
+
   let hasVerifier = 1;
 }
 

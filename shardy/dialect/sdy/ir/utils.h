@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -52,6 +53,10 @@ bool inDialect(Operation* op) {
   return op->getDialect()->getNamespace() == Dialect::getDialectNamespace();
 }
 
+// Gets the `TensorShardingPerValueAttr` of the given `op` if it exists, or
+// creates a new one with a fully open sharding for each result.
+TensorShardingPerValueAttr getOrCreateShardingPerResult(Operation* op,
+                                                        StringRef meshName);
 
 // Emits a warning once for the given `flag`, with `op` attached as a note
 // if `MLIRContext::shouldPrintOpOnDiagnostic` is true (assuming the op is
@@ -201,6 +206,12 @@ MutableArrayRef<OpOperand> getBodyTerminatorOpOperands(RegionOpTy op) {
 template <typename RegionOpTy>
 ValueRange getBodyTerminatorOperands(RegionOpTy op) {
   return getBodyTerminator(op)->getOperands();
+}
+
+// Gets the value of the `op` body terminator at `index`.
+template <typename RegionOpTy>
+Value getBodyTerminatorOperand(RegionOpTy op, int64_t index) {
+  return getBodyTerminator(op)->getOperand(index);
 }
 
 // Gets the value types returned from the `op` body terminator.

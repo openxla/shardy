@@ -17,6 +17,7 @@ limitations under the License.
 #include <memory>  // IWYU pragma: keep
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -38,47 +39,10 @@ namespace {
 using llvm::DenseMap;
 using llvm::EquivalenceClasses;
 using llvm::SmallDenseMap;
-using llvm::SmallVector;
 
 using ValueToShardingGroup =
-    llvm::DenseMap<Value, llvm::SmallVector<ShardingGroupOp>>;
-
-void unifyShardingGroups(ValueToShardingGroup& tensorToGroups) {
-  if (tensorToGroups.empty()) {
-    return;
-  }
-  // Merge the equivalence classes of group ids which had the same tensors
-  // within them. (unionSets uses the default comparator and will consider the
-  // minimum group_id as the representative element of the equivalence class).
-  EquivalenceClasses<int64_t> shardingGroupEquivalences;
-  for (auto& [_, groupsForTensor] : tensorToGroups) {
-    const int64_t canonicalId = groupsForTensor.front().getGroupId();
-    for (ShardingGroupOp group : groupsForTensor) {
-      shardingGroupEquivalences.unionSets(canonicalId, group.getGroupId());
-    }
-  }
-
-  // After merging groups we reindex the group IDs so that they take values
-  // from the set {0,1,...,N-1} (N is the number of equivalence classes).
-  // The leader element of each equivalent class corresponds to the minimum
-  // group_id, so by looping over the group leaders in order their reindexed
-  // ids can be set to maintain the same relative ordering.
-  int64_t reindexId = 0;
-  SmallDenseMap<int64_t, int64_t> reindexMap;
-  for (const auto& group : shardingGroupEquivalences) {
-    if (group.isLeader()) {
-      reindexMap[group.getData()] = reindexId++;
-    }
-  }
-
-  // Update the graph to replace group_ids with their canonical id.
-  for (auto& [_, groupsForTensor] : tensorToGroups) {
-    for (ShardingGroupOp op : groupsForTensor) {
-      op.setGroupId(reindexMap[shardingGroupEquivalences.getLeaderValue(
-          op.getGroupId())]);
-    }
-  }
-}
+    llvm::MapVector<Value, llvm::SmallVector<ShardingGroupOp>>;
+using GroupIdToShardingGroups = SmallVector<SmallVector<ShardingGroupOp>>;
 
 LogicalResult buildShardingGroupMappingAndValidateGroups(
     ModuleOp module, ValueToShardingGroup& tensorToGroups) {
@@ -126,6 +90,83 @@ LogicalResult buildShardingGroupMappingAndValidateGroups(
   return failure(result.wasInterrupted());
 }
 
+GroupIdToShardingGroups unifyShardingGroups(
+    ValueToShardingGroup& tensorToGroups) {
+  // Merge the equivalence classes of group ids which had the same tensors
+  // within them. (unionSets uses the default comparator and will consider the
+  // minimum group_id as the representative element of the equivalence class).
+  EquivalenceClasses<int64_t> shardingGroupEquivalences;
+  for (auto& [_, groupsForTensor] : tensorToGroups) {
+    int64_t canonicalId = groupsForTensor.front().getGroupId();
+    for (ShardingGroupOp group : groupsForTensor) {
+      shardingGroupEquivalences.unionSets(canonicalId, group.getGroupId());
+    }
+  }
+
+  // After merging groups we reindex the group IDs so that they take values
+  // from the set {0,1,...,N-1} (N is the number of equivalence classes).
+  // The leader element of each equivalent class corresponds to the minimum
+  // group_id, so by looping over the group leaders in order their reindexed
+  // ids can be set to maintain the same relative ordering.
+  int64_t reindexId = 0;
+  SmallDenseMap<int64_t, int64_t> reindexMap;
+  for (const auto& group : shardingGroupEquivalences) {
+    if (group.isLeader()) {
+      reindexMap[group.getData()] = reindexId++;
+    }
+  }
+
+  GroupIdToShardingGroups reindexGroups(reindexId);
+  // Update the graph to replace group_ids with their canonical id.
+  for (auto& [_, groupsForTensor] : tensorToGroups) {
+    for (ShardingGroupOp op : groupsForTensor) {
+      op.setGroupId(reindexMap[shardingGroupEquivalences.getLeaderValue(
+          op.getGroupId())]);
+      reindexGroups[op.getGroupId()].push_back(op);
+    }
+  }
+  return reindexGroups;
+}
+
+// This function verifies that sharding groups with pre-existing shardings are
+// compatible.  Compatibility means all values in the group must have either no
+// sharding or the same sharding.
+LogicalResult validateCompatibilityAndApplyInitialShardingConstraints(
+    ModuleOp module, GroupIdToShardingGroups& groupIdToShardingGroups) {
+  SmallDenseMap<int64_t, TensorShardingAttr> groupIdToSharding;
+  // Tensors can have initial shardings defined in several ways (e.g., sharding
+  // constraints, function arguments, manual computations). These initial
+  // shardings only conflict with Sharding Groups if their value belongs to a
+  // group. Therefore, we only need to validate the consistency of shardings
+  // within ShardingGroupOps to ensure no conflicts.
+  for (const auto& shardingGroups : groupIdToShardingGroups) {
+    for (ShardingGroupOp shardingGroupOp : shardingGroups) {
+      TensorShardingAttr sharding = getSharding(shardingGroupOp.getInput());
+      int64_t groupId = shardingGroupOp.getGroupId();
+      if (!sharding) {
+        continue;
+      }
+      auto [it, inserted] = groupIdToSharding.try_emplace(groupId, sharding);
+      if (!inserted && it->second != sharding) {
+        shardingGroupOp.emitError(
+            "Inconsistent shardings prior to propagation for ShardingGroupOps "
+            "with canonicalized groupId: ")
+            << groupId;
+        return failure();
+      }
+    }
+  }
+
+  // Apply initial shardings to all values in the group.
+  for (auto& [groupId, sharding] : groupIdToSharding) {
+    for (ShardingGroupOp shardingGroupOp : groupIdToShardingGroups[groupId]) {
+      setSharding(shardingGroupOp.getInput(), sharding);
+    }
+  }
+
+  return success();
+}
+
 struct ShardingGroupImportPass
     : public impl::ShardingGroupImportPassBase<ShardingGroupImportPass> {
   using ShardingGroupImportPassBase::ShardingGroupImportPassBase;
@@ -134,12 +175,26 @@ struct ShardingGroupImportPass
     // Extract the sharding group ids and tensor -> {group_id} mapping from the
     // high level module and validate any sharding group constrainst are met.
     ValueToShardingGroup tensorToGroups;
-    if (failed(buildShardingGroupMappingAndValidateGroups(getOperation(),
+    ModuleOp module = getOperation();
+    if (failed(buildShardingGroupMappingAndValidateGroups(module,
                                                           tensorToGroups))) {
       signalPassFailure();
     }
+    // If there are no sharding groups, the rest of the preprocessing steps
+    // are not necessary.
+    if (tensorToGroups.empty()) {
+      return;
+    }
 
-    unifyShardingGroups(tensorToGroups);
+    GroupIdToShardingGroups groupIdToReindexedTensors =
+        unifyShardingGroups(tensorToGroups);
+    // This pass assumes sharding constraints are already applied to values.
+    // Compatibility constraints are applied after group unification to detect
+    // conflicts within the unified groups.
+    if (failed(validateCompatibilityAndApplyInitialShardingConstraints(
+            module, groupIdToReindexedTensors))) {
+      signalPassFailure();
+    }
   }
 };
 

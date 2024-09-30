@@ -112,8 +112,7 @@ struct SinkDataFlowEdgesPass
       if (SmallVector<TensorShardingAttr> resultShardings =
               getShardingsFromDataFlowEdges(getDataFlowEdgeResultOwners(op));
           !resultShardings.empty()) {
-        op->setAttr(kShardingAttr, TensorShardingPerValueAttr::get(
-                                       op->getContext(), resultShardings));
+        setOpResultEdgeOwnerShardings(op, resultShardings);
       }
       return WalkResult::advance();
     });
