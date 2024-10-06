@@ -280,14 +280,14 @@ func.func @propagate_from_multi_result_op_with_priorities(
 
 // CHECK-LABEL: func @manual_computation_shardings_with_priority(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {?}]>},
-// CHECK-SAME:      %arg1: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
+// CHECK-SAME:      %arg1: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
 func.func @manual_computation_shardings_with_priority(
     %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p2, {?}]>},
     %arg1: tensor<32x32xf32> ) -> tensor<32x32xf32> {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", ?}, {?}]>]>}
   // CHECK-NEXT: sdy.manual_computation(%[[ADD_0]], %arg1)
-  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {?}]>, <@mesh, [{"a", ?}, {?}]>]
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {?}]>, <@mesh, [{"a", ?}, {"b", ?}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}]>]
   // CHECK-SAME:   manual_axes={"a"} (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
   // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>}
@@ -303,6 +303,9 @@ func.func @manual_computation_shardings_with_priority(
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %1: tensor<32x32xf32>
 }
+
+// DO NOT SUBMIT - add a test that would fail without this test because manual
+// axes are propagated outside even if they have low priority.
 
 // Tests user based priority propagation with op based priority propagation.
 // - For %arg0/%arg1 we make use of user based priorities. Since %arg0 is p1 but
