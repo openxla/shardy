@@ -41,6 +41,17 @@ func.func @redundant_manual_axes(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   return %0: tensor<8xf32>
 }
 
+// CHECK-LABEL: func @redundant_manual_axes_inlined_mesh
+func.func @redundant_manual_axes_inlined_mesh(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = stablehlo.custom_call @foo(%arg0) {has_side_effect = true} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: return %0 : tensor<8xf32>
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<mesh<["a"=2, "b"=1, "c"=1]>, [{"b", "c", "a"}]>] out_shardings=[<mesh<["a"=2, "b"=1, "c"=1]>, [{"b", "c", "a"}]>]
+      manual_axes={"b", "c"}  (%arg1: tensor<8xf32>) {
+    %1 = stablehlo.custom_call @foo(%arg1) {has_side_effect = true} : (tensor<8xf32>) -> tensor<8xf32>
+    sdy.return %1 : tensor<8xf32>
+  } : (tensor<8xf32>) -> (tensor<8xf32>)
+  return %0: tensor<8xf32>
+}
 
 // Top manual_computation is inlinable, middle one isn't, most inner is.
 // CHECK-LABEL: func @nested_two_inlinable

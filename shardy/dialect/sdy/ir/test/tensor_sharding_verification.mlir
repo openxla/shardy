@@ -115,12 +115,48 @@ func.func @num_shardings_does_not_match_num_results(%arg0: tensor<2x64x13xf32>, 
 sdy.mesh @mesh1 = <["a"=2]>
 sdy.mesh @mesh2 = <["b"=2]>
 
-// CHECK-LABEL: func @op_shardings_refers_to_multiples_meshes
-func.func @op_shardings_refers_to_multiples_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
+// CHECK-LABEL: func @op_shardings_refer_to_different_meshes
+func.func @op_shardings_refer_to_different_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-   // expected-error @+1 {{op result shardings can only refer to one mesh: @mesh2 vs @mesh1}}
+   // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["b"=2]> vs #sdy.mesh<["a"=2]>}}
   %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1]
     {sdy.sharding=#sdy.sharding_per_value<[<@mesh1, [{"a"}, {}]>, <@mesh2, [{"b"}, {}]>]>} :
+    (tensor<2x64x13xf32>, tensor<2x64x13xf32>, tensor<f32>, tensor<f32>) -> (tensor<2x13xf32>, tensor<2x13xf32>)
+    reducer(%arg2: tensor<f32>, %arg4: tensor<f32>) (%arg3: tensor<f32>, %arg5: tensor<f32>)  {
+      %2 = stablehlo.add %arg2, %arg4 : tensor<f32>
+      %3 = stablehlo.add %arg3, %arg5 : tensor<f32>
+      stablehlo.return %2, %3 : tensor<f32>, tensor<f32>
+    }
+  return %1#0, %1#1 : tensor<2x13xf32>, tensor<2x13xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @op_shardings_bound_to_different_inlined_meshes
+func.func @op_shardings_bound_to_different_inlined_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
+  %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+   // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["b"=2]> vs #sdy.mesh<["a"=2]>}}
+  %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1]
+    {sdy.sharding=#sdy.sharding_per_value<[<mesh<["a"=2]>, [{"a"}, {}]>, <mesh<["b"=2]>, [{"b"}, {}]>]>} :
+    (tensor<2x64x13xf32>, tensor<2x64x13xf32>, tensor<f32>, tensor<f32>) -> (tensor<2x13xf32>, tensor<2x13xf32>)
+    reducer(%arg2: tensor<f32>, %arg4: tensor<f32>) (%arg3: tensor<f32>, %arg5: tensor<f32>)  {
+      %2 = stablehlo.add %arg2, %arg4 : tensor<f32>
+      %3 = stablehlo.add %arg3, %arg5 : tensor<f32>
+      stablehlo.return %2, %3 : tensor<f32>, tensor<f32>
+    }
+  return %1#0, %1#1 : tensor<2x13xf32>, tensor<2x13xf32>
+}
+
+// -----
+
+sdy.mesh @mesh2 = <["b"=2]>
+
+// CHECK-LABEL: func @op_shardings_bound_to_different_inlined_and_referenced_meshes
+func.func @op_shardings_bound_to_different_inlined_and_referenced_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
+  %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+   // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["b"=2]> vs #sdy.mesh<["a"=2]>}}
+  %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1]
+    {sdy.sharding=#sdy.sharding_per_value<[<mesh<["a"=2]>, [{"a"}, {}]>, <@mesh2, [{"b"}, {}]>]>} :
     (tensor<2x64x13xf32>, tensor<2x64x13xf32>, tensor<f32>, tensor<f32>) -> (tensor<2x13xf32>, tensor<2x13xf32>)
     reducer(%arg2: tensor<f32>, %arg4: tensor<f32>) (%arg3: tensor<f32>, %arg5: tensor<f32>)  {
       %2 = stablehlo.add %arg2, %arg4 : tensor<f32>
@@ -191,9 +227,17 @@ func.func @multi_result_op_failure(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x6
 
 sdy.mesh @mesh = <["a"=2]>
 
-func.func @unknown_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func @unknown_axis_mesh_ref(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{unknown axis name: "c"}}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {"c"}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+func.func @unknown_axis_inlined_mesh(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // expected-error @+1 {{unknown axis name: "c"}}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<mesh<["a"=2, "b"=2]>, [{}, {"c"}]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 

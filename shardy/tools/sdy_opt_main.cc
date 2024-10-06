@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Quant/QuantOps.h"
+#include "mlir/Dialect/Quant/IR/Quant.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
   mlir::registerAllPasses();
 
   mlir::DialectRegistry dialects;
-  dialects.insert<mlir::func::FuncDialect, mlir::quant::QuantizationDialect,
+  dialects.insert<mlir::func::FuncDialect, mlir::quant::QuantDialect,
                   mlir::sdy::SdyDialect, mlir::stablehlo::StablehloDialect>();
   mlir::func::registerAllExtensions(dialects);
 

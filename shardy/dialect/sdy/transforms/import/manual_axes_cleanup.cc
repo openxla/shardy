@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Rewrite/FrozenRewritePatternSet.h"
 #include "mlir/Support/LLVM.h"
@@ -40,13 +41,13 @@ namespace {
 
 // Returns whether the new shardings needed to be updated to account for unused
 // manual axes, and the new shardings.
-std::optional<SmallVector<TensorShardingAttr>> addUnusedManualAxesToReplicatedAxes(
+std::optional<SmallVector<TensorShardingAttr>>
+addUnusedManualAxesToReplicatedAxes(
     ArrayRef<TensorShardingAttr> shardings, ArrayRef<StringAttr> manualAxes,
-    std::function<bool(AxisRefAttr lhs, AxisRefAttr rhs)> meshComparator,
-    StringAttr meshName) {
+    std::function<bool(AxisRefAttr lhs, AxisRefAttr rhs)> meshComparator) {
   SmallVector<TensorShardingAttr> newShardings;
   bool modified = false;
-  for (const auto& sharding : shardings) {
+  for (TensorShardingAttr sharding : shardings) {
     llvm::SmallSet<StringRef, 2> unusedManualAxes;
     unusedManualAxes.insert(manualAxes.begin(), manualAxes.end());
     sharding.forEachAxisRef([&unusedManualAxes](AxisRefAttr axis) {
@@ -67,7 +68,7 @@ std::optional<SmallVector<TensorShardingAttr>> addUnusedManualAxesToReplicatedAx
                     });
     llvm::sort(newReplicatedAxes, meshComparator);
     newShardings.push_back(
-        TensorShardingAttr::get(sharding.getContext(), meshName,
+        TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
                                 sharding.getDimShardings(), newReplicatedAxes));
     modified = true;
   }
@@ -76,44 +77,29 @@ std::optional<SmallVector<TensorShardingAttr>> addUnusedManualAxesToReplicatedAx
 
 // Adds any unused manual axes to the replicated_axes list for each in/out
 // sharding
-void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op) {
+void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op,
+                                         MeshAttr mesh) {
   OpBuilder builder(op);
-  std::optional<StringRef> meshName = getCommonMeshName(
-      op.getInShardings().getShardings(), op.getOutShardings().getShardings());
-  assert(meshName.has_value() &&
-         "Expected no input/output ManualComputationOps to be canonicalized");
-  MeshAttr mesh = getMeshAttr(op, *meshName);
-  assert(mesh && "unknown mesh");
 
   ArrayRef<StringAttr> manualAxes = op.getManualAxes();
   auto meshComparator = AxisRefAttr::getMeshComparator(mesh);
-  SmallVector<TensorShardingAttr> newShardings;
-  StringAttr meshNameAttr = builder.getStringAttr(*meshName);
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
-              op.getInShardings().getShardings(), manualAxes, meshComparator,
-              meshNameAttr)) {
+              op.getInShardings().getShardings(), manualAxes, meshComparator)) {
     op.setInShardings(*newShardings);
   }
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
-              op.getOutShardings().getShardings(), manualAxes, meshComparator,
-              meshNameAttr)) {
+              op.getOutShardings().getShardings(), manualAxes,
+              meshComparator)) {
     op.setOutShardings(*newShardings);
   }
 }
 
 // Sorts the manual axes in mesh axis order.
-void sortManualAxes(ManualComputationOp op) {
-  std::optional<StringRef> meshName = getCommonMeshName(
-      op.getInShardings().getShardings(), op.getOutShardings().getShardings());
-  assert(meshName.has_value() &&
-         "Expected no input/output ManualComputationOps to be canonicalized");
-  MeshAttr mesh = getMeshAttr(op, meshName.value());
-  assert(mesh && "unknown mesh");
-
+void sortManualAxes(ManualComputationOp op, MeshAttr mesh) {
   ArrayRef<StringAttr> manualAxes = op.getManualAxes();
   auto meshComparator = mesh.getAxisNameComparator();
 
@@ -131,8 +117,18 @@ struct ManualAxesCleanupPass
 
   void runOnOperation() final {
     getOperation()->walk([](ManualComputationOp op) {
-      sortManualAxes(op);
-      addUnusedManualAxesToReplicatedAxes(op);
+      ArrayRef<TensorShardingAttr> inShardings =
+          op.getInShardings().getShardings();
+      ArrayRef<TensorShardingAttr> outShardings =
+          op.getOutShardings().getShardings();
+      if (inShardings.empty() && outShardings.empty()) {
+        // Nothing to do.
+        return;
+      }
+      MeshAttr mesh = getCommonMesh(inShardings, outShardings, op);
+      assert(mesh && "expected inputs and outputs to have a common mesh");
+      sortManualAxes(op, mesh);
+      addUnusedManualAxesToReplicatedAxes(op, mesh);
     });
   }
 

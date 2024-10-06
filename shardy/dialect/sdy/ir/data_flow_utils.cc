@@ -97,6 +97,14 @@ void setBlockArgumentEdgeOwnerShardings(
       shardings);
 }
 
+void setOpResultEdgeOwnerShardings(Operation* op,
+                                   ArrayRef<TensorShardingAttr> shardings) {
+  if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+    return shardableDataFlowOp.setOpResultEdgeOwnerShardings(shardings);
+  }
+  setShardings(op, shardings);
+}
+
 DataFlowEdgeOp getDataFlowEdge(Value target) {
   return DataFlowEdgeOp::getDataFlowEdgeUser(getDataFlowEdgeOwner(target));
 }

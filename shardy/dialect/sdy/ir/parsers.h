@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/Region.h"
 #include "mlir/Support/LLVM.h"
@@ -26,6 +27,8 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
+
+ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef);
 
 // Parses the factor sizes of an OpShardingRule. The keys in the list are the
 // indices in the factor mapping, with i=0, j=1, k=2,... z=17. For any index

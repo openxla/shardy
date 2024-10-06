@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "llvm/ADT/STLExtras.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/Region.h"
@@ -49,6 +50,15 @@ void DimensionShardingAttr::print(AsmPrinter& printer) const {
 void DimMappingAttr::print(AsmPrinter& printer) const {
   for (int64_t factorIndex : getFactorIndices()) {
     printer << factorSymbolString(factorIndex);
+  }
+}
+
+void printMeshOrRef(AsmPrinter& printer, Attribute meshOrRef) {
+  if (auto mesh = dyn_cast<MeshAttr>(meshOrRef)) {
+    printer << MeshAttr::getMnemonic();
+    printer.printStrippedAttrOrType(mesh);
+  } else {
+    printer << meshOrRef;
   }
 }
 

@@ -33,6 +33,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
@@ -73,6 +74,18 @@ EmitErrorFn getEmitValueInRangeErrorFn(EmitErrorFn emitError, int64_t numValues,
     }
     return emitError("") << index << " - " << msg;
   };
+}
+
+template <class OpOrSymbolTable>
+FailureOr<MeshAttr> getMeshOrFail(TensorShardingAttr sharding,
+                                  OpOrSymbolTable opOrSymbolTable,
+                                  EmitErrorFn emitError) {
+  MeshAttr mesh = sharding.getMesh(opOrSymbolTable);
+  if (!mesh) {
+    // We can assume the sharding has a mesh symbol name.
+    return emitError("unknown mesh: ") << sharding.getMeshSymName();
+  }
+  return mesh;
 }
 
 // Verifies the following for `axisRefs`:
@@ -333,18 +346,17 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   return success();
 }
 
-// Same as the overload above, but in addition verifies that the mesh name in
-// `shardingAttr` is present in the module's symbol table.
+// Same as the overload above, but in addition verifies that if `shardingAttr`
+// references a mesh by name, it's present in the module's symbol table.
 LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        Type type, Operation* op,
                                        EmitErrorFn emitError) {
-  SymbolRefAttr meshName = shardingAttr.getMeshSymName();
-  MeshAttr mesh = getMeshAttr(op, meshName);
-  if (!mesh) {
-    return emitError("unknown mesh: ") << meshName;
+  FailureOr<MeshAttr> mesh = getMeshOrFail(shardingAttr, op, emitError);
+  if (failed(mesh)) {
+    return failure();
   }
 
-  return verifyTensorShardingAttr(shardingAttr, type, mesh, emitError,
+  return verifyTensorShardingAttr(shardingAttr, type, *mesh, emitError,
                                   /*checkDivisibility=*/false,
                                   getParentManualComputationOps(op));
 }
@@ -353,12 +365,15 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
 //
 // - The number of tensor shardings is equal to the number of tensors (size of
 //   `types`).
-// - All shardings reference the same mesh name, and that name is present in the
-//   module's symbol table.
+// - All shardings must have the same mesh, and it must be equal to `commonMesh`
+//   if present.
 // - All shardings are valid (see `verifyTensorShardingAttr`).
+// TODO(bartchr): relax this to allow different meshes when the op is a dataflow
+// op
 LogicalResult verifyTensorShardingPerValueAttr(
     TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
-    Operation* op, EmitErrorFn emitError, SymbolRefAttr meshName) {
+    Operation* op, EmitErrorFn emitError, const SymbolTable& symbolTable,
+    MeshAttr commonMesh = MeshAttr()) {
   ArrayRef<TensorShardingAttr> shardingsPerValue =
       shardingPerValueAttr.getShardings();
   if (shardingsPerValue.size() != types.size()) {
@@ -367,35 +382,41 @@ LogicalResult verifyTensorShardingPerValueAttr(
            << " values";
   }
 
-  MeshAttr mesh;
   for (auto [index, entry] :
        llvm::enumerate(llvm::zip(shardingsPerValue, types))) {
     EmitErrorFn valueEmitError =
         getEmitValueInRangeErrorFn(emitError, types.size(), index);
     auto [shardingAttr, resultType] = entry;
-    SymbolRefAttr otherMeshName = shardingAttr.getMeshSymName();
-    if (!meshName) {
-      meshName = otherMeshName;
-    } else if (meshName != otherMeshName) {
-      return emitError("shardings can only refer to one mesh: ")
-             << otherMeshName << " vs " << meshName;
+    FailureOr<MeshAttr> otherMesh =
+        getMeshOrFail(shardingAttr, symbolTable, valueEmitError);
+    if (failed(otherMesh)) {
+      return failure();
     }
 
-    if (!mesh) {
-      mesh = getMeshAttr(op, meshName);
-      if (!mesh) {
-        return valueEmitError("unknown mesh: ") << meshName;
-      }
+    if (!commonMesh) {
+      commonMesh = *otherMesh;
+    } else if (*otherMesh != commonMesh) {
+      return emitError("shardings can only be bound to one mesh: ")
+             << *otherMesh << " vs " << commonMesh;
     }
 
     if (failed(verifyTensorShardingAttr(
-            shardingAttr, resultType, mesh, valueEmitError,
+            shardingAttr, resultType, commonMesh, valueEmitError,
             /*checkDivisibility=*/false, getParentManualComputationOps(op)))) {
       return failure();
     }
   }
 
   return success();
+}
+
+// Same as the overload above, but creates a `SymbolTable`.
+LogicalResult verifyTensorShardingPerValueAttr(
+    TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
+    Operation* op, EmitErrorFn emitError, MeshAttr commonMesh = MeshAttr()) {
+  return verifyTensorShardingPerValueAttr(
+      shardingPerValueAttr, types, op, emitError,
+      SymbolTable(op->getParentOfType<ModuleOp>()), commonMesh);
 }
 
 // Verifies an attribute of either a function argument or result.
@@ -636,10 +657,11 @@ LogicalResult DataFlowEdgeOp::verify() {
         "expected input of sdy.data_flow_edge to have a single user");
   }
   if (Operation* depOp = getInput().getDefiningOp();
-      depOp && inDialect<SdyDialect>(depOp)) {
+      depOp && inDialect<SdyDialect>(depOp) &&
+      !mlir::isa<ShardableDataFlowOpInterface>(depOp)) {
     return emitOpError(
                "expected input of sdy.data_flow_edge to not be defined by an "
-               "SdyDialect op")
+               "SdyDialect op (other than an sdy.named_computation).")
                .attachNote(depOp->getLoc())
            << "sdy op defining the input of the sdy.data_flow_edge";
   }
@@ -687,7 +709,7 @@ ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
 // For each set of op values (operands/results) and corresponding sharding for
 // each value, verifies:
 // 1. the sharding list itself wrt the mesh and `globalTypes`,
-// 2. each sharding is bound to the same 'meshName',
+// 2. each sharding is bound to the same `mesh`,
 // 3. the in/out shardings are valid w.r.t the corresponding global
 //    type,
 // 4. the number of global and local tensor inputs/outputs of the op region
@@ -703,7 +725,8 @@ ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
 template <typename GlobalRangeT, typename LocalRangeT>
 LogicalResult verifyManualComputationValue(
     ManualComputationOp op, GlobalRangeT globalTypes, LocalRangeT localTypes,
-    TensorShardingPerValueAttr shardingPerValueAttr, SymbolRefAttr meshName,
+    TensorShardingPerValueAttr shardingPerValueAttr,
+    const SymbolTable& symbolTable, MeshAttr mesh,
     const llvm::SmallDenseSet<StringRef>& manualAxesSet,
     StringRef valueKindStr) {
   if (globalTypes.empty() && localTypes.empty() &&
@@ -712,7 +735,7 @@ LogicalResult verifyManualComputationValue(
     return success();
   }
   // 1. Verify the sharding list itself wrt the mesh and `globalTypes`.
-  // 2. Verify each sharding is bound to the same 'meshName'.
+  // 2. Verify each sharding is bound to the same 'mesh'.
   // 3. Verify the in/out shardings are valid w.r.t the corresponding global
   //    type.
   if (failed(verifyTensorShardingPerValueAttr(
@@ -720,7 +743,7 @@ LogicalResult verifyManualComputationValue(
           [op, valueKindStr](StringRef msg) {
             return op->emitOpError(valueKindStr) << " " << msg;
           },
-          meshName))) {
+          symbolTable, mesh))) {
     return failure();
   }
 
@@ -734,7 +757,6 @@ LogicalResult verifyManualComputationValue(
            << valueKindStr << "s";
   }
 
-  MeshAttr mesh = getMeshAttr(op, meshName);
   for (auto [valueIndex, valueEntry] : llvm::enumerate(llvm::zip_equal(
            globalTypes, localTypes, shardingPerValueAttr.getShardings()))) {
     auto [globalType, localType, sharding] = valueEntry;
@@ -805,7 +827,7 @@ mlir::LogicalResult TensorShardingAttr::verifyForType(
 
 LogicalResult ManualComputationOp::verify() {
   ManualAxisToOwner alreadyManualAxes =
-      getParentManualComputationOps(this->getOperation());
+      getParentManualComputationOps(getOperation());
   for (StringRef axisName : getManualAxes()) {
     if (alreadyManualAxes.contains(axisName)) {
       return emitBoundAxisInManualComputationError(
@@ -814,29 +836,29 @@ LogicalResult ManualComputationOp::verify() {
     }
   }
 
-  // Pick any mesh. verifyManualComputationValue will verify all in/out
+  // Pick any mesh. `verifyManualComputationValue` will verify all in/out
   // shardings refer to the same mesh.
-  SymbolRefAttr meshName;
+  MeshAttr mesh;
   if (!getInShardings().empty()) {
-    meshName = getInShardings().getShardings().front().getMeshSymName();
+    mesh = getInShardings().getShardings().front().getMesh(getOperation());
   } else if (!getOutShardings().empty()) {
-    meshName = getOutShardings().getShardings().front().getMeshSymName();
+    mesh = getOutShardings().getShardings().front().getMesh(getOperation());
+  } else if (!getManualAxes().empty()) {
+    return emitOpError(
+        "cannot have manual_axes when there are no input/output shardings.");
   }
+  // If a call to `getMesh` returned empty, a failure will be emitted in
+  // `verifyManualComputationValue`.
 
-  if (!getManualAxes().empty()) {
-    if (!meshName) {
-      return emitOpError(
-          "cannot have manual_axes when there are no input/output shardings.");
-    }
-  }
+  SymbolTable symbolTable(getOperation()->getParentOfType<ModuleOp>());
   llvm::SmallDenseSet<StringRef> manualAxesSet(
       getManualAxes().begin(), getManualAxes().end());
   if (failed(verifyManualComputationValue(
           *this, getOperandTypes(), getBody().getArgumentTypes(),
-          getInShardings(), meshName, manualAxesSet, "operand")) ||
+          getInShardings(), symbolTable, mesh, manualAxesSet, "operand")) ||
       failed(verifyManualComputationValue(
           *this, getResultTypes(), getBodyTerminatorOpOperandTypes(*this),
-          getOutShardings(), meshName, manualAxesSet, "result"))) {
+          getOutShardings(), symbolTable, mesh, manualAxesSet, "result"))) {
     return failure();
   }
 
@@ -849,6 +871,69 @@ LogicalResult PropagationBarrierOp::verify() {
         "cannot specify `BOTH` as the direction. Not blocking propagation "
         "direction makes the op redundant.");
   }
+  return success();
+}
+
+namespace {
+
+LogicalResult AllInnerAndOuterTypesMatchInNamedComputation(
+    NamedComputationOp op, TypeRange innerTypes, TypeRange outerTypes,
+    StringRef innerName, StringRef outerName) {
+  if (innerTypes.size() != outerTypes.size()) {
+    return op.emitError("number of ")
+           << innerName << "s must match the number of " << outerName
+           << "s: " << innerTypes.size() << " != " << outerTypes.size();
+  }
+
+  for (auto [i, types] :
+       llvm::enumerate(llvm::zip_equal(innerTypes, outerTypes))) {
+    auto [innerType, outerType] = types;
+    if (innerType != outerType) {
+      return op.emitError("expected the type of the ")
+             << i << "'th " << innerName
+             << " to match the type of the corresponding " << outerName << ": "
+             << innerType << " vs " << outerType;
+    }
+  }
+
+  return success();
+}
+
+}  // namespace
+
+LogicalResult NamedComputationOp::verify() {
+  if (failed(AllInnerAndOuterTypesMatchInNamedComputation(
+          *this, getBody().getArgumentTypes(), getOperandTypes(),
+          "block argument", "operand")) ||
+      failed(AllInnerAndOuterTypesMatchInNamedComputation(
+          *this, getBodyTerminatorOpOperandTypes(*this), getResultTypes(),
+          "returned value", "result"))) {
+    return failure();
+  }
+
+  std::optional<TensorShardingPerValueAttr> inShardings = getInShardings();
+  std::optional<TensorShardingPerValueAttr> outShardings = getOutShardings();
+  if (!(inShardings || outShardings)) {
+    return success();
+  }
+
+  // TODO(pxy): remove this once the `ShardableDataFlowOpInterface` is verified.
+  // Verify the in/out shardings.
+  if (inShardings &&
+      failed(verifyTensorShardingPerValueAttr(
+          *inShardings, getOperandTypes(), *this, [this](StringRef msg) {
+            return emitOpError("in_shardings ") << msg;
+          }))) {
+    return failure();
+  }
+  if (outShardings &&
+      failed(verifyTensorShardingPerValueAttr(
+          *outShardings, getResultTypes(), *this, [this](StringRef msg) {
+            return emitOpError("out_shardings ") << msg;
+          }))) {
+    return failure();
+  }
+
   return success();
 }
 
@@ -891,12 +976,9 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
              << "TensorShardingPerValueAttr";
     }
 
-    // TODO(tomnatan): verify all relevant tensors are bound to the same mesh
-
     return verifyTensorShardingPerValueAttr(
         shardingPerValue, op->getResultTypes(), op,
-        [op](StringRef msg) { return op->emitOpError("result ") << msg; },
-        SymbolRefAttr());
+        [op](StringRef msg) { return op->emitOpError("result ") << msg; });
   }
 
   if (attr.getName() == kShardingRuleAttr) {

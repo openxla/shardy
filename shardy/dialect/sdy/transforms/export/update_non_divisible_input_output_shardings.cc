@@ -60,8 +60,7 @@ namespace {
 // See update_non_divisible_input_output_shardings.mlir for more examples.
 TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
                                     ShapedType type, func::FuncOp funcOp) {
-  StringRef meshName = sharding.getMeshName();
-  MeshAttr mesh = getMeshAttr(funcOp, meshName);
+  MeshAttr mesh = sharding.getMesh(funcOp);
   assert(mesh && "unknown mesh");
   MLIRContext* ctx = funcOp->getContext();
   llvm::SmallVector<DimensionShardingAttr> newDimShardings;
@@ -119,7 +118,7 @@ TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
   // NOTE: no need to account for replicated axes, since we end with a sharding
   // that covers less-than-or-equal amount of axes than we started with. So no
   // way the final sharding can use an axis/sub-axis from the replicated axes.
-  return TensorShardingAttr::get(ctx, meshName, newDimShardings,
+  return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), newDimShardings,
                                  sharding.getReplicatedAxes());
 }
 
@@ -156,12 +155,9 @@ struct UpdateNonDivisibleInputOutputShardingsPass
     // Update results.
     updateValueShardings(
         funcOp.getResultTypes(),
-        [&](int64_t index) {
-          return funcOp.getResultAttrOfType<TensorShardingAttr>(index,
-                                                                kShardingAttr);
-        },
+        [&](int64_t index) { return getFuncResultSharding(funcOp, index); },
         [&](int64_t index, TensorShardingAttr sharding) {
-          funcOp.setResultAttr(index, kShardingAttr, sharding);
+          setFuncResultSharding(funcOp, index, sharding);
         },
         funcOp);
   }

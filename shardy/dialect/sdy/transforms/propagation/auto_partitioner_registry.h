@@ -18,8 +18,8 @@ limitations under the License.
 
 #include <functional>
 
+#include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/PassOptions.h"
-#include "mlir/IR/DialectRegistry.h"  // from @llvm-project
 
 namespace mlir {
 namespace sdy {
