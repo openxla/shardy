@@ -75,16 +75,6 @@ within that sub-computation.
 
 NOTE: This pass is the MLIR equivalent of xla::HloConstantSplitter,
 needed for the purpose of Shardy Propagation.
-### `-sdy-import-maximal-sharding`
-
-_Convert sdy.sharding=n to maximal sharding._
-
-Convert `sdy.sharding=n` to maximal sharding as follows:
-
-```mlir
-@sdy.mesh @maximal_mesh_n = <device_ids=[n]>
-sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
-```
 ### `-sdy-lift-inlined-meshes`
 
 _Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s._
@@ -94,8 +84,11 @@ name, referencing either an existing or new `MeshOp` in the module, such
 that no two `MeshOp`s with an identical `MeshAttr` (existing `MeshOp`s are
 deduped as well).
 
-Each new mesh will have the first available name in
-[`mesh`, `mesh_0`, `mesh_1`, ...].
+The name of each new `MeshOp` will either be:
+
+* `maximal_mesh_{device-id}`, for a maximal mesh (i.e., empty axis list and
+  a single device ID).
+* The first available name in [`mesh`, `mesh_0`, `mesh_1`, ...], otherwise.
 ### `-sdy-manual-axes-cleanup`
 
 _Cleans up the use of manual axes in `ManualComputationOp`s_
