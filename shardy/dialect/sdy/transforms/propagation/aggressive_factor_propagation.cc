@@ -82,10 +82,10 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
           newAxes,
           [&, factorIndex = factorIndex, &factorSharding = factorSharding,
            &tensorFactorShardings = tensorFactorShardings](
-              AxisRefAttr axisRef, int64_t shardedSize) {
+              AxisRefAttr axisRef, int64_t prevShardedSize) {
             return compatiblePrefixNoConflictsWithinFactor(
                 axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
-                shardedSize, factorSizes[factorIndex]);
+                prevShardedSize, factorSizes[factorIndex], mesh);
           },
           mesh, conservativePropagation);
       if (shouldUpdate(factorSharding.axisRefs, newAxes)) {

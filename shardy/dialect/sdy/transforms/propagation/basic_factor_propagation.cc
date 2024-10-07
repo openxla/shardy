@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -74,8 +75,8 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
 std::optional<AxisRefAttr>
 BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> replicatedAxes,
-    const FactorSharding& factorSharding, int64_t shardedSize,
-    int64_t factorSize) const {
+    const FactorSharding& factorSharding, int64_t prevShardedSize,
+    int64_t factorSize, MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
 
   SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
@@ -93,10 +94,26 @@ BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
   // `factorAxes` with `result`. It is feasible only if the factor:
   // - is open.
   // - does not have overflow axes.
-  // - is minor-most or `factorSize` is divisible by `shardedSize`.
-  if (!factorSharding.isClosed && factorSharding.overflowAxes.empty() &&
-      (factorSharding.isMinorMost || factorSize % shardedSize == 0)) {
-    return result;
+  // - is minor-most or the returned prefix of `result` does not overflow the
+  //   factor w.r.t. `factorSize`.
+  if (!factorSharding.isClosed && factorSharding.overflowAxes.empty()) {
+    if (factorSharding.isMinorMost) {
+      return result;
+    }
+    if (!mesh) {
+      return result;
+    }
+    if (factorSize % prevShardedSize == 0) {
+      const int64_t axisSize = result.getSize(mesh);
+      const int64_t gcd = std::gcd(factorSize / prevShardedSize, axisSize);
+      if (gcd == axisSize) {
+        return result;
+      }
+      if (gcd != 1) {
+        return AxisRefAttr::get(result.getContext(), result.getName(),
+                                result.getSubAxisPreSize(), gcd);
+      }
+    }
   }
 
   // We cannot propagate the full `result` to `factorAxes`. We can still keep
@@ -113,18 +130,13 @@ BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
 void BasicFactorPropagation::truncateAxesByRemovingConflicts(
     SmallVector<AxisRefAttr>& axes,
     std::function<std::optional<AxisRefAttr>(AxisRefAttr curAxis,
-                                             int64_t shardedSize)>
+                                             int64_t prevShardedSize)>
         removeConflicts,
     MeshAttr mesh, bool conservativePropagation) const {
-  int64_t shardedSize = 1;
+  int64_t prevShardedSize = 1;
   for (const auto [axisIndex, curAxis] : llvm::enumerate(axes)) {
-    // This check is only for tests. For convenience we can pass a `MeshAttr()`
-    // to avoid the divisibility constraint.
-    if (mesh) {
-      shardedSize *= curAxis.getSize(mesh);
-    }
-
-    std::optional<AxisRefAttr> newAxis = removeConflicts(curAxis, shardedSize);
+    std::optional<AxisRefAttr> newAxis =
+        removeConflicts(curAxis, prevShardedSize);
     if (!newAxis || (conservativePropagation && newAxis->getSubAxisInfo())) {
       axes.truncate(axisIndex);
       return;
@@ -133,6 +145,12 @@ void BasicFactorPropagation::truncateAxesByRemovingConflicts(
       axes[axisIndex] = *newAxis;
       axes.truncate(axisIndex + 1);
       return;
+    }
+
+    // This check is only for tests. For convenience we can pass a `MeshAttr()`
+    // to avoid the divisibility constraint.
+    if (mesh) {
+      prevShardedSize *= newAxis->getSize(mesh);
     }
   }
 }
@@ -319,7 +337,8 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
 
 std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     AxisRefAttr axisRef, const TensorFactorShardings& tensorFactorSharding,
-    int64_t factorIndex, int64_t shardedSize, int64_t factorSize) const {
+    int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
+    MeshAttr mesh) const {
   const FactorIndexToSharding& factorIndexToSharding =
       tensorFactorSharding.factorIndexToSharding;
 
@@ -341,19 +360,20 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
   // within the factor.
   return compatiblePrefixNoConflictsWithinFactor(
       result, tensorFactorSharding.replicatedAxes, factorShardingIt->second,
-      shardedSize, factorSize);
+      prevShardedSize, factorSize, mesh);
 }
 
 std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     AxisRefAttr axisRef, const ShardingProjection& projection,
-    int64_t factorIndex, int64_t shardedSize, int64_t factorSize) const {
+    int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
+    MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
     SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
         result, compatiblePrefix(result, tensorFactorSharding, factorIndex,
-                                 shardedSize, factorSize));
+                                 prevShardedSize, factorSize, mesh));
   }
   return result;
 }
@@ -374,9 +394,9 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
   // the replicated axes, and all axes that are minor to it.
   truncateAxesByRemovingConflicts(
       resultAxes,
-      [&](AxisRefAttr axisRef, int64_t shardedSize) {
-        return compatiblePrefix(axisRef, projection, factorIndex, shardedSize,
-                                factorSize);
+      [&](AxisRefAttr axisRef, int64_t prevShardedSize) {
+        return compatiblePrefix(axisRef, projection, factorIndex,
+                                prevShardedSize, factorSize, mesh);
       },
       mesh, conservativePropagation);
 
