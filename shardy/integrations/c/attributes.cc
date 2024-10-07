@@ -35,6 +35,12 @@ AttrTy unwrapAttr(MlirAttribute attr) {
   return mlir::cast<AttrTy>(unwrap(attr));
 }
 
+template <typename AttrTy>
+mlir::ArrayRef<AttrTy> unwrapAttrs(const MlirAttribute* attrs,
+                                   intptr_t nAttrs) {
+  return mlir::ArrayRef(reinterpret_cast<const AttrTy*>(attrs), nAttrs);
+}
+
 }  // namespace
 
 //===----------------------------------------------------------------------===//
@@ -69,10 +75,9 @@ bool sdyAttributeIsAMeshAttr(MlirAttribute attr) {
 MlirAttribute sdyMeshAttrGet(MlirContext ctx, intptr_t nAxes,
                              const MlirAttribute* axes, intptr_t nDeviceIds,
                              const int64_t* deviceIds) {
-  return wrap(sdy::MeshAttr::get(
-      unwrap(ctx),
-      mlir::ArrayRef(reinterpret_cast<const sdy::MeshAxisAttr*>(axes), nAxes),
-      mlir::ArrayRef(deviceIds, nDeviceIds)));
+  return wrap(sdy::MeshAttr::get(unwrap(ctx),
+                                 unwrapAttrs<sdy::MeshAxisAttr>(axes, nAxes),
+                                 mlir::ArrayRef(deviceIds, nDeviceIds)));
 }
 
 int64_t sdyMeshAttrGetDeviceIdsSize(MlirAttribute attr) {
@@ -151,9 +156,8 @@ MlirAttribute sdyDimensionShardingAttrGet(MlirContext ctx, intptr_t nAxes,
                                           const MlirAttribute* axes,
                                           bool isClosed, int64_t priority) {
   return wrap(sdy::DimensionShardingAttr::get(
-      unwrap(ctx),
-      mlir::ArrayRef(reinterpret_cast<const sdy::AxisRefAttr*>(axes), nAxes),
-      isClosed, priority == -1 ? std::nullopt : std::make_optional(priority)));
+      unwrap(ctx), unwrapAttrs<sdy::AxisRefAttr>(axes, nAxes), isClosed,
+      priority == -1 ? std::nullopt : std::make_optional(priority)));
 }
 
 intptr_t sdyDimensionShardingAttrGetAxesSize(MlirAttribute attr) {
@@ -184,23 +188,19 @@ bool sdyAttributeIsATensorShardingAttr(MlirAttribute attr) {
   return mlir::isa<sdy::TensorShardingAttr>(unwrap(attr));
 }
 
-MlirAttribute sdyTensorShardingAttrGet(MlirContext ctx, MlirStringRef meshName,
+MlirAttribute sdyTensorShardingAttrGet(MlirContext ctx, MlirAttribute meshOrRef,
                                        intptr_t nDimShardings,
                                        const MlirAttribute* dimShardings,
                                        intptr_t nReplicatedAxes,
                                        const MlirAttribute* replicatedAxes) {
   return wrap(sdy::TensorShardingAttr::get(
-      unwrap(ctx), unwrap(meshName),
-      mlir::ArrayRef(
-          reinterpret_cast<const sdy::DimensionShardingAttr*>(dimShardings),
-          nDimShardings),
-      mlir::ArrayRef(reinterpret_cast<const sdy::AxisRefAttr*>(replicatedAxes),
-                     nReplicatedAxes)));
+      unwrap(ctx), unwrap(meshOrRef),
+      unwrapAttrs<sdy::DimensionShardingAttr>(dimShardings, nDimShardings),
+      unwrapAttrs<sdy::AxisRefAttr>(replicatedAxes, nReplicatedAxes)));
 }
 
-MlirStringRef sdyTensorShardingAttrGetMeshName(MlirAttribute attr) {
-  return wrap(
-      unwrapAttr<sdy::TensorShardingAttr>(attr).getMeshSymName().getValue());
+MlirAttribute sdyTensorShardingAttrGetMeshOrRef(MlirAttribute attr) {
+  return wrap(unwrapAttr<sdy::TensorShardingAttr>(attr).getMeshOrRef());
 }
 
 intptr_t sdyTensorShardingAttrGetDimShardingsSize(MlirAttribute attr) {
@@ -236,9 +236,7 @@ MlirAttribute sdyTensorShardingPerValueAttrGet(MlirContext ctx,
                                                const MlirAttribute* shardings) {
   return wrap(sdy::TensorShardingPerValueAttr::get(
       unwrap(ctx),
-      mlir::ArrayRef(
-          reinterpret_cast<const sdy::TensorShardingAttr*>(shardings),
-          nShardings)));
+      unwrapAttrs<sdy::TensorShardingAttr>(shardings, nShardings)));
 }
 
 intptr_t sdyTensorShardingPerValueAttrGetShardingsSize(MlirAttribute attr) {
@@ -287,9 +285,7 @@ bool sdyAttributeIsATensorMappingAttr(MlirAttribute attr) {
 MlirAttribute sdyTensorMappingAttrGet(MlirContext ctx, intptr_t nMappings,
                                       const MlirAttribute* mappings) {
   return wrap(sdy::TensorMappingAttr::get(
-      unwrap(ctx),
-      mlir::ArrayRef(reinterpret_cast<const sdy::DimMappingAttr*>(mappings),
-                     nMappings)));
+      unwrap(ctx), unwrapAttrs<sdy::DimMappingAttr>(mappings, nMappings)));
 }
 
 intptr_t sdyTensorMappingAttrGetRank(MlirAttribute attr) {
@@ -322,12 +318,8 @@ MlirAttribute sdyOpShardingRuleAttrGet(MlirContext ctx, intptr_t nFactorSizes,
                                        bool isCustomRule) {
   return wrap(sdy::OpShardingRuleAttr::get(
       unwrap(ctx), mlir::ArrayRef(factorSizes, nFactorSizes),
-      mlir::ArrayRef(
-          reinterpret_cast<const sdy::TensorMappingAttr*>(operandMappings),
-          nOperandMappings),
-      mlir::ArrayRef(
-          reinterpret_cast<const sdy::TensorMappingAttr*>(resultMappings),
-          nResultMappings),
+      unwrapAttrs<sdy::TensorMappingAttr>(operandMappings, nOperandMappings),
+      unwrapAttrs<sdy::TensorMappingAttr>(resultMappings, nResultMappings),
       isCustomRule));
 }
 
@@ -374,8 +366,8 @@ bool sdyAttributeIsAManualAxesAttr(MlirAttribute attr) {
 
 MlirAttribute sdyManualAxesAttrGet(
     MlirContext ctx, intptr_t nAxes, const MlirAttribute* axes) {
-  return wrap(sdy::ManualAxesAttr::get(unwrap(ctx), mlir::ArrayRef(
-      reinterpret_cast<const mlir::StringAttr*>(axes), nAxes)));
+  return wrap(sdy::ManualAxesAttr::get(
+      unwrap(ctx), unwrapAttrs<mlir::StringAttr>(axes, nAxes)));
 }
 
 intptr_t sdyManualAxesAttrGetAxesSize(MlirAttribute attr) {

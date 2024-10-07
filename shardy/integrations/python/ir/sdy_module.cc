@@ -15,8 +15,10 @@ limitations under the License.
 
 #include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
+#include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
 #include "mlir/Bindings/Python/PybindAdaptors.h"  // IWYU pragma: keep
@@ -51,6 +53,15 @@ py::str toPyString(MlirStringRef mlirStringRef) {
 
 MlirStringRef toStringRef(const std::string& s) {
   return mlirStringRefCreate(s.c_str(), s.size());
+}
+
+MlirAttribute toMeshOrRefAttr(
+    MlirContext ctx,
+    const std::variant<std::string, MlirAttribute>& meshOrRef) {
+  if (auto* meshName = std::get_if<std::string>(&meshOrRef)) {
+    return mlirFlatSymbolRefAttrGet(ctx, toStringRef(*meshName));
+  }
+  return std::get<MlirAttribute>(meshOrRef);
 }
 
 PYBIND11_MODULE(_sdy, m) {
@@ -192,25 +203,26 @@ PYBIND11_MODULE(_sdy, m) {
       m, "TensorShardingAttr", sdyAttributeIsATensorShardingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::string& meshName,
+          [](py::object cls,
+             const std::variant<std::string, MlirAttribute>& meshOrRef,
              const std::vector<MlirAttribute>& dimensionShardings,
              const std::vector<MlirAttribute>& replicatedAxes,
              MlirContext ctx) {
             return cls(sdyTensorShardingAttrGet(
-                ctx, toStringRef(meshName), dimensionShardings.size(),
+                ctx, toMeshOrRefAttr(ctx, meshOrRef), dimensionShardings.size(),
                 dimensionShardings.data(), replicatedAxes.size(),
                 replicatedAxes.data()));
           },
-          py::arg("cls"), py::arg("mesh_name"), py::arg("dimension_shardings"),
+          py::arg("cls"), py::arg("mesh_or_ref"),
+          py::arg("dimension_shardings"),
           py::arg("replicated_axes") = std::vector<MlirAttribute>(),
           py::arg("context") = py::none(),
-          "Creates a TensorShardingAttr with the mesh name, dimension "
-          "shardings, and replicated axes.")
-      .def_property_readonly(
-          "mesh_name",
-          [](MlirAttribute self) {
-            return toPyString(sdyTensorShardingAttrGetMeshName(self));
-          })
+          "Creates a TensorShardingAttr with either an inlined mesh or mesh "
+          "name, dimension shardings, and replicated axes.")
+      .def_property_readonly("mesh_or_ref",
+                             [](MlirAttribute self) {
+                               return sdyTensorShardingAttrGetMeshOrRef(self);
+                             })
       .def_property_readonly("dimension_shardings",
                              [](MlirAttribute self) {
                                return propertyVector<MlirAttribute>(

@@ -123,12 +123,12 @@ sdyDimensionShardingAttrGetPriority(MlirAttribute attr);
 MLIR_CAPI_EXPORTED bool sdyAttributeIsATensorShardingAttr(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute sdyTensorShardingAttrGet(
-    MlirContext ctx, MlirStringRef meshName, intptr_t nDimShardings,
+    MlirContext ctx, MlirAttribute meshOrRef, intptr_t nDimShardings,
     const MlirAttribute* dimShardings, intptr_t nReplicatedAxes,
     const MlirAttribute* replicatedAxes);
 
-MLIR_CAPI_EXPORTED MlirStringRef
-sdyTensorShardingAttrGetMeshName(MlirAttribute attr);
+MLIR_CAPI_EXPORTED MlirAttribute
+sdyTensorShardingAttrGetMeshOrRef(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED intptr_t
 sdyTensorShardingAttrGetDimShardingsSize(MlirAttribute attr);
