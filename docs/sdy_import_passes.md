@@ -85,6 +85,17 @@ Convert `sdy.sharding=n` to maximal sharding as follows:
 @sdy.mesh @maximal_mesh_n = <device_ids=[n]>
 sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
 ```
+### `-sdy-lift-inlined-meshes`
+
+_Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s._
+
+Replaces any inlined `MeshAttr` in a `TensorShardingAttr` with a mesh symbol
+name, referencing either an existing or new `MeshOp` in the module, such
+that no two `MeshOp`s with an identical `MeshAttr` (existing `MeshOp`s are
+deduped as well).
+
+Each new mesh will have the first available name in
+[`mesh`, `mesh_0`, `mesh_1`, ...].
 ### `-sdy-manual-axes-cleanup`
 
 _Cleans up the use of manual axes in `ManualComputationOp`s_

@@ -738,24 +738,26 @@ Syntax:
 
 ```
 #sdy.sharding<
-  FlatSymbolRefAttr,   # mesh_sym_name
+  ::mlir::Attribute,   # mesh_or_ref
   ::llvm::ArrayRef<DimensionShardingAttr>,   # dim_shardings
   ::llvm::ArrayRef<AxisRefAttr>   # replicated_axes
 >
 ```
 
-A tensor sharding is bound to a specific mesh by its name, and can only
-reference axis names from that mesh. The dimension shardings tell us for
-each dimension of the tensor, along which axes (or sub-axes) it is sharded
-from major to minor. All other axes that don’t shard a dimension are either
-implicitly or explicitly (if they appear in the list of replicated axes)
-replicated.
+A tensor sharding is bound to a specific mesh, and can only reference axis
+names from that mesh. The dimension shardings tell us for each dimension of
+the tensor, along which axes (or sub-axes) it is sharded from major to
+minor. All other axes that don’t shard a dimension are either implicitly or
+explicitly (if they appear in the list of replicated axes) replicated.
+
+The mesh this sharding is bound to can either be specified by a symbol
+name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 
 #### Parameters:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| mesh_sym_name | `FlatSymbolRefAttr` |  |
+| mesh_or_ref | `::mlir::Attribute` | mesh attr or flat mesh symbol reference attr |
 | dim_shardings | `::llvm::ArrayRef<DimensionShardingAttr>` |  |
 | replicated_axes | `::llvm::ArrayRef<AxisRefAttr>` | list of axis refs |
 
