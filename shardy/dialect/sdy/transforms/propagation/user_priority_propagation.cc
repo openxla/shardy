@@ -24,7 +24,6 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -37,7 +36,6 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/common/file_utils.h"
-#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
@@ -119,7 +117,7 @@ TensorShardingAttr getUpdatedShardingForPriority(
                   return !seenAxesWithCurrentPriority.contains(axis);
                 });
   return TensorShardingAttr::get(curSharding.getContext(),
-                                 curSharding.getMeshName(), newDimShardings,
+                                 curSharding.getMeshOrRef(), newDimShardings,
                                  newReplicatedAxes);
 }
 
@@ -133,14 +131,13 @@ void updateReferencedShardingsForPriority(
                            getSharding(value), originalSharding, curPriority));
   }
 
-  for (auto [funcOp, resultShardings] :
+  for (const auto& [funcOp, resultShardings] :
        shardingReferences.funcOpAndResultShardingsVec) {
     for (auto [resNum, originalSharding] : resultShardings) {
-      funcOp.setResultAttr(resNum, kShardingAttr,
-                           getUpdatedShardingForPriority(
-                               funcOp.getResultAttrOfType<TensorShardingAttr>(
-                                   resNum, kShardingAttr),
-                               originalSharding, curPriority));
+      setFuncResultSharding(
+          funcOp, resNum,
+          getUpdatedShardingForPriority(getFuncResultSharding(funcOp, resNum),
+                                        originalSharding, curPriority));
     }
   }
 }
@@ -168,15 +165,14 @@ TensorShardingAttr getInitializedSharding(TensorShardingAttr originalSharding,
       dimSharding = DimensionShardingAttr::get(ctx, {}, /*isClosed=*/true);
     }
   }
-  StringRef meshName = originalSharding.getMeshName();
-  MeshAttr mesh = getMeshAttr(op, meshName);
+  MeshAttr mesh = originalSharding.getMesh(op);
   assert(mesh && "unknown mesh");
   llvm::sort(newReplicatedAxes, AxisRefAttr::getMeshComparator(mesh));
   // TODO(tomnatan): we need to merge split axes and split them again when
   // updating? or can we assume we won't see split axes?
 
-  return TensorShardingAttr::get(ctx, meshName, newDimShardings,
-                                 newReplicatedAxes);
+  return TensorShardingAttr::get(ctx, originalSharding.getMeshOrRef(),
+                                 newDimShardings, newReplicatedAxes);
 }
 
 // Clears `priorities` and add all non-zero priorities in `sharding` to it.
@@ -234,8 +230,7 @@ void addFuncResultShardingToPriorityMapAndInitialize(
     FuncOp funcOp, int resNum,
     PriorityToShardingReferences& priorityToShardingReferences,
     llvm::SmallDenseSet<int64_t>& prioritiesInSharding) {
-  auto sharding =
-      funcOp.getResultAttrOfType<TensorShardingAttr>(resNum, kShardingAttr);
+  auto sharding = getFuncResultSharding(funcOp, resNum);
   if (!sharding) {
     return;
   }
@@ -246,8 +241,8 @@ void addFuncResultShardingToPriorityMapAndInitialize(
         funcOp)
         .emplace_back(resNum, sharding);
   }
-  funcOp.setResultAttr(resNum, kShardingAttr,
-                       getInitializedSharding(sharding, funcOp));
+  setFuncResultSharding(funcOp, resNum,
+                        getInitializedSharding(sharding, funcOp));
 }
 
 // Traverses `funcOp` and for each value or func result with a sharding:
@@ -336,8 +331,8 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
   SmallVector<PriorityShardingReferences> shardingReferencesPerPriority =
       getShardingReferencesPerPriorityAndInitialize(moduleOp);
   // We first run the first iteration (priority 0):
-  if (failed(OpPriorityPropagationPassImpl::propagate(moduleOp,
-                                                    getDirectionToPropagate))) {
+  if (failed(OpPriorityPropagationPassImpl::propagate(
+          moduleOp, getDirectionToPropagate))) {
     return failure();
   }
   saveModuleOpAfterPriority(moduleOp, dumpDirectory, 0);

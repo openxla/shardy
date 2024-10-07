@@ -67,6 +67,11 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   }];
   let cppNamespace = "::mlir::sdy";
 
+  // TODO(bartchr): make the methods:
+  // - setOpResultEdgeOwnerSharding
+  // - setBlockArgumentEdgeOwnerSharding
+  // an extra class declaration method which are implemented through their
+  // plural counterparts.
   let methods = [
     InterfaceMethod<
       /*desc=*/[{
@@ -77,19 +82,63 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Sets the shardings of the block argument edge owner with the given index.
+        Sets the `sharding` of the block argument edge owner with the given
+        `index`.
       }],
       /*retType=*/"void",
       /*methodName=*/"setBlockArgumentEdgeOwnerSharding",
-      /*args=*/(ins "unsigned":$index, "mlir::sdy::TensorShardingAttr":$sharding)
+      /*args=*/(ins
+          "unsigned":$index,
+          "mlir::sdy::TensorShardingAttr":$sharding)
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Sets shardings of all block argument edge owners.
+        Sets `shardings` of all block argument edge owners.
       }],
       /*retType=*/"void",
       /*methodName=*/"setBlockArgumentEdgeOwnerShardings",
       /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings)
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns the shardings of all op result data flow edge owners.
+      }],
+      /*retType=*/"mlir::ArrayRef<mlir::sdy::TensorShardingAttr>",
+      /*methodName=*/"getOpResultEdgeOwnerShardings",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return mlir::sdy::details::getOpResultEdgeOwnerShardingsImpl(
+            this->getOperation());
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Sets the `sharding` of the op result edge owner with the given `index`.
+      }],
+      /*retType=*/"void",
+      /*methodName=*/"setOpResultEdgeOwnerSharding",
+      /*args=*/(ins
+          "unsigned":$index,
+          "mlir::sdy::TensorShardingAttr":$sharding),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        mlir::sdy::details::setOpResultEdgeOwnerShardingImpl(
+            this->getOperation(), index, sharding);
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Sets `shardings` of all op result edge owners.
+      }],
+      /*retType=*/"void",
+      /*methodName=*/"setOpResultEdgeOwnerShardings",
+      /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        mlir::sdy::details::setOpResultEdgeOwnerShardingsImpl(
+            this->getOperation(), shardings);
+      }]
     >,
     InterfaceMethod<
       /*desc=*/[{
@@ -107,7 +156,7 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Gets the data flow edge sources given a target value.
+        Gets the data flow edge sources given a `target` value.
       }],
       /*retType=*/"mlir::SmallVector<mlir::Value>",
       /*methodName=*/"getEdgeSources",
@@ -115,7 +164,8 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Gets the owner target of a data flow edge given a target that may or may not be the owner.
+        Gets the owner `target` of a data flow edge given a `target` that may or
+        may not be the owner.
       }],
       /*retType=*/"mlir::Value",
       /*methodName=*/"getEdgeOwnerFromTarget",
@@ -123,7 +173,7 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Gets the owner target of a data flow edge given a source.
+        Gets the owner target of a data flow edge given a `source`.
       }],
       /*retType=*/"mlir::Value",
       /*methodName=*/"getEdgeOwnerFromSource",
@@ -131,7 +181,7 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Gets the non-owner targets of a data flow edge given the edge owner.
+        Gets the non-owner targets of a data flow edge given the edge `owner`.
       }],
       /*retType=*/"mlir::SmallVector<mlir::Value>",
       /*methodName=*/"getNonEdgeOwnerTargets",
@@ -142,14 +192,20 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   ];
 
   let extraClassDeclaration = [{
-    // Gets the sharding of the block argument edge owner with the given index.
-    mlir::sdy::TensorShardingAttr getBlockArgumentEdgeOwnerSharding(unsigned index){
-      mlir::ArrayRef<mlir::sdy::TensorShardingAttr> argSharding = getBlockArgumentEdgeOwnerShardings();
-      if(!argSharding.empty()) {
-        return argSharding[index];
-      }
-      return nullptr;
-    }
+    // Gets the sharding of the block argument edge owner with the given
+    // `index`.
+    mlir::sdy::TensorShardingAttr getBlockArgumentEdgeOwnerSharding(
+        unsigned index);
+
+    // Gets the sharding of the op result edge owner with the given `index`.
+    mlir::sdy::TensorShardingAttr getOpResultEdgeOwnerSharding(unsigned index);
+
+    // Gets the sharding of the edge owner of the given `value`.
+    mlir::sdy::TensorShardingAttr getEdgeOwnerSharding(Value value);
+
+    // Sets the `sharding` of the edge owner of the given `value`.
+    void setEdgeOwnerSharding(
+        Value value, mlir::sdy::TensorShardingAttr sharding);
   }];
 }
 

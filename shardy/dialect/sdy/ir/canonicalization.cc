@@ -15,10 +15,10 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
-#include <optional>
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
@@ -80,21 +80,26 @@ class RedundantManualComputationPattern
  private:
   LogicalResult matchAndRewrite(ManualComputationOp manualComputationOp,
                                 PatternRewriter& rewriter) const override {
-    std::optional<StringRef> meshName =
-        getCommonMeshName(manualComputationOp.getInShardings().getShardings(),
-                          manualComputationOp.getOutShardings().getShardings());
+    ArrayRef<TensorShardingAttr> inShardings =
+        manualComputationOp.getInShardings().getShardings();
+    ArrayRef<TensorShardingAttr> outShardings =
+        manualComputationOp.getOutShardings().getShardings();
 
     int64_t manualAxesProduct = 1;
-    if (meshName.has_value()) {
-      MeshAttr mesh = getMeshAttr(manualComputationOp, *meshName);
-      assert(mesh && "unknown mesh");
+    if (!inShardings.empty() || !outShardings.empty()) {
+      MeshAttr mesh =
+          getCommonMesh(inShardings, outShardings, manualComputationOp);
+      assert(mesh && "expected inputs and outputs to have a common mesh");
       for (StringAttr manualAxis : manualComputationOp.getManualAxes()) {
         manualAxesProduct *= mesh.getAxisSize(manualAxis);
       }
     }
 
     if (manualAxesProduct != 1) {
-      return failure();
+      return rewriter.notifyMatchFailure(
+          manualComputationOp, [](Diagnostic& diag) {
+            diag << "product of manual axis sizes is not 1";
+          });
     }
 
     mlir::InlinerInterface inliner(manualComputationOp.getContext());

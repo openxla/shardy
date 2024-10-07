@@ -104,6 +104,27 @@ Attribute DimensionShardingAttr::parse(AsmParser& parser, Type type) {
       priority == -1 ? std::nullopt : std::make_optional(priority));
 }
 
+ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef) {
+  if (!parser.parseOptionalKeyword(MeshAttr::getMnemonic())) {
+    auto mesh = FieldParser<MeshAttr>::parse(parser);
+    if (failed(mesh)) {
+      return parser.emitError(parser.getCurrentLocation(),
+                              "failed to parse MeshAttr");
+    }
+    meshOrRef = *mesh;
+    return success();
+  }
+
+  auto symbolRef = FieldParser<FlatSymbolRefAttr>::parse(parser);
+  if (failed(symbolRef)) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expecting MeshAttr or FlatSymbolRefAttr, got: ")
+           << meshOrRef;
+  }
+  meshOrRef = *symbolRef;
+  return success();
+}
+
 namespace {
 
 // Removes and returns the index from the symbol in factorsStr. For example:

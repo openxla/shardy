@@ -57,7 +57,8 @@ NOTE: This method *must* be implemented by the user.
 ```c++
 void setBlockArgumentEdgeOwnerSharding(unsigned index, mlir::sdy::TensorShardingAttr sharding);
 ```
-Sets the shardings of the block argument edge owner with the given index.
+Sets the `sharding` of the block argument edge owner with the given
+`index`.
 
 NOTE: This method *must* be implemented by the user.
 
@@ -66,7 +67,34 @@ NOTE: This method *must* be implemented by the user.
 ```c++
 void setBlockArgumentEdgeOwnerShardings(mlir::ArrayRef<mlir::sdy::TensorShardingAttr> shardings);
 ```
-Sets shardings of all block argument edge owners.
+Sets `shardings` of all block argument edge owners.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getOpResultEdgeOwnerShardings`
+
+```c++
+mlir::ArrayRef<mlir::sdy::TensorShardingAttr> getOpResultEdgeOwnerShardings();
+```
+Returns the shardings of all op result data flow edge owners.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `setOpResultEdgeOwnerSharding`
+
+```c++
+void setOpResultEdgeOwnerSharding(unsigned index, mlir::sdy::TensorShardingAttr sharding);
+```
+Sets the `sharding` of the op result edge owner with the given `index`.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `setOpResultEdgeOwnerShardings`
+
+```c++
+void setOpResultEdgeOwnerShardings(mlir::ArrayRef<mlir::sdy::TensorShardingAttr> shardings);
+```
+Sets `shardings` of all op result edge owners.
 
 NOTE: This method *must* be implemented by the user.
 
@@ -93,7 +121,7 @@ NOTE: This method *must* be implemented by the user.
 ```c++
 mlir::SmallVector<mlir::Value> getEdgeSources(mlir::Value target);
 ```
-Gets the data flow edge sources given a target value.
+Gets the data flow edge sources given a `target` value.
 
 NOTE: This method *must* be implemented by the user.
 
@@ -102,7 +130,8 @@ NOTE: This method *must* be implemented by the user.
 ```c++
 mlir::Value getEdgeOwnerFromTarget(mlir::Value target);
 ```
-Gets the owner target of a data flow edge given a target that may or may not be the owner.
+Gets the owner `target` of a data flow edge given a `target` that may or
+may not be the owner.
 
 NOTE: This method *must* be implemented by the user.
 
@@ -111,7 +140,7 @@ NOTE: This method *must* be implemented by the user.
 ```c++
 mlir::Value getEdgeOwnerFromSource(mlir::OpOperand&source);
 ```
-Gets the owner target of a data flow edge given a source.
+Gets the owner target of a data flow edge given a `source`.
 
 NOTE: This method *must* be implemented by the user.
 
@@ -120,7 +149,7 @@ NOTE: This method *must* be implemented by the user.
 ```c++
 mlir::SmallVector<mlir::Value> getNonEdgeOwnerTargets(mlir::Value owner);
 ```
-Gets the non-owner targets of a data flow edge given the edge owner.
+Gets the non-owner targets of a data flow edge given the edge `owner`.
 
 NOTE: This method *must* be implemented by the user.
 

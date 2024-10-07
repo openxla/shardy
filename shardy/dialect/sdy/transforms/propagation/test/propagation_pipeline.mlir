@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-propagation-pipeline 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-propagation-pipeline 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
@@ -55,4 +55,26 @@ func.func @sharding_constraint_replaced_with_reshard(%arg0: tensor<8x8xf32>) -> 
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
   // CHECK-NEXT: return %arg0, %0
   return %arg0, %0 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
+
+// CHECK: sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @inlined_mesh(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
+// CHECK-SAME:      %arg2: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {?}]>})
+// CHECK-SAME:  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}) {
+func.func @inlined_mesh(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<["a"=2, "b"=2]>, [{"a"}, {"b"}]>},
+    %arg1: tensor<8x8xf32>, %arg2: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg1
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
+  // CHECK-NEXT: stablehlo.dot_general %[[ADD]], %arg2
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
+  %1 = stablehlo.dot_general %0, %arg2, contracting_dims = [1] x [0] :
+    (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  return %1 : tensor<8x16xf32>
 }

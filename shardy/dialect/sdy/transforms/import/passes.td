@@ -15,6 +15,20 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
+def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
+  let summary = "Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s.";
+  let description = [{
+    Replaces any inlined `MeshAttr` in a `TensorShardingAttr` with a mesh symbol
+    name, referencing either an existing or new `MeshOp` in the module, such
+    that no two `MeshOp`s with an identical `MeshAttr` (existing `MeshOp`s are
+    deduped as well).
+
+    Each new mesh will have the first available name in
+    [`mesh`, `mesh_0`, `mesh_1`, ...].
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
   let summary = "Inserts `DataFlowEdgeOp` for every data-flow edge.";
   let description = [{

@@ -36,6 +36,22 @@ func.func @replicated_axes(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> 
   return %0 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @inlined_mesh
+func.func @inlined_mesh(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add
+  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {}]>]>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @inlined_mesh_and_ref
+func.func @inlined_mesh_and_ref(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: stablehlo.optimization_barrier
+  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<mesh<["a"=2, "b"=4]>, [{"a"}, {}]>, <@foo, [{"a"}, {}]>]>
+  %0:2 = stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<mesh<["a"=2, "b"=4]>, [{"a"}, {}]>, <@foo, [{"a"}, {}]>]>} %arg0, %arg1 : tensor<8x8xf32>, tensor<8x8xf32>
+  return %0#0, %0#1 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
 // CHECK-LABEL: func @tensor_with_open_dimension_shardings
 func.func @tensor_with_open_dimension_shardings(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add

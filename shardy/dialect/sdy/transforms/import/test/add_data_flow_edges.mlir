@@ -97,3 +97,85 @@ func.func @while_unused_result(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
   }
   return %3#0 : tensor<32x96xf32>
 }
+
+// CHECK-LABEL: func @named_computation_multiple_inputs_outputs
+func.func @named_computation_multiple_inputs_outputs(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>) {
+  // CHECK-NEXT: %[[NC:.*]]:2 = sdy.named_computation<"my_func">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg3 : tensor<4x2xi32>
+  // CHECK-NEXT:   return %[[EDGE_1]], %[[EDGE_2]] : tensor<8x2xi32>, tensor<4x2xi32>
+  // CHECK-NEXT: } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  // CHECK-NEXT: %[[EDGE_3:.*]] = sdy.data_flow_edge %[[NC]]#0 : tensor<8x2xi32>
+  // CHECK-NEXT: %[[EDGE_4:.*]] = sdy.data_flow_edge %[[NC]]#1 : tensor<4x2xi32>
+  // CHECK-NEXT: return %[[EDGE_3]], %[[EDGE_4]] : tensor<8x2xi32>, tensor<4x2xi32>
+  %0:2 = sdy.named_computation<"my_func">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+    sdy.return %arg2, %arg3 : tensor<8x2xi32>, tensor<4x2xi32>
+  } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  return %0#0, %0#1 : tensor<8x2xi32>, tensor<4x2xi32>
+}
+
+// CHECK-LABEL: func @named_computation_with_shardings
+func.func @named_computation_with_shardings(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>) {
+  // CHECK-NEXT: %[[NC:.*]]:2 = sdy.named_computation<"my_func">(%arg0, %arg1) in_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, [{?}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, [{?}, {}]>] (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 sharding=<@mesh, [{"a"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg3 sharding=<@mesh, [{?}, {}]> : tensor<4x2xi32>
+  // CHECK-NEXT:   return %[[EDGE_1]], %[[EDGE_2]] : tensor<8x2xi32>, tensor<4x2xi32>
+  // CHECK-NEXT: } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  // CHECK-NEXT: %[[EDGE_3:.*]] = sdy.data_flow_edge %[[NC]]#0 sharding=<@mesh, [{"a"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT: %[[EDGE_4:.*]] = sdy.data_flow_edge %[[NC]]#1 sharding=<@mesh, [{?}, {}]> : tensor<4x2xi32>
+  // CHECK-NEXT: return %[[EDGE_3]], %[[EDGE_4]] : tensor<8x2xi32>, tensor<4x2xi32>
+  %0:2 = sdy.named_computation<"my_func">(%arg0, %arg1) in_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, [{?}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, [{?}, {}]>] (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+    sdy.return %arg2, %arg3 : tensor<8x2xi32>, tensor<4x2xi32>
+  } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  return %0#0, %0#1 : tensor<8x2xi32>, tensor<4x2xi32>
+}
+
+// CHECK-LABEL: func @named_computation_ops_inside_and_outside
+func.func @named_computation_ops_inside_and_outside(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>) {
+  // CHECK-NEXT: %[[NC:.*]]:2 = sdy.named_computation<"my_func">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg3 : tensor<4x2xi32>
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[EDGE_1]], %[[EDGE_1]] : tensor<8x2xi32>
+  // CHECK-NEXT:   return %[[ADD]], %[[EDGE_2]] : tensor<8x2xi32>, tensor<4x2xi32>
+  // CHECK-NEXT: } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  // CHECK-NEXT: %[[EDGE_3:.*]] = sdy.data_flow_edge %[[NC]]#0 : tensor<8x2xi32>
+  // CHECK-NEXT: %[[EDGE_4:.*]] = sdy.data_flow_edge %[[NC]]#1 : tensor<4x2xi32>
+  // CHECK-NEXT: %[[SUB:.*]] = stablehlo.subtract %[[EDGE_3]], %[[EDGE_3]] : tensor<8x2xi32>
+  // CHECK-NEXT: return %[[SUB]], %[[EDGE_4]] : tensor<8x2xi32>, tensor<4x2xi32>
+  %0:2 = sdy.named_computation<"my_func">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>) {
+    %2 = stablehlo.add %arg2, %arg2 : tensor<8x2xi32>
+    sdy.return %2, %arg3 : tensor<8x2xi32>, tensor<4x2xi32>
+  } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  %1 = stablehlo.subtract %0#0, %0#0 : tensor<8x2xi32>
+  return %1, %0#1 : tensor<8x2xi32>, tensor<4x2xi32>
+}
+
+// CHECK-LABEL: func @named_computation_unused_result
+func.func @named_computation_unused_result(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %[[NC:.*]]:2 = sdy.named_computation<"my_func_1">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg3 : tensor<4x2xi32>
+  // CHECK-NEXT:   return %[[EDGE_1]], %[[EDGE_2]] : tensor<8x2xi32>, tensor<4x2xi32>
+  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[EDGE_1:.*]] = sdy.data_flow_edge %[[NC]]#0 : tensor<8x2xi32>
+  // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %[[NC]]#1 : tensor<4x2xi32>
+  // CHECK-NEXT: return %[[EDGE_1]] : tensor<8x2xi32>
+  %0:2 = sdy.named_computation<"my_func_1">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+    sdy.return %arg2, %arg3 : tensor<8x2xi32>, tensor<4x2xi32>
+  } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  return %0#0 : tensor<8x2xi32>
+}
+
+// CHECK-LABEL: func @named_computation_skip_tokens
+func.func @named_computation_skip_tokens(%arg0: tensor<8x2xi32>, %arg1: !stablehlo.token) -> (tensor<8x2xi32>, !stablehlo.token) {
+  // CHECK-NEXT: %[[NC:.*]]:2 = sdy.named_computation<"foo">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: !stablehlo.token) {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 : tensor<8x2xi32>
+  // CHECK-NEXT:   sdy.return %[[EDGE_1]], %arg3 : tensor<8x2xi32>, !stablehlo.token
+  // CHECK-NEXT: } : (tensor<8x2xi32>, !stablehlo.token) -> (tensor<8x2xi32>, !stablehlo.token)
+  // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %[[NC]]#0 : tensor<8x2xi32>
+  // CHECK-NEXT: return %[[EDGE_2]], %[[NC]]#1 : tensor<8x2xi32>, !stablehlo.token
+  %0:2 = sdy.named_computation<"foo">(%arg0, %arg1) (%arg2: tensor<8x2xi32>, %arg3: !stablehlo.token) {
+    sdy.return %arg2, %arg3 : tensor<8x2xi32>, !stablehlo.token
+  } : (tensor<8x2xi32>, !stablehlo.token) -> (tensor<8x2xi32>, !stablehlo.token)
+  return %0#0, %0#1 : tensor<8x2xi32>, !stablehlo.token
+}

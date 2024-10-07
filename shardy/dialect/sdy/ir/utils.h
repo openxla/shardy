@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -51,7 +52,6 @@ template <class Dialect>
 bool inDialect(Operation* op) {
   return op->getDialect()->getNamespace() == Dialect::getDialectNamespace();
 }
-
 
 // Emits a warning once for the given `flag`, with `op` attached as a note
 // if `MLIRContext::shouldPrintOpOnDiagnostic` is true (assuming the op is
@@ -106,6 +106,12 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // the enclosing module of `op`, and returns its `MeshAttr` if it exists in the
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
+
+// Returns the common `MeshAttr` bound by all the `TensorShardingAttr` or
+// nullptr if there is none.
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
+                       ArrayRef<TensorShardingAttr> resultsShardings,
+                       Operation* op);
 
 // Returns the common mesh name used by all the `TensorShardingAttr` or
 // std::nullopt if there is none.
@@ -168,6 +174,14 @@ TensorShardingAttr getSharding(Value value);
 // `TensorShardingAttr` if `value` doesn't have a sharding.
 TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName);
 
+// Sets the `TensorShardingPerValueAttr` of the given `op`, but
+// replaces the sharding at the given `index` with the given `sharding`.
+//
+// If no `TensorShardingPerValueAttr` exists, it's set to a new one with
+// a fully open sharding for each result with the same mesh name as `sharding`.
+void replaceShardingAtIndex(Operation* op, unsigned index,
+                            TensorShardingAttr sharding);
+
 // Sets the sharding of the given `value`, whose location depends on the type of
 // the value, to `sharding`.
 //
@@ -179,7 +193,32 @@ TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName);
 // TODO(tomnatan): consider moving this to a dedicated sdy/utils dir.
 void setSharding(Value value, TensorShardingAttr sharding);
 
+// Return the sharding of the `resNum` result of the given `funcOp`.
+TensorShardingAttr getFuncResultSharding(func::FuncOp funcOp, int64_t resNum);
+
+// Sets the sharding of the `resNum` result of the given `funcOp` to `sharding`.
+void setFuncResultSharding(func::FuncOp funcOp, int64_t resNum,
+                           TensorShardingAttr sharding);
+
+// Returns the sharding of each value in `values`. Returns an empty array if the
+// op has no sharding attributes.
 SmallVector<TensorShardingAttr> getShardings(ValueRange values);
+
+// Gets the sharding attributes that live on `op` inside the `sdy.sharding`
+// attr. Returns an empty array if the op has no sharding attributes.
+ArrayRef<TensorShardingAttr> getShardings(Operation* op);
+
+// Gets the `TensorShardingPerValueAttr` that lives on `op` inside the
+// `sdy.sharding` attr. Returns a null attr if the op has no such attr.
+TensorShardingPerValueAttr getShardingPerValue(Operation* op);
+
+// Sets the sharding attributes on `op` to a
+// `TensorShardingPerValueAttr` named `sdy.sharding` consisting of `shardings`.
+void setShardings(Operation* op, ArrayRef<TensorShardingAttr> shardings);
+
+// Sets the sharding attributes on `op` to a
+// `TensorShardingPerValueAttr` named `sdy.sharding` consisting of `shardings`.
+void setShardings(Operation* op, TensorShardingPerValueAttr shardingPerValue);
 
 // Cleanup the module by removing sharding rule attrs. Keep any user specified
 // ones.
@@ -201,6 +240,12 @@ MutableArrayRef<OpOperand> getBodyTerminatorOpOperands(RegionOpTy op) {
 template <typename RegionOpTy>
 ValueRange getBodyTerminatorOperands(RegionOpTy op) {
   return getBodyTerminator(op)->getOperands();
+}
+
+// Gets the value of the `op` body terminator at `index`.
+template <typename RegionOpTy>
+Value getBodyTerminatorOperand(RegionOpTy op, int64_t index) {
+  return getBodyTerminator(op)->getOperand(index);
 }
 
 // Gets the value types returned from the `op` body terminator.

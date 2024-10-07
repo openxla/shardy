@@ -34,3 +34,16 @@ cc_test(
         "@stablehlo//:stablehlo_ops",
     ],
 )
+
+cc_library(
+    name = "sharding_walker",
+    srcs = ["sharding_walker.cc"],
+    hdrs = ["sharding_walker.h"],
+    deps = [
+        "//shardy/dialect/sdy/ir:dialect",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)

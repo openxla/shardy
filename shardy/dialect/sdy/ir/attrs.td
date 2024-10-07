@@ -361,28 +361,43 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
   }];
 }
 
+// Either a `MeshAttr` or a symbol name, referencing a corresponding `MeshOp`
+// symbol.
+def Sdy_MeshOrRef : AnyAttrOf<[Sdy_Mesh, FlatSymbolRefAttr],
+                              "mesh attr or flat mesh symbol reference attr"> {
+  string cppType = "::mlir::Attribute";
+}
+
 def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
   let mnemonic = "sharding";
   let summary = "Tensor sharding";
   let description = [{
-    A tensor sharding is bound to a specific mesh by its name, and can only
-    reference axis names from that mesh. The dimension shardings tell us for
-    each dimension of the tensor, along which axes (or sub-axes) it is sharded
-    from major to minor. All other axes that don’t shard a dimension are either
-    implicitly or explicitly (if they appear in the list of replicated axes)
-    replicated.
+    A tensor sharding is bound to a specific mesh, and can only reference axis
+    names from that mesh. The dimension shardings tell us for each dimension of
+    the tensor, along which axes (or sub-axes) it is sharded from major to
+    minor. All other axes that don’t shard a dimension are either implicitly or
+    explicitly (if they appear in the list of replicated axes) replicated.
+
+    The mesh this sharding is bound to can either be specified by a symbol
+    name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
   }];
   let parameters = (ins
-      "FlatSymbolRefAttr":$mesh_sym_name,
+      Sdy_MeshOrRef:$mesh_or_ref,
       OptionalArrayRefParameter<"DimensionShardingAttr">:$dim_shardings,
       Sdy_AxisRefs:$replicated_axes
   );
   let assemblyFormat = [{
-    `<` $mesh_sym_name `,` `[` (`]`):($dim_shardings^ `]`)? ``
+    `<` custom<MeshOrRef>($mesh_or_ref) `,` `[` (`]`):($dim_shardings^ `]`)? ``
         (`,` `replicated` `` `=` `` `{` $replicated_axes^ `}`)? `>`
   }];
 
   let builders = [
+    AttrBuilder<(ins "StringAttr":$mesh_name,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes), [{
+      return $_get($_ctxt, FlatSymbolRefAttr::get(mesh_name),
+                   dim_shardings, replicated_axes);
+    }]>,
     AttrBuilder<(ins "StringRef":$mesh_name,
                      "ArrayRef<DimensionShardingAttr>":$dim_shardings,
                      "ArrayRef<AxisRefAttr>":$replicated_axes), [{
@@ -418,9 +433,28 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
                       });
     }
 
+    // Returns the mesh `FlatSymbolRefAttr` this sharding references, assuming
+    // it doesn't have an inlined `MeshAttr`.
+    FlatSymbolRefAttr getMeshSymName() const {
+      return mlir::cast<FlatSymbolRefAttr>(getMeshOrRef());
+    }
+
+    // Returns the mesh name this sharding references, assuming it doesn't have
+    // an inlined `MeshAttr`.
     StringRef getMeshName() const {
       return getMeshSymName().getValue();
     }
+
+    // If this sharding has an inlined `MeshAttr`, returns it, otherwise looks
+    // up the mesh symbol with the referenced name in `symbolTable`, and returns
+    // its `MeshAttr` if it exists in the table, or nullptr otherwise.
+    MeshAttr getMesh(const SymbolTable& symbolTable) const;
+
+    // If this sharding has an inlined `MeshAttr`, returns it, otherwise looks
+    // up the mesh symbol with the referenced name in the symbol table of the
+    // enclosing module of `op`, and returns its `MeshAttr` if it exists in the
+    // table, or nullptr otherwise.
+    MeshAttr getMesh(Operation* op) const;
 
     // Returns true if all dimension shardings are empty and there are no
     // replicated axes.
@@ -518,10 +552,16 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
   let assemblyFormat = "`<` `[` (`]`):($shardings^ `]`)? `>`";
 
   let extraClassDeclaration = [{
-    // Builds a `TensorShardingPerValue` for each type in `types`, with all
-    // dimension shardings marked open (can be further replicated/sharded).
+    // Builds a `TensorSharding` for each type in `types`, with all dimension
+    // shardings marked open (can be further replicated/sharded).
     static TensorShardingPerValueAttr getFullyOpen(
         MLIRContext* context, TypeRange types, StringRef meshName);
+
+    // Builds an open `TensorSharding` for each type in `types`, but
+    // with the sharding at `index` replaced with `sharding`.
+    static TensorShardingPerValueAttr getOpenWithShardingAtIndex(
+        MLIRContext* context, TypeRange types, int64_t index,
+        TensorShardingAttr sharding);
 
     // Returns whether there are no values.
     bool empty() const { return getShardings().empty(); }

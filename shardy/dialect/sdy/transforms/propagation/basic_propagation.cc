@@ -341,12 +341,12 @@ LogicalResult propagateFuncResults(FuncOp funcOp,
         //   op of `returnValue`.
         // As such, we pass `returnValue` as both the operand and result.
         returnValue, returnValue, getSharding(returnValue),
-        funcOp.getResultAttrOfType<TensorShardingAttr>(resNum, kShardingAttr),
+        getFuncResultSharding(funcOp, resNum),
         [&](TensorShardingAttr sharding) {
           setSharding(returnValue, sharding);
         },
         [&](TensorShardingAttr sharding) {
-          funcOp.setResultAttr(resNum, kShardingAttr, sharding);
+          setFuncResultSharding(funcOp, resNum, sharding);
         },
         // Treat the sharding data flow b/w the `funcOp` terminator and func
         // result attrs as an identity op. Create an equivalent sharding

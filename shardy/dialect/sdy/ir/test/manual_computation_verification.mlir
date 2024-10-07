@@ -1,10 +1,10 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
 sdy.mesh @meshA = <["a"=2]>
-sdy.mesh @meshB = <["a"=2]>
+sdy.mesh @meshB = <["a"=4]>
 
 func.func @man_comp_different_meshes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
-  // expected-error @+1 {{op result shardings can only refer to one mesh: @meshB vs @meshA}}
+  // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["a"=4]> vs #sdy.mesh<["a"=2]>}}
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@meshA, [{}, {}]>] out_shardings=[<@meshB, [{}, {}]>] manual_axes={} (%arg1: tensor<16x32xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
     sdy.return %1 : tensor<16x32xf32>
