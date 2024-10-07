@@ -23,8 +23,11 @@ def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
     that no two `MeshOp`s with an identical `MeshAttr` (existing `MeshOp`s are
     deduped as well).
 
-    Each new mesh will have the first available name in
-    [`mesh`, `mesh_0`, `mesh_1`, ...].
+    The name of each new `MeshOp` will either be:
+
+    * `maximal_mesh_{device-id}`, for a maximal mesh (i.e., empty axis list and
+      a single device ID).
+    * The first available name in [`mesh`, `mesh_0`, `mesh_1`, ...], otherwise.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }

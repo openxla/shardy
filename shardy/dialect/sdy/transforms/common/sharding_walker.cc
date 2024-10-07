@@ -24,6 +24,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -80,7 +81,7 @@ void processShardings(
 
 void walkShardings(Operation* rootOp, TransformShardingFn callback,
                    ConsumeOpFn consumeOpFn, bool transformShardings) {
-  rootOp->walk([&](Operation* op) {
+  rootOp->walk<WalkOrder::PreOrder>([&](Operation* op) {
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
         .Case<FuncOp>([&](FuncOp funcOp) {

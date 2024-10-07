@@ -14,10 +14,14 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
+#include <cstdint>
 #include <memory>  // IWYU pragma: keep
+#include <optional>
+#include <string>
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -35,6 +39,17 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/import/passes.h.inc"
 
 namespace {
+
+MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
+  auto createMesh = [&](StringRef meshName) {
+    return builder.create<MeshOp>(loc, meshName, mesh);
+  };
+  if (std::optional<int64_t> deviceId = mesh.getMaximalDeviceId()) {
+    std::string meshName = llvm::formatv("maximal_mesh_{0}", deviceId);
+    return createMesh(meshName);
+  }
+  return createMesh("mesh");
+}
 
 TensorShardingAttr replaceMesh(TensorShardingAttr sharding,
                                StringAttr meshName) {
@@ -96,9 +111,11 @@ struct LiftInlinedMeshesPass
       }
       if (auto mesh = dyn_cast<MeshAttr>(sharding.getMeshOrRef())) {
         // Inlined mesh with a new `MeshAttr`.
-        // TODO(tomnatan): give more elaborate names like `maximal_mesh_i`.
+        // TODO(tomnatan): give better names for meshes with device IDs, e.g.,
+        // `@some_mesh_arbitrary_device_order` when there is an identical
+        // `@some_mesh` without device IDs.
         newMeshName = symbolTable.insert(
-            builder.create<MeshOp>(moduleOp.getLoc(), "mesh", mesh));
+            createNewMeshOp(moduleOp.getLoc(), mesh, builder));
         return replaceMesh(sharding, newMeshName);
       }
       return sharding;

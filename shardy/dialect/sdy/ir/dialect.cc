@@ -187,6 +187,13 @@ bool MeshAttr::isMaximal(int64_t deviceId) const {
   return getAxes().empty() && getDeviceIds() == ArrayRef<int64_t>(deviceId);
 }
 
+std::optional<int64_t> MeshAttr::getMaximalDeviceId() const {
+  if (getAxes().empty() && getDeviceIds().size() == 1) {
+    return getDeviceIds().front();
+  }
+  return std::nullopt;
+}
+
 std::function<bool(StringRef lhs, StringRef rhs)>
 MeshAttr::getAxisNameComparator() const {
   ArrayRef<MeshAxisAttr> axes = getAxes();

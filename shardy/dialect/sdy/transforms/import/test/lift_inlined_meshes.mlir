@@ -53,6 +53,19 @@ func.func @inlined_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@me
 
 // -----
 
+// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
+// CHECK: sdy.mesh @maximal_mesh_7 = <[], device_ids=[7]>
+
+// CHECK-LABEL: func @inlined_maximal_mesh(
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh_3, [{}, {}]>})
+func.func @inlined_maximal_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<[], device_ids=[3]>, [{}, {}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_7, [{}, {}]>]>
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<[], device_ids=[7]>, [{}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
 // CHECK: sdy.mesh @mesh = <["x"=2, "y"=4]>
 sdy.mesh @mesh = <["x"=2, "y"=4]>
 
@@ -62,8 +75,8 @@ sdy.mesh @mesh_0 = <["x"=2], device_ids=[1, 0]>
 // CHECK-NOT: @mesh_1
 sdy.mesh @mesh_1 = <["x"=2, "y"=4]>
 
-// CHECK: sdy.mesh @maximal_mesh_5 = <[], device_ids=[5]>
-sdy.mesh @maximal_mesh_5 = <[], device_ids=[5]>
+// CHECK: sdy.mesh @some_maximal_mesh = <[], device_ids=[5]>
+sdy.mesh @some_maximal_mesh = <[], device_ids=[5]>
 
 // CHECK-NOT: @copy_of_mesh
 sdy.mesh @copy_of_mesh = <["x"=2, "y"=4]>
@@ -71,15 +84,15 @@ sdy.mesh @copy_of_mesh = <["x"=2, "y"=4]>
 // CHECK-NOT: @copy_of_mesh_0
 sdy.mesh @copy_of_mesh_0 = <["x"=2], device_ids=[1, 0]>
 
-// CHECK: sdy.mesh @mesh_1 = <["a"=4]>
-// CHECK: sdy.mesh @mesh_2 = <["x"=8]>
-// CHECK: sdy.mesh @mesh_3 = <[], device_ids=[2]>
+// CHECK: sdy.mesh @mesh_1 = <["x"=8]>
+// CHECK: sdy.mesh @mesh_2 = <["a"=4]>
+// CHECK: sdy.mesh @maximal_mesh_2 = <[], device_ids=[2]>
 
 // CHECK-LABEL: func @many_inlined_meshes_and_duplicates(
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{"x"}, {}]>},
 // CHECK-SAME:    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}], replicated={"y"}>})
-// CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{?}, {?}]>},
-// CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_1, [{}, {}]>}) {
+// CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_1, [{?}, {?}]>},
+// CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}, {}]>}) {
 func.func @many_inlined_meshes_and_duplicates(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=2], device_ids=[1, 0]>, [{"x"}, {}]>},
     %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}], replicated={"y"}>})
@@ -88,8 +101,8 @@ func.func @many_inlined_meshes_and_duplicates(
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
   // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[ADD_0]], %arg1 : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC_0:.*]] = sdy.sharding_constraint %[[ADD_1]] <@mesh, [{}, {"y"}]>
-  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[SC_0]], %[[SC_0]] {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_5, [{}, {}]>]>}
-  // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %[[ADD_2]] <@mesh_1, [{}, {"a"}]>
+  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[SC_0]], %[[SC_0]] {sdy.sharding = #sdy.sharding_per_value<[<@some_maximal_mesh, [{}, {}]>]>}
+  // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %[[ADD_2]] <@mesh_2, [{}, {"a"}]>
   // CHECK-NEXT: %[[ADD_3:.*]] = stablehlo.add %[[ADD_2]], %[[SC_1]] : tensor<8x8xf32>
   // CHECK-NEXT: return %[[SC_1]], %[[ADD_3]]
   %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_1, [{"x"}, {}]>]>} : tensor<8x8xf32>
@@ -107,8 +120,8 @@ func.func @many_inlined_meshes_and_duplicates(
 func.func @another_func_in_module(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{}, {}]>})
     -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@copy_of_mesh_0, [{}, {}]>}) {
-  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_1, [{"a"}, {}]>]>}
-  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh_3, [{}, {}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@maximal_mesh_2, [{}, {}]>
   // CHECK-NEXT: return %[[SC]]
   %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["a"=4]>, [{"a"}, {}]>]>} : tensor<8x8xf32>
   %1 = sdy.sharding_constraint %0 <mesh<[], device_ids=[2]>, [{}, {}]> : tensor<8x8xf32>
