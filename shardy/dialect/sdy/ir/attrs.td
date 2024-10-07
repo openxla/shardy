@@ -95,6 +95,8 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   ];
 
   let extraClassDeclaration = [{
+    bool hasAxis(StringRef axisName) const;
+
     int64_t getAxisSize(StringRef axisName) const;
 
     // Returns the total size of the mesh across all axes, as in the total

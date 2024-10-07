@@ -159,6 +159,12 @@ void ShardableDataFlowOpInterface::setEdgeOwnerSharding(
 // MeshAttr
 //===----------------------------------------------------------------------===//
 
+bool MeshAttr::hasAxis(StringRef axisName) const {
+  return llvm::any_of(getAxes(), [axisName](MeshAxisAttr axis) {
+    return axis.getName() == axisName;
+  });
+}
+
 int64_t MeshAttr::getAxisSize(StringRef axisName) const {
   for (MeshAxisAttr meshAxis : getAxes()) {
     if (meshAxis.getName() == axisName) {

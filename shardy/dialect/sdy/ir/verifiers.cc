@@ -850,6 +850,12 @@ LogicalResult ManualComputationOp::verify() {
   // If a call to `getMesh` returned empty, a failure will be emitted in
   // `verifyManualComputationValue`.
 
+  for (StringAttr axisName : getManualAxes()) {
+    if (mesh && !mesh.hasAxis(axisName)) {
+      return emitOpError("unknown manual axis: ") << axisName;
+    }
+  }
+
   SymbolTable symbolTable(getOperation()->getParentOfType<ModuleOp>());
   llvm::SmallDenseSet<StringRef> manualAxesSet(
       getManualAxes().begin(), getManualAxes().end());
