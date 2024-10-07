@@ -969,12 +969,6 @@ LogicalResult SdyDialect::verifyRegionResultAttribute(Operation* op,
 LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
                                                    NamedAttribute attr) {
   if (attr.getName() == kShardingAttr) {
-    if (auto intAttr = dyn_cast<IntegerAttr>(attr.getValue())) {
-      if (intAttr.getInt() < 0) {
-        return op->emitOpError("should have a non-negative device ID");
-      }
-      return success();
-    }
     auto shardingPerValue =
         dyn_cast<TensorShardingPerValueAttr>(attr.getValue());
     if (!shardingPerValue) {

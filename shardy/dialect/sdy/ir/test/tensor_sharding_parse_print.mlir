@@ -138,11 +138,3 @@ func.func @op_sharding_with_multiple_priorities(%arg0 : tensor<8x8xf32>, %arg1 :
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{"a"}p0, {"b"}p1]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
-
-// CHECK-LABEL: func @maximal_sharding
-func.func @maximal_sharding(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // CHECK-NEXT: stablehlo.add
-  // CHECK-SAME: sdy.sharding = 3
-  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = 3} : tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}

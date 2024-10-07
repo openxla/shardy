@@ -42,7 +42,6 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
-  pm.addPass(createImportMaximalShardingPass());
 
   GreedyRewriteConfig config;
   config.useTopDownTraversal = true;

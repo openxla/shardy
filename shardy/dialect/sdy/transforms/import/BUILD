@@ -38,7 +38,6 @@ cc_library(
         "add_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
         "constant_splitter.cc",
-        "import_maximal_sharding.cc",
         "import_pipeline.cc",
         "lift_inlined_meshes.cc",
         "manual_axes_cleanup.cc",

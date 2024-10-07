@@ -138,19 +138,6 @@ def ShardingGroupImportPass : Pass<"sdy-sharding-group-import", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
-def ImportMaximalShardingPass : Pass<"sdy-import-maximal-sharding", "ModuleOp"> {
-  let summary = "Convert sdy.sharding=n to maximal sharding.";
-  let description = [{
-    Convert `sdy.sharding=n` to maximal sharding as follows:
-
-    ```mlir
-    @sdy.mesh @maximal_mesh_n = <device_ids=[n]>
-    sdy.sharding = #sdy.sharding<@maximal_mesh_n, [...]>
-    ```
-  }];
-  let dependentDialects = ["mlir::sdy::SdyDialect"];
-}
-
 def ManualAxesCleanupPass : Pass<"sdy-manual-axes-cleanup", "ModuleOp"> {
   let summary = "Cleans up the use of manual axes in `ManualComputationOp`s";
   let description = [{
