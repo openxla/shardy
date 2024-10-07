@@ -85,7 +85,7 @@ func.func @main(%arg0: tensor<16x16xf32>) -> tensor<16x16xf32> {
 sdy.mesh @mesh = <["a"=2]>
 
 // CHECK: func.func @main
-// CHECK-NEXT %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}
+// CHECK-SAME %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}
 func.func @main(%arg0: tensor<16x16xf32>) -> tensor<16x16xf32> {
   %0 = stablehlo.constant dense<0> : tensor<i32>
   %inc = stablehlo.constant dense<1> : tensor<i32>
@@ -109,3 +109,35 @@ func.func @main(%arg0: tensor<16x16xf32>) -> tensor<16x16xf32> {
   return %1#0 : tensor<16x16xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
+
+// CHECK-LABEL: @add_manual_axes_to_replicated
+func.func @add_manual_axes_to_replicated(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh, [{"c", ?}], replicated={"a"}>]
+  // CHECK-SAME{LITERAL}:  out_shardings=[<@mesh, [{"c", ?}], replicated={"a"}>]
+  // CHECK-SAME{LITERAL}: manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c", ?}]>] out_shardings=[<@mesh, [{"c", ?}]>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+    sdy.return %arg1 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
+
+// Due to the in_sharding being fully closed, the in_sharding is added to the
+// func arg but with the manual axis added as replicated.
+// CHECK-LABEL: @add_manual_axes_to_replicated_applied_constraint
+// CHECK-SAME     %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {}], replicated={"a"}>}
+// CHECK-SAME     -> tensor<16x16xf32> {
+func.func @add_manual_axes_to_replicated_applied_constraint(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c"}]>] out_shardings=[<@mesh, [{"c"}]>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<4xf32>
+    sdy.return %1 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}

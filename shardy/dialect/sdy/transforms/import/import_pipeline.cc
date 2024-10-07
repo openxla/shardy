@@ -36,6 +36,7 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
+  pm.addPass(createManualAxesCleanupPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
   // The sharding group import pass must run after applying sharding
   // constraints. This ensures we can detect sharding conflicts between group
