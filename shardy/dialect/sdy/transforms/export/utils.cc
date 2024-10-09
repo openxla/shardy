@@ -19,6 +19,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "third_party/openxla/shardy/src/shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
@@ -38,6 +39,39 @@ SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
     break;
   }
   return result;
+}
+
+SmallVector<SmallVector<AxisRefAttr>> getGreatestCommonPrefixAxes(
+    const ShardingProjection& projection) {
+  FactorIndexToSharding factorIndexToCommonSharding;
+  int numFactors = 0;
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    // Detects conflicts within the same factor.
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (factorIndex + 1 > numFactors) {
+        numFactors = factorIndex + 1;
+      }
+      auto commonFactorShardingIt =
+          factorIndexToCommonSharding.find(factorIndex);
+      if (commonFactorShardingIt == factorIndexToCommonSharding.end()) {
+        factorIndexToCommonSharding[factorIndex] = factorSharding;
+        continue;
+      }
+      factorIndexToCommonSharding[factorIndex] = {
+          .axisRefs =
+              getGreatestCommonPrefix(commonFactorShardingIt->second.axisRefs,
+                                      factorSharding.axisRefs)};
+    }
+  }
+  SmallVector<SmallVector<AxisRefAttr>> factorAxisRefs(numFactors);
+  for (const auto& [factorIndex, factorSharding] :
+       factorIndexToCommonSharding) {
+    factorAxisRefs[factorIndex] = llvm::to_vector(factorSharding.axisRefs);
+  }
+  return factorAxisRefs;
 }
 
 }  // namespace sdy
