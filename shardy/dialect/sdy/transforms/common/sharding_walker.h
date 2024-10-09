@@ -29,8 +29,8 @@ using ConsumeShardingFn = std::function<void(TensorShardingAttr)>;
 using TransformShardingFn =
     std::function<TensorShardingAttr(TensorShardingAttr)>;
 
-// Walks the given `rootOp` in forward pre-order and applies `callback` on any
-// `TensorShardingAttr` encountered.
+// Walks the given `rootOp` in forward pre-order and applies `consumeFn` on
+// any `TensorShardingAttr` encountered.
 //
 // In addition, applies `consumeOpFn` on every encountered op, before consuming
 // its shardings.
@@ -39,7 +39,7 @@ void walkShardings(
     ConsumeOpFn consumeOpFn = [](Operation*) {});
 
 // Walks the given `rootOp` in forward pre-order and replaces any
-// `TensorShardingAttr` encountered with the result of applying `callback` on
+// `TensorShardingAttr` encountered with the result of applying `transformFn` on
 // it.
 //
 // In addition, applies `consumeOpFn` on every encountered op, before
