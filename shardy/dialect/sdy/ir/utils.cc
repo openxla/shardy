@@ -154,8 +154,7 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
 
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
-                       Operation* op) {
-  SymbolTable symbolTable(op->getParentOfType<ModuleOp>());
+                       const SymbolTable& symbolTable) {
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
            operandShardings, resultsShardings)) {
@@ -172,6 +171,13 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
   }
 
   return mesh;
+}
+
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
+                       ArrayRef<TensorShardingAttr> resultsShardings,
+                       Operation* op) {
+  return getCommonMesh(operandShardings, resultsShardings,
+                       SymbolTable(op->getParentOfType<ModuleOp>()));
 }
 
 std::optional<StringRef> getCommonMeshName(

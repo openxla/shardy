@@ -111,6 +111,12 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
 // nullptr if there is none.
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
+                       const SymbolTable& symbolTable);
+
+// Returns the common `MeshAttr` bound by all the `TensorShardingAttr` or
+// nullptr if there is none.
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
+                       ArrayRef<TensorShardingAttr> resultsShardings,
                        Operation* op);
 
 // Returns the common mesh name used by all the `TensorShardingAttr` or
