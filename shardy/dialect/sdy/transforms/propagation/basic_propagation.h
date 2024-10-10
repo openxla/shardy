@@ -23,6 +23,7 @@ limitations under the License.
 #include "llvm/Support/CommandLine.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
@@ -70,14 +71,15 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
   // (e.g. pushing the sharding of an operand in a call op to the function's
   // argument) as we assume the inliner pass was called.
   LogicalResult propagate(
-      ModuleOp moduleOp, const FactorPropagation& factorPropagation,
+      ModuleOp moduleOp, const SymbolTable& symbolTable,
+      const FactorPropagation& factorPropagation,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
 
   // Same as `propagate` above, but uses the strategy in private member
   // `basicFactorPropagation`. Sub-classes should override this method to
   // extend the propagation algorithm and define higher level strategies.
   virtual LogicalResult propagate(
-      ModuleOp moduleOp,
+      ModuleOp moduleOp, const SymbolTable& symbolTable,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
 
   const BasicFactorPropagation& getBasicFactorPropagation() const {

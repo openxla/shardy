@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -327,12 +328,13 @@ void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
 }  // namespace
 
 LogicalResult UserPriorityPropagationPassImpl::propagate(
-    ModuleOp moduleOp, GetDirectionToPropagateFn getDirectionToPropagate) {
+    ModuleOp moduleOp, const SymbolTable& symbolTable,
+    GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<PriorityShardingReferences> shardingReferencesPerPriority =
       getShardingReferencesPerPriorityAndInitialize(moduleOp);
   // We first run the first iteration (priority 0):
   if (failed(OpPriorityPropagationPassImpl::propagate(
-          moduleOp, getDirectionToPropagate))) {
+          moduleOp, symbolTable, getDirectionToPropagate))) {
     return failure();
   }
   saveModuleOpAfterPriority(moduleOp, dumpDirectory, 0);
@@ -341,7 +343,7 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
        shardingReferencesPerPriority) {
     updateReferencedShardingsForPriority(shardingReferences, priority);
     if (failed(OpPriorityPropagationPassImpl::propagate(
-            moduleOp, getDirectionToPropagate))) {
+            moduleOp, symbolTable, getDirectionToPropagate))) {
       return failure();
     }
     saveModuleOpAfterPriority(moduleOp, dumpDirectory, priority);

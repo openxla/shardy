@@ -107,23 +107,32 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
 
-// Returns the common `MeshAttr` bound by all the `TensorShardingAttr` or
+// Returns the common `MeshAttr` bound by all the `TensorShardingAttr`s or
 // nullptr if there is none.
+//
+// Ignores empty meshes unless all meshes are empty.
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        const SymbolTable& symbolTable);
 
-// Returns the common `MeshAttr` bound by all the `TensorShardingAttr` or
+// Returns the common `MeshAttr` bound by all the `TensorShardingAttr`s or
 // nullptr if there is none.
+//
+// Ignores empty meshes unless all meshes are empty.
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        Operation* op);
 
-// Returns the common mesh name used by all the `TensorShardingAttr` or
-// std::nullopt if there is none.
+// Returns the name of the common mesh referenced by all the
+// `TensorShardingAttr`s or std::nullopt if there is none.
+//
+// Ignores empty meshes unless all meshes are empty, and assumes there are no
+// inlined meshes and no two mesh names refer to the same `MeshAttr` (otherwise
+// one of will be returned arbitrarily).
 std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings);
+    ArrayRef<TensorShardingAttr> resultsShardings,
+    const SymbolTable& symbolTable);
 
 // Creates the symbol equivalent of a factor index:
 //   -  0 -> 'i'

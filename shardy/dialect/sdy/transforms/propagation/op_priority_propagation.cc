@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
@@ -128,9 +129,10 @@ struct OpPriorityPropagationPass
 }  // namespace
 
 LogicalResult OpPriorityPropagationPassImpl::propagate(
-    ModuleOp moduleOp, GetDirectionToPropagateFn getDirectionToPropagate) {
+    ModuleOp moduleOp, const SymbolTable& symbolTable,
+    GetDirectionToPropagateFn getDirectionToPropagate) {
   if (!runOpPriorityPropagation) {
-    return AggressivePropagationPassImpl::propagate(moduleOp,
+    return AggressivePropagationPassImpl::propagate(moduleOp, symbolTable,
                                                     getDirectionToPropagate);
   }
   // Reset currentOpPriority to 0. Before running the pass. This same instance
@@ -138,8 +140,9 @@ LogicalResult OpPriorityPropagationPassImpl::propagate(
   for (int64_t currentOpPriority = 0;
        currentOpPriority < opPropagationSchedule.size(); currentOpPriority++) {
     if (AggressivePropagationPassImpl::propagate(
-            moduleOp, getOpBasedDirectionToPropagate(currentOpPriority,
-                                                     getDirectionToPropagate))
+            moduleOp, symbolTable,
+            getOpBasedDirectionToPropagate(currentOpPriority,
+                                           getDirectionToPropagate))
             .failed()) {
       return failure();
     }

@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "llvm/Support/CommandLine.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
@@ -56,7 +57,8 @@ struct AggressivePropagationPass
 }  // namespace
 
 LogicalResult AggressivePropagationPassImpl::propagate(
-    ModuleOp moduleOp, GetDirectionToPropagateFn getDirectionToPropagate) {
+    ModuleOp moduleOp, const SymbolTable& symbolTable,
+    GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<const FactorPropagation*, 2> strategies;
   switch (propagationStrategy) {
     case PropagationStrategy::Aggressive: {
@@ -75,8 +77,8 @@ LogicalResult AggressivePropagationPassImpl::propagate(
   }
 
   for (const FactorPropagation* strategy : strategies) {
-    if (failed(BasicPropagationPassImpl::propagate(moduleOp, *strategy,
-                                                   getDirectionToPropagate))) {
+    if (failed(BasicPropagationPassImpl::propagate(
+            moduleOp, symbolTable, *strategy, getDirectionToPropagate))) {
       return failure();
     }
   }

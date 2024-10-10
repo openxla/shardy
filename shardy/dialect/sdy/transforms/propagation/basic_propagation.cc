@@ -35,6 +35,7 @@ limitations under the License.
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Pass/Pass.h"
@@ -223,9 +224,9 @@ LogicalResult propagateTensorShardings(
     SetShardingPerTensorCallback setResultShardingCallback,
     OpShardingRuleAttr shardingRule, PropagationDirection direction,
     const FactorPropagation& factorPropagation, bool conservativePropagation,
-    Operation* op, PatternRewriter* rewriter) {
+    Operation* op, const SymbolTable& symbolTable, PatternRewriter* rewriter) {
   std::optional<StringRef> meshName =
-      getCommonMeshName(operandShardings, resultsShardings);
+      getCommonMeshName(operandShardings, resultsShardings, symbolTable);
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or
     // the sharding attributes use different meshes.
@@ -280,7 +281,8 @@ LogicalResult propagateTensorShardings(
     TensorShardingAttr resultsSharding,
     SetTensorShardingCallback setOperandShardingCallback,
     SetTensorShardingCallback setResultShardingCallback,
-    OpShardingRuleAttr shardingRule, Operation* op, PatternRewriter* rewriter,
+    OpShardingRuleAttr shardingRule, Operation* op,
+    const SymbolTable& symbolTable, PatternRewriter* rewriter,
     const FactorPropagation& factorPropagation,
     PropagationDirection direction = PropagationDirection::BOTH,
     bool conservativePropagation = false) {
@@ -293,14 +295,14 @@ LogicalResult propagateTensorShardings(
         setResultShardingCallback(sharding);
       },
       shardingRule, direction, factorPropagation, conservativePropagation, op,
-      rewriter);
+      symbolTable, rewriter);
 }
 
 // Same as the overload above, except the operand and result shardings are
 // extracted using `getSharding` and set using `setSharding`.
 LogicalResult propagateTensorShardings(
     ValueRange operands, ValueRange results, OpShardingRuleAttr shardingRule,
-    Operation* op, PatternRewriter& rewriter,
+    Operation* op, const SymbolTable& symbolTable, PatternRewriter& rewriter,
     const FactorPropagation& factorPropagation,
     PropagationDirection direction = PropagationDirection::BOTH,
     bool conservativePropagation = false) {
@@ -313,12 +315,13 @@ LogicalResult propagateTensorShardings(
         setSharding(results[index], sharding);
       },
       shardingRule, direction, factorPropagation, conservativePropagation, op,
-      &rewriter);
+      symbolTable, &rewriter);
 }
 
 // Propagates the shardings between the operands of the `funcOp`'s terminator
 // and the `funcOp`'s result type attrs.
 LogicalResult propagateFuncResults(FuncOp funcOp,
+                                   const SymbolTable& symbolTable,
                                    const FactorPropagation& factorPropagation) {
   for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
     Value returnValue = returnOperand.get();
@@ -351,8 +354,8 @@ LogicalResult propagateFuncResults(FuncOp funcOp,
         // Treat the sharding data flow b/w the `funcOp` terminator and func
         // result attrs as an identity op. Create an equivalent sharding
         // rule.
-        createIdentityShardingRule(tensorType), funcOp, /*rewriter=*/nullptr,
-        factorPropagation);
+        createIdentityShardingRule(tensorType), funcOp, symbolTable,
+        /*rewriter=*/nullptr, factorPropagation);
   }
   return success();
 }
@@ -360,9 +363,10 @@ LogicalResult propagateFuncResults(FuncOp funcOp,
 // Overload of `propagateFuncResults` to propagate operand/result shardings of
 // every `FuncOp` in `moduleOp`.
 LogicalResult propagateFuncResults(ModuleOp moduleOp,
+                                   const SymbolTable& symbolTable,
                                    const FactorPropagation& factorPropagation) {
   for (auto funcOp : moduleOp.getOps<FuncOp>()) {
-    if (failed(propagateFuncResults(funcOp, factorPropagation))) {
+    if (failed(propagateFuncResults(funcOp, symbolTable, factorPropagation))) {
       return failure();
     }
   }
@@ -374,9 +378,11 @@ LogicalResult propagateFuncResults(ModuleOp moduleOp,
 class PropagateRegisteredOp : public RewritePattern {
  public:
   explicit PropagateRegisteredOp(
-      MLIRContext* context, GetDirectionToPropagateFn getDirectionToPropagate,
+      MLIRContext* context, const SymbolTable& symbolTable,
+      GetDirectionToPropagateFn getDirectionToPropagate,
       bool conservativePropagation, const FactorPropagation& factorPropagation)
       : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context),
+        symbolTable(symbolTable),
         getDirectionToPropagate(getDirectionToPropagate),
         conservativePropagation(conservativePropagation),
         factorPropagation(factorPropagation) {}
@@ -401,11 +407,12 @@ class PropagateRegisteredOp : public RewritePattern {
     }
 
     return propagateTensorShardings(
-        op->getOperands(), op->getResults(), shardingRule, op, rewriter,
-        factorPropagation, direction, conservativePropagation);
+        op->getOperands(), op->getResults(), shardingRule, op, symbolTable,
+        rewriter, factorPropagation, direction, conservativePropagation);
   }
 
  private:
+  const SymbolTable& symbolTable;
   GetDirectionToPropagateFn getDirectionToPropagate;
   bool conservativePropagation;
   const FactorPropagation& factorPropagation;
@@ -418,8 +425,10 @@ class PropagateRegisteredOp : public RewritePattern {
 class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
  public:
   explicit PropagateDataFlowEdgeOp(MLIRContext* context,
+                                   const SymbolTable& symbolTable,
                                    const FactorPropagation& factorPropagation)
       : OpRewritePattern<DataFlowEdgeOp>(context),
+        symbolTable(symbolTable),
         factorPropagation(factorPropagation) {}
 
   LogicalResult matchAndRewrite(DataFlowEdgeOp dataFlowEdgeOp,
@@ -429,12 +438,13 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
     // targets.
     return propagateTensorShardings(
         sources, dataFlowEdgeOp.getResult(),
-        createIdentityShardingRule(
-            cast<ShapedType>(dataFlowEdgeOp.getType()), sources.size()),
-        dataFlowEdgeOp, rewriter, factorPropagation);
+        createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
+                                   sources.size()),
+        dataFlowEdgeOp, symbolTable, rewriter, factorPropagation);
   }
 
  private:
+  const SymbolTable& symbolTable;
   const FactorPropagation& factorPropagation;
 };
 
@@ -466,8 +476,10 @@ class PropagateManualComputationOp
     : public OpRewritePattern<ManualComputationOp> {
  public:
   explicit PropagateManualComputationOp(
-      MLIRContext* context, const FactorPropagation& factorPropagation)
+      MLIRContext* context, const SymbolTable& symbolTable,
+      const FactorPropagation& factorPropagation)
       : OpRewritePattern<ManualComputationOp>(context),
+        symbolTable(symbolTable),
         factorPropagation(factorPropagation) {}
 
   LogicalResult matchAndRewrite(ManualComputationOp manualComputationOp,
@@ -503,7 +515,7 @@ class PropagateManualComputationOp
               },
               createIdentityShardingRule(
                   cast<RankedTensorType>(operand.getType())),
-              manualComputationOp, &rewriter, factorPropagation)
+              manualComputationOp, symbolTable, &rewriter, factorPropagation)
               .succeeded();
     }
 
@@ -530,7 +542,7 @@ class PropagateManualComputationOp
               },
               createIdentityShardingRule(
                   cast<RankedTensorType>(opResult.getType())),
-              manualComputationOp, &rewriter, factorPropagation)
+              manualComputationOp, symbolTable, &rewriter, factorPropagation)
               .succeeded();
     }
 
@@ -538,6 +550,7 @@ class PropagateManualComputationOp
   }
 
  private:
+  const SymbolTable& symbolTable;
   const FactorPropagation& factorPropagation;
 };
 
@@ -547,8 +560,10 @@ class PropagatePropagationBarrier
     : public OpRewritePattern<PropagationBarrierOp> {
  public:
   explicit PropagatePropagationBarrier(
-      MLIRContext* context, const FactorPropagation& factorPropagation)
+      MLIRContext* context, const SymbolTable& symbolTable,
+      const FactorPropagation& factorPropagation)
       : OpRewritePattern<PropagationBarrierOp>(context),
+        symbolTable(symbolTable),
         factorPropagation(factorPropagation) {}
 
   LogicalResult matchAndRewrite(PropagationBarrierOp propagationBarrierOp,
@@ -557,11 +572,12 @@ class PropagatePropagationBarrier
         propagationBarrierOp.getInput(), propagationBarrierOp.getResult(),
         createIdentityShardingRule(
             cast<RankedTensorType>(propagationBarrierOp.getType())),
-        propagationBarrierOp, rewriter, factorPropagation,
+        propagationBarrierOp, symbolTable, rewriter, factorPropagation,
         propagationBarrierOp.getAllowedDirection());
   }
 
  private:
+  const SymbolTable& symbolTable;
   const FactorPropagation& factorPropagation;
 };
 
@@ -588,20 +604,22 @@ PropagationDirection propagateAny(Operation*) {
 }
 
 LogicalResult BasicPropagationPassImpl::propagate(
-    ModuleOp moduleOp, const FactorPropagation& factorPropagation,
+    ModuleOp moduleOp, const SymbolTable& symbolTable,
+    const FactorPropagation& factorPropagation,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   // Pushes any shardings that exist on the `funcOp` result type attrs to the
   // corresponding values returned in the terminator of the body of `funcOp`.
-  if (failed(propagateFuncResults(moduleOp, factorPropagation))) {
+  if (failed(propagateFuncResults(moduleOp, symbolTable, factorPropagation))) {
     return failure();
   }
   MLIRContext* context = moduleOp.getContext();
   RewritePatternSet patterns(context);
   patterns.add<PropagateDataFlowEdgeOp, PropagateManualComputationOp,
-               PropagatePropagationBarrier>(context, factorPropagation);
-  patterns.add<PropagateRegisteredOp>(context, getDirectionToPropagate,
-                                      conservativePropagation,
-                                      factorPropagation);
+               PropagatePropagationBarrier>(context, symbolTable,
+                                            factorPropagation);
+  patterns.add<PropagateRegisteredOp>(
+      context, symbolTable, getDirectionToPropagate, conservativePropagation,
+      factorPropagation);
   // Note that we only need a single iteration (and another to confirm
   // convergence), since we make sure ops whose sharding changes are
   // added back to the worklist.
@@ -615,20 +633,23 @@ LogicalResult BasicPropagationPassImpl::propagate(
 
   // Pushes any shardings from the values returned in the terminator of the body
   // of `funcOp` to the corresponding `funcOp` result type attrs.
-  if (failed(propagateFuncResults(moduleOp, factorPropagation))) {
+  if (failed(propagateFuncResults(moduleOp, symbolTable, factorPropagation))) {
     return failure();
   }
   return success();
 }
 
 LogicalResult BasicPropagationPassImpl::propagate(
-    ModuleOp moduleOp, GetDirectionToPropagateFn getDirectionToPropagate) {
-  return propagate(moduleOp, basicFactorPropagation, getDirectionToPropagate);
+    ModuleOp moduleOp, const SymbolTable& symbolTable,
+    GetDirectionToPropagateFn getDirectionToPropagate) {
+  return propagate(moduleOp, symbolTable, basicFactorPropagation,
+                   getDirectionToPropagate);
 }
 
 void BasicPropagationPassImpl::runOnOperation() {
   ModuleOp moduleOp = getOperation();
-  if (failed(propagate(moduleOp))) {
+  SymbolTable symbolTable(moduleOp);
+  if (failed(propagate(moduleOp, symbolTable))) {
     signalPassFailure();
     return;
   }

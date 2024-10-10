@@ -19,6 +19,7 @@ limitations under the License.
 #include <memory>
 
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
@@ -35,7 +36,7 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
 
  protected:
   LogicalResult propagate(
-      ModuleOp moduleOp,
+      ModuleOp moduleOp, const SymbolTable& symbolTable,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 };
 

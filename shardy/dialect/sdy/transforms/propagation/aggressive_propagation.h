@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "llvm/Support/CommandLine.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
@@ -64,7 +65,7 @@ class AggressivePropagationPassImpl : public BasicPropagationPassImpl {
   // If `propagationStrategy` is `BasicThenAggressive`, we first use the basic
   // strategy, and then the aggressive strategy to resolve conflicts.
   LogicalResult propagate(
-      ModuleOp moduleOp,
+      ModuleOp moduleOp, const SymbolTable& symbolTable,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 
   Option<PropagationStrategy> propagationStrategy = {

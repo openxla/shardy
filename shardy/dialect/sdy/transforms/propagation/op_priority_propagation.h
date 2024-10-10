@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "llvm/Support/CommandLine.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
@@ -44,7 +45,7 @@ class OpPriorityPropagationPassImpl : public AggressivePropagationPassImpl {
   // returns, and the current direction for a given op and op-priority based on
   // an internally defined strategy.
   LogicalResult propagate(
-      ModuleOp moduleOp,
+      ModuleOp moduleOp, const SymbolTable& symbolTable,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 
   Option<bool> runOpPriorityPropagation = {

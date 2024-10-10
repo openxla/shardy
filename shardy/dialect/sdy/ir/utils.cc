@@ -162,9 +162,9 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
       continue;
     }
     MeshAttr otherMesh = sharding.getMesh(symbolTable);
-    if (!mesh) {
+    if (!mesh || mesh.empty()) {
       mesh = otherMesh;
-    } else if (otherMesh != mesh) {
+    } else if (otherMesh != mesh && !otherMesh.empty()) {
       // Found more than one mesh name.
       return nullptr;
     }
@@ -182,22 +182,22 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
 
 std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings) {
-  StringRef meshName;
+    ArrayRef<TensorShardingAttr> resultsShardings,
+    const SymbolTable& symbolTable) {
+  MeshAttr mesh =
+      getCommonMesh(operandShardings, resultsShardings, symbolTable);
+  if (!mesh) {
+    return std::nullopt;
+  }
+  // We assume that if there is a common mesh, then there can only be a unique
+  // symbol name referencing that mesh, so we return the first one.
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
            operandShardings, resultsShardings)) {
-    if (!sharding) {
-      continue;
-    }
-    if (meshName.empty()) {
-      meshName = sharding.getMeshName();
-    } else if (meshName != sharding.getMeshName()) {
-      // Found more than one mesh name.
-      return std::nullopt;
+    if (sharding) {
+      return sharding.getMeshName();
     }
   }
-
-  return meshName.empty() ? std::nullopt : std::make_optional(meshName);
+  llvm_unreachable("at least one of the tensors should have a sharding");
 }
 
 std::string factorSymbolString(int64_t factor) {

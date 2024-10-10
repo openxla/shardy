@@ -18,12 +18,14 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"  // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/utils.h"    // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/dialect.h"    // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/utils.h"      // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "stablehlo/dialect/StablehloOps.h"  // IWYU pragma: keep
 
@@ -71,8 +73,10 @@ struct InsertExplicitReshardsPass
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
 
   void runOnOperation() final {
+    func::FuncOp funcOp = getOperation();
+    SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
-    getOperation().walk([](Operation* op) {
+    funcOp.walk([&](Operation* op) {
       // TODO(enver): Handle the case when the operation does not have sharding
       // rule, perhaps use getOrCreateShardingRule utility.
       OpShardingRuleAttr shardingRule =
@@ -83,8 +87,9 @@ struct InsertExplicitReshardsPass
         // populated at a previous populate-op-sharding-rules pass.
         return;
       }
-      std::optional<StringRef> meshName = getCommonMeshName(
-          getShardings(op->getOperands()), getShardings(op->getResults()));
+      std::optional<StringRef> meshName =
+          getCommonMeshName(getShardings(op->getOperands()),
+                            getShardings(op->getResults()), symbolTable);
       if (!meshName.has_value()) {
         // This means none of the operands or results have a sharding attribute
         // or the sharding attributes use different meshes. Skip if so.
