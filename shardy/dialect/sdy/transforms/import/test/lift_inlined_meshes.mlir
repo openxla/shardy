@@ -53,6 +53,18 @@ func.func @inlined_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@me
 
 // -----
 
+// CHECK: sdy.mesh @empty_mesh = <[]>
+
+// CHECK-LABEL: func @inlined_empty_mesh(
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}, {}]>})
+func.func @inlined_empty_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<[]>, [{}, {}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}, {}]>]>
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<[]>, [{}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
 // CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
 // CHECK: sdy.mesh @maximal_mesh_7 = <[], device_ids=[7]>
 

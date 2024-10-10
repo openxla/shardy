@@ -159,6 +159,10 @@ void ShardableDataFlowOpInterface::setEdgeOwnerSharding(
 // MeshAttr
 //===----------------------------------------------------------------------===//
 
+bool MeshAttr::empty() const {
+  return getAxes().empty() && getDeviceIds().empty();
+}
+
 bool MeshAttr::hasAxis(StringRef axisName) const {
   return llvm::any_of(getAxes(), [axisName](MeshAxisAttr axis) {
     return axis.getName() == axisName;
@@ -173,7 +177,7 @@ int64_t MeshAttr::getAxisSize(StringRef axisName) const {
   }
   // Since verification will fail if an axis name doesn't appear in the bound
   // mesh, we can assume we would never get here.
-  llvm_unreachable("unknown axis name");
+  llvm::report_fatal_error("unknown axis name");
 }
 
 int64_t MeshAttr::getTotalSize() const {

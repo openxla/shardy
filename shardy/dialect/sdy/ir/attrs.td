@@ -95,8 +95,15 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   ];
 
   let extraClassDeclaration = [{
+    // Returns true if this mesh has no axes or device ids.
+    bool empty() const;
+
+    // Returns true if this mesh has an axis with the given `axisName`.
     bool hasAxis(StringRef axisName) const;
 
+    // Returns the size of the axis with the given `axisName`.
+    //
+    // Assumes the axis is present in the mesh.
     int64_t getAxisSize(StringRef axisName) const;
 
     // Returns the total size of the mesh across all axes, as in the total

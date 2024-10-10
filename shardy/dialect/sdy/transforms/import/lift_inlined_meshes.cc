@@ -48,6 +48,9 @@ MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
     std::string meshName = llvm::formatv("maximal_mesh_{0}", deviceId);
     return createMesh(meshName);
   }
+  if (mesh.empty()) {
+    return createMesh("empty_mesh");
+  }
   return createMesh("mesh");
 }
 
