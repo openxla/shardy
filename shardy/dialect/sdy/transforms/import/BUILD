@@ -23,6 +23,12 @@ gentbl_cc_library(
             "passes.h.inc",
         ),
         (
+            [
+                "-gen-pass-capi-header",
+            ],
+            "passes.capi.h.inc",
+        ),
+        (
             ["-gen-pass-doc"],
             "g3doc/sdy_import_passes.md",
         ),

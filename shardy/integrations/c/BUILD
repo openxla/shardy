@@ -5,11 +5,13 @@ package(default_visibility = ["//visibility:public"])
 SDY_CAPI_SOURCES = [
     "attributes.cc",
     "dialect.cc",
+    "passes.cc",
 ]
 
 SDY_CAPI_HEADERS = [
     "attributes.h",
     "dialect.h",
+    "passes.h",
 ]
 
 cc_library(
@@ -18,6 +20,7 @@ cc_library(
     hdrs = SDY_CAPI_HEADERS,
     deps = [
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms:passes",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:CAPIIR",
         "@llvm-project//mlir:IR",
@@ -42,8 +45,10 @@ cc_library(
     hdrs = SDY_CAPI_HEADERS,
     deps = [
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms:passes",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:CAPIIRObjects",
+        "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
     ],
     alwayslink = True,
