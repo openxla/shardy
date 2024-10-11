@@ -440,19 +440,11 @@ TensorShardingAttr getTensorShardingAttr(MLIRContext* context, int64_t rank,
 }  // namespace
 
 MeshAttr TensorShardingAttr::getMesh(const SymbolTable& symbolTable) const {
-  // TODO(tomnatan): remove mlir:: once Attribute::dyn_cast is removed.
-  if (auto mesh = mlir::dyn_cast<MeshAttr>(getMeshOrRef())) {
-    return mesh;
-  }
-  return getMeshAttr(symbolTable, getMeshSymName());
+  return getMeshOrLookup(symbolTable, getMeshOrRef());
 }
 
 MeshAttr TensorShardingAttr::getMesh(Operation* op) const {
-  // TODO(tomnatan): remove mlir:: once Attribute::dyn_cast is removed.
-  if (auto mesh = mlir::dyn_cast<MeshAttr>(getMeshOrRef())) {
-    return mesh;
-  }
-  return getMeshAttr(op, getMeshSymName());
+  return getMeshOrLookup(op, getMeshOrRef());
 }
 
 bool TensorShardingAttr::emptyAxes() const {

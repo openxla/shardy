@@ -126,6 +126,20 @@ int64_t isScalar(Value value) {
   return false;
 }
 
+MeshAttr getMeshOrLookup(const SymbolTable& symbolTable, Attribute meshOrRef) {
+  if (auto mesh = dyn_cast<MeshAttr>(meshOrRef)) {
+    return mesh;
+  }
+  return getMeshAttr(symbolTable, cast<FlatSymbolRefAttr>(meshOrRef));
+}
+
+MeshAttr getMeshOrLookup(Operation* op, Attribute meshOrRef) {
+  if (auto mesh = dyn_cast<MeshAttr>(meshOrRef)) {
+    return mesh;
+  }
+  return getMeshAttr(op, cast<FlatSymbolRefAttr>(meshOrRef));
+}
+
 MeshAttr getMeshAttr(const SymbolTable& symbolTable, StringRef meshName) {
   if (auto meshOp = symbolTable.lookup<MeshOp>(meshName)) {
     return meshOp.getMesh();
@@ -152,9 +166,10 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
   return nullptr;
 }
 
-MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
-                       ArrayRef<TensorShardingAttr> resultsShardings,
-                       const SymbolTable& symbolTable) {
+Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
+                             ArrayRef<TensorShardingAttr> resultsShardings,
+                             const SymbolTable& symbolTable) {
+  Attribute meshOrRef;
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
            operandShardings, resultsShardings)) {
@@ -164,13 +179,24 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
     MeshAttr otherMesh = sharding.getMesh(symbolTable);
     if (!mesh || mesh.empty()) {
       mesh = otherMesh;
+      meshOrRef = sharding.getMeshOrRef();
     } else if (otherMesh != mesh && !otherMesh.empty()) {
       // Found more than one mesh name.
       return nullptr;
     }
   }
 
-  return mesh;
+  return meshOrRef;
+}
+
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
+                       ArrayRef<TensorShardingAttr> resultsShardings,
+                       const SymbolTable& symbolTable) {
+  if (Attribute meshOrRef =
+          getCommonMeshOrRef(operandShardings, resultsShardings, symbolTable)) {
+    return getMeshOrLookup(symbolTable, meshOrRef);
+  }
+  return nullptr;
 }
 
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
@@ -184,20 +210,13 @@ std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultsShardings,
     const SymbolTable& symbolTable) {
-  MeshAttr mesh =
-      getCommonMesh(operandShardings, resultsShardings, symbolTable);
-  if (!mesh) {
-    return std::nullopt;
-  }
+  Attribute meshOrRef =
+      getCommonMeshOrRef(operandShardings, resultsShardings, symbolTable);
   // We assume that if there is a common mesh, then there can only be a unique
-  // symbol name referencing that mesh, so we return the first one.
-  for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
-           operandShardings, resultsShardings)) {
-    if (sharding) {
-      return sharding.getMeshName();
-    }
-  }
-  llvm_unreachable("at least one of the tensors should have a sharding");
+  // symbol name referencing that mesh.
+  return meshOrRef
+             ? std::make_optional(cast<FlatSymbolRefAttr>(meshOrRef).getValue())
+             : std::nullopt;
 }
 
 std::string factorSymbolString(int64_t factor) {

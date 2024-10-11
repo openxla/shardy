@@ -118,7 +118,7 @@ sdy.mesh @mesh2 = <["b"=2]>
 // CHECK-LABEL: func @op_shardings_refer_to_different_meshes
 func.func @op_shardings_refer_to_different_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-   // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["b"=2]> vs #sdy.mesh<["a"=2]>}}
+   // expected-error @+1 {{op result shardings can only be bound to the same mesh or an empty mesh}}
   %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1]
     {sdy.sharding=#sdy.sharding_per_value<[<@mesh1, [{"a"}, {}]>, <@mesh2, [{"b"}, {}]>]>} :
     (tensor<2x64x13xf32>, tensor<2x64x13xf32>, tensor<f32>, tensor<f32>) -> (tensor<2x13xf32>, tensor<2x13xf32>)
@@ -135,7 +135,7 @@ func.func @op_shardings_refer_to_different_meshes(%arg0: tensor<2x64x13xf32>, %a
 // CHECK-LABEL: func @op_shardings_bound_to_different_inlined_meshes
 func.func @op_shardings_bound_to_different_inlined_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-   // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["b"=2]> vs #sdy.mesh<["a"=2]>}}
+   // expected-error @+1 {{op result shardings can only be bound to the same mesh or an empty mesh}}
   %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1]
     {sdy.sharding=#sdy.sharding_per_value<[<mesh<["a"=2]>, [{"a"}, {}]>, <mesh<["b"=2]>, [{"b"}, {}]>]>} :
     (tensor<2x64x13xf32>, tensor<2x64x13xf32>, tensor<f32>, tensor<f32>) -> (tensor<2x13xf32>, tensor<2x13xf32>)
@@ -154,7 +154,7 @@ sdy.mesh @mesh2 = <["b"=2]>
 // CHECK-LABEL: func @op_shardings_bound_to_different_inlined_and_referenced_meshes
 func.func @op_shardings_bound_to_different_inlined_and_referenced_meshes(%arg0: tensor<2x64x13xf32>, %arg1: tensor<2x64x13xf32>) -> (tensor<2x13xf32>, tensor<2x13xf32>) {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-   // expected-error @+1 {{op result shardings can only be bound to one mesh: #sdy.mesh<["b"=2]> vs #sdy.mesh<["a"=2]>}}
+   // expected-error @+1 {{op result shardings can only be bound to the same mesh or an empty mesh}}
   %1:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %0) across dimensions = [1]
     {sdy.sharding=#sdy.sharding_per_value<[<mesh<["a"=2]>, [{"a"}, {}]>, <@mesh2, [{"b"}, {}]>]>} :
     (tensor<2x64x13xf32>, tensor<2x64x13xf32>, tensor<f32>, tensor<f32>) -> (tensor<2x13xf32>, tensor<2x13xf32>)

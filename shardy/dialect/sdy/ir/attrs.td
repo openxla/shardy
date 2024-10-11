@@ -65,8 +65,8 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
 
   Here are some examples of meshes:
 
-    - An empty mesh represents a mesh with an unnamed axis of size 1 and device
-      ID 0: <[]>
+    - An empty mesh represents a placeholder mesh that can be replaced during
+      propagation: <[]>
     - A mesh with an unnamed axis and an explicit device ID, which is typically
       used to represent maximal sharding: <[], device_ids=[3]>
     - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>

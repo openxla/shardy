@@ -22,9 +22,12 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Rewrite/FrozenRewritePatternSet.h"
 #include "mlir/Support/LLVM.h"
@@ -41,9 +44,13 @@ namespace {
 
 // Returns whether the new shardings needed to be updated to account for unused
 // manual axes, and the new shardings.
+//
+// If a sharding that needs to be updated is bound to an empty mesh, replaces
+// its mesh with `commonMeshOrRef`.
 std::optional<SmallVector<TensorShardingAttr>>
 addUnusedManualAxesToReplicatedAxes(
     ArrayRef<TensorShardingAttr> shardings, ArrayRef<StringAttr> manualAxes,
+    Attribute commonMeshOrRef, const SymbolTable& symbolTable,
     std::function<bool(AxisRefAttr lhs, AxisRefAttr rhs)> meshComparator) {
   SmallVector<TensorShardingAttr> newShardings;
   bool modified = false;
@@ -67,8 +74,11 @@ addUnusedManualAxesToReplicatedAxes(
                       return AxisRefAttr::get(sharding.getContext(), axis);
                     });
     llvm::sort(newReplicatedAxes, meshComparator);
+    Attribute meshOrRef = sharding.getMesh(symbolTable).empty()
+                              ? commonMeshOrRef
+                              : sharding.getMeshOrRef();
     newShardings.push_back(
-        TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
+        TensorShardingAttr::get(sharding.getContext(), meshOrRef,
                                 sharding.getDimShardings(), newReplicatedAxes));
     modified = true;
   }
@@ -77,8 +87,9 @@ addUnusedManualAxesToReplicatedAxes(
 
 // Adds any unused manual axes to the replicated_axes list for each in/out
 // sharding
-void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op,
-                                         MeshAttr mesh) {
+void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op, MeshAttr mesh,
+                                         Attribute commonMeshOrRef,
+                                         const SymbolTable& symbolTable) {
   OpBuilder builder(op);
 
   ArrayRef<StringAttr> manualAxes = op.getManualAxes();
@@ -86,14 +97,15 @@ void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op,
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
-              op.getInShardings().getShardings(), manualAxes, meshComparator)) {
+              op.getInShardings().getShardings(), manualAxes, commonMeshOrRef,
+              symbolTable, meshComparator)) {
     op.setInShardings(*newShardings);
   }
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
-              op.getOutShardings().getShardings(), manualAxes,
-              meshComparator)) {
+              op.getOutShardings().getShardings(), manualAxes, commonMeshOrRef,
+              symbolTable, meshComparator)) {
     op.setOutShardings(*newShardings);
   }
 }
@@ -116,7 +128,9 @@ struct ManualAxesCleanupPass
   using ManualAxesCleanupPassBase::ManualAxesCleanupPassBase;
 
   void runOnOperation() final {
-    getOperation()->walk([](ManualComputationOp op) {
+    ModuleOp moduleOp = getOperation();
+    SymbolTable symbolTable(moduleOp);
+    moduleOp->walk([&](ManualComputationOp op) {
       ArrayRef<TensorShardingAttr> inShardings =
           op.getInShardings().getShardings();
       ArrayRef<TensorShardingAttr> outShardings =
@@ -125,10 +139,13 @@ struct ManualAxesCleanupPass
         // Nothing to do.
         return;
       }
-      MeshAttr mesh = getCommonMesh(inShardings, outShardings, op);
+      Attribute meshOrRef =
+          getCommonMeshOrRef(inShardings, outShardings, symbolTable);
+      MeshAttr mesh =
+          meshOrRef ? getMeshOrLookup(symbolTable, meshOrRef) : nullptr;
       assert(mesh && "expected inputs and outputs to have a common mesh");
       sortManualAxes(op, mesh);
-      addUnusedManualAxesToReplicatedAxes(op, mesh);
+      addUnusedManualAxesToReplicatedAxes(op, mesh, meshOrRef, symbolTable);
     });
   }
 

@@ -89,6 +89,16 @@ int64_t getTensorRank(Value value);
 // Returns true if the value is a tensor with rank 0.
 int64_t isScalar(Value value);
 
+// If `meshOrRef` is a `MeshAttr`, returns it, otherwise, looks up the
+// referenced mesh symbol in `symbolTable`, and returns its `MeshAttr`
+// if it exists in the table, or nullptr otherwise.
+MeshAttr getMeshOrLookup(const SymbolTable& symbolTable, Attribute meshOrRef);
+
+// If `meshOrRef` is a `MeshAttr`, returns it, otherwise, looks up the
+// referenced mesh symbol in the symbol table of the enclosing module of `op`,
+// and returns its `MeshAttr` if it exists in the table, or nullptr otherwise.
+MeshAttr getMeshOrLookup(Operation* op, Attribute meshOrRef);
+
 // Looks up the mesh symbol with the given `meshName` in `symbolTable`, and
 // returns its `MeshAttr` if it exists in the table, or nullptr otherwise.
 MeshAttr getMeshAttr(const SymbolTable& symbolTable, StringRef meshName);
@@ -106,6 +116,17 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // the enclosing module of `op`, and returns its `MeshAttr` if it exists in the
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
+
+// Returns the common mesh (or a reference to it) bound by all the
+// `TensorShardingAttr`s or nullptr if there is none.
+//
+// Ignores empty meshes unless all meshes are empty.
+//
+// If there is a common mesh, returns the first inlined common mesh or reference
+// to it encountered.
+Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
+                             ArrayRef<TensorShardingAttr> resultsShardings,
+                             const SymbolTable& symbolTable);
 
 // Returns the common `MeshAttr` bound by all the `TensorShardingAttr`s or
 // nullptr if there is none.
