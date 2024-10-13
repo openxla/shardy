@@ -30,6 +30,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {
@@ -72,6 +73,7 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
   // argument) as we assume the inliner pass was called.
   LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
+      const ShardingGroupMap& shardingGroupMap,
       const FactorPropagation& factorPropagation,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
 
@@ -80,6 +82,7 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
   // extend the propagation algorithm and define higher level strategies.
   virtual LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
+      const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
 
   const BasicFactorPropagation& getBasicFactorPropagation() const {

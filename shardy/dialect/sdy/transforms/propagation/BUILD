@@ -57,6 +57,7 @@ cc_library(
         ":op_sharding_rule_builder",
         ":op_sharding_rule_registry",
         ":passes_inc",
+        ":sharding_group_map",
         ":sharding_projection",
         ":utils",
         "//shardy/common:file_utils",
@@ -102,6 +103,19 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
         "@stablehlo//:stablehlo_ops",
+    ],
+)
+
+cc_library(
+    name = "sharding_group_map",
+    srcs = ["sharding_group_map.cc"],
+    hdrs = ["sharding_group_map.h"],
+    deps = [
+        ":utils",
+        "//shardy/dialect/sdy/ir:dialect",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
     ],
 )
 

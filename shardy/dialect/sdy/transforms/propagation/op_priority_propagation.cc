@@ -34,6 +34,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {
@@ -130,17 +131,18 @@ struct OpPriorityPropagationPass
 
 LogicalResult OpPriorityPropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
+    const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   if (!runOpPriorityPropagation) {
-    return AggressivePropagationPassImpl::propagate(moduleOp, symbolTable,
-                                                    getDirectionToPropagate);
+    return AggressivePropagationPassImpl::propagate(
+        moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate);
   }
   // Reset currentOpPriority to 0. Before running the pass. This same instance
   // could have been run earlier already (e.g. with a different user priority).
   for (int64_t currentOpPriority = 0;
        currentOpPriority < opPropagationSchedule.size(); currentOpPriority++) {
     if (AggressivePropagationPassImpl::propagate(
-            moduleOp, symbolTable,
+            moduleOp, symbolTable, shardingGroupMap,
             getOpBasedDirectionToPropagate(currentOpPriority,
                                            getDirectionToPropagate))
             .failed()) {

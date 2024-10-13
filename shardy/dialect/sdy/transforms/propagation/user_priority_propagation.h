@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_priority_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {
@@ -37,6 +38,7 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
  protected:
   LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
+      const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 };
 

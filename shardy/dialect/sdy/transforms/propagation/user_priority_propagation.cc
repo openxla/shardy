@@ -42,6 +42,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_priority_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {
@@ -329,12 +330,13 @@ void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
 
 LogicalResult UserPriorityPropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
+    const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<PriorityShardingReferences> shardingReferencesPerPriority =
       getShardingReferencesPerPriorityAndInitialize(moduleOp);
   // We first run the first iteration (priority 0):
   if (failed(OpPriorityPropagationPassImpl::propagate(
-          moduleOp, symbolTable, getDirectionToPropagate))) {
+          moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate))) {
     return failure();
   }
   saveModuleOpAfterPriority(moduleOp, dumpDirectory, 0);
@@ -343,7 +345,8 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
        shardingReferencesPerPriority) {
     updateReferencedShardingsForPriority(shardingReferences, priority);
     if (failed(OpPriorityPropagationPassImpl::propagate(
-            moduleOp, symbolTable, getDirectionToPropagate))) {
+            moduleOp, symbolTable, shardingGroupMap,
+            getDirectionToPropagate))) {
       return failure();
     }
     saveModuleOpAfterPriority(moduleOp, dumpDirectory, priority);

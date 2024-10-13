@@ -27,6 +27,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {
@@ -58,6 +59,7 @@ struct AggressivePropagationPass
 
 LogicalResult AggressivePropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
+    const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<const FactorPropagation*, 2> strategies;
   switch (propagationStrategy) {
@@ -77,8 +79,9 @@ LogicalResult AggressivePropagationPassImpl::propagate(
   }
 
   for (const FactorPropagation* strategy : strategies) {
-    if (failed(BasicPropagationPassImpl::propagate(
-            moduleOp, symbolTable, *strategy, getDirectionToPropagate))) {
+    if (failed(BasicPropagationPassImpl::propagate(moduleOp, symbolTable,
+                                                   shardingGroupMap, *strategy,
+                                                   getDirectionToPropagate))) {
       return failure();
     }
   }
