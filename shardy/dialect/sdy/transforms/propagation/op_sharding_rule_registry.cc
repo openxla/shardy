@@ -162,28 +162,27 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
 OpShardingRuleAttr createOpShardingRule(Operation* op,
                                         const bool conservativePropagation) {
   return TypeSwitch<Operation*, OpShardingRuleAttr>(op)
-      .Case<ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
-            stablehlo::AllGatherOp, stablehlo::AllReduceOp,
-            stablehlo::AllToAllOp, stablehlo::AndOp, stablehlo::Atan2Op,
-            stablehlo::CbrtOp, stablehlo::CeilOp, stablehlo::ClzOp,
-            stablehlo::CollectivePermuteOp, stablehlo::CompareOp,
-            stablehlo::ComplexOp, stablehlo::ConvertOp, stablehlo::CosineOp,
-            stablehlo::CrossReplicaSumOp, stablehlo::DivOp, stablehlo::ExpOp,
-            stablehlo::Expm1Op, stablehlo::FloorOp, stablehlo::ImagOp,
-            stablehlo::IsFiniteOp, stablehlo::Log1pOp, stablehlo::LogOp,
-            stablehlo::LogisticOp, stablehlo::MaxOp, stablehlo::MinOp,
-            stablehlo::MulOp, stablehlo::NegOp, stablehlo::NotOp,
-            stablehlo::OrOp, stablehlo::PopulationCountOp, stablehlo::PowOp,
-            stablehlo::RealOp, stablehlo::ReducePrecisionOp,
-            stablehlo::ReduceScatterOp, stablehlo::RemOp,
-            stablehlo::RoundNearestEvenOp, stablehlo::RoundOp,
-            stablehlo::RsqrtOp, stablehlo::ShiftLeftOp,
-            stablehlo::ShiftRightArithmeticOp, stablehlo::ShiftRightLogicalOp,
-            stablehlo::SignOp, stablehlo::SineOp, stablehlo::SqrtOp,
-            stablehlo::SubtractOp, stablehlo::TanhOp, stablehlo::XorOp>(
-          [](Operation* pointwiseOp) {
-            return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
-          })
+      .Case<
+          ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
+          stablehlo::AllGatherOp, stablehlo::AllReduceOp, stablehlo::AllToAllOp,
+          stablehlo::AndOp, stablehlo::Atan2Op, stablehlo::CbrtOp,
+          stablehlo::CeilOp, stablehlo::ClzOp, stablehlo::CollectivePermuteOp,
+          stablehlo::CompareOp, stablehlo::ComplexOp, stablehlo::ConvertOp,
+          stablehlo::CosineOp, stablehlo::CrossReplicaSumOp, stablehlo::DivOp,
+          stablehlo::ExpOp, stablehlo::Expm1Op, stablehlo::FloorOp,
+          stablehlo::ImagOp, stablehlo::IsFiniteOp, stablehlo::Log1pOp,
+          stablehlo::LogOp, stablehlo::LogisticOp, stablehlo::MaxOp,
+          stablehlo::MinOp, stablehlo::MulOp, stablehlo::NegOp,
+          stablehlo::NotOp, stablehlo::OrOp, stablehlo::PopulationCountOp,
+          stablehlo::PowOp, stablehlo::RealOp, stablehlo::ReducePrecisionOp,
+          stablehlo::ReduceScatterOp, stablehlo::RemOp,
+          stablehlo::RoundNearestEvenOp, stablehlo::RoundOp, stablehlo::RsqrtOp,
+          stablehlo::ShiftLeftOp, stablehlo::ShiftRightArithmeticOp,
+          stablehlo::ShiftRightLogicalOp, stablehlo::SignOp, stablehlo::SineOp,
+          stablehlo::SqrtOp, stablehlo::SubtractOp, stablehlo::TanOp,
+          stablehlo::TanhOp, stablehlo::XorOp>([](Operation* pointwiseOp) {
+        return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
+      })
       // The following case is for ops that are only pointwise for the sake of
       // propagation, but would require communication for the result to be
       // sharded like the operand along a specific dimensions. For example, if
