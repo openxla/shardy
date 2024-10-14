@@ -280,14 +280,14 @@ func.func @propagate_from_multi_result_op_with_priorities(
 
 // CHECK-LABEL: func @manual_computation_shardings_with_priority(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {?}]>},
-// CHECK-SAME:      %arg1: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
+// CHECK-SAME:      %arg1: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
 // CHECK-SAME:  -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
 func.func @manual_computation_shardings_with_priority(
     %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p2, {?}]>},
     %arg1: tensor<32x32xf32> ) -> tensor<32x32xf32> {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", ?}, {?}]>]>}
   // CHECK-NEXT: sdy.manual_computation(%[[ADD_0]], %arg1)
-  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {?}]>, <@mesh, [{"a", ?}, {?}]>]
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {?}]>, <@mesh, [{"a", ?}, {"b", ?}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}]>]
   // CHECK-SAME:   manual_axes={"a"} (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
   // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>}
@@ -302,6 +302,34 @@ func.func @manual_computation_shardings_with_priority(
     sdy.return %2 : tensor<16x32xf32>
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %1: tensor<32x32xf32>
+}
+
+// CHECK-LABEL: func @manual_computation_sharding_with_low_priority(
+// CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {}]>},
+// CHECK-SAME:      %arg1: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>})
+// CHECK-SAME:  -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {}]>}) {
+func.func @manual_computation_sharding_with_low_priority(
+    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p1, {}]>},
+    %arg1: tensor<32x32xf32>) -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p1, {}]>}) {
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c", ?}, {?}]>]>}
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD_0]], %arg1)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {}]>, <@mesh, [{"a", "b"}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"a", "b"}, {}]>]
+  // CHECK-SAME:   manual_axes={"a"} (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
+  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", ?}, {?}]>]>}
+  // CHECK-NEXT:   sdy.return %[[ADD_1]]
+  // CHECK-NEXT: }
+  // CHECK-NEXT: stablehlo.add %[[MC]], %[[MC]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c", ?}, {?}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 : tensor<32x32xf32>
+  %1 = sdy.manual_computation(%0, %arg1)
+      in_shardings=[<@mesh, [{"a", "b"}p2, {}]>, <@mesh, [{"a", "b"}p0, {}]>]
+      out_shardings=[<@mesh, [{"a", "b"}p2, {}]>] manual_axes={"a"}
+      (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
+    %3 = stablehlo.add %arg2, %arg3 : tensor<16x32xf32>
+    sdy.return %3 : tensor<16x32xf32>
+  } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
+  %2 = stablehlo.add %1, %1 : tensor<32x32xf32>
+  func.return %2: tensor<32x32xf32>
 }
 
 // Tests user based priority propagation with op based priority propagation.

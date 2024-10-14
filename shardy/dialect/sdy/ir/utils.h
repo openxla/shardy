@@ -189,7 +189,6 @@ Operation* getOwningOp(Value value);
 //
 // Returns an empty value if the given `value` has no shardable value, e.g., a
 // scalar block argument of a reduction function.
-// TODO(tomnatan): consider moving this to a dedicated sdy/utils dir.
 Value getShardableValue(Value value);
 
 // Returns the sharding of the given `value`, whose location depends on the type
@@ -203,8 +202,10 @@ Value getShardableValue(Value value);
 //
 // Returns an empty `TensorShardingAttr` if the given `value` has no sharding or
 // if it has no shardable value (see `getShardableValue`)
-// TODO(tomnatan): consider moving this to a dedicated sdy/utils dir.
-TensorShardingAttr getSharding(Value value);
+//
+// If `removeManualAxes` is true, then manual axes are removed from the returned
+// sharding if `value` is a block argument of a `ManualComputationOp`.
+TensorShardingAttr getSharding(Value value, bool removeManualAxes = true);
 
 // Returns the sharding of the given `value`, or a fully open empty
 // `TensorShardingAttr` if `value` doesn't have a sharding.
@@ -226,8 +227,11 @@ void replaceShardingAtIndex(Operation* op, unsigned index,
 //
 // Some op results and block arguments don't have shardings attached to them.
 // Instead we recursively loop through the defining op of these ops' operands.
-// TODO(tomnatan): consider moving this to a dedicated sdy/utils dir.
-void setSharding(Value value, TensorShardingAttr sharding);
+//
+// If `addManualAxes` is true, then the manual axes are added to the given
+// `sharding` if `value` is a block argument of a `ManualComputationOp`.
+void setSharding(Value value, TensorShardingAttr sharding,
+                 bool addManualAxes = true);
 
 // Return the sharding of the `resNum` result of the given `funcOp`.
 TensorShardingAttr getFuncResultSharding(func::FuncOp funcOp, int64_t resNum);

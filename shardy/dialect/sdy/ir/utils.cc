@@ -261,7 +261,7 @@ Value getShardableValue(Value value) {
       });
 }
 
-TensorShardingAttr getSharding(Value value) {
+TensorShardingAttr getSharding(Value value, bool removeManualAxes) {
   value = getShardableValue(value);
   if (!value) {
     // This means the value is a scalar block argument, in which case it can't
@@ -283,11 +283,14 @@ TensorShardingAttr getSharding(Value value) {
           [](ReshardOp reshardOp) { return reshardOp.getShardingAttr(); })
       .Case<ManualComputationOp>([&](ManualComputationOp manualComputationOp) {
         if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-          // Block arguments of a `ManualComputationOp` can only be referred to
-          // inside the body. Remove any of the manual axes that are prefixed to
-          // it so the body of the MC op doesn't know about them.
-          return manualComputationOp.getInShardingWithoutManualAxes(
-              blockArg.getArgNumber());
+          if (removeManualAxes) {
+            // Block arguments of a `ManualComputationOp` can only be referred
+            // to inside the body. Remove any of the manual axes that are
+            // prefixed to it so the body of the MC op doesn't know about them.
+            return manualComputationOp.getInShardingWithoutManualAxes(
+                blockArg.getArgNumber());
+          }
+          return manualComputationOp.getInSharding(blockArg.getArgNumber());
         }
         // An op outside of a `ManualComputationOp`, that is a user of the
         // `OpResult,` would request this value. As such keep the manual
@@ -320,7 +323,8 @@ TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName) {
                                           getTensorRank(value), meshName);
 }
 
-void setSharding(Value value, TensorShardingAttr sharding) {
+void setSharding(Value value, TensorShardingAttr sharding,
+                 bool addManualAxes) {
   value = getShardableValue(value);
   assert(value && "value should exist if its sharding is updated");
   TypeSwitch<Operation*>(getOwningOp(value))
@@ -338,12 +342,17 @@ void setSharding(Value value, TensorShardingAttr sharding) {
           [&](ReshardOp reshardOp) { reshardOp.setShardingAttr(sharding); })
       .Case<ManualComputationOp>([&](ManualComputationOp manualComputationOp) {
         if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-          // We only set `in_shardings` when propagating from a use inside
-          // the body of the `ManualComputationOp` to the `in_shardings`, and
-          // since propagation within the body of the op doesn't see the manual
-          // axes, we need to add them back.
-          manualComputationOp.setInShardingAddingManualAxes(
-              blockArg.getArgNumber(), sharding);
+          if (addManualAxes) {
+            // We only set `in_shardings` when propagating from a use inside
+            // the body of the `ManualComputationOp` to the `in_shardings`, and
+            // since propagation within the body of the op doesn't see the
+            // manual axes, we need to add them back.
+            manualComputationOp.setInShardingAddingManualAxes(
+                blockArg.getArgNumber(), sharding);
+          } else {
+            manualComputationOp.setInSharding(blockArg.getArgNumber(),
+                                              sharding);
+          }
         } else {
           // This would happen when an op outside of a `ManualComputationOp`
           // is a user of a result of the `ManualComputationOp`. In this case,

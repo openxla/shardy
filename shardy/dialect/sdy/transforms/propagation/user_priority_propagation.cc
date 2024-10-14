@@ -25,7 +25,6 @@ limitations under the License.
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -38,7 +37,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_priority_propagation.h"
@@ -52,40 +51,18 @@ namespace sdy {
 
 namespace {
 
-using func::FuncOp;
-
-// A value and its original sharding.
-struct ValueSharding {
-  Value value;
+// A value or func result and its original sharding.
+struct ShardingReference {
+  ValueOrFuncResult valueOrFuncResult;
   TensorShardingAttr sharding;
 
-  ValueSharding(Value value, TensorShardingAttr sharding)
-      : value(value), sharding(sharding) {}
-};
-
-// A function result number and its original sharding.
-struct FuncResultSharding {
-  int64_t resNum;
-  TensorShardingAttr sharding;
-
-  FuncResultSharding(int64_t resNum, TensorShardingAttr sharding)
-      : resNum(resNum), sharding(sharding) {}
-};
-
-struct FuncOpAndResultShardings {
-  FuncOp funcOp;
-  SmallVector<FuncResultSharding> funcResultShardings;
-
-  explicit FuncOpAndResultShardings(
-      FuncOp funcOp, ArrayRef<FuncResultSharding> funcResultShardings = {})
-      : funcOp(funcOp), funcResultShardings(funcResultShardings) {}
+  ShardingReference(const ValueOrFuncResult& valueOrFuncResult,
+                    TensorShardingAttr sharding)
+      : valueOrFuncResult(valueOrFuncResult), sharding(sharding) {}
 };
 
 // References to a subset of value and function result shardings of a function.
-struct ShardingReferences {
-  SmallVector<ValueSharding> valueShardings;
-  SmallVector<FuncOpAndResultShardings> funcOpAndResultShardingsVec;
-};
+using ShardingReferences = SmallVector<ShardingReference>;
 
 using PriorityToShardingReferences =
     llvm::SmallMapVector<int64_t, ShardingReferences, 4>;
@@ -128,19 +105,13 @@ TensorShardingAttr getUpdatedShardingForPriority(
 // `getUpdatedShardingForPriority`).
 void updateReferencedShardingsForPriority(
     const ShardingReferences& shardingReferences, int64_t curPriority) {
-  for (auto [value, originalSharding] : shardingReferences.valueShardings) {
-    setSharding(value, getUpdatedShardingForPriority(
-                           getSharding(value), originalSharding, curPriority));
-  }
-
-  for (const auto& [funcOp, resultShardings] :
-       shardingReferences.funcOpAndResultShardingsVec) {
-    for (auto [resNum, originalSharding] : resultShardings) {
-      setFuncResultSharding(
-          funcOp, resNum,
-          getUpdatedShardingForPriority(getFuncResultSharding(funcOp, resNum),
-                                        originalSharding, curPriority));
-    }
+  for (const auto& [valueOrFuncResult, originalSharding] : shardingReferences) {
+    transformSharding(
+        valueOrFuncResult,
+        [&, originalSharding = originalSharding](TensorShardingAttr sharding) {
+          return getUpdatedShardingForPriority(sharding, originalSharding,
+                                               curPriority);
+        });
   }
 }
 
@@ -152,7 +123,7 @@ void updateReferencedShardingsForPriority(
 // Dimension shardings with an explicit priority 0 will be the same except their
 // priority is dropped.
 TensorShardingAttr getInitializedSharding(TensorShardingAttr originalSharding,
-                                          Operation* op) {
+                                          const SymbolTable& symbolTable) {
   MLIRContext* ctx = originalSharding.getContext();
   SmallVector<DimensionShardingAttr> newDimShardings(
       originalSharding.getDimShardings());
@@ -167,7 +138,7 @@ TensorShardingAttr getInitializedSharding(TensorShardingAttr originalSharding,
       dimSharding = DimensionShardingAttr::get(ctx, {}, /*isClosed=*/true);
     }
   }
-  MeshAttr mesh = originalSharding.getMesh(op);
+  MeshAttr mesh = originalSharding.getMesh(symbolTable);
   assert(mesh && "unknown mesh");
   llvm::sort(newReplicatedAxes, AxisRefAttr::getMeshComparator(mesh));
   // TODO(tomnatan): we need to merge split axes and split them again when
@@ -188,67 +159,8 @@ void clearAndAddNonZeroPriorities(TensorShardingAttr sharding,
   }
 }
 
-// If `value` has a sharding, adds that original sharding to
-// `priorityToShardingReferences` for every non-zero priority in its dimension
-// shardings, and initializes the sharding for the first iteration (see
-// `getInitializedSharding`).
-void addValueShardingToPriorityMapAndInitialize(
-    Value value, PriorityToShardingReferences& priorityToShardingReferences,
-    llvm::SmallDenseSet<int64_t>& prioritiesInSharding) {
-  TensorShardingAttr sharding = getSharding(value);
-  if (!sharding) {
-    return;
-  }
-  clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
-  for (int64_t priority : prioritiesInSharding) {
-    priorityToShardingReferences[priority].valueShardings.emplace_back(
-        value, sharding);
-  }
-  setSharding(value, getInitializedSharding(sharding, getOwningOp(value)));
-}
-
-// Gets the result shardings of a `funcOp` for a given `priority`. If `funcOp`
-// doesn't have a result sharding for `priority`, adds it and initializes it,
-// and returns a reference to it.
-SmallVector<FuncResultSharding>& getFuncResultShardings(
-    SmallVector<FuncOpAndResultShardings>& funcOpAndResultShardingsVec,
-    FuncOp funcOp) {
-  // Add a new entry for `funcOp` if any of the conditions holds:
-  // 1. this is the first time we are adding func shardings for this priority,
-  //    so there is no `FuncOp` yet
-  // 2. this is a new `funcOp` that this function is running on
-  if (funcOpAndResultShardingsVec.empty() ||
-      funcOpAndResultShardingsVec.back().funcOp != funcOp) {
-    funcOpAndResultShardingsVec.emplace_back(funcOp);
-  }
-  return funcOpAndResultShardingsVec.back().funcResultShardings;
-}
-
-// If `funcOp` has a sharding for result `resNum`, adds that original sharding
-// to `priorityToShardingReferences` for every non-zero priority in its
-// dimension shardings, and initializes the sharding for the first iteration
-// (see `getInitializedSharding`).
-void addFuncResultShardingToPriorityMapAndInitialize(
-    FuncOp funcOp, int resNum,
-    PriorityToShardingReferences& priorityToShardingReferences,
-    llvm::SmallDenseSet<int64_t>& prioritiesInSharding) {
-  auto sharding = getFuncResultSharding(funcOp, resNum);
-  if (!sharding) {
-    return;
-  }
-  clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
-  for (int64_t priority : prioritiesInSharding) {
-    getFuncResultShardings(
-        priorityToShardingReferences[priority].funcOpAndResultShardingsVec,
-        funcOp)
-        .emplace_back(resNum, sharding);
-  }
-  setFuncResultSharding(funcOp, resNum,
-                        getInitializedSharding(sharding, funcOp));
-}
-
-// Traverses `funcOp` and for each value or func result with a sharding:
-//   - Adds {value / result number, sharding} to the sharding references of each
+// Traverses `moduleOp` and for each value or func result with a sharding:
+//   - Adds {value / func result, sharding} to the sharding references of each
 //     non-zero priority in its dimension shardings.
 //   - Initializes the tensor's current sharding for the first iteration (see
 //     `getInitializedSharding`).
@@ -257,32 +169,23 @@ void addFuncResultShardingToPriorityMapAndInitialize(
 //
 // Returns a vector of `PriorityShardingReferences` sorted by priority.
 SmallVector<PriorityShardingReferences>
-getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp) {
-  PriorityToShardingReferences priorityToValueShardings;
+getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp,
+                                              const SymbolTable& symbolTable) {
+  PriorityToShardingReferences priorityToShardingReferences;
   llvm::SmallDenseSet<int64_t> prioritiesInSharding;
-  moduleOp.walk([&](Operation* op) {
-    if (isa<FuncOp, ManualComputationOp>(op)) {
-      // These ops have block arguments with attached shardings.
-      for (Value arg : op->getRegion(0).getArguments()) {
-        addValueShardingToPriorityMapAndInitialize(
-            arg, priorityToValueShardings, prioritiesInSharding);
-      }
+  transformShardings(moduleOp, [&](TensorShardingAttr sharding,
+                                   const ValueOrFuncResult& valueOrFuncResult) {
+    clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
+    for (int64_t priority : prioritiesInSharding) {
+      priorityToShardingReferences[priority].emplace_back(valueOrFuncResult,
+                                                          sharding);
     }
-    for (Value result : op->getResults()) {
-      addValueShardingToPriorityMapAndInitialize(
-          result, priorityToValueShardings, prioritiesInSharding);
-    }
+    return getInitializedSharding(sharding, symbolTable);
   });
-  for (auto funcOp : moduleOp.getOps<FuncOp>()) {
-    for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
-      addFuncResultShardingToPriorityMapAndInitialize(
-          funcOp, resNum, priorityToValueShardings, prioritiesInSharding);
-    }
-  }
-  // Finally we take the vector of `PriorityValueShardings` and sort it by
+  // Finally we take the vector of `priorityToShardingReferences` and sort it by
   // priority.
   SmallVector<PriorityShardingReferences> priorityShardingReferencesVec =
-      priorityToValueShardings.takeVector();
+      priorityToShardingReferences.takeVector();
   llvm::sort(
       priorityShardingReferencesVec,
       [](const PriorityShardingReferences& a,
@@ -333,7 +236,7 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
     const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<PriorityShardingReferences> shardingReferencesPerPriority =
-      getShardingReferencesPerPriorityAndInitialize(moduleOp);
+      getShardingReferencesPerPriorityAndInitialize(moduleOp, symbolTable);
   // We first run the first iteration (priority 0):
   if (failed(OpPriorityPropagationPassImpl::propagate(
           moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate))) {
