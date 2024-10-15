@@ -448,7 +448,7 @@ func.func @slice(%arg0: tensor<32x4x8xf32>) -> tensor<32x1x2xf32> {
 // dimension as well, but this decision could change in the future.
 // CHECK-LABEL: func @sort
 func.func @sort(%arg0: tensor<4x32x8xi32>, %arg1: tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k], [i, j, k]) {i=4, j=32, k=8}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([k, i, j], [l, i, j])->([m, i, j], [n, i, j]) {i=32, j=8, k=1, l=1, m=1, n=1}>
   %0:2 = "stablehlo.sort"(%arg0, %arg1) ({
     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<f32>, %arg5: tensor<f32>):
       %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
