@@ -186,11 +186,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       // The following case is for ops that are only pointwise for the sake of
       // propagation, but would require communication for the result to be
       // sharded like the operand along a specific dimensions. For example, if
-      // the operand of an `stablehlo::SortOp` is sharded along the sorted
+      // the operand of an `stablehlo::ReverseOp` is sharded along the reversed
       // dimension, we would want to propagate that sharding to the
       // corresponding dimension of the result, even though that would require
-      // communication as all elements are needed for sorting.
-      .Case<stablehlo::CholeskyOp, stablehlo::ReverseOp, stablehlo::SortOp>(
+      // communication as all elements are needed for reversing.
+      .Case<stablehlo::CholeskyOp, stablehlo::ReverseOp>(
           [](Operation* pointwiseOp) {
             return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
           })
@@ -867,6 +867,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                     /*alwaysAddFactor=*/!conservativePropagation)
                 .build();
           })
+      .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
+        return OpShardingRuleBuilder(sort)
+            .addPointwiseIf(
+                getTensorShape(sort.getResult(0)),
+                [&](int64_t dim) { return sort.getDimension() != dim; })
+            .build();
+      })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);
         RankedTensorType inType = transpose.getOperand().getType();
