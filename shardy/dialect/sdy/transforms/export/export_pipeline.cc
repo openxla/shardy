@@ -29,6 +29,7 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
   pm.addNestedPass<func::FuncOp>(
       createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+  pm.addPass(createShardingGroupCleanupPass());
   pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
                                                "sdy_module_after_sdy_export"));
 }

@@ -174,6 +174,7 @@ cc_library(
         ":enums_inc",
         ":op_interface_inc",
         ":ops_inc",
+        "//third_party/tensorflow/compiler/xla/service/spmd/shardy:constants",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:BytecodeOpInterface",
         "@llvm-project//mlir:FuncDialect",
