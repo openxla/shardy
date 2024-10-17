@@ -310,6 +310,20 @@ TensorFactorShardings buildTensorFactorShardings(
   return result;
 }
 
+TensorFactorShardings buildTensorFactorShardings(
+    TensorMappingAttr tensorMapping, ArrayRef<FactorSharding> factorShardings) {
+  TensorFactorShardings result;
+  // TODO(enver): Drop replicatedAxes after propagation, perhaps isMinorMost as
+  // well.
+  result.factorIndexToSharding.reserve(factorShardings.size());
+  for (const auto& dimMapping : tensorMapping.getDimMappings()) {
+    for (int64_t factorIndex : dimMapping.getFactorIndices()) {
+      result.factorIndexToSharding[factorIndex] = factorShardings[factorIndex];
+    }
+  }
+  return result;
+}
+
 }  // namespace
 
 ShardingProjection::ShardingProjection(
@@ -343,6 +357,20 @@ ShardingProjection ShardingProjection::build(Operation* op,
                                              MeshAttr mesh) {
   return build(getShardings(op->getOperands()), getShardings(op->getResults()),
                shardingRule, mesh);
+}
+
+ShardingProjection ShardingProjection::build(
+    ArrayRef<FactorSharding> factorShardings, OpShardingRuleAttr shardingRule) {
+  ShardingProjection projection;
+  for (const auto& operandMapping : shardingRule.getOperandMappings()) {
+    projection.operands.push_back(
+        buildTensorFactorShardings(operandMapping, factorShardings));
+  }
+  for (const auto& resultMapping : shardingRule.getResultMappings()) {
+    projection.results.push_back(
+        buildTensorFactorShardings(resultMapping, factorShardings));
+  }
+  return projection;
 }
 
 }  // namespace sdy

@@ -185,6 +185,12 @@ class ShardingProjection {
                                   OpShardingRuleAttr shardingRule,
                                   MeshAttr mesh);
 
+  // Builds a `ShardingProjection` w.r.t. the given `shardingRule` where factor
+  // shardings are the same across all operands and results, and specified by
+  // `factorShardings`.
+  static ShardingProjection build(ArrayRef<FactorSharding> factorShardings,
+                                  OpShardingRuleAttr shardingRule);
+
   bool operator==(const ShardingProjection& other) const {
     return operands == other.operands && results == other.results;
   }

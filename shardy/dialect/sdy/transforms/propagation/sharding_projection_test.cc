@@ -101,6 +101,17 @@ ShardingProjection getShardingProjection(ModuleOp module) {
   return projection;
 }
 
+template <class OpTy>
+ShardingProjection getShardingProjection(
+    ModuleOp module, ArrayRef<FactorSharding> factorShardings) {
+  OpTy op = getFirstOp<OpTy>(module);
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  assert(shardingRule);
+  ShardingProjection projection =
+      ShardingProjection::build(factorShardings, shardingRule);
+  return projection;
+}
+
 //===----------------------------------------------------------------------===//
 // Tests for ShardingProjection::build
 //
@@ -553,6 +564,70 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorSizeOneAxes) {
               ElementsAre(AxisRefIs("a"), AxisRefIs("b"), AxisRefIs("c"))),
           FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty())));
+}
+
+TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromFactorShardings) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=2, "c"=2, "d"=2]>
+
+    func.func @main(%arg0: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+                    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+        -> tensor<2x4xf32> {
+      %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>
+      } : (tensor<2x8xf32>, tensor<8x4xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::DotGeneralOp>(
+          module.get(),
+          {{.axisRefs = {AxisRefAttr::get(module->getContext(), "a")},
+            .isClosed = true,
+            .isMinorMost = true},
+           {.axisRefs = {AxisRefAttr::get(module->getContext(), "b")},
+            .isClosed = true,
+            .isMinorMost = true},
+           {.axisRefs = {AxisRefAttr::get(module->getContext(), "c"),
+                         AxisRefAttr::get(module->getContext(), "d")},
+            .isClosed = true,
+            .isMinorMost = true}});
+
+  EXPECT_THAT(
+      projection.getOperand(0),
+      TensorFactorShardingsIs(
+          /*factorIndexToSharding*/ UnorderedElementsAre(
+              FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("a"))),
+              FactorShardingIs(/*index*/ 2, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("c"), AxisRefIs("d")))),
+          /*replicatedAxes*/ IsEmpty()));
+  EXPECT_THAT(
+      projection.getOperand(1),
+      TensorFactorShardingsIs(
+          /*factorIndexToSharding*/ UnorderedElementsAre(
+              FactorShardingIs(/*index*/ 2, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("c"), AxisRefIs("d"))),
+              FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("b")))),
+          /*replicatedAxes*/ IsEmpty()));
+  EXPECT_THAT(projection.getResult(0),
+              TensorFactorShardingsIs(
+                  /*factorIndexToSharding*/ UnorderedElementsAre(
+                      FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                                       /*isMinorMost*/ true,
+                                       ElementsAre(AxisRefIs("a"))),
+                      FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                                       /*isMinorMost*/ true,
+                                       ElementsAre(AxisRefIs("b")))),
+                  /*replicatedAxes*/ IsEmpty()));
 }
 
 //===----------------------------------------------------------------------===//
