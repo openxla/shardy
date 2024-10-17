@@ -38,6 +38,7 @@ cc_library(
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
         "sharding_constraint_to_reshard.cc",
+        "sharding_group_cleanup.cc",
         "sink_data_flow_edges.cc",
         "update_non_divisible_input_output_shardings.cc",
     ],
