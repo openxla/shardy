@@ -24,6 +24,7 @@ namespace mlir {
 namespace sdy {
 
 void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
+  pm.addPass(createRemoveShardingGroupsPass());
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   pm.addNestedPass<func::FuncOp>(

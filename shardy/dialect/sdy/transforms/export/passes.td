@@ -95,3 +95,8 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def RemoveShardingGroupsPass : Pass<"sdy-remove-sharding-groups", "ModuleOp"> {
+  let summary = "Removes ShardingGroupOps after propagation.";
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
