@@ -34,6 +34,24 @@ namespace sdy {
 namespace {
 
 // Returns true if `input` is used by any `ShardingConstraintOp` or
+// `ManualComputationOp`, that has a different sharding than `sharding`.
+bool isUsedByConstraintWithDifferentSharding(Value input,
+                                             TensorShardingAttr sharding) {
+  return llvm::any_of(input.getUses(), [&](OpOperand& use) {
+    if (auto otherShardingConstraint =
+            dyn_cast<ShardingConstraintOp>(use.getOwner())) {
+      return otherShardingConstraint.getSharding() != sharding;
+    }
+    if (auto manualComputation =
+            dyn_cast<ManualComputationOp>(use.getOwner())) {
+      return manualComputation.getInSharding(use.getOperandNumber()) !=
+             sharding;
+    }
+    return false;
+  });
+}
+
+// Returns true if `input` is used by any `ShardingConstraintOp` or
 // `ManualComputationOp`, that isn't `optionalShardingConstraint` if provided.
 bool isUsedByOtherShardingConstraint(
     Value input, Operation* optionalShardingConstraint = nullptr) {
@@ -62,8 +80,8 @@ bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
 
   // TODO(b/358627707): revisit restricting to a single use if not dangling.
   // Return true if `input` has no other uses of type `ShardingConstraintOp` or
-  // `ManualComputationOp`
-  return !isUsedByOtherShardingConstraint(input, op);
+  // `ManualComputationOp` with a different sharding.
+  return !isUsedByConstraintWithDifferentSharding(input, sharding);
 }
 
 // If `curShardingConstraintOp` is the last `ShardingConstraintOp` in a chain
