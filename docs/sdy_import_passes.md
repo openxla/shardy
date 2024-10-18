@@ -23,7 +23,7 @@ all of the following:
   of all targets of the edge.
 * The sharding of the `ShardingConstraintOp` is fully closed.
 * The input doesn't have any other users of type `ShardingConstraintOp` or
-  `ManualComputationOp`.
+  `ManualComputationOp` with a different sharding.
 
 Which indicates that the `ShardingConstraintOp` dictates the sharding of
 its input.
