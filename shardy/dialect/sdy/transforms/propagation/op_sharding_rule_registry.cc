@@ -742,17 +742,15 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             continue;
           }
 
-          assert(inDim < inRank && outDim < outRank);
-          if (prodDimSizesIn == prodFactorsIn) {
+          if (inDim < inRank && prodDimSizesIn == prodFactorsIn) {
             prodDimSizesIn *= inType.getDimSize(inDim);
           }
-          if (prodDimSizesOut == prodFactorsOut) {
+          if (outDim < outRank && prodDimSizesOut == prodFactorsOut) {
             prodDimSizesOut *= outType.getDimSize(outDim);
           }
 
           int64_t nextInFactor = prodDimSizesIn / prodFactorsIn;
           int64_t nextOutFactor = prodDimSizesOut / prodFactorsOut;
-          assert(nextInFactor > 1 && nextOutFactor > 1);
 
           int64_t nextFactorGcd = std::gcd(nextInFactor, nextOutFactor);
 
@@ -765,27 +763,32 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             prodFactorsIn *= nextFactorGcd;
             prodFactorsOut *= nextFactorGcd;
           } else {
-            // Otherwise, we add the next factors as unique factors (different
-            // factor indices for the input and output), and we wouldn't be able
-            // to add a common factor until the in and out accumulated factors
-            // match again (they might have already diverged).
-            nextInFactor = nextInFactor > nextFactorGcd
-                               ? nextInFactor / nextFactorGcd
-                               : nextFactorGcd;
-            builder.addFactor(inDim, kNullDim, nextInFactor);
-            prodFactorsIn *= nextInFactor;
-
-            nextOutFactor = nextOutFactor > nextFactorGcd
-                                ? nextOutFactor / nextFactorGcd
-                                : nextFactorGcd;
-            builder.addFactor(kNullDim, outDim, nextOutFactor);
-            prodFactorsOut *= nextOutFactor;
+            // Otherwise, we add a unique factor for either the input, output,
+            // or both. We wouldn't be able to add a common factor until the in
+            // and out accumulated factors match again (they might have
+            // already diverged).
+            bool addInFactor = prodFactorsIn <= prodFactorsOut;
+            bool addOutFactor = prodFactorsOut <= prodFactorsIn;
+            if (addInFactor && nextInFactor > 1) {
+              nextInFactor = nextInFactor > nextFactorGcd
+                                 ? nextInFactor / nextFactorGcd
+                                 : nextFactorGcd;
+              builder.addFactor(inDim, kNullDim, nextInFactor);
+              prodFactorsIn *= nextInFactor;
+            }
+            if (addOutFactor && nextOutFactor > 1) {
+              nextOutFactor = nextOutFactor > nextFactorGcd
+                                  ? nextOutFactor / nextFactorGcd
+                                  : nextFactorGcd;
+              builder.addFactor(kNullDim, outDim, nextOutFactor);
+              prodFactorsOut *= nextOutFactor;
+            }
           }
 
-          if (prodDimSizesIn == prodFactorsIn) {
+          if (inDim < inRank && prodDimSizesIn == prodFactorsIn) {
             inDim++;
           }
-          if (prodDimSizesOut == prodFactorsOut) {
+          if (outDim < outRank && prodDimSizesOut == prodFactorsOut) {
             outDim++;
           }
         }
