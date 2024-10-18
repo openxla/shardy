@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/ir/dialect.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -358,6 +359,41 @@ AxisRefAttr AxisRefAttr::merge(AxisRefAttr other, MeshAttr mesh) const {
   }
   return AxisRefAttr::get(getContext(), getName(),
                           SubAxisInfoAttr::get(getContext(), preSize, size));
+}
+
+std::optional<AxisRefAttr> AxisRefAttr::getGreatestCommonPrefix(
+    AxisRefAttr other) const {
+  if (other.getName() != getName()) {
+    return std::nullopt;
+  }
+
+  if (getSubAxisPreSize() != other.getSubAxisPreSize()) {
+    return std::nullopt;
+  }
+
+  if (!getSubAxisInfo() && !other.getSubAxisInfo()) {
+    return AxisRefAttr::get(getContext(), getName());
+  }
+
+  if (!getSubAxisInfo()) {
+    return AxisRefAttr::get(
+        getContext(), getName(),
+        SubAxisInfoAttr::get(getContext(), getSubAxisPreSize(),
+                             other.getSubAxisInfo().getSize()));
+  }
+
+  if (!other.getSubAxisInfo()) {
+    return AxisRefAttr::get(
+        getContext(), getName(),
+        SubAxisInfoAttr::get(getContext(), getSubAxisPreSize(),
+                             getSubAxisInfo().getSize()));
+  }
+
+  return AxisRefAttr::get(
+      getContext(), getName(),
+      SubAxisInfoAttr::get(getContext(), getSubAxisPreSize(),
+                           std::min(getSubAxisInfo().getSize(),
+                                    other.getSubAxisInfo().getSize())));
 }
 
 //===----------------------------------------------------------------------===//

@@ -218,6 +218,29 @@ TEST_F(DialectTest, AxisRefAttrMerge) {
             createAxis("x"));
 }
 
+TEST_F(DialectTest, AxisRefAttrGetGreatestCommonPrefix) {
+  EXPECT_EQ(createAxis("x").getGreatestCommonPrefix(createAxis("x")),
+            createAxis("x"));
+  EXPECT_EQ(createAxis("x").getGreatestCommonPrefix(createAxis("y")),
+            std::nullopt);
+  EXPECT_EQ(createSubAxis("x", 1, 2).getGreatestCommonPrefix(
+                createSubAxis("x", 2, 4)),
+            std::nullopt);
+  EXPECT_EQ(createSubAxis("x", 1, 4).getGreatestCommonPrefix(createAxis("x")),
+            createSubAxis("x", 1, 4));
+  EXPECT_EQ(createAxis("x").getGreatestCommonPrefix(createSubAxis("x", 1, 4)),
+            createSubAxis("x", 1, 4));
+  EXPECT_EQ(createSubAxis("x", 1, 2).getGreatestCommonPrefix(
+                createSubAxis("x", 1, 4)),
+            createSubAxis("x", 1, 2));
+  EXPECT_EQ(createSubAxis("x", 2, 8).getGreatestCommonPrefix(
+                createSubAxis("x", 2, 4)),
+            createSubAxis("x", 2, 4));
+  EXPECT_EQ(createSubAxis("x", 1, 2).getGreatestCommonPrefix(
+                createSubAxis("y", 1, 2)),
+            std::nullopt);
+}
+
 TEST_F(DialectTest, TensorShardingAttrCanShardOrReplicate) {
   TensorShardingAttr sharding = createTensorSharding(
       {createDimSharding({createAxis("x"), createSubAxis("z", 2, 2)},
