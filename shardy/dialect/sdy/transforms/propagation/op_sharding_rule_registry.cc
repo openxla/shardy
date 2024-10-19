@@ -711,8 +711,6 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         RankedTensorType inType = reshape.getOperand().getType();
         RankedTensorType outType = reshape.getType();
 
-        OpShardingRuleBuilder builder(reshape);
-
         if (inType.getNumElements() == 0) {
           // This reshape has a dimension with size 0, in which case we return
           // an empty rule as the algorithm can't handle it. There is no point
@@ -732,6 +730,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         int64_t prodFactorsIn = 1;
         int64_t prodFactorsOut = 1;
 
+        OpShardingRuleBuilder builder(reshape);
+
         while (inDim < inRank || outDim < outRank) {
           if (inDim < inRank && inType.getDimSize(inDim) == 1) {
             builder.addFactor(inDim++, kNullDim, 1);
@@ -742,50 +742,74 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             continue;
           }
 
-          assert(inDim < inRank && outDim < outRank);
-          if (prodDimSizesIn == prodFactorsIn) {
+          if (inDim < inRank && prodDimSizesIn == prodFactorsIn) {
             prodDimSizesIn *= inType.getDimSize(inDim);
           }
-          if (prodDimSizesOut == prodFactorsOut) {
+          if (outDim < outRank && prodDimSizesOut == prodFactorsOut) {
             prodDimSizesOut *= outType.getDimSize(outDim);
           }
 
           int64_t nextInFactor = prodDimSizesIn / prodFactorsIn;
           int64_t nextOutFactor = prodDimSizesOut / prodFactorsOut;
-          assert(nextInFactor > 1 && nextOutFactor > 1);
 
           int64_t nextFactorGcd = std::gcd(nextInFactor, nextOutFactor);
 
-          if (nextFactorGcd > 1 && prodFactorsIn == prodFactorsOut) {
-            // The next in and out factors have a GCD greater than 1, and the
-            // current in and out accumulated factors match, therefore we can
-            // add the GCD as a common factor (same factor index for both input
-            // and output).
-            builder.addFactor(inDim, outDim, nextFactorGcd);
-            prodFactorsIn *= nextFactorGcd;
-            prodFactorsOut *= nextFactorGcd;
-          } else {
-            // Otherwise, we add the next factors as unique factors (different
-            // factor indices for the input and output), and we wouldn't be able
-            // to add a common factor until the in and out accumulated factors
-            // match again (they might have already diverged).
-            nextInFactor = nextInFactor > nextFactorGcd
-                               ? nextInFactor / nextFactorGcd
-                               : nextFactorGcd;
+          auto getNextFactorIfDivereged = [nextFactorGcd](
+                                              int64_t nextFactor,
+                                              int64_t smallerProdFactors,
+                                              int64_t largerProdFactors) {
+            if (largerProdFactors % smallerProdFactors == 0 &&
+                nextFactor % (largerProdFactors / smallerProdFactors) == 0) {
+              // We can add a smaller factor that would converge the in and out
+              // factors.
+              return largerProdFactors / smallerProdFactors;
+            }
+            if (nextFactor > nextFactorGcd) {
+              // We can add a smaller factor that would preserve the next factor
+              // GCD for the next iteration.
+              return nextFactor / nextFactorGcd;
+            }
+            return nextFactor;
+          };
+
+          if (prodFactorsIn == prodFactorsOut) {
+            // The current in and out accumulated factors match.
+            if (nextFactorGcd > 1) {
+              // The next in and out factors have a GCD greater than 1,
+              // therefore we can add the GCD as a common factor.
+              builder.addFactor(inDim, outDim, nextFactorGcd);
+              prodFactorsIn *= nextFactorGcd;
+              prodFactorsOut *= nextFactorGcd;
+            } else {
+              // Otherwise, we add the next factors as unique factors, and we
+              // wouldn't be able to add a common factor until the in and out
+              // factors converge again.
+              assert(nextInFactor > 1 && nextOutFactor > 1);
+              builder.addFactor(inDim, kNullDim, nextInFactor);
+              prodFactorsIn *= nextInFactor;
+              builder.addFactor(kNullDim, outDim, nextOutFactor);
+              prodFactorsOut *= nextOutFactor;
+            }
+          } else if (prodFactorsIn < prodFactorsOut) {
+            // In and out factors have already diverged. Add a factor for the
+            // input if its factors are behind the output factors.
+            nextInFactor = getNextFactorIfDivereged(
+                nextInFactor, prodFactorsIn, prodFactorsOut);
             builder.addFactor(inDim, kNullDim, nextInFactor);
             prodFactorsIn *= nextInFactor;
-
-            nextOutFactor = nextOutFactor > nextFactorGcd
-                                ? nextOutFactor / nextFactorGcd
-                                : nextFactorGcd;
+          } else {
+            // Similarly, add a factor for the output if its factors are behind
+            // the input factors.
+            nextOutFactor = getNextFactorIfDivereged(
+                nextOutFactor, prodFactorsOut, prodFactorsIn);
             builder.addFactor(kNullDim, outDim, nextOutFactor);
             prodFactorsOut *= nextOutFactor;
           }
 
-          if (prodDimSizesIn == prodFactorsIn) {
+          if (inDim < inRank && prodDimSizesIn == prodFactorsIn) {
             inDim++;
           }
-          if (prodDimSizesOut == prodFactorsOut) {
+          if (outDim < outRank && prodDimSizesOut == prodFactorsOut) {
             outDim++;
           }
         }
