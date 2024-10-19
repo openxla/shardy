@@ -48,6 +48,10 @@ are both sharded on axis "x" on their non-contracting dimensions. Here,
 `rhs` tensor is resharded, before the dot operation, explicitly to be
 sharded only on its first dimension and on axis "x". This way, the dot
 opearation becomes compatible.
+### `-sdy-remove-sharding-groups`
+
+_Removes ShardingGroupOps after propagation._
+
 ### `-sdy-sharding-constraint-to-reshard`
 
 _Converts ShardingConstraintOp into ReshardOp._
