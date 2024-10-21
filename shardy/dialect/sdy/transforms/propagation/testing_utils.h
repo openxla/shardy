@@ -49,42 +49,47 @@ MATCHER_P3(SubAxisRefIs, axisName, preSize, size,
          arg.getSubAxisInfo().getSize() == size;
 }
 
-MATCHER_P5(FactorShardingWithOverflowIs, index, isClosed, isMinorMost,
-           axisRefsMatcher, overflowAxesMatcher,
-           "factor " + PrintToString(index) + " sharding that is " +
+MATCHER_P3(FactorShardingIs, isClosed, axisRefsMatcher, overflowAxesMatcher,
+           PrintToString("factor sharding that is ") +
                (isClosed || negation ? "closed" : "open") +
-               (negation ? " or " : " and ") +
-               (isMinorMost || negation ? "minor-most" : "non-minor-most") +
                (negation ? " or " : " and ") +
                DescribeMatcher<ArrayRef<AxisRefAttr>>(axisRefsMatcher,
                                                       negation) +
                "\n" + (negation ? " or" : " and") + " has overflow axes that " +
                DescribeMatcher<ArrayRef<AxisRefAttr>>(overflowAxesMatcher,
                                                       negation)) {
-  *result_listener << "where factor " << arg.first << " sharding is "
-                   << (arg.second.isClosed ? "closed" : "open") << " and ";
-  if (arg.first != index || arg.second.isClosed != isClosed ||
-      !ExplainMatchResult(axisRefsMatcher, arg.second.axisRefs,
+  *result_listener << "where factor sharding is "
+                   << (arg.second.factor.isClosed ? "closed" : "open")
+                   << " and ";
+  if (arg.second.factor.isClosed != isClosed ||
+      !ExplainMatchResult(axisRefsMatcher, arg.second.factor.axisRefs,
                           result_listener)) {
     return false;
   }
   *result_listener << "\nand overflow axes ";
-  return ExplainMatchResult(overflowAxesMatcher, arg.second.overflowAxes,
+  return ExplainMatchResult(overflowAxesMatcher, arg.second.factor.overflowAxes,
                             result_listener);
 }
 
-MATCHER_P4(FactorShardingIs, index, isClosed, isMinorMost, axisRefsMatcher,
-           DescribeMatcher<FactorIndexToSharding::value_type>(
-               FactorShardingWithOverflowIs(index, isClosed, isMinorMost,
-                                            axisRefsMatcher, IsEmpty()),
-               negation)) {
-  return ExplainMatchResult(
-      FactorShardingWithOverflowIs(index, isClosed, isMinorMost,
-                                   axisRefsMatcher, IsEmpty()),
-      arg, result_listener);
+MATCHER_P3(TensorFactorShardingIs, index, isMinorMost, factorShardingMatcher,
+           "factor " + PrintToString(index) + " sharding that is " +
+               (isMinorMost || negation ? "minor-most" : "non-minor-most") +
+               "\n" + (negation ? " or" : " and") +
+               DescribeMatcher<FactorIndexToSharding::value_type>(
+                   factorShardingMatcher, negation)
+
+) {
+  *result_listener << "where factor " << arg.first << " is "
+                   << (arg.second.isMinorMost ? "minor-most"
+                                              : "non-minor-most");
+  if (arg.first != index || arg.second.isMinorMost != isMinorMost) {
+    return false;
+  }
+  *result_listener << " and sharding ";
+  return ExplainMatchResult(factorShardingMatcher, arg, result_listener);
 }
 
-MATCHER_P2(TensorFactorShardingsIs, factorIndexToShardingMatcher,
+MATCHER_P2(TensorFactorShardingMapIs, factorIndexToShardingMatcher,
            replicatedAxesMatcher,
            "tensor factor shardings that:\n" +
                DescribeMatcher<FactorIndexToSharding>(

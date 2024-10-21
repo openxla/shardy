@@ -61,14 +61,14 @@ bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
   return oldAxes.back().strictPrefixOf(newAxes.back());
 }
 
-bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,
-                                               ArrayRef<AxisRefAttr> newAxes) {
+bool TensorFactorShardingMap::updateShardingAxes(
+    int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes) {
   auto factorShardingIt = factorIndexToSharding.find(factorIndex);
   if (factorShardingIt == factorIndexToSharding.end()) {
     return false;
   }
 
-  SmallVector<AxisRefAttr>& oldAxes = factorShardingIt->second.axisRefs;
+  SmallVector<AxisRefAttr>& oldAxes = factorShardingIt->second.factor.axisRefs;
   if (shouldUpdate(oldAxes, newAxes)) {
     oldAxes = llvm::to_vector(newAxes);
     return true;
@@ -103,7 +103,7 @@ int64_t addAxesToDimSharding(SmallVector<AxisRefAttr>& dimSharding,
 
 }  // namespace
 
-TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
+TensorShardingAttr TensorFactorShardingMap::createTensorShardingAttr(
     MLIRContext* ctx, TensorMappingAttr tensorMapping,
     ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh) const {
   SmallVector<DimensionShardingAttr> newDimShardings;
@@ -114,19 +114,19 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
     SmallVector<AxisRefAttr> dimSharding;
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
       int64_t factorSize = factorSizes[factorIndex];
-      const FactorSharding& factorSharding =
+      const TensorFactorSharding& factorSharding =
           factorIndexToSharding.at(factorIndex);
-      isClosed |= factorSharding.isClosed;
+      isClosed |= factorSharding.factor.isClosed;
 
-      int64_t shardedSize =
-          addAxesToDimSharding(dimSharding, factorSharding.axisRefs, mesh);
+      int64_t shardedSize = addAxesToDimSharding(
+          dimSharding, factorSharding.factor.axisRefs, mesh);
 
-      if (!factorSharding.overflowAxes.empty()) {
+      if (!factorSharding.factor.overflowAxes.empty()) {
         // If this factor has overflow axes, that means any subsequent factor
         // should be ignored, so we add the overflow axes to the dimension and
         // move to the next dimension.
-        (void)addAxesToDimSharding(dimSharding, factorSharding.overflowAxes,
-                                   mesh);
+        (void)addAxesToDimSharding(dimSharding,
+                                   factorSharding.factor.overflowAxes, mesh);
         break;
       }
 
@@ -207,7 +207,7 @@ void addRemainingAxes(SmallVector<AxisRefAttr>& currentAxes,
   }
 }
 
-// Builds a `TensorFactorShardings` for a tensor with the specified
+// Builds a `TensorFactorShardingMap` for a tensor with the specified
 // `optionalSharding` and `tensorMapping`.
 //
 // The high level algorithm for projecting a dimension sharding into factor
@@ -215,10 +215,10 @@ void addRemainingAxes(SmallVector<AxisRefAttr>& currentAxes,
 // current factor sharding (starting from the major-most factor and axis) until
 // the factor is fully sharded, which might require further splitting an axis,
 // or this is the minor-most factor, then moving to the next factor.
-TensorFactorShardings buildTensorFactorShardings(
+TensorFactorShardingMap buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, TensorShardingAttr optionalSharding,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh) {
-  TensorFactorShardings result;
+  TensorFactorShardingMap result;
   auto& [factorIndexToSharding, replicatedAxes] = result;
   factorIndexToSharding.reserve(factorSizes.size());
 
@@ -238,17 +238,17 @@ TensorFactorShardings buildTensorFactorShardings(
 
     bool hasOverflowAxes = false;
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
-      FactorSharding& factorSharding = factorIndexToSharding[factorIndex];
+      TensorFactorSharding& factorSharding = factorIndexToSharding[factorIndex];
       factorSharding.isMinorMost = dimMapping.isMinorMost(factorIndex);
 
       if (hasOverflowAxes) {
         // If a previous factor had overflow axes, all subsequent factors should
         // be empty and closed, so that they won't be sharded along any axis.
-        factorSharding.isClosed = true;
+        factorSharding.factor.isClosed = true;
         break;
       }
 
-      factorSharding.isClosed = isDimClosed;
+      factorSharding.factor.isClosed = isDimClosed;
       int64_t remainingFactorSize = factorSizes[factorIndex];
 
       if (factorSharding.isMinorMost) {
@@ -257,8 +257,8 @@ TensorFactorShardings buildTensorFactorShardings(
         // NOTE: we allow the minor-most factor to be sharded by axes whose
         // product of sizes doesn't divide the factor's size (which requires
         // padding).
-        addRemainingAxes(factorSharding.axisRefs, remainingAxisInfo, axes,
-                         axisIndex, mesh);
+        addRemainingAxes(factorSharding.factor.axisRefs, remainingAxisInfo,
+                         axes, axisIndex, mesh);
         break;
       }
 
@@ -286,7 +286,7 @@ TensorFactorShardings buildTensorFactorShardings(
           remainingFactorSize /= remainingAxisInfo->size;
           remainingAxisInfo = getAxisRefInfo(axes, ++axisIndex, mesh);
         }
-        factorSharding.axisRefs.push_back(
+        factorSharding.factor.axisRefs.push_back(
             AxisRefAttr::get(ctx, axisName, subAxisInfo));
       }
 
@@ -295,8 +295,8 @@ TensorFactorShardings buildTensorFactorShardings(
         // relatively prime, therefore we add all remaining axes to the list of
         // overflow axes.
         hasOverflowAxes = true;
-        addRemainingAxes(factorSharding.overflowAxes, remainingAxisInfo, axes,
-                         axisIndex, mesh);
+        addRemainingAxes(factorSharding.factor.overflowAxes, remainingAxisInfo,
+                         axes, axisIndex, mesh);
       }
     }
   }
@@ -310,15 +310,16 @@ TensorFactorShardings buildTensorFactorShardings(
   return result;
 }
 
-TensorFactorShardings buildTensorFactorShardings(
+TensorFactorShardingMap buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, ArrayRef<FactorSharding> factorShardings) {
-  TensorFactorShardings result;
-  // TODO(enver): Drop replicatedAxes after propagation, perhaps isMinorMost as
-  // well.
+  TensorFactorShardingMap result;
+  // TODO(enver): Drop replicatedAxes after propagation.
   result.factorIndexToSharding.reserve(factorShardings.size());
   for (const auto& dimMapping : tensorMapping.getDimMappings()) {
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
-      result.factorIndexToSharding[factorIndex] = factorShardings[factorIndex];
+      result.factorIndexToSharding[factorIndex] = {
+          .factor = factorShardings[factorIndex],
+          .isMinorMost = dimMapping.isMinorMost(factorIndex)};
     }
   }
   return result;
@@ -327,8 +328,8 @@ TensorFactorShardings buildTensorFactorShardings(
 }  // namespace
 
 ShardingProjection::ShardingProjection(
-    SmallVector<TensorFactorShardings> operands,
-    SmallVector<TensorFactorShardings> results)
+    SmallVector<TensorFactorShardingMap> operands,
+    SmallVector<TensorFactorShardingMap> results)
     : operands(std::move(operands)), results(std::move(results)) {}
 
 ShardingProjection ShardingProjection::build(

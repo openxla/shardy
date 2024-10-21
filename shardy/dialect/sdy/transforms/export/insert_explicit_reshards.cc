@@ -41,15 +41,15 @@ namespace {
 // 1. Factors are sharded the same way across operands and results.
 bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
   FactorIndexToSharding factorIndexToCommonSharding;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
-                                                 projection.getResults())) {
+  for (const TensorFactorShardingMap& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardingMap>(projection.getOperands(),
+                                                   projection.getResults())) {
     // Detects conflicts within the same factor.
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
       // TODO(enver): Handle the case when some factor shardings have overflow
       // axes.
-      if (!factorSharding.overflowAxes.empty()) {
+      if (!factorSharding.factor.overflowAxes.empty()) {
         return false;
       }
       auto commonFactorShardingIt =
@@ -58,7 +58,8 @@ bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
         factorIndexToCommonSharding[factorIndex] = factorSharding;
         continue;
       }
-      if (factorSharding.axisRefs != commonFactorShardingIt->second.axisRefs) {
+      if (factorSharding.factor.axisRefs !=
+          commonFactorShardingIt->second.factor.axisRefs) {
         return false;
       }
     }
