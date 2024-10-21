@@ -290,7 +290,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
           FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
-                           /*isMinorMost*/ false, ElementsAre(AxisRefIs("a"))),
+                           /*isMinorMost*/ true, ElementsAre(AxisRefIs("a"))),
           FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty()),
           FactorShardingIs(/*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
@@ -537,7 +537,7 @@ TEST_F(ShardingProjectionBuildTest,
                       /*axisRefs*/ ElementsAre(AxisRefIs("a")),
                       /*overflowAxes*/ ElementsAre(AxisRefIs("b"))),
                   FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
-                                   /*isMinorMost*/ false, IsEmpty())));
+                                   /*isMinorMost*/ true, IsEmpty())));
 }
 
 TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorSizeOneAxes) {
