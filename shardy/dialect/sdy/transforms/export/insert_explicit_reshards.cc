@@ -20,6 +20,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -37,9 +38,27 @@ namespace sdy {
 
 namespace {
 
+// Returns true iff any tensor factor sharding has non-empty overflow axes.
+bool containsOverflowAxes(const ShardingProjection& projection) {
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (!factorSharding.overflowAxes.empty()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // Checks if factor sharding is compatible, that is, it satisfies:
 // 1. Factors are sharded the same way across operands and results.
-bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
+//
+// Assumes factor shardings do not have overflow axes.
+// TODO(enver): Handle the case when some factor shardings have overflow axes.
+bool hasCompatibleFactorShardings(const ShardingProjection& projection) {
   FactorIndexToSharding factorIndexToCommonSharding;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
@@ -47,11 +66,6 @@ bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
     // Detects conflicts within the same factor.
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      // TODO(enver): Handle the case when some factor shardings have overflow
-      // axes.
-      if (!factorSharding.overflowAxes.empty()) {
-        return false;
-      }
       auto commonFactorShardingIt =
           factorIndexToCommonSharding.find(factorIndex);
       if (commonFactorShardingIt == factorIndexToCommonSharding.end()) {
@@ -68,12 +82,103 @@ bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
   return true;
 }
 
+// Insert explicit reshards for operands and result tensors that change by
+// the given `projection` for a given `op`. The reshards are inserted only to
+// make the given operation compatible.
+//
+// For example,
+//
+// func.func @foo(
+//   %arg0: tensor<8x32xf32> {
+//     sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>},
+//   %arg1: tensor<32x16xf32> {
+//     sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>})
+//   -> tensor<8x16xf32> {
+//
+//   %0 = stablehlo.negate %arg1 {sdy.sharding =
+//     #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>} : tensor<32x16xf32>
+//   %1 = stablehlo.dot %arg0, %0 {
+//     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>,
+//     sdy.sharding_rule =
+//       #sdy.op_sharding_rule<([i, k], [k, j])->([i, j]) {i=8, j=16, k=32}>} :
+//     (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
+//   %2 = stablehlo.negate %1 {sdy.sharding =
+//     #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x16xf32>
+//   return %2 : tensor<8x16xf32>
+// }
+//
+// after a call on the stablehlo.dot operation, by the projection, i: {}, j: {},
+// k: {"y"}, the module becomes:
+//
+// func.func @foo(
+//   %arg0: tensor<8x32xf32> {
+//     sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>},
+//   %arg1: tensor<32x16xf32> {
+//     sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>})
+//   -> tensor<8x16xf32> {
+//
+//   %0 = stablehlo.negate %arg1 {sdy.sharding =
+//     #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>} : tensor<32x16xf32>
+//   %1 = sdy.reshard %0 <@mesh, [{"y"}, {}]> : tensor<32x16xf32>
+//   %2 = stablehlo.dot %arg0, %1 {
+//     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>,
+//     sdy.sharding_rule =
+//       #sdy.op_sharding_rule<([i, k], [k, j])->([i, j]) {i=8, j=16, k=32}>} :
+//     (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
+//   %3 = sdy.reshard %2 <@mesh, [{"x"}, {}]> : tensor<8x16xf32>
+//   %4 = stablehlo.negate %3 {sdy.sharding =
+//     #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x16xf32>
+//   return %4 : tensor<8x16xf32>
+// }
+//
+// In the above example, note that the operand and result shardings for
+// stablehlo.negate ops remained unchanged.
+//
+// Assumes factor shardings do not have overflow axes.
+// TODO(enver): Handle the case when some factor shardings have overflow axes.
+void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
+                            IRRewriter& rewriter,
+                            OpShardingRuleAttr shardingRule, StringRef meshName,
+                            MeshAttr mesh) {
+  for (int index = op->getNumOperands() - 1; index >= 0; index--) {
+    auto value = op->getOperand(index);
+    rewriter.setInsertionPointAfterValue(value);
+    auto newTensorSharding =
+        projection.getOperand(index).createTensorShardingAttr(
+            mesh.getContext(), shardingRule.getOperandMapping(index),
+            shardingRule.getFactorSizes(), meshName, mesh);
+    if (newTensorSharding == getSharding(value)) {
+      continue;
+    }
+    auto reshardOp =
+        rewriter.create<ReshardOp>(value.getLoc(), value, newTensorSharding);
+    rewriter.modifyOpInPlace(op, [&]() { op->setOperand(index, reshardOp); });
+  }
+
+  for (const auto& [value, tensorFactorShardings, tensorMapping] :
+       llvm::zip_equal(op->getResults(), projection.getResults(),
+                       shardingRule.getResultMappings())) {
+    auto newTensorSharding = tensorFactorShardings.createTensorShardingAttr(
+        mesh.getContext(), tensorMapping, shardingRule.getFactorSizes(),
+        meshName, mesh);
+    if (newTensorSharding == getSharding(value)) {
+      continue;
+    }
+    rewriter.setInsertionPointAfterValue(value);
+    auto reshardOp =
+        rewriter.create<ReshardOp>(value.getLoc(), value, getSharding(value));
+    rewriter.replaceAllUsesExcept(value, reshardOp, reshardOp);
+    setSharding(value, newTensorSharding);
+  }
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
 
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
+    IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
     funcOp.walk([&](Operation* op) {
@@ -103,12 +208,24 @@ struct InsertExplicitReshardsPass
       assert(mesh && "unknown mesh");
       ShardingProjection shardingProjection =
           ShardingProjection::build(op, shardingRule, mesh);
-      // Checks if factors are sharded the same way across operands and results.
-      if (hasCompatibleFactorSharding(shardingProjection)) {
+
+      // Return without inserting reshards if any factor shardings have overflow
+      // axes. This case is not handled yet.
+      // TODO(enver): Handle the case when factor shardings have overflow axes.
+      if (containsOverflowAxes(shardingProjection)) {
         return;
       }
 
-      // TODO(enver): Insert the explicit reshard ops.
+      // Checks if factors are sharded the same way across operands and results.
+      if (hasCompatibleFactorShardings(shardingProjection)) {
+        return;
+      }
+
+      // TODO(enver): Build a projection where, for each factor, factor
+      // shardings are the same across all operands and results;
+
+      insertExplicitReshards(op, shardingProjection, rewriter, shardingRule,
+                             *meshName, mesh);
     });
   }
 };
