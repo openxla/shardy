@@ -61,7 +61,7 @@ bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
   return oldAxes.back().strictPrefixOf(newAxes.back());
 }
 
-bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,
+bool TensorFactorShardingMap::updateShardingAxes(int64_t factorIndex,
                                                ArrayRef<AxisRefAttr> newAxes) {
   auto factorShardingIt = factorIndexToSharding.find(factorIndex);
   if (factorShardingIt == factorIndexToSharding.end()) {
@@ -103,7 +103,7 @@ int64_t addAxesToDimSharding(SmallVector<AxisRefAttr>& dimSharding,
 
 }  // namespace
 
-TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
+TensorShardingAttr TensorFactorShardingMap::createTensorShardingAttr(
     MLIRContext* ctx, TensorMappingAttr tensorMapping,
     ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh) const {
   SmallVector<DimensionShardingAttr> newDimShardings;
@@ -114,7 +114,7 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
     SmallVector<AxisRefAttr> dimSharding;
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
       int64_t factorSize = factorSizes[factorIndex];
-      const FactorSharding& factorSharding =
+      const TensorFactorSharding& factorSharding =
           factorIndexToSharding.at(factorIndex);
       isClosed |= factorSharding.isClosed;
 
@@ -207,7 +207,7 @@ void addRemainingAxes(SmallVector<AxisRefAttr>& currentAxes,
   }
 }
 
-// Builds a `TensorFactorShardings` for a tensor with the specified
+// Builds a `TensorFactorShardingMap` for a tensor with the specified
 // `optionalSharding` and `tensorMapping`.
 //
 // The high level algorithm for projecting a dimension sharding into factor
@@ -215,10 +215,10 @@ void addRemainingAxes(SmallVector<AxisRefAttr>& currentAxes,
 // current factor sharding (starting from the major-most factor and axis) until
 // the factor is fully sharded, which might require further splitting an axis,
 // or this is the minor-most factor, then moving to the next factor.
-TensorFactorShardings buildTensorFactorShardings(
+TensorFactorShardingMap buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, TensorShardingAttr optionalSharding,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh) {
-  TensorFactorShardings result;
+  TensorFactorShardingMap result;
   auto& [factorIndexToSharding, replicatedAxes] = result;
   factorIndexToSharding.reserve(factorSizes.size());
 
@@ -238,7 +238,7 @@ TensorFactorShardings buildTensorFactorShardings(
 
     bool hasOverflowAxes = false;
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
-      FactorSharding& factorSharding = factorIndexToSharding[factorIndex];
+      TensorFactorSharding& factorSharding = factorIndexToSharding[factorIndex];
       factorSharding.isMinorMost = dimMapping.isMinorMost(factorIndex);
 
       if (hasOverflowAxes) {
@@ -310,9 +310,9 @@ TensorFactorShardings buildTensorFactorShardings(
   return result;
 }
 
-TensorFactorShardings buildTensorFactorShardings(
-    TensorMappingAttr tensorMapping, ArrayRef<FactorSharding> factorShardings) {
-  TensorFactorShardings result;
+TensorFactorShardingMap buildTensorFactorShardings(
+    TensorMappingAttr tensorMapping, ArrayRef<TensorFactorSharding> factorShardings) {
+  TensorFactorShardingMap result;
   // TODO(enver): Drop replicatedAxes after propagation, perhaps isMinorMost as
   // well.
   result.factorIndexToSharding.reserve(factorShardings.size());
@@ -327,8 +327,8 @@ TensorFactorShardings buildTensorFactorShardings(
 }  // namespace
 
 ShardingProjection::ShardingProjection(
-    SmallVector<TensorFactorShardings> operands,
-    SmallVector<TensorFactorShardings> results)
+    SmallVector<TensorFactorShardingMap> operands,
+    SmallVector<TensorFactorShardingMap> results)
     : operands(std::move(operands)), results(std::move(results)) {}
 
 ShardingProjection ShardingProjection::build(
@@ -360,7 +360,7 @@ ShardingProjection ShardingProjection::build(Operation* op,
 }
 
 ShardingProjection ShardingProjection::build(
-    ArrayRef<FactorSharding> factorShardings, OpShardingRuleAttr shardingRule) {
+    ArrayRef<TensorFactorSharding> factorShardings, OpShardingRuleAttr shardingRule) {
   ShardingProjection projection;
   for (const auto& operandMapping : shardingRule.getOperandMappings()) {
     projection.operands.push_back(

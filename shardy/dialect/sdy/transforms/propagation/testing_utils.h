@@ -49,7 +49,7 @@ MATCHER_P3(SubAxisRefIs, axisName, preSize, size,
          arg.getSubAxisInfo().getSize() == size;
 }
 
-MATCHER_P5(FactorShardingWithOverflowIs, index, isClosed, isMinorMost,
+MATCHER_P5(TensorFactorShardingWithOverflowIs, index, isClosed, isMinorMost,
            axisRefsMatcher, overflowAxesMatcher,
            "factor " + PrintToString(index) + " sharding that is " +
                (isClosed || negation ? "closed" : "open") +
@@ -73,18 +73,18 @@ MATCHER_P5(FactorShardingWithOverflowIs, index, isClosed, isMinorMost,
                             result_listener);
 }
 
-MATCHER_P4(FactorShardingIs, index, isClosed, isMinorMost, axisRefsMatcher,
+MATCHER_P4(TensorFactorShardingIs, index, isClosed, isMinorMost, axisRefsMatcher,
            DescribeMatcher<FactorIndexToSharding::value_type>(
-               FactorShardingWithOverflowIs(index, isClosed, isMinorMost,
+               TensorFactorShardingWithOverflowIs(index, isClosed, isMinorMost,
                                             axisRefsMatcher, IsEmpty()),
                negation)) {
   return ExplainMatchResult(
-      FactorShardingWithOverflowIs(index, isClosed, isMinorMost,
+      TensorFactorShardingWithOverflowIs(index, isClosed, isMinorMost,
                                    axisRefsMatcher, IsEmpty()),
       arg, result_listener);
 }
 
-MATCHER_P2(TensorFactorShardingsIs, factorIndexToShardingMatcher,
+MATCHER_P2(TensorFactorShardingMapIs, factorIndexToShardingMatcher,
            replicatedAxesMatcher,
            "tensor factor shardings that:\n" +
                DescribeMatcher<FactorIndexToSharding>(

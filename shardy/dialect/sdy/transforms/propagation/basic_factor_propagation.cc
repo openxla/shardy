@@ -75,7 +75,7 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
 std::optional<AxisRefAttr>
 BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> replicatedAxes,
-    const FactorSharding& factorSharding, int64_t prevShardedSize,
+    const TensorFactorSharding& factorSharding, int64_t prevShardedSize,
     int64_t factorSize, MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
 
@@ -158,7 +158,7 @@ void BasicFactorPropagation::truncateAxesByRemovingConflicts(
 namespace {
 
 using DirectionBasedTensorShardings =
-    std::pair<ArrayRef<TensorFactorShardings>, ArrayRef<TensorFactorShardings>>;
+    std::pair<ArrayRef<TensorFactorShardingMap>, ArrayRef<TensorFactorShardingMap>>;
 
 // Gets the tensor shardings that should be processed first and then second.
 //
@@ -175,8 +175,8 @@ using DirectionBasedTensorShardings =
 // on the result factor shardings but not the operands.
 std::optional<DirectionBasedTensorShardings> getDirectionBasedTensorShardings(
     PropagationDirection direction, Operation* op,
-    ArrayRef<TensorFactorShardings> operands,
-    ArrayRef<TensorFactorShardings> results) {
+    ArrayRef<TensorFactorShardingMap> operands,
+    ArrayRef<TensorFactorShardingMap> results) {
   static const char* errMsg =
       "since Shardy is propagating {0} for this op, Shardy may not "
       "fully propagate to each of the multiple {1}s; {0} "
@@ -313,8 +313,8 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
   bool canExpand = true;
 
   auto updateCompatibleMajorAxesWithTensors =
-      [&](ArrayRef<TensorFactorShardings> tensors) {
-        for (const TensorFactorShardings& tensor : tensors) {
+      [&](ArrayRef<TensorFactorShardingMap> tensors) {
+        for (const TensorFactorShardingMap& tensor : tensors) {
           if (auto factorShardingIt =
                   tensor.factorIndexToSharding.find(factorIndex);
               factorShardingIt != tensor.factorIndexToSharding.end()) {
@@ -336,7 +336,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
 }
 
 std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
-    AxisRefAttr axisRef, const TensorFactorShardings& tensorFactorSharding,
+    AxisRefAttr axisRef, const TensorFactorShardingMap& tensorFactorSharding,
     int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
     MeshAttr mesh) const {
   const FactorIndexToSharding& factorIndexToSharding =
@@ -368,8 +368,8 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
     MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+  for (const TensorFactorShardingMap& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardingMap>(projection.getOperands(),
                                                  projection.getResults())) {
     SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
         result, compatiblePrefix(result, tensorFactorSharding, factorIndex,

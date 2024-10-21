@@ -412,14 +412,14 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   }
   MeshAttr mesh = MeshAttr::get(&context, meshAxisAttrs);
 
-  TensorFactorShardings operand = {
+  TensorFactorShardingMap operand = {
       .factorIndexToSharding = {
           {0,
            {.axisRefs = {createAxis("a"), createAxis("b")},
             .isMinorMost = true}},
           {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
       }};
-  TensorFactorShardings resultBefore = {
+  TensorFactorShardingMap resultBefore = {
       .factorIndexToSharding = {
           {0, {.axisRefs = {}, .isMinorMost = false}},
           {1, {.axisRefs = {}, .isMinorMost = true}},
@@ -433,7 +433,7 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   // factor size (4) isn't divisible by the size of ["c"] (3).
 
   auto test = [&](ArrayRef<int64_t> factorSizes,
-                  const TensorFactorShardings& resultAfter) {
+                  const TensorFactorShardingMap& resultAfter) {
     ShardingProjection projectionBefore({operand}, {resultBefore});
     ShardingProjection projectionAfter({operand}, {resultAfter});
     auto [updateOperands, updateResults] = propagateFactorShardings(
@@ -446,7 +446,7 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   {
     // The factor size (9) is divisible by the size of ["a", "b"] (9).
     SmallVector<int64_t> factorSizes = {9, 4};
-    TensorFactorShardings resultAfter = {
+    TensorFactorShardingMap resultAfter = {
         .factorIndexToSharding = {
             {0,
              {.axisRefs = {createAxis("a"), createAxis("b")},
@@ -460,7 +460,7 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
     // The factor size (6) is divisible by the size of ["a"] (3), but not by the
     // size of ["a", "b"] (9).
     SmallVector<int64_t> factorSizes = {6, 19};
-    TensorFactorShardings resultAfter = {
+    TensorFactorShardingMap resultAfter = {
         .factorIndexToSharding = {
             {0, {.axisRefs = {createAxis("a")}, .isMinorMost = false}},
             {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
@@ -471,7 +471,7 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   {
     // The factor size (4) isn't divisible by the size of ["a"] (3).
     SmallVector<int64_t> factorSizes = {4, 1};
-    TensorFactorShardings resultAfter = {
+    TensorFactorShardingMap resultAfter = {
         .factorIndexToSharding = {
             {0, {.axisRefs = {}, .isMinorMost = false}},
             {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
@@ -481,30 +481,30 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
 }
 
 TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
-  TensorFactorShardings operandBefore0 = {
+  TensorFactorShardingMap operandBefore0 = {
       .factorIndexToSharding = {
           {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
           {1, {.axisRefs = {createAxis("d"), createAxis("e")}}},
       }};
-  TensorFactorShardings operandBefore1 = {
+  TensorFactorShardingMap operandBefore1 = {
       .factorIndexToSharding = {
           {0, {.axisRefs = {createAxis("a")}}},
           {1, {.axisRefs = {createAxis("d")}}},
       }};
-  TensorFactorShardings result0 = {
+  TensorFactorShardingMap result0 = {
       .factorIndexToSharding = {
           {0,
            {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
           {1, {.axisRefs = {createAxis("d")}}},
       }};
 
-  TensorFactorShardings operandAfter0 = {
+  TensorFactorShardingMap operandAfter0 = {
       .factorIndexToSharding = {
           {0,
            {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
           {1, {.axisRefs = {createAxis("d"), createAxis("e")}}},
       }};
-  TensorFactorShardings operandAfter1 = {
+  TensorFactorShardingMap operandAfter1 = {
       .factorIndexToSharding = {
           {0,
            {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
@@ -546,14 +546,14 @@ TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
 }
 
 TEST_F(BasicFactorPropagationTest, UniDirectionalPropagationWithConflict) {
-  TensorFactorShardings operand0 = {
+  TensorFactorShardingMap operand0 = {
       .factorIndexToSharding = {
           {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
       }};
-  TensorFactorShardings operand1 = {.factorIndexToSharding = {
+  TensorFactorShardingMap operand1 = {.factorIndexToSharding = {
                                         {0, {.axisRefs = {createAxis("a")}}},
                                     }};
-  TensorFactorShardings result = {
+  TensorFactorShardingMap result = {
       .factorIndexToSharding = {
           {0,
            {.axisRefs = {createAxis("z"), createAxis("a"), createAxis("b")}}},

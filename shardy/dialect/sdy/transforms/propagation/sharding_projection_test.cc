@@ -66,7 +66,7 @@ void verifyShardingAttrsMatch(TensorShardingAttr resultSharding,
 }
 
 void verifyReconstructedShardings(
-    ValueRange tensors, ArrayRef<TensorFactorShardings> tensorFactorShardings,
+    ValueRange tensors, ArrayRef<TensorFactorShardingMap> tensorFactorShardings,
     ArrayRef<TensorMappingAttr> tensorMappings, ArrayRef<int64_t> factorSizes,
     StringRef meshName, MeshAttr mesh) {
   for (auto [tensor, factorShardings, tensorMapping] :
@@ -82,7 +82,7 @@ void verifyReconstructedShardings(
 // Builds a `ShardingProjection` for the first OpTy in the main function.
 //
 // In addition, verifies that reconstructing the `TensorShardingAttr` for each
-// tensor (using `TensorFactorShardings::createTensorShardingAttr`) from the
+// tensor (using `TensorFactorShardingMap::createTensorShardingAttr`) from the
 // created projection matches the original sharding.
 template <class OpTy>
 ShardingProjection getShardingProjection(ModuleOp module) {
@@ -103,7 +103,7 @@ ShardingProjection getShardingProjection(ModuleOp module) {
 
 template <class OpTy>
 ShardingProjection getShardingProjection(
-    ModuleOp module, ArrayRef<FactorSharding> factorShardings) {
+    ModuleOp module, ArrayRef<TensorFactorSharding> factorShardings) {
   OpTy op = getFirstOp<OpTy>(module);
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   assert(shardingRule);
@@ -115,7 +115,7 @@ ShardingProjection getShardingProjection(
 //===----------------------------------------------------------------------===//
 // Tests for ShardingProjection::build
 //
-// TensorFactorShardings::createTensorShardingAttr is also tested indirectly
+// TensorFactorShardingMap::createTensorShardingAttr is also tested indirectly
 // by calling it using the created `ShardingProjection` and verifying that the
 // reconstructed `TensorShardingAttr` for each tensor matches the original one.
 //===----------------------------------------------------------------------===//
@@ -141,32 +141,32 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimple) {
       getShardingProjection<stablehlo::DotGeneralOp>(module.get());
 
   EXPECT_THAT(projection.getOperand(0),
-              TensorFactorShardingsIs(
+              TensorFactorShardingMapIs(
                   /*factorIndexToSharding*/ UnorderedElementsAre(
-                      FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                      TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                                        /*isMinorMost*/ true,
                                        ElementsAre(AxisRefIs("b"))),
-                      FactorShardingIs(/*index*/ 2, /*isClosed*/ false,
+                      TensorFactorShardingIs(/*index*/ 2, /*isClosed*/ false,
                                        /*isMinorMost*/ true,
                                        ElementsAre(AxisRefIs("a")))),
                   /*replicatedAxes*/ IsEmpty()));
   EXPECT_THAT(projection.getOperand(1),
-              TensorFactorShardingsIs(
+              TensorFactorShardingMapIs(
                   /*factorIndexToSharding*/ UnorderedElementsAre(
-                      FactorShardingIs(
+                      TensorFactorShardingIs(
                           /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
                           ElementsAre(AxisRefIs("d"))),
-                      FactorShardingIs(
+                      TensorFactorShardingIs(
                           /*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
                           ElementsAre(AxisRefIs("a"), AxisRefIs("c")))),
                   /*replicatedAxes*/ ElementsAre(AxisRefIs("b"))));
   EXPECT_THAT(
       projection.getResult(0),
-      TensorFactorShardingsIs(
+      TensorFactorShardingMapIs(
           /*factorIndexToSharding*/ UnorderedElementsAre(
-              FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+              TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ false,
                                /*isMinorMost*/ true, IsEmpty()),
-              FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+              TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                /*isMinorMost*/ true,
                                ElementsAre(AxisRefIs("d"), AxisRefIs("e")))),
           /*replicatedAxes*/ ElementsAre(AxisRefIs("a"), AxisRefIs("c"))));
@@ -189,21 +189,21 @@ TEST_F(ShardingProjectionBuildTest, ReshapeSplitDim) {
 
   EXPECT_THAT(
       projection.getOperand(0),
-      TensorFactorShardingsIs(
+      TensorFactorShardingMapIs(
           /*factorIndexToSharding*/ UnorderedElementsAre(
-              FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+              TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                                /*isMinorMost*/ false,
                                ElementsAre(SubAxisRefIs("a", 1, 2))),
-              FactorShardingIs(
+              TensorFactorShardingIs(
                   /*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                   ElementsAre(SubAxisRefIs("a", 2, 2), AxisRefIs("b")))),
           /*replicatedAxes*/ ElementsAre(AxisRefIs("c"))));
   EXPECT_THAT(projection.getResult(0),
-              TensorFactorShardingsIs(
+              TensorFactorShardingMapIs(
                   /*factorIndexToSharding*/ UnorderedElementsAre(
-                      FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+                      TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ false,
                                        /*isMinorMost*/ true, IsEmpty()),
-                      FactorShardingIs(/*index*/ 1, /*isClosed*/ false,
+                      TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ false,
                                        /*isMinorMost*/ true, IsEmpty())),
                   /*replicatedAxes*/ IsEmpty()));
 }
@@ -226,15 +226,15 @@ TEST_F(ShardingProjectionBuildTest, ReshapeSplitDimAxisAlreadySplit) {
       getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(projection.getOperand(0),
-              TensorFactorShardingsIs(
+              TensorFactorShardingMapIs(
                   /*factorIndexToSharding*/ UnorderedElementsAre(
-                      FactorShardingIs(
+                      TensorFactorShardingIs(
                           /*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ true,
                           ElementsAre(SubAxisRefIs("a", 1, 2), AxisRefIs("b"))),
-                      FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                      TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                        /*isMinorMost*/ false,
                                        ElementsAre(SubAxisRefIs("a", 2, 2))),
-                      FactorShardingIs(/*index*/ 2, /*isClosed*/ true,
+                      TensorFactorShardingIs(/*index*/ 2, /*isClosed*/ true,
                                        /*isMinorMost*/ true,
                                        ElementsAre(SubAxisRefIs("a", 4, 4)))),
                   /*replicatedAxes*/ ElementsAre(SubAxisRefIs("c", 2, 2))));
@@ -259,15 +259,15 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMergeDim) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ false,
                            /*isMinorMost*/ true, ElementsAre(AxisRefIs("a"))),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            ElementsAre(AxisRefIs("b")))));
   EXPECT_THAT(
       projection.getResult(0).factorIndexToSharding,
-      UnorderedElementsAre(FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+      UnorderedElementsAre(TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ false,
                                             /*isMinorMost*/ false, IsEmpty()),
-                           FactorShardingIs(/*index*/ 1, /*isClosed*/ false,
+                           TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ false,
                                             /*isMinorMost*/ true, IsEmpty())));
 }
 
@@ -289,11 +289,11 @@ TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                            /*isMinorMost*/ false, ElementsAre(AxisRefIs("a"))),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty()),
-          FactorShardingIs(/*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty())));
 }
 
@@ -317,9 +317,9 @@ TEST_F(ShardingProjectionBuildTest, AddSingleFactorNonDivisible) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty()),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            ElementsAre(AxisRefIs("a")))));
 }
 
@@ -343,9 +343,9 @@ TEST_F(ShardingProjectionBuildTest, SingleFactorOverflows) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty()),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            ElementsAre(AxisRefIs("a"), AxisRefIs("b")))));
 }
 
@@ -368,12 +368,12 @@ TEST_F(ShardingProjectionBuildTest, FactorWithSmallerSizeThanDimOverflows) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ false,
                            /*isMinorMost*/ true, ElementsAre(AxisRefIs("a"))),
-          FactorShardingIs(
+          TensorFactorShardingIs(
               /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
               /*axisRefs*/ ElementsAre(AxisRefIs("c"))),
-          FactorShardingIs(
+          TensorFactorShardingIs(
               /*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
               /*axisRefs*/
               ElementsAre(AxisRefIs("b"), SubAxisRefIs("d", 2, 2),
@@ -399,10 +399,10 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorNonDivisible) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                            /*isMinorMost*/ false,
                            ElementsAre(SubAxisRefIs("a", 1, 2))),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            ElementsAre(SubAxisRefIs("a", 2, 3)))));
 }
 
@@ -425,10 +425,10 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorOverflows) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                            /*isMinorMost*/ false,
                            ElementsAre(SubAxisRefIs("a", 1, 2))),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            ElementsAre(SubAxisRefIs("a", 2, 8)))));
 }
 
@@ -452,10 +452,10 @@ TEST_F(ShardingProjectionBuildTest,
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+          TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                            /*isMinorMost*/ false,
                            ElementsAre(SubAxisRefIs("a", 1, 2))),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            ElementsAre(SubAxisRefIs("a", 2, 8), AxisRefIs("b"),
                                        AxisRefIs("c")))));
 }
@@ -478,11 +478,11 @@ TEST_F(ShardingProjectionBuildTest, ReshapeNonMinorMostFactorNonDivisible) {
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
-      UnorderedElementsAre(FactorShardingWithOverflowIs(
+      UnorderedElementsAre(TensorFactorShardingWithOverflowIs(
                                /*index*/ 0, /*isClosed*/ false,
                                /*isMinorMost*/ false, /*axisRefs*/ IsEmpty(),
                                /*overflowAxes*/ ElementsAre(AxisRefIs("a"))),
-                           FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                           TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                             /*isMinorMost*/ true, IsEmpty())));
 }
 
@@ -505,11 +505,11 @@ TEST_F(ShardingProjectionBuildTest,
 
   EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
               UnorderedElementsAre(
-                  FactorShardingWithOverflowIs(
+                  TensorFactorShardingWithOverflowIs(
                       /*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ false,
                       /*axisRefs*/ ElementsAre(SubAxisRefIs("a", 1, 2)),
                       /*overflowAxes*/ ElementsAre(SubAxisRefIs("a", 2, 3))),
-                  FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                  TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                    /*isMinorMost*/ true, IsEmpty())));
 }
 
@@ -532,11 +532,11 @@ TEST_F(ShardingProjectionBuildTest,
 
   EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
               UnorderedElementsAre(
-                  FactorShardingWithOverflowIs(
+                  TensorFactorShardingWithOverflowIs(
                       /*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ false,
                       /*axisRefs*/ ElementsAre(AxisRefIs("a")),
                       /*overflowAxes*/ ElementsAre(AxisRefIs("b"))),
-                  FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                  TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                    /*isMinorMost*/ false, IsEmpty())));
 }
 
@@ -559,14 +559,14 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorSizeOneAxes) {
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
-          FactorShardingIs(
+          TensorFactorShardingIs(
               /*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ false,
               ElementsAre(AxisRefIs("a"), AxisRefIs("b"), AxisRefIs("c"))),
-          FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+          TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty())));
 }
 
-TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromFactorShardings) {
+TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromTensorFactorShardings) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=4, "b"=2, "c"=2, "d"=2]>
 
@@ -598,33 +598,33 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromFactorShardings) {
 
   EXPECT_THAT(
       projection.getOperand(0),
-      TensorFactorShardingsIs(
+      TensorFactorShardingMapIs(
           /*factorIndexToSharding*/ UnorderedElementsAre(
-              FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+              TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                                /*isMinorMost*/ true,
                                ElementsAre(AxisRefIs("a"))),
-              FactorShardingIs(/*index*/ 2, /*isClosed*/ true,
+              TensorFactorShardingIs(/*index*/ 2, /*isClosed*/ true,
                                /*isMinorMost*/ true,
                                ElementsAre(AxisRefIs("c"), AxisRefIs("d")))),
           /*replicatedAxes*/ IsEmpty()));
   EXPECT_THAT(
       projection.getOperand(1),
-      TensorFactorShardingsIs(
+      TensorFactorShardingMapIs(
           /*factorIndexToSharding*/ UnorderedElementsAre(
-              FactorShardingIs(/*index*/ 2, /*isClosed*/ true,
+              TensorFactorShardingIs(/*index*/ 2, /*isClosed*/ true,
                                /*isMinorMost*/ true,
                                ElementsAre(AxisRefIs("c"), AxisRefIs("d"))),
-              FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+              TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                /*isMinorMost*/ true,
                                ElementsAre(AxisRefIs("b")))),
           /*replicatedAxes*/ IsEmpty()));
   EXPECT_THAT(projection.getResult(0),
-              TensorFactorShardingsIs(
+              TensorFactorShardingMapIs(
                   /*factorIndexToSharding*/ UnorderedElementsAre(
-                      FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                      TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ true,
                                        /*isMinorMost*/ true,
                                        ElementsAre(AxisRefIs("a"))),
-                      FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                      TensorFactorShardingIs(/*index*/ 1, /*isClosed*/ true,
                                        /*isMinorMost*/ true,
                                        ElementsAre(AxisRefIs("b")))),
                   /*replicatedAxes*/ IsEmpty()));
@@ -685,28 +685,28 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
   // other members (isClosed, isMinorMost, overflowAxes).
   EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
               UnorderedElementsAre(
-                  FactorShardingIs(
+                  TensorFactorShardingIs(
                       /*index*/ 0, /*isClosed*/ true, /*isMinorMost*/ true,
                       ElementsAre(AxisRefIs("a"), AxisRefIs("b"))),
-                  FactorShardingIs(
+                  TensorFactorShardingIs(
                       /*index*/ 2, /*isClosed*/ false, /*isMinorMost*/ true,
                       ElementsAre(AxisRefIs("c")))));
 
   EXPECT_THAT(projection.getOperand(1).factorIndexToSharding,
               UnorderedElementsAre(
-                  FactorShardingIs(
+                  TensorFactorShardingIs(
                       /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
                       ElementsAre(AxisRefIs("d"), SubAxisRefIs("f", 1, 2))),
-                  FactorShardingIs(
+                  TensorFactorShardingIs(
                       /*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
                       ElementsAre(AxisRefIs("e")))));
 
   EXPECT_THAT(projection.getResult(0).factorIndexToSharding,
               UnorderedElementsAre(
-                  FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+                  TensorFactorShardingIs(/*index*/ 0, /*isClosed*/ false,
                                    /*isMinorMost*/ true,
                                    ElementsAre(AxisRefIs("a"), AxisRefIs("b"))),
-                  FactorShardingIs(
+                  TensorFactorShardingIs(
                       /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
                       ElementsAre(AxisRefIs("d"), AxisRefIs("f")))));
 }
@@ -750,7 +750,7 @@ TEST_F(ShouldUpdateTest, ShouldUpdateTest) {
 }
 
 //===----------------------------------------------------------------------===//
-// Tests for TensorFactorShardings::createTensorShardingAttr
+// Tests for TensorFactorShardingMap::createTensorShardingAttr
 //
 // Since ShardingProjectionBuildTest also tests this method indirectly in each
 // test case, here we only test the special cases that aren't tested above.
@@ -788,7 +788,7 @@ TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
   ASSERT_TRUE(module);
   auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  TensorFactorShardings factorShardings{
+  TensorFactorShardingMap factorShardings{
       .factorIndexToSharding =
           {{0, {.axisRefs = {createAxis("b"), createSubAxis("a", 2, 2)}}},
            {1, {.axisRefs = {createSubAxis("a", 4, 2)}}}},
@@ -819,7 +819,7 @@ TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
   ASSERT_TRUE(module);
   auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  TensorFactorShardings factorShardings{
+  TensorFactorShardingMap factorShardings{
       .factorIndexToSharding = {{0,
                                  {.axisRefs = {createSubAxis("a", 1, 2)},
                                   .overflowAxes = {createSubAxis("a", 2, 3)}}},
@@ -850,7 +850,7 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
   ASSERT_TRUE(module);
   auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  TensorFactorShardings factorShardings{
+  TensorFactorShardingMap factorShardings{
       .factorIndexToSharding =
           {{0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
            {1, {.axisRefs = {createAxis("c")}}}},
@@ -882,7 +882,7 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
   ASSERT_TRUE(module);
   auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  TensorFactorShardings factorShardings{
+  TensorFactorShardingMap factorShardings{
       .factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
                                 {1, {.axisRefs = {createAxis("b")}}}}};
 
@@ -910,7 +910,7 @@ TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
   ASSERT_TRUE(module);
   auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  TensorFactorShardings factorShardings{
+  TensorFactorShardingMap factorShardings{
       .factorIndexToSharding = {{0, {.axisRefs = {createAxis("b")}}},
                                 {1, {.axisRefs = {createAxis("a")}}}}};
 
