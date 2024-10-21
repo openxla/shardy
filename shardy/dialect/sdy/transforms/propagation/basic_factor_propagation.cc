@@ -64,9 +64,10 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
   for (const auto& [otherFactorIndex, shardings] : factorIndexToSharding) {
     if (otherFactorIndex != factorIndex) {
       SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
-          result, getPrefixWithoutOverlap(result, shardings.overflowAxes));
+          result,
+          getPrefixWithoutOverlap(result, shardings.factor.overflowAxes));
       SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
-          result, getPrefixWithoutOverlap(result, shardings.axisRefs));
+          result, getPrefixWithoutOverlap(result, shardings.factor.axisRefs));
     }
   }
   return result;
@@ -75,14 +76,14 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
 std::optional<AxisRefAttr>
 BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> replicatedAxes,
-    const FactorSharding& factorSharding, int64_t prevShardedSize,
+    const TensorFactorSharding& factorSharding, int64_t prevShardedSize,
     int64_t factorSize, MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
 
   SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
       result, getPrefixWithoutOverlap(result, replicatedAxes));
 
-  ArrayRef<AxisRefAttr> factorAxes = factorSharding.axisRefs;
+  ArrayRef<AxisRefAttr> factorAxes = factorSharding.factor.axisRefs;
   if (llvm::any_of(factorAxes, [&](AxisRefAttr shardingAxis) {
         return shardingAxis.contains(result);
       })) {
@@ -96,7 +97,8 @@ BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
   // - does not have overflow axes.
   // - is minor-most or the returned prefix of `result` does not overflow the
   //   factor w.r.t. `factorSize`.
-  if (!factorSharding.isClosed && factorSharding.overflowAxes.empty()) {
+  if (!factorSharding.factor.isClosed &&
+      factorSharding.factor.overflowAxes.empty()) {
     if (factorSharding.isMinorMost) {
       return result;
     }
@@ -158,7 +160,8 @@ void BasicFactorPropagation::truncateAxesByRemovingConflicts(
 namespace {
 
 using DirectionBasedTensorShardings =
-    std::pair<ArrayRef<TensorFactorShardings>, ArrayRef<TensorFactorShardings>>;
+    std::pair<ArrayRef<TensorFactorShardingMap>,
+              ArrayRef<TensorFactorShardingMap>>;
 
 // Gets the tensor shardings that should be processed first and then second.
 //
@@ -175,8 +178,8 @@ using DirectionBasedTensorShardings =
 // on the result factor shardings but not the operands.
 std::optional<DirectionBasedTensorShardings> getDirectionBasedTensorShardings(
     PropagationDirection direction, Operation* op,
-    ArrayRef<TensorFactorShardings> operands,
-    ArrayRef<TensorFactorShardings> results) {
+    ArrayRef<TensorFactorShardingMap> operands,
+    ArrayRef<TensorFactorShardingMap> results) {
   static const char* errMsg =
       "since Shardy is propagating {0} for this op, Shardy may not "
       "fully propagate to each of the multiple {1}s; {0} "
@@ -313,13 +316,14 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
   bool canExpand = true;
 
   auto updateCompatibleMajorAxesWithTensors =
-      [&](ArrayRef<TensorFactorShardings> tensors) {
-        for (const TensorFactorShardings& tensor : tensors) {
+      [&](ArrayRef<TensorFactorShardingMap> tensors) {
+        for (const TensorFactorShardingMap& tensor : tensors) {
           if (auto factorShardingIt =
                   tensor.factorIndexToSharding.find(factorIndex);
               factorShardingIt != tensor.factorIndexToSharding.end()) {
             std::tie(resultAxes, canExpand) = getCompatibleMajorAxesInternal(
-                resultAxes, factorShardingIt->second.axisRefs, canExpand);
+                resultAxes, factorShardingIt->second.factor.axisRefs,
+                canExpand);
           }
         }
       };
@@ -336,7 +340,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
 }
 
 std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
-    AxisRefAttr axisRef, const TensorFactorShardings& tensorFactorSharding,
+    AxisRefAttr axisRef, const TensorFactorShardingMap& tensorFactorSharding,
     int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
     MeshAttr mesh) const {
   const FactorIndexToSharding& factorIndexToSharding =
@@ -368,9 +372,9 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
     MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
-                                                 projection.getResults())) {
+  for (const TensorFactorShardingMap& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardingMap>(projection.getOperands(),
+                                                   projection.getResults())) {
     SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
         result, compatiblePrefix(result, tensorFactorSharding, factorIndex,
                                  prevShardedSize, factorSize, mesh));

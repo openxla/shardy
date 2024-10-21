@@ -120,14 +120,14 @@ void notifyShardingModified(Value value,
   notifyUsersModified(value, notifyOpModified);
 }
 
-// Update the sharding of `value` to the sharding in `tensorFactorShardings`.
+// Update the sharding of `value` to the sharding in `TensorFactorShardingMap`.
 //
 // Returns true if it's possible to update the sharding, i.e., if strided view
 // isn't needed and all non-minor-most factors are divisible by sharding axes.
 bool updateTensorSharding(
     TensorShardingAttr oldTensorSharding,
     SetTensorShardingCallback setTensorShardingCallback,
-    const TensorFactorShardings& tensorFactorShardings,
+    const TensorFactorShardingMap& tensorFactorShardings,
     TensorMappingAttr tensorMapping, ArrayRef<int64_t> factorSizes,
     StringRef meshName, MeshAttr mesh, Value modifiedValue,
     const ShardingGroupMap& shardingGroupMap,
@@ -173,17 +173,17 @@ bool updateTensorSharding(
   return true;
 }
 
-// Updates the sharding of all tensors according to `tensorFactorShardings`.
+// Updates the sharding of all tensors according to `TensorFactorShardingMap`.
 //
 // Skips tensors for which `updateTensor` is set to false.
 //
 // If an operand or result couldn't be updated to the corresponding sharding in
-// `tensorFactorShardings`, e.g., if strided view is required, sets the
+// `TensorFactorShardingMap`, e.g., if strided view is required, sets the
 // respective bit in `updateTensor` or `updateResult` to false.
 void updateTensorShardings(
     ValueRange tensors, ArrayRef<TensorShardingAttr> tensorShardings,
     SetShardingPerTensorCallback setTensorShardingCallback,
-    ArrayRef<TensorFactorShardings> tensorFactorShardings,
+    ArrayRef<TensorFactorShardingMap> tensorFactorShardings,
     ArrayRef<TensorMappingAttr> tensorMappings, ArrayRef<int64_t> factorSizes,
     BitVector& updateTensor, StringRef meshName, MeshAttr mesh,
     const ShardingGroupMap& shardingGroupMap,

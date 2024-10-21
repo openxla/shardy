@@ -70,7 +70,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   // different shardings to different tensors along the same factor. Examples
   // are provided in the docstring of this class.
   for (const auto& [tensorIndex, tensorFactorShardings] :
-       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+       llvm::enumerate(llvm::concat<const TensorFactorShardingMap>(
            projection.getOperands(), projection.getResults()))) {
     // Propagate the axes got in Step 1, and resolve conflicts within a factor.
     FactorIndexToSharding newSharding =
@@ -88,8 +88,8 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
                 prevShardedSize, factorSizes[factorIndex], mesh);
           },
           mesh, conservativePropagation);
-      if (shouldUpdate(factorSharding.axisRefs, newAxes)) {
-        factorSharding.axisRefs = newAxes;
+      if (shouldUpdate(factorSharding.factor.axisRefs, newAxes)) {
+        factorSharding.factor.axisRefs = newAxes;
         factorUpdated.set(factorIndex);
       }
     }
@@ -97,7 +97,8 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     // Resolve conflicts (overlapping sharding axes) between factors.
     bool tensorUpdated = false;
     for (const int64_t factorIndex : factorUpdated.set_bits()) {
-      SmallVector<AxisRefAttr> newAxes = newSharding[factorIndex].axisRefs;
+      SmallVector<AxisRefAttr> newAxes =
+          newSharding[factorIndex].factor.axisRefs;
       truncateAxesByRemovingConflicts(
           newAxes,
           [&, factorIndex = factorIndex](AxisRefAttr axisRef, int64_t) {

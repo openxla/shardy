@@ -64,32 +64,37 @@ TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
       {
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a")}}},
-                   {3, {.axisRefs = {createAxis("h")}}},
+                   {0, {.factor = {.axisRefs = {createAxis("a")}}}},
+                   {3, {.factor = {.axisRefs = {createAxis("h")}}}},
                }},
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {}}},
-                   {2, {.axisRefs = {createAxis("g")}}},
-                   {3, {.axisRefs = {createAxis("i")}}},
+                   {0, {.factor = {.axisRefs = {}}}},
+                   {2, {.factor = {.axisRefs = {createAxis("g")}}}},
+                   {3, {.factor = {.axisRefs = {createAxis("i")}}}},
                }},
-          {.factorIndexToSharding = {{1, {.axisRefs = {createAxis("e")}}}}},
+          {.factorIndexToSharding =
+               {{1, {.factor = {.axisRefs = {createAxis("e")}}}}}},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c")}}},
-                   {1, {.axisRefs = {createAxis("e"), createAxis("f")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("c")}}}},
+                   {1,
+                    {.factor = {.axisRefs = {createAxis("e"),
+                                             createAxis("f")}}}},
                }},
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("d")}}},
-                   {2, {.axisRefs = {}}},
-                   {3, {.axisRefs = {createAxis("i"), createAxis("j")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("d")}}}},
+                   {2, {.factor = {.axisRefs = {}}}},
+                   {3,
+                    {.factor = {.axisRefs = {createAxis("i"),
+                                             createAxis("j")}}}},
                }},
       });
 
@@ -107,27 +112,35 @@ TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
       {
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-                   {3, {.axisRefs = {createAxis("h")}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
+                   {3, {.factor = {.axisRefs = {createAxis("h")}}}},
                }},
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-                   {2, {.axisRefs = {createAxis("g")}}},
-                   {3, {.axisRefs = {createAxis("i")}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
+                   {2, {.factor = {.axisRefs = {createAxis("g")}}}},
+                   {3, {.factor = {.axisRefs = {createAxis("i")}}}},
                }},
-          {.factorIndexToSharding =
-               {{1, {.axisRefs = {createAxis("e"), createAxis("f")}}}}},
+          {.factorIndexToSharding = {{1,
+                                      {.factor = {.axisRefs = {createAxis("e"),
+                                                               createAxis(
+                                                                   "f")}}}}}},
       },
       /*results=*/{
           projection.getResult(0),
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("d")}}},
-                   {2, {.axisRefs = {createAxis("g")}}},
-                   {3, {.axisRefs = {createAxis("i"), createAxis("j")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("d")}}}},
+                   {2, {.factor = {.axisRefs = {createAxis("g")}}}},
+                   {3,
+                    {.factor = {.axisRefs = {createAxis("i"),
+                                             createAxis("j")}}}},
                }},
       });
 
@@ -144,43 +157,50 @@ TEST_F(BasicFactorPropagationTest, SubAxesConflictsOnlyForSameFactor) {
       {
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
                    {1,
-                    {.axisRefs = {createSubAxis("c", 2, 2), createAxis("d")}}},
-                   {4, {.axisRefs = {createSubAxis("j", 1, 4)}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 8)}}},
+                    {.factor = {.axisRefs = {createSubAxis("c", 2, 2),
+                                             createAxis("d")}}}},
+                   {4, {.factor = {.axisRefs = {createSubAxis("j", 1, 4)}}}},
+                   {5, {.factor = {.axisRefs = {createSubAxis("k", 1, 8)}}}},
                }},
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {}}},
-                   {1, {.axisRefs = {createSubAxis("c", 2, 4)}}},
+                   {0, {.factor = {.axisRefs = {}}}},
+                   {1, {.factor = {.axisRefs = {createSubAxis("c", 2, 4)}}}},
                    {3,
-                    {.axisRefs = {createAxis("g"), createSubAxis("h", 1, 8)}}},
+                    {.factor = {.axisRefs = {createAxis("g"),
+                                             createSubAxis("h", 1, 8)}}}},
                    {5,
-                    {.axisRefs = {createSubAxis("k", 1, 4)}, .isClosed = true}},
+                    {.factor = {.axisRefs = {createSubAxis("k", 1, 4)},
+                                .isClosed = true}}},
                }},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createSubAxis("a", 1, 2)}}},
+                   {0, {.factor = {.axisRefs = {createSubAxis("a", 1, 2)}}}},
                    {2,
-                    {.axisRefs = {createSubAxis("e", 2, 4),
-                                  createSubAxis("f", 4, 2)}}},
+                    {.factor = {.axisRefs = {createSubAxis("e", 2, 4),
+                                             createSubAxis("f", 4, 2)}}}},
                    {3,
-                    {.axisRefs = {createAxis("g"), createSubAxis("h", 1, 4),
-                                  createAxis("i")}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 2)}}},
+                    {.factor = {.axisRefs = {createAxis("g"),
+                                             createSubAxis("h", 1, 4),
+                                             createAxis("i")}}}},
+                   {5, {.factor = {.axisRefs = {createSubAxis("k", 1, 2)}}}},
                }},
           {.factorIndexToSharding =
                {
                    {1,
-                    {.axisRefs = {createSubAxis("c", 2, 4), createAxis("d")}}},
+                    {.factor = {.axisRefs = {createSubAxis("c", 2, 4),
+                                             createAxis("d")}}}},
                    {2,
-                    {.axisRefs = {createSubAxis("e", 2, 4),
-                                  createSubAxis("f", 4, 8)}}},
-                   {4, {.axisRefs = {createSubAxis("j", 2, 4)}}},
-                   {5, {.axisRefs = {}}},
+                    {.factor = {.axisRefs = {createSubAxis("e", 2, 4),
+                                             createSubAxis("f", 4, 8)}}}},
+                   {4, {.factor = {.axisRefs = {createSubAxis("j", 2, 4)}}}},
+                   {5, {.factor = {.axisRefs = {}}}},
                }},
       });
 
@@ -205,35 +225,43 @@ TEST_F(BasicFactorPropagationTest, SubAxesConflictsOnlyForSameFactor) {
           projection.getOperand(0),
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-                   {1, {.axisRefs = {createSubAxis("c", 2, 4)}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
+                   {1, {.factor = {.axisRefs = {createSubAxis("c", 2, 4)}}}},
                    {3,
-                    {.axisRefs = {createAxis("g"), createSubAxis("h", 1, 8)}}},
+                    {.factor = {.axisRefs = {createAxis("g"),
+                                             createSubAxis("h", 1, 8)}}}},
                    {5,
-                    {.axisRefs = {createSubAxis("k", 1, 4)}, .isClosed = true}},
+                    {.factor = {.axisRefs = {createSubAxis("k", 1, 4)},
+                                .isClosed = true}}},
                }},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
                    {2,
-                    {.axisRefs = {createSubAxis("e", 2, 4),
-                                  createSubAxis("f", 4, 8)}}},
+                    {.factor = {.axisRefs = {createSubAxis("e", 2, 4),
+                                             createSubAxis("f", 4, 8)}}}},
                    {3,
-                    {.axisRefs = {createAxis("g"), createSubAxis("h", 1, 4),
-                                  createAxis("i")}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
+                    {.factor = {.axisRefs = {createAxis("g"),
+                                             createSubAxis("h", 1, 4),
+                                             createAxis("i")}}}},
+                   {5, {.factor = {.axisRefs = {createSubAxis("k", 1, 4)}}}},
                }},
           {.factorIndexToSharding =
                {
                    {1,
-                    {.axisRefs = {createSubAxis("c", 2, 4), createAxis("d")}}},
+                    {.factor = {.axisRefs = {createSubAxis("c", 2, 4),
+                                             createAxis("d")}}}},
                    {2,
-                    {.axisRefs = {createSubAxis("e", 2, 4),
-                                  createSubAxis("f", 4, 8)}}},
-                   {4, {.axisRefs = {createSubAxis("j", 2, 4)}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
+                    {.factor = {.axisRefs = {createSubAxis("e", 2, 4),
+                                             createSubAxis("f", 4, 8)}}}},
+                   {4, {.factor = {.axisRefs = {createSubAxis("j", 2, 4)}}}},
+                   {5, {.factor = {.axisRefs = {createSubAxis("k", 1, 4)}}}},
                }},
       });
 
@@ -251,47 +279,52 @@ TEST_F(BasicFactorPropagationTest,
       {
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a")}}},
+                   {0, {.factor = {.axisRefs = {createAxis("a")}}}},
                    {3,
-                    {.axisRefs = {createSubAxis("h", 1, 2), createAxis("i")}}},
+                    {.factor = {.axisRefs = {createSubAxis("h", 1, 2),
+                                             createAxis("i")}}}},
                }},
           {.factorIndexToSharding =
                {
-                   {1, {.axisRefs = {createAxis("b")}}},
-                   {2, {.axisRefs = {createAxis("f")}, .isClosed = true}},
+                   {1, {.factor = {.axisRefs = {createAxis("b")}}}},
+                   {2,
+                    {.factor = {.axisRefs = {createAxis("f")},
+                                .isClosed = true}}},
                },
            .replicatedAxes = {createSubAxis("h", 1, 2)}},
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {}}},
+                   {0, {.factor = {.axisRefs = {}}}},
                    {4,
-                    {.axisRefs = {createSubAxis("j", 1, 8),
-                                  createSubAxis("k", 2, 4)}}},
+                    {.factor = {.axisRefs = {createSubAxis("j", 1, 8),
+                                             createSubAxis("k", 2, 4)}}}},
                }},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c"), createAxis("d")}}},
-                   {3, {.axisRefs = {}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("c"),
+                                             createAxis("d")}}}},
+                   {3, {.factor = {.axisRefs = {}}}},
                },
            .replicatedAxes = {createSubAxis("h", 2, 4),
                               createSubAxis("i", 2, 2)}},
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c"), createAxis("e")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("c"),
+                                             createAxis("e")}}}},
                    {2,
-                    {.axisRefs = {createAxis("f"), createAxis("g")},
-                     .isClosed = true}},
+                    {.factor = {.axisRefs = {createAxis("f"), createAxis("g")},
+                                .isClosed = true}}},
                }},
           {.factorIndexToSharding =
                {
-                   {4, {.axisRefs = {createSubAxis("j", 1, 4)}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
+                   {4, {.factor = {.axisRefs = {createSubAxis("j", 1, 4)}}}},
+                   {5, {.factor = {.axisRefs = {createSubAxis("k", 1, 4)}}}},
                }},
       });
 
@@ -318,29 +351,30 @@ TEST_F(BasicFactorPropagationTest,
           projection.getOperand(1),
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a")}}},
+                   {0, {.factor = {.axisRefs = {createAxis("a")}}}},
                    {4,
-                    {.axisRefs = {createSubAxis("j", 1, 8),
-                                  createSubAxis("k", 2, 4)}}},
+                    {.factor = {.axisRefs = {createSubAxis("j", 1, 8),
+                                             createSubAxis("k", 2, 4)}}}},
                }},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c"), createAxis("d")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("c"),
+                                             createAxis("d")}}}},
                    {3,
-                    {.axisRefs = {createSubAxis("h", 1, 2),
-                                  createSubAxis("i", 1, 2)}}},
+                    {.factor = {.axisRefs = {createSubAxis("h", 1, 2),
+                                             createSubAxis("i", 1, 2)}}}},
                },
            .replicatedAxes = {createSubAxis("h", 2, 4),
                               createSubAxis("i", 2, 2)}},
           projection.getResult(1),
           {.factorIndexToSharding =
                {
-                   {4, {.axisRefs = {createSubAxis("j", 1, 8)}}},
-                   {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
+                   {4, {.factor = {.axisRefs = {createSubAxis("j", 1, 8)}}}},
+                   {5, {.factor = {.axisRefs = {createSubAxis("k", 1, 4)}}}},
                }},
       });
 
@@ -357,18 +391,21 @@ TEST_F(BasicFactorPropagationTest, ConflictsWithOverflowAxes) {
       {
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-                   {1, {.axisRefs = {createAxis("c")}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
+                   {1, {.factor = {.axisRefs = {createAxis("c")}}}},
                }},
       },
       /*results=*/{
           {
               .factorIndexToSharding =
                   {
-                      {0, {.axisRefs = {}}},
+                      {0, {.factor = {.axisRefs = {}}}},
                       {1,
-                       {.axisRefs = {},
-                        .overflowAxes = {createSubAxis("b", 1, 2)}}},
+                       {.factor = {.axisRefs = {},
+                                   .overflowAxes = {createSubAxis("b", 1,
+                                                                  2)}}}},
                   },
           },
       });
@@ -387,10 +424,11 @@ TEST_F(BasicFactorPropagationTest, ConflictsWithOverflowAxes) {
           {
               .factorIndexToSharding =
                   {
-                      {0, {.axisRefs = {createAxis("a")}}},
+                      {0, {.factor = {.axisRefs = {createAxis("a")}}}},
                       {1,
-                       {.axisRefs = {},
-                        .overflowAxes = {createSubAxis("b", 1, 2)}}},
+                       {.factor = {.axisRefs = {},
+                                   .overflowAxes = {createSubAxis("b", 1,
+                                                                  2)}}}},
                   },
           },
       });
@@ -412,17 +450,17 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   }
   MeshAttr mesh = MeshAttr::get(&context, meshAxisAttrs);
 
-  TensorFactorShardings operand = {
+  TensorFactorShardingMap operand = {
       .factorIndexToSharding = {
           {0,
-           {.axisRefs = {createAxis("a"), createAxis("b")},
+           {.factor = {.axisRefs = {createAxis("a"), createAxis("b")}},
             .isMinorMost = true}},
-          {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
+          {1, {.factor = {.axisRefs = {createAxis("c")}}, .isMinorMost = true}},
       }};
-  TensorFactorShardings resultBefore = {
+  TensorFactorShardingMap resultBefore = {
       .factorIndexToSharding = {
-          {0, {.axisRefs = {}, .isMinorMost = false}},
-          {1, {.axisRefs = {}, .isMinorMost = true}},
+          {0, {.factor = {.axisRefs = {}}, .isMinorMost = false}},
+          {1, {.factor = {.axisRefs = {}}, .isMinorMost = true}},
       }};
 
   // The compatible major axes for factor 0 are ["a", "b"]. This factor is
@@ -433,7 +471,7 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   // factor size (4) isn't divisible by the size of ["c"] (3).
 
   auto test = [&](ArrayRef<int64_t> factorSizes,
-                  const TensorFactorShardings& resultAfter) {
+                  const TensorFactorShardingMap& resultAfter) {
     ShardingProjection projectionBefore({operand}, {resultBefore});
     ShardingProjection projectionAfter({operand}, {resultAfter});
     auto [updateOperands, updateResults] = propagateFactorShardings(
@@ -446,12 +484,13 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   {
     // The factor size (9) is divisible by the size of ["a", "b"] (9).
     SmallVector<int64_t> factorSizes = {9, 4};
-    TensorFactorShardings resultAfter = {
+    TensorFactorShardingMap resultAfter = {
         .factorIndexToSharding = {
             {0,
-             {.axisRefs = {createAxis("a"), createAxis("b")},
+             {.factor = {.axisRefs = {createAxis("a"), createAxis("b")}},
               .isMinorMost = false}},
-            {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
+            {1,
+             {.factor = {.axisRefs = {createAxis("c")}}, .isMinorMost = true}},
         }};
     test(factorSizes, resultAfter);
   }
@@ -460,10 +499,12 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
     // The factor size (6) is divisible by the size of ["a"] (3), but not by the
     // size of ["a", "b"] (9).
     SmallVector<int64_t> factorSizes = {6, 19};
-    TensorFactorShardings resultAfter = {
+    TensorFactorShardingMap resultAfter = {
         .factorIndexToSharding = {
-            {0, {.axisRefs = {createAxis("a")}, .isMinorMost = false}},
-            {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
+            {0,
+             {.factor = {.axisRefs = {createAxis("a")}}, .isMinorMost = false}},
+            {1,
+             {.factor = {.axisRefs = {createAxis("c")}}, .isMinorMost = true}},
         }};
     test(factorSizes, resultAfter);
   }
@@ -471,44 +512,48 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   {
     // The factor size (4) isn't divisible by the size of ["a"] (3).
     SmallVector<int64_t> factorSizes = {4, 1};
-    TensorFactorShardings resultAfter = {
+    TensorFactorShardingMap resultAfter = {
         .factorIndexToSharding = {
-            {0, {.axisRefs = {}, .isMinorMost = false}},
-            {1, {.axisRefs = {createAxis("c")}, .isMinorMost = true}},
+            {0, {.factor = {.axisRefs = {}}, .isMinorMost = false}},
+            {1,
+             {.factor = {.axisRefs = {createAxis("c")}}, .isMinorMost = true}},
         }};
     test(factorSizes, resultAfter);
   }
 }
 
 TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
-  TensorFactorShardings operandBefore0 = {
+  TensorFactorShardingMap operandBefore0 = {
       .factorIndexToSharding = {
-          {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-          {1, {.axisRefs = {createAxis("d"), createAxis("e")}}},
+          {0, {.factor = {.axisRefs = {createAxis("a"), createAxis("b")}}}},
+          {1, {.factor = {.axisRefs = {createAxis("d"), createAxis("e")}}}},
       }};
-  TensorFactorShardings operandBefore1 = {
+  TensorFactorShardingMap operandBefore1 = {
       .factorIndexToSharding = {
-          {0, {.axisRefs = {createAxis("a")}}},
-          {1, {.axisRefs = {createAxis("d")}}},
+          {0, {.factor = {.axisRefs = {createAxis("a")}}}},
+          {1, {.factor = {.axisRefs = {createAxis("d")}}}},
       }};
-  TensorFactorShardings result0 = {
+  TensorFactorShardingMap result0 = {
       .factorIndexToSharding = {
           {0,
-           {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
-          {1, {.axisRefs = {createAxis("d")}}},
+           {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                    createAxis("c")}}}},
+          {1, {.factor = {.axisRefs = {createAxis("d")}}}},
       }};
 
-  TensorFactorShardings operandAfter0 = {
+  TensorFactorShardingMap operandAfter0 = {
       .factorIndexToSharding = {
           {0,
-           {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
-          {1, {.axisRefs = {createAxis("d"), createAxis("e")}}},
+           {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                    createAxis("c")}}}},
+          {1, {.factor = {.axisRefs = {createAxis("d"), createAxis("e")}}}},
       }};
-  TensorFactorShardings operandAfter1 = {
+  TensorFactorShardingMap operandAfter1 = {
       .factorIndexToSharding = {
           {0,
-           {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
-          {1, {.axisRefs = {createAxis("d")}}},
+           {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                    createAxis("c")}}}},
+          {1, {.factor = {.axisRefs = {createAxis("d")}}}},
       }};
 
   {
@@ -546,17 +591,19 @@ TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
 }
 
 TEST_F(BasicFactorPropagationTest, UniDirectionalPropagationWithConflict) {
-  TensorFactorShardings operand0 = {
+  TensorFactorShardingMap operand0 = {
       .factorIndexToSharding = {
-          {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+          {0, {.factor = {.axisRefs = {createAxis("a"), createAxis("b")}}}},
       }};
-  TensorFactorShardings operand1 = {.factorIndexToSharding = {
-                                        {0, {.axisRefs = {createAxis("a")}}},
-                                    }};
-  TensorFactorShardings result = {
+  TensorFactorShardingMap operand1 = {
+      .factorIndexToSharding = {
+          {0, {.factor = {.axisRefs = {createAxis("a")}}}},
+      }};
+  TensorFactorShardingMap result = {
       .factorIndexToSharding = {
           {0,
-           {.axisRefs = {createAxis("z"), createAxis("a"), createAxis("b")}}},
+           {.factor = {.axisRefs = {createAxis("z"), createAxis("a"),
+                                    createAxis("b")}}}},
       }};
 
   {
@@ -584,24 +631,26 @@ TEST_F(BasicFactorPropagationTest, NonePropagationDirection) {
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("c")}}}},
                }},
       },
       /*results=*/{
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+                   {0,
+                    {.factor = {.axisRefs = {createAxis("a"),
+                                             createAxis("b")}}}},
                }},
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {createAxis("a")}}},
+                   {0, {.factor = {.axisRefs = {createAxis("a")}}}},
                }},
           {.factorIndexToSharding =
                {
                    {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c")}}},
+                    {.factor = {.axisRefs = {createAxis("a"), createAxis("b"),
+                                             createAxis("c")}}}},
                }},
       });
 
@@ -620,9 +669,10 @@ TEST_F(BasicFactorPropagationTest,
       {{.factorIndexToSharding =
             {
                 {0,
-                 {.axisRefs = {createAxis("a"), createSubAxis("b", 1, 2),
-                               createAxis("c")}}},
-                {1, {.axisRefs = {createSubAxis("b", 2, 4)}}},
+                 {.factor = {.axisRefs = {createAxis("a"),
+                                          createSubAxis("b", 1, 2),
+                                          createAxis("c")}}}},
+                {1, {.factor = {.axisRefs = {createSubAxis("b", 2, 4)}}}},
             }}},
       /*results=*/{{.factorIndexToSharding = {{0, {}}, {1, {}}}}});
 
@@ -631,8 +681,9 @@ TEST_F(BasicFactorPropagationTest,
 
   ShardingProjection projectionExpected(
       /*operands=*/{projection.getOperand(0)},
-      /*results=*/{{.factorIndexToSharding = {
-                        {0, {.axisRefs = {createAxis("a")}}}, {1, {}}}}});
+      /*results=*/{
+          {.factorIndexToSharding = {
+               {0, {.factor = {.axisRefs = {createAxis("a")}}}}, {1, {}}}}});
 
   auto [updateOperands, updateResults] = propagateFactorShardings(
       projection, 2, PropagationDirection::BOTH, /*mesh=*/nullptr,
