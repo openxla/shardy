@@ -63,7 +63,8 @@ MATCHER_P5(FactorShardingWithOverflowIs, index, isClosed, isMinorMost,
                                                       negation)) {
   *result_listener << "where factor " << arg.first << " sharding is "
                    << (arg.second.isClosed ? "closed" : "open") << " and ";
-  if (arg.first != index || arg.second.isClosed != isClosed ||
+  if (arg.first != index || arg.second.isMinorMost != isMinorMost ||
+      arg.second.isClosed != isClosed ||
       !ExplainMatchResult(axisRefsMatcher, arg.second.axisRefs,
                           result_listener)) {
     return false;
