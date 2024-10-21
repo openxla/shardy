@@ -70,7 +70,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   // different shardings to different tensors along the same factor. Examples
   // are provided in the docstring of this class.
   for (const auto& [tensorIndex, tensorFactorShardings] :
-       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+       llvm::enumerate(llvm::concat<const TensorFactorShardingMap>(
            projection.getOperands(), projection.getResults()))) {
     // Propagate the axes got in Step 1, and resolve conflicts within a factor.
     FactorIndexToSharding newSharding =

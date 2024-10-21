@@ -32,44 +32,44 @@ bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
 
 // The axes along which a factor is sharded, and whether the factor can be
 // further sharded (unless it's fully sharded already).
-struct FactorSharding {
+struct TensorFactorSharding {
   SmallVector<AxisRefAttr> axisRefs;
   bool isClosed = false;
   bool isMinorMost = false;
   // Additional axes in the dimension sharding that was projected to this
-  // `FactorSharding`, such that the size of the first overflow axis doesn't
+  // `TensorFactorSharding`, such that the size of the first overflow axis doesn't
   // divide the factor size, and the factor is non-minor-most.
   //
   // We need to store these axes so that we can add them when projecting back to
   // dimension shardings.
   SmallVector<AxisRefAttr> overflowAxes;
 
-  bool operator==(const FactorSharding& other) const {
+  bool operator==(const TensorFactorSharding& other) const {
     return axisRefs == other.axisRefs && isClosed == other.isClosed &&
            isMinorMost == other.isMinorMost &&
            overflowAxes == other.overflowAxes;
   }
 
-  bool operator!=(const FactorSharding& other) const {
+  bool operator!=(const TensorFactorSharding& other) const {
     return !(*this == other);
   }
 };
 
-using FactorIndexToSharding = llvm::DenseMap<int64_t, FactorSharding>;
+using FactorIndexToSharding = llvm::DenseMap<int64_t, TensorFactorSharding>;
 
 // Holds the factor shardings and replicated axes of a tensor.
-struct TensorFactorShardings {
+struct TensorFactorShardingMap {
   // A mapping between factor index to the sharding of that factor.
   // TODO(tomnatan): consider using a vector with null for unmapped factors.
   FactorIndexToSharding factorIndexToSharding;
   SmallVector<AxisRefAttr> replicatedAxes;
 
-  bool operator==(const TensorFactorShardings& other) const {
+  bool operator==(const TensorFactorShardingMap& other) const {
     return factorIndexToSharding == other.factorIndexToSharding &&
            replicatedAxes == other.replicatedAxes;
   }
 
-  bool operator!=(const TensorFactorShardings& other) const {
+  bool operator!=(const TensorFactorShardingMap& other) const {
     return !(*this == other);
   }
 
@@ -83,7 +83,7 @@ struct TensorFactorShardings {
   bool updateShardingAxes(int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes);
 
   // Creates a `TensorShardingAttr` by projecting the factor shardings in
-  // this `TensorFactorShardings` to dimension shardings w.r.t. to
+  // this `TensorFactorShardingMap` to dimension shardings w.r.t. to
   // `tensorMapping`.
   //
   // Ignores sharding of any factor that needs strided view.
@@ -140,20 +140,20 @@ class ShardingProjection {
  public:
   ShardingProjection() = default;
 
-  ShardingProjection(SmallVector<TensorFactorShardings> operands,
-                     SmallVector<TensorFactorShardings> results);
+  ShardingProjection(SmallVector<TensorFactorShardingMap> operands,
+                     SmallVector<TensorFactorShardingMap> results);
 
   int64_t getNumOperands() const { return operands.size(); }
   int64_t getNumResults() const { return results.size(); }
   int64_t getNumTensors() const { return getNumOperands() + getNumResults(); }
 
-  ArrayRef<TensorFactorShardings> getOperands() const { return operands; }
-  ArrayRef<TensorFactorShardings> getResults() const { return results; }
+  ArrayRef<TensorFactorShardingMap> getOperands() const { return operands; }
+  ArrayRef<TensorFactorShardingMap> getResults() const { return results; }
 
-  const TensorFactorShardings& getOperand(int64_t operandNum) const {
+  const TensorFactorShardingMap& getOperand(int64_t operandNum) const {
     return operands[operandNum];
   }
-  const TensorFactorShardings& getResult(int64_t resultNum) const {
+  const TensorFactorShardingMap& getResult(int64_t resultNum) const {
     return results[resultNum];
   }
 
@@ -188,7 +188,7 @@ class ShardingProjection {
   // Builds a `ShardingProjection` w.r.t. the given `shardingRule` where factor
   // shardings are the same across all operands and results, and specified by
   // `factorShardings`.
-  static ShardingProjection build(ArrayRef<FactorSharding> factorShardings,
+  static ShardingProjection build(ArrayRef<TensorFactorSharding> factorShardings,
                                   OpShardingRuleAttr shardingRule);
 
   bool operator==(const ShardingProjection& other) const {
@@ -200,8 +200,8 @@ class ShardingProjection {
   }
 
  private:
-  SmallVector<TensorFactorShardings> operands;
-  SmallVector<TensorFactorShardings> results;
+  SmallVector<TensorFactorShardingMap> operands;
+  SmallVector<TensorFactorShardingMap> results;
 };
 
 }  // namespace sdy

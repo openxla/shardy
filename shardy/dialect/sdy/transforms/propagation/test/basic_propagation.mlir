@@ -458,7 +458,7 @@ func.func @non_minor_most_factor_non_divisible(%arg0: tensor<8xf32> {sdy.shardin
 
 // NOTE: it's important to make sure that the sharding of %arg0 doesn't change,
 // because "b" is added to the ShardingProjection as an overflow axis (see
-// `FactorSharding`), that gets added back when creating the updated
+// `TensorFactorSharding`), that gets added back when creating the updated
 // `TensorShardingAttr`.
 // CHECK-LABEL: func @non_minor_most_factor_non_divisible_multiple_axes(
 // CHECK-SAME:      %arg0: tensor<2x2x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_3_c_2_d_2, [{"c"}, {"d", ?}, {"a", "b"}]>})
@@ -472,7 +472,7 @@ func.func @non_minor_most_factor_non_divisible_multiple_axes(
 
 // NOTE: it's important to make sure that the sharding of %arg0 doesn't change,
 // because "a":(2)3 is added to the ShardingProjection as an overflow axis (see
-// `FactorSharding`), that gets added back when creating the updated
+// `TensorFactorSharding`), that gets added back when creating the updated
 // `TensorShardingAttr`.
 // CHECK-LABEL: func @non_minor_most_factor_non_divisible_sub_axis(
 // CHECK-SAME:      %arg0: tensor<2x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_6_b_2, [{"b", ?}, {"a"}]>})
@@ -485,7 +485,7 @@ func.func @non_minor_most_factor_non_divisible_sub_axis(
 }
 
 // This test verifies that "b" isn't propagated from the `stablehlo.reshape` to
-// %arg0, even though "b" in %arg0 is an overflow axis (see `FactorSharding`).
+// %arg0, even though "b" in %arg0 is an overflow axis (see `TensorFactorSharding`).
 // CHECK-LABEL: func @non_minor_most_factor_non_divisible_other_open_dim_unchanged(
 // CHECK-SAME:      %arg0: tensor<3x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_3, [{?}, {"a", "b", ?}]>})
 func.func @non_minor_most_factor_non_divisible_other_open_dim_unchanged(

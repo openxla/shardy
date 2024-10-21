@@ -127,7 +127,7 @@ class BasicFactorPropagation : public FactorPropagation {
   // Returns std::nullopt if the compatible prefix does not exist.
   std::optional<AxisRefAttr> compatiblePrefixNoConflictsWithinFactor(
       AxisRefAttr axisRef, ArrayRef<AxisRefAttr> replicatedAxes,
-      const FactorSharding& factorSharding, int64_t prevShardedSize,
+      const TensorFactorSharding& factorSharding, int64_t prevShardedSize,
       int64_t factorSize, MeshAttr mesh) const;
 
   // For each axis in `axes`, call `removeConflicts` to get the compatible
@@ -156,12 +156,12 @@ class BasicFactorPropagation : public FactorPropagation {
   // If this tensor is mapped to `factorIndex`, returns the prefix of `axisRef`
   // by removing conflicts with other factors and within the factor itself.
   std::optional<AxisRefAttr> compatiblePrefix(
-      AxisRefAttr axisRef, const TensorFactorShardings& tensorFactorSharding,
+      AxisRefAttr axisRef, const TensorFactorShardingMap& tensorFactorSharding,
       int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,
       MeshAttr mesh) const;
 
   // Returns the largest compatible prefix of `axisRef` by removing conflicts
-  // with every `TensorFactorShardings` in `projection`.
+  // with every `TensorFactorShardingMap` in `projection`.
   std::optional<AxisRefAttr> compatiblePrefix(
       AxisRefAttr axisRef, const ShardingProjection& projection,
       int64_t factorIndex, int64_t prevShardedSize, int64_t factorSize,

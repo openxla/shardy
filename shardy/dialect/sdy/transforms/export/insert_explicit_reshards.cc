@@ -41,8 +41,8 @@ namespace {
 // 1. Factors are sharded the same way across operands and results.
 bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
   FactorIndexToSharding factorIndexToCommonSharding;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+  for (const TensorFactorShardingMap& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardingMap>(projection.getOperands(),
                                                  projection.getResults())) {
     // Detects conflicts within the same factor.
     for (const auto& [factorIndex, factorSharding] :
