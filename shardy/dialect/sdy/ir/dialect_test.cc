@@ -218,6 +218,30 @@ TEST_F(DialectTest, AxisRefAttrMerge) {
             createAxis("x"));
 }
 
+TEST_F(DialectTest, AxisRefAttrGetGreatestCommonPrefix) {
+  auto isNotPrefix = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_EQ(a.getGreatestCommonPrefix(b), std::nullopt);
+    EXPECT_EQ(b.getGreatestCommonPrefix(a), std::nullopt);
+  };
+  isNotPrefix(createAxis("x"), createAxis("y"));
+  isNotPrefix(createSubAxis("x", 1, 2), createSubAxis("x", 2, 4));
+  isNotPrefix(createSubAxis("x", 1, 2), createSubAxis("y", 1, 2));
+
+  auto samePrefix = [](AxisRefAttr a) {
+    EXPECT_EQ(a.getGreatestCommonPrefix(a), a);
+  };
+  samePrefix(createAxis("x"));
+  samePrefix(createSubAxis("x", 2, 4));
+
+  auto prefix = [](AxisRefAttr small, AxisRefAttr large) {
+    EXPECT_EQ(small.getGreatestCommonPrefix(large), small);
+    EXPECT_EQ(large.getGreatestCommonPrefix(small), small);
+  };
+  prefix(createSubAxis("x", 1, 4), createAxis("x"));
+  prefix(createSubAxis("x", 1, 2), createSubAxis("x", 1, 4));
+  prefix(createSubAxis("x", 2, 4), createSubAxis("x", 2, 8));
+}
+
 TEST_F(DialectTest, TensorShardingAttrCanShardOrReplicate) {
   TensorShardingAttr sharding = createTensorSharding(
       {createDimSharding({createAxis("x"), createSubAxis("z", 2, 2)},

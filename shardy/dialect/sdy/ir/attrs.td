@@ -283,6 +283,19 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     //  "a":(1)4, "b":(2)4 -> "a":(1)4
     std::optional<AxisRefAttr> getPrefixWithoutOverlap(AxisRefAttr other) const;
 
+    // Returns the greatest common prefix of this and `other`. If the two
+    // axes do not have common prefix, return `std::nullopt`.
+    //
+    // For example:
+    //  "a", "a" -> "a"
+    //  "a", "b" -> std::nullopt
+    //  "a":(1)2, "a":(2)4 -> std::nullopt
+    //  "a":(1)4, "a" -> "a":(1)4
+    //  "a", "a":(1)4 -> "a":(1)4
+    //  "a":(1)2, "a":(1)4 -> "a":(1)2
+    //  "a":(2)8, "a":(2)4 -> "a":(2)4
+    std::optional<AxisRefAttr> getGreatestCommonPrefix(AxisRefAttr other) const;
+
     // Returns whether this axis-ref can be merged with `other`, i.e., they are
     // consecutive sub-axes of the same full axis and this sub-axis is major to
     // `other`.

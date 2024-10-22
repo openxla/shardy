@@ -360,6 +360,17 @@ AxisRefAttr AxisRefAttr::merge(AxisRefAttr other, MeshAttr mesh) const {
                           SubAxisInfoAttr::get(getContext(), preSize, size));
 }
 
+std::optional<AxisRefAttr> AxisRefAttr::getGreatestCommonPrefix(
+    AxisRefAttr other) const {
+  if (prefixOf(other)) {
+    return *this;
+  }
+  if (other.prefixOf(*this)) {
+    return other;
+  }
+  return std::nullopt;
+}
+
 //===----------------------------------------------------------------------===//
 // DimensionShardingAttr
 //===----------------------------------------------------------------------===//
