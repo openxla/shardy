@@ -505,6 +505,7 @@ Syntax:
 ```
 
 
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -556,6 +557,7 @@ Syntax:
   ::llvm::ArrayRef<StringAttr>   # value
 >
 ```
+
 
 
 #### Parameters:
@@ -622,6 +624,7 @@ Syntax:
   int64_t   # size
 >
 ```
+
 
 
 #### Parameters:
@@ -724,6 +727,7 @@ Syntax:
 ```
 
 
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -772,6 +776,7 @@ Syntax:
   ::llvm::ArrayRef<TensorShardingAttr>   # shardings
 >
 ```
+
 
 
 #### Parameters:

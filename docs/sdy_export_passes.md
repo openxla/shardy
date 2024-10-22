@@ -52,9 +52,11 @@ opearation becomes compatible.
 
 _Removes ShardingGroupOps after propagation._
 
+
 ### `-sdy-sharding-constraint-to-reshard`
 
 _Converts ShardingConstraintOp into ReshardOp._
+
 
 ### `-sdy-sink-data-flow-edges`
 
