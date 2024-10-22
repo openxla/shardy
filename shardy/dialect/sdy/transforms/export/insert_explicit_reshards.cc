@@ -37,9 +37,27 @@ namespace sdy {
 
 namespace {
 
+// Returns true iff any tensor factor sharding has non-empty overflow axes.
+bool hasOverflowAxes(const ShardingProjection& projection) {
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [_, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (!factorSharding.overflowAxes.empty()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Checks if factor sharding is compatible, that is, it satisfies:
 // 1. Factors are sharded the same way across operands and results.
-bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
+//
+// Assumes factor shardings do not have overflow axes.
+// TODO(enver): Handle the case when some factor shardings have overflow axes.
+bool hasCompatibleFactorShardings(const ShardingProjection& projection) {
   FactorIndexToSharding factorIndexToCommonSharding;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
@@ -47,11 +65,6 @@ bool hasCompatibleFactorSharding(const ShardingProjection& projection) {
     // Detects conflicts within the same factor.
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      // TODO(enver): Handle the case when some factor shardings have overflow
-      // axes.
-      if (!factorSharding.overflowAxes.empty()) {
-        return false;
-      }
       auto commonFactorShardingIt =
           factorIndexToCommonSharding.find(factorIndex);
       if (commonFactorShardingIt == factorIndexToCommonSharding.end()) {
@@ -103,10 +116,21 @@ struct InsertExplicitReshardsPass
       assert(mesh && "unknown mesh");
       ShardingProjection shardingProjection =
           ShardingProjection::build(op, shardingRule, mesh);
-      // Checks if factors are sharded the same way across operands and results.
-      if (hasCompatibleFactorSharding(shardingProjection)) {
+
+      // Return without inserting reshards if any factor sharding has overflow
+      // axes. This case is not handled yet.
+      // TODO(enver): Handle the case when factor shardings have overflow axes.
+      if (hasOverflowAxes(shardingProjection)) {
         return;
       }
+
+      // Checks if factors are sharded the same way across operands and results.
+      if (hasCompatibleFactorShardings(shardingProjection)) {
+        return;
+      }
+
+      // TODO(enver): Build a projection where, for each factor, factor
+      // shardings are the same across all operands and results;
 
       // TODO(enver): Insert the explicit reshard ops.
     });
