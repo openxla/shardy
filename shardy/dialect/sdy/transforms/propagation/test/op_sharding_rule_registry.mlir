@@ -457,6 +457,17 @@ func.func @sort(%arg0: tensor<4x32x8xi32>, %arg1: tensor<4x32x8xf32>) -> (tensor
   return %0#0, %0#1 : tensor<4x32x8xi32>, tensor<4x32x8xf32>
 }
 
+// CHECK-LABEL: func @sort_all_other_dims_size_one
+func.func @sort_all_other_dims_size_one(%arg0: tensor<1x4x1xi32>) -> tensor<1x4x1xi32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, j])->([i, l, j]) {i=1, j=1, k=1, l=1}>
+  %0 = "stablehlo.sort"(%arg0) ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {dimension = 1 : i64, is_stable = true} : (tensor<1x4x1xi32>) -> tensor<1x4x1xi32>
+  return %0 : tensor<1x4x1xi32>
+}
+
 // CHECK-LABEL: func @reduce_single_result
 func.func @reduce_single_result(%arg0: tensor<2x64x13xf32>) -> tensor<2x13xf32> {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>

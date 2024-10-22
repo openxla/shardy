@@ -186,11 +186,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       // The following case is for ops that are only pointwise for the sake of
       // propagation, but would require communication for the result to be
       // sharded like the operand along a specific dimensions. For example, if
-      // the operand of an `stablehlo::SortOp` is sharded along the sorted
+      // the operand of an `stablehlo::ReverseOp` is sharded along the reverse
       // dimension, we would want to propagate that sharding to the
       // corresponding dimension of the result, even though that would require
       // communication as all elements are needed for sorting.
-      .Case<stablehlo::CholeskyOp, stablehlo::ReverseOp, stablehlo::SortOp>(
+      .Case<stablehlo::CholeskyOp, stablehlo::ReverseOp>(
           [](Operation* pointwiseOp) {
             return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
           })
@@ -891,6 +891,25 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                     /*alwaysAddFactor=*/!conservativePropagation)
                 .build();
           })
+      .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
+        // If the input is sharded along the sort dimension, and any of the
+        // non-sort dimensions has size >1, the partitioner will add an
+        // all-to-all before and after the sort, to make the sort dimension
+        // replicated during the sort. Therefore, we add a factor for the sort
+        // dimension.
+        ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());
+        for (auto [dim, dimSize] : llvm::enumerate(shape)) {
+          if (dim != sort.getDimension() && dimSize > 1) {
+            return OpShardingRuleBuilder::buildPointwise(sort);
+          }
+        }
+
+        // Otherwise, add a factor for all dimensions except the sort.
+        return OpShardingRuleBuilder(sort)
+            .addPointwiseIf(
+                shape, [&](int64_t dim) { return dim != sort.getDimension(); })
+            .build();
+      })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);
         RankedTensorType inType = transpose.getOperand().getType();
