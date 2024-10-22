@@ -274,7 +274,6 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMergeDim) {
 TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=2]>
-
     func.func @main(%arg0: tensor<4x2x1xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}, {}]>})
         -> tensor<8xf32> {
       %0 = stablehlo.reshape %arg0 : (tensor<4x2x1xf32>) -> tensor<8xf32>
@@ -290,11 +289,18 @@ TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
       projection.getOperand(0).factorIndexToSharding,
       UnorderedElementsAre(
           FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
-                           /*isMinorMost*/ false, ElementsAre(AxisRefIs("a"))),
+                           /*isMinorMost*/ true, ElementsAre(AxisRefIs("a"))),
           FactorShardingIs(/*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty()),
           FactorShardingIs(/*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
                            IsEmpty())));
+
+  EXPECT_THAT(
+      projection.getResult(0).factorIndexToSharding,
+      UnorderedElementsAre(FactorShardingIs(/*index*/ 0, /*isClosed*/ false,
+                                            /*isMinorMost*/ false, IsEmpty()),
+                           FactorShardingIs(/*index*/ 1, /*isClosed*/ false,
+                                            /*isMinorMost*/ true, IsEmpty())));
 }
 
 TEST_F(ShardingProjectionBuildTest, AddSingleFactorNonDivisible) {
@@ -537,7 +543,15 @@ TEST_F(ShardingProjectionBuildTest,
                       /*axisRefs*/ ElementsAre(AxisRefIs("a")),
                       /*overflowAxes*/ ElementsAre(AxisRefIs("b"))),
                   FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
-                                   /*isMinorMost*/ false, IsEmpty())));
+                                   /*isMinorMost*/ true, IsEmpty())));
+
+  EXPECT_THAT(projection.getResult(0).factorIndexToSharding,
+              UnorderedElementsAre(
+                  FactorShardingIs(
+                      /*index*/ 0, /*isClosed*/ false, /*isMinorMost*/ true,
+                      /*axisRefs*/ IsEmpty()),
+                  FactorShardingIs(/*index*/ 1, /*isClosed*/ false,
+                                   /*isMinorMost*/ true, IsEmpty())));
 }
 
 TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorSizeOneAxes) {
