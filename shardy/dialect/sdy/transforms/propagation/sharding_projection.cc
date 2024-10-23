@@ -311,14 +311,19 @@ TensorFactorShardings buildTensorFactorShardings(
 }
 
 TensorFactorShardings buildTensorFactorShardings(
-    TensorMappingAttr tensorMapping, ArrayRef<FactorSharding> factorShardings) {
+    TensorMappingAttr tensorMapping,
+    ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList) {
   TensorFactorShardings result;
-  // TODO(enver): Drop replicatedAxes after propagation, perhaps isMinorMost as
-  // well.
-  result.factorIndexToSharding.reserve(factorShardings.size());
+  // TODO(enver): Drop replicatedAxes after propagation, perhaps isClosed too.
+  result.factorIndexToSharding.reserve(axisRefsList.size());
   for (const auto& dimMapping : tensorMapping.getDimMappings()) {
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
-      result.factorIndexToSharding[factorIndex] = factorShardings[factorIndex];
+      // TODO(enver): Consider defining a ctor for FactorSharding instead.
+      FactorSharding& factorSharding =
+          result.factorIndexToSharding[factorIndex];
+      factorSharding.axisRefs = llvm::to_vector(axisRefsList[factorIndex]);
+      factorSharding.isClosed = true;
+      factorSharding.isMinorMost = dimMapping.isMinorMost(factorIndex);
     }
   }
   return result;
@@ -360,15 +365,16 @@ ShardingProjection ShardingProjection::build(Operation* op,
 }
 
 ShardingProjection ShardingProjection::build(
-    ArrayRef<FactorSharding> factorShardings, OpShardingRuleAttr shardingRule) {
+    ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList,
+    OpShardingRuleAttr shardingRule) {
   ShardingProjection projection;
   for (const auto& operandMapping : shardingRule.getOperandMappings()) {
     projection.operands.push_back(
-        buildTensorFactorShardings(operandMapping, factorShardings));
+        buildTensorFactorShardings(operandMapping, axisRefsList));
   }
   for (const auto& resultMapping : shardingRule.getResultMappings()) {
     projection.results.push_back(
-        buildTensorFactorShardings(resultMapping, factorShardings));
+        buildTensorFactorShardings(resultMapping, axisRefsList));
   }
   return projection;
 }

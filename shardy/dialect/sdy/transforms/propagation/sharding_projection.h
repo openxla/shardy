@@ -187,8 +187,9 @@ class ShardingProjection {
 
   // Builds a `ShardingProjection` w.r.t. the given `shardingRule` where factor
   // shardings are the same across all operands and results, and specified by
-  // `factorShardings`.
-  static ShardingProjection build(ArrayRef<FactorSharding> factorShardings,
+  // `axisRefsList`. The resulting factor shardings are all closed, and with
+  // empty overflow axes.
+  static ShardingProjection build(ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList,
                                   OpShardingRuleAttr shardingRule);
 
   bool operator==(const ShardingProjection& other) const {

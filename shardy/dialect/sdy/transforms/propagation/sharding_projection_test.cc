@@ -103,12 +103,12 @@ ShardingProjection getShardingProjection(ModuleOp module) {
 
 template <class OpTy>
 ShardingProjection getShardingProjection(
-    ModuleOp module, ArrayRef<FactorSharding> factorShardings) {
+    ModuleOp module, ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList) {
   OpTy op = getFirstOp<OpTy>(module);
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   assert(shardingRule);
   ShardingProjection projection =
-      ShardingProjection::build(factorShardings, shardingRule);
+      ShardingProjection::build(axisRefsList, shardingRule);
   return projection;
 }
 
@@ -598,17 +598,10 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromFactorShardings) {
 
   ShardingProjection projection =
       getShardingProjection<stablehlo::DotGeneralOp>(
-          module.get(),
-          {{.axisRefs = {AxisRefAttr::get(module->getContext(), "a")},
-            .isClosed = true,
-            .isMinorMost = true},
-           {.axisRefs = {AxisRefAttr::get(module->getContext(), "b")},
-            .isClosed = true,
-            .isMinorMost = true},
-           {.axisRefs = {AxisRefAttr::get(module->getContext(), "c"),
-                         AxisRefAttr::get(module->getContext(), "d")},
-            .isClosed = true,
-            .isMinorMost = true}});
+          module.get(), {{AxisRefAttr::get(module->getContext(), "a")},
+                         {AxisRefAttr::get(module->getContext(), "b")},
+                         {AxisRefAttr::get(module->getContext(), "c"),
+                          AxisRefAttr::get(module->getContext(), "d")}});
 
   EXPECT_THAT(
       projection.getOperand(0),
@@ -642,6 +635,49 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromFactorShardings) {
                                        /*isMinorMost*/ true,
                                        ElementsAre(AxisRefIs("b")))),
                   /*replicatedAxes*/ IsEmpty()));
+}
+
+TEST_F(ShardingProjectionBuildTest, ReshapeFromFactorShardings) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
+    func.func @main(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+        -> tensor<2x4xf32> {
+      %0 = stablehlo.reshape %arg0 : (tensor<8xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+
+  ShardingProjection projection = getShardingProjection<stablehlo::ReshapeOp>(
+      module.get(), {{AxisRefAttr::get(module->getContext(), "a")},
+                     {AxisRefAttr::get(module->getContext(), "b"),
+                      AxisRefAttr::get(module->getContext(), "c")}});
+
+  EXPECT_THAT(
+      projection.getOperand(0),
+      TensorFactorShardingsIs(
+          /*factorIndexToSharding*/ UnorderedElementsAre(
+              FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                               /*isMinorMost*/ false,
+                               ElementsAre(AxisRefIs("a"))),
+              FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("b"), AxisRefIs("c")))),
+          /*replicatedAxes*/ IsEmpty()));
+
+  EXPECT_THAT(
+      projection.getResult(0),
+      TensorFactorShardingsIs(
+          /*factorIndexToSharding*/ UnorderedElementsAre(
+              FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("a"))),
+              FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                               /*isMinorMost*/ true,
+                               ElementsAre(AxisRefIs("b"), AxisRefIs("c")))),
+          /*replicatedAxes*/ IsEmpty()));
 }
 
 //===----------------------------------------------------------------------===//
