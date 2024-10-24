@@ -189,6 +189,7 @@ cc_library(
     name = "testing_utils",
     hdrs = ["testing_utils.h"],
     deps = [
+        ":op_sharding_rule_registry",
         ":sharding_projection",
         ":utils",
         "//shardy/dialect/sdy/ir:dialect",

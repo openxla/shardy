@@ -40,77 +40,9 @@ namespace mlir {
 namespace sdy {
 namespace {
 
-inline constexpr StringRef kMeshName = "mesh";
-
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 using ::testing::UnorderedElementsAre;
-
-MeshAttr getMeshAttr(ModuleOp module) {
-  return cast<MeshOp>(module.lookupSymbol(kMeshName)).getMesh();
-}
-
-template <class OpTy>
-OpTy getFirstOp(ModuleOp module) {
-  auto mainFn = cast<func::FuncOp>(module.lookupSymbol("main"));
-  auto ops = mainFn.getBody().front().getOps<OpTy>();
-  assert(!ops.empty());
-  return *ops.begin();
-}
-
-void verifyShardingAttrsMatch(TensorShardingAttr resultSharding,
-                              TensorShardingAttr expectedSharding) {
-  EXPECT_EQ(resultSharding, expectedSharding)
-      << "result: " << llvm::to_string(resultSharding)
-      << ", expected: " << llvm::to_string(expectedSharding);
-}
-
-void verifyReconstructedShardings(
-    ValueRange tensors, ArrayRef<TensorFactorShardings> tensorFactorShardings,
-    ArrayRef<TensorMappingAttr> tensorMappings, ArrayRef<int64_t> factorSizes,
-    StringRef meshName, MeshAttr mesh) {
-  for (auto [tensor, factorShardings, tensorMapping] :
-       llvm::zip(tensors, tensorFactorShardings, tensorMappings)) {
-    TensorShardingAttr reconstructedSharding =
-        factorShardings.createTensorShardingAttr(
-            mesh.getContext(), tensorMapping, factorSizes, kMeshName, mesh);
-    verifyShardingAttrsMatch(reconstructedSharding,
-                             getOrCreateSharding(tensor, kMeshName));
-  }
-}
-
-// Builds a `ShardingProjection` for the first OpTy in the main function.
-//
-// In addition, verifies that reconstructing the `TensorShardingAttr` for each
-// tensor (using `TensorFactorShardings::createTensorShardingAttr`) from the
-// created projection matches the original sharding.
-template <class OpTy>
-ShardingProjection getShardingProjection(ModuleOp module) {
-  OpTy op = getFirstOp<OpTy>(module);
-  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  assert(shardingRule);
-  MeshAttr mesh = getMeshAttr(module);
-  ShardingProjection projection =
-      ShardingProjection::build(op, shardingRule, mesh);
-  verifyReconstructedShardings(op->getOperands(), projection.getOperands(),
-                               shardingRule.getOperandMappings(),
-                               shardingRule.getFactorSizes(), kMeshName, mesh);
-  verifyReconstructedShardings(op->getResults(), projection.getResults(),
-                               shardingRule.getResultMappings(),
-                               shardingRule.getFactorSizes(), kMeshName, mesh);
-  return projection;
-}
-
-template <class OpTy>
-ShardingProjection getShardingProjection(
-    ModuleOp module, ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList) {
-  OpTy op = getFirstOp<OpTy>(module);
-  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
-  assert(shardingRule);
-  ShardingProjection projection =
-      ShardingProjection::build(axisRefsList, shardingRule);
-  return projection;
-}
 
 //===----------------------------------------------------------------------===//
 // Tests for ShardingProjection::build
@@ -138,7 +70,8 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimple) {
   OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::DotGeneralOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::DotGeneralOp>(
+          module.get());
 
   EXPECT_THAT(projection.getOperand(0),
               TensorFactorShardingsIs(
@@ -185,7 +118,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeSplitDim) {
   OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0),
@@ -223,7 +156,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeSplitDimAxisAlreadySplit) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(projection.getOperand(0),
               TensorFactorShardingsIs(
@@ -254,7 +187,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMergeDim) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -283,7 +216,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeWithSizeOneDims) {
   OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -318,7 +251,7 @@ TEST_F(ShardingProjectionBuildTest, AddSingleFactorNonDivisible) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::AddOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::AddOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -344,7 +277,7 @@ TEST_F(ShardingProjectionBuildTest, SingleFactorOverflows) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::AddOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::AddOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -369,7 +302,7 @@ TEST_F(ShardingProjectionBuildTest, FactorWithSmallerSizeThanDimOverflows) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::SliceOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::SliceOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -400,7 +333,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorNonDivisible) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -426,7 +359,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorOverflows) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -453,7 +386,7 @@ TEST_F(ShardingProjectionBuildTest,
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -480,7 +413,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeNonMinorMostFactorNonDivisible) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -507,7 +440,7 @@ TEST_F(ShardingProjectionBuildTest,
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
               UnorderedElementsAre(
@@ -534,7 +467,7 @@ TEST_F(ShardingProjectionBuildTest,
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
               UnorderedElementsAre(
@@ -568,7 +501,7 @@ TEST_F(ShardingProjectionBuildTest, ReshapeMinorMostFactorSizeOneAxes) {
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::ReshapeOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(module.get());
 
   EXPECT_THAT(
       projection.getOperand(0).factorIndexToSharding,
@@ -597,7 +530,7 @@ TEST_F(ShardingProjectionBuildTest, DotGeneralSimpleFromFactorShardings) {
   ASSERT_TRUE(module);
 
   ShardingProjection projection =
-      getShardingProjection<stablehlo::DotGeneralOp>(
+      testing_utils::getShardingProjection<stablehlo::DotGeneralOp>(
           module.get(), {{AxisRefAttr::get(module->getContext(), "a")},
                          {AxisRefAttr::get(module->getContext(), "b")},
                          {AxisRefAttr::get(module->getContext(), "c"),
@@ -650,10 +583,11 @@ TEST_F(ShardingProjectionBuildTest, ReshapeFromFactorShardings) {
   OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
 
-  ShardingProjection projection = getShardingProjection<stablehlo::ReshapeOp>(
-      module.get(), {{AxisRefAttr::get(module->getContext(), "a")},
-                     {AxisRefAttr::get(module->getContext(), "b"),
-                      AxisRefAttr::get(module->getContext(), "c")}});
+  ShardingProjection projection =
+      testing_utils::getShardingProjection<stablehlo::ReshapeOp>(
+          module.get(), {{AxisRefAttr::get(module->getContext(), "a")},
+                         {AxisRefAttr::get(module->getContext(), "b"),
+                          AxisRefAttr::get(module->getContext(), "c")}});
 
   EXPECT_THAT(
       projection.getOperand(0),
@@ -702,7 +636,8 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
   OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   ShardingProjection projection =
-      getShardingProjection<stablehlo::DotGeneralOp>(module.get());
+      testing_utils::getShardingProjection<stablehlo::DotGeneralOp>(
+          module.get());
 
   // Set the sharding of factor 0 (LHS non-contracting dim) to ["a", "b"].
   // - The LHS is mapped to factor 0. The old sharding is the same as the new
@@ -819,8 +754,8 @@ class CreateTensorShardingAttrTest : public PropagationTestBase {
   TensorShardingAttr createTensorSharding(
       ArrayRef<DimensionShardingAttr> dimShardings,
       ArrayRef<AxisRefAttr> replicatedAxes = {}) {
-    return TensorShardingAttr::get(&context, kMeshName, dimShardings,
-                                   replicatedAxes);
+    return TensorShardingAttr::get(&context, testing_utils::kMeshName,
+                                   dimShardings, replicatedAxes);
   }
 };
 
@@ -836,7 +771,7 @@ TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
   OwningOpRef<ModuleOp> module =
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
-  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  auto op = testing_utils::getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   TensorFactorShardings factorShardings{
       .factorIndexToSharding =
@@ -846,9 +781,9 @@ TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
 
   TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
       &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
-      kMeshName, getMeshAttr(module.get()));
+      testing_utils::kMeshName, testing_utils::getMeshAttr(module.get()));
 
-  verifyShardingAttrsMatch(
+  testing_utils::verifyShardingAttrsMatch(
       shardingAttr, createTensorSharding(
                         /*dimShardings=*/{openDimSharding(
                             {createAxis("b"), createSubAxis("a", 2, 4)})},
@@ -867,7 +802,7 @@ TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
   OwningOpRef<ModuleOp> module =
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
-  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  auto op = testing_utils::getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   TensorFactorShardings factorShardings{
       .factorIndexToSharding = {{0,
@@ -878,9 +813,10 @@ TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
 
   TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
       &context, shardingRule.getOperandMapping(0),
-      shardingRule.getFactorSizes(), kMeshName, getMeshAttr(module.get()));
+      shardingRule.getFactorSizes(), testing_utils::kMeshName,
+      testing_utils::getMeshAttr(module.get()));
 
-  verifyShardingAttrsMatch(
+  testing_utils::verifyShardingAttrsMatch(
       shardingAttr, createTensorSharding(
                         /*dimShardings=*/{openDimSharding({createAxis("a")})},
                         /*replicatedAxes=*/{createAxis("b")}));
@@ -898,7 +834,7 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
   OwningOpRef<ModuleOp> module =
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
-  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  auto op = testing_utils::getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   TensorFactorShardings factorShardings{
       .factorIndexToSharding =
@@ -908,9 +844,9 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
 
   TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
       &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
-      kMeshName, getMeshAttr(module.get()));
+      testing_utils::kMeshName, testing_utils::getMeshAttr(module.get()));
 
-  verifyShardingAttrsMatch(
+  testing_utils::verifyShardingAttrsMatch(
       shardingAttr,
       createTensorSharding(
           /*dimShardings=*/{openDimSharding(
@@ -930,7 +866,7 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
   OwningOpRef<ModuleOp> module =
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
-  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  auto op = testing_utils::getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   TensorFactorShardings factorShardings{
       .factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
@@ -938,10 +874,10 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
 
   TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
       &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
-      kMeshName, getMeshAttr(module.get()));
+      testing_utils::kMeshName, testing_utils::getMeshAttr(module.get()));
 
   // Axis "b" isn't added to the sharding because it would require strided view.
-  verifyShardingAttrsMatch(
+  testing_utils::verifyShardingAttrsMatch(
       shardingAttr, createTensorSharding(
                         /*dimShardings=*/{openDimSharding({createAxis("a")})}));
 }
@@ -958,7 +894,7 @@ TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
   OwningOpRef<ModuleOp> module =
       parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
-  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  auto op = testing_utils::getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   TensorFactorShardings factorShardings{
       .factorIndexToSharding = {{0, {.axisRefs = {createAxis("b")}}},
@@ -966,12 +902,12 @@ TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
 
   TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
       &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
-      kMeshName, getMeshAttr(module.get()));
+      testing_utils::kMeshName, testing_utils::getMeshAttr(module.get()));
 
-  verifyShardingAttrsMatch(shardingAttr,
-                           createTensorSharding(
-                               /*dimShardings=*/{openDimSharding(
-                                   {createAxis("b"), createAxis("a")})}));
+  testing_utils::verifyShardingAttrsMatch(
+      shardingAttr, createTensorSharding(
+                        /*dimShardings=*/{openDimSharding(
+                            {createAxis("b"), createAxis("a")})}));
 }
 
 }  // namespace
