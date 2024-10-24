@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <tuple>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -24,6 +25,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -66,6 +68,30 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     return result;
   }
 
+  // Given a factor with non-empty new axes, if we cannot propagate the new axes
+  // to a tensor that contains this factor, this tensor must be a source of this
+  // new axes. We collect a map from factor index to the size of the larget
+  // source tensor.
+  SmallVector<int64_t> factorToTensorSize(factorSizes.size(), 1);
+  for (const auto& tensorFactorShardings :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    int64_t tensorSize = 1;
+    for (const auto& [factorIndex, _] :
+         tensorFactorShardings.factorIndexToSharding) {
+      tensorSize *= factorSizes[factorIndex];
+    }
+
+    for (const auto& [factorIndex, sharding] :
+         tensorFactorShardings.factorIndexToSharding) {
+      if (!axesPerFactor[factorIndex].empty() &&
+          !shouldUpdate(sharding.axisRefs, axesPerFactor[factorIndex]) &&
+          factorToTensorSize[factorIndex] < tensorSize) {
+        factorToTensorSize[factorIndex] = tensorSize;
+      }
+    }
+  }
+
   // The propagation on each tensor is independent. This strategy can propagate
   // different shardings to different tensors along the same factor. Examples
   // are provided in the docstring of this class.
@@ -94,9 +120,16 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
       }
     }
 
+    SmallVector<int> factorIndices = toSetBitsVector(factorUpdated);
+    // Unstable sort is acceptable since there is no equality in the tuple.
+    llvm::sort(factorIndices, [&](int64_t i, int64_t j) {
+      return std::forward_as_tuple(factorToTensorSize[i], -i) >
+             std::forward_as_tuple(factorToTensorSize[j], -j);
+    });
+
     // Resolve conflicts (overlapping sharding axes) between factors.
     bool tensorUpdated = false;
-    for (const int64_t factorIndex : factorUpdated.set_bits()) {
+    for (const int64_t factorIndex : factorIndices) {
       SmallVector<AxisRefAttr> newAxes = newSharding[factorIndex].axisRefs;
       truncateAxesByRemovingConflicts(
           newAxes,
