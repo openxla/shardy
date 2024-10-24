@@ -20,6 +20,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -81,12 +82,84 @@ bool hasCompatibleFactorShardings(const ShardingProjection& projection) {
   return true;
 }
 
+// Insert explicit reshards for operands and results that change by
+// the given `projection` for a given `op`. The reshards are inserted only to
+// make the given operation compatible.
+//
+// For example,
+//
+// ```mlir
+//   %arg0: tensor<8x32xf32> { sdy.sharding = @mesh, [{}, {"y"}]>}
+//   %arg1: tensor<32x16xf32> { sdy.sharding = <@mesh, [{"y"}, {"x"}]>}
+//   %0 = stablehlo.dot %arg0, %arg1 { sdy.sharding = <@mesh, [{"x"}, {}]>,
+//     sdy.sharding_rule = <([i, k], [k, j])->([i, j])> }
+//   %1 = stablehlo.negate %0 {sdy.sharding = <@mesh, [{"x"}, {}]>
+//   return %1
+// ```
+//
+// after a call on the stablehlo.dot operation, by the projection, i: {}, j: {},
+// k: {"y"}, the module becomes:
+//
+// ```mlir
+//   %arg0: tensor<8x32xf32> { sdy.sharding = @mesh, [{}, {"y"}]>}
+//   %arg1: tensor<32x16xf32> { sdy.sharding = <@mesh, [{"y"}, {"x"}]>}
+//   %0 = stablehlo.reshard %arg1 {sdy.sharding = <@mesh, [{"y"}, {}]>}
+//   %1 = stablehlo.dot %arg0, %0 { sdy.sharding = <@mesh, [{}, {}]>,
+//     sdy.sharding_rule = <([i, k], [k, j])->([i, j])> }
+//   %2 = stablehlo.reshard %1 {sdy.sharding = <@mesh, [{"x"}, {}]>}
+//   %3 = stablehlo.negate %2 {sdy.sharding = <@mesh, [{"x"}, {}]>
+//   return %3
+// ```
+//
+// In the above example, note that the operand and result shardings for
+// stablehlo.negate op remained unchanged.
+//
+// Assumes factor shardings do not have overflow axes.
+// TODO(enver): Handle the case when some factor shardings have overflow axes.
+void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
+                            IRRewriter& rewriter,
+                            OpShardingRuleAttr shardingRule, StringRef meshName,
+                            MeshAttr mesh) {
+  rewriter.setInsertionPoint(op);
+  for (const auto& [index, value] : llvm::enumerate(op->getOperands())) {
+    auto newTensorSharding =
+        projection.getOperand(index).createTensorShardingAttr(
+            mesh.getContext(), shardingRule.getOperandMapping(index),
+            shardingRule.getFactorSizes(), meshName, mesh);
+    if (newTensorSharding == getSharding(value)) {
+      continue;
+    }
+    auto reshardOp =
+        rewriter.create<ReshardOp>(value.getLoc(), value, newTensorSharding);
+    rewriter.modifyOpInPlace(op, [&]() { op->setOperand(index, reshardOp); });
+  }
+
+  rewriter.setInsertionPointAfter(op);
+  for (const auto& [value, tensorFactorShardings, tensorMapping] :
+       llvm::zip_equal(op->getResults(), projection.getResults(),
+                       shardingRule.getResultMappings())) {
+    // TODO(enver): The following logic is mostly shared between operands and
+    // results. Use a helper function, instead.
+    auto newTensorSharding = tensorFactorShardings.createTensorShardingAttr(
+        mesh.getContext(), tensorMapping, shardingRule.getFactorSizes(),
+        meshName, mesh);
+    if (newTensorSharding == getSharding(value)) {
+      continue;
+    }
+    auto reshardOp =
+        rewriter.create<ReshardOp>(value.getLoc(), value, getSharding(value));
+    rewriter.replaceAllUsesExcept(value, reshardOp, reshardOp);
+    setSharding(value, newTensorSharding);
+  }
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
 
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
+    IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
     funcOp.walk([&](Operation* op) {
@@ -107,7 +180,6 @@ struct InsertExplicitReshardsPass
         // This means none of the operands or results have a sharding attribute
         // or the sharding attributes use different meshes. Skip if so.
         // TODO(enver): Actually, we are moving towards supporting multiple
-        // meshes during propagation. We should handle this by inserting
         // explicit reshards so operands and results are all bound by the same
         // mesh.
         return;
@@ -132,7 +204,8 @@ struct InsertExplicitReshardsPass
       // TODO(enver): Build a projection where, for each factor, factor
       // shardings are the same across all operands and results;
 
-      // TODO(enver): Insert the explicit reshard ops.
+      insertExplicitReshards(op, shardingProjection, rewriter, shardingRule,
+                             *meshName, mesh);
     });
   }
 };
