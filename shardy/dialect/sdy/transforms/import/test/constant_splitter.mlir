@@ -145,3 +145,30 @@ func.func @splits_sdy_constants(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, 
   %2 = stablehlo.add %0, %1 : tensor<8x16xf32>
   return %0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func @splits_sharding_groups
+func.func @splits_sharding_groups(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // Each intermediate result is included in a distinct sharding group. Post
+  // splitting, we verify that all subcomputation results corresponding to an
+  // original unsplit result are included in the same sharding group.
+  // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_0]] group_id=0
+  // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_1]] group_id=0
+  // CHECK-NEXT: %[[CONST_2:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_2]] group_id=0
+  // CHECK-NEXT: %[[CONST_3:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_3]] group_id=0
+  // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[CONST_0]], %arg0
+  // CHECK-NEXT: sdy.sharding_group %[[DOT_GENERAL]] group_id=1
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CONST_1]], %[[DOT_GENERAL]]
+  // CHECK-NEXT: sdy.sharding_group %[[ADD]] group_id=2
+  // CHECK-NEXT: return %[[CONST_2]], %[[ADD]]
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  sdy.sharding_group %0 group_id=0 : tensor<8x16xf32>
+  %1 = stablehlo.dot_general %0, %arg0, contracting_dims = [1] x [0] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  sdy.sharding_group %1 group_id=1 : tensor<8x16xf32>
+  %2 = stablehlo.add %0, %1 : tensor<8x16xf32>
+  sdy.sharding_group %2 group_id=2 : tensor<8x16xf32>
+  return %0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
+}
