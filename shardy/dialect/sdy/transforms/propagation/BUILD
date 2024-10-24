@@ -254,6 +254,7 @@ cc_library(
         ":basic_factor_propagation",
         ":factor_propagation",
         ":sharding_projection",
+        ":utils",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:macros",
         "@llvm-project//llvm:Support",
