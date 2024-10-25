@@ -35,30 +35,50 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
-                  ArrayRef<AxisRefAttr> newAxes) {
-  if (newAxes.empty()) {
-    return false;
+RelationshipOfTwoArrayOfAxes getRelationshipOfTwoArrayOfAxes(
+    ArrayRef<AxisRefAttr> first, ArrayRef<AxisRefAttr> second) {
+  if (first.empty() && second.empty()) {
+    return RelationshipOfTwoArrayOfAxes::EQUAL;
   }
-  if (oldAxes.empty()) {
-    return true;
+  if (first.empty() && !second.empty()) {
+    return RelationshipOfTwoArrayOfAxes::FIRST_IS_STRICT_PREFIX_OF_SECOND;
+  }
+  if (!first.empty() && second.empty()) {
+    return RelationshipOfTwoArrayOfAxes::SECOND_IS_STRICT_PREFIX_OF_FIRST;
   }
 
-  int64_t minSize = std::min(oldAxes.size(), newAxes.size());
+  int64_t minSize = std::min(first.size(), second.size());
   for (int64_t i = 0; i < minSize - 1; ++i) {
-    if (oldAxes[i] != newAxes[i]) {
-      return false;
+    if (first[i] != second[i]) {
+      return RelationshipOfTwoArrayOfAxes::OTHER;
     }
   }
 
-  if (newAxes.size() < oldAxes.size()) {
-    return false;
-  }
-  if (newAxes.size() > oldAxes.size()) {
-    return oldAxes[minSize - 1].prefixOf(newAxes[minSize - 1]);
+  if (first.size() < second.size()) {
+    if (first[minSize - 1].prefixOf(second[minSize - 1])) {
+      return RelationshipOfTwoArrayOfAxes::FIRST_IS_STRICT_PREFIX_OF_SECOND;
+    }
+    return RelationshipOfTwoArrayOfAxes::OTHER;
   }
 
-  return oldAxes.back().strictPrefixOf(newAxes.back());
+  if (first.size() > second.size()) {
+    if (second[minSize - 1].prefixOf(first[minSize - 1])) {
+      return RelationshipOfTwoArrayOfAxes::SECOND_IS_STRICT_PREFIX_OF_FIRST;
+    }
+    return RelationshipOfTwoArrayOfAxes::OTHER;
+  }
+
+  assert(first.size() == second.size());
+  if (first.back() == second.back()) {
+    return RelationshipOfTwoArrayOfAxes::EQUAL;
+  }
+  if (first.back().prefixOf(second.back())) {
+    return RelationshipOfTwoArrayOfAxes::FIRST_IS_STRICT_PREFIX_OF_SECOND;
+  }
+  if (second.back().prefixOf(first.back())) {
+    return RelationshipOfTwoArrayOfAxes::SECOND_IS_STRICT_PREFIX_OF_FIRST;
+  }
+  return RelationshipOfTwoArrayOfAxes::OTHER;
 }
 
 bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,

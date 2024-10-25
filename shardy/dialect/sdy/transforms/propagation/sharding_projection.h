@@ -27,8 +27,26 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+enum class RelationshipOfTwoArrayOfAxes {
+  // The two arrays are equal.
+  EQUAL,
+  // The first array is a strict prefix of the second array.
+  FIRST_IS_STRICT_PREFIX_OF_SECOND,
+  // The second array is a strict prefix of the first array.
+  SECOND_IS_STRICT_PREFIX_OF_FIRST,
+  // All other cases.
+  OTHER
+};
+
+RelationshipOfTwoArrayOfAxes getRelationshipOfTwoArrayOfAxes(
+    ArrayRef<AxisRefAttr> first, ArrayRef<AxisRefAttr> second);
+
 // Returns true if the `oldAxes` is a strict prefix of `newAxes`,
-bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
+inline bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
+                         ArrayRef<AxisRefAttr> newAxes) {
+  return getRelationshipOfTwoArrayOfAxes(oldAxes, newAxes) ==
+         RelationshipOfTwoArrayOfAxes::FIRST_IS_STRICT_PREFIX_OF_SECOND;
+}
 
 // The axes along which a factor is sharded, and whether the factor can be
 // further sharded (unless it's fully sharded already).

@@ -762,6 +762,54 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
 }
 
 //===----------------------------------------------------------------------===//
+// Tests for getRelationshipOfTwoArrayOfAxes
+//===----------------------------------------------------------------------===//
+
+class GetRelationshipOfTwoArrayOfAxesTest : public PropagationTestBase {};
+
+TEST_F(GetRelationshipOfTwoArrayOfAxesTest,
+       GetRelationshipOfTwoArrayOfAxesTest) {
+  auto sameAxes = [](ArrayRef<AxisRefAttr> axes) {
+    EXPECT_EQ(getRelationshipOfTwoArrayOfAxes(axes, axes),
+              RelationshipOfTwoArrayOfAxes::EQUAL);
+  };
+  sameAxes({});
+  sameAxes({createAxis("a")});
+  sameAxes({createSubAxis("a", 2, 4)});
+  sameAxes({createAxis("a"), createSubAxis("b", 1, 2)});
+
+  auto strictPrefix = [](ArrayRef<AxisRefAttr> prefix,
+                         ArrayRef<AxisRefAttr> superset) {
+    EXPECT_EQ(getRelationshipOfTwoArrayOfAxes(prefix, superset),
+              RelationshipOfTwoArrayOfAxes::FIRST_IS_STRICT_PREFIX_OF_SECOND);
+    EXPECT_EQ(getRelationshipOfTwoArrayOfAxes(superset, prefix),
+              RelationshipOfTwoArrayOfAxes::SECOND_IS_STRICT_PREFIX_OF_FIRST);
+  };
+  strictPrefix({}, {createAxis("a")});
+  strictPrefix({createAxis("a")}, {createAxis("a"), createAxis("b")});
+  strictPrefix({createSubAxis("a", 1, 4)}, {createAxis("a"), createAxis("b")});
+  strictPrefix({createAxis("a"), createSubAxis("b", 1, 2)},
+               {createAxis("a"), createAxis("b")});
+  strictPrefix({createAxis("a"), createSubAxis("b", 1, 2)},
+               {createAxis("a"), createSubAxis("b", 1, 8)});
+
+  auto otherReplationship = [](ArrayRef<AxisRefAttr> first,
+                               ArrayRef<AxisRefAttr> second) {
+    EXPECT_EQ(getRelationshipOfTwoArrayOfAxes(first, second),
+              RelationshipOfTwoArrayOfAxes::OTHER);
+    EXPECT_EQ(getRelationshipOfTwoArrayOfAxes(second, first),
+              RelationshipOfTwoArrayOfAxes::OTHER);
+  };
+  otherReplationship({createAxis("a")}, {createAxis("b")});
+  otherReplationship({createAxis("a")}, {createSubAxis("b", 1, 2)});
+  otherReplationship({createAxis("a"), createAxis("b")},
+                     {createAxis("a"), createAxis("c")});
+  otherReplationship({createAxis("a"), createAxis("b")}, {createAxis("b")});
+  otherReplationship({createAxis("a")},
+                     {createSubAxis("a", 1, 4), createAxis("b")});
+}
+
+//===----------------------------------------------------------------------===//
 // Tests for shouldUpdate
 //===----------------------------------------------------------------------===//
 
