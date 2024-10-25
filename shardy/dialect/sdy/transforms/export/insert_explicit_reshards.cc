@@ -131,7 +131,8 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
     }
     auto reshardOp =
         rewriter.create<ReshardOp>(value.getLoc(), value, newTensorSharding);
-    rewriter.modifyOpInPlace(op, [&]() { op->setOperand(index, reshardOp); });
+    rewriter.modifyOpInPlace(
+        op, [&, index = index]() { op->setOperand(index, reshardOp); });
   }
 
   rewriter.setInsertionPointAfter(op);
