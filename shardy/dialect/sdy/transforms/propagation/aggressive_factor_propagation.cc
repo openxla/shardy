@@ -52,7 +52,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   }
 
   // Find the compatible major axes ignoring conflicts.
-  SmallVector<SmallVector<AxisRefAttr>> axesPerFactor;
+  AxesPerFactor axesPerFactor;
   axesPerFactor.reserve(factorSizes.size());
   bool allElementsAreEmpty = true;
   for (int64_t i = 0; i < factorSizes.size(); ++i) {
