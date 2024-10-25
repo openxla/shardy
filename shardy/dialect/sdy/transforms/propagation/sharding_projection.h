@@ -27,6 +27,8 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+using AxisRefsList = SmallVector<SmallVector<AxisRefAttr>>;
+
 // Returns true if the `oldAxes` is a strict prefix of `newAxes`,
 bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
 
