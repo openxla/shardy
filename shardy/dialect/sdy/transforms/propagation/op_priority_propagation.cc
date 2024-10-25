@@ -77,8 +77,7 @@ PropagationDirection isPassThrough(Operation* op) {
       isa<stablehlo::ReshapeOp, stablehlo::TransposeOp>(op)) {
     return PropagationDirection::BOTH;
   }
-  if (isa<stablehlo::ConcatenateOp, stablehlo::DynamicSliceOp,
-          stablehlo::DynamicUpdateSliceOp>(op)) {
+  if (isa<stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp>(op)) {
     return PropagationDirection::FORWARD;
   }
   return PropagationDirection::NONE;
