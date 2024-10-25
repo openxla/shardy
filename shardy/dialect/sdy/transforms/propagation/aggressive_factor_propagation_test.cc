@@ -37,12 +37,13 @@ using ::testing::IsEmpty;
 class AggressiveFactorPropagationTest : public PropagationTestBase {
  protected:
   UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, int64_t numFactors,
+      ShardingProjection& projection,
       PropagationDirection direction = PropagationDirection::BOTH,
       MeshAttr mesh = nullptr, bool conservativePropagation = false,
       Operation* op = nullptr) {
     return AggressiveFactorPropagation().propagateFactorShardings(
-        projection, direction, SmallVector<int64_t>(numFactors, 1), mesh, op,
+        projection, direction,
+        SmallVector<int64_t>(projection.getNumFactors(), 1), mesh, op,
         conservativePropagation);
   }
 };
@@ -74,7 +75,8 @@ TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
                    {10, {.axisRefs = {createAxis("f")}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {}}},
@@ -88,10 +90,12 @@ TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
                    {8, {.axisRefs = {}}},
                    {9, {.axisRefs = {}}},
                }},
-      });
+      },
+      /*numFactors=*/11);
   ShardingProjection projectionExpected(
       /*operands=*/{projection.getOperand(0), projection.getOperand(1)},
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {}}},
@@ -105,7 +109,8 @@ TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
                    {8, {.axisRefs = {createAxis("f")}}},
                    {9, {.axisRefs = {createAxis("g")}}},
                }},
-      });
+      },
+      /*numFactors=*/11);
 
   // Axis "a" may be propagated to the result along factors 0 or 1, which forms
   // a real conflict. Thus, we do not apply either of propagation choices.
@@ -119,8 +124,7 @@ TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
   // Propagation on different factors are independent. Although we cannot
   // propagate "e" to the Operand 0 along factor 7, we still propagate "e" to
   // the result along factor 7.
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 11);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
   EXPECT_EQ(projection, projectionExpected);
@@ -133,18 +137,20 @@ TEST_F(AggressiveFactorPropagationTest, TwoFactorsDoNotCoExistInAnyTensor) {
           {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}}}},
           {.factorIndexToSharding = {{1, {.axisRefs = {createAxis("a")}}}}},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding = {{0, {.axisRefs = {}}}}},
           {.factorIndexToSharding = {{1, {.axisRefs = {}}}}},
-      });
+      },
+      /*numFactors=*/2);
   ShardingProjection projectionExpected(
       /*operands=*/{projection.getOperand(0), projection.getOperand(1)},
-      /*results=*/{projection.getOperand(0), projection.getOperand(1)});
+      /*results=*/{projection.getOperand(0), projection.getOperand(1)},
+      /*numFactors=*/2);
 
   // We can propagate axis "a" along both factors since the two factors do not
   // co-exist in any tensor.
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 2);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
   EXPECT_EQ(projection, projectionExpected);
@@ -175,7 +181,8 @@ TEST_F(AggressiveFactorPropagationTest,
                                   createSubAxis("k", 2, 4)}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0,
@@ -199,7 +206,8 @@ TEST_F(AggressiveFactorPropagationTest,
                    {4, {.axisRefs = {createSubAxis("j", 1, 4)}}},
                    {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
                }},
-      });
+      },
+      /*numFactors=*/6);
 
   ShardingProjection projectionExpected(
       /*operands=*/
@@ -223,7 +231,8 @@ TEST_F(AggressiveFactorPropagationTest,
                                   createSubAxis("k", 2, 4)}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0,
@@ -241,10 +250,10 @@ TEST_F(AggressiveFactorPropagationTest,
                    {4, {.axisRefs = {createSubAxis("j", 1, 8)}}},
                    {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
                }},
-      });
+      },
+      /*numFactors=*/6);
 
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 6);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 2));
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 2));
   EXPECT_EQ(projection, projectionExpected);
@@ -279,7 +288,8 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
                    {3, {.axisRefs = {}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {}}},
@@ -296,7 +306,8 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
                    {2, {.axisRefs = {}}},
                    {3, {.axisRefs = {}}},
                }},
-      });
+      },
+      /*numFactors=*/4);
 
   ShardingProjection projectionExpected(
       /*operands=*/
@@ -317,7 +328,8 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
                    {3, {.axisRefs = {createAxis("d")}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {}}},
@@ -334,13 +346,13 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
                    {2, {.axisRefs = {createAxis("c")}}},
                    {3, {.axisRefs = {}}},
                }},
-      });
+      },
+      /*numFactors=*/4);
 
   // “a” can be propagated to the Result 0 along either Factor 0 or Factor 2.
   // This strategy truncate “a” for both F0 and F2 in Result 0. Namely, this
   // strategy does not resolve real conflicts across factors.
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 4);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(1, 2));
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
   EXPECT_EQ(projection, projectionExpected);

@@ -16,10 +16,18 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
 #include <cstdint>
+#include <string>
 
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OwningOpRef.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/register.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -27,12 +35,13 @@ namespace mlir {
 namespace sdy {
 namespace {
 
+using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::IsEmpty;
 
 class ExportTest : public ::testing::Test {
  protected:
-  void SetUp() override { context.loadDialect<SdyDialect>(); }
+  void SetUp() override { loadAllRequiredDialects(&context); }
 
   AxisRefAttr createAxis(StringRef name) {
     return AxisRefAttr::get(&context, name);
@@ -85,6 +94,53 @@ TEST_F(ExportTest, getGreatestCommonPrefix_Empty) {
   };
   emptyPrefix({createAxis("a"), createAxis("c")});
   emptyPrefix({});
+}
+
+TEST_F(ExportTest, GetGreatestCommonPrefixAxes_DotGeneralSimple) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=2, "c"=2, "d"=2, "e"=2]>
+    func.func @main(%arg0: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {"a"}]>},
+                    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c"}, {"d"}], replicated={"b"}>})
+        -> tensor<2x4xf32> {
+      %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"d", "e"}], replicated={"a", "c"}>]>
+      } : (tensor<2x8xf32>, tensor<8x4xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      testing_utils::getShardingProjection<stablehlo::DotGeneralOp>(
+          module.get());
+
+  EXPECT_THAT(getGreatestCommonPrefixAxes(projection),
+              ElementsAre(IsEmpty(), ElementsAre(AxisRefIs("d")),
+                          ElementsAre(AxisRefIs("a"))));
+}
+
+TEST_F(ExportTest,
+       GetGreatestCommonPrefixAxes_DotConflictOnNonContractingDimension) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=2]>
+    func.func @main(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+                    %arg1: tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {"a"}]>})
+        -> tensor<8x16xf32> {
+      %0 = stablehlo.dot %arg0, %arg1 {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>,
+        sdy.sharding_rule = #sdy.op_sharding_rule<([i, k],[k, j])->([i, j]) {i=8, j=32, k=16}>
+      } : (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
+      return %0 : tensor<8x16xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      testing_utils::getShardingProjection<stablehlo::DotOp>(module.get());
+
+  EXPECT_THAT(getGreatestCommonPrefixAxes(projection),
+              ElementsAre(ElementsAre(AxisRefIs("a")), IsEmpty(),
+                          ElementsAre(AxisRefIs("b"))));
 }
 
 }  // namespace

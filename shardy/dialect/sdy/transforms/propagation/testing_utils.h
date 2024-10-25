@@ -16,12 +16,20 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_TESTING_UTILS_H_
 #define SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_TESTING_UTILS_H_
 
+#include <cassert>
 #include <cstdint>
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/ScopedPrinter.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/register.h"
+#include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -29,9 +37,82 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+namespace testing_utils {
+
+inline constexpr StringRef kMeshName = "mesh";
+
+inline void verifyShardingAttrsMatch(TensorShardingAttr resultSharding,
+                                     TensorShardingAttr expectedSharding) {
+  EXPECT_EQ(resultSharding, expectedSharding)
+      << "result: " << llvm::to_string(resultSharding)
+      << ", expected: " << llvm::to_string(expectedSharding);
+}
+
+inline void verifyReconstructedShardings(
+    ValueRange tensors, ArrayRef<TensorFactorShardings> tensorFactorShardings,
+    ArrayRef<TensorMappingAttr> tensorMappings, ArrayRef<int64_t> factorSizes,
+    StringRef meshName, MeshAttr mesh) {
+  for (auto [tensor, factorShardings, tensorMapping] :
+       llvm::zip(tensors, tensorFactorShardings, tensorMappings)) {
+    TensorShardingAttr reconstructedSharding =
+        factorShardings.createTensorShardingAttr(
+            mesh.getContext(), tensorMapping, factorSizes, kMeshName, mesh);
+    verifyShardingAttrsMatch(reconstructedSharding,
+                             getOrCreateSharding(tensor, kMeshName));
+  }
+}
+
+inline MeshAttr getMeshAttr(ModuleOp module) {
+  return cast<MeshOp>(module.lookupSymbol(kMeshName)).getMesh();
+}
+
+template <class OpTy>
+OpTy getFirstOp(ModuleOp module) {
+  auto mainFn = cast<func::FuncOp>(module.lookupSymbol("main"));
+  auto ops = mainFn.getBody().front().getOps<OpTy>();
+  assert(!ops.empty());
+  return *ops.begin();
+}
+
+// Builds a `ShardingProjection` for the first OpTy in the main function.
+//
+// In addition, verifies that reconstructing the `TensorShardingAttr` for each
+// tensor (using `TensorFactorShardings::createTensorShardingAttr`) from the
+// created projection matches the original sharding.
+template <class OpTy>
+ShardingProjection getShardingProjection(ModuleOp module) {
+  OpTy op = getFirstOp<OpTy>(module);
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  assert(shardingRule);
+  MeshAttr mesh = getMeshAttr(module);
+  ShardingProjection projection =
+      ShardingProjection::build(op, shardingRule, mesh);
+  verifyReconstructedShardings(op->getOperands(), projection.getOperands(),
+                               shardingRule.getOperandMappings(),
+                               shardingRule.getFactorSizes(), kMeshName, mesh);
+  verifyReconstructedShardings(op->getResults(), projection.getResults(),
+                               shardingRule.getResultMappings(),
+                               shardingRule.getFactorSizes(), kMeshName, mesh);
+  return projection;
+}
+
+template <class OpTy>
+ShardingProjection getShardingProjection(
+    ModuleOp module, ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList) {
+  OpTy op = getFirstOp<OpTy>(module);
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  assert(shardingRule);
+  ShardingProjection projection =
+      ShardingProjection::build(axisRefsList, shardingRule);
+  return projection;
+}
+}  // namespace testing_utils
+
+namespace {
 using ::testing::DescribeMatcher;
 using ::testing::IsEmpty;
 using ::testing::PrintToString;
+}  // namespace
 
 MATCHER_P(AxisRefIs, axisName,
           (negation ? "axis isn't " : "axis is ") + PrintToString(axisName)) {

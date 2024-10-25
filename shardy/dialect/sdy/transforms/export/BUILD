@@ -70,6 +70,7 @@ cc_library(
     hdrs = ["utils.h"],
     deps = [
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Support",
     ],
@@ -81,8 +82,15 @@ cc_test(
     deps = [
         ":utils",
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/ir:register",
+        "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
+        "//shardy/dialect/sdy/transforms/propagation:testing_utils",
         "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Support",
+        "@stablehlo//:stablehlo_ops",
     ],
 )

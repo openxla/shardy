@@ -39,12 +39,13 @@ using ::testing::IsEmpty;
 class BasicFactorPropagationTest : public PropagationTestBase {
  protected:
   UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, int64_t numFactors,
+      ShardingProjection& projection,
       PropagationDirection direction = PropagationDirection::BOTH,
       MeshAttr mesh = nullptr, bool conservativePropagation = false,
       Operation* op = nullptr) {
     return BasicFactorPropagation().propagateFactorShardings(
-        projection, direction, SmallVector<int64_t>(numFactors, 1), mesh, op,
+        projection, direction,
+        SmallVector<int64_t>(projection.getNumFactors(), 1), mesh, op,
         conservativePropagation);
   }
 
@@ -75,7 +76,8 @@ TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
                }},
           {.factorIndexToSharding = {{1, {.axisRefs = {createAxis("e")}}}}},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0,
@@ -91,7 +93,8 @@ TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
                    {2, {.axisRefs = {}}},
                    {3, {.axisRefs = {createAxis("i"), createAxis("j")}}},
                }},
-      });
+      },
+      /*numFactors=*/4);
 
   // Propagate the following axes along each factor to all tensors.
   // * Factor 0: ["a", "b"] is the compatible major sharding axes of ["a"], [],
@@ -119,7 +122,8 @@ TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
           {.factorIndexToSharding =
                {{1, {.axisRefs = {createAxis("e"), createAxis("f")}}}}},
       },
-      /*results=*/{
+      /*results=*/
+      {
           projection.getResult(0),
           {.factorIndexToSharding =
                {
@@ -129,10 +133,10 @@ TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
                    {2, {.axisRefs = {createAxis("g")}}},
                    {3, {.axisRefs = {createAxis("i"), createAxis("j")}}},
                }},
-      });
+      },
+      /*numFactors=*/4);
 
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 4);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 1, 2));
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(1));
   EXPECT_EQ(projection, projectionExpected);
@@ -160,7 +164,8 @@ TEST_F(BasicFactorPropagationTest, SubAxesConflictsOnlyForSameFactor) {
                     {.axisRefs = {createSubAxis("k", 1, 4)}, .isClosed = true}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {createSubAxis("a", 1, 2)}}},
@@ -182,7 +187,8 @@ TEST_F(BasicFactorPropagationTest, SubAxesConflictsOnlyForSameFactor) {
                    {4, {.axisRefs = {createSubAxis("j", 2, 4)}}},
                    {5, {.axisRefs = {}}},
                }},
-      });
+      },
+      /*numFactors=*/6);
 
   // Propagate the following axes along each factor to all tensors.
   // * Factor 0: ["a", "b"] is the compatible major sharding axes of ["a", "b"],
@@ -213,7 +219,8 @@ TEST_F(BasicFactorPropagationTest, SubAxesConflictsOnlyForSameFactor) {
                     {.axisRefs = {createSubAxis("k", 1, 4)}, .isClosed = true}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
@@ -235,10 +242,10 @@ TEST_F(BasicFactorPropagationTest, SubAxesConflictsOnlyForSameFactor) {
                    {4, {.axisRefs = {createSubAxis("j", 2, 4)}}},
                    {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
                }},
-      });
+      },
+      /*numFactors=*/6);
 
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 6);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(1));
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
   EXPECT_EQ(projection, projectionExpected);
@@ -269,7 +276,8 @@ TEST_F(BasicFactorPropagationTest,
                                   createSubAxis("k", 2, 4)}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0,
@@ -293,7 +301,8 @@ TEST_F(BasicFactorPropagationTest,
                    {4, {.axisRefs = {createSubAxis("j", 1, 4)}}},
                    {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
                }},
-      });
+      },
+      /*numFactors=*/6);
 
   // Propagate the following axes along each factor to all tensors.
   // * Factor 0: The compatible major axes are ["a", "b", "c"]. However, "b" is
@@ -324,7 +333,8 @@ TEST_F(BasicFactorPropagationTest,
                                   createSubAxis("k", 2, 4)}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0,
@@ -342,10 +352,10 @@ TEST_F(BasicFactorPropagationTest,
                    {4, {.axisRefs = {createSubAxis("j", 1, 8)}}},
                    {5, {.axisRefs = {createSubAxis("k", 1, 4)}}},
                }},
-      });
+      },
+      /*numFactors=*/6);
 
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 6);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(2));
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 2));
   EXPECT_EQ(projection, projectionExpected);
@@ -361,7 +371,8 @@ TEST_F(BasicFactorPropagationTest, ConflictsWithOverflowAxes) {
                    {1, {.axisRefs = {createAxis("c")}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {
               .factorIndexToSharding =
                   {
@@ -371,7 +382,8 @@ TEST_F(BasicFactorPropagationTest, ConflictsWithOverflowAxes) {
                         .overflowAxes = {createSubAxis("b", 1, 2)}}},
                   },
           },
-      });
+      },
+      /*numFactors=*/2);
 
   // The compatible major axes for factor 0 are ["a", "b"], but the result has
   // "b" in the overflow axes of factor 1.
@@ -383,7 +395,8 @@ TEST_F(BasicFactorPropagationTest, ConflictsWithOverflowAxes) {
   // Finally, we propagate ["a"] and [] along factors 0 and 1, respectively.
   ShardingProjection projectionExpected(
       /*operands=*/{projection.getOperand(0)},
-      /*results=*/{
+      /*results=*/
+      {
           {
               .factorIndexToSharding =
                   {
@@ -393,10 +406,10 @@ TEST_F(BasicFactorPropagationTest, ConflictsWithOverflowAxes) {
                         .overflowAxes = {createSubAxis("b", 1, 2)}}},
                   },
           },
-      });
+      },
+      /*numFactors=*/2);
 
-  auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 2);
+  auto [updateOperands, updateResults] = propagateFactorShardings(projection);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
   EXPECT_EQ(projection, projectionExpected);
@@ -434,8 +447,8 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
 
   auto test = [&](ArrayRef<int64_t> factorSizes,
                   const TensorFactorShardings& resultAfter) {
-    ShardingProjection projectionBefore({operand}, {resultBefore});
-    ShardingProjection projectionAfter({operand}, {resultAfter});
+    ShardingProjection projectionBefore({operand}, {resultBefore}, 2);
+    ShardingProjection projectionAfter({operand}, {resultAfter}, 2);
     auto [updateOperands, updateResults] = propagateFactorShardings(
         projectionBefore, factorSizes, PropagationDirection::BOTH, mesh);
     EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
@@ -520,12 +533,13 @@ TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
     // along factor 1. We do not propagate sideways to each operand as our
     // current behavior with BACKWARD closes all operands for factor expansion.
 
-    ShardingProjection projection({operandBefore0, operandBefore1}, {result0});
+    ShardingProjection projection({operandBefore0, operandBefore1}, {result0},
+                                  2);
     ShardingProjection projectionExpected({operandAfter0, operandAfter1},
-                                          {result0});
+                                          {result0}, 2);
 
     auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 2, PropagationDirection::BACKWARD);
+        propagateFactorShardings(projection, PropagationDirection::BACKWARD);
     EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 1));
     EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
     EXPECT_EQ(projection, projectionExpected);
@@ -533,12 +547,13 @@ TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
 
   {
     // Test that we only propagate forwards.
-    ShardingProjection projection({result0}, {operandBefore0, operandBefore1});
+    ShardingProjection projection({result0}, {operandBefore0, operandBefore1},
+                                  2);
     ShardingProjection projectionExpected({result0},
-                                          {operandAfter0, operandAfter1});
+                                          {operandAfter0, operandAfter1}, 2);
 
     auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 2, PropagationDirection::FORWARD);
+        propagateFactorShardings(projection, PropagationDirection::FORWARD);
     EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
     EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
     EXPECT_EQ(projection, projectionExpected);
@@ -562,16 +577,16 @@ TEST_F(BasicFactorPropagationTest, UniDirectionalPropagationWithConflict) {
   {
     // Even though we are propagating backwards, we still need to account for
     // conflicts. The "z" blocks any propagation.
-    ShardingProjection projection({operand0, operand1}, {result});
+    ShardingProjection projection({operand0, operand1}, {result}, 1);
     auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 1, PropagationDirection::BACKWARD);
+        propagateFactorShardings(projection, PropagationDirection::BACKWARD);
     EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
     EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
   }
   {
-    ShardingProjection projection({result}, {operand0, operand1});
+    ShardingProjection projection({result}, {operand0, operand1}, 1);
     auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 1, PropagationDirection::FORWARD);
+        propagateFactorShardings(projection, PropagationDirection::FORWARD);
     EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
     EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
   }
@@ -588,7 +603,8 @@ TEST_F(BasicFactorPropagationTest, NonePropagationDirection) {
                                   createAxis("c")}}},
                }},
       },
-      /*results=*/{
+      /*results=*/
+      {
           {.factorIndexToSharding =
                {
                    {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
@@ -603,12 +619,13 @@ TEST_F(BasicFactorPropagationTest, NonePropagationDirection) {
                     {.axisRefs = {createAxis("a"), createAxis("b"),
                                   createAxis("c")}}},
                }},
-      });
+      },
+      /*numFactors=*/1);
 
   // Even though [a, b, c] is the most compatible, since we aren't propagating,
   // we don't update any operands or results.
   auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 1, PropagationDirection::NONE);
+      propagateFactorShardings(projection, PropagationDirection::NONE);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
 }
@@ -624,18 +641,21 @@ TEST_F(BasicFactorPropagationTest,
                                createAxis("c")}}},
                 {1, {.axisRefs = {createSubAxis("b", 2, 4)}}},
             }}},
-      /*results=*/{{.factorIndexToSharding = {{0, {}}, {1, {}}}}});
+      /*results=*/{{.factorIndexToSharding = {{0, {}}, {1, {}}}}},
+      /*numFactors=*/2);
 
   // In conservative mode, sub-axes are not propagated. Hence, only the full "a"
   // will be propagated to the result, while other axes are not propagated.
 
   ShardingProjection projectionExpected(
       /*operands=*/{projection.getOperand(0)},
-      /*results=*/{{.factorIndexToSharding = {
-                        {0, {.axisRefs = {createAxis("a")}}}, {1, {}}}}});
+      /*results=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {}}}}},
+      /*numFactors=*/2);
 
   auto [updateOperands, updateResults] = propagateFactorShardings(
-      projection, 2, PropagationDirection::BOTH, /*mesh=*/nullptr,
+      projection, PropagationDirection::BOTH, /*mesh=*/nullptr,
       /*conservativePropagation=*/true);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));

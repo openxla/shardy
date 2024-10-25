@@ -19,6 +19,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
@@ -38,6 +39,27 @@ SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
     break;
   }
   return result;
+}
+
+AxisRefsList getGreatestCommonPrefixAxes(const ShardingProjection& projection) {
+  AxisRefsList factorAxisRefs(projection.getNumFactors());
+  SmallVector<bool> factorIsSeen(projection.getNumFactors());
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    // Detects conflicts within the same factor.
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (!factorIsSeen[factorIndex]) {
+        factorAxisRefs[factorIndex] = llvm::to_vector(factorSharding.axisRefs);
+        factorIsSeen[factorIndex] = true;
+        continue;
+      }
+      factorAxisRefs[factorIndex] = getGreatestCommonPrefix(
+          factorAxisRefs[factorIndex], factorSharding.axisRefs);
+    }
+  }
+  return factorAxisRefs;
 }
 
 }  // namespace sdy

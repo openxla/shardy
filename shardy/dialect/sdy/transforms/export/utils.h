@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "llvm/ADT/SmallVector.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
@@ -25,6 +26,13 @@ namespace sdy {
 // Returns the greatest common prefix of given two arrays axis refs.
 SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
                                                  ArrayRef<AxisRefAttr> second);
+
+// Returns an array of axis-ref arrays where each axis-ref array defines a
+// factor sharding, for the corresponding factor, as the greatest common
+// prefix of factor shardings across all operands and results.
+// TODO(enver): The number of factors can instead be an api of
+// ShardingProjection, and this method can get it from the projection.
+AxisRefsList getGreatestCommonPrefixAxes(const ShardingProjection& projection);
 
 }  // namespace sdy
 }  // namespace mlir

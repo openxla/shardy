@@ -333,27 +333,27 @@ TensorFactorShardings buildTensorFactorShardings(
 
 ShardingProjection::ShardingProjection(
     SmallVector<TensorFactorShardings> operands,
-    SmallVector<TensorFactorShardings> results)
-    : operands(std::move(operands)), results(std::move(results)) {}
+    SmallVector<TensorFactorShardings> results, int64_t numFactors)
+    : operands(std::move(operands)),
+      results(std::move(results)),
+      numFactors(numFactors) {}
 
 ShardingProjection ShardingProjection::build(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultShardings,
     OpShardingRuleAttr shardingRule, MeshAttr mesh) {
   ShardingProjection projection;
-
+  projection.numFactors = shardingRule.getNumFactors();
   for (const auto& [operandSharding, operandMapping] :
        llvm::zip_equal(operandShardings, shardingRule.getOperandMappings())) {
     projection.operands.push_back(buildTensorFactorShardings(
         operandMapping, operandSharding, shardingRule.getFactorSizes(), mesh));
   }
-
   for (const auto& [resultSharding, resultMapping] :
        llvm::zip_equal(resultShardings, shardingRule.getResultMappings())) {
     projection.results.push_back(buildTensorFactorShardings(
         resultMapping, resultSharding, shardingRule.getFactorSizes(), mesh));
   }
-
   return projection;
 }
 
@@ -368,6 +368,7 @@ ShardingProjection ShardingProjection::build(
     ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList,
     OpShardingRuleAttr shardingRule) {
   ShardingProjection projection;
+  projection.numFactors = shardingRule.getNumFactors();
   for (const auto& operandMapping : shardingRule.getOperandMappings()) {
     projection.operands.push_back(
         buildTensorFactorShardings(operandMapping, axisRefsList));

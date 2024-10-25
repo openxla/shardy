@@ -27,6 +27,8 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+using AxisRefsList = SmallVector<SmallVector<AxisRefAttr>>;
+
 // Returns true if the `oldAxes` is a strict prefix of `newAxes`,
 bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
 
@@ -141,11 +143,13 @@ class ShardingProjection {
   ShardingProjection() = default;
 
   ShardingProjection(SmallVector<TensorFactorShardings> operands,
-                     SmallVector<TensorFactorShardings> results);
+                     SmallVector<TensorFactorShardings> results,
+                     int64_t numFactors);
 
   int64_t getNumOperands() const { return operands.size(); }
   int64_t getNumResults() const { return results.size(); }
   int64_t getNumTensors() const { return getNumOperands() + getNumResults(); }
+  int64_t getNumFactors() const { return numFactors; }
 
   ArrayRef<TensorFactorShardings> getOperands() const { return operands; }
   ArrayRef<TensorFactorShardings> getResults() const { return results; }
@@ -203,6 +207,7 @@ class ShardingProjection {
  private:
   SmallVector<TensorFactorShardings> operands;
   SmallVector<TensorFactorShardings> results;
+  int64_t numFactors;
 };
 
 }  // namespace sdy
