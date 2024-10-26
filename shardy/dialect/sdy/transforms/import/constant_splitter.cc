@@ -45,6 +45,15 @@ namespace {
 
 using func::FuncOp;
 
+void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
+                             OpBuilder& builder) {
+  for (Operation* user : opResult.getUsers()) {
+    if (auto shardingGroupOp = dyn_cast<ShardingGroupOp>(user)) {
+      builder.clone(*shardingGroupOp, mapping);
+    }
+  }
+}
+
 // Returns true if the given op is either:
 // - A constant or iota op.
 // - A broadcast, slice, or pure element-wise op whose operands are all
@@ -71,9 +80,12 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
       cloneSubComputation(defOpResult, mapping);
     }
   }
+
   if (!mapping.lookupOrNull(opResult)) {
     // This will insert the cloned op right before the original op.
-    OpBuilder(op).clone(*op, mapping);
+    OpBuilder builder(op);
+    builder.clone(*op, mapping);
+    cloneShardingGroupUsers(opResult, mapping, builder);
   }
 }
 
@@ -130,6 +142,9 @@ struct ConstantSplitterPass
     // Then we split constant sub-computations for each non-constant user.
     llvm::DenseSet<Operation*> constantOps;
     funcOp.walk([&](Operation* op) {
+      if (isa<ShardingGroupOp>(op)) {
+        return;
+      }
       if (isConstantExpression(op, constantOps)) {
         constantOps.insert(op);
         return;
