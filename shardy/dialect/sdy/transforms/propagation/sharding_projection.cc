@@ -35,30 +35,38 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
-                  ArrayRef<AxisRefAttr> newAxes) {
-  if (newAxes.empty()) {
-    return false;
+PrefixStatus isAxisListPrefixOf(ArrayRef<AxisRefAttr> first,
+                                ArrayRef<AxisRefAttr> second) {
+  if (first.empty() && second.empty()) {
+    return PrefixStatus::EQUAL;
   }
-  if (oldAxes.empty()) {
-    return true;
+  if (first.empty()) {
+    return PrefixStatus::STRICT_PREFIX;
+  }
+  if (first.size() > second.size()) {
+    return PrefixStatus::NOT_A_PREFIX;
   }
 
-  int64_t minSize = std::min(oldAxes.size(), newAxes.size());
+  int64_t minSize = std::min(first.size(), second.size());
   for (int64_t i = 0; i < minSize - 1; ++i) {
-    if (oldAxes[i] != newAxes[i]) {
-      return false;
+    if (first[i] != second[i]) {
+      return PrefixStatus::NOT_A_PREFIX;
     }
   }
 
-  if (newAxes.size() < oldAxes.size()) {
-    return false;
+  if (first.size() == second.size() && first.back() == second.back()) {
+    return PrefixStatus::EQUAL;
   }
-  if (newAxes.size() > oldAxes.size()) {
-    return oldAxes[minSize - 1].prefixOf(newAxes[minSize - 1]);
+  if (first[minSize - 1].prefixOf(second[minSize - 1])) {
+    return PrefixStatus::STRICT_PREFIX;
   }
+  return PrefixStatus::NOT_A_PREFIX;
+}
 
-  return oldAxes.back().strictPrefixOf(newAxes.back());
+// Returns true if the `oldAxes` is a strict prefix of `newAxes`,
+bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
+                  ArrayRef<AxisRefAttr> newAxes) {
+  return isAxisListPrefixOf(oldAxes, newAxes) == PrefixStatus::STRICT_PREFIX;
 }
 
 bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,

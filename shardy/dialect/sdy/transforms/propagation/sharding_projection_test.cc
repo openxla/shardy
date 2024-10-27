@@ -762,41 +762,49 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
 }
 
 //===----------------------------------------------------------------------===//
-// Tests for shouldUpdate
+// Tests for IsAxisListPrefixOfTest
 //===----------------------------------------------------------------------===//
 
-class ShouldUpdateTest : public PropagationTestBase {};
+class IsAxisListPrefixOfTest : public PropagationTestBase {};
 
-TEST_F(ShouldUpdateTest, ShouldUpdateTest) {
-  // One of the input arguments is empty.
-  EXPECT_FALSE(shouldUpdate({}, {}));
-  EXPECT_FALSE(shouldUpdate({createAxis("a")}, {}));
-  EXPECT_TRUE(shouldUpdate({}, {createAxis("a")}));
-
-  // The two input arguments are the same.
-  EXPECT_FALSE(shouldUpdate({createAxis("a")}, {createAxis("a")}));
-  SmallVector<AxisRefAttr> axes = {createAxis("a"), createSubAxis("b", 2, 4)};
-  EXPECT_FALSE(shouldUpdate(axes, axes));
-
-  EXPECT_FALSE(shouldUpdate({createAxis("a")}, {createAxis("b")}));
-  EXPECT_FALSE(shouldUpdate({createAxis("a"), createAxis("b")},
-                            {createAxis("b"), createAxis("a")}));
-  EXPECT_FALSE(
-      shouldUpdate({createAxis("a"), createSubAxis("b", 2, 4)},
-                   {createAxis("a"), createAxis("b"), createAxis("c")}));
-  EXPECT_FALSE(
-      shouldUpdate({createAxis("a"), createAxis("b"), createAxis("c")},
-                   {createAxis("a"), createAxis("b"), createAxis("d")}));
-
-  auto expectTrue = [&](ArrayRef<AxisRefAttr> oldAxes,
-                        ArrayRef<AxisRefAttr> newAxes) {
-    EXPECT_TRUE(shouldUpdate(oldAxes, newAxes));
-    EXPECT_FALSE(shouldUpdate(newAxes, oldAxes));
+TEST_F(IsAxisListPrefixOfTest, IsAxisListPrefixOfTest) {
+  auto sameAxes = [](ArrayRef<AxisRefAttr> axes) {
+    EXPECT_EQ(isAxisListPrefixOf(axes, axes), PrefixStatus::EQUAL);
   };
-  expectTrue({createAxis("a"), createAxis("b")},
-             {createAxis("a"), createAxis("b"), createAxis("c")});
-  expectTrue({createAxis("a"), createSubAxis("b", 1, 4)},
-             {createAxis("a"), createAxis("b")});
+  sameAxes({});
+  sameAxes({createAxis("a")});
+  sameAxes({createSubAxis("a", 2, 4)});
+  sameAxes({createAxis("a"), createSubAxis("b", 1, 2)});
+
+  auto strictPrefix = [](ArrayRef<AxisRefAttr> prefix,
+                         ArrayRef<AxisRefAttr> superset) {
+    EXPECT_EQ(isAxisListPrefixOf(prefix, superset),
+              PrefixStatus::STRICT_PREFIX);
+    EXPECT_EQ(isAxisListPrefixOf(superset, prefix), PrefixStatus::NOT_A_PREFIX);
+  };
+  strictPrefix({}, {createAxis("a")});
+  strictPrefix({createAxis("a")}, {createAxis("a"), createAxis("b")});
+  strictPrefix({createSubAxis("a", 1, 4)}, {createAxis("a"), createAxis("b")});
+  strictPrefix({createAxis("a"), createSubAxis("b", 1, 2)},
+               {createAxis("a"), createAxis("b")});
+  strictPrefix({createAxis("a"), createSubAxis("b", 1, 2)},
+               {createAxis("a"), createSubAxis("b", 1, 8)});
+
+  auto otherReplationship = [](ArrayRef<AxisRefAttr> first,
+                               ArrayRef<AxisRefAttr> second) {
+    EXPECT_EQ(isAxisListPrefixOf(first, second), PrefixStatus::NOT_A_PREFIX);
+    EXPECT_EQ(isAxisListPrefixOf(second, first), PrefixStatus::NOT_A_PREFIX);
+  };
+  otherReplationship({createAxis("a")}, {createAxis("b")});
+  otherReplationship({createAxis("a")}, {createSubAxis("b", 1, 2)});
+  otherReplationship({createAxis("a"), createAxis("b")},
+                     {createAxis("a"), createAxis("c")});
+  otherReplationship({createAxis("a"), createAxis("b")},
+                     {createAxis("b"), createAxis("a")});
+  otherReplationship({createAxis("a"), createSubAxis("b", 2, 4)},
+                     {createAxis("a"), createAxis("b")});
+  otherReplationship({createAxis("a")},
+                     {createSubAxis("a", 1, 4), createAxis("b")});
 }
 
 //===----------------------------------------------------------------------===//

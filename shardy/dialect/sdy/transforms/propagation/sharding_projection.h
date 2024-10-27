@@ -29,6 +29,18 @@ namespace sdy {
 
 using AxesPerFactor = SmallVector<SmallVector<AxisRefAttr>>;
 
+enum class PrefixStatus {
+  // The two arrays are equal.
+  EQUAL,
+  // The first array is a strict prefix of the second array.
+  STRICT_PREFIX,
+  // The first array is not a prefix of the second array.
+  NOT_A_PREFIX
+};
+
+PrefixStatus isAxisListPrefixOf(ArrayRef<AxisRefAttr> first,
+                                ArrayRef<AxisRefAttr> second);
+
 // Returns true if the `oldAxes` is a strict prefix of `newAxes`,
 bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
 
