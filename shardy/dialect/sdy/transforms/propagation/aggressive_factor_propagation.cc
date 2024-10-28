@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <tuple>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -24,6 +25,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -37,6 +39,46 @@ bool updateTensorSharding(ShardingProjection& projection, int64_t tensorIndex,
   }
   return projection.updateResultSharding(
       tensorIndex - projection.getNumOperands(), factorIndex, newAxes);
+}
+
+struct TensorIndexSize {
+  int64_t index;
+  int64_t size;
+};
+
+// Given a factor Fi with non-empty new axes, if tensor Tj contains this factor
+// and Tj/Fi is a prefix of the new axes, Tj is a source of this new axes.
+// Return a vector of source tensor per factor.
+SmallVector<TensorIndexSize> getFactorToSourceTensor(
+    const ShardingProjection& projection, ArrayRef<int64_t> factorSizes,
+    AxesPerFactorRef axesPerFactor) {
+  SmallVector<TensorIndexSize> factorToSourceTensor(
+      factorSizes.size(), {/*index=*/-1, /*size=*/-1});
+  for (const auto& [tensorIndex, tensorFactorShardings] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           projection.getOperands(), projection.getResults()))) {
+    int64_t tensorSize = 1;
+    for (const auto& [factorIndex, _] :
+         tensorFactorShardings.factorIndexToSharding) {
+      tensorSize *= factorSizes[factorIndex];
+    }
+
+    for (const auto& [factorIndex, sharding] :
+         tensorFactorShardings.factorIndexToSharding) {
+      const bool isSource =
+          !axesPerFactor[factorIndex].empty() &&
+          isAxisListPrefixOf(axesPerFactor[factorIndex], sharding.axisRefs) !=
+              PrefixStatus::NOT_A_PREFIX;
+      // There may be multiple sources for the same factor. We take the one with
+      // largest tensor size.
+      TensorIndexSize& sourceTensor = factorToSourceTensor[factorIndex];
+      if (isSource && tensorSize > sourceTensor.size) {
+        sourceTensor.size = tensorSize;
+        sourceTensor.index = tensorIndex;
+      }
+    }
+  }
+  return factorToSourceTensor;
 }
 
 }  // namespace
@@ -66,6 +108,9 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     return result;
   }
 
+  SmallVector<TensorIndexSize> factorToSourceTensor =
+      getFactorToSourceTensor(projection, factorSizes, axesPerFactor);
+
   // The propagation on each tensor is independent. This strategy can propagate
   // different shardings to different tensors along the same factor. Examples
   // are provided in the docstring of this class.
@@ -94,9 +139,22 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
       }
     }
 
+    SmallVector<int> sortedFactorIndices = toSetBitsVector(factorUpdated);
+    // We sort the factors based on:
+    // 1. larger source tensor size first
+    // 2. smaller source tensor index first
+    // 3. smaller factor index first
+    // Unstable sort is fine because there is no equality in the candidates.
+    llvm::sort(sortedFactorIndices, [&](int64_t i, int64_t j) {
+      return std::forward_as_tuple(-factorToSourceTensor[i].size,
+                                   factorToSourceTensor[i].index, i) <
+             std::forward_as_tuple(-factorToSourceTensor[j].size,
+                                   factorToSourceTensor[j].index, j);
+    });
+
     // Resolve conflicts (overlapping sharding axes) between factors.
     bool tensorUpdated = false;
-    for (const int64_t factorIndex : factorUpdated.set_bits()) {
+    for (const int64_t factorIndex : sortedFactorIndices) {
       SmallVector<AxisRefAttr> newAxes = newSharding[factorIndex].axisRefs;
       truncateAxesByRemovingConflicts(
           newAxes,
