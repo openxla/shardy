@@ -63,26 +63,3 @@ cc_library(
         "@stablehlo//:stablehlo_ops",
     ],
 )
-
-cc_library(
-    name = "utils",
-    srcs = ["utils.cc"],
-    hdrs = ["utils.h"],
-    deps = [
-        "//shardy/dialect/sdy/ir:dialect",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:Support",
-    ],
-)
-
-cc_test(
-    name = "utils_test",
-    srcs = ["utils_test.cc"],
-    deps = [
-        ":utils",
-        "//shardy/dialect/sdy/ir:dialect",
-        "@com_google_googletest//:gtest_main",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Support",
-    ],
-)

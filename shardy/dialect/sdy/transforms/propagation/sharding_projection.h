@@ -203,8 +203,9 @@ class ShardingProjection {
   // shardings are the same across all operands and results, and specified by
   // `axisRefsList`. The resulting factor shardings are all closed, and with
   // empty overflow axes.
-  static ShardingProjection build(ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList,
-                                  OpShardingRuleAttr shardingRule);
+  static ShardingProjection build(
+      ArrayRef<SmallVector<AxisRefAttr>> axisRefsList,
+      OpShardingRuleAttr shardingRule);
 
   bool operator==(const ShardingProjection& other) const {
     return operands == other.operands && results == other.results;
@@ -213,6 +214,11 @@ class ShardingProjection {
   bool operator!=(const ShardingProjection& other) const {
     return !(*this == other);
   }
+
+  // Returns an array of axis-ref arrays where each axis-ref array defines a
+  // factor sharding, for the corresponding factor, as the greatest common
+  // prefix of factor shardings across all operands and results.
+  AxesPerFactor getGreatestCommonPrefixAxes(int64_t numFactors);
 
  private:
   SmallVector<TensorFactorShardings> operands;

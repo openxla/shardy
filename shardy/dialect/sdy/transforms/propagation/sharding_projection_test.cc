@@ -103,7 +103,7 @@ ShardingProjection getShardingProjection(ModuleOp module) {
 
 template <class OpTy>
 ShardingProjection getShardingProjection(
-    ModuleOp module, ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList) {
+    ModuleOp module, ArrayRef<SmallVector<AxisRefAttr>> axisRefsList) {
   OpTy op = getFirstOp<OpTy>(module);
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   assert(shardingRule);
@@ -680,6 +680,63 @@ TEST_F(ShardingProjectionBuildTest, ReshapeFromFactorShardings) {
           /*replicatedAxes*/ IsEmpty()));
 }
 
+TEST_F(ShardingProjectionBuildTest,
+       BuildFromGreatestCommonPrefixAxes_DotGeneralSimple) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=2, "c"=2, "d"=2, "e"=2]>
+    func.func @main(%arg0: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {"a"}]>},
+                    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c"}, {"d"}], replicated={"b"}>})
+        -> tensor<2x4xf32> {
+      %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"d", "e"}], replicated={"a", "c"}>]>
+      } : (tensor<2x8xf32>, tensor<8x4xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection initialProjection =
+      getShardingProjection<stablehlo::DotGeneralOp>(module.get());
+
+  ASSERT_THAT(initialProjection.getGreatestCommonPrefixAxes(/*numFactors=*/3),
+              ElementsAre(IsEmpty(), ElementsAre(AxisRefIs("d")),
+                          ElementsAre(AxisRefIs("a"))));
+
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::DotGeneralOp>(
+          module.get(),
+          initialProjection.getGreatestCommonPrefixAxes(/*numFactors=*/3));
+
+  EXPECT_THAT(projection.getOperand(0),
+              TensorFactorShardingsIs(
+                  /*factorIndexToSharding*/ UnorderedElementsAre(
+                      FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                                       /*isMinorMost*/ true, IsEmpty()),
+                      FactorShardingIs(/*index*/ 2, /*isClosed*/ true,
+                                       /*isMinorMost*/ true,
+                                       ElementsAre(AxisRefIs("a")))),
+                  /*replicatedAxes*/ IsEmpty()));
+  EXPECT_THAT(projection.getOperand(1),
+              TensorFactorShardingsIs(
+                  /*factorIndexToSharding*/ UnorderedElementsAre(
+                      FactorShardingIs(
+                          /*index*/ 1, /*isClosed*/ true, /*isMinorMost*/ true,
+                          ElementsAre(AxisRefIs("d"))),
+                      FactorShardingIs(
+                          /*index*/ 2, /*isClosed*/ true, /*isMinorMost*/ true,
+                          ElementsAre(AxisRefIs("a")))),
+                  /*replicatedAxes*/ IsEmpty()));
+  EXPECT_THAT(projection.getResult(0),
+              TensorFactorShardingsIs(
+                  /*factorIndexToSharding*/ UnorderedElementsAre(
+                      FactorShardingIs(/*index*/ 0, /*isClosed*/ true,
+                                       /*isMinorMost*/ true, IsEmpty()),
+                      FactorShardingIs(/*index*/ 1, /*isClosed*/ true,
+                                       /*isMinorMost*/ true,
+                                       ElementsAre(AxisRefIs("d")))),
+                  /*replicatedAxes*/ IsEmpty()));
+}
+
 //===----------------------------------------------------------------------===//
 // Tests for ShardingProjection::updateSharding
 //===----------------------------------------------------------------------===//
@@ -980,6 +1037,102 @@ TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
                            createTensorSharding(
                                /*dimShardings=*/{openDimSharding(
                                    {createAxis("b"), createAxis("a")})}));
+}
+
+//===----------------------------------------------------------------------===//
+// Tests for ShardingProjection::getGreatestCommonPrefixAxes
+//===----------------------------------------------------------------------===//
+class ShardingProjectionGetGreatestCommonPrefixAxesTest
+    : public PropagationTestBase {};
+
+TEST_F(ShardingProjectionGetGreatestCommonPrefixAxesTest, DotGeneralSimple) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=2, "c"=2, "d"=2, "e"=2]>
+    func.func @main(%arg0: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {"a"}]>},
+                    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c"}, {"d"}], replicated={"b"}>})
+        -> tensor<2x4xf32> {
+      %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"d", "e"}], replicated={"a", "c"}>]>
+      } : (tensor<2x8xf32>, tensor<8x4xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::DotGeneralOp>(module.get());
+
+  ASSERT_THAT(projection.getGreatestCommonPrefixAxes(/*numFactors=*/3),
+              ElementsAre(IsEmpty(), ElementsAre(AxisRefIs("d")),
+                          ElementsAre(AxisRefIs("a"))));
+}
+
+TEST_F(ShardingProjectionGetGreatestCommonPrefixAxesTest,
+       DotConflictOnNonContractingDimension) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=2]>
+    func.func @main(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+                    %arg1: tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {"a"}]>})
+        -> tensor<8x16xf32> {
+      %0 = stablehlo.dot %arg0, %arg1 {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>,
+        sdy.sharding_rule = #sdy.op_sharding_rule<([i, k],[k, j])->([i, j]) {i=8, j=32, k=16}>
+      } : (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
+      return %0 : tensor<8x16xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::DotOp>(module.get());
+
+  EXPECT_THAT(projection.getGreatestCommonPrefixAxes(/*numFactors=*/3),
+              ElementsAre(ElementsAre(AxisRefIs("a")), IsEmpty(),
+                          ElementsAre(AxisRefIs("b"))));
+}
+
+TEST_F(ShardingProjectionGetGreatestCommonPrefixAxesTest, SubAxesSharding) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=24, "b"=16, "c"=2, "d"=2]>
+    func.func @main(%arg0: tensor<1536xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a":(2)6,"b":(2)4,"c","d"}]>})
+        -> tensor<1536xf32> {
+      %0 = stablehlo.abs %arg0 {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a":(2)6,"b":(2)8,"c"}]>]>,
+        sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i]) {i=1536}>
+      } : (tensor<1536xf32>) -> tensor<1536xf32>
+      return %0 : tensor<1536xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::AbsOp>(module.get());
+
+  EXPECT_THAT(projection.getGreatestCommonPrefixAxes(/*numFactors=*/1),
+              ElementsAre(ElementsAre(SubAxisRefIs("a", 2, 6),
+                                      SubAxisRefIs("b", 2, 4))));
+}
+
+TEST_F(ShardingProjectionGetGreatestCommonPrefixAxesTest,
+       DifferentSubAxisPrefixes) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=24, "b"=16, "c"=2, "d"=2]>
+    func.func @main(%arg0: tensor<1536xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b","a":(2)4,"c"}]>})
+        -> tensor<1536xf32> {
+      %0 = stablehlo.abs %arg0 {
+        sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b","a":(4)2,"c","d"}]>]>,
+        sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i]) {i=1536}>
+      } : (tensor<1536xf32>) -> tensor<1536xf32>
+      return %0 : tensor<1536xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::AbsOp>(module.get());
+
+  EXPECT_THAT(projection.getGreatestCommonPrefixAxes(/*numFactors=*/1),
+              ElementsAre(ElementsAre(AxisRefIs("b"))));
 }
 
 }  // namespace

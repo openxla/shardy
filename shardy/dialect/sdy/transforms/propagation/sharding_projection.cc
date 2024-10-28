@@ -320,7 +320,7 @@ TensorFactorShardings buildTensorFactorShardings(
 
 TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping,
-    ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList) {
+    ArrayRef<SmallVector<AxisRefAttr>> axisRefsList) {
   TensorFactorShardings result;
   // TODO(enver): Drop replicatedAxes after propagation, perhaps isClosed too.
   result.factorIndexToSharding.reserve(axisRefsList.size());
@@ -329,7 +329,7 @@ TensorFactorShardings buildTensorFactorShardings(
       // TODO(enver): Consider defining a ctor for FactorSharding instead.
       FactorSharding& factorSharding =
           result.factorIndexToSharding[factorIndex];
-      factorSharding.axisRefs = llvm::to_vector(axisRefsList[factorIndex]);
+      factorSharding.axisRefs = axisRefsList[factorIndex];
       factorSharding.isClosed = true;
       factorSharding.isMinorMost = dimMapping.isMinorMost(factorIndex);
     }
@@ -373,7 +373,7 @@ ShardingProjection ShardingProjection::build(Operation* op,
 }
 
 ShardingProjection ShardingProjection::build(
-    ArrayRef<ArrayRef<AxisRefAttr>> axisRefsList,
+    ArrayRef<SmallVector<AxisRefAttr>> axisRefsList,
     OpShardingRuleAttr shardingRule) {
   ShardingProjection projection;
   for (const auto& operandMapping : shardingRule.getOperandMappings()) {
@@ -385,6 +385,47 @@ ShardingProjection ShardingProjection::build(
         buildTensorFactorShardings(resultMapping, axisRefsList));
   }
   return projection;
+}
+
+namespace {
+// Returns the greatest common prefix of given two arrays axis refs.
+inline SmallVector<AxisRefAttr> getGreatestCommonPrefix(
+    ArrayRef<AxisRefAttr> first, ArrayRef<AxisRefAttr> second) {
+  SmallVector<AxisRefAttr> result;
+  for (auto [firstAxisRef, secondAxisRef] : llvm::zip(first, second)) {
+    if (firstAxisRef == secondAxisRef) {
+      result.push_back(firstAxisRef);
+      continue;
+    }
+    if (auto prefix = firstAxisRef.getGreatestCommonPrefix(secondAxisRef);
+        prefix) {
+      result.push_back(*prefix);
+    }
+    break;
+  }
+  return result;
+}
+}  // namespace
+
+AxesPerFactor ShardingProjection::getGreatestCommonPrefixAxes(
+    int64_t numFactors) {
+  AxesPerFactor factorAxisRefs(numFactors);
+  BitVector factorIsSeen(numFactors);
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(getOperands(), getResults())) {
+    // Detects conflicts within the same factor.
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (!factorIsSeen[factorIndex]) {
+        factorAxisRefs[factorIndex] = factorSharding.axisRefs;
+        factorIsSeen.set(factorIndex);
+        continue;
+      }
+      factorAxisRefs[factorIndex] = getGreatestCommonPrefix(
+          factorAxisRefs[factorIndex], factorSharding.axisRefs);
+    }
+  }
+  return factorAxisRefs;
 }
 
 }  // namespace sdy
