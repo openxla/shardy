@@ -320,16 +320,16 @@ TensorFactorShardings buildTensorFactorShardings(
 
 TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping,
-    ArrayRef<SmallVector<AxisRefAttr>> axisRefsList) {
+    AxesPerFactorRef axesPerFactor) {
   TensorFactorShardings result;
   // TODO(enver): Drop replicatedAxes after propagation, perhaps isClosed too.
-  result.factorIndexToSharding.reserve(axisRefsList.size());
+  result.factorIndexToSharding.reserve(axesPerFactor.size());
   for (const auto& dimMapping : tensorMapping.getDimMappings()) {
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
       // TODO(enver): Consider defining a ctor for FactorSharding instead.
       FactorSharding& factorSharding =
           result.factorIndexToSharding[factorIndex];
-      factorSharding.axisRefs = axisRefsList[factorIndex];
+      factorSharding.axisRefs = axesPerFactor[factorIndex];
       factorSharding.isClosed = true;
       factorSharding.isMinorMost = dimMapping.isMinorMost(factorIndex);
     }
@@ -373,16 +373,16 @@ ShardingProjection ShardingProjection::build(Operation* op,
 }
 
 ShardingProjection ShardingProjection::build(
-    ArrayRef<SmallVector<AxisRefAttr>> axisRefsList,
+    AxesPerFactorRef axesPerFactorRef,
     OpShardingRuleAttr shardingRule) {
   ShardingProjection projection;
   for (const auto& operandMapping : shardingRule.getOperandMappings()) {
     projection.operands.push_back(
-        buildTensorFactorShardings(operandMapping, axisRefsList));
+        buildTensorFactorShardings(operandMapping, axesPerFactorRef));
   }
   for (const auto& resultMapping : shardingRule.getResultMappings()) {
     projection.results.push_back(
-        buildTensorFactorShardings(resultMapping, axisRefsList));
+        buildTensorFactorShardings(resultMapping, axesPerFactorRef));
   }
   return projection;
 }

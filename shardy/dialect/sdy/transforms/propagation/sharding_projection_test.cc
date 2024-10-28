@@ -103,12 +103,12 @@ ShardingProjection getShardingProjection(ModuleOp module) {
 
 template <class OpTy>
 ShardingProjection getShardingProjection(
-    ModuleOp module, ArrayRef<SmallVector<AxisRefAttr>> axisRefsList) {
+    ModuleOp module, AxesPerFactorRef axesPerFactor) {
   OpTy op = getFirstOp<OpTy>(module);
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
   assert(shardingRule);
   ShardingProjection projection =
-      ShardingProjection::build(axisRefsList, shardingRule);
+      ShardingProjection::build(axesPerFactor, shardingRule);
   return projection;
 }
 

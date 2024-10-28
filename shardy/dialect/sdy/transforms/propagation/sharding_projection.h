@@ -28,6 +28,7 @@ namespace mlir {
 namespace sdy {
 
 using AxesPerFactor = SmallVector<SmallVector<AxisRefAttr>>;
+using AxesPerFactorRef = ArrayRef<SmallVector<AxisRefAttr>>;
 
 enum class PrefixStatus {
   // The two arrays are equal.
@@ -201,10 +202,10 @@ class ShardingProjection {
 
   // Builds a `ShardingProjection` w.r.t. the given `shardingRule` where factor
   // shardings are the same across all operands and results, and specified by
-  // `axisRefsList`. The resulting factor shardings are all closed, and with
+  // `axesPerFactor`. The resulting factor shardings are all closed, and with
   // empty overflow axes.
   static ShardingProjection build(
-      ArrayRef<SmallVector<AxisRefAttr>> axisRefsList,
+      AxesPerFactorRef axesPerFactor,
       OpShardingRuleAttr shardingRule);
 
   bool operator==(const ShardingProjection& other) const {
