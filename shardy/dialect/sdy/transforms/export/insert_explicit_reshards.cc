@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"  // IWYU pragma: keep
@@ -121,20 +122,21 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
                             OpShardingRuleAttr shardingRule, StringRef meshName,
                             MeshAttr mesh) {
   rewriter.setInsertionPoint(op);
-  for (const auto& [index, operand] : llvm::enumerate(op->getOperands())) {
-    auto newTensorSharding =
-        projection.getOperand(index).createTensorShardingAttr(
-            mesh.getContext(), shardingRule.getOperandMapping(index),
-            shardingRule.getFactorSizes(), meshName, mesh);
-    if (newTensorSharding == getSharding(operand)) {
+  for (auto [operand, tensorFactorShardings, tensorMapping] :
+       llvm::zip_equal(op->getOpOperands(), projection.getOperands(),
+                       shardingRule.getOperandMappings())) {
+    auto newTensorSharding = tensorFactorShardings.createTensorShardingAttr(
+        mesh.getContext(), tensorMapping, shardingRule.getFactorSizes(),
+        meshName, mesh);
+    Value operandValue = operand.get();
+    if (newTensorSharding == getSharding(operandValue)) {
       continue;
     }
-    auto reshardOp = rewriter.create<ReshardOp>(operand.getLoc(), operand,
-                                                newTensorSharding);
-    op->setOperand(index, reshardOp);
+    auto reshardOp = rewriter.create<ReshardOp>(
+        operandValue.getLoc(), operandValue, newTensorSharding);
+    operand.set(reshardOp);
   }
 
-  rewriter.setInsertionPointAfter(op);
   for (const auto& [result, tensorFactorShardings, tensorMapping] :
        llvm::zip_equal(op->getResults(), projection.getResults(),
                        shardingRule.getResultMappings())) {
