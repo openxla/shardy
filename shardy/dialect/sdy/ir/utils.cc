@@ -314,9 +314,15 @@ TensorShardingAttr getSharding(Value value, bool removeManualAxes) {
       });
 }
 
-TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName) {
+TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
+                                       bool isClosed) {
   if (TensorShardingAttr sharding = getSharding(value)) {
     return sharding;
+  }
+
+  if (isClosed) {
+    return TensorShardingAttr::getFullyClosed(value.getContext(),
+                                              getTensorRank(value), meshName);
   }
 
   return TensorShardingAttr::getFullyOpen(value.getContext(),

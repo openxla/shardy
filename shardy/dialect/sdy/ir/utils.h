@@ -207,9 +207,12 @@ Value getShardableValue(Value value);
 // sharding if `value` is a block argument of a `ManualComputationOp`.
 TensorShardingAttr getSharding(Value value, bool removeManualAxes = true);
 
-// Returns the sharding of the given `value`, or a fully open empty
-// `TensorShardingAttr` if `value` doesn't have a sharding.
-TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName);
+// Returns the sharding of the given `value`, or an empty
+// `TensorShardingAttr` if `value` doesn't have a sharding, in which case the
+// empty sharding is either fully open or fully closed depending on `isClosed`
+// parameter.
+TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
+                                       bool isClosed = false);
 
 // Sets the `TensorShardingPerValueAttr` of the given `op`, but
 // replaces the sharding at the given `index` with the given `sharding`.

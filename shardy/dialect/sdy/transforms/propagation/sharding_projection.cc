@@ -113,7 +113,8 @@ int64_t addAxesToDimSharding(SmallVector<AxisRefAttr>& dimSharding,
 
 TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
     MLIRContext* ctx, TensorMappingAttr tensorMapping,
-    ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh) const {
+    ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh,
+    bool forceClosed) const {
   SmallVector<DimensionShardingAttr> newDimShardings;
   newDimShardings.reserve(tensorMapping.getRank());
 
@@ -152,8 +153,8 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
     }
     // If this dimension is fully sharded, we mark it as closed since it can't
     // be further sharded.
-    newDimShardings.push_back(
-        DimensionShardingAttr::get(ctx, dimSharding, isClosed));
+    newDimShardings.push_back(DimensionShardingAttr::get(
+        ctx, dimSharding, forceClosed ? true : isClosed));
   }
 
   return TensorShardingAttr::get(ctx, meshName, newDimShardings,

@@ -889,6 +889,60 @@ class CreateTensorShardingAttrTest : public PropagationTestBase {
   }
 };
 
+TEST_F(CreateTensorShardingAttrTest, Simple) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+    func.func @main(%arg0: tensor<4x4xf32>) -> tensor<4x4xf32> {
+      %0 = stablehlo.abs %arg0 : (tensor<4x4xf32>) -> tensor<4x4xf32>
+      return %0 : tensor<4x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  auto op = getFirstOp<stablehlo::AbsOp>(module.get());
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  TensorFactorShardings factorShardings{
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                {1, {.axisRefs = {createAxis("b")}}}}};
+
+  TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
+      &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+      kMeshName, getMeshAttr(module.get()));
+
+  verifyShardingAttrsMatch(
+      shardingAttr, createTensorSharding(
+                        /*dimShardings=*/{openDimSharding({createAxis("a")}),
+                                          openDimSharding({createAxis("b")})},
+                        /*replicatedAxes=*/{}));
+}
+
+TEST_F(CreateTensorShardingAttrTest, ForceClosed) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+    func.func @main(%arg0: tensor<4x4xf32>) -> tensor<4x4xf32> {
+      %0 = stablehlo.abs %arg0 : (tensor<4x4xf32>) -> tensor<4x4xf32>
+      return %0 : tensor<4x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  auto op = getFirstOp<stablehlo::AbsOp>(module.get());
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  TensorFactorShardings factorShardings{
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                {1, {.axisRefs = {createAxis("b")}}}}};
+
+  TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
+      &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+      kMeshName, getMeshAttr(module.get()), /*forceClosed=*/true);
+
+  verifyShardingAttrsMatch(
+      shardingAttr, createTensorSharding(
+                        /*dimShardings=*/{closedDimSharding({createAxis("a")}),
+                                          closedDimSharding({createAxis("b")})},
+                        /*replicatedAxes=*/{}));
+}
+
 TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=8, "b"=2, "c"=2]>

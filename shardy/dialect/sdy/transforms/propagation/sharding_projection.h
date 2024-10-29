@@ -105,8 +105,8 @@ struct TensorFactorShardings {
   TensorShardingAttr createTensorShardingAttr(MLIRContext* ctx,
                                               TensorMappingAttr tensorMapping,
                                               ArrayRef<int64_t> factorSizes,
-                                              StringRef meshName,
-                                              MeshAttr mesh) const;
+                                              StringRef meshName, MeshAttr mesh,
+                                              bool forceClosed = false) const;
 };
 
 // A struct that specifies which operands and results are updated.

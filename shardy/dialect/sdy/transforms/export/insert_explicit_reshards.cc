@@ -122,15 +122,18 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
                             MeshAttr mesh) {
   rewriter.setInsertionPoint(op);
   for (const auto& [index, operand] : llvm::enumerate(op->getOperands())) {
-    auto newTensorSharding =
+    auto projectionOperandSharding =
         projection.getOperand(index).createTensorShardingAttr(
             mesh.getContext(), shardingRule.getOperandMapping(index),
-            shardingRule.getFactorSizes(), meshName, mesh);
-    if (newTensorSharding == getSharding(operand)) {
+            shardingRule.getFactorSizes(), meshName, mesh,
+            /*forceClosed=*/true);
+    auto opOperandSharding =
+        getOrCreateSharding(operand, meshName, /*isClosed=*/true);
+    if (projectionOperandSharding == opOperandSharding) {
       continue;
     }
     auto reshardOp = rewriter.create<ReshardOp>(operand.getLoc(), operand,
-                                                newTensorSharding);
+                                                projectionOperandSharding);
     op->setOperand(index, reshardOp);
   }
 
@@ -140,16 +143,19 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
                        shardingRule.getResultMappings())) {
     // TODO(enver): The following logic is mostly shared between operands and
     // results. Use a helper function, instead.
-    auto newTensorSharding = tensorFactorShardings.createTensorShardingAttr(
-        mesh.getContext(), tensorMapping, shardingRule.getFactorSizes(),
-        meshName, mesh);
-    if (newTensorSharding == getSharding(result)) {
+    auto projectionResultSharding =
+        tensorFactorShardings.createTensorShardingAttr(
+            mesh.getContext(), tensorMapping, shardingRule.getFactorSizes(),
+            meshName, mesh, /*forceClosed=*/true);
+    auto opResultSharding =
+        getOrCreateSharding(result, meshName, /*isClosed=*/true);
+    if (projectionResultSharding == opResultSharding) {
       continue;
     }
-    auto reshardOp = rewriter.create<ReshardOp>(result.getLoc(), result,
-                                                getSharding(result));
+    auto reshardOp =
+        rewriter.create<ReshardOp>(result.getLoc(), result, opResultSharding);
     rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
-    setSharding(result, newTensorSharding);
+    setSharding(result, projectionResultSharding);
   }
 }
 
