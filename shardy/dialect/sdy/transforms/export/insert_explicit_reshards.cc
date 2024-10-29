@@ -163,6 +163,9 @@ struct InsertExplicitReshardsPass
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
     funcOp.walk([&](Operation* op) {
+      if (isa<ReshardOp>(op)) {
+        return;
+      }
       // TODO(enver): Handle the case when the operation does not have sharding
       // rule, perhaps use getOrCreateShardingRule utility.
       OpShardingRuleAttr shardingRule =
