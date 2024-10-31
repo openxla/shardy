@@ -25,8 +25,9 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"  // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/dialect.h"    // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/utils.h"      // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/data_flow_utils.h"
+#include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/utils.h"    // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "stablehlo/dialect/StablehloOps.h"  // IWYU pragma: keep
 
@@ -161,8 +162,19 @@ struct InsertExplicitReshardsPass
     func::FuncOp funcOp = getOperation();
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
-    // TODO(enver): Handle data flow ops.
+
     funcOp.walk([&](Operation* op) {
+      // TODO(enver): Handle manual computation op.
+      if (isa<ManualComputationOp>(op)) {
+        return;
+      }
+      // TODO(enver): Handle data flow ops.
+      if (isDataFlowOp(op)) {
+        return;
+      }
+      // TODO(enver): Handle data flow edge op, if data flow edge are added
+      // before this pass.
+
       // TODO(enver): Handle the case when the operation does not have sharding
       // rule, perhaps use getOrCreateShardingRule utility.
       OpShardingRuleAttr shardingRule =
