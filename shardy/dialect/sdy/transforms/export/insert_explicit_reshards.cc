@@ -27,6 +27,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/dialect.h"    // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"      // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "stablehlo/dialect/StablehloOps.h"  // IWYU pragma: keep
 
@@ -163,10 +164,13 @@ struct InsertExplicitReshardsPass
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
     funcOp.walk([&](Operation* op) {
-      // TODO(enver): Handle the case when the operation does not have sharding
-      // rule, perhaps use getOrCreateShardingRule utility.
+      // TODO(enver): Check if data flow ops, data flow edge op, manual
+      // computation op require extra check before creating sharding rule.
+
+      // NOTE: Creating a sharding rule requires data flow edges are present.
       OpShardingRuleAttr shardingRule =
-          op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr);
+          getOrCreateShardingRule(op, /*conservativePropagation=*/false,
+                                  /*setShardingRuleOnOp=*/false);
       if (!shardingRule) {
         // Insert explicit reshards only on operations with sharding rules,
         // since all the operations of interest got their sharding rules
@@ -206,6 +210,8 @@ struct InsertExplicitReshardsPass
 
       insertExplicitReshards(op, shardingProjection, rewriter, shardingRule,
                              *meshName, mesh);
+
+      // TODO(enver): Remove sharding rules from ops.
     });
   }
 };

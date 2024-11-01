@@ -33,12 +33,15 @@ namespace sdy {
 OpShardingRuleAttr createOpShardingRule(Operation* op,
                                         bool conservativePropagation = false);
 
-// Gets the sharding rule if it exists already on the op. Else creates one,
-// sets it on the op, and returns it.
+// Gets the sharding rule if it exists already on the op. Else creates one.
+//
+// If `setShardingRuleOnOp` is true, sets it on the op, and returns the
+// sharding rule.
 //
 // See `createOpShardingRule` for more info.
-OpShardingRuleAttr getOrCreateShardingRule(
-    Operation* op, bool conservativePropagation = false);
+OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
+                                           bool conservativePropagation = false,
+                                           bool setShardingRuleOnOp = true);
 
 }  // namespace sdy
 }  // namespace mlir

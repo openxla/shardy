@@ -146,14 +146,15 @@ void addGatherScatterFactors(RankedTensorType inputType,
 }  // namespace
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
-                                           bool conservativePropagation) {
+                                           bool conservativePropagation,
+                                           bool setShardingRuleOnOp) {
   if (auto shardingRule =
           op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr)) {
     return shardingRule;
   }
   OpShardingRuleAttr shardingRule =
       createOpShardingRule(op, conservativePropagation);
-  if (shardingRule) {
+  if (setShardingRuleOnOp && shardingRule) {
     op->setAttr(kShardingRuleAttr, shardingRule);
   }
   return shardingRule;
