@@ -76,12 +76,12 @@ bool TensorFactorShardings::expandShardingAxes(int64_t factorIndex,
   }
 
   SmallVector<AxisRefAttr>& oldAxes = factorShardingIt->second.axisRefs;
-  if (isStrictPrefix(oldAxes, newAxes)) {
-    oldAxes = llvm::to_vector(newAxes);
-    return true;
+  if (!isStrictPrefix(oldAxes, newAxes)) {
+    return false;
   }
 
-  return false;
+  oldAxes = llvm::to_vector(newAxes);
+  return true;
 }
 
 namespace {

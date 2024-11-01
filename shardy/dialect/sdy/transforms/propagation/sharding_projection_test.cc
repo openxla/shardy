@@ -865,13 +865,13 @@ TEST_F(IsAxisListPrefixOfTest, IsAxisListPrefixOfTest) {
 }
 
 //===----------------------------------------------------------------------===//
-// Tests for TensorFactorShardings::createTensorShardingAttr
+// Tests for TensorFactorShardings.
 //
 // Since ShardingProjectionBuildTest also tests this method indirectly in each
 // test case, here we only test the special cases that aren't tested above.
 //===----------------------------------------------------------------------===//
 
-class CreateTensorShardingAttrTest : public PropagationTestBase {
+class TensorFactorShardingsTest : public PropagationTestBase {
  protected:
   DimensionShardingAttr openDimSharding(ArrayRef<AxisRefAttr> axes) {
     return DimensionShardingAttr::get(&context, axes, /*isClosed=*/false);
@@ -889,7 +889,8 @@ class CreateTensorShardingAttrTest : public PropagationTestBase {
   }
 };
 
-TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
+TEST_F(TensorFactorShardingsTest,
+       CreateTensorShardingAttr_ConsecutiveSubAxesMerged) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=8, "b"=2, "c"=2]>
 
@@ -920,7 +921,8 @@ TEST_F(CreateTensorShardingAttrTest, ConsecutiveSubAxesMerged) {
                         /*replicatedAxes=*/{createAxis("c")}));
 }
 
-TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
+TEST_F(TensorFactorShardingsTest,
+       CreateTensorShardingAttr_OverflowSubAxisMerged) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=6, "b"=2]>
 
@@ -951,7 +953,8 @@ TEST_F(CreateTensorShardingAttrTest, OverflowSubAxisMerged) {
                         /*replicatedAxes=*/{createAxis("b")}));
 }
 
-TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
+TEST_F(TensorFactorShardingsTest,
+       CreateTensorShardingAttr_NonMinorMostFactorFullySharded) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=2, "b"=2, "c"=4, "d"=2]>
 
@@ -983,7 +986,8 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorFullySharded) {
           /*replicatedAxes=*/{createAxis("d")}));
 }
 
-TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
+TEST_F(TensorFactorShardingsTest,
+       CreateTensorShardingAttr_NonMinorMostFactorPartiallySharded) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=2, "b"=2]>
 
@@ -1011,7 +1015,8 @@ TEST_F(CreateTensorShardingAttrTest, NonMinorMostFactorPartiallySharded) {
                         /*dimShardings=*/{openDimSharding({createAxis("a")})}));
 }
 
-TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
+TEST_F(TensorFactorShardingsTest,
+       CreateTensorShardingAttr_MinorMostFactorNotDivisible) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=3, "b"=4]>
 
@@ -1020,8 +1025,7 @@ TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
       return %0 : tensor<16xf32>
     })mlir";
 
-  OwningOpRef<ModuleOp> module =
-      parseSourceString<ModuleOp>(program, &context);
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
   ASSERT_TRUE(module);
   auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
@@ -1037,6 +1041,47 @@ TEST_F(CreateTensorShardingAttrTest, MinorMostFactorNotDivisible) {
                            createTensorSharding(
                                /*dimShardings=*/{openDimSharding(
                                    {createAxis("b"), createAxis("a")})}));
+}
+
+TEST_F(TensorFactorShardingsTest, ExpandShardingAxes_Expands) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=3, "b"=2, "c"=2]>
+
+    func.func @main(%arg0: tensor<4x4xf32>) -> tensor<16xf32> {
+      %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
+      return %0 : tensor<16xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  TensorFactorShardings factorShardings{
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("b")}}},
+                                {1, {.axisRefs = {createAxis("a")}}}}};
+
+  EXPECT_TRUE(factorShardings.expandShardingAxes(
+      /*factorIndex=*/0, {createAxis("b"), createAxis("c")}));
+
+  TensorShardingAttr shardingAttr = factorShardings.createTensorShardingAttr(
+      &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+      kMeshName, getMeshAttr(module.get()));
+
+  verifyShardingAttrsMatch(shardingAttr,
+                           createTensorSharding(
+                               /*dimShardings=*/{openDimSharding(
+                                   {createAxis("b"),createAxis("c"), createAxis("a")})}));
+}
+
+
+TEST_F(TensorFactorShardingsTest, ExpandShardingAxes_DoesNotExpand) {
+  TensorFactorShardings factorShardings{
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("b")}}},
+                                {1, {.axisRefs = {createAxis("a")}}}}};
+
+  EXPECT_FALSE(factorShardings.expandShardingAxes(
+      /*factorIndex=*/0, {createAxis("c"), createAxis("b")}));
 }
 
 //===----------------------------------------------------------------------===//
