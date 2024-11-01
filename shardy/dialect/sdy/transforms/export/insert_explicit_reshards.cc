@@ -205,11 +205,15 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      // TODO(enver): Build a projection where, for each factor, factor
-      // shardings are the same across all operands and results;
+      // TODO(enver): Instead of building a new projection, update and use the
+      // existing one.
+      ShardingProjection projection = ShardingProjection::build(
+          shardingProjection.getGreatestCommonPrefixAxes(
+              shardingRule.getNumFactors()),
+          shardingRule);
 
-      insertExplicitReshards(op, shardingProjection, rewriter, shardingRule,
-                             *meshName, mesh);
+      insertExplicitReshards(op, projection, rewriter, shardingRule, *meshName,
+                             mesh);
 
       // TODO(enver): Remove sharding rules from ops.
     });
