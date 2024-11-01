@@ -967,13 +967,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       // TODO(b/327191011): output unregistered op stats instead.
       .Case<ModuleOp, func::FuncOp, ConstantOp, DataFlowEdgeOp,
             ManualComputationOp, MeshOp, PropagationBarrierOp,
-            ShardableDataFlowOpInterface, stablehlo::CaseOp,
-            stablehlo::ConstantOp, stablehlo::CreateTokenOp,
+            ShardableDataFlowOpInterface, ShardingGroupOp, ReshardOp,
+            stablehlo::CaseOp, stablehlo::ConstantOp, stablehlo::CreateTokenOp,
             stablehlo::GetTupleElementOp, stablehlo::IotaOp,
             stablehlo::OutfeedOp, stablehlo::OptimizationBarrierOp,
             stablehlo::PartitionIdOp, stablehlo::RngBitGeneratorOp,
-            stablehlo::WhileOp, ShardingGroupOp>(
-          [](Operation*) { return OpShardingRuleAttr(); })
+            stablehlo::WhileOp>([](Operation*) { return OpShardingRuleAttr(); })
       .Case<ShardingRuleOpInterface>(
           [](ShardingRuleOpInterface shardingRuleOp) {
             return shardingRuleOp.getShardingRule();
