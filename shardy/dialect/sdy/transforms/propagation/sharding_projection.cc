@@ -63,13 +63,12 @@ PrefixStatus isAxisListPrefixOf(ArrayRef<AxisRefAttr> first,
   return PrefixStatus::NOT_A_PREFIX;
 }
 
-// Returns true if the `oldAxes` is a strict prefix of `newAxes`,
-bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes,
-                  ArrayRef<AxisRefAttr> newAxes) {
-  return isAxisListPrefixOf(oldAxes, newAxes) == PrefixStatus::STRICT_PREFIX;
+// Returns if `first` is a strict prefix of `second`.
+bool isStrictPrefix(ArrayRef<AxisRefAttr> first, ArrayRef<AxisRefAttr> second) {
+  return isAxisListPrefixOf(first, second) == PrefixStatus::STRICT_PREFIX;
 }
 
-bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,
+bool TensorFactorShardings::expandShardingAxes(int64_t factorIndex,
                                                ArrayRef<AxisRefAttr> newAxes) {
   auto factorShardingIt = factorIndexToSharding.find(factorIndex);
   if (factorShardingIt == factorIndexToSharding.end()) {
@@ -77,7 +76,7 @@ bool TensorFactorShardings::updateShardingAxes(int64_t factorIndex,
   }
 
   SmallVector<AxisRefAttr>& oldAxes = factorShardingIt->second.axisRefs;
-  if (shouldUpdate(oldAxes, newAxes)) {
+  if (isStrictPrefix(oldAxes, newAxes)) {
     oldAxes = llvm::to_vector(newAxes);
     return true;
   }
@@ -160,14 +159,14 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
                                  replicatedAxes);
 }
 
-UpdateTensorShardings ShardingProjection::updateSharding(
+UpdateTensorShardings ShardingProjection::expandSharding(
     int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes) {
   UpdateTensorShardings result(getNumOperands(), getNumResults());
   for (auto [i, tensor] : llvm::enumerate(operands)) {
-    result.updateOperands[i] = tensor.updateShardingAxes(factorIndex, newAxes);
+    result.updateOperands[i] = tensor.expandShardingAxes(factorIndex, newAxes);
   }
   for (auto [i, tensor] : llvm::enumerate(results)) {
-    result.updateResults[i] = tensor.updateShardingAxes(factorIndex, newAxes);
+    result.updateResults[i] = tensor.expandShardingAxes(factorIndex, newAxes);
   }
   return result;
 }

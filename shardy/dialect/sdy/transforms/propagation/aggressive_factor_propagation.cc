@@ -32,12 +32,12 @@ namespace sdy {
 
 namespace {
 
-bool updateTensorSharding(ShardingProjection& projection, int64_t tensorIndex,
+bool expandTensorSharding(ShardingProjection& projection, int64_t tensorIndex,
                           int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes) {
   if (tensorIndex < projection.getNumOperands()) {
-    return projection.updateOperandSharding(tensorIndex, factorIndex, newAxes);
+    return projection.expandOperandSharding(tensorIndex, factorIndex, newAxes);
   }
-  return projection.updateResultSharding(
+  return projection.expandResultSharding(
       tensorIndex - projection.getNumOperands(), factorIndex, newAxes);
 }
 
@@ -133,7 +133,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
                 prevShardedSize, factorSizes[factorIndex], mesh);
           },
           mesh, conservativePropagation);
-      if (shouldUpdate(factorSharding.axisRefs, newAxes)) {
+      if (isStrictPrefix(factorSharding.axisRefs, newAxes)) {
         factorSharding.axisRefs = newAxes;
         factorUpdated.set(factorIndex);
       }
@@ -164,7 +164,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
           },
           mesh, conservativePropagation);
       tensorUpdated |=
-          updateTensorSharding(projection, tensorIndex, factorIndex, newAxes);
+          expandTensorSharding(projection, tensorIndex, factorIndex, newAxes);
     }
 
     if (tensorIndex < projection.getNumOperands()) {

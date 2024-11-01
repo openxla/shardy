@@ -42,8 +42,8 @@ enum class PrefixStatus {
 PrefixStatus isAxisListPrefixOf(ArrayRef<AxisRefAttr> first,
                                 ArrayRef<AxisRefAttr> second);
 
-// Returns true if the `oldAxes` is a strict prefix of `newAxes`,
-bool shouldUpdate(ArrayRef<AxisRefAttr> oldAxes, ArrayRef<AxisRefAttr> newAxes);
+// Returns if `first` is a strict prefix of `second`.
+bool isStrictPrefix(ArrayRef<AxisRefAttr> first, ArrayRef<AxisRefAttr> second);
 
 // The axes along which a factor is sharded, and whether the factor can be
 // further sharded (unless it's fully sharded already).
@@ -88,14 +88,11 @@ struct TensorFactorShardings {
     return !(*this == other);
   }
 
-  // Updates the sharding axes of the given `factorIndex` to `newAxes` if
+  // Expands the sharding axes of the given `factorIndex` to `newAxes` if
   // 1. this tensor is associated with that factor, and
-  // 2. `newAxes` strictly contains existing axes. For example, ["a", "b"]
-  //    strictly contains ["a"] and ["a", "b":(1)2]. We assume that `newAxes`
-  //    and the existing axes share the same prefix. `newAxes` being ["a", "b"]
-  //    is illegal if the existing axes are ["b", "a"] or "["a":(2)2]".
-  // Returns if the sharding axes have been updated.
-  bool updateShardingAxes(int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes);
+  // 2. the existing axes are a strict prefix of `newAxes`.
+  // Returns if the sharding axes have been expanded.
+  bool expandShardingAxes(int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes);
 
   // Creates a `TensorShardingAttr` by projecting the factor shardings in
   // this `TensorFactorShardings` to dimension shardings w.r.t. to
@@ -126,7 +123,7 @@ struct UpdateTensorShardings {
 // typical workflow is
 //   1. Project dimension shardings to factor shardings via a
 //      `OpShardingRuleAttr`. This step may split axes.
-//   2. Manipulate the shardings through `updateSharding`.
+//   2. Manipulate the shardings through `expandSharding`.
 //   3. Project the updated factor shardings back to dimension shardings. This
 //      step may merge sub-axes and require strided view.
 //
@@ -172,19 +169,19 @@ class ShardingProjection {
     return results[resultNum];
   }
 
-  bool updateOperandSharding(int64_t operandIndex, int64_t factorIndex,
+  bool expandOperandSharding(int64_t operandIndex, int64_t factorIndex,
                              ArrayRef<AxisRefAttr> newAxes) {
-    return operands[operandIndex].updateShardingAxes(factorIndex, newAxes);
+    return operands[operandIndex].expandShardingAxes(factorIndex, newAxes);
   }
-  bool updateResultSharding(int64_t resultIndex, int64_t factorIndex,
+  bool expandResultSharding(int64_t resultIndex, int64_t factorIndex,
                             ArrayRef<AxisRefAttr> newAxes) {
-    return results[resultIndex].updateShardingAxes(factorIndex, newAxes);
+    return results[resultIndex].expandShardingAxes(factorIndex, newAxes);
   }
 
-  // Updates the shardings of all tensors that are associated with
+  // Expands the shardings of all tensors that are associated with
   // `factorIndex` to be `newAxes` for that factor. Returns two BitVectors
-  // indicating whether the operands and results have been updated.
-  UpdateTensorShardings updateSharding(int64_t factorIndex,
+  // indicating whether the operands and results have been expanded.
+  UpdateTensorShardings expandSharding(int64_t factorIndex,
                                        ArrayRef<AxisRefAttr> newAxes);
 
   // Builds a `ShardingProjection` for the given operand and result shardings,

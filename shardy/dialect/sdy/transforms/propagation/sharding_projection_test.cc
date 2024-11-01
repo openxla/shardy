@@ -738,12 +738,12 @@ TEST_F(ShardingProjectionBuildTest,
 }
 
 //===----------------------------------------------------------------------===//
-// Tests for ShardingProjection::updateSharding
+// Tests for ShardingProjection::expandSharding
 //===----------------------------------------------------------------------===//
 
-class ShardingProjectionUpdateShardingTest : public PropagationTestBase {};
+class ShardingProjectionExpandShardingTest : public PropagationTestBase {};
 
-TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
+TEST_F(ShardingProjectionExpandShardingTest, DotGeneralSimple) {
   const std::string program = R"mlir(
     sdy.mesh @mesh = <["a"=4, "b"=4, "c"=4, "d"=4, "e"=4, "f"=4]>
 
@@ -767,7 +767,7 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
   // - The RHS is not mapped to factor 0, so it will be skipped.
   // - The result is mapped to factor 0. The old sharding axes ["a", "b":(1)2]
   //   are smaller than the new one, so the sharding axes are updated.
-  UpdateTensorShardings ifUpdated = projection.updateSharding(
+  UpdateTensorShardings ifUpdated = projection.expandSharding(
       /*factorIndex=*/0, {createAxis("a"), createAxis("b")});
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), ElementsAre(0));
@@ -777,18 +777,18 @@ TEST_F(ShardingProjectionUpdateShardingTest, DotGeneralSimple) {
   // - The RHS is mapped to factor 1, and can be expaneded to new axes.
   // - The result is mapped to factor 1. The existing axes ["d", "f"] is larger
   //   than the new one, so it will be skipped.
-  ifUpdated = projection.updateSharding(
+  ifUpdated = projection.expandSharding(
       /*factorIndex=*/1, {createAxis("d"), createSubAxis("f", 1, 2)});
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), ElementsAre(1));
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), IsEmpty());
 
   // We set the sharding of factor 2 (contracting dim) to [] (an empty vector of
   // axes). Skip all the tensors.
-  ifUpdated = projection.updateSharding(/*factorIndex=*/2, {});
+  ifUpdated = projection.expandSharding(/*factorIndex=*/2, {});
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), IsEmpty());
 
-  // Check the new factorIndexToSharding. `updateSharding` should not modify
+  // Check the new factorIndexToSharding. `expandSharding` should not modify
   // other members (isClosed, isMinorMost, overflowAxes).
   EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
               UnorderedElementsAre(

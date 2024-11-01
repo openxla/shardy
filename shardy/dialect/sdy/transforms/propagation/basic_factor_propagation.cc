@@ -421,7 +421,7 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
 
     // Update all shardings along this factor if possible.
     auto [updateOperandForFactor, updateResultForFactor] =
-        projection.updateSharding(factorIndex, axesToPropagate);
+        projection.expandSharding(factorIndex, axesToPropagate);
 
     result.updateOperands |= updateOperandForFactor;
     result.updateResults |= updateResultForFactor;
