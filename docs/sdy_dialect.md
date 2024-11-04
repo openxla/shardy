@@ -4,8 +4,6 @@
 The Shardy (SDY) dialect defines an axis-based tensor sharding
 representation and additional API components to attach shardings to tensors.
 
-[TOC]
-
 ## Operations
 
 ### `sdy.constant` (sdy::ConstantOp)

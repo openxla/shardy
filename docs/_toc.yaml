@@ -1,0 +1,29 @@
+toc:
+  - heading: Shardy documentation
+  - title: Getting started
+    section:
+    - title: Overview
+      path: overview.md
+    - title: Use Shardy from JAX
+      path: getting_started_jax.md
+    # - title: Use Shardy with MyDialect
+    #   path: getting_started_mydialect.md
+    # - title: Automatic partitioner
+    #   path: automatic_partitioner.md
+  - title: Concepts
+    section:
+    - title: Shardy architecture
+      path: 2024-03-14-shardy-partitioner-rfc.md
+    - title: Sharding representation
+      path: sharding_representation.md
+    - title: Propagation
+      path: propagation.md
+    - title: Compiler API
+      path: compiler_api.md
+  - title: Reference documentation
+    section:
+      - sdy_dialect.md
+      - sdy_export_passes.md
+      - sdy_import_passes.md
+      - sdy_op_interfaces.md
+      - sdy_propagation_passes.md
