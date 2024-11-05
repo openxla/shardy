@@ -94,7 +94,7 @@ TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
       /*results=*/{
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {}}},
+                   {0, {.axisRefs = {createAxis("a")}}},
                    {1, {.axisRefs = {}}},
                    {2, {.axisRefs = {}, .overflowAxes = {createAxis("d")}}},
                    {3, {.axisRefs = {createAxis("c")}}},
@@ -108,7 +108,8 @@ TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
       });
 
   // Axis "a" may be propagated to the result along factors 0 or 1, which forms
-  // a real conflict. Thus, we do not apply either of propagation choices.
+  // a real conflict. We prefer factor 0 because its source is the first operand
+  // (all tensors have the same size).
   //
   // Other conflicts are fake. We can propagate other axes as much as possible.
   // Axes "c", "b", "e", "f", "g" can be propagated to the result along factors
@@ -320,7 +321,7 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
       /*results=*/{
           {.factorIndexToSharding =
                {
-                   {0, {.axisRefs = {}}},
+                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
                    {1, {.axisRefs = {}, .isClosed = true}},
                    {2, {.axisRefs = {createAxis("c")}}},
                    {3, {.axisRefs = {createAxis("d")}}},
@@ -337,8 +338,8 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
       });
 
   // “a” can be propagated to the Result 0 along either Factor 0 or Factor 2.
-  // This strategy truncate “a” for both F0 and F2 in Result 0. Namely, this
-  // strategy does not resolve real conflicts across factors.
+  // This strategy prefers factor 0 because its source is the first operand
+  // (all tensors have the same size).
   auto [updateOperands, updateResults] =
       propagateFactorShardings(projection, 4);
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(1, 2));
