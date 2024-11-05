@@ -94,6 +94,17 @@ struct TensorFactorShardings {
   // Returns if the sharding axes have been expanded.
   bool expandShardingAxes(int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes);
 
+  // Updates the factor sharding at `factorIndex` with new sharding axes
+  // `newAxes` and new overflow axes `newOverflowAxes` if
+  // 1. this tensor is associated with that factor, and
+  // 2. the existing axes are different than the new ones.
+  //
+  // Assumes either new overflow axes are empty or the factor is non-minor-most.
+  //
+  // Returns if the factor sharding has been updated.
+  bool updateShardingAxes(int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes,
+                          ArrayRef<AxisRefAttr> newOverflowAxes);
+
   // Creates a `TensorShardingAttr` by projecting the factor shardings in
   // this `TensorFactorShardings` to dimension shardings w.r.t. to
   // `tensorMapping`.
@@ -114,6 +125,12 @@ struct UpdateTensorShardings {
   UpdateTensorShardings(int64_t numOperands, int64_t numResults)
       : updateOperands(BitVector(numOperands)),
         updateResults(BitVector(numResults)) {}
+
+  UpdateTensorShardings& operator|=(const UpdateTensorShardings& other) {
+    updateOperands |= other.updateOperands;
+    updateResults |= other.updateResults;
+    return *this;
+  }
 };
 
 // The sharding projection holds information about how factors (rather than
@@ -183,6 +200,14 @@ class ShardingProjection {
   // indicating whether the operands and results have been expanded.
   UpdateTensorShardings expandSharding(int64_t factorIndex,
                                        ArrayRef<AxisRefAttr> newAxes);
+
+  // Updates the shardings of all tensors that are associated with
+  // `factorIndex` to be `newAxes` and `newOverflowAxes` for that factor. Keep
+  // it open/close if it is already open/close. Returns two BitVectors
+  // indicating whether the operands and results have been updated.
+  UpdateTensorShardings updateSharding(int64_t factorIndex,
+                                       ArrayRef<AxisRefAttr> newAxes,
+                                       ArrayRef<AxisRefAttr> newOverflowAxes);
 
   // Builds a `ShardingProjection` for the given operand and result shardings,
   // w.r.t. the given `shardingRule`.

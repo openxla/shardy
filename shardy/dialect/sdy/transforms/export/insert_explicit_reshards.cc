@@ -29,6 +29,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"      // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"  // IWYU pragma: keep
 
 namespace mlir {
@@ -118,35 +119,31 @@ bool hasCompatibleFactorShardings(const ShardingProjection& projection) {
 // Assumes factor shardings do not have overflow axes.
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
 void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
+                            UpdateTensorShardings updateTensorShardings,
                             IRRewriter& rewriter,
                             OpShardingRuleAttr shardingRule, StringRef meshName,
                             MeshAttr mesh) {
   rewriter.setInsertionPoint(op);
-  for (const auto& [index, operand] : llvm::enumerate(op->getOperands())) {
+  for (int operandIndex : updateTensorShardings.updateOperands.set_bits()) {
+    auto operand = op->getOperand(operandIndex);
     auto newTensorSharding =
-        projection.getOperand(index).createTensorShardingAttr(
-            mesh.getContext(), shardingRule.getOperandMapping(index),
-            shardingRule.getFactorSizes(), meshName, mesh);
-    if (newTensorSharding == getSharding(operand)) {
-      continue;
-    }
+        projection.getOperand(operandIndex)
+            .createTensorShardingAttr(
+                mesh.getContext(), shardingRule.getOperandMapping(operandIndex),
+                shardingRule.getFactorSizes(), meshName, mesh);
     auto reshardOp = rewriter.create<ReshardOp>(operand.getLoc(), operand,
                                                 newTensorSharding);
-    op->setOperand(index, reshardOp);
+    op->setOperand(operandIndex, reshardOp);
   }
 
   rewriter.setInsertionPointAfter(op);
-  for (const auto& [result, tensorFactorShardings, tensorMapping] :
-       llvm::zip_equal(op->getResults(), projection.getResults(),
-                       shardingRule.getResultMappings())) {
-    // TODO(enver): The following logic is mostly shared between operands and
-    // results. Use a helper function, instead.
-    auto newTensorSharding = tensorFactorShardings.createTensorShardingAttr(
-        mesh.getContext(), tensorMapping, shardingRule.getFactorSizes(),
-        meshName, mesh);
-    if (newTensorSharding == getSharding(result)) {
-      continue;
-    }
+  for (int resultIndex : toSetBitsVector(updateTensorShardings.updateResults)) {
+    auto result = op->getResult(resultIndex);
+    auto newTensorSharding =
+        projection.getResult(resultIndex)
+            .createTensorShardingAttr(
+                mesh.getContext(), shardingRule.getResultMapping(resultIndex),
+                shardingRule.getFactorSizes(), meshName, mesh);
     auto reshardOp = rewriter.create<ReshardOp>(result.getLoc(), result,
                                                 getSharding(result));
     rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
@@ -163,6 +160,8 @@ struct InsertExplicitReshardsPass
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
+    // TODO(enver): Handle cases func op result sharding does not match the
+    // sharding of returned value.
     funcOp.walk([&](Operation* op) {
       // TODO(enver): Check if data flow ops, data flow edge op, manual
       // computation op require extra check before creating sharding rule.
@@ -205,15 +204,19 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      // TODO(enver): Instead of building a new projection, update and use the
-      // existing one.
-      ShardingProjection projection = ShardingProjection::build(
-          shardingProjection.getGreatestCommonPrefixAxes(
-              shardingRule.getNumFactors()),
-          shardingRule);
+      UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
+                                                  shardingRule.getNumResults());
+      for (const auto& [index, factorAxes] :
+           llvm::enumerate(shardingProjection.getGreatestCommonPrefixAxes(
+               shardingRule.getNumFactors()))) {
+        // TODO(enver): Add unit tests to test overflow axes are cleared after
+        // handling the case that some factors have overflow axes.
+        updateTensorShardings |= shardingProjection.updateSharding(
+            index, factorAxes, /*overflowAxes=*/{});
+      }
 
-      insertExplicitReshards(op, projection, rewriter, shardingRule, *meshName,
-                             mesh);
+      insertExplicitReshards(op, shardingProjection, updateTensorShardings,
+                             rewriter, shardingRule, *meshName, mesh);
 
       // TODO(enver): Remove sharding rules from ops.
     });

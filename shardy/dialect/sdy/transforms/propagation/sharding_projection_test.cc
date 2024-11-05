@@ -1084,6 +1084,54 @@ TEST_F(TensorFactorShardingsTest, ExpandShardingAxes_DoesNotExpand) {
       /*factorIndex=*/0, {createAxis("c"), createAxis("b")}));
 }
 
+TEST_F(TensorFactorShardingsTest, UpdateShardingAxes_Updates) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=2, "b"=4, "c"=4]>
+
+    func.func @main(%arg0: tensor<4x4xf32>) -> tensor<16xf32> {
+      %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
+      return %0 : tensor<16xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  auto op = getFirstOp<stablehlo::ReshapeOp>(module.get());
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(op);
+  TensorFactorShardings factorShardings{
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("b")}}},
+                                {1, {.axisRefs = {createAxis("a")}}}}};
+
+  EXPECT_TRUE(factorShardings.updateShardingAxes(
+      /*factorIndex=*/0, /*axisRefs=*/{createAxis("c")},
+      /*newOverflowAxes=*/{}));
+
+  verifyShardingAttrsMatch(
+      factorShardings.createTensorShardingAttr(
+          &context, shardingRule.getOperandMapping(0),
+          shardingRule.getFactorSizes(), kMeshName, getMeshAttr(module.get())),
+      createTensorSharding(
+          /*dimShardings=*/{openDimSharding({createAxis("c")}),
+                            openDimSharding({createAxis("a")})}));
+
+  verifyShardingAttrsMatch(
+      factorShardings.createTensorShardingAttr(
+          &context, shardingRule.getResultMapping(0),
+          shardingRule.getFactorSizes(), kMeshName, getMeshAttr(module.get())),
+      createTensorSharding(
+          /*dimShardings=*/{
+              openDimSharding({createAxis("c"), createAxis("a")})}));
+}
+
+TEST_F(TensorFactorShardingsTest, UpdateShardingAxes_DoesNotUpdate) {
+  TensorFactorShardings factorShardings{
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("b")}}},
+                                {1, {.axisRefs = {createAxis("a")}}}}};
+
+  EXPECT_FALSE(factorShardings.updateShardingAxes(
+      /*factorIndex=*/0, /*newAxes=*/{createAxis("b")},
+      /*newOverflowAxes=*/{}));
+}
+
 //===----------------------------------------------------------------------===//
 // Tests for ShardingProjection::getGreatestCommonPrefixAxes
 //===----------------------------------------------------------------------===//
