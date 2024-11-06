@@ -29,7 +29,7 @@ The [GSPMD](https://arxiv.org/abs/2105.04663) and [PartIR](https://arxiv.org/abs
 
 ### Status
 
-Shardy is being developed as an MLIR-based partitioning system, and will be completely open sourced. The Shardy project is in active development, but we seek feedback from the open source community.
+Shardy is being developed as an MLIR-based partitioning system. The Shardy project is in active development, but we seek feedback from the open source community.
 
 
 ## Sharding Representation
@@ -65,7 +65,7 @@ Let’s explore the sharding representation with a simple rank 2 tensor and 4 de
 We first reshape the 4 devices `[0, 1, 2, 3] `into a 2-d array `[[0, 1], [2, 3]]` to create a mesh with 2 axes:
 
 ```c++
-@mesh_xy = <"x"=2, "y"=2>
+@mesh_xy = <["x"=2, "y"=2]>
 ```
 
 We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
@@ -89,12 +89,12 @@ We expand the basic structure and each key component in this section.
 
 ### Basic structure
 
-The dimension shardings tell us for each dimension of the tensor, along which axes (or"sub-axes") it is sharded from major to minor. All other axes that don’t shard a dimension are implicitly replicated (or explicitly replicated)
+The dimension shardings tell us for each dimension of the tensor, along which axes (or "sub-axes") it is sharded from major to minor. All other axes that don’t shard a dimension are implicitly replicated (or explicitly replicated)
 
 We will start with a simple example and extend it as we describe additional features.
 
 ```c++
-@mesh_xy= <"x"=2, "y"=4, "z"=2>
+@mesh_xy = <["x"=2, "y"=4, "z"=2]>
 
 // The 1st tensor dimension is sharded along axis "x" and the 2nd tensor dimension is
 // sharded along axis "z" then further along axis "y". The local shape of this tensor (i.e. the shape on a single device), would be tensor<2x1xf32>.
@@ -117,10 +117,10 @@ Each dimension of a tensor can either be open or closed.
 
 An open dimension is one open for propagation to further shard it along additional axes, i.e. the specified dimension sharding doesn’t have to be the final sharding of that dimension. This is similar (but not exactly the same as) to
 
-*   GSPMD’s <code>unspecified_dims</code>
-*   <code>partir.UNKNOWN</code>
+* GSPMD’s `unspecified_dims`
+* `partir.UNKNOWN`
 
-If a dimension is open we add a <code>?</code> following the axes that the dimension is already sharded on (see example below).
+If a dimension is open we add a `?` following the axes that the dimension is already sharded on (see example below).
 
 
 #### Closed
@@ -130,7 +130,7 @@ A closed dimension is one that isn’t available for propagation to add further 
 We can extend the example from above to have an open dimension and a closed dimension.
 
 ```c++
-@mesh_xy= <"x"=2, "y"=4, "z"=2>
+@mesh_xy = <["x"=2, "y"=4, "z"=2]>
 
 // The 1st dimension is closed, therefore it can't be further sharded and {"x"}
 // will remain its sharding. The 2nd dimension is open, and can therefore be
@@ -146,7 +146,7 @@ An explicit set of axes that a tensor is replicated on. While it can be determin
 Ordering of replicated axes has no effect on how the data of a tensor is stored. But, for consistency only, the axes will be stored in the order they are specified in the top level mesh. For example, if the mesh is:
 
 ```c++
-@mesh_xy = <"c"=2, "a"=2, "b"=2>
+@mesh_xy = <["c"=2, "a"=2, "b"=2]>
 ```
 
 And we want axes `"a"` and `"c"` to be explicitly replicated, the order should be:
@@ -158,7 +158,7 @@ replicated={"c", "a"}
 We can extend our example from above to have an explicitly replicated axis.
 
 ```c++
-@mesh_xy= <"x"=2, "y"=4, "z"=2>
+@mesh_xy = <["x"=2, "y"=4, "z"=2]>
 
 // Since "y" is explicitly replicated, it can't be used to shard the 2nd
 // dimension that is open. However, "z" is implicitly replicated so it can be
@@ -180,7 +180,7 @@ The same process can be done in the compiler to split an axis of size `k` furthe
 To understand the motivation behind splitting axes, we will look at the following example:
 
 ```c++
-@mesh_xy= <"x"=4>
+@mesh_xy = <["x"=4]>
 
 %arg0 : tensor<8xf32> {sdy.sharding=<@mesh_xy, [{"x"}]>}
 %0 = reshape %arg0 : (tensor<8xf32>) -> tensor<2x4xf32>
@@ -200,6 +200,8 @@ We have a few options for dealing with such cases:
 *   Allow, and return the sharding in a different format (e.g. an ordered list of device IDs and dimension sizes, similar to HLO sharding).
 *   Disallow, and all-gather sub-axes that shard the input/output.
 
+Currently we allow sub-axes on the inputs/outputs in the propagation pipeline. Let us know if you want a way to disable this.
+
 
 #### Representation
 
@@ -213,10 +215,10 @@ To extract a specific sub-axis of size `k` from a full axis `"x"` of size `n`, w
 
 However, the number of other sub-axes doesn’t make a difference when using a specific sub-axis `"x":(m)k`, and any other sub-axes don't need to be referenced in the tensor sharding if they don't shard a dimension or are explicitly replicated.
 
-Going back to the example in motivation, we can shard the result as follows:
+Going back to the example in the [Motivation section](#motivation), we can shard the result as follows:
 
 ```c++
-@mesh_xy= <"x"=4>
+@mesh_xy = <["x"=4]>
 
 %arg0 : tensor<8xf32> {sdy.sharding=<@mesh_xy, [{"x"}]>}
 %0 = reshape %arg0 {sdy.sharding_per_value=<[<@mesh_xy, [{"x":(1)2}, {"x":(2)2}]>]>}
@@ -226,7 +228,7 @@ Going back to the example in motivation, we can shard the result as follows:
 Here is another example of a split axis where only some of its sub-axes are used.
 
 ```c++
-@mesh_xy= <"x"=2, "y"=8, "z"=2>
+@mesh_xy = <["x"=2, "y"=8, "z"=2]>
 
 // Axis "y" is effectively split into 3 sub-axes denoted as
 //   "y":(1)2, "y":(2)2, "y":(4)2
@@ -240,7 +242,7 @@ Similarly, the following two shardings are semantically equivalent. We can think
 
 ```c++
 @mesh_full= <"devices"=8>
-@mesh_xy= <"x"=4, "y"=2>
+@mesh_xy = <["x"=4, "y"=2]>
 
 sharding<@mesh_xy, [{"x"},{ "y"}]> : tensor<4x4xf32>
 sharding<@mesh_full, [{"devices":(1)4}, {"devices":(4)2}]> : tensor<4x4xf32>
@@ -254,7 +256,7 @@ In addition to sub-axes being used to shard dimension, they can also be marked a
 For example:
 
 ```c++
-@mesh_xy= <"x"=2, "y"=8, "z"=2>
+@mesh_xy = <["x"=2, "y"=8, "z"=2]>
 
 // Sub-axis "y":(1)2 is explicitly replicated and "y":(4)2 is implicitly replicated.
 sharding<@mesh_xy, [{"x"}, {"y":(2)2}], replicated={"y":(1)2}> : tensor<4x8xf32>
@@ -278,7 +280,7 @@ One logical mesh is a multi-dimensional view of devices. We may need multiple vi
 
 For example, the sharding representation in some frameworks can be an ordered list of devices and dimension sizes, but this can't be represented with the [axis splitting](#axis-splitting-and-sub-axes) above.
 
-We propose to overcome this limitation and handle existing corner cases by defining **multiple logical meshes** at the top level of the program. Each mesh can have a different number of axes with different names, as well as its own arbitrary assignment for the same set of devices, i.e. each mesh refers to the same set of devices (by their unique logical ID) but with an arbitrary order, similar to the GSPMD representation.
+We overcome this limitation and handle existing corner cases by defining **multiple logical meshes** at the top level of the program. Each mesh can have a different number of axes with different names, as well as its own arbitrary assignment for the same set of devices, i.e. each mesh refers to the same set of devices (by their unique logical ID) but with an arbitrary order, similar to the GSPMD representation.
 
 Each sharding representation is linked to a specific logical mesh, therefore it will only reference axes from that mesh.
 
@@ -289,18 +291,12 @@ We provide two examples below:
 Users can specify multiple meshes with different named axes, that have the same order of devices. In this example, `<@mesh_0, "b">` is identical to `<@mesh_1, "z">.`
 
 ```c++
-@mesh_0 = {<"a"=4, "b"=2>, devices=[0, 1, 2, 3, 4, 5, 6, 7]}
-@mesh_1 = {<"x"=2, "y"=2, "z"=2>, devices=[0, 1, 2, 3, 4, 5, 6, 7]}
+@mesh_0 = {<["a"=4, "b"=2]>, device_ids=[0, 1, 2, 3, 4, 5, 6, 7]}
+@mesh_1 = {<["x"=2, "y"=2, "z"=2]>, device_ids=[0, 1, 2, 3, 4, 5, 6, 7]}
 ```
 
-Alternatively, users can specify shardings with an arbitrary order of devices and no axes names, in which case the meshes will have a different order of logical device IDs and default axis names.
-
-```c++
-@mesh_0 = {<"axis_0"=4, "axis_1"=2>, devices=[0, 1, 2, 3, 4, 5, 6, 7]}
-@mesh_1 = {<"axis_0"=4, "axis_1"=2>, devices=[7, 6, 5, 4, 3, 2, 1, 0]}
-```
-
-**Note**: we do not plan to propagate sharding across meshes. If we were to propagate across meshes in the future, device ordering would need to be taken into consideration. The corresponding reshards may be introduced if necessary.
+**Note**: we do not plan to propagate sharding across different meshes at the
+moment (different being different axis names/sizes and `device_ids`.)
 
 
 ### Priorities
@@ -312,7 +308,7 @@ Priorities are values attached to some or all dimensions of a sharding represent
 For example:
 
 ```c++
-@mesh_xy = <"w"=6, "x"=2, "y"=4, "z"=2>
+@mesh_xy = <["w"=6, "x"=2, "y"=4, "z"=2]>
 
 //                                    |-> y is implicitly p0
 %arg4 : sharding<@mesh_xy, [{"x"}p1, {"y"}, {"z",?}p2], replicated={}}>
@@ -340,19 +336,7 @@ It's possible for a dimension of size `d` to be sharded along axes whose product
 For example:
 
 ```c++
-@mesh_xy= <"x"=8, "y"=2, "z"=3>
+@mesh_xy = <["x"=8, "y"=2, "z"=3]>
 
 sharding<@mesh_xy, [{"x"}, {"y"}, {"z"}]> : tensor<7x3x8xf32>
-```
-
-However, the following is still required - If the product of axis sizes that shard a dimension is greater than the dimension size, then the product of sizes without the minor-most axis must be less than the dimension size, otherwise an axis is further sharding a dimension with an un-sharded size of 1.
-
-For example:
-
-```c++
-@mesh_xy= <"x"=2, "y"=4, "z"=2>
-
-// Both dimension shardings here are invalid because the dimension is already fully
-// sharded without the minor-most (rightmost) axis.
-sharding<@mesh_xy, [{"x"}, {"y", "z"}]> : tensor<1x4xf32>
 ```

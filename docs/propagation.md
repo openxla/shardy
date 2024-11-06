@@ -21,6 +21,8 @@ We compose multiple conflict resolution strategies in a hierarchy:
 3. **Aggressive propagation.** Propagate shardings with an aggressive strategy. The basic strategy only propagates shardings without conflicts, while the aggressive strategy resolves conflicts. Higher aggressiveness can reduce the memory footprint at the cost of potential communication.
 4. **Basic Propagation.** It is the lowest strategy of propagation in the hierarchy, that doesn't do any conflict resolution, and instead propagates axes that are compatible between all operands and results.
 
+![Propagation hierarchy, showing 4 stacks, from bottom to top, with the following labels: Basic Propagation, Aggressive Propagation, Operation Priority Propagation, User Priority Propagation.](images/propagation.png)
+
 This hierarchy can be interpreted as nested for loops. For example, for each user priority, a full op-priority propagation is applied.
 
 ### Operation sharding rule
@@ -89,11 +91,15 @@ This example also emphasizes why we need to store the factor sizes - since we ca
 
 In Shardy, we have the hierarchy of tensors, dimensions, and factors. They represent data at different levels. A factor is a sub-dimension. It is an internal hierarchy used in sharding propagation. Each dimension may correspond to one or more factors. The mapping between dimension and factor is defined by OpShardingRule.
 
+![Schema showing the Shardy propagation algorithm.](images/propagation_algorithms.png)
+
 **Shardy propagates sharding axes along factors instead of dimensions**. To do that, we have three steps as shown in the figure below
 
 1. Project DimSharding to FactorSharding
 2. Propagate sharding axes in the space of FactorSharding
-3. Projecte the updated FactorSharding to get the updated DimSharding
+3. Project the updated FactorSharding to get the updated DimSharding
+
+![Schema showing sharding propagation across FactorSharding and DimSharding.](images/projected_sharding.png)
 
 #### Visualization of Sharding Propagation Along Factors
 
@@ -112,9 +118,9 @@ Thus, each cell represents a factor sharding. A factor can be missing in partial
 
 | `C = dot(A, B)` | F0 Batching dim | F1 Non-contracting dim | F2 Non-contracting dim | F3 Contracting dim | Explicitly replicated axes |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| T0 = A |  |  |  |  |  |
-| T1 = B |  |  |  |  |  |
-| T2 = C |  |  |  |  |  |
+| T0 = A |  |  | X |  |  |
+| T1 = B |  | X |  |  |  |
+| T2 = C |  |  |  | X |  |
 
 #### Collect and propagate sharding axes
 
@@ -122,19 +128,19 @@ We use a simple example shown below to visualize the propagation.
 
 |  | F0 | F1 | F2 | Explicitly replicated axes |
 | :---- | :---- | :---- | :---- | :---- |
-| T0 | “a” |  | “f” |  |
-| T1 | “a”, “b” | “c”, “d” | “g” |  |
-| T2 |  | “c”, “e” |  |  |
+| T0 | "a" |  | "f" |  |
+| T1 | "a", "b" | "c", "d" | "g" |  |
+| T2 |  | "c", "e" |  |  |
 
-**Step 1\.** Find axes to propagate along each factor (a.k.a. the (longest) compatible major sharding axes). For this example, we propagate \[“a”, “b”\] along F0, propagate \[“c”\] along F1, and propagate nothing along F2.
+**Step 1.** Find axes to propagate along each factor (a.k.a. the (longest) compatible major sharding axes). For this example, we propagate `["a", "b"]` along F0, propagate `["c"]` along F1, and propagate nothing along F2.
 
-**Step 2\.** Expand the factor shardings to obtain the following result.
+**Step 2.** Expand the factor shardings to obtain the following result.
 
 |  | F0 | F1 | F2 | Explicitly replicated axes |
 | :---- | :---- | :---- | :---- | :---- |
-| T0 | “a”, **“b”** | **“c”** | “f” |  |
-| T1 | “a”, “b” | “c”, “d” | “g” |  |
-| T2 | **“a”, “b”** | “c”, “e” |  |  |
+| T0 | "a", **"b"** | **"c"** | "f" |  |
+| T1 | "a", "b" | "c", "d" | "g" |  |
+| T2 | **"a", "b"** | "c", "e" |  |  |
 
 ### Operations that are treated differently during propagation (**outdated**)
 
@@ -161,6 +167,8 @@ What’s important to realize is that `OptimizationBarrierOp` is not a typical o
 Optimization barriers will never have a sharding. Instead, their corresponding operands will.
 
 When looking up the sharding of an operand of some operation `op`, the partitioner will “flow through” the optimization barrier. So below, when querying `y_i`, we will look at the sharding of `x_i`.
+
+![Schema of the stablehlo optimization barrier.](images/operands.png)
 
 ```c
 GetSharding(y_i); // Sharding of x_i
@@ -189,9 +197,13 @@ GetSharding(body_arg_i);   // Sharding of x_i
 GetSharding(pred_arg_i);   // Sharding of x_i
 ```
 
+![Relationship between operands and results in a while op.](images/get_sharding.png)
+
 `pred_arg_i` and `body_arg_i` can never have shardings on them (restriction of MLIR not allowing attributes to be added on op block arguments), so we alias the sharding that `x_i` has. However, the same can’t be said for what we do for `result_arg_i`.
 
 Since we partition inside of the `WhileOp` body, we need to consider the shardings inside the region as well. So what do we do when we want to propagate the sharding of `result_arg_i` backwards, up to the defining op of `x_i`? Or propagate the sharding of `x_i` to the corresponding `result_arg_i`? What we need to do is find the most compatible sharding between it and its corresponding `x_i`, and update whichever needs updating using the compatible sharding (most compatible since both may have different shardings).
+
+![GetCompatibleMajorShardingAxes in while op.](images/whileop.png)
 
 #### CaseOp
 
@@ -199,3 +211,5 @@ Similar logic is used for `CaseOp` as for `WhileOp` except:
 
 * Since a `CaseOp` body is just a return, there is no propagation happening inside the body. We just look up the sharding of each corresponding branch value.
 * But since each branch may have different shardings, values `a_i`/`b_i` below, then there may be a conflict. We need to resolve this in a similar way to how we propagate to `result_arg_i` in `WhileOp`.
+
+![GetCompatibleMajorShardingAxes in case op.](images/caseop.png)

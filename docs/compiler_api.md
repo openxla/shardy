@@ -16,7 +16,7 @@ This doc describes the design of such API components in Shardy and explains thei
 
 * [**Sharding Constraint**](#sharding-constraint) - attach a sharding to an intermediate tensor (e.g. the result of a matmul) to indicate that this is how that tensor, or a subset of its uses, should be sharded.
 
-* [**Shard As/Like**](#shard-as) - group multiple tensors by an ID to indicate that they should be sharded in the same way.
+* [**Shard As**](#shard-as) - group multiple tensors by an ID to indicate that they should be sharded in the same way.
 
 * [**Manual Computation**](#manual-computation) - encloses a sub-computation that is manually partitioned using a subset of mesh axes, where the shardings along those manual axes are specified for all inputs and outputs, and inside the sub-computation the tensor types are local w.r.t those shardings.
 
@@ -37,7 +37,7 @@ For example:
 // The output has a sharding specified.
 func @main(%arg0: tensor<8x8xf32> 
             {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}]>},
-                       %arg1: tensor<8x16xf32>)
+            %arg1: tensor<8x16xf32>)
     -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{}, {"y"}]>}) {
   ...
 }
@@ -119,23 +119,3 @@ For example:
 #### Nesting manual computations
 
 You can nest multiple manual computations within one another as long as each one operates on their own unique set of manual axes.
-
-#### Grammar
-
-```c
-sdy.manual_computation ::=      (operand_1,...,operand_n)    in_shardings=[in_sharding_1,...,in_sharding_n]   out_shardings=[out_sharding_1,...,out_sharding_m]   manual_axes={<manual_axis_name_1>,...,<manual_axis_name_r>}   region
-: (operand_type_1,...,operand_type_n)
-  -> (result_type_1,...,result_type_m) 
-
-operand ::= MLIR::Value
-
-in_sharding ::= sharding // see go/sdy-sharding-representation 
-out_sharding ::= sharding // see go/sdy-sharding-representation   
-
-manual_axis_name ::= str
-
-region ::= body of the computation (MLIR::Region)
-
-operand_type := mlir::RankedTensorType
-result_type := mlir::RankedTensorType
-```

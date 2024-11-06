@@ -34,10 +34,6 @@ both systems, and the shared experience of both teams and users.
     * Short term, the initial implementation will use the current GSPMD SPMD partitioner.
     * Long term, we plan to create a new MLIR-based SPMD partitioner.
 
-### Status
-
-Shardy is being developed as an MLIR-based partitioning system, and will be completely open sourced. The Shardy project is in active development, but we seek feedback from the open source community.
-
 ## Code repository
 
 The Shardy code is available at https://github.com/openxla/shardy.
