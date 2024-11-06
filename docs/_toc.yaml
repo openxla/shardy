@@ -13,7 +13,7 @@ toc:
   - title: Concepts
     section:
     - title: Shardy architecture
-      path: 2024-03-14-shardy-partitioner-rfc.md
+      path: architecture.md
     - title: Sharding representation
       path: sharding_representation.md
     - title: Propagation

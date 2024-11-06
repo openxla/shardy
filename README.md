@@ -1,11 +1,14 @@
 # Shardy
 
-Shardy is an MLIR-based partitioning system. It is meant to be dialect
+Shardy is an MLIR-based tensor partitioning system for all dialects. Built from
+the collaboration of both the [GSPMD](https://arxiv.org/abs/2105.04663) and
+[PartIR](https://arxiv.org/abs/2401.11202) teams, it incorporates the best of
+both systems, and the shared experience of both teams and users.
+
+Shardy is meant to be dialect
 agnostic and provide extensive user control and debuggability features. It
 includes an axis-based sharding representation, a set of compiler APIs,
 functionality for sharding propagation, and plans for an SPMD partitioner.
-
-For more information see the rfcs directory.
 
 ## Status
 

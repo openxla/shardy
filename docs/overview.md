@@ -5,7 +5,7 @@ the collaboration of both the [GSPMD](https://arxiv.org/abs/2105.04663) and
 [PartIR](https://arxiv.org/abs/2401.11202) teams, it incorporates the best of
 both systems, and the shared experience of both teams and users.
 
-### Benefits
+## Benefits
 
 - More control and predictability for users by combining GSPMD's propagation
   with PartIR's incremental partitioning.
@@ -18,7 +18,7 @@ both systems, and the shared experience of both teams and users.
   contributors (internal, external, and across various time zones) to support
   users.
 
-### Components
+## Components
 
 * Sharding Representation: An axis-based sharding representation that is bound to a specific logical mesh (out of potentially multiple meshes), and supports constraining dimension shardings and axes, splitting axes for operations like reshape, priorities for incremental partitioning, and more.
 * Compiler APIs: A set of compiler components that can be used alongside the sharding representation to influence sharding propagation.
