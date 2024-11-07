@@ -7,6 +7,8 @@ functionality for sharding propagation, and plans for an SPMD partitioner.
 
 For more information see the rfcs directory.
 
+TEMPPP
+
 ## Status
 
 Shardy is a work in progress. Currently the core dialect and c bindings are
