@@ -441,7 +441,7 @@ inline SmallVector<AxisRefAttr> getGreatestCommonPrefix(
 }  // namespace
 
 AxesPerFactor ShardingProjection::getGreatestCommonPrefixAxes(
-    int64_t numFactors) {
+    int64_t numFactors) const {
   AxesPerFactor factorAxisRefs(numFactors);
   BitVector factorIsSeen(numFactors);
   for (const TensorFactorShardings& tensorFactorSharding :

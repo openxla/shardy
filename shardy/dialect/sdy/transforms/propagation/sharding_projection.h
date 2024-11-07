@@ -241,7 +241,7 @@ class ShardingProjection {
   // Returns an array of axis-ref arrays where each axis-ref array defines a
   // factor sharding, for the corresponding factor, as the greatest common
   // prefix of factor shardings across all operands and results.
-  AxesPerFactor getGreatestCommonPrefixAxes(int64_t numFactors);
+  AxesPerFactor getGreatestCommonPrefixAxes(int64_t numFactors) const;
 
  private:
   SmallVector<TensorFactorShardings> operands;
