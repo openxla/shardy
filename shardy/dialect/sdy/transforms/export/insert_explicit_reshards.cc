@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
+#include <cstdint>
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
@@ -151,6 +152,11 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
+AxesPerFactor findCommonAxes(const ShardingProjection& projection,
+                             int64_t numFactors) {
+  return projection.getGreatestCommonPrefixAxes(numFactors);
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -206,9 +212,8 @@ struct InsertExplicitReshardsPass
 
       UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                                   shardingRule.getNumResults());
-      for (const auto& [index, factorAxes] :
-           llvm::enumerate(shardingProjection.getGreatestCommonPrefixAxes(
-               shardingRule.getNumFactors()))) {
+      for (const auto& [index, factorAxes] : llvm::enumerate(findCommonAxes(
+               shardingProjection, shardingRule.getNumFactors()))) {
         // TODO(enver): Add unit tests to test overflow axes are cleared after
         // handling the case that some factors have overflow axes.
         updateTensorShardings |= shardingProjection.updateSharding(
