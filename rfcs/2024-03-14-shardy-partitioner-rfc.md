@@ -49,7 +49,7 @@ Sharding representation can either be:
 
 Design a new **axis-based** sharding representation that is general enough to handle all existing use cases of both GSPMD and PartIR.
 
-See  for more information on the requirements.
+See for more information on the requirements.
 
 
 ### Overview
