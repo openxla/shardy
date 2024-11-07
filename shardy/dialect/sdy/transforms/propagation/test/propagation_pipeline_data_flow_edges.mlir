@@ -120,14 +120,15 @@ func.func @case_multiple_results_different_sharding(
 
 // Make sure we account for when an axis is used in another dimension when
 // finding the most compatible major sharding axes.
+// In this case we prefer the sharding of %arg1, because both %arg1 and %arg2
+// have the same size.
 // CHECK-LABEL: func @case_multiple_dim_most_compatible(
 // CHECK-SAME:      %arg0: tensor<i32>,
 // CHECK-SAME:      %arg1: tensor<8x8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg2: tensor<8x8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", "b", ?}, {?}]>}
-// CHECK-SAME:      -> (tensor<8x8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}, {?}]>})
+// CHECK-SAME:      -> (tensor<8x8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}, {"b", ?}]>})
 func.func @case_multiple_dim_most_compatible(
   %arg0: tensor<i32>,
-
   %arg1: tensor<8x8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{?}, {"b", ?}]>},
   %arg2: tensor<8x8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", "b", ?}, {?}]>}
   ) -> (tensor<8x8xi64>) {
@@ -135,7 +136,7 @@ func.func @case_multiple_dim_most_compatible(
     stablehlo.return %arg1 : tensor<8x8xi64>
   }, {
     stablehlo.return %arg2 : tensor<8x8xi64>
-  // CHECK: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {?}]>]>} :
+  // CHECK: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {"b", ?}]>]>} :
   }) : (tensor<i32>) -> (tensor<8x8xi64>)
   return %0 : tensor<8x8xi64>
 }

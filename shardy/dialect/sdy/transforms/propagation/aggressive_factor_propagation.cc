@@ -20,6 +20,7 @@ limitations under the License.
 #include <tuple>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -108,8 +109,22 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     return result;
   }
 
+  // We sort the factors based on:
+  // 1. larger source tensor size first
+  // 2. smaller source tensor index first
+  // 3. smaller factor index first
+  // Unstable sort is fine because there is no equality in the candidates.
+  // TODO(b/376233527): reevaluate this conflict resolution heuristic.
+  SmallVector<int64_t> sortedFactorIndices =
+      llvm::to_vector(llvm::seq<int64_t>(0, factorSizes.size()));
   SmallVector<TensorIndexSize> factorToSourceTensor =
       getFactorToSourceTensor(projection, factorSizes, axesPerFactor);
+  llvm::sort(sortedFactorIndices, [&](int64_t i, int64_t j) {
+    return std::forward_as_tuple(-factorToSourceTensor[i].size,
+                                 factorToSourceTensor[i].index, i) <
+           std::forward_as_tuple(-factorToSourceTensor[j].size,
+                                 factorToSourceTensor[j].index, j);
+  });
 
   // The propagation on each tensor is independent. This strategy can propagate
   // different shardings to different tensors along the same factor. Examples
@@ -117,15 +132,24 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   for (const auto& [tensorIndex, tensorFactorShardings] :
        llvm::enumerate(llvm::concat<const TensorFactorShardings>(
            projection.getOperands(), projection.getResults()))) {
-    // Propagate the axes got in Step 1, and resolve conflicts within a factor.
-    FactorIndexToSharding newSharding =
+    const FactorIndexToSharding& factorIndexToSharding =
         tensorFactorShardings.factorIndexToSharding;
-    BitVector factorUpdated(factorSizes.size());
-    for (auto& [factorIndex, factorSharding] : newSharding) {
+
+    // Propagate the axes got in Step 1, resolving conflicts between factors by
+    // following the order of preference in  `sortedFactorIndices`.
+    bool tensorUpdated = false;
+    for (int64_t factorIndex : sortedFactorIndices) {
+      auto factorShardingIt = factorIndexToSharding.find(factorIndex);
+      if (factorShardingIt == factorIndexToSharding.end()) {
+        continue;
+      }
+      const FactorSharding& factorSharding = factorShardingIt->second;
       SmallVector<AxisRefAttr> newAxes = axesPerFactor[factorIndex];
+
+      // Resolve conflicts within a factor.
       truncateAxesByRemovingConflicts(
           newAxes,
-          [&, factorIndex = factorIndex, &factorSharding = factorSharding,
+          [&, factorIndex = factorIndex,
            &tensorFactorShardings = tensorFactorShardings](
               AxisRefAttr axisRef, int64_t prevShardedSize) {
             return compatiblePrefixNoConflictsWithinFactor(
@@ -133,34 +157,20 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
                 prevShardedSize, factorSizes[factorIndex], mesh);
           },
           mesh, conservativePropagation);
-      if (isStrictPrefix(factorSharding.axisRefs, newAxes)) {
-        factorSharding.axisRefs = newAxes;
-        factorUpdated.set(factorIndex);
+      if (!isStrictPrefix(factorSharding.axisRefs, newAxes)) {
+        continue;
       }
-    }
 
-    SmallVector<int> sortedFactorIndices = toSetBitsVector(factorUpdated);
-    // We sort the factors based on:
-    // 1. larger source tensor size first
-    // 2. smaller source tensor index first
-    // 3. smaller factor index first
-    // Unstable sort is fine because there is no equality in the candidates.
-    llvm::sort(sortedFactorIndices, [&](int64_t i, int64_t j) {
-      return std::forward_as_tuple(-factorToSourceTensor[i].size,
-                                   factorToSourceTensor[i].index, i) <
-             std::forward_as_tuple(-factorToSourceTensor[j].size,
-                                   factorToSourceTensor[j].index, j);
-    });
-
-    // Resolve conflicts (overlapping sharding axes) between factors.
-    bool tensorUpdated = false;
-    for (const int64_t factorIndex : sortedFactorIndices) {
-      SmallVector<AxisRefAttr> newAxes = newSharding[factorIndex].axisRefs;
+      // Resolve conflicts (overlapping sharding axes) between factors.
+      //
+      // Note that we pass `factorIndexToSharding`, which might have been
+      // updated for a previous factor (previous iteration), thus we are
+      // checking for conflicts w.r.t. the updated state of this tensor.
       truncateAxesByRemovingConflicts(
           newAxes,
           [&, factorIndex = factorIndex](AxisRefAttr axisRef, int64_t) {
             return compatiblePrefixNoConflictsAcrossFactors(
-                axisRef, newSharding, factorIndex);
+                axisRef, factorIndexToSharding, factorIndex);
           },
           mesh, conservativePropagation);
       tensorUpdated |=

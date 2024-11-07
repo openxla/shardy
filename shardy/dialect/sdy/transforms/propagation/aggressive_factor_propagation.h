@@ -44,28 +44,35 @@ namespace sdy {
 // `BasicFactorPropagation` is conservative in terms of conflicts across
 // factors. The overlapped axis between factors cannot be propagated. This
 // strategy is more aggressive by allowing the overlapped axis being propagated
-// along different factors if there is no overlapped axis in the result
+// along different factors if there is no overlapped axis in the current
 // shardings.
+//
+// To resolve conflicts across factors, when there are multiple choices (that
+// cannot co-exist), we prefer the factor with the larger source tensor (the
+// tensor from which the factor sharding is propagated), as it's normally
+// beneficial to reshard the smaller tensor. If two factors have the same source
+// tensor size, we sort based on the source tensor index and finally factor
+// index.
 //
 // Let us take C = dot(A, B) as an example. F0 is the factor corresponding to a
 // non-contracting dimension of A. F1 corresponds to a non-contracting dimension
-// of B. F2 corresponds to a contracting dimension. "-" means that the tensor
+// of B. F2 corresponds to a contracting dimension. '-' means that the tensor
 // does not contain the factor.
 //
 //     F0    F1    F2
 // A  "a"    -
 // B   -
 // C        "a"    -
-// Case 1. Fake conflict. `BasicFactorPropagation` propagates nothing, while
-// this strategy propagates "a" to B/F1.
+// Case 1. Conflict with a single choice. `BasicFactorPropagation` propagates
+// nothing, while this strategy propagates "a" to B/F1.
 //
 //     F0    F1    F2
 // A  "a"    -
 // B   -    "a"
 // C               -
-// Case 2. Real conflict. Both `BasicFactorPropagation` and this strategy
-// propagate nothing. We can propagate "a" to C/F0 or C/F1, which is illegal
-// since "a" cannot be used twice in C.
+// Case 2. Conflict with multiple choices. `BasicFactorPropagation` propagates
+// nothing, while this strategy propagates "a" to C/F1, since F1 is preferred
+// over F0 (tensor B is larger than A).
 class AggressiveFactorPropagation : public BasicFactorPropagation {
  public:
   UpdateTensorShardings propagateFactorShardings(

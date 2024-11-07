@@ -84,6 +84,26 @@ bool TensorFactorShardings::expandShardingAxes(int64_t factorIndex,
   return true;
 }
 
+bool TensorFactorShardings::updateShardingAxes(
+    int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes,
+    ArrayRef<AxisRefAttr> newOverflowAxes) {
+  auto factorShardingIt = factorIndexToSharding.find(factorIndex);
+  if (factorShardingIt == factorIndexToSharding.end()) {
+    return false;
+  }
+
+  SmallVector<AxisRefAttr>& oldAxes = factorShardingIt->second.axisRefs;
+  SmallVector<AxisRefAttr>& oldOverflowAxes =
+      factorShardingIt->second.overflowAxes;
+  if (oldAxes == newAxes && oldOverflowAxes == newOverflowAxes) {
+    return false;
+  }
+
+  oldAxes = llvm::to_vector(newAxes);
+  oldOverflowAxes = llvm::to_vector(newOverflowAxes);
+  return true;
+}
+
 namespace {
 
 // Adds all axes in `axes` to `dimSharding`.
@@ -167,6 +187,21 @@ UpdateTensorShardings ShardingProjection::expandSharding(
   }
   for (auto [i, tensor] : llvm::enumerate(results)) {
     result.updateResults[i] = tensor.expandShardingAxes(factorIndex, newAxes);
+  }
+  return result;
+}
+
+UpdateTensorShardings ShardingProjection::updateSharding(
+    int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes,
+    ArrayRef<AxisRefAttr> newOverflowAxes) {
+  UpdateTensorShardings result(getNumOperands(), getNumResults());
+  for (auto [i, tensor] : llvm::enumerate(operands)) {
+    result.updateOperands[i] =
+        tensor.updateShardingAxes(factorIndex, newAxes, newOverflowAxes);
+  }
+  for (auto [i, tensor] : llvm::enumerate(results)) {
+    result.updateResults[i] =
+        tensor.updateShardingAxes(factorIndex, newAxes, newOverflowAxes);
   }
   return result;
 }
@@ -371,9 +406,8 @@ ShardingProjection ShardingProjection::build(Operation* op,
                shardingRule, mesh);
 }
 
-ShardingProjection ShardingProjection::build(
-    AxesPerFactorRef axesPerFactorRef,
-    OpShardingRuleAttr shardingRule) {
+ShardingProjection ShardingProjection::build(AxesPerFactorRef axesPerFactorRef,
+                                             OpShardingRuleAttr shardingRule) {
   ShardingProjection projection;
   for (const auto& operandMapping : shardingRule.getOperandMappings()) {
     projection.operands.push_back(
@@ -407,7 +441,7 @@ inline SmallVector<AxisRefAttr> getGreatestCommonPrefix(
 }  // namespace
 
 AxesPerFactor ShardingProjection::getGreatestCommonPrefixAxes(
-    int64_t numFactors) {
+    int64_t numFactors) const {
   AxesPerFactor factorAxisRefs(numFactors);
   BitVector factorIsSeen(numFactors);
   for (const TensorFactorShardings& tensorFactorSharding :
