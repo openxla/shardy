@@ -1,0 +1,6 @@
+toc:
+  - heading: Shardy documentation
+  - title: Getting started
+    section:
+    - title: Overview
+      path: sdy_dialect.md
