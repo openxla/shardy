@@ -1,6 +1,18 @@
 toc:
-  - heading: Shardy documentation
-  - title: Getting started
-    section:
-    - title: Overview
-      path: sdy_dialect.md
+- heading: Shardy documentation
+- title: Getting started
+  section:
+  - title: Introduction
+    path: /shardy
+- title: Reference documentation
+  section:
+  - title: SDY dialect
+    path: /shardy/sdy_dialect
+  - title: SDY export passes
+    path: /shardy/sdy_export_passes
+  - title: SDY import passes
+    path: /shardy/sdy_import_passes
+  - title: SDY op interfaces
+    path: /shardy/sdy_op_interfaces
+  - title: SDY propagation passes
+    path: /shardy/sdy_propagation_passes
