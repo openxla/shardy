@@ -52,13 +52,13 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     communications (note that the operation might still require communication
     such as all-reduce or halo-swaps).
 
-    After propagation, some opeartions may still have incompatible shardings.
+    After propagation, some operations may still have incompatible shardings.
 
     Please note, when an axis (or sub-axis) is used to shard non-corresponding
     dimensions (e.g. non-contracting dimensions in matmul) across multiple
     tensors, or when an axis shards a dimension in one tensor but not the
     corresponding dimension in the other tensor, it is said that the operation
-    has a sharding conflict. Hence, after this pass, the opeartions become
+    has a sharding conflict. Hence, after this pass, the operations become
     conflict-free.
 
     This pass injects reshard operations explicitly so that, for each operation,
@@ -91,7 +91,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     are both sharded on axis "x" on their non-contracting dimensions. Here,
     `rhs` tensor is resharded, before the dot operation, explicitly to be
     sharded only on its first dimension and on axis "x". This way, the dot
-    opearation becomes compatible.
+    operation becomes compatible.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
