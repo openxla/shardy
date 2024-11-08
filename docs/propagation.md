@@ -91,7 +91,7 @@ This example also emphasizes why we need to store the factor sizes - since we ca
 
 In Shardy, we have the hierarchy of tensors, dimensions, and factors. They represent data at different levels. A factor is a sub-dimension. It is an internal hierarchy used in sharding propagation. Each dimension may correspond to one or more factors. The mapping between dimension and factor is defined by OpShardingRule.
 
-![Schema showing the Shardy propagation algorithm.](images/propagation_algorithms.png)
+![Schema showing the Shardy propagation algorithm.](images/propagation_algorithm.png)
 
 **Shardy propagates sharding axes along factors instead of dimensions**. To do that, we have three steps as shown in the figure below
 
@@ -114,7 +114,7 @@ We will use the following table to visualize the sharding propagation problem an
 * Each column represents a factor. F0 means the factor with index 0. We propagate shardings along factors (columns).
 * Each row represents a tensor. T0 refers to the tensor with index 0. Tensors are all operands and results involved for a specific operation. The axes in a row cannot overlap. An axis (or sub-axis) cannot be used to partition one tensor many times. If an axis is explicitly replicated, we cannot use it to partition the tensor.
 
-Thus, each cell represents a factor sharding. A factor can be missing in partial tensors. The table for `C = dot(A, B)` is below. The highlighted cells imply that the factor is not in the tensor. For example, F2 is in T1 and T2, but not in T0.
+Thus, each cell represents a factor sharding. A factor can be missing in partial tensors. The table for `C = dot(A, B)` is below. The cells containing an `X` imply that the factor is not in the tensor. For example, F2 is in T1 and T2, but not in T0.
 
 | `C = dot(A, B)` | F0 Batching dim | F1 Non-contracting dim | F2 Non-contracting dim | F3 Contracting dim | Explicitly replicated axes |
 | :---- | :---- | :---- | :---- | :---- | :---- |
@@ -142,9 +142,9 @@ We use a simple example shown below to visualize the propagation.
 | T1 | "a", "b" | "c", "d" | "g" |  |
 | T2 | **"a", "b"** | "c", "e" |  |  |
 
-### Operations that are treated differently during propagation (**outdated**)
+### Operations that are treated differently during propagation
 
-The above propagation step description applies to every op other than `CustomCallOp`, `OptimizationBarrierOp`, `WhileOp`, and `CaseOp`. Here we will talk about how and why they are treated differently.
+The above propagation step description applies to every op other than `CustomCallOp`, `OptimizationBarrierOp`, `WhileOp`, and `CaseOp`. These operations use data-flow edges, which define a bridge between a set of sources and a set of targets of this op, such that all sources and targets should be sharded in the same way.
 
 #### OptimizationBarrierOp
 
@@ -152,21 +152,33 @@ The above propagation step description applies to every op other than `CustomCal
 
 ##### Why an Operation sharding rule doesn’t work
 
-You may think that since this op has no region, then why aren’t we creating a sharding rule? Well, let's try\! For this you may think the registry would have something like this:
+You may think that since this op has no region, then why aren’t we creating a sharding rule? Well, let's try! For this you may think the registry would have something like this:
 
 ```
 ([arg_0_i, arg_0_j,...],..., [arg_n_i, arg_n_j,...])->([result_0_i, result_0_j,...],..., [result_n_i, result_n_j,...])
 ```
 
-So each dimension has a unique factor corresponding to its result. But doing so, if we partition the op on some axis, then that axis would correspond to an argument’s dimension’s factor. But since that factor doesn’t appear in any of the other operands/results, **we would mark the rest of the operands/results as replicated on that axis**\! But that isn’t what we want here. We want to allow the other operands/results to also be partitioned on this axis.
+So each dimension has a unique factor corresponding to its result. But doing so, if we partition the op on some axis, then that axis would correspond to an argument’s dimension’s factor. But since that factor doesn’t appear in any of the other operands/results, **we would mark the rest of the operands/results as replicated on that axis**! But that isn’t what we want here. We want to allow the other operands/results to also be partitioned on this axis.
 
 What’s important to realize is that `OptimizationBarrierOp` is not a typical op. It doesn’t really do anything. There is no relationship between `arg_i`/`result_i` and `arg_j`/`result_j`. Each operand/result pairs are independent of one another.
 
 ##### Solution
 
-Optimization barriers will never have a sharding. Instead, their corresponding operands will.
+An _owner_ is a user specified target of the data flow edge used by Shardy's propagation. The user can choose it arbitrarily but it needs to be static.
 
-When looking up the sharding of an operand of some operation `op`, the partitioner will “flow through” the optimization barrier. So below, when querying `y_i`, we will look at the sharding of `x_i`.
+For example, given the `custom_op` defined below:
+
+```c
+  y_1, ..., y_n = custom_op (x_1, ..., x_n)
+                  ((body_arg_1,..., body_arg_n) {
+                    ...
+                    return return_value_1, ..., return_value_n
+                  })
+```
+
+This custom_op has two types for data flow edges: `n` edges each between `return_value_i` (sources) and `y_i` (targets) and `n` edges between `x_i` (sources) and `body_arg_i` (targets). In this case, the edge owners are the same as the targets.
+
+When looking up the sharding of an operand of some operation `op`, the partitioner will "flow through" the optimization barrier. So below, when querying `return_value_i`, we will look at the sharding of the owner `y_i`.
 
 ![Schema of the stablehlo optimization barrier.](images/operands.png)
 
@@ -176,12 +188,12 @@ GetSharding(y_i); // Sharding of x_i
 
 #### WhileOp
 
-The same sort of logic from `OptimizationBarrierOp` is used on `WhileOp`. The exact same logic is used for looking up the sharding on a result of a `WhileOp`, but this time there is some added complexity due to it being a region op with multiple “operands” per result value.
+The same sort of logic from `OptimizationBarrierOp` is used on `WhileOp`. However, this time there is some added complexity due to it being a region op with multiple "operands" per result value. An op can have multiple data flow edges that are orthogonal to one another.
 
 ```c
  y_1, ..., y_n = stablehlo.while (x_1, ..., x_n)
                  ((pred_arg_1,... , pred_arg_n) { ... })
-                 ((body_arg_1,..., brody_arg_n) {
+                 ((body_arg_1,..., body_arg_n) {
                    ...
                    stablehlo.return result_arg_1, ..., result_arg_n
                  })
@@ -189,7 +201,7 @@ The same sort of logic from `OptimizationBarrierOp` is used on `WhileOp`. The ex
  _ = op(..., y_i, ...)
 ```
 
-For `y_i`, `body_arg_i`, and `pred_arg_i`, we will just look up the sharding that `x_i` has.
+This while op has n data flow edges, the i-th data flow edges is between sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`, `body_arg_i`. As before, the edge owners are the same as the targets.
 
 ```c
 GetSharding(y_i);          // Sharding of x_i
@@ -204,6 +216,16 @@ GetSharding(pred_arg_i);   // Sharding of x_i
 Since we partition inside of the `WhileOp` body, we need to consider the shardings inside the region as well. So what do we do when we want to propagate the sharding of `result_arg_i` backwards, up to the defining op of `x_i`? Or propagate the sharding of `x_i` to the corresponding `result_arg_i`? What we need to do is find the most compatible sharding between it and its corresponding `x_i`, and update whichever needs updating using the compatible sharding (most compatible since both may have different shardings).
 
 ![GetCompatibleMajorShardingAxes in while op.](images/whileop.png)
+
+An sdy.data_flow_edge takes as input the root target of an edge (can be any of the targets, but preferably an op result rather than a block argument), which shouldn't have any other uses. This op isn't pure because it can take an input that originally didn't have any uses.
+
+The sdy.data_flow_edge also holds an optional sharding for all targets of the edge, and that sharding should be updated instead of the targets' sharding (if can be attached) during propagation. This is useful when an op has many edges, as it's much more efficient to:
+
+    propagate through each edge separately.
+    update the sharding of each edge separately instead of all targets at once (e.g. an op has a single immutable TensorShardingPerValueAttr for result shardings).
+    add each edge to the worklist separately when the sharding of a source has changed.
+
+Propagation will propagate shardings between all sources and targets of a sdy.data_flow_edge as if it was a regular op with the sources as operands and targets as results, and an identity sdy.op_sharding_rule. That means that forward propagation is from sources to targets and backwards propagation is from targets to sources.
 
 #### CaseOp
 
