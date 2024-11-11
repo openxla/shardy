@@ -166,11 +166,35 @@ struct InsertExplicitReshardsPass
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     // TODO(enver): Handle data flow ops.
-    // TODO(enver): Handle cases func op result sharding does not match the
-    // sharding of returned value.
     funcOp.walk([&](Operation* op) {
       // TODO(enver): Check if data flow ops, data flow edge op, manual
       // computation op require extra check before creating sharding rule.
+
+      if (isa<func::ReturnOp>(op)) {
+        rewriter.setInsertionPoint(op);
+        for (const auto& [index, opOperand] :
+             llvm::enumerate(op->getOpOperands())) {
+          Value operand = opOperand.get();
+          TensorShardingAttr funcResultSharding =
+              getFuncResultSharding(funcOp, index);
+          TensorShardingAttr operandSharding = getSharding(operand);
+          if (isFullyReplicated(operandSharding) &&
+              isFullyReplicated(funcResultSharding)) {
+            continue;
+          }
+          if (funcResultSharding != operandSharding) {
+            // TODO(enver): Close all shardings and drop replicated axes before
+            // this pass on the export pipeline.
+            auto reshardOp = rewriter.create<ReshardOp>(
+                operand.getLoc(), operand,
+                funcResultSharding
+                    ? funcResultSharding
+                    : TensorShardingAttr::getFullyClosedLike(operandSharding));
+            opOperand.set(reshardOp);
+          }
+        }
+        return;
+      }
 
       // NOTE: Creating a sharding rule requires data flow edges are present.
       OpShardingRuleAttr shardingRule =
@@ -178,8 +202,7 @@ struct InsertExplicitReshardsPass
                                   /*setShardingRuleOnOp=*/false);
       if (!shardingRule) {
         // Insert explicit reshards only on operations with sharding rules,
-        // since all the operations of interest got their sharding rules
-        // populated at a previous populate-op-sharding-rules pass.
+        // since all the operations of interest got their sharding rules.
         return;
       }
       std::optional<StringRef> meshName =
@@ -193,6 +216,7 @@ struct InsertExplicitReshardsPass
         // mesh.
         return;
       }
+
       MeshAttr mesh = getMeshAttr(op, meshName.value());
       assert(mesh && "unknown mesh");
       ShardingProjection shardingProjection =

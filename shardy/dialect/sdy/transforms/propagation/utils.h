@@ -42,6 +42,9 @@ PropagationDirection unionOfPropagationDirections(PropagationDirection d1,
 PropagationDirection intersectionOfPropagationDirections(
     PropagationDirection d1, PropagationDirection d2);
 
+// Returns whether all dimensions are fully replicated.
+bool isFullyReplicated(TensorShardingAttr sharding);
+
 }  // namespace sdy
 }  // namespace mlir
 

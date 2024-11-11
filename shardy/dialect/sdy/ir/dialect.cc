@@ -558,6 +558,12 @@ TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
   return getTensorShardingAttr(context, rank, meshName, /*isClosed=*/true);
 }
 
+TensorShardingAttr TensorShardingAttr::getFullyClosedLike(
+    TensorShardingAttr sharding) {
+  return getTensorShardingAttr(sharding.getContext(), sharding.getRank(),
+                               sharding.getMeshOrRef(), /*isClosed=*/true);
+}
+
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
                                                     int64_t rank,
                                                     StringRef meshName) {

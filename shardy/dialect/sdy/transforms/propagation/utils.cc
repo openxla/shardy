@@ -61,5 +61,13 @@ PropagationDirection intersectionOfPropagationDirections(
                                         : std::min(d2, d1);
 }
 
+bool isFullyReplicated(TensorShardingAttr sharding) {
+  return !sharding ||
+         llvm::all_of(sharding.getDimShardings(),
+                      [](const DimensionShardingAttr& dimSharding) {
+                        return dimSharding.emptyAxes();
+                      });
+}
+
 }  // namespace sdy
 }  // namespace mlir
