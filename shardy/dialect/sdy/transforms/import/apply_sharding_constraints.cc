@@ -123,26 +123,6 @@ ShardingConstraintOp getFirstShardingConstraintInChain(
   return prevShardingConstraintOp;
 }
 
-void moveAfterValue(Operation* op, Value value) {
-  if (Operation* defOp = value.getDefiningOp()) {
-    op->moveAfter(defOp);
-  } else {
-    Block* block = cast<BlockArgument>(value).getOwner();
-    op->moveBefore(block, block->begin());
-  }
-}
-
-// Moves a chain of `ShardingConstraintOp`s ending with `shardingConstraintOp`
-// after `value`.
-void moveChainAfterValue(ShardingConstraintOp shardingConstraintOp,
-                         Value value) {
-  while (shardingConstraintOp) {
-    moveAfterValue(shardingConstraintOp, value);
-    shardingConstraintOp =
-        shardingConstraintOp.getInput().getDefiningOp<ShardingConstraintOp>();
-  }
-}
-
 struct ApplyShardingConstraintsPass
     : public impl::ApplyShardingConstraintsPassBase<
           ApplyShardingConstraintsPass> {
@@ -163,18 +143,23 @@ struct ApplyShardingConstraintsPass
                 // If `shardingConstraintOp` is the last op in a chain of at
                 // least two sharding constraints, and the input of the chain
                 // isn't used by any other sharding constraint, then replace
-                // all uses of the input with `shardingConstraintOp`.
+                // all uses of the input that are defined after
+                // `shardingConstraintOp` (and in the same block) with the
+                // latter.
+                // TODO(b/377454801): reconsider this logic.
                 if (ShardingConstraintOp firstInChain =
                         getFirstShardingConstraintInChain(shardingConstraintOp);
                     firstInChain && firstInChain != shardingConstraintOp &&
                     !isUsedByOtherShardingConstraint(firstInChain.getInput(),
                                                      firstInChain)) {
-                  // We need to move the chain right after its input, to make
-                  // sure all other uses of the input are after the chain.
-                  moveChainAfterValue(shardingConstraintOp,
-                                      firstInChain.getInput());
-                  firstInChain.getInput().replaceAllUsesExcept(
-                      shardingConstraintOp.getResult(), firstInChain);
+                  firstInChain.getInput().replaceUsesWithIf(
+                      shardingConstraintOp.getResult(), [&](OpOperand& use) {
+                        return use.getOwner() != firstInChain &&
+                               shardingConstraintOp->getBlock() ==
+                                   use.getOwner()->getBlock() &&
+                               shardingConstraintOp->isBeforeInBlock(
+                                   use.getOwner());
+                      });
                 }
               })
           .Case<ManualComputationOp>(
