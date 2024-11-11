@@ -387,6 +387,9 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
     // Returns the priority of this dimension sharding, if present, or the
     // default priority otherwise.
     int64_t getPriorityOrDefault() const;
+
+    // Builds a closed `DimensionShardingAttr` matching `dimSharding` in axes and priority.
+    static DimensionShardingAttr getClosedLike(DimensionShardingAttr sharding);
   }];
 }
 
@@ -565,6 +568,11 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // replicated axes being marked closed and matching `sharding` in
     // `mesh_sym_name` and rank.
     static TensorShardingAttr getFullyClosedLike(TensorShardingAttr sharding);
+
+    // Builds a fully open `TensorShardingAttr` with all dim shardings and
+    // replicated axes being marked closed and matching `sharding` in dim
+    // sharding axes, `mesh_sym_name` and rank.
+    static TensorShardingAttr getClosedLike(TensorShardingAttr sharding);
 
     // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
     // being marked open (can be further replicated/sharded).

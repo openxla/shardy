@@ -424,6 +424,13 @@ int64_t DimensionShardingAttr::getPriorityOrDefault() const {
   return getPriority().value_or(kDefaultPriority);
 }
 
+DimensionShardingAttr DimensionShardingAttr::getClosedLike(
+    DimensionShardingAttr dimSharding) {
+  return DimensionShardingAttr::get(dimSharding.getContext(),
+                                    dimSharding.getAxes(), /*isClosed=*/true,
+                                    /*priority=*/dimSharding.getPriority());
+}
+
 //===----------------------------------------------------------------------===//
 // TensorShardingAttr
 //===----------------------------------------------------------------------===//
@@ -556,6 +563,18 @@ TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
                                                       int64_t rank,
                                                       StringRef meshName) {
   return getTensorShardingAttr(context, rank, meshName, /*isClosed=*/true);
+}
+
+TensorShardingAttr TensorShardingAttr::getClosedLike(
+    TensorShardingAttr sharding) {
+  SmallVector<DimensionShardingAttr> closedDimShardings(sharding.getRank());
+  for (int index = 0; index < sharding.getRank(); index++) {
+    closedDimShardings[index] =
+        DimensionShardingAttr::getClosedLike(sharding.getDimSharding(index));
+  }
+  return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
+                                 /*dimShardings=*/closedDimShardings,
+                                 /*replicatedAxes=*/{});
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyClosedLike(
