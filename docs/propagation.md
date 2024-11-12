@@ -114,13 +114,13 @@ We will use the following table to visualize the sharding propagation problem an
 * Each column represents a factor. F0 means the factor with index 0. We propagate shardings along factors (columns).
 * Each row represents a tensor. T0 refers to the tensor with index 0. Tensors are all operands and results involved for a specific operation. The axes in a row cannot overlap. An axis (or sub-axis) cannot be used to partition one tensor many times. If an axis is explicitly replicated, we cannot use it to partition the tensor.
 
-Thus, each cell represents a factor sharding. A factor can be missing in partial tensors. The table for `C = dot(A, B)` is below. The cells containing an `X` imply that the factor is not in the tensor. For example, F2 is in T1 and T2, but not in T0.
+Thus, each cell represents a factor sharding. A factor can be missing in partial tensors. The table for `C = dot(A, B)` is below. The cells containing an `N` imply that the factor is not in the tensor. For example, F2 is in T1 and T2, but not in T0.
 
 | `C = dot(A, B)` | F0 Batching dim | F1 Non-contracting dim | F2 Non-contracting dim | F3 Contracting dim | Explicitly replicated axes |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| T0 = A |  |  | X |  |  |
-| T1 = B |  | X |  |  |  |
-| T2 = C |  |  |  | X |  |
+| T0 = A |  |  | N |  |  |
+| T1 = B |  | N |  |  |  |
+| T2 = C |  |  |  | N |  |
 
 #### Collect and propagate sharding axes
 
