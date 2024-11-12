@@ -160,11 +160,11 @@ You may think that since this op has no region, then why aren’t we creating a 
 
 So each dimension has a unique factor corresponding to its result. But doing so, if we partition the op on some axis, then that axis would correspond to an argument’s dimension’s factor. But since that factor doesn’t appear in any of the other operands/results, **we would mark the rest of the operands/results as replicated on that axis**! But that isn’t what we want here. We want to allow the other operands/results to also be partitioned on this axis.
 
-What’s important to realize is that `OptimizationBarrierOp` is not a typical op. It doesn’t really do anything. There is no relationship between `arg_i`/`result_i` and `arg_j`/`result_j`. Each operand/result pairs are independent of one another.
+What’s important to realize is that `OptimizationBarrierOp` is not a typical op. There is no relationship between `arg_i`/`result_i` and `arg_j`/`result_j`. Each operand/result pairs are independent of one another.
 
 ##### Solution
 
-An _owner_ is a user specified target of the data flow edge used by Shardy's propagation. The user can choose it arbitrarily but it needs to be static.
+A data flow edge of some op X defines a bridge between a set of *sources* and a set of *targets*, such that all sources and targets should be sharded in the same way.
 
 For example, given the `custom_op` defined below:
 
@@ -176,9 +176,9 @@ For example, given the `custom_op` defined below:
                   })
 ```
 
-This custom_op has two types for data flow edges: `n` edges each between `return_value_i` (sources) and `y_i` (targets) and `n` edges between `x_i` (sources) and `body_arg_i` (targets). In this case, the edge owners are the same as the targets.
+This `custom_op` has two types for data flow edges: `n` edges each between `return_value_i` (sources) and `y_i` (targets) and `n` edges between `x_i` (sources) and `body_arg_i` (targets).
 
-When looking up the sharding of an operand of some operation `op`, the partitioner will "flow through" the optimization barrier. So below, when querying `return_value_i`, we will look at the sharding of the owner `y_i`.
+When looking up the sharding of an operand of some operation `op`, the partitioner will "flow through" the operation. In this case, the sharding of the sources will be determined by the targets.
 
 ![Schema of the stablehlo optimization barrier.](images/operands.png)
 
@@ -201,7 +201,7 @@ The same sort of logic from `OptimizationBarrierOp` is used on `WhileOp`. Howeve
  _ = op(..., y_i, ...)
 ```
 
-This while op has n data flow edges, the i-th data flow edges is between sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`, `body_arg_i`. As before, the edge owners are the same as the targets.
+This while op has `n` data flow edges, the `i`-th data flow edge is between sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`, `body_arg_i`. As before, the sharding of the sources is determined by the targets.
 
 ```c
 GetSharding(y_i);          // Sharding of x_i
@@ -216,16 +216,6 @@ GetSharding(pred_arg_i);   // Sharding of x_i
 Since we partition inside of the `WhileOp` body, we need to consider the shardings inside the region as well. So what do we do when we want to propagate the sharding of `result_arg_i` backwards, up to the defining op of `x_i`? Or propagate the sharding of `x_i` to the corresponding `result_arg_i`? What we need to do is find the most compatible sharding between it and its corresponding `x_i`, and update whichever needs updating using the compatible sharding (most compatible since both may have different shardings).
 
 ![GetCompatibleMajorShardingAxes in while op.](images/whileop.png)
-
-An sdy.data_flow_edge takes as input the root target of an edge (can be any of the targets, but preferably an op result rather than a block argument), which shouldn't have any other uses. This op isn't pure because it can take an input that originally didn't have any uses.
-
-The sdy.data_flow_edge also holds an optional sharding for all targets of the edge, and that sharding should be updated instead of the targets' sharding (if can be attached) during propagation. This is useful when an op has many edges, as it's much more efficient to:
-
-    propagate through each edge separately.
-    update the sharding of each edge separately instead of all targets at once (e.g. an op has a single immutable TensorShardingPerValueAttr for result shardings).
-    add each edge to the worklist separately when the sharding of a source has changed.
-
-Propagation will propagate shardings between all sources and targets of a sdy.data_flow_edge as if it was a regular op with the sources as operands and targets as results, and an identity sdy.op_sharding_rule. That means that forward propagation is from sources to targets and backwards propagation is from targets to sources.
 
 #### CaseOp
 
