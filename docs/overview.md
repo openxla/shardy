@@ -36,4 +36,4 @@ both systems, and the shared experience of both teams and users.
 
 ## Code repository
 
-The Shardy code is available at https://github.com/openxla/shardy.
+ The Shardy project is in active development, and we seek feedback from the open source community. The Shardy code is available at https://github.com/openxla/shardy.

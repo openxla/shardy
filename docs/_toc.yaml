@@ -5,34 +5,32 @@ toc:
   - Introduction
     path: /shardy
   - title: Overview
-    path: shardy/overview
+    path: /shardy/overview
   - title: Use Shardy from JAX
-    path: shardy/getting_started_jax
+    path: /shardy/getting_started_jax
   # - title: Use Shardy with MyDialect
-  #   path: shardy/getting_started_mydialect
+  #   path: /shardy/getting_started_mydialect
   # - title: Automatic partitioner
-  #   path: shardy/automatic_partitioner
+  #   path: /shardy/automatic_partitioner
   # - title: Contributing guide
-  #   path: shardy/contributing
+  #   path: /shardy/contributing
 - title: Concepts
   section:
-  - title: Shardy architecture
-    path: shardy/architecture
   - title: Sharding representation
-    path: shardy/sharding_representation
+    path: /shardy/sharding_representation
   - title: Propagation
-    path: shardy/propagation
+    path: /shardy/propagation
   - title: Compiler API
-    path: shardy/compiler_api
+    path: /shardy/compiler_api
 - title: Reference documentation
   section:
     - title: SDY dialect
-      path: shardy/sdy_dialect
+      path: /shardy/sdy_dialect
     - title: SDY export passes
-      path: shardy/sdy_export_passes
+      path: /shardy/sdy_export_passes
     - title: SDY import passes
-      path: shardy/sdy_import_passes
+      path: /shardy/sdy_import_passes
     - title: SDY op interfaces
-      path: shardy/sdy_op_interfaces
+      path: /shardy/sdy_op_interfaces
     - title: SDY propagation passes
-      path: shardy/sdy_propagation_passes
+      path: /shardy/sdy_propagation_passes
