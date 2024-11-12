@@ -105,3 +105,8 @@ def CloseShardingsPass : Pass<"sdy-close-shardings", "ModuleOp"> {
   let summary = "Closes tensor shardings and drops replicated axes.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def DropShardingRulesPass : Pass<"sdy-drop-sharding-rules", "func::FuncOp"> {
+  let summary = "Drops `OpShardingRuleAttr` from all registered ops.";
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
