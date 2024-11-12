@@ -242,33 +242,11 @@ bool hasFactorShardingWithMultipleAxesOrSubAxes(
   return false;
 }
 
-bool hasFactorShardingWithSubAxes(const ShardingProjection& projection) {
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
-                                                 projection.getResults())) {
-    for (const auto& [_, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      for (const auto& axisRef : factorSharding.axisRefs) {
-        if (axisRef.getSubAxisInfo()) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 AxesPerFactor findCommonAxes(const ShardingProjection& projection,
                              int64_t numFactors) {
   // TODO(enver): Use majority vote heuristic also for cases where some
   // factors may have multple axes or subaxes.
   if (hasFactorShardingWithMultipleAxesOrSubAxes(projection)) {
-    return projection.getGreatestCommonPrefixAxes(numFactors);
-  }
-
-  // TODO(enver): Use majority vote heuristic also for cases where some
-  // factors may have multple axes or subaxes.
-  if (hasFactorShardingWithSubAxes(projection)) {
     return projection.getGreatestCommonPrefixAxes(numFactors);
   }
 
