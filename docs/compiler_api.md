@@ -67,9 +67,9 @@ In cases where there are no data dependencies or no strong data dependencies bet
 
 To achieve this, we introduce a notion of shard groups, where each group contains any number of instructions which are associated with the same shard group id. Sharding groups enforce shardings within the same group to be the same.
 
-For instance, in a hypothetical user program such as shown below, we want to shard the output of the program exactly the same as the input of the program while there are no data dependencies between the two. 
+For instance, in a hypothetical user program such as shown below, we want to shard the output of the program exactly the same as the input of the program while there are no data dependencies between the two.
 
-If we run this program, sharding propagation will not be able to infer on the sharding of tensors `%1` and `%2`, and they will end up being replicated. However, by attaching a `shard_group` attribute which says that the input `%0` and the output `%2` are within the same `shard_group`, we allow the sharding `@mesh_xy,` `[{"x"},{"y"}]>` to be propagated from the input `%0` to the output `%2`, and in turn to the rest of the graph, which is broadcasted constant `%1` here.
+If we run this program, sharding propagation will not be able to infer on the sharding of tensors `%1` and `%2`, and they will end up being replicated. However, by attaching a `shard_group` attribute which says that the input `%0` and the output `%2` are within the same `shard_group`, we allow the sharding `@mesh_xy,` `[{"x"},{"y"}]>` to be propagated from the input `%0` to the output `%2`, and in turn to the rest of the graph, which is broadcasted constant `%1` here. We can assign a value to a group with the [`sdy.sharding_group` operation](sdy_dialect.md#sdysharding_group-sdyshardinggroupop).
 
 ```c
 @mesh_xy = <"x"=2, "y"=2>
