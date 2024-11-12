@@ -152,9 +152,127 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
+// Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
+// with the largest count from a list that is initialized with all the
+// pairs with non-zero count, assign the picked axis to the picked factor, and
+// delete all the pairs from the list that is either with the picked factor, or
+// with an axis that overlaps with the picked axis. Continue iterating until the
+// list is empty.
+AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
+    const ShardingProjection& projection, int64_t numFactors) {
+  AxesPerFactor factorAxisRefs(numFactors);
+  // TODO(enver): The algorithm iterates over all {axes, factor} pairs at each
+  // pick, hence the complexity is roughly O(fp) where f is the number of
+  // factors, and p is the number of pairs. Optimize to lower the complextiy.
+  // Consider using a map from AxisRefs to factors.
+  SmallVector<DenseMap<AxisRefAttr, int64_t>> factorAxesCounts(numFactors);
+  int64_t maxCount = 0;
+  int64_t bestFactorIndex;
+  AxisRefAttr bestAxisRef;
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (factorSharding.axisRefs.empty()) {
+        continue;
+      }
+      AxisRefAttr axisRef = factorSharding.axisRefs[0];
+      int64_t axesCount = ++factorAxesCounts[factorIndex][axisRef];
+      if (axesCount > maxCount) {
+        maxCount = axesCount;
+        bestFactorIndex = factorIndex;
+        bestAxisRef = axisRef;
+      }
+    }
+  }
+
+  // TODO(enver): Assign an axis to a factor immediately if the count is more
+  // than floor(n/2) where n is the number of tensors.
+  BitVector unseenFactors(numFactors, true);
+  // TODO(enver): Optimize to mark unseen only the factors with an axis.
+  while (maxCount > 0) {
+    factorAxisRefs[bestFactorIndex].push_back(bestAxisRef);
+    unseenFactors.reset(bestFactorIndex);
+    // TODO(enver): Tie-breaking currently depends on the order of iteration.
+    // Consider some heuristic for breaking ties.
+    // Invalidate axes that overlaps with the picked one across all unseen
+    // factors. During the iteration, also find the new best.
+    maxCount = 0;
+    int64_t nextBestFactorIndex;
+    AxisRefAttr nextBestAxisRef;
+    for (int factorIndex : unseenFactors.set_bits()) {
+      auto& axesCounts = factorAxesCounts[factorIndex];
+      for (const auto& [axisRef, count] : axesCounts) {
+        // TODO(enver): Relax the overlap check. We need to erase in case of an
+        // overlap only if the factor indices appear together in any of the
+        // operands or results.
+        if (bestAxisRef.overlaps(axisRef)) {
+          // TODO(enver): Optimize to flip unseen if all the axes of the factor
+          // have zero count.
+          // Clear the count of overlapping axis, effectively erasing.
+          axesCounts[axisRef] = 0;
+          continue;
+        }
+        if (count > maxCount) {
+          maxCount = count;
+          nextBestFactorIndex = factorIndex;
+          nextBestAxisRef = axisRef;
+        }
+      }
+    }
+    bestFactorIndex = nextBestFactorIndex;
+    bestAxisRef = nextBestAxisRef;
+  }
+  return factorAxisRefs;
+}
+
+bool hasFactorShardingWithMultipleAxesOrSubAxes(
+    const ShardingProjection& projection) {
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [_, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (factorSharding.axisRefs.size() > 1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool hasFactorShardingWithSubAxes(const ShardingProjection& projection) {
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [_, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      for (const auto& axisRef : factorSharding.axisRefs) {
+        if (axisRef.getSubAxisInfo()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 AxesPerFactor findCommonAxes(const ShardingProjection& projection,
                              int64_t numFactors) {
-  return projection.getGreatestCommonPrefixAxes(numFactors);
+  // TODO(enver): Use majority vote heuristic also for cases where some
+  // factors may have multple axes or subaxes.
+  if (hasFactorShardingWithMultipleAxesOrSubAxes(projection)) {
+    return projection.getGreatestCommonPrefixAxes(numFactors);
+  }
+
+  // TODO(enver): Use majority vote heuristic also for cases where some
+  // factors may have multple axes or subaxes.
+  if (hasFactorShardingWithSubAxes(projection)) {
+    return projection.getGreatestCommonPrefixAxes(numFactors);
+  }
+
+  return findCommonAxesUsingMajorityVoteHeuristic(projection, numFactors);
 }
 
 struct InsertExplicitReshardsPass
