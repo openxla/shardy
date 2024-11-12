@@ -138,3 +138,9 @@ func.func @op_sharding_with_multiple_priorities(%arg0 : tensor<8x8xf32>, %arg1 :
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{"a"}p0, {"b"}p1]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// CHECK-LABEL: func @dynamic_shaped_tensor_with_sharding
+// CHECK-SAME:    %arg0: tensor<?x?xf32> {sdy.sharding = #sdy.sharding<@foo, [{}, {"a"}]>}
+func.func @dynamic_shaped_tensor_with_sharding(%arg0: tensor<?x?xf32> {sdy.sharding = #sdy.sharding<@foo, [{}, {"a"}]>}) -> tensor<?x?xf32> {
+  return %arg0 : tensor<?x?xf32>
+}

@@ -20,17 +20,8 @@ func.func @token_sharding_with_replicated_axes(%arg0: !stablehlo.token {sdy.shar
 
 sdy.mesh @mesh = <["a"=2]>
 
-// expected-error @+1 {{'func.func' op arg 0 - only ranked tensors with a static shape can have a sharding}}
+// expected-error @+1 {{'func.func' op arg 0 - only ranked tensors can have a sharding}}
 func.func @unranked_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy.sharding<@mesh, []>}) -> tensor<*xf32> {
-  return %arg0 : tensor<*xf32>
-}
-
-// -----
-
-sdy.mesh @mesh = <["a"=2]>
-
-// expected-error @+1 {{'func.func' op arg 0 - only ranked tensors with a static shape can have a sharding}}
-func.func @dynamic_shaped_tensor_with_sharding(%arg0: tensor<*xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<?x?xf32> {
   return %arg0 : tensor<*xf32>
 }
 
@@ -42,6 +33,24 @@ func.func @dim_shardings_rank_mismatch(%arg0: tensor<8xf32>, %arg1: tensor<8xf32
   // expected-error @+1 {{op result - sharding doesn't match tensor rank: 2 != 1}}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {"b"}], replicated={"a"}>]>} : tensor<8xf32>
   return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// expected-error @+1 {{op arg 0 - sharding doesn't match tensor rank: 1 != 2}}
+func.func @dynamic_shaped_tensor_rank_mismatch(%arg0: tensor<?x?xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> tensor<?x?xf32> {
+  return %arg0 : tensor<?x?xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// expected-error @+1 {{op arg 0 - dim 0 is empty and closed but has a priority}}
+func.func @dynamic_shaped_tensor_empty_closed_priority(%arg0: tensor<?x?xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}p1, {}]>}) -> tensor<?x?xf32> {
+  return %arg0 : tensor<?x?xf32>
 }
 
 // -----
@@ -325,6 +334,16 @@ func.func @size_zero_dim_sharded(%arg0: tensor<8x0xf32>, %arg1: tensor<8x0xf32>)
 
 sdy.mesh @mesh = <["a"=2]>
 
+func.func @size_zero_dim_sharded_dynamic_shape(%arg0: tensor<?x0xf32>, %arg1: tensor<?x0xf32>) -> tensor<?x0xf32> {
+  // expected-error @+1 {{dim 1 of size 0 is sharded on an axis of size > 1}}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : tensor<?x0xf32>
+  return %0 : tensor<?x0xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
 func.func @unknown_sub_axis(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{unknown axis name: "c"}}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {"c":(2)2}], replicated={"a"}>]>} : tensor<8x8xf32>
@@ -449,6 +468,16 @@ func.func @sub_axes_overlap(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> t
   // expected-error @+1 {{overlapping sub-axes: "a":(1)4, "a":(2)4}}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{"a":(2)4}, {"b":(2)2}], replicated={"a":(1)4}>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=8, "b"=4]>
+
+func.func @sub_axes_overlap_dynamic(%arg0: tensor<?x?xf32>, %arg1: tensor<?x?xf32>) -> tensor<?x?xf32> {
+  // expected-error @+1 {{overlapping sub-axes: "a":(1)4, "a":(2)4}}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{"a":(2)4}, {"b":(2)2}], replicated={"a":(1)4}>]>} : tensor<?x?xf32>
+  return %0 : tensor<?x?xf32>
 }
 
 // -----

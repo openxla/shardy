@@ -207,7 +207,7 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 // If `type` isn't a `ShapedType`, the sharding must have rank 0 and no
 // replicated axes.
 //
-// - The tensor should have a rank and static shape.
+// - The tensor should have a rank.
 // - The number of dimension shardings is equal to the rank of the tensor.
 // - Dimensions of size 0 aren't sharded.
 // - Replicated axes are ordered w.r.t. `mesh` (see
@@ -239,11 +239,12 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
     }
     return success();
   }
-  if (!tensorType.hasStaticShape()) {
-    return emitError(
-               "only ranked tensors with a static shape can have a sharding. ")
+
+  if (!tensorType.hasRank()) {
+    return emitError("only ranked tensors can have a sharding. ")
            << "type: " << type;
   }
+
   int64_t rank = tensorType.getRank();
   if (shardingAttr.getRank() != rank) {
     return emitError("sharding doesn't match tensor rank: ")
@@ -262,6 +263,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   for (auto [dim, dimShardingAndSize] : llvm::enumerate(llvm::zip_equal(
            shardingAttr.getDimShardings(), tensorType.getShape()))) {
     auto [dimSharding, dimSize] = dimShardingAndSize;
+
     if (dimSharding.getPriority()) {
       if (dimSharding.getPriority().value() < 0) {
         return emitError("dim ") << dim << " has a negative priority";
@@ -271,10 +273,16 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                << dim << " is empty and closed but has a priority";
       }
     }
+
     if (failed(verifyAxisRefList(dimSharding.getAxes(), axisNameToSize,
                                  seenAxisRefs, axisNameToSubAxes, emitError))) {
       return failure();
     }
+
+    if (dimSize == ShapedType::kDynamic) {
+      continue;
+    }
+
     if (dimSize == 0 &&
         llvm::any_of(dimSharding.getAxes(), [&](AxisRefAttr axisRef) {
           return axisNameToSize[axisRef.getName()] > 1;

@@ -634,6 +634,25 @@ struct BasicPropagationPass
   }
 };
 
+// Verifies that all shapes are static in the module.
+bool allShapesStatic(ModuleOp moduleOp) {
+  return !moduleOp
+              .walk([](Operation* op) {
+                for (Type type : op->getResultTypes()) {
+                  if (auto tensorType = dyn_cast<ShapedType>(type);
+                      tensorType && !tensorType.hasStaticShape()) {
+                    op->emitError(
+                        "Shardy propagation only supports ranked tensors with "
+                        "a static shape. type: ")
+                        << tensorType;
+                    return WalkResult::interrupt();
+                  }
+                }
+                return WalkResult::advance();
+              })
+              .wasInterrupted();
+}
+
 }  // namespace
 
 PropagationDirection propagateAny(Operation*) {
@@ -690,6 +709,11 @@ LogicalResult BasicPropagationPassImpl::propagate(
 void BasicPropagationPassImpl::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   SymbolTable symbolTable(moduleOp);
+
+  if (!allShapesStatic(moduleOp)) {
+    return signalPassFailure();
+  }
+
   // Build sharding group mappings to link values to other members within their
   // group. These maps are passed through the propagation methods so that
   // `updateTensorShardings` can enforce the sharding group constraints.
