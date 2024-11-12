@@ -4,6 +4,11 @@
 _Closes tensor shardings and drops replicated axes._
 
 
+### `-sdy-drop-sharding-rules`
+
+_Drops `OpShardingRuleAttr` from all registered ops._
+
+
 ### `-sdy-insert-explicit-reshards`
 
 _Inserts explicit reshards to make all operations have compatible shardings._
