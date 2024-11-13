@@ -178,7 +178,7 @@ For example, given the `custom_op` defined below:
 
 This `custom_op` has two types for data flow edges: `n` edges each between `return_value_i` (sources) and `y_i` (targets) and `n` edges between `x_i` (sources) and `body_arg_i` (targets).
 
-When looking up the sharding of an operand of some operation `op`, the partitioner will "flow through" the operation. In this case, the sharding of the sources will be determined by the targets.
+When looking up the sharding of an operand of some operation `op`, the partitioner will "flow through" the operation. In this case, the sharding of the sources will be determined by the targets. In general, the shardings will be propagated between the sources and targets of each data flow edge, similar to the way shardings are propagated between the operands and results of non-data-flow operations.
 
 ![Schema of the stablehlo optimization barrier.](images/operands.png)
 
