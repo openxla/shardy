@@ -18,6 +18,7 @@ limitations under the License.
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
@@ -152,6 +153,21 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
+// Checks if any two axes, one from the first array, and the other from the
+// second array, overlap.
+// TODO(enver): Optimize by using a set of AxisRefAttr.
+bool axisRefsOverlap(ArrayRef<AxisRefAttr> first,
+                     ArrayRef<AxisRefAttr> second) {
+  for (const auto& firstAxisRef : first) {
+    for (const auto& secondAxisRef : second) {
+      if (firstAxisRef.overlaps(secondAxisRef)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
 // with the largest count from a list that is initialized with all the
 // pairs with non-zero count, assign the picked axis to the picked factor, and
@@ -161,14 +177,11 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
 AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors) {
   AxesPerFactor factorAxisRefs(numFactors);
-  // TODO(enver): The algorithm iterates over all {axes, factor} pairs at each
-  // pick, hence the complexity is roughly O(fp) where f is the number of
-  // factors, and p is the number of pairs. Optimize to lower the complextiy.
-  // Consider using a map from AxisRefs to factors.
-  SmallVector<DenseMap<AxisRefAttr, int64_t>> factorAxesCounts(numFactors);
+  SmallVector<DenseMap<ArrayRef<AxisRefAttr>, int64_t>> factorAxesCounts(
+      numFactors);
   int64_t maxCount = 0;
   int64_t bestFactorIndex;
-  AxisRefAttr bestAxisRef;
+  ArrayRef<AxisRefAttr> bestAxisRefs;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -177,22 +190,26 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       if (factorSharding.axisRefs.empty()) {
         continue;
       }
-      AxisRefAttr axisRef = factorSharding.axisRefs[0];
-      int64_t axesCount = ++factorAxesCounts[factorIndex][axisRef];
+      ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
+      int64_t axesCount = ++factorAxesCounts[factorIndex][axisRefs];
       if (axesCount > maxCount) {
         maxCount = axesCount;
         bestFactorIndex = factorIndex;
-        bestAxisRef = axisRef;
+        bestAxisRefs = axisRefs;
       }
     }
   }
 
+  // TODO(enver): Instead of taking an axes-array with the largest count, take a
+  // prefix with the largest count.  For example, if a factor appears in 2
+  // tensors, and one has sharding [x,y] and the other has sharding [x,z], then
+  // the count of [x] prefix will be two for this factor.
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
   BitVector unseenFactors(numFactors, true);
   // TODO(enver): Optimize to mark unseen only the factors with an axis.
   while (maxCount > 0) {
-    factorAxisRefs[bestFactorIndex].push_back(bestAxisRef);
+    factorAxisRefs[bestFactorIndex] = llvm::to_vector(bestAxisRefs);
     unseenFactors.reset(bestFactorIndex);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
@@ -200,56 +217,37 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     // factors. During the iteration, also find the new best.
     maxCount = 0;
     int64_t nextBestFactorIndex;
-    AxisRefAttr nextBestAxisRef;
+    ArrayRef<AxisRefAttr> nextBestAxisRefs;
     for (int factorIndex : unseenFactors.set_bits()) {
       auto& axesCounts = factorAxesCounts[factorIndex];
-      for (const auto& [axisRef, count] : axesCounts) {
+      for (const auto& [axisRefs, count] : axesCounts) {
         // TODO(enver): Relax the overlap check. We need to erase in case of an
         // overlap only if the factor indices appear together in any of the
         // operands or results.
-        if (bestAxisRef.overlaps(axisRef)) {
+        if (axisRefsOverlap(bestAxisRefs, axisRefs)) {
           // TODO(enver): Optimize to flip unseen if all the axes of the factor
           // have zero count.
           // Clear the count of overlapping axis, effectively erasing.
-          axesCounts[axisRef] = 0;
+          // TODO(enver): Instead of removing from the list, trim the axisRefs,
+          // to use the largest prefix that does not overlap with bestAxisRefs.
+          axesCounts[axisRefs] = 0;
           continue;
         }
         if (count > maxCount) {
           maxCount = count;
           nextBestFactorIndex = factorIndex;
-          nextBestAxisRef = axisRef;
+          nextBestAxisRefs = axisRefs;
         }
       }
     }
     bestFactorIndex = nextBestFactorIndex;
-    bestAxisRef = nextBestAxisRef;
+    bestAxisRefs = nextBestAxisRefs;
   }
   return factorAxisRefs;
 }
 
-bool hasFactorShardingWithMultipleAxesOrSubAxes(
-    const ShardingProjection& projection) {
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
-                                                 projection.getResults())) {
-    for (const auto& [_, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      if (factorSharding.axisRefs.size() > 1) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 AxesPerFactor findCommonAxes(const ShardingProjection& projection,
                              int64_t numFactors) {
-  // TODO(enver): Use majority vote heuristic also for cases where some
-  // factors may have multple axes or subaxes.
-  if (hasFactorShardingWithMultipleAxesOrSubAxes(projection)) {
-    return projection.getGreatestCommonPrefixAxes(numFactors);
-  }
-
   return findCommonAxesUsingMajorityVoteHeuristic(projection, numFactors);
 }
 
