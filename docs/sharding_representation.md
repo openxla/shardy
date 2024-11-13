@@ -27,7 +27,7 @@ We first reshape the 4 devices `[0, 1, 2, 3]` into a 2-d array `[[0, 1], [2, 3]]
 
 We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
 
-![Sharding representation of a rank 2 tensor](images/sdy0.png)
+![Sharding representation of a rank 2 tensor](images/sharding_representation.png)
 
 ### Other key components
 
