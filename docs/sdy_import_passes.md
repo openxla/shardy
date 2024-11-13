@@ -49,9 +49,9 @@ defined after the last `ShardingConstraintOp` in the chain (and within the
 same block), with the result of the chain, as it should dictate the sharding
 of those uses.
 
-NOTE: The `in_shardings` of a `ManualComputationOp` are in essense sharding
+NOTE: The `in_shardings` of a `ManualComputationOp` are in essence sharding
 constraints on the corresponding operands, so this pass will also apply
-their sharding if the above conditions are satisfied (expect for the
+their sharding if the above conditions are satisfied (except for the
 dangling case).
 ### `-sdy-constant-splitter`
 
