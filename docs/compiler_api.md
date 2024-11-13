@@ -16,7 +16,7 @@ This doc describes the design of such API components in Shardy and explains thei
 
 * [**Sharding Constraint**](#sharding-constraint) - attach a sharding to an intermediate tensor (e.g. the result of a matmul) to indicate that this is how that tensor, or a subset of its uses, should be sharded.
 
-* [**Shard As**](#shard-as) - group multiple tensors by an ID to indicate that they should be sharded in the same way.
+* [**Sharding Group**](#sharding-group) - group multiple tensors by an ID to indicate that they should be sharded in the same way.
 
 * [**Manual Computation**](#manual-computation) - encloses a sub-computation that is manually partitioned using a subset of mesh axes, where the shardings along those manual axes are specified for all inputs and outputs, and inside the sub-computation the tensor types are local w.r.t those shardings.
 
@@ -31,7 +31,7 @@ In MLIR, attributes can be attached to function arguments and results, and there
 For example:
 
 ```c
-@mesh_xy = <"x"=2, "y"=2>
+@mesh_xy = <["x"=2, "y"=2]>
 
 // The 1st input has a sharding specified, but the 2nd input doesn't.
 // The output has a sharding specified.
@@ -55,13 +55,13 @@ This is an MLIR operation that takes the tensor as input, and has a sharding att
 It can have open dimension shardings, which mean the operand can be further sharded along available axes.
 
 ```c
-@mesh_xy = <"x"=2, "y"=2>
+@mesh_xy = <["x"=2, "y"=2]>
 
 %0 = ... : tensor<8x8xf32>
 %1 = sdy.sharding_constraint %0 <@mesh_xy, [{"x"}, {?}]> : tensor<8x8xf32>
 ```
 
-### Shard As
+### Sharding Group
 
 In cases where there are no data dependencies or no strong data dependencies between two or more tensors, while users have the knowledge that those tensors should be partitioned in the same or in a similar ways, the Shardy API offers a way to specify this relation. This gives users the freedom to explicitly specify that tensors should be partitioned as each other.
 
@@ -72,7 +72,7 @@ For instance, in a hypothetical user program such as shown below, we want to sha
 If we run this program, sharding propagation will not be able to infer on the sharding of tensors `%1` and `%2`, and they will end up being replicated. However, by attaching a `shard_group` attribute which says that the input `%0` and the output `%2` are within the same `shard_group`, we allow the sharding `@mesh_xy,` `[{"x"},{"y"}]>` to be propagated from the input `%0` to the output `%2`, and in turn to the rest of the graph, which is broadcasted constant `%1` here. We can assign a value to a group with the [`sdy.sharding_group` operation](sdy_dialect.md#sdysharding_group-sdyshardinggroupop).
 
 ```c
-@mesh_xy = <"x"=2, "y"=2>
+@mesh_xy = <["x"=2, "y"=2]>
 
 module @"jit_zeros_like" {
   func.func @main(%arg0: tensor<8x2xi64> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"},{"y"}]>}}) -> (tensor<8x2xi64>) {
@@ -98,7 +98,11 @@ For example:
 @mesh_name = <"data"=2, "model"=2>
 
 %0 = ... : tensor<16x32xf32>
-%1 = sdy.manual_computation(%0)     in_shardings=[<@mesh_name, [{"data"}, {"model",?}]>]      out_shardings=[<@mesh_name, [{"data"}, {?}]>]      manual_axes={"data"}      (%arg1: tensor<8x32xf32>) {
+%1 = sdy.manual_computation(%0)
+    in_shardings=[<@mesh_name, [{"data"}, {"model",?}]>]
+    out_shardings=[<@mesh_name, [{"data"}, {?}]>]
+    manual_axes={"data"}
+    (%arg1: tensor<8x32xf32>) {
   // body
   return %42 : tensor<8x32xf32>
 } : (tensor<16x32xf32>) -> tensor<16x32xf32>
