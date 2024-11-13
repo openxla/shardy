@@ -95,7 +95,7 @@ This is the MLIR operation with a single region for the manual sub-computation. 
 For example:
 
 ```c
-@mesh_name = <"data"=2, "model"=2>
+@mesh_name = <["data"=2, "model"=2]>
 
 %0 = ... : tensor<16x32xf32>
 %1 = sdy.manual_computation(%0)
