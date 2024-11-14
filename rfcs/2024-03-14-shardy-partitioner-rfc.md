@@ -60,7 +60,7 @@ A logical mesh is a multi-dimensional view of devices, defined by a list of axis
 
 The proposed sharding representation is bound to a specific logical mesh by its name, and can only reference axis names from that mesh. The sharding of a tensor specifies along which axes (of a specific logical mesh), each dimension of the tensor is sharded, ordered from major to minor. The tensor is replicated along all other axes of the mesh.
 
-Let’s explore the sharding representation with a simple rank 2 tensor and 4 devices.
+Let's explore the sharding representation with a simple rank 2 tensor and 4 devices.
 
 We first reshape the 4 devices `[0, 1, 2, 3] `into a 2-d array `[[0, 1], [2, 3]]` to create a mesh with 2 axes:
 
@@ -74,12 +74,12 @@ We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
 
 #### Other key components
 
-* **Open/Closed dimensions** - dimensions can either be open - can be further sharded on available axes; or closed - are fixed and can’t be changed.
+* **Open/Closed dimensions** - dimensions can either be open - can be further sharded on available axes; or closed - are fixed and can't be changed.
 * **Explicitly replicated axes** - all axes that are not used to shard a dimension are implicitly replicated, but the sharding can specify axes that are explicitly replicated and therefore cannot be used to shard a dimension later on.
 * **Axis splitting and sub-axes** - a (full) mesh axis can be split into multiple sub-axes that can be individually used to shard a dimension or be explicitly replicated.
 * **Multiple logical meshes** - different shardings can be bound to different logical meshes, which can have different axes or even a different order of logical device ids.
 * **Priorities** - to partition a program incrementally, priorities can be attached to dimension shardings, which determine in which order per-dimension sharding constraints will be propagated throughout the module.
-* **Dimension sharding divisibility** - a dimension can be sharded on axes whose product of sizes doesn’t divide the dimension size.
+* **Dimension sharding divisibility** - a dimension can be sharded on axes whose product of sizes doesn't divide the dimension size.
 
 
 ## Detailed Design
@@ -89,7 +89,7 @@ We expand the basic structure and each key component in this section.
 
 ### Basic structure
 
-The dimension shardings tell us for each dimension of the tensor, along which axes (or"sub-axes") it is sharded from major to minor. All other axes that don’t shard a dimension are implicitly replicated (or explicitly replicated)
+The dimension shardings tell us for each dimension of the tensor, along which axes (or"sub-axes") it is sharded from major to minor. All other axes that don't shard a dimension are implicitly replicated (or explicitly replicated)
 
 We will start with a simple example and extend it as we describe additional features.
 
@@ -115,9 +115,9 @@ Each dimension of a tensor can either be open or closed.
 
 #### Open
 
-An open dimension is one open for propagation to further shard it along additional axes, i.e. the specified dimension sharding doesn’t have to be the final sharding of that dimension. This is similar (but not exactly the same as) to
+An open dimension is one open for propagation to further shard it along additional axes, i.e. the specified dimension sharding doesn't have to be the final sharding of that dimension. This is similar (but not exactly the same as) to
 
-*   GSPMD’s <code>unspecified_dims</code>
+*   GSPMD's <code>unspecified_dims</code>
 *   <code>partir.UNKNOWN</code>
 
 If a dimension is open we add a <code>?</code> following the axes that the dimension is already sharded on (see example below).
@@ -125,7 +125,7 @@ If a dimension is open we add a <code>?</code> following the axes that the dimen
 
 #### Closed
 
-A closed dimension is one that isn’t available for propagation to add further sharding to, i.e. the specified dimension sharding is the final sharding of that dimension and it can’t be changed. A common use case of this is to make all inputs/outputs of a module static, i.e. they can't be modified.
+A closed dimension is one that isn't available for propagation to add further sharding to, i.e. the specified dimension sharding is the final sharding of that dimension and it can't be changed. A common use case of this is to make all inputs/outputs of a module static, i.e. they can't be modified.
 
 We can extend the example from above to have an open dimension and a closed dimension.
 
@@ -193,7 +193,7 @@ We want to shard the result of the reshape in a way that would avoid communicati
 
 #### Function Input/output shardings
 
-It is possible that during propagation an input or output of the main function will become sharded along a sub-axis. This can be a problem for some frameworks, where we can’t express such shardings to give back to the user.
+It is possible that during propagation an input or output of the main function will become sharded along a sub-axis. This can be a problem for some frameworks, where we can't express such shardings to give back to the user.
 
 We have a few options for dealing with such cases:
 
@@ -211,7 +211,7 @@ To extract a specific sub-axis of size `k` from a full axis `"x"` of size `n`, w
 *   `k>1` is the **_actual size_** of this sub-axis (`k` should be a divisor of `n`).
 *   `n/(m*k)` is the **_post-size_**. It is the product of all sub-axis sizes to the right of (that are minor to) this sub-axis (if equal to 1 it means there are none, If larger than 1 it corresponds to a single or multiple sub-axes).
 
-However, the number of other sub-axes doesn’t make a difference when using a specific sub-axis `"x":(m)k`, and any other sub-axes don't need to be referenced in the tensor sharding if they don't shard a dimension or are explicitly replicated.
+However, the number of other sub-axes doesn't make a difference when using a specific sub-axis `"x":(m)k`, and any other sub-axes don't need to be referenced in the tensor sharding if they don't shard a dimension or are explicitly replicated.
 
 Going back to the example in motivation, we can shard the result as follows:
 
@@ -249,7 +249,7 @@ sharding<@mesh_full, [{"devices":(1)4}, {"devices":(4)2}]> : tensor<4x4xf32>
 
 #### Explicitly replicated sub-axes
 
-In addition to sub-axes being used to shard dimension, they can also be marked as explicitly replicated. We allow this in the representation because sub-axes behave just like full axes, i.e. when you shard a dimension along a sub-axis of axis `"x"`, the other sub-axes of `"x"` are implicitly replicated, and therefore can be explicitly replicated to indicate that a sub-axis must stay replicated and can’t be used to shard a dimension.
+In addition to sub-axes being used to shard dimension, they can also be marked as explicitly replicated. We allow this in the representation because sub-axes behave just like full axes, i.e. when you shard a dimension along a sub-axis of axis `"x"`, the other sub-axes of `"x"` are implicitly replicated, and therefore can be explicitly replicated to indicate that a sub-axis must stay replicated and can't be used to shard a dimension.
 
 For example:
 
@@ -324,7 +324,7 @@ We allow attaching a priority to each dimension sharding (0 by default), which i
 
 Even if a sharding has an open dimension with lower priority, e.g., `{"z",?}p2`, it won't be overridden by another tensor sharding with a higher priority during propagation. However, such an open dimension can be further sharded after all higher priority shardings have been propagated.
 
-In other words, priorities are **NOT** about which dimension sharding is more important than another - it’s the order in which distinct groups of dimension shardings should propagate to the entire program, and how conflicts on intermediate, unannotated tensors should be resolved.
+In other words, priorities are **NOT** about which dimension sharding is more important than another - it's the order in which distinct groups of dimension shardings should propagate to the entire program, and how conflicts on intermediate, unannotated tensors should be resolved.
 
 
 #### Invariants

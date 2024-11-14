@@ -24,7 +24,7 @@ specifies along which axes (of a specific logical mesh), each dimension of the
 tensor is sharded, ordered from major to minor. The tensor is replicated along
 all other axes of the mesh.
 
-Let’s explore the sharding representation with a simple rank 2 tensor and 4
+Let's explore the sharding representation with a simple rank 2 tensor and 4
 devices.
 
 We first reshape the 4 devices `[0, 1, 2, 3]` into a 2-d array `[[0, 1], [2,
@@ -42,7 +42,7 @@ We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
 
 *   [**Open/Closed dimensions**](#openclosed-dimensions) - dimensions can either
     be open - can be further sharded on available axes; or closed - are fixed
-    and can’t be changed.
+    and can't be changed.
 *   [**Explicitly replicated axes**](#explicitly-replicated-axes) - all axes
     that are not used to shard a dimension are implicitly replicated, but the
     sharding can specify axes that are explicitly replicated and therefore
@@ -58,7 +58,7 @@ We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
     order per-dimension sharding constraints will be propagated throughout the
     module.
 *   [**Dimension sharding divisibility**](#dimension-sharding-divisibility) - a
-    dimension can be sharded on axes whose product of sizes doesn’t divide the
+    dimension can be sharded on axes whose product of sizes doesn't divide the
     dimension size.
 
 ## Detailed Design
@@ -69,7 +69,7 @@ We expand the basic structure and each key component in this section.
 
 The dimension shardings tell us for each dimension of the tensor, along which
 axes (or [sub-axes](#axis-splitting-and-sub-axes)) it is sharded from major to
-minor. All other axes that don’t shard a dimension are implicitly replicated (or
+minor. All other axes that don't shard a dimension are implicitly replicated (or
 [explicitly replicated](#explicitly-replicated-axes)).
 
 We will start with a simple example and extend it as we describe additional
@@ -98,22 +98,22 @@ Each dimension of a tensor can either be open or closed.
 #### Open
 
 An open dimension is open for propagation to further shard it along additional
-axes, i.e. the specified dimension sharding doesn’t have to be the final
+axes, i.e. the specified dimension sharding doesn't have to be the final
 sharding of that dimension. This is similar (but not exactly the same as) to
 
 *   [`jax.sharding.PartitionSpec.UNCONSTRAINED`](https://jax.readthedocs.io/en/latest/jax.sharding.html#jax.sharding.PartitionSpec)
-*   GSPMD’s `unspecified_dims`
+*   GSPMD's `unspecified_dims`
 
 If a dimension is open we add a `?` following the axes that the dimension is
 already sharded on (see example below).
 
 #### Closed
 
-A closed dimension is one that isn’t available for propagation to add further
+A closed dimension is one that isn't available for propagation to add further
 sharding to, i.e. the specified dimension sharding is the final sharding of that
-dimension and it can’t be changed. A common use case of this is how GSPMD
-(usually) doesn’t modify the input/output arguments of a module, or how with
-`jax.jit`, the user specified `in_shardings` are static - they can’t change.
+dimension and it can't be changed. A common use case of this is how GSPMD
+(usually) doesn't modify the input/output arguments of a module, or how with
+`jax.jit`, the user specified `in_shardings` are static - they can't change.
 
 We can extend the example from above to have an open dimension and a closed
 dimension.
@@ -193,7 +193,7 @@ greater than the 1st dimension of the result, we need to split the axis into two
 sub-axes `"x.0"` and `"x.1"` of size 2 each, and shard the 1st dimension on
 `"x.0"` and the 2nd dimension on `"x.1"`.
 
-**Note**: shardings that are specified by the users can’t have sub-axes and must
+**Note**: shardings that are specified by the users can't have sub-axes and must
 reference full axes, as this is currently not supported by JAX and users can
 always change their mesh to have smaller axes.
 
@@ -201,8 +201,8 @@ always change their mesh to have smaller axes.
 
 It is possible that during propagation an input or output of the main function
 will become sharded along a sub-axis. This can be a problem for some frameworks,
-where we can’t express such shardings to give back to the user (e.g. in JAX we
-can’t express sub-axes with
+where we can't express such shardings to give back to the user (e.g. in JAX we
+can't express sub-axes with
 [`jax.sharding.NamedSharding`](https://jax.readthedocs.io/en/latest/jax.sharding.html#jax.sharding.NamedSharding)).
 
 We have a few options for dealing with such cases:
@@ -239,9 +239,9 @@ sub-axes: `"x":(m)k`.
     the right of (that are minor to) this sub-axis (if equal to 1 it means there
     are none, If larger than 1 it corresponds to a single or multiple sub-axes).
 
-However, the number of other sub-axes doesn’t make a difference when using a
-specific sub-axis `"x":(m)k`, and any other sub-axis doesn’t need to be
-referenced in the tensor sharding if it doesn’t shard a dimension or is
+However, the number of other sub-axes doesn't make a difference when using a
+specific sub-axis `"x":(m)k`, and any other sub-axis doesn't need to be
+referenced in the tensor sharding if it doesn't shard a dimension or is
 explicitly replicated.
 
 Going back to the example in [Motivation section](#motivation), we can shard the
@@ -287,7 +287,7 @@ as explicitly replicated. We allow this in the representation because sub-axes
 behave just like full axes, i.e. when you shard a dimension along a sub-axis of
 axis `"x"`, the other sub-axes of `"x"` are implicitly replicated, and therefore
 can be explicitly replicated to indicate that a sub-axis must stay replicated
-and can’t be used to shard a dimension.
+and can't be used to shard a dimension.
 
 For example:
 
@@ -324,7 +324,7 @@ assignments.
 For example,
 [`jax.sharding.PositionalSharding` does not have one common logical mesh](https://jax.readthedocs.io/en/latest/notebooks/Distributed_arrays_and_automatic_parallelization.html#sharding-basics-and-the-positionalsharding-subclass).
 GSPMD currently supports that with HloSharding, where the representation can be
-an ordered list of devices and dimension sizes, but this can’t be represented
+an ordered list of devices and dimension sizes, but this can't be represented
 with the [axis splitting](#axis-splitting-and-sub-axes) above.
 
 We overcome this limitation and handle existing corner cases by defining
@@ -362,7 +362,7 @@ Priority is a way to prioritize certain partitioning+propagation decisions over
 others, and allows for incremental partitioning of a program.
 
 Priorities are values attached to some or all dimensions of a sharding
-representation (replicated axes don’t have priorities).
+representation (replicated axes don't have priorities).
 
 For example:
 
@@ -375,7 +375,7 @@ For example:
 
 Priorities give users more fine grained control over propagation, e.g., batch
 parallelism first, then megatron, and finally ZeRO sharding. This allows for
-strong guarantees about what’s partitioned and allows for better debuggability
+strong guarantees about what's partitioned and allows for better debuggability
 by having more fine grained sharding strategies (can see how the program looks
 after just megatron in isolation).
 
@@ -384,12 +384,12 @@ indicates that all shardings with priority `<i` will be propagated to the entire
 program before shardings with priority `i`.
 
 Even if a sharding has an open dimension with lower priority, e.g., `{"z",?}p2`,
-it won’t be overridden by another tensor sharding with a higher priority during
+it won't be overridden by another tensor sharding with a higher priority during
 propagation. However, such an open dimension can be further sharded after all
 higher priority shardings have been propagated.
 
 In other words, priorities are **NOT** about which dimension sharding is more
-important than another - it’s the order in which distinct groups of dimension
+important than another - it's the order in which distinct groups of dimension
 shardings should propagate to the entire program, and how conflicts on
 intermediate, unannotated tensors should be resolved.
 
@@ -397,14 +397,14 @@ intermediate, unannotated tensors should be resolved.
 
 *   Priorities start at 0 (highest priority) and increase (to allow users to add
     and remove priorities easily, we allow gaps between priorities, e.g., p0 and
-    p2 are used but p1 isn’t).
+    p2 are used but p1 isn't).
 
-*   An empty closed dimension sharding (i.e., `{}`), shouldn’t have a priority,
-    as this won’t have any effect.
+*   An empty closed dimension sharding (i.e., `{}`), shouldn't have a priority,
+    as this won't have any effect.
 
 ### Dimension sharding divisibility
 
-It’s possible for a dimension of size `d` to be sharded along axes whose product
+It's possible for a dimension of size `d` to be sharded along axes whose product
 of sizes is `n`, such that `d` is not divisible by `n` (which in practice would
 require the dimension to be padded).
 

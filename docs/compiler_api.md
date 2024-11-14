@@ -9,7 +9,7 @@ sharding representations can be used in a program, e.g. to attach a sharding to
 a specific tensor of the program.
 
 Sharding propagation is the process of deciding on a sharding for every tensor
-in a program given sharding constraints for a subset of the tensors. Shardy’s
+in a program given sharding constraints for a subset of the tensors. Shardy's
 compiler API exposes several ways to influence/control sharding propagation.
 Additionally it allows users to insert manually sharded computations into their
 programs.
@@ -19,7 +19,7 @@ programs.
 This doc describes the design of such API components in Shardy and explains
 their behavior and invariants. Note that while this API is used to control
 sharding propagation, this doc is **NOT** going to discuss anything about the
-behavior of propagation nor how it’s designed.
+behavior of propagation nor how it's designed.
 
 ## Overview
 
@@ -132,9 +132,9 @@ module @"jit_zeros_like" {
 }
 ```
 
-In this simple example above, alternatively we could’ve explicitly specified the
+In this simple example above, alternatively we could've explicitly specified the
 same sharding on the output as the input, which would achieve the same effect,
-since we’ve already known what shard we want to assign to the input ahead of
+since we've already known what shard we want to assign to the input ahead of
 time but in more realistic cases, we use shard as to keep the sharding of
 multiple tensors in sync without necessarily knowing the sharding for any of
 them, while Shardy will take care of the rest and find the best sharding to

@@ -35,11 +35,11 @@ We compose multiple conflict resolution strategies in a hierarchy:
     partitioning of the program, e.g., doing batch parallelism -> megatron ->
     ZeRO sharding. This is achieved by applying propagation in iterations - at
     iteration `i` we propagate all dimension shardings that have priority `<=i`
-    and ignore all others. We also make sure that propagation won’t override
+    and ignore all others. We also make sure that propagation won't override
     user defined shardings with lower priority (`>i`), even if they are ignored
     during previous iterations.
 2.  **Operation based priorities**. We propagate shardings, based on the
-    operation type. The “pass-through” operations (e.g., element-wise operations
+    operation type. The "pass-through" operations (e.g., element-wise operations
     and reshape) have the highest priority, while operations with shape
     transformation (e.g., dot and reduce) have lower priority.
 3.  **Aggressive propagation.** Propagate shardings with an aggressive strategy.
@@ -91,7 +91,7 @@ In this encoding, every dimension is mapped to a single factor.
 sharded along an axis, propagation will lookup the factor of that dimension in
 this mapping, and shard other operands/results along their respective dimension
 with the same factor – and (subject to the earlier discussion about replication)
-potentially also replicate other operands/results that don’t have that factor
+potentially also replicate other operands/results that don't have that factor
 along that axis.
 
 ### Compound factors: extending the rule for reshapes

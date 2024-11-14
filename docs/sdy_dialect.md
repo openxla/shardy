@@ -751,7 +751,7 @@ Syntax:
 A tensor sharding is bound to a specific mesh, and can only reference axis
 names from that mesh. The dimension shardings tell us for each dimension of
 the tensor, along which axes (or sub-axes) it is sharded from major to
-minor. All other axes that don’t shard a dimension are either implicitly or
+minor. All other axes that don't shard a dimension are either implicitly or
 explicitly (if they appear in the list of replicated axes) replicated.
 
 The mesh this sharding is bound to can either be specified by a symbol
