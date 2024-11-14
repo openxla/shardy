@@ -83,9 +83,8 @@ PropagationDirection isPassThrough(Operation* op) {
   return PropagationDirection::NONE;
 }
 
-constexpr std::array<GetDirectionToPropagateFnPtr, 4> opPropagationSchedule = {
-    isPassThrough, isNotABoth<stablehlo::BroadcastInDimOp>,
-    isaBackward<stablehlo::BroadcastInDimOp>, propagateAny};
+constexpr std::array<GetDirectionToPropagateFnPtr, 2> opPropagationSchedule = {
+    isPassThrough, propagateAny};
 
 // Returns the direction in which the given operation should be propagated.
 //
