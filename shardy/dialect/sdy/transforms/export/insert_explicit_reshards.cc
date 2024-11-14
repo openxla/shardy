@@ -16,6 +16,7 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -168,6 +169,8 @@ bool axisRefsOverlap(ArrayRef<AxisRefAttr> first,
   return false;
 }
 
+using FactorAxesPair = std::pair<int64_t, ArrayRef<AxisRefAttr>>;
+
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
 // with the largest count from a list that is initialized with all the
 // pairs with non-zero count, assign the picked axis to the picked factor, and
@@ -180,8 +183,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   SmallVector<DenseMap<ArrayRef<AxisRefAttr>, int64_t>> factorAxesCounts(
       numFactors);
   int64_t maxCount = 0;
-  int64_t bestFactorIndex;
-  ArrayRef<AxisRefAttr> bestAxisRefs;
+  FactorAxesPair bestFactorAxes;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -194,8 +196,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       int64_t axesCount = ++factorAxesCounts[factorIndex][axisRefs];
       if (axesCount > maxCount) {
         maxCount = axesCount;
-        bestFactorIndex = factorIndex;
-        bestAxisRefs = axisRefs;
+        bestFactorAxes = FactorAxesPair(factorIndex, axisRefs);
       }
     }
   }
@@ -209,22 +210,22 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   BitVector unseenFactors(numFactors, true);
   // TODO(enver): Optimize to mark unseen only the factors with an axis.
   while (maxCount > 0) {
-    factorAxisRefs[bestFactorIndex] = llvm::to_vector(bestAxisRefs);
-    unseenFactors.reset(bestFactorIndex);
+    factorAxisRefs[bestFactorAxes.first] =
+        llvm::to_vector(bestFactorAxes.second);
+    unseenFactors.reset(bestFactorAxes.first);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
     maxCount = 0;
-    int64_t nextBestFactorIndex;
-    ArrayRef<AxisRefAttr> nextBestAxisRefs;
+    FactorAxesPair nextBestFactorAxes;
     for (int factorIndex : unseenFactors.set_bits()) {
       auto& axesCounts = factorAxesCounts[factorIndex];
       for (const auto& [axisRefs, count] : axesCounts) {
         // TODO(enver): Relax the overlap check. We need to erase in case of an
         // overlap only if the factor indices appear together in any of the
         // operands or results.
-        if (axisRefsOverlap(bestAxisRefs, axisRefs)) {
+        if (axisRefsOverlap(bestFactorAxes.second, axisRefs)) {
           // TODO(enver): Optimize to flip unseen if all the axes of the factor
           // have zero count.
           // Clear the count of overlapping axis, effectively erasing.
@@ -235,13 +236,11 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
         }
         if (count > maxCount) {
           maxCount = count;
-          nextBestFactorIndex = factorIndex;
-          nextBestAxisRefs = axisRefs;
+          nextBestFactorAxes = FactorAxesPair(factorIndex, axisRefs);
         }
       }
     }
-    bestFactorIndex = nextBestFactorIndex;
-    bestAxisRefs = nextBestAxisRefs;
+    bestFactorAxes = nextBestFactorAxes;
   }
   return factorAxisRefs;
 }
