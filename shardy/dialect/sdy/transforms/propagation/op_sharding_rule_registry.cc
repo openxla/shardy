@@ -468,29 +468,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           //
           // Operands: [operand, iota, init_val (scalar), init_arg (scalar)]
           // Results: [values, indices]
-          ArrayRef<int64_t> inputShape =
-              getTensorShape(customCall.getOperand(0));
-          ArrayRef<int64_t> resultShape =
-              getTensorShape(customCall.getResult(0));
-          int64_t numInputs = 2, numResults = 2;
-          SmallVector<int64_t> operandDims(customCall->getNumOperands(),
-                                           kNullDim);
-          SmallVector<int64_t> resultDims(customCall->getNumResults(),
-                                          kNullDim);
           return OpShardingRuleBuilder(customCall)
               .addPointwiseIfDimSizesMatch(
-                  inputShape, resultShape,
-                  /*alwaysAddFactor=*/false,
-                  /*onMismatchFn=*/
-                  [&](int64_t dim, OpShardingRuleBuilder& builder) {
-                    std::fill_n(operandDims.begin(), numInputs, dim);
-                    resultDims.assign(numResults, kNullDim);
-                    builder.addFactor(operandDims, resultDims, inputShape[dim]);
-                    resultDims.assign(numResults, dim);
-                    std::fill_n(operandDims.begin(), numInputs, kNullDim);
-                    builder.addFactor(operandDims, resultDims,
-                                      resultShape[dim]);
-                  })
+                  getTensorShape(customCall.getOperand(0)),
+                  getTensorShape(customCall.getResult(0)),
+                  /*alwaysAddFactor=*/false)
               .build();
         }
         // TODO(b/327191011): output unregistered op stats instead.
