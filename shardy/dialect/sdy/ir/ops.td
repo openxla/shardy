@@ -197,7 +197,7 @@ def Sdy_ShardingGroupOp : Sdy_Op<"sharding_group",
   // Op is non-pure since it modifies the internal representation of the
   // sharding group.
   []>{
-  let summary = "Sharding group operation";
+  let summary = "Constrains tensors in the group to have the same sharding.";
   let description = [{
     This op provides an interface to assign tensors to sharding groups (
     groups of tensors that will be enforced to have identical shardings).
