@@ -155,28 +155,30 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
-// Checks if any two axes, one from the first array, and the other from the
-// second array, overlap.
-// TODO(enver): Optimize by using a set of AxisRefAttr.
-bool axisRefsOverlap(ArrayRef<AxisRefAttr> first,
-                     ArrayRef<AxisRefAttr> second) {
-  for (const auto& firstAxisRef : first) {
-    for (const auto& secondAxisRef : second) {
-      if (firstAxisRef.overlaps(secondAxisRef)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 struct FactorAxesPair {
   int64_t factorIndex = -1;
+  // The axes that this FactorAxesPair holds is defined by `axisRefs` and
+  // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is
+  // empty, then `axisRefs` is empty as well.
   ArrayRef<AxisRefAttr> axisRefs;
+  AxisRefAttr tailAxisRef;
 
+  // Assumes that input `tailAxisRef` is non-empty.
+  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs,
+                 AxisRefAttr tailAxisRef)
+      : factorIndex(factorIndex),
+        axisRefs(axisRefs),
+        tailAxisRef(tailAxisRef) {}
+
+  // Assumes that input `axisRefs` is non-empty.
   FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
-      : factorIndex(factorIndex), axisRefs(axisRefs) {}
+      : factorIndex(factorIndex),
+        axisRefs(axisRefs.drop_back()),
+        tailAxisRef(axisRefs.back()) {}
 
+  // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
+  // use it when the axes is empty.
+  FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
   FactorAxesPair() = default;
 
   bool operator<(const FactorAxesPair& rhs) const {
@@ -191,17 +193,52 @@ struct FactorAxesPair {
         return axisRef < rhsAxisRef;
       }
     }
+    if (tailAxisRef != rhs.tailAxisRef) {
+      return tailAxisRef < rhs.tailAxisRef;
+    }
     return false;
   }
 
   bool operator==(const FactorAxesPair& rhs) const {
-    return factorIndex == rhs.factorIndex && axisRefs == rhs.axisRefs;
+    return factorIndex == rhs.factorIndex && axisRefs == rhs.axisRefs &&
+           tailAxisRef == rhs.tailAxisRef;
+  }
+
+  // TODO(enver): Define an iterator that iterates on the concatenation of
+  // axisRefs and tail, and use it below for overlaps.
+
+  // Checks if `axisRef` overlaps with axes of this FactorAxesPair.
+  bool overlaps(AxisRefAttr axisRef) const {
+    if (tailAxisRef && axisRef.overlaps(tailAxisRef)) {
+      return true;
+    }
+    return llvm::any_of(axisRefs, [&](AxisRefAttr againstAxisRef) {
+      return axisRef.overlaps(againstAxisRef);
+    });
+  }
+
+  // Checks if any two axes, one from this, and the other from `rhs`, overlap.
+  bool overlaps(const FactorAxesPair& rhs) const {
+    if (tailAxisRef && rhs.overlaps(tailAxisRef)) {
+      return true;
+    }
+    return llvm::any_of(
+        axisRefs, [&](AxisRefAttr axisRef) { return rhs.overlaps(axisRef); });
+  }
+
+  void assignTo(AxesPerFactor& axesPerFactor) {
+    if (!tailAxisRef) {  // Implies the whole axes is empty.
+      axesPerFactor[factorIndex].clear();
+      return;
+    }
+    axesPerFactor[factorIndex] = llvm::to_vector(axisRefs);
+    axesPerFactor[factorIndex].push_back(tailAxisRef);
   }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   static unsigned getHashValue(const FactorAxesPair& m) {
-    return llvm::hash_combine(m.factorIndex, m.axisRefs);
+    return llvm::hash_combine(m.factorIndex, m.axisRefs, m.tailAxisRef);
   }
   static bool isEqual(const FactorAxesPair& lhs, const FactorAxesPair& rhs) {
     return lhs == rhs;
@@ -210,7 +247,7 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
 
   static inline FactorAxesPair getTombstoneKey() {
-    return FactorAxesPair(/*factorIndex=*/-2, /*axisRefs=*/{});
+    return FactorAxesPair(/*factorIndex=*/-2);
   }
 };
 
@@ -232,8 +269,7 @@ struct FactorAxesAssignmentCandidate {
   }
 
   void assignTo(AxesPerFactor& axesPerFactor) {
-    axesPerFactor[factorAxes.factorIndex] =
-        llvm::to_vector(factorAxes.axisRefs);
+    factorAxes.assignTo(axesPerFactor);
   }
 };
 
@@ -282,10 +318,8 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
-      // TODO(enver): Use FactorAxesPair overlap api instead.
       if (factorAxes.factorIndex == bestFactorAxes.factorAxes.factorIndex ||
-          axisRefsOverlap(factorAxes.axisRefs,
-                          bestFactorAxes.factorAxes.axisRefs)) {
+          factorAxes.overlaps(bestFactorAxes.factorAxes)) {
         // TODO(enver): Optimize to flip unseen if all the axes of the factor
         // have zero count.
         // Clear the count of overlapping axis, effectively erasing.
