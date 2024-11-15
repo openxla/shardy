@@ -16,7 +16,6 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <optional>
-#include <utility>
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -197,6 +196,13 @@ struct FactorAxesPair {
   bool operator==(const FactorAxesPair& rhs) const {
     return factorIndex == rhs.factorIndex && axisRefs == rhs.axisRefs;
   }
+
+  bool overlaps(const FactorAxesPair& rhs) const {
+    if (factorIndex == rhs.factorIndex) {
+      return true;
+    }
+    return axisRefsOverlap(axisRefs, rhs.axisRefs);
+  }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
@@ -265,9 +271,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
-      // TODO(enver): Use FactorAxesPair overlap api instead.
-      if (factorAxes.factorIndex == bestFactorAxes.factorIndex ||
-          axisRefsOverlap(factorAxes.axisRefs, bestFactorAxes.axisRefs)) {
+      if (factorAxes.overlaps(bestFactorAxes)) {
         // TODO(enver): Optimize to flip unseen if all the axes of the factor
         // have zero count.
         // Clear the count of overlapping axis, effectively erasing.
