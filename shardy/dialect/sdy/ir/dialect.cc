@@ -254,6 +254,24 @@ AxisRefAttr::getMeshComparator(MeshAttr mesh) {
   };
 }
 
+bool AxisRefAttr::operator<(const AxisRefAttr& rhs) const {
+  StringRef name = getName();
+  StringRef rhsName = rhs.getName();
+  if (name != rhsName) {
+    return name < rhsName;
+  }
+  // Both axis-refs have the same name, if one is a sub-axis and the other
+  // is the full axis, then the sub-axis is smaller.
+  if (!getSubAxisInfo()) {
+    return false;
+  }
+  if (!rhs.getSubAxisInfo()) {
+    return true;
+  }
+  // Both axis-refs are sub-axes.
+  return getSubAxisInfo() < rhs.getSubAxisInfo();
+}
+
 std::string AxisRefAttr::toString() const {
   return strippedAttrString(*this, /*stripMnemonic=*/true);
 }

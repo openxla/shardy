@@ -169,7 +169,30 @@ bool axisRefsOverlap(ArrayRef<AxisRefAttr> first,
   return false;
 }
 
-using FactorAxesPair = std::pair<int64_t, ArrayRef<AxisRefAttr>>;
+struct FactorAxesPair {
+  int64_t factorIndex;
+  ArrayRef<AxisRefAttr> axisRefs;
+
+  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
+      : factorIndex(factorIndex), axisRefs(axisRefs) {}
+
+  FactorAxesPair() = default;
+
+  bool operator<(const FactorAxesPair& rhs) const {
+    if (factorIndex != rhs.factorIndex) {
+      return factorIndex < rhs.factorIndex;
+    }
+    if (axisRefs.size() != rhs.axisRefs.size()) {
+      return axisRefs.size() < rhs.axisRefs.size();
+    }
+    for (auto [axisRef, rhsAxisRef] : llvm::zip_equal(axisRefs, rhs.axisRefs)) {
+      if (axisRef != rhsAxisRef) {
+        return axisRef < rhsAxisRef;
+      }
+    }
+    return false;
+  }
+};
 
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
 // with the largest count from a list that is initialized with all the
@@ -192,11 +215,13 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       if (factorSharding.axisRefs.empty()) {
         continue;
       }
-      ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
-      int64_t axesCount = ++factorAxesCounts[factorIndex][axisRefs];
-      if (axesCount > maxCount) {
+      FactorAxesPair factorAxes(factorIndex, factorSharding.axisRefs);
+      int64_t axesCount =
+          ++factorAxesCounts[factorAxes.factorIndex][factorAxes.axisRefs];
+      if (axesCount > maxCount ||
+          (axesCount == maxCount && factorAxes < bestFactorAxes)) {
         maxCount = axesCount;
-        bestFactorAxes = FactorAxesPair(factorIndex, axisRefs);
+        bestFactorAxes = factorAxes;
       }
     }
   }
@@ -210,9 +235,9 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   BitVector unseenFactors(numFactors, true);
   // TODO(enver): Optimize to mark unseen only the factors with an axis.
   while (maxCount > 0) {
-    factorAxisRefs[bestFactorAxes.first] =
-        llvm::to_vector(bestFactorAxes.second);
-    unseenFactors.reset(bestFactorAxes.first);
+    factorAxisRefs[bestFactorAxes.factorIndex] =
+        llvm::to_vector(bestFactorAxes.axisRefs);
+    unseenFactors.reset(bestFactorAxes.factorIndex);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
@@ -225,7 +250,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
         // TODO(enver): Relax the overlap check. We need to erase in case of an
         // overlap only if the factor indices appear together in any of the
         // operands or results.
-        if (axisRefsOverlap(bestFactorAxes.second, axisRefs)) {
+        if (axisRefsOverlap(bestFactorAxes.axisRefs, axisRefs)) {
           // TODO(enver): Optimize to flip unseen if all the axes of the factor
           // have zero count.
           // Clear the count of overlapping axis, effectively erasing.
@@ -234,9 +259,11 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
           axesCounts[axisRefs] = 0;
           continue;
         }
-        if (count > maxCount) {
+        FactorAxesPair factorAxes(factorIndex, axisRefs);
+        if (count > maxCount ||
+            (count == maxCount && factorAxes < nextBestFactorAxes)) {
           maxCount = count;
-          nextBestFactorAxes = FactorAxesPair(factorIndex, axisRefs);
+          nextBestFactorAxes = factorAxes;
         }
       }
     }

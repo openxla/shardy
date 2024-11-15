@@ -187,6 +187,12 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     static std::function<bool(AxisRefAttr lhs, AxisRefAttr rhs)>
     getMeshComparator(MeshAttr mesh);
 
+    // Returns a comparator that order axis names lexicographically.
+    // 1. Compare the axis names lexicographically.
+    // 2. For two axes with the same name, sub-axis is smaller than the full axis.
+    // 3. Sort two sub-axes based on comparator of SubAxisInfoAttr.
+    bool operator<(const AxisRefAttr &rhs) const;
+
     std::string toString() const;
 
     // Returns the size of this axis or sub-axis.

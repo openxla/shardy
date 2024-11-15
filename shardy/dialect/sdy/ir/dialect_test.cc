@@ -154,6 +154,24 @@ TEST_F(DialectTest, AxisRefAttrOverlaps) {
   checkOverlaps(createSubAxis("x", 1, 2), createSubAxis("x", 4, 2), false);
 }
 
+TEST_F(DialectTest, AxisRefAttrCompare) {
+  auto compare = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_TRUE(a < b);
+    EXPECT_FALSE(b < a);
+    EXPECT_FALSE(a < a);
+    EXPECT_FALSE(b < b);
+  };
+
+  compare(createAxis("x"), createAxis("y"));
+  compare(createSubAxis("x", 1, 4), createSubAxis("y", 2, 4));
+  compare(createAxis("x"), createSubAxis("y", 2, 4));
+  compare(createSubAxis("x", 1, 4), createAxis("y"));
+  compare(createSubAxis("x", 1, 4), createSubAxis("x", 2, 4));
+  compare(createSubAxis("x", 1, 4), createSubAxis("x", 1, 8));
+  compare(createSubAxis("x", 1, 4), createAxis("x"));
+  compare(createSubAxis("x", 1, 4), createSubAxis("x", 2, 2));
+}
+
 // The test cases are the same as DialectTest.AxisRefAttrOverlaps.
 TEST_F(DialectTest, AxisRefAttrGetPrefixWithoutOverlap) {
   auto samePrefix = [](AxisRefAttr a, AxisRefAttr b) {
