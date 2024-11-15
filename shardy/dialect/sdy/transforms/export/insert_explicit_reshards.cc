@@ -230,6 +230,11 @@ struct FactorAxesAssignmentCandidate {
     // TODO(enver): Tie-break based on sharded tensor sizes, instead.
     return rhs.factorAxes < factorAxes;
   }
+
+  void assignTo(AxesPerFactor& axesPerFactor) {
+    axesPerFactor[factorAxes.factorIndex] =
+        llvm::to_vector(factorAxes.axisRefs);
+  }
 };
 
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
@@ -265,8 +270,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
   while (bestFactorAxes.count > 0) {
-    factorAxisRefs[bestFactorAxes.factorAxes.factorIndex] =
-        llvm::to_vector(bestFactorAxes.factorAxes.axisRefs);
+    bestFactorAxes.assignTo(factorAxisRefs);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
