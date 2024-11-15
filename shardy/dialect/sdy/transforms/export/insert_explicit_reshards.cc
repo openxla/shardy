@@ -18,6 +18,7 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
@@ -170,7 +171,7 @@ bool axisRefsOverlap(ArrayRef<AxisRefAttr> first,
 }
 
 struct FactorAxesPair {
-  int64_t factorIndex;
+  int64_t factorIndex = -1;
   ArrayRef<AxisRefAttr> axisRefs;
 
   FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
@@ -192,6 +193,25 @@ struct FactorAxesPair {
     }
     return false;
   }
+
+  bool operator==(const FactorAxesPair& rhs) const {
+    return factorIndex == rhs.factorIndex && axisRefs == rhs.axisRefs;
+  }
+};
+
+struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
+  static unsigned getHashValue(const FactorAxesPair& m) {
+    return llvm::hash_combine(m.factorIndex, m.axisRefs);
+  }
+  static bool isEqual(const FactorAxesPair& lhs, const FactorAxesPair& rhs) {
+    return lhs == rhs;
+  }
+
+  static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
+
+  static inline FactorAxesPair getTombstoneKey() {
+    return FactorAxesPair(/*factorIndex=*/-2, /*axisRefs=*/{});
+  }
 };
 
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
@@ -203,8 +223,7 @@ struct FactorAxesPair {
 AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors) {
   AxesPerFactor factorAxisRefs(numFactors);
-  SmallVector<DenseMap<ArrayRef<AxisRefAttr>, int64_t>> factorAxesCounts(
-      numFactors);
+  DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo> factorAxesCounts;
   int64_t maxCount = 0;
   FactorAxesPair bestFactorAxes;
   for (const TensorFactorShardings& tensorFactorSharding :
@@ -216,8 +235,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
         continue;
       }
       FactorAxesPair factorAxes(factorIndex, factorSharding.axisRefs);
-      int64_t axesCount =
-          ++factorAxesCounts[factorAxes.factorIndex][factorAxes.axisRefs];
+      int64_t axesCount = ++factorAxesCounts[factorAxes];
       if (axesCount > maxCount ||
           (axesCount == maxCount && factorAxes < bestFactorAxes)) {
         maxCount = axesCount;
@@ -232,39 +250,36 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   // the count of [x] prefix will be two for this factor.
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
-  BitVector unseenFactors(numFactors, true);
-  // TODO(enver): Optimize to mark unseen only the factors with an axis.
   while (maxCount > 0) {
     factorAxisRefs[bestFactorAxes.factorIndex] =
         llvm::to_vector(bestFactorAxes.axisRefs);
-    unseenFactors.reset(bestFactorAxes.factorIndex);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
     maxCount = 0;
     FactorAxesPair nextBestFactorAxes;
-    for (int factorIndex : unseenFactors.set_bits()) {
-      auto& axesCounts = factorAxesCounts[factorIndex];
-      for (const auto& [axisRefs, count] : axesCounts) {
-        // TODO(enver): Relax the overlap check. We need to erase in case of an
-        // overlap only if the factor indices appear together in any of the
-        // operands or results.
-        if (axisRefsOverlap(bestFactorAxes.axisRefs, axisRefs)) {
-          // TODO(enver): Optimize to flip unseen if all the axes of the factor
-          // have zero count.
-          // Clear the count of overlapping axis, effectively erasing.
-          // TODO(enver): Instead of removing from the list, trim the axisRefs,
-          // to use the largest prefix that does not overlap with bestAxisRefs.
-          axesCounts[axisRefs] = 0;
-          continue;
-        }
-        FactorAxesPair factorAxes(factorIndex, axisRefs);
-        if (count > maxCount ||
-            (count == maxCount && factorAxes < nextBestFactorAxes)) {
-          maxCount = count;
-          nextBestFactorAxes = factorAxes;
-        }
+    for (auto factorAxesCountIt = factorAxesCounts.begin();
+         factorAxesCountIt != factorAxesCounts.end(); factorAxesCountIt++) {
+      const auto& [factorAxes, count] = *factorAxesCountIt;
+      // TODO(enver): Relax the overlap check. We need to erase in case of an
+      // overlap only if the factor indices appear together in any of the
+      // operands or results.
+      // TODO(enver): Use FactorAxesPair overlap api instead.
+      if (factorAxes.factorIndex == bestFactorAxes.factorIndex ||
+          axisRefsOverlap(factorAxes.axisRefs, bestFactorAxes.axisRefs)) {
+        // TODO(enver): Optimize to flip unseen if all the axes of the factor
+        // have zero count.
+        // Clear the count of overlapping axis, effectively erasing.
+        // TODO(enver): Instead of removing from the list, trim the axisRefs,
+        // to use the largest prefix that does not overlap with bestAxisRefs.
+        factorAxesCounts.erase(factorAxesCountIt);
+        continue;
+      }
+      if (count > maxCount ||
+          (count == maxCount && factorAxes < nextBestFactorAxes)) {
+        maxCount = count;
+        nextBestFactorAxes = factorAxes;
       }
     }
     bestFactorAxes = nextBestFactorAxes;
