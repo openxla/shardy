@@ -458,7 +458,7 @@ Interfaces: `InferTypeOpInterface`
 
 ### `sdy.sharding_group` (sdy::ShardingGroupOp)
 
-_Sharding group operation_
+_Constrains tensors in the group to have the same sharding._
 
 
 Syntax:
