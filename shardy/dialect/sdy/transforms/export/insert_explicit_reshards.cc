@@ -13,10 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <optional>
-#include <utility>
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -155,19 +155,15 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
-// Checks if any two axes, one from the first array, and the other from the
-// second array, overlap.
+// Checks if `axisRef` overlaps with any axis of the `againstAxisRefs`.
 // TODO(enver): Optimize by using a set of AxisRefAttr.
-bool axisRefsOverlap(ArrayRef<AxisRefAttr> first,
-                     ArrayRef<AxisRefAttr> second) {
-  for (const auto& firstAxisRef : first) {
-    for (const auto& secondAxisRef : second) {
-      if (firstAxisRef.overlaps(secondAxisRef)) {
-        return true;
-      }
-    }
-  }
-  return false;
+// TODO(enver): Make this an api of AxisRefAttr.
+bool axisRefOverlap(AxisRefAttr axisRef,
+                    ArrayRef<AxisRefAttr> againstAxisRefs) {
+
+ return llvm::any_of(againstAxisRefs, [&](const AxisRefAttr& againstAxisRef) {
+    return axisRef.overlaps(againstAxisRef);
+  });
 }
 
 struct FactorAxesPair {
@@ -197,6 +193,21 @@ struct FactorAxesPair {
   bool operator==(const FactorAxesPair& rhs) const {
     return factorIndex == rhs.factorIndex && axisRefs == rhs.axisRefs;
   }
+
+  // Checks if `axisRef` overlaps with axes of this FactorAxesPair.
+  bool overlaps(AxisRefAttr axisRef) const {
+    return axisRefOverlap(axisRef, axisRefs);
+  }
+
+  // Checks if any two axes, one from this, and the other from `rhs`, overlap.
+  bool overlaps(const FactorAxesPair& rhs) const {
+    for (const auto& axisRef : axisRefs) {
+      if (rhs.overlaps(axisRef)) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
@@ -214,6 +225,29 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   }
 };
 
+struct FactorAxesAssignmentCandidate {
+  FactorAxesPair factorAxes;
+  int64_t count = 0;
+
+  FactorAxesAssignmentCandidate(FactorAxesPair factorAxes, int64_t count)
+      : factorAxes(factorAxes), count(count) {}
+
+  FactorAxesAssignmentCandidate() = default;
+
+  bool operator<(const FactorAxesAssignmentCandidate& rhs) const {
+    if (count != rhs.count) {
+      return count < rhs.count;
+    }
+    // TODO(enver): Tie-break based on sharded tensor sizes, instead.
+    return rhs.factorAxes < factorAxes;
+  }
+
+  void assignTo(AxesPerFactor& axesPerFactor) {
+    axesPerFactor[factorAxes.factorIndex] =
+        llvm::to_vector(factorAxes.axisRefs);
+  }
+};
+
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
 // with the largest count from a list that is initialized with all the
 // pairs with non-zero count, assign the picked axis to the picked factor, and
@@ -224,8 +258,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors) {
   AxesPerFactor factorAxisRefs(numFactors);
   DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo> factorAxesCounts;
-  int64_t maxCount = 0;
-  FactorAxesPair bestFactorAxes;
+  FactorAxesAssignmentCandidate bestFactorAxes;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -235,12 +268,9 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
         continue;
       }
       FactorAxesPair factorAxes(factorIndex, factorSharding.axisRefs);
-      int64_t axesCount = ++factorAxesCounts[factorAxes];
-      if (axesCount > maxCount ||
-          (axesCount == maxCount && factorAxes < bestFactorAxes)) {
-        maxCount = axesCount;
-        bestFactorAxes = factorAxes;
-      }
+      bestFactorAxes = std::max(
+          bestFactorAxes, FactorAxesAssignmentCandidate(
+                              factorAxes, ++factorAxesCounts[factorAxes]));
     }
   }
 
@@ -250,24 +280,21 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   // the count of [x] prefix will be two for this factor.
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
-  while (maxCount > 0) {
-    factorAxisRefs[bestFactorAxes.factorIndex] =
-        llvm::to_vector(bestFactorAxes.axisRefs);
+  while (bestFactorAxes.count > 0) {
+    bestFactorAxes.assignTo(factorAxisRefs);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
-    maxCount = 0;
-    FactorAxesPair nextBestFactorAxes;
+    FactorAxesAssignmentCandidate nextBestFactorAxes;
     for (auto factorAxesCountIt = factorAxesCounts.begin();
          factorAxesCountIt != factorAxesCounts.end(); factorAxesCountIt++) {
       const auto& [factorAxes, count] = *factorAxesCountIt;
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
-      // TODO(enver): Use FactorAxesPair overlap api instead.
-      if (factorAxes.factorIndex == bestFactorAxes.factorIndex ||
-          axisRefsOverlap(factorAxes.axisRefs, bestFactorAxes.axisRefs)) {
+      if (factorAxes.factorIndex == bestFactorAxes.factorAxes.factorIndex ||
+          factorAxes.overlaps(bestFactorAxes.factorAxes)) {
         // TODO(enver): Optimize to flip unseen if all the axes of the factor
         // have zero count.
         // Clear the count of overlapping axis, effectively erasing.
@@ -276,11 +303,8 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
         factorAxesCounts.erase(factorAxesCountIt);
         continue;
       }
-      if (count > maxCount ||
-          (count == maxCount && factorAxes < nextBestFactorAxes)) {
-        maxCount = count;
-        nextBestFactorAxes = factorAxes;
-      }
+      nextBestFactorAxes = std::max(
+          nextBestFactorAxes, FactorAxesAssignmentCandidate(factorAxes, count));
     }
     bestFactorAxes = nextBestFactorAxes;
   }
