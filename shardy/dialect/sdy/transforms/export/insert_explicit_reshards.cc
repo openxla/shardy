@@ -17,6 +17,7 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -155,8 +156,7 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
-struct FactorAxesPair {
-  int64_t factorIndex = -1;
+struct AxesWithTail {
   // The axes that this FactorAxesPair holds is defined by `axisRefs` and
   // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is
   // empty, then `axisRefs` is empty as well.
@@ -164,29 +164,26 @@ struct FactorAxesPair {
   AxisRefAttr tailAxisRef;
 
   // Assumes that input `tailAxisRef` is non-empty.
-  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs,
-                 AxisRefAttr tailAxisRef)
-      : factorIndex(factorIndex),
-        axisRefs(axisRefs),
-        tailAxisRef(tailAxisRef) {}
+  AxesWithTail(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
+      : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
 
-  // Assumes that input `axisRefs` is non-empty.
-  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
-      : factorIndex(factorIndex),
-        axisRefs(axisRefs.drop_back()),
-        tailAxisRef(axisRefs.back()) {}
+  AxesWithTail() = default;
 
-  // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
-  // use it when the axes is empty.
-  FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
-  FactorAxesPair() = default;
+  // TODO(enver): Define an iterator that iterates on the concatenation of
+  // axisRefs and tail, and use it for the methods below.
 
-  bool operator<(const FactorAxesPair& rhs) const {
-    if (factorIndex != rhs.factorIndex) {
-      return factorIndex < rhs.factorIndex;
-    }
-    if (axisRefs.size() != rhs.axisRefs.size()) {
-      return axisRefs.size() < rhs.axisRefs.size();
+  // Checks if the axes is empty.
+  bool empty() const {
+    // If `tailAxisRef` is empty, then `axisRefs` is empty as well. Hence, it is
+    // sufficient to check if `tailAxisRef` empty.
+    return !tailAxisRef;
+  }
+
+  int64_t size() const { return empty() ? 0 : axisRefs.size() + 1; }
+
+  bool operator<(const AxesWithTail& rhs) const {
+    if (size() != rhs.size()) {
+      return size() < rhs.size();
     }
     for (auto [axisRef, rhsAxisRef] : llvm::zip_equal(axisRefs, rhs.axisRefs)) {
       if (axisRef != rhsAxisRef) {
@@ -199,17 +196,17 @@ struct FactorAxesPair {
     return false;
   }
 
-  bool operator==(const FactorAxesPair& rhs) const {
-    return factorIndex == rhs.factorIndex && axisRefs == rhs.axisRefs &&
-           tailAxisRef == rhs.tailAxisRef;
+  bool operator==(const AxesWithTail& rhs) const {
+    return axisRefs == rhs.axisRefs && tailAxisRef == rhs.tailAxisRef;
   }
 
-  // TODO(enver): Define an iterator that iterates on the concatenation of
-  // axisRefs and tail, and use it below for overlaps.
-
   // Checks if `axisRef` overlaps with axes of this FactorAxesPair.
+  // Assumes `axisRef` is non-empty.
   bool overlaps(AxisRefAttr axisRef) const {
-    if (tailAxisRef && axisRef.overlaps(tailAxisRef)) {
+    if (empty()) {
+      return false;
+    }
+    if (axisRef.overlaps(tailAxisRef)) {
       return true;
     }
     return llvm::any_of(axisRefs, [&](AxisRefAttr againstAxisRef) {
@@ -218,27 +215,74 @@ struct FactorAxesPair {
   }
 
   // Checks if any two axes, one from this, and the other from `rhs`, overlap.
-  bool overlaps(const FactorAxesPair& rhs) const {
-    if (tailAxisRef && rhs.overlaps(tailAxisRef)) {
+  bool overlaps(const AxesWithTail& rhs) const {
+    if (empty()) {
+      return false;
+    }
+    if (rhs.overlaps(tailAxisRef)) {
       return true;
     }
     return llvm::any_of(
         axisRefs, [&](AxisRefAttr axisRef) { return rhs.overlaps(axisRef); });
   }
 
-  void assignTo(AxesPerFactor& axesPerFactor) {
-    if (!tailAxisRef) {  // Implies the whole axes is empty.
-      axesPerFactor[factorIndex].clear();
-      return;
+  SmallVector<AxisRefAttr> toVector() const {
+    if (empty()) {
+      return {};
     }
-    axesPerFactor[factorIndex] = llvm::to_vector(axisRefs);
-    axesPerFactor[factorIndex].push_back(tailAxisRef);
+    SmallVector<AxisRefAttr> resultAxes = llvm::to_vector(axisRefs);
+    resultAxes.push_back(tailAxisRef);
+    return resultAxes;
+  }
+
+  std::pair<ArrayRef<AxisRefAttr>, AxisRefAttr> toPair() const {
+    return std::make_pair(axisRefs, tailAxisRef);
+  }
+};
+
+struct FactorAxesPair {
+  int64_t factorIndex = -1;
+  AxesWithTail axes;
+
+  // Assumes that input `tailAxisRef` is non-empty.
+  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs,
+                 AxisRefAttr tailAxisRef)
+      : factorIndex(factorIndex), axes(AxesWithTail(axisRefs, tailAxisRef)) {}
+
+  // Assumes that input `axisRefs` is non-empty.
+  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
+      : factorIndex(factorIndex),
+        axes(AxesWithTail(axisRefs.drop_back(), axisRefs.back())) {}
+
+  // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
+  // use it when the axes is empty.
+  FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
+  FactorAxesPair() = default;
+
+  bool operator<(const FactorAxesPair& rhs) const {
+    if (factorIndex != rhs.factorIndex) {
+      return factorIndex < rhs.factorIndex;
+    }
+    return axes < rhs.axes;
+  }
+
+  bool operator==(const FactorAxesPair& rhs) const {
+    return factorIndex == rhs.factorIndex && axes == rhs.axes;
+  }
+
+  // Checks if any two axes, one from this, and the other from `rhs`, overlap.
+  bool overlaps(const FactorAxesPair& rhs) const {
+    return axes.overlaps(rhs.axes);
+  }
+
+  void assignTo(AxesPerFactor& axesPerFactor) const {
+    axesPerFactor[factorIndex] = axes.toVector();
   }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   static unsigned getHashValue(const FactorAxesPair& m) {
-    return llvm::hash_combine(m.factorIndex, m.axisRefs, m.tailAxisRef);
+    return llvm::hash_combine(m.factorIndex, m.axes.toPair());
   }
   static bool isEqual(const FactorAxesPair& lhs, const FactorAxesPair& rhs) {
     return lhs == rhs;
