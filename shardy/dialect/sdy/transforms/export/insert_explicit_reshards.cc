@@ -273,16 +273,9 @@ struct FactorAxesAssignmentCandidate {
   }
 };
 
-// Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
-// with the largest count from a list that is initialized with all the
-// pairs with non-zero count, assign the picked axis to the picked factor, and
-// delete all the pairs from the list that is either with the picked factor, or
-// with an axis that overlaps with the picked axis. Continue iterating until the
-// list is empty.
-AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
-    const ShardingProjection& projection, int64_t numFactors) {
-  AxesPerFactor factorAxisRefs(numFactors);
-  DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo> factorAxesCounts;
+FactorAxesAssignmentCandidate findFactorAxesCounts(
+    const ShardingProjection& projection,
+    DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo>& factorAxesCounts) {
   FactorAxesAssignmentCandidate bestFactorAxes;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
@@ -298,7 +291,21 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
                               factorAxes, ++factorAxesCounts[factorAxes]));
     }
   }
+  return bestFactorAxes;
+}
 
+// Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
+// with the largest count from a list that is initialized with all the
+// pairs with non-zero count, assign the picked axis to the picked factor, and
+// delete all the pairs from the list that is either with the picked factor, or
+// with an axis that overlaps with the picked axis. Continue iterating until the
+// list is empty.
+AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
+    const ShardingProjection& projection, int64_t numFactors) {
+  AxesPerFactor factorAxisRefs(numFactors);
+  DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo> factorAxesCounts;
+  FactorAxesAssignmentCandidate bestFactorAxes =
+      findFactorAxesCounts(projection, factorAxesCounts);
   // TODO(enver): Instead of taking an axes-array with the largest count, take a
   // prefix with the largest count.  For example, if a factor appears in 2
   // tensors, and one has sharding [x,y] and the other has sharding [x,z], then
