@@ -241,7 +241,10 @@ struct AxesWithTail {
 };
 
 struct FactorAxesPair {
-  int64_t factorIndex = -1;
+  constexpr static int64_t kEmptyFactorIndex = -1;
+  constexpr static int64_t kTombstoneFactorIndex = -2;
+
+  int64_t factorIndex = kEmptyFactorIndex;
   AxesWithTail axes;
 
   // Assumes that input `tailAxisRef` is non-empty.
@@ -270,6 +273,8 @@ struct FactorAxesPair {
     return factorIndex == rhs.factorIndex && axes == rhs.axes;
   }
 
+  bool empty() const { return factorIndex == kEmptyFactorIndex; }
+
   // Checks if any two axes, one from this, and the other from `rhs`, overlap.
   bool overlaps(const FactorAxesPair& rhs) const {
     return axes.overlaps(rhs.axes);
@@ -291,7 +296,7 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
 
   static inline FactorAxesPair getTombstoneKey() {
-    return FactorAxesPair(/*factorIndex=*/-2);
+    return FactorAxesPair(FactorAxesPair::kTombstoneFactorIndex);
   }
 };
 
@@ -311,13 +316,9 @@ struct FactorAxesAssignmentCandidate {
     // TODO(enver): Tie-break based on sharded tensor sizes, instead.
     return factorAxes < rhs.factorAxes;
   }
-
-  void assignTo(AxesPerFactor& axesPerFactor) {
-    factorAxes.assignTo(axesPerFactor);
-  }
 };
 
-FactorAxesAssignmentCandidate findFactorAxesCounts(
+FactorAxesPair findFactorAxesCounts(
     const ShardingProjection& projection,
     DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo>& factorAxesCounts) {
   FactorAxesAssignmentCandidate bestFactorAxes;
@@ -335,7 +336,7 @@ FactorAxesAssignmentCandidate findFactorAxesCounts(
                               factorAxes, ++factorAxesCounts[factorAxes]));
     }
   }
-  return bestFactorAxes;
+  return bestFactorAxes.factorAxes;
 }
 
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
@@ -348,7 +349,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors) {
   AxesPerFactor factorAxisRefs(numFactors);
   DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo> factorAxesCounts;
-  FactorAxesAssignmentCandidate bestFactorAxes =
+  FactorAxesPair bestFactorAxes =
       findFactorAxesCounts(projection, factorAxesCounts);
   // TODO(enver): Instead of taking an axes-array with the largest count, take a
   // prefix with the largest count.  For example, if a factor appears in 2
@@ -356,7 +357,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   // the count of [x] prefix will be two for this factor.
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
-  while (bestFactorAxes.count > 0) {
+  while (!bestFactorAxes.empty()) {
     bestFactorAxes.assignTo(factorAxisRefs);
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
@@ -369,8 +370,8 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
-      if (factorAxes.factorIndex == bestFactorAxes.factorAxes.factorIndex ||
-          factorAxes.overlaps(bestFactorAxes.factorAxes)) {
+      if (factorAxes.factorIndex == bestFactorAxes.factorIndex ||
+          factorAxes.overlaps(bestFactorAxes)) {
         // TODO(enver): Optimize to flip unseen if all the axes of the factor
         // have zero count.
         // Clear the count of overlapping axis, effectively erasing.
@@ -382,7 +383,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       nextBestFactorAxes = std::max(
           nextBestFactorAxes, FactorAxesAssignmentCandidate(factorAxes, count));
     }
-    bestFactorAxes = nextBestFactorAxes;
+    bestFactorAxes = nextBestFactorAxes.factorAxes;
   }
   return factorAxisRefs;
 }
