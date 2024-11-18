@@ -265,7 +265,7 @@ struct FactorAxesAssignmentCandidate {
       return count < rhs.count;
     }
     // TODO(enver): Tie-break based on sharded tensor sizes, instead.
-    return rhs.factorAxes < factorAxes;
+    return factorAxes < rhs.factorAxes;
   }
 
   void assignTo(AxesPerFactor& axesPerFactor) {
