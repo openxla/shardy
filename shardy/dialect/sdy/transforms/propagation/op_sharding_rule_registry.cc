@@ -378,7 +378,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         if (callTargetName == "X64Combine" ||
             callTargetName == "MoveToDevice" ||
             callTargetName == "MoveToHost" || callTargetName == "mhlo.tan" ||
-            callTargetName == "mhlo.erf") {
+            callTargetName == "mhlo.erf" ||
+            callTargetName == "LayoutConstraint") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         if (callTargetName == "Eigh") {
