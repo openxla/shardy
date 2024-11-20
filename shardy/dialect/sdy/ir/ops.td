@@ -427,4 +427,41 @@ def NamedComputationOp : Sdy_Op<"named_computation",
   let hasVerifier = 1;
 }
 
+
+def AllGatherOp : Sdy_Op<"all_gather",
+    [SameOperandsAndResultType]> {
+  let summary = "Gathers chunks of a tensor along axes";
+  let description = [{
+    Gathers chunks of a tensor along axes specified in `gatheringAxes`.
+
+    The `gatheringAxes` is a list of lists of axes. Each inner list specifies
+    the axes along which a separate gather should be performed. The outer list
+    is over the dimensions of the tensor. It will be applied to the sharding of
+    the operand (`tensor`) to obtain the sharding of the result (`outSharding`).
+
+    Note that `outSharding` is not used to determine the sharding of the result.
+    Instead, the sharding of the result is determined by the sharding of the
+    operand and the `gatheringAxes`, and `outSharding` must match this inferred
+    sharding.
+
+    Example:
+    ```mlir
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\]>]>} : tensor<8x8xf32>
+    %2 = sdy.all_gather gathering_axes=[{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
+    ```
+
+  }];
+
+  let arguments = (ins
+    AnyTensor:$tensor,
+    Sdy_ListOfAxisRefLists:$gatheringAxes,
+    Sdy_TensorSharding:$outSharding
+  );
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$gatheringAxes $tensor `out_sharding````=```$outSharding attr-dict `:` type($result)";
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+}
+
+
 #endif  // SDY_OPS

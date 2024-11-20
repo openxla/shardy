@@ -164,5 +164,10 @@ void ShardingGroupOp::getCanonicalizationPatterns(RewritePatternSet& results,
   results.add<DedupShardingGroupPattern>(context);
 }
 
+void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                              MLIRContext* context) {
+  results.add<AllGatherNoopPattern>(context);
+}
+
 }  // namespace sdy
 }  // namespace mlir

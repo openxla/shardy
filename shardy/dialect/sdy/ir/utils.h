@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_IR_UTILS_H_
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -173,6 +174,22 @@ std::string strippedAttrString(AttrTy attr, bool stripMnemonic = false) {
   if (stripMnemonic) {
     result.erase(0, attr.getMnemonic().size());
   }
+  return result;
+}
+
+// Returns the string representation of an `ArrayRef` of attributes, `attrs`,
+// without dialect wrapping.
+//
+// If `stripMnemonic` is true, also strips the mnemonic of the attribute.
+template <class AttrTy>
+std::string strippedAttrsString(ArrayRef<AttrTy> attrs,
+                                       bool stripMnemonic = false) {
+  std::string result = "[";
+  llvm::raw_string_ostream os(result);
+  llvm::interleaveComma(attrs, os, [&](AttrTy attr) {
+    os << strippedAttrString(attr, stripMnemonic);
+  });
+  result += "]";
   return result;
 }
 

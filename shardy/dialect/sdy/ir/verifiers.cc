@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <numeric>
@@ -251,11 +252,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
            << shardingAttr.getRank() << " != " << rank;
   }
 
-  SmallDenseMap<StringRef, int64_t> axisNameToSize;
-  axisNameToSize.reserve(mesh.getAxes().size());
-  for (MeshAxisAttr axis : mesh.getAxes()) {
-    axisNameToSize[axis.getName()] = axis.getSize();
-  }
+  SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
 
   // Verify dimension shardings
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
@@ -948,6 +945,107 @@ LogicalResult NamedComputationOp::verify() {
             return emitOpError("out_shardings ") << msg;
           }))) {
     return failure();
+  }
+
+  return success();
+}
+
+// For each AllGatherOp, verifies:
+// 1. The tensor shardings.
+// 2. the common mesh of the result and operand.
+// 3. the all gathering axes.
+// 4. the application of the all gathering axes to the operand
+// TODO (b/379838852) The following case should compile! For now, only subaxis
+// that are ignored or exact-matched in all_gather are supported.
+LogicalResult AllGatherOp::verify() {
+  // 1. Verify MeshAttr of result and operand is the same.
+  TensorShardingAttr resultSharding = getOutSharding();
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  if (!operandSharding) {
+    return emitOpError("gathering on operand without sharding");
+  }
+  if (failed(verifyTensorShardingAttr(resultSharding, getType(), *this,
+                                      getEmitErrorFn(*this)))) {
+    return failure();
+  }
+
+  // 2. Verify MeshAttr of result and operand is the same.
+  MeshAttr mesh = resultSharding.getMesh(*this);
+  MeshAttr operandMesh = operandSharding.getMesh(*this);
+
+  if (mesh != operandMesh) {
+    return emitOpError("result mesh does not match operand mesh")
+               .attachNote(getOperand().getLoc())
+           << "operand mesh: " << operandMesh;
+  }
+
+  // 3. Verify the all gathering axes.
+  SmallDenseSet<AxisRefAttr> seenAxisRefs;
+  SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
+  ArrayRef<AxisRefListAttr> gatheringAxes = getGatheringAxes();
+  SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
+
+  for (AxisRefListAttr axisRefList : gatheringAxes) {
+    if (failed(verifyAxisRefList(axisRefList.getValue(), axisNameToSize,
+                                 seenAxisRefs, axisNameToSubAxes,
+                                 getEmitErrorFn(*this)))) {
+      return failure();
+    }
+  }
+
+  // 4. Verify that applying gathering_axes to the operand gets to_sharding.
+  // For example:
+  // operand sharding: (a, b, c, d)
+  // gathering axes: (c, d)
+  // -> (a, b)
+
+  // 4.1. Verify same rank of the result sharding and operand sharding.
+  ArrayRef<DimensionShardingAttr> resultDimShardings =
+      resultSharding.getDimShardings();
+  ArrayRef<DimensionShardingAttr> operandDimShardings =
+      operandSharding.getDimShardings();
+  if (resultDimShardings.size() != operandDimShardings.size()) {
+    return emitOpError("result sharding has rank ")
+           << resultDimShardings.size() << " but operand sharding has rank "
+           << operandDimShardings.size();
+  }
+  // 4.2. Verify same rank of result sharding and the gathering axes.
+  if (resultDimShardings.size() != gatheringAxes.size()) {
+    return emitOpError("result sharding has rank ")
+           << resultDimShardings.size() << " but gathering axes has rank "
+           << gatheringAxes.size();
+  }
+
+  // 4.3. Verify that applying gathering_axes to the operand gets to_sharding.
+  size_t dimIdx = 0;
+  for (auto [operandDimSharding, dimGatheringAxes] :
+       llvm::zip_equal(operandDimShardings, gatheringAxes)) {
+    ArrayRef<AxisRefAttr> expectedDimSharding = operandDimSharding.getAxes();
+    ArrayRef<AxisRefAttr> dimGatheringAxesRef = dimGatheringAxes.getValue();
+    int64_t gatheringAxisIndex = dimGatheringAxes.size() - 1;
+    int64_t operandDimShardingIndex = expectedDimSharding.size() - 1;
+    while (gatheringAxisIndex >= 0 && operandDimShardingIndex >= 0 &&
+           expectedDimSharding[operandDimShardingIndex] ==
+               dimGatheringAxesRef[gatheringAxisIndex]) {
+      expectedDimSharding = expectedDimSharding.drop_back();
+      gatheringAxisIndex--;
+      operandDimShardingIndex--;
+    }
+    if (gatheringAxisIndex > 0) {
+      return emitOpError(
+                 "Cannot apply all gathering axes to operand on dimension ")
+             << dimIdx << " " << gatheringAxisIndex << " "
+             << operandDimShardingIndex << " " << expectedDimSharding.size()
+             << " " << dimGatheringAxesRef.size();
+    }
+
+    if (expectedDimSharding != resultDimShardings[dimIdx].getAxes()) {
+      return emitOpError("result dim sharding doesn't match expected sharding ")
+             << strippedAttrsString(expectedDimSharding, /*stripMnemonic=*/true)
+             << " on dimension " << dimIdx;
+    }
+
+    dimIdx++;
   }
 
   return success();

@@ -127,6 +127,9 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     // mesh.
     std::function<bool(StringRef lhs, StringRef rhs)> getAxisNameComparator()
     const;
+
+    // Returns a map from axis name to axis size.
+    llvm::SmallDenseMap<StringRef, int64_t> getAxisNameToSize() const;
   }];
 }
 
@@ -753,5 +756,20 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     bool isCustom() const { return getIsCustomRule(); }
   }];
 }
+
+def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
+                                 "axis_ref_list", "AxisRefAttr"> {
+  let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
+}
+
+def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
+                                 "list_of_axis_ref_lists", "AxisRefListAttr"> {
+}
+
+def Sdy_EmptyAxesPerDim : AttrConstraint<
+    CPred<"$_self.isa<ListOfAxisRefListsAttr>() && "
+          "llvm::all_of($_self.cast<ListOfAxisRefListsAttr>(),"
+          "               [](const AxisRefListAttr& al) { return al.size() == 0; })">,
+    "is empty axes-per-dim">;
 
 #endif  // SDY_ATTRS

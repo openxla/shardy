@@ -24,6 +24,7 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -217,6 +218,16 @@ MeshAttr::getAxisNameComparator() const {
 
     llvm_unreachable("axis names not present in mesh");
   };
+}
+
+llvm::SmallDenseMap<StringRef, int64_t> MeshAttr::getAxisNameToSize() const {
+  llvm::SmallDenseMap<StringRef, int64_t> axisNameToSize;
+  ArrayRef<MeshAxisAttr> axes = getAxes();
+  axisNameToSize.reserve(axes.size());
+  for (MeshAxisAttr axis : axes) {
+    axisNameToSize[axis.getName()] = axis.getSize();
+  }
+  return axisNameToSize;
 }
 
 //===----------------------------------------------------------------------===//
