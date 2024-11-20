@@ -8,6 +8,61 @@ representation and additional API components to attach shardings to tensors.
 
 ## Operations
 
+### `sdy.all_gather` (sdy::AllGatherOp)
+
+_Gathers chunks of a tensor along axes_
+
+
+Syntax:
+
+```
+operation ::= `sdy.all_gather` $gatheringAxes $tensor `out_sharding````=```$outSharding attr-dict `:` type($result)
+```
+
+Gathers chunks of a tensor along axes specified in `gatheringAxes`.
+
+The `gatheringAxes` is a list of lists of axes. Each inner list specifies
+the axes along which a separate gather should be performed. The outer list
+is over the dimensions of the tensor. It will be applied to the sharding of
+the operand (`tensor`) to obtain the sharding of the result (`outSharding`).
+
+Note that `outSharding` is not used to determine the sharding of the result.
+Instead, the sharding of the result is determined by the sharding of the
+operand and the `gatheringAxes`, and `outSharding` must match this inferred
+sharding.
+
+Example:
+```mlir
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\]>]>} : tensor<8x8xf32>
+%2 = sdy.all_gather gathering_axes=[{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
+```
+
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>gatheringAxes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td></td></tr>
+<tr><td><code>outSharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | tensor of any type values
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | tensor of any type values
+
+
 ### `sdy.constant` (sdy::ConstantOp)
 
 _Constant operation_
@@ -513,6 +568,26 @@ Syntax:
 | name | `::llvm::StringRef` | name |
 | sub_axis_info | `SubAxisInfoAttr` |  |
 
+### AxisRefListAttr
+
+
+
+Syntax:
+
+```
+#sdy.axis_ref_list<
+  ::llvm::ArrayRef<AxisRefAttr>   # value
+>
+```
+
+
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| value | `::llvm::ArrayRef<AxisRefAttr>` |  |
+
 ### DimMappingAttr
 
 List of factor indices for a dimension
@@ -545,6 +620,26 @@ highest priority is assumed when the priority is missing in the annotation.
 | axes | `::llvm::ArrayRef<AxisRefAttr>` | list of axis refs |
 | is_closed | `bool` |  |
 | priority | `std::optional<int64_t>` |  |
+
+### ListOfAxisRefListsAttr
+
+
+
+Syntax:
+
+```
+#sdy.list_of_axis_ref_lists<
+  ::llvm::ArrayRef<AxisRefListAttr>   # value
+>
+```
+
+
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| value | `::llvm::ArrayRef<AxisRefListAttr>` |  |
 
 ### ManualAxesAttr
 
