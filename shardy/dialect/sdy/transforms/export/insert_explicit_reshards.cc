@@ -361,14 +361,11 @@ FactorAxesPair findFactorAxesCounts(
                                                  projection.getResults())) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      if (factorSharding.axisRefs.empty()) {
-        continue;
+      ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
+      while (!axisRefs.empty()) {
+        axesSets[factorIndex].insert(AxesWithTail(axisRefs));
+        axisRefs = axisRefs.drop_back();
       }
-      // TODO(enver): Add all prefixes of `factorSharding.axisRefs` to the set.
-      // This way, a prefix that appears with different suffixes will have more
-      // count, and may be preferable. It also requires that assignment of axes
-      // on factors are not final and may be expanded.
-      axesSets[factorIndex].insert(AxesWithTail(factorSharding.axisRefs));
     }
   }
 
