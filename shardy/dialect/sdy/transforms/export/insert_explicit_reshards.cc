@@ -162,12 +162,18 @@ struct AxesWithTail {
   // empty, then `axisRefs` is empty as well.
   ArrayRef<AxisRefAttr> axisRefs;
   AxisRefAttr tailAxisRef;
+  bool isTombstone = false;
 
   // Assumes that input `tailAxisRef` is non-empty.
   AxesWithTail(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
       : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
 
+  // Assumes that input `axisRefs` is non-empty.
+  AxesWithTail(ArrayRef<AxisRefAttr> axisRefs)
+      : axisRefs(axisRefs.drop_back()), tailAxisRef(axisRefs.back()) {}
+
   AxesWithTail() = default;
+  AxesWithTail(bool isTombstone) : isTombstone(isTombstone) {}
 
   // TODO(enver): Define an iterator that iterates on the concatenation of
   // axisRefs and tail, and use it for the methods below.
@@ -238,6 +244,40 @@ struct AxesWithTail {
   std::pair<ArrayRef<AxisRefAttr>, AxisRefAttr> toPair() const {
     return std::make_pair(axisRefs, tailAxisRef);
   }
+
+  // Checks if this axes is a strict prefix of the axes of `rhs`.
+  bool strictPrefixOf(const AxesWithTail& rhs) const {
+    if (empty()) {
+      return !rhs.empty();
+    }
+    if (size() > rhs.size()) {
+      return false;
+    }
+    for (auto [axisRef, rhsAxisRef] : llvm::zip(axisRefs, rhs.axisRefs)) {
+      if (axisRef != rhsAxisRef) {
+        return false;
+      }
+    }
+    if (size() == rhs.size()) {
+      return tailAxisRef.strictPrefixOf(rhs.tailAxisRef);
+    }
+    return tailAxisRef.prefixOf(rhs.axisRefs[axisRefs.size()]);
+  }
+};
+
+struct AxesWithTailInfo : public llvm::DenseMapInfo<AxesWithTail> {
+  static unsigned getHashValue(const AxesWithTail& m) {
+    return llvm::hash_value(m.toPair());
+  }
+  static bool isEqual(const AxesWithTail& lhs, const AxesWithTail& rhs) {
+    return lhs == rhs;
+  }
+
+  static inline AxesWithTail getEmptyKey() { return AxesWithTail(); }
+
+  static inline AxesWithTail getTombstoneKey() {
+    return AxesWithTail(/*isTombstone=*/true);
+  }
 };
 
 struct FactorAxesPair {
@@ -247,15 +287,8 @@ struct FactorAxesPair {
   int64_t factorIndex = kEmptyFactorIndex;
   AxesWithTail axes;
 
-  // Assumes that input `tailAxisRef` is non-empty.
-  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs,
-                 AxisRefAttr tailAxisRef)
-      : factorIndex(factorIndex), axes(AxesWithTail(axisRefs, tailAxisRef)) {}
-
-  // Assumes that input `axisRefs` is non-empty.
-  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
-      : factorIndex(factorIndex),
-        axes(AxesWithTail(axisRefs.drop_back(), axisRefs.back())) {}
+  FactorAxesPair(int64_t factorIndex, AxesWithTail axes)
+      : factorIndex(factorIndex), axes(axes) {}
 
   // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
   // use it when the axes is empty.
@@ -319,9 +352,10 @@ struct FactorAxesAssignmentCandidate {
 };
 
 FactorAxesPair findFactorAxesCounts(
-    const ShardingProjection& projection,
+    const ShardingProjection& projection, int64_t numFactors,
     DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo>& factorAxesCounts) {
-  FactorAxesAssignmentCandidate bestFactorAxes;
+  // Find sets of candidate axes per factor.
+  SmallVector<DenseSet<AxesWithTail, AxesWithTailInfo>> axesSets(numFactors);
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -330,11 +364,42 @@ FactorAxesPair findFactorAxesCounts(
       if (factorSharding.axisRefs.empty()) {
         continue;
       }
-      FactorAxesPair factorAxes(factorIndex, factorSharding.axisRefs);
-      bestFactorAxes = std::max(
-          bestFactorAxes, FactorAxesAssignmentCandidate(
-                              factorAxes, ++factorAxesCounts[factorAxes]));
+      // TODO(enver): Add all prefixes of `factorSharding.axisRefs` to the set.
+      // This way, a prefix that appears with different suffixes will have more
+      // count, and may be preferable. It also requires that assignment of axes
+      // on factors are not final and may be expanded.
+      axesSets[factorIndex].insert(AxesWithTail(factorSharding.axisRefs));
     }
+  }
+
+  // Count factor-axes pairs.
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (factorSharding.axisRefs.empty()) {
+        continue;
+      }
+      FactorAxesPair factorAxes(factorIndex,
+                                AxesWithTail(factorSharding.axisRefs));
+      ++factorAxesCounts[factorAxes];
+      // Increment counts for all its strict prefixes.
+      for (const AxesWithTail& axes : axesSets[factorIndex]) {
+        if (axes.strictPrefixOf(factorAxes.axes)) {
+          ++factorAxesCounts[FactorAxesPair(factorIndex, axes)];
+        }
+      }
+    }
+  }
+
+  // Find the best factor-axes pair.
+  // TODO(enver): For two factor-axes pairs, if both have the same factor and
+  // the same count, and one is the prefix of the other, drop the prefix one.
+  FactorAxesAssignmentCandidate bestFactorAxes;
+  for (const auto& [factorAxes, count] : factorAxesCounts) {
+    bestFactorAxes = std::max(bestFactorAxes,
+                              FactorAxesAssignmentCandidate(factorAxes, count));
   }
   return bestFactorAxes.factorAxes;
 }
@@ -350,7 +415,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   AxesPerFactor factorAxisRefs(numFactors);
   DenseMap<FactorAxesPair, int64_t, FactorAxesPairInfo> factorAxesCounts;
   FactorAxesPair bestFactorAxes =
-      findFactorAxesCounts(projection, factorAxesCounts);
+      findFactorAxesCounts(projection, numFactors, factorAxesCounts);
   // TODO(enver): Instead of taking an axes-array with the largest count, take a
   // prefix with the largest count.  For example, if a factor appears in 2
   // tensors, and one has sharding [x,y] and the other has sharding [x,z], then
@@ -370,10 +435,22 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
-      if (factorAxes.factorIndex == bestFactorAxes.factorIndex ||
-          factorAxes.overlaps(bestFactorAxes)) {
-        // TODO(enver): Optimize to flip unseen if all the axes of the factor
-        // have zero count.
+      if (factorAxes.factorIndex == bestFactorAxes.factorIndex) {
+        // Drop any factor-axis pair that can not extend on the best one, for
+        // the best factor, which is a (not necessarily strict) prefix of an
+        // existing sharding of the factor.
+        // Drops when the iterated axes is the same as the best one, as a result
+        // the best factor-axis pair removed from the map.
+        if (!bestFactorAxes.axes.strictPrefixOf(factorAxes.axes)) {
+          factorAxesCounts.erase(factorAxesCountIt);
+        } else {
+          nextBestFactorAxes =
+              std::max(nextBestFactorAxes,
+                       FactorAxesAssignmentCandidate(factorAxes, count));
+        }
+        continue;
+      }
+      if (factorAxes.overlaps(bestFactorAxes)) {
         // Clear the count of overlapping axis, effectively erasing.
         // TODO(enver): Instead of removing from the list, trim the axisRefs,
         // to use the largest prefix that does not overlap with bestAxisRefs.
