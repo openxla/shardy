@@ -420,26 +420,6 @@ ShardingProjection ShardingProjection::build(AxesPerFactorRef axesPerFactorRef,
   return projection;
 }
 
-namespace {
-// Returns the greatest common prefix of given two arrays axis refs.
-inline SmallVector<AxisRefAttr> getGreatestCommonPrefix(
-    ArrayRef<AxisRefAttr> first, ArrayRef<AxisRefAttr> second) {
-  SmallVector<AxisRefAttr> result;
-  for (auto [firstAxisRef, secondAxisRef] : llvm::zip(first, second)) {
-    if (firstAxisRef == secondAxisRef) {
-      result.push_back(firstAxisRef);
-      continue;
-    }
-    if (auto prefix = firstAxisRef.getGreatestCommonPrefix(secondAxisRef);
-        prefix) {
-      result.push_back(*prefix);
-    }
-    break;
-  }
-  return result;
-}
-}  // namespace
-
 AxesPerFactor ShardingProjection::getGreatestCommonPrefixAxes(
     int64_t numFactors) const {
   AxesPerFactor factorAxisRefs(numFactors);

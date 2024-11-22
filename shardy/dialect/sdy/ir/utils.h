@@ -311,6 +311,10 @@ TypeRange getBodyTerminatorOpOperandTypes(RegionOpTy op) {
   return getBodyTerminator(op)->getOperandTypes();
 }
 
+// Returns the greatest common prefix of given two arrays axis refs.
+SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
+                                                 ArrayRef<AxisRefAttr> second);
+
 // Inlines (i.e., move) operations from region `src` into `dst` and converts the
 // terminator of each block in `dst` to `TerminatorOpTy`. The `rewriter`'s
 // insertion point is modified.

@@ -381,6 +381,23 @@ void setFuncResultSharding(FuncOp funcOp, int64_t resNum,
   funcOp.setResultAttr(resNum, kShardingAttr, sharding);
 }
 
+SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
+                                                 ArrayRef<AxisRefAttr> second) {
+  SmallVector<AxisRefAttr> result;
+  for (auto [firstAxisRef, secondAxisRef] : llvm::zip(first, second)) {
+    if (firstAxisRef == secondAxisRef) {
+      result.push_back(firstAxisRef);
+      continue;
+    }
+    if (auto prefix = firstAxisRef.getGreatestCommonPrefix(secondAxisRef);
+        prefix) {
+      result.push_back(*prefix);
+    }
+    break;
+  }
+  return result;
+}
+
 SmallVector<TensorShardingAttr> getShardings(ValueRange values) {
   return llvm::to_vector(
       llvm::map_range(values, [](Value value) { return getSharding(value); }));
