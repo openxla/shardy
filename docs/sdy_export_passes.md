@@ -63,6 +63,37 @@ operation becomes compatible.
 _Removes ShardingGroupOps after propagation._
 
 
+### `-sdy-reshard-to-collectives`
+
+_Converts ReshardOp into various Shardy collective ops._
+
+Here we match reshard ops and rewrite them into various Shardy collective
+ ops. After this pass, no reshard ops remain in the module. This pass assumes
+ that xplicit reshards have already been inserted
+ (`sdy-insert-explicit-reshards`).
+
+ A clarifying example:
+
+ Input:
+ ```mlir
+ mesh = <"x"=2, "y"=2, "z"=2>
+ %0 : tensor<16x2xf32> {sdy.sharding<@mesh, \[{"x", "y", "z"}, {}\]>
+ %1 = sdy.reshard %arg0 <@mesh, \[{"x"}, {}\]> : tensor<16x2xf32>
+ ```
+
+ Output:
+ ```mlir
+ mesh = <"x"=2, "y"=2, "z"=2>
+ %0 : tensor<16x2xf32> {sdy.sharding<@mesh, \[{"x", "y", "z"}, {}\]>
+ %1 = sdy.all_gather  \[{"y", "z"}, {}\] %arg0 out_sharding=<@mesh, \[{"x"}, {}\]> : tensor<16x2xf32>
+ ```
+
+ In the example above, the tensor `%0 : tensor<16x2xf32>` is sharded as
+ `\[{"x", "y", "z"}, {}\]`. Then, there's a `reshard` op resharding it as
+ `\[{"x"}, {}\]`. On the first axes, since the suffix `{"y", "z"}` is removed
+ after the reshard, we infer that we have all-gathered `{"y", "z"}`. The
+ second dimension is not changed.
+
 ### `-sdy-sharding-constraint-to-reshard`
 
 _Converts ShardingConstraintOp into ReshardOp._
