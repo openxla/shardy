@@ -52,16 +52,6 @@ Returns the shardings of all block argument data flow edge owners.
 
 NOTE: This method *must* be implemented by the user.
 
-#### `setBlockArgumentEdgeOwnerSharding`
-
-```c++
-void setBlockArgumentEdgeOwnerSharding(unsigned index, mlir::sdy::TensorShardingAttr sharding);
-```
-Sets the `sharding` of the block argument edge owner with the given
-`index`.
-
-NOTE: This method *must* be implemented by the user.
-
 #### `setBlockArgumentEdgeOwnerShardings`
 
 ```c++
@@ -80,21 +70,23 @@ Returns the shardings of all op result data flow edge owners.
 
 NOTE: This method *must* be implemented by the user.
 
-#### `setOpResultEdgeOwnerSharding`
-
-```c++
-void setOpResultEdgeOwnerSharding(unsigned index, mlir::sdy::TensorShardingAttr sharding);
-```
-Sets the `sharding` of the op result edge owner with the given `index`.
-
-NOTE: This method *must* be implemented by the user.
-
 #### `setOpResultEdgeOwnerShardings`
 
 ```c++
 void setOpResultEdgeOwnerShardings(mlir::ArrayRef<mlir::sdy::TensorShardingAttr> shardings);
 ```
 Sets `shardings` of all op result edge owners.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `transformTargetSharding`
+
+```c++
+mlir::sdy::TensorShardingAttr transformTargetSharding(mlir::Value target, mlir::sdy::TensorShardingAttr sharding, mlir::sdy::DataFlowShardingTransformType transformType);
+```
+Transforms the `sharding` of the target depending on `transformType`
+
+See `DataFlowShardingTransformType` for more information.
 
 NOTE: This method *must* be implemented by the user.
 
