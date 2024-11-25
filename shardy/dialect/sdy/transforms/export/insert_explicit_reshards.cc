@@ -353,7 +353,7 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   }
 };
 
-struct FactorAxesAssignmentCandidate {
+struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
   int64_t count = 0;
   // The size of axes to shard further. Hence, if the factor is already assigned
@@ -361,13 +361,13 @@ struct FactorAxesAssignmentCandidate {
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
   int64_t shardingSize = 0;
 
-  FactorAxesAssignmentCandidate(FactorAxesPair factorAxes, int64_t count,
-                                int64_t shardingSize)
+  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t count,
+                      int64_t shardingSize)
       : factorAxes(factorAxes), count(count), shardingSize(shardingSize) {}
 
-  FactorAxesAssignmentCandidate() = default;
+  FactorAxesCandidate() = default;
 
-  bool operator<(const FactorAxesAssignmentCandidate& rhs) const {
+  bool operator<(const FactorAxesCandidate& rhs) const {
     if (count != rhs.count) {
       return count < rhs.count;
     }
@@ -380,7 +380,7 @@ struct FactorAxesAssignmentCandidate {
 };
 
 using FactorAxesCandidatesMap =
-    DenseMap<FactorAxesPair, FactorAxesAssignmentCandidate, FactorAxesPairInfo>;
+    DenseMap<FactorAxesPair, FactorAxesCandidate, FactorAxesPairInfo>;
 
 void incrementFactorAxesCounts(FactorAxesCandidatesMap& factorAxesCounts,
                                const FactorAxesPair& factorAxes,
@@ -394,7 +394,7 @@ void incrementFactorAxesCounts(FactorAxesCandidatesMap& factorAxesCounts,
                                factorAxes.axes.getShardingSize(mesh));
 }
 
-FactorAxesCandidatesMap findFactorAxesCounts(
+SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
     const ShardingProjection& projection, int64_t numFactors, MeshAttr mesh) {
   // Find sets of candidate axes per factor.
   SmallVector<DenseSet<AxesWithTail, AxesWithTailInfo>> axesSets(numFactors);
@@ -415,7 +415,7 @@ FactorAxesCandidatesMap findFactorAxesCounts(
   // the same count, and one is the prefix of the other, drop the prefix one.
 
   // Count factor-axes pairs.
-  FactorAxesCandidatesMap factorAxesCounts;
+  FactorAxesCandidatesMap factorAxesCandidatesMap;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -426,17 +426,22 @@ FactorAxesCandidatesMap findFactorAxesCounts(
       }
       FactorAxesPair factorAxes(factorIndex,
                                 AxesWithTail(factorSharding.axisRefs));
-      incrementFactorAxesCounts(factorAxesCounts, factorAxes, mesh);
+      incrementFactorAxesCounts(factorAxesCandidatesMap, factorAxes, mesh);
       // Increment counts for all its strict prefixes.
       for (const AxesWithTail& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
-          incrementFactorAxesCounts(factorAxesCounts,
+          incrementFactorAxesCounts(factorAxesCandidatesMap,
                                     FactorAxesPair(factorIndex, axes), mesh);
         }
       }
     }
   }
-  return factorAxesCounts;
+
+  SmallVector<FactorAxesCandidate> factorAxesCandidates;
+  for (const auto& [_, candidate] : factorAxesCandidatesMap) {
+    factorAxesCandidates.push_back(candidate);
+  }
+  return factorAxesCandidates;
 }
 
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
@@ -448,8 +453,8 @@ FactorAxesCandidatesMap findFactorAxesCounts(
 SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors, MeshAttr mesh) {
   SmallVector<AxesWithTail> factorAxisRefs(numFactors);
-  FactorAxesCandidatesMap factorAxesCounts =
-      findFactorAxesCounts(projection, numFactors, mesh);
+  SmallVector<FactorAxesCandidate> factorAxesCandidates =
+      findFactorAxesCandidates(projection, numFactors, mesh);
   // TODO(enver): Instead of taking an axes-array with the largest count, take
   // a prefix with the largest count.  For example, if a factor appears in 2
   // tensors, and one has sharding [x,y] and the other has sharding [x,z],
@@ -458,7 +463,7 @@ SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
   // than floor(n/2) where n is the number of tensors.
   // The first iteration is to find the initial best.
   FactorAxesPair bestFactorAxes;
-  while (!factorAxesCounts.empty()) {
+  while (!factorAxesCandidates.empty()) {
     if (!bestFactorAxes.empty()) {
       bestFactorAxes.assignTo(factorAxisRefs);
     }
@@ -466,22 +471,22 @@ SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
     // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
-    FactorAxesAssignmentCandidate nextBestFactorAxes;
-    for (auto factorAxesCountIt = factorAxesCounts.begin();
-         factorAxesCountIt != factorAxesCounts.end(); factorAxesCountIt++) {
-      const auto& [factorAxes, candidate] = *factorAxesCountIt;
+    FactorAxesCandidate nextBestFactorAxes;
+    int64_t candidateIndex = 0;
+    while (candidateIndex < factorAxesCandidates.size()) {
+      FactorAxesCandidate& candidate = factorAxesCandidates[candidateIndex];
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
-      if (factorAxes.factorIndex == bestFactorAxes.factorIndex) {
+      if (candidate.factorAxes.factorIndex == bestFactorAxes.factorIndex) {
         // Drop any factor-axis pair that can not extend on the best one, for
         // the best factor, which is a (not necessarily strict) prefix of an
         // existing sharding of the factor.
         // Drops when the iterated axes is the same as the best one, as a
         // result the best factor-axis pair removed from the map.
-        if (!bestFactorAxes.axes.strictPrefixOf(factorAxes.axes)) {
-          // TODO(enver): Replace with llvm::make_early_inc_range.
-          factorAxesCounts.erase(factorAxesCountIt);
+        if (!bestFactorAxes.axes.strictPrefixOf(candidate.factorAxes.axes)) {
+          factorAxesCandidates[candidateIndex] = factorAxesCandidates.back();
+          factorAxesCandidates.pop_back();
         } else {
           // At each iteration, we pick a factor-axes pair that expands
           // on the existing assignment on `factorAxisRefs`. In order to
@@ -492,23 +497,24 @@ SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
           // factor-axes pair, as we remove all factor-axes pair who can
           // not expand from the picked axes for the picked factor from
           // map at each iteration.
-          factorAxesCountIt->second.shardingSize =
-              factorAxes.axes.getShardingSize(mesh,
-                                              /*prefix=*/bestFactorAxes.axes);
-          nextBestFactorAxes =
-              std::max(nextBestFactorAxes, factorAxesCountIt->second);
+          candidate.shardingSize = candidate.factorAxes.axes.getShardingSize(
+              mesh,
+              /*prefix=*/bestFactorAxes.axes);
+          nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
+          candidateIndex++;
         }
         continue;
       }
-      if (factorAxes.overlaps(bestFactorAxes)) {
+      if (candidate.factorAxes.overlaps(bestFactorAxes)) {
         // Clear the count of overlapping axis, effectively erasing.
         // TODO(enver): Instead of removing from the list, trim the axisRefs,
         // to use the largest prefix that does not overlap with bestAxisRefs.
-        // TODO(enver): Replace with llvm::make_early_inc_range.
-        factorAxesCounts.erase(factorAxesCountIt);
+        factorAxesCandidates[candidateIndex] = factorAxesCandidates.back();
+        factorAxesCandidates.pop_back();
         continue;
       }
       nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
+      candidateIndex++;
     }
     bestFactorAxes = nextBestFactorAxes.factorAxes;
   }
