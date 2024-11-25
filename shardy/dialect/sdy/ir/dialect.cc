@@ -624,6 +624,25 @@ TensorShardingAttr TensorShardingAttr::getFullyOpenLike(
                                sharding.getMeshOrRef(), /*isClosed=*/false);
 }
 
+RankedTensorType TensorShardingAttr::getLocalTensorType(
+    RankedTensorType globalTensorType, MeshAttr mesh) {
+  if (getDimShardings().empty()) {
+    return globalTensorType;
+  }
+  SmallVector<int64_t> localShape;
+  localShape.reserve(globalTensorType.getRank());
+
+  for (auto [dim, dimSharding] : llvm::enumerate(getDimShardings())) {
+    int64_t shardSize = dimSharding.getShardedSize(mesh);
+    int64_t dimSize = globalTensorType.getDimSize(dim);
+    // We allow non divisible sharding
+    int64_t localSize = (dimSize + shardSize - 1) / shardSize;
+    localShape.push_back(localSize);
+  }
+  return RankedTensorType::get(ArrayRef<int64_t>(localShape),
+                               globalTensorType.getElementType());
+}
+
 //===----------------------------------------------------------------------===//
 // TensorShardingPerValueAttr
 //===----------------------------------------------------------------------===//

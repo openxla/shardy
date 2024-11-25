@@ -18,9 +18,10 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/dialect/sdy/ir/dialect.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -329,6 +330,33 @@ TEST_F(DialectTest, TensorShardingAttrGetReplicated) {
       sharding.getReplicated("z", mesh),
       createTensorSharding(dimShardings, {createSubAxis("v", 2, 2),
                                           createAxis("y"), createAxis("z")}));
+}
+
+TEST_F(DialectTest, TensorShardingAttrGetLocalTensorType) {
+  OpBuilder builder(&context);
+  auto globalType = RankedTensorType::get({8, 4}, builder.getI32Type());
+  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2),
+                                       MeshAxisAttr::get(&context, "y", 3),
+                                       MeshAxisAttr::get(&context, "z", 4)});
+
+  TensorShardingAttr sharding1 = createTensorSharding({});
+  EXPECT_EQ(sharding1.getLocalTensorType(globalType, mesh), globalType);
+
+  TensorShardingAttr sharding2 = createTensorSharding(
+      {createDimSharding({createAxis("x")}), createDimSharding({})});
+  EXPECT_EQ(sharding2.getLocalTensorType(globalType, mesh),
+            RankedTensorType::get({4, 4}, builder.getI32Type()));
+
+  TensorShardingAttr sharding3 = createTensorSharding(
+      {createDimSharding({createAxis("y")}), createDimSharding({})});
+  EXPECT_EQ(sharding3.getLocalTensorType(globalType, mesh),
+            RankedTensorType::get({3, 4}, builder.getI32Type()));
+
+  TensorShardingAttr sharding4 = createTensorSharding(
+      {createDimSharding({createAxis("x"), createAxis("z")}),
+       createDimSharding({createAxis("y")})});
+  EXPECT_EQ(sharding4.getLocalTensorType(globalType, mesh),
+            RankedTensorType::get({1, 2}, builder.getI32Type()));
 }
 
 TEST_F(DialectTest, DimensionShardingAttrGetSharded) {

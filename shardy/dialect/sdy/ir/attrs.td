@@ -591,7 +591,13 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // Builds a fully open `TensorShardingAttr` matching `sharding` in
     // `mesh_sym_name` and rank.
     static TensorShardingAttr getFullyOpenLike(TensorShardingAttr sharding);
-  }];
+
+    // Gets the local tensor type from a global RankedTensorType w.r.t. the
+    // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
+    // mesh and tensor type.
+    RankedTensorType getLocalTensorType(RankedTensorType globalTensorType,
+                                        MeshAttr mesh);
+    }];
 }
 
 def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> {
@@ -636,7 +642,7 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
     // must return a new instance.
     TensorShardingPerValueAttr replaceValueSharding(
         int64_t index, TensorShardingAttr sharding) const;
-  }];
+    }];
 }
 
 def Sdy_DimMapping : AttrDef<Sdy_Dialect, "DimMapping"> {
