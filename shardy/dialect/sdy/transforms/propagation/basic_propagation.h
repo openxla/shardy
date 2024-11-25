@@ -43,6 +43,14 @@ using GetDirectionToPropagateFn =
 // A function that returns `PropagationDirection::BOTH` for all operations.
 PropagationDirection propagateAny(Operation* op);
 
+struct PropagationOptions {
+  bool keepShardingRules = false;
+  StringRef dumpDirectory = "";
+  bool conservativePropagation = false;
+  bool debugShardingOrigins = false;
+  bool debugEdgeSourceSharding = false;
+};
+
 // The implementation class for the basic propagation pass.
 //
 // Higher strategies in the hierarchy should extend this class, and override one
@@ -91,6 +99,9 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
 
   void runOnOperation() override;
 
+  // Sets the propagation options declared below.
+  void setPropagationOptions(const PropagationOptions& options);
+
   Option<bool> keepShardingRules{
       *this, "keep-sharding-rules",
       llvm::cl::desc("whether to keep existing and created op sharding rules"),
@@ -109,6 +120,23 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
                      "sharding axes during propagation"),
       llvm::cl::init(false)};
 
+  Option<bool> debugShardingOrigins{
+      *this, "debug-sharding-origins",
+      llvm::cl::desc(
+          "whether to save information about the origin of a sharding "
+          "on the MLIR module. These would be the shardings on the function "
+          "inputs, outputs, sharding constraints and manual computations "
+          "before propagation."),
+      llvm::cl::init(false)};
+
+  Option<bool> debugEdgeSourceSharding{
+      *this, "debug-edge-source-sharding",
+      llvm::cl::desc(
+          "whether to save information about the edge source of a sharding "
+          "on the MLIR module. These are from which operand/result a sharding "
+          "was propagated."),
+      llvm::cl::init(false)};
+
  private:
   // This class owns the basic factor propagation strategy.
   BasicFactorPropagation basicFactorPropagation;
@@ -117,8 +145,7 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
 // Runs the basic sharding propagation algorithm (see
 // `BasicPropagationPass`).
 std::unique_ptr<Pass> createBasicPropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory = "",
-    bool conservativePropagation = false);
+    const PropagationOptions& options);
 
 }  // namespace sdy
 }  // namespace mlir

@@ -58,8 +58,7 @@ class OpPriorityPropagationPassImpl : public AggressivePropagationPassImpl {
 
 // Runs op based sharding propagation (see `OpPriorityPropagationPass`).
 std::unique_ptr<Pass> createOpPriorityPropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory = "",
-    bool conservativePropagation = false);
+    const PropagationOptions& options);
 
 }  // namespace sdy
 }  // namespace mlir

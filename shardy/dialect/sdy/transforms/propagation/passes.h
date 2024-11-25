@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 
 // IWYU pragma: end_keep
 
@@ -40,6 +41,11 @@ namespace sdy {
 //
 // The added propagation pass is the top-level layer of propagation, which
 // includes all conflict resolution strategies in a hierarchy.
+void addPropagationPipeline(OpPassManager& pm,
+                            const PropagationOptions& options = {});
+
+// TODO(bartchr): delete this once cl/651336079 is submitted and propagated to
+// XLA.
 void addPropagationPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
                             bool conservativePropagation = false);
 

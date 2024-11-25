@@ -113,15 +113,8 @@ struct OpPriorityPropagationPass
     : public impl::OpPriorityPropagationPassBase<OpPriorityPropagationPass> {
   using OpPriorityPropagationPassBase::OpPriorityPropagationPassBase;
 
-  explicit OpPriorityPropagationPass(
-      // NOLINTBEGIN(clang-diagnostic-shadow-field)
-      bool keepShardingRules, StringRef dumpDirectory,
-      bool conservativePropagation, bool runOpPriorityPropagation) {
-    // NOLINTEND(clang-diagnostic-shadow-field)
-    this->keepShardingRules = keepShardingRules;
-    this->dumpDirectory = dumpDirectory.str();
-    this->conservativePropagation = conservativePropagation;
-    this->runOpPriorityPropagation = runOpPriorityPropagation;
+  explicit OpPriorityPropagationPass(const PropagationOptions& options) {
+    setPropagationOptions(options);
   }
 };
 
@@ -151,11 +144,8 @@ LogicalResult OpPriorityPropagationPassImpl::propagate(
 }
 
 std::unique_ptr<Pass> createOpPriorityPropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory,
-    bool conservativePropagation) {
-  return std::make_unique<OpPriorityPropagationPass>(
-      keepShardingRules, dumpDirectory, conservativePropagation,
-      /*runOpPriorityPropagation=*/true);
+    const PropagationOptions& options) {
+  return std::make_unique<OpPriorityPropagationPass>(options);
 }
 
 }  // namespace sdy

@@ -31,6 +31,14 @@ inline constexpr StringRef kShardingAttr = "sdy.sharding";
 // Tensor sharding rule attribute name. See OpShardingRuleAttr for more info.
 inline constexpr StringRef kShardingRuleAttr = "sdy.sharding_rule";
 
+// Attribute name for saving which input/output/sharding_constraint sharding
+// caused a value to be sharded a certain way.
+inline constexpr StringRef kOriginShardingAttr = "sdy.origin_sharding";
+
+// Attribute name for the unique name of a sharding origin. Is either an
+// `sdy.sharding_constraint`, or `sdy.ManualComputationOp` input/output.
+inline constexpr StringRef kOriginShardingNameAttr = "sdy.origin_sharding_name";
+
 // Default priority for a `DimensionShardingAttr` that doesn't have a
 // user-defined priority.
 inline constexpr int64_t kDefaultPriority = 0;

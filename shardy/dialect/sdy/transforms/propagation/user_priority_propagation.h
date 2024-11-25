@@ -45,8 +45,7 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
 // Runs the user-priority propagation algorithm (see
 // `UserPriorityPropagationPass`).
 std::unique_ptr<Pass> createUserPriorityPropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory = "",
-    bool conservativePropagation = false);
+    const PropagationOptions& optios);
 
 }  // namespace sdy
 }  // namespace mlir

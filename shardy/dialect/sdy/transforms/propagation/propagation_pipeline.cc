@@ -18,18 +18,27 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
+#include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/user_priority_propagation.h"
 
 namespace mlir {
 namespace sdy {
 
+void addPropagationPipeline(OpPassManager& pm,
+                            const PropagationOptions& options) {
+  addImportPipeline(pm, options.dumpDirectory);
+  pm.addPass(createUserPriorityPropagationPass(options));
+  addExportPipeline(pm, options.dumpDirectory);
+}
+
+// TODO(bartchr): delete this once cl/651336079 is submitted and propagated to
+// XLA.
 void addPropagationPipeline(OpPassManager& pm, StringRef dumpDirectory,
                             bool conservativePropagation) {
-  addImportPipeline(pm, dumpDirectory);
-  pm.addPass(createUserPriorityPropagationPass(
-      /*keepShardingRules=*/false, dumpDirectory, conservativePropagation));
-  addExportPipeline(pm, dumpDirectory);
+  addPropagationPipeline(pm, PropagationOptions{
+                                 /*keepShardingRules=*/false, dumpDirectory,
+                                 conservativePropagation});
 }
 
 void registerPropagationPipeline() {
@@ -37,7 +46,10 @@ void registerPropagationPipeline() {
       "sdy-propagation-pipeline",
       "Runs the SDY propagation pass, preceded by a sequence of import passes "
       "needed as a pre-processing step for propagation",
-      [](OpPassManager& pm) { return addPropagationPipeline(pm); });
+      [](OpPassManager& pm) {
+        return addPropagationPipeline(pm, /*dumpDirectory */ "",
+                                      /*conservativePropagation=*/false);
+      });
 }
 
 }  // namespace sdy

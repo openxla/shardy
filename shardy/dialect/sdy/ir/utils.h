@@ -373,6 +373,16 @@ void cloneRegionAndConvertTerminatorOp(Region& src, Region& dst) {
   cloneRegionAndConvertTerminatorOp<TerminatorOpTy>(src, dst, rewriter);
 }
 
+// Gets the enclosing `OpTy` of the given `op`. If the `op` is already of type
+// `OpTy`, returns it.
+template <class OpTy>
+OpTy getEnclosingOfType(Operation* op) {
+  if (auto typedOp = mlir::dyn_cast<OpTy>(op)) {
+    return typedOp;
+  }
+  return op->getParentOfType<OpTy>();
+}
+
 }  // namespace sdy
 }  // namespace mlir
 

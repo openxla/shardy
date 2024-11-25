@@ -201,14 +201,8 @@ struct UserPriorityPropagationPass
           UserPriorityPropagationPass> {
   using UserPriorityPropagationPassBase::UserPriorityPropagationPassBase;
 
-  // NOLINTBEGIN(clang-diagnostic-shadow-field)
-  explicit UserPriorityPropagationPass(bool keepShardingRules,
-                                       StringRef dumpDirectory,
-                                       bool conservativePropagation) {
-    // NOLINTEND(clang-diagnostic-shadow-field)
-    this->keepShardingRules = keepShardingRules;
-    this->dumpDirectory = dumpDirectory.str();
-    this->conservativePropagation = conservativePropagation;
+  explicit UserPriorityPropagationPass(const PropagationOptions& options) {
+    setPropagationOptions(options);
   }
 
   void getDependentDialects(mlir::DialectRegistry& registry) const override {
@@ -272,10 +266,8 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
 }
 
 std::unique_ptr<Pass> createUserPriorityPropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory,
-    bool conservativePropagation) {
-  return std::make_unique<UserPriorityPropagationPass>(
-      keepShardingRules, dumpDirectory, conservativePropagation);
+    const PropagationOptions& options) {
+  return std::make_unique<UserPriorityPropagationPass>(options);
 }
 
 }  // namespace sdy

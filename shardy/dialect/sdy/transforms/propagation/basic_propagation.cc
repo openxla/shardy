@@ -46,6 +46,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
@@ -204,7 +205,7 @@ void updateTensorShardings(
 void updateTensorShardings(
     ValueRange operands, ValueRange results,
     ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings,
+    ArrayRef<TensorShardingAttr> resultShardings,
     SetShardingPerTensorCallback setOperandShardingCallback,
     SetShardingPerTensorCallback setResultShardingCallback,
     OpShardingRuleAttr shardingRule,
@@ -217,7 +218,7 @@ void updateTensorShardings(
                         shardingRule.getOperandMappings(),
                         shardingRule.getFactorSizes(), updateOperand, meshName,
                         mesh, shardingGroupMap, notifyOpModified);
-  updateTensorShardings(results, resultsShardings, setResultShardingCallback,
+  updateTensorShardings(results, resultShardings, setResultShardingCallback,
                         shardingProjection.getResults(),
                         shardingRule.getResultMappings(),
                         shardingRule.getFactorSizes(), updateResult, meshName,
@@ -233,7 +234,7 @@ void updateTensorShardings(
 LogicalResult propagateTensorShardings(
     ValueRange operands, ValueRange results,
     ArrayRef<TensorShardingAttr> operandShardings,
-    ArrayRef<TensorShardingAttr> resultsShardings,
+    ArrayRef<TensorShardingAttr> resultShardings,
     SetShardingPerTensorCallback setOperandShardingCallback,
     SetShardingPerTensorCallback setResultShardingCallback,
     OpShardingRuleAttr shardingRule, PropagationDirection direction,
@@ -241,7 +242,7 @@ LogicalResult propagateTensorShardings(
     const ShardingGroupMap& shardingGroupMap, bool conservativePropagation,
     Operation* op, const SymbolTable& symbolTable, PatternRewriter* rewriter) {
   std::optional<StringRef> meshName =
-      getCommonMeshName(operandShardings, resultsShardings, symbolTable);
+      getCommonMeshName(operandShardings, resultShardings, symbolTable);
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or
     // the sharding attributes use different meshes.
@@ -255,7 +256,7 @@ LogicalResult propagateTensorShardings(
   assert(mesh && "unknown mesh");
 
   ShardingProjection shardingProjection = ShardingProjection::build(
-      operandShardings, resultsShardings, shardingRule, mesh);
+      operandShardings, resultShardings, shardingRule, mesh);
 
   auto [updateOperand, updateResult] =
       factorPropagation.propagateFactorShardings(
@@ -276,11 +277,16 @@ LogicalResult propagateTensorShardings(
       }
     };
   }
-  updateTensorShardings(operands, results, operandShardings, resultsShardings,
-                        setOperandShardingCallback, setResultShardingCallback,
-                        shardingRule, shardingProjection, updateOperand,
-                        updateResult, meshName.value(), mesh, shardingGroupMap,
-                        notifyOpModified);
+
+  op->getContext()->executeAction<SourceShardingAction>(
+      [&]() {
+        updateTensorShardings(
+            operands, results, operandShardings, resultShardings,
+            setOperandShardingCallback, setResultShardingCallback, shardingRule,
+            shardingProjection, updateOperand, updateResult, meshName.value(),
+            mesh, shardingGroupMap, notifyOpModified);
+      },
+      /*IRUnits=*/{op}, operands, results, operandShardings, resultShardings);
 
   bool anyUpdated = updateOperand.any() || updateResult.any();
   if (rewriter && !anyUpdated) {
@@ -624,13 +630,8 @@ struct BasicPropagationPass
     : public impl::BasicPropagationPassBase<BasicPropagationPass> {
   using BasicPropagationPassBase::BasicPropagationPassBase;
 
-  // NOLINTBEGIN(clang-diagnostic-shadow-field)
-  explicit BasicPropagationPass(bool keepShardingRules, StringRef dumpDirectory,
-                                bool conservativePropagation) {
-    // NOLINTEND(clang-diagnostic-shadow-field)
-    this->keepShardingRules = keepShardingRules;
-    this->dumpDirectory = dumpDirectory.str();
-    this->conservativePropagation = conservativePropagation;
+  explicit BasicPropagationPass(const PropagationOptions& options) {
+    setPropagationOptions(options);
   }
 };
 
@@ -708,6 +709,13 @@ LogicalResult BasicPropagationPassImpl::propagate(
 
 void BasicPropagationPassImpl::runOnOperation() {
   ModuleOp moduleOp = getOperation();
+  MLIRContext& context = getContext();
+
+  // Prepare debugging handler for sharding origins and edge sources.
+  ShardingDebugMappings mappings(debugShardingOrigins, debugEdgeSourceSharding);
+  SourceShardingHandler handler(&mappings);
+  handler.prepareHandler(moduleOp);
+
   SymbolTable symbolTable(moduleOp);
 
   if (!allShapesStatic(moduleOp)) {
@@ -725,14 +733,25 @@ void BasicPropagationPassImpl::runOnOperation() {
   if (!keepShardingRules) {
     removeShardingRules(moduleOp);
   }
+
+  context.registerActionHandler(nullptr);
+  handler.saveOnModule(moduleOp);
+
   saveModuleOp(moduleOp, dumpDirectory, "sdy_module_after_propagation");
 }
 
-std::unique_ptr<Pass> createBasicPropagationPass(bool keepShardingRules,
-                                                 StringRef dumpDirectory,
-                                                 bool conservativePropagation) {
-  return std::make_unique<BasicPropagationPass>(
-      keepShardingRules, dumpDirectory, conservativePropagation);
+void BasicPropagationPassImpl::setPropagationOptions(
+    const PropagationOptions& options) {
+  keepShardingRules = options.keepShardingRules;
+  dumpDirectory = options.dumpDirectory.str();
+  conservativePropagation = options.conservativePropagation;
+  debugShardingOrigins = options.debugShardingOrigins;
+  debugEdgeSourceSharding = options.debugEdgeSourceSharding;
+}
+
+std::unique_ptr<Pass> createBasicPropagationPass(
+    const PropagationOptions& options) {
+  return std::make_unique<BasicPropagationPass>(options);
 }
 
 }  // namespace sdy
