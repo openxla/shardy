@@ -414,6 +414,43 @@ TensorShardingPerValueAttr getShardingPerValue(Operation* op) {
   return op->getAttrOfType<TensorShardingPerValueAttr>(kShardingAttr);
 }
 
+RankedTensorType getLocalTypeFromValue(Value value) {
+  RankedTensorType globalTensorType =
+      dyn_cast<RankedTensorType>(value.getType());
+  assert(globalTensorType && getShardableValue(value));
+  TensorShardingAttr sharding =
+      TypeSwitch<Operation*, TensorShardingAttr>(getOwningOp(value))
+          .Case<FuncOp>([value](FuncOp funcOp) {
+            return funcOp.getArgAttrOfType<TensorShardingAttr>(
+                cast<BlockArgument>(value).getArgNumber(), kShardingAttr);
+          })
+          .Case<ReshardOp>(
+              [](ReshardOp reshardOp) { return reshardOp.getShardingAttr(); })
+          .Case<ManualComputationOp>(
+              [&](ManualComputationOp manualComputationOp) {
+                if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+                  return manualComputationOp.getInSharding(
+                      blockArg.getArgNumber());
+                }
+                return manualComputationOp.getOutSharding(
+                    cast<OpResult>(value).getResultNumber());
+              })
+          .Default([value](Operation* op) {
+            if (TensorShardingPerValueAttr shardingPerResult =
+                    getShardingPerValue(op)) {
+              return shardingPerResult
+                  .getShardings()[cast<OpResult>(value).getResultNumber()];
+            }
+            return TensorShardingAttr();
+          });
+  if (!sharding) {
+    return globalTensorType;
+  }
+  RankedTensorType localType = sharding.getLocalTensorType(
+      globalTensorType, sharding.getMesh(getOwningOp(value)));
+  return localType;
+}
+
 void setShardings(Operation* op, ArrayRef<TensorShardingAttr> shardings) {
   if (shardings.empty()) {
     return;

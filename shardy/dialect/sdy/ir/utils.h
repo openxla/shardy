@@ -269,6 +269,10 @@ ArrayRef<TensorShardingAttr> getShardings(Operation* op);
 // `sdy.sharding` attr. Returns a null attr if the op has no such attr.
 TensorShardingPerValueAttr getShardingPerValue(Operation* op);
 
+// Returns the local type of the given `value` if it is sharded, or the global
+// type otherwise. It assumes the value is ranked.
+RankedTensorType getLocalTypeFromValue(Value value);
+
 // Sets the sharding attributes on `op` to a
 // `TensorShardingPerValueAttr` named `sdy.sharding` consisting of `shardings`.
 void setShardings(Operation* op, ArrayRef<TensorShardingAttr> shardings);
