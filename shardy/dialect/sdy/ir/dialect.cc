@@ -101,11 +101,6 @@ ArrayRef<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(Operation* op) {
   return getShardings(op);
 }
 
-void setOpResultEdgeOwnerShardingImpl(Operation* op, unsigned index,
-                                      TensorShardingAttr sharding) {
-  replaceShardingAtIndex(op, index, sharding);
-}
-
 void setOpResultEdgeOwnerShardingsImpl(Operation* op,
                                        ArrayRef<TensorShardingAttr> shardings) {
   setShardings(op, shardings);
@@ -117,10 +112,10 @@ void setOpResultEdgeOwnerShardingsImpl(Operation* op,
 // ShardableDataFlowOpInterface
 //===----------------------------------------------------------------------===//
 
-mlir::sdy::TensorShardingAttr
+TensorShardingAttr
 ShardableDataFlowOpInterface::getBlockArgumentEdgeOwnerSharding(
     unsigned index) {
-  if (mlir::ArrayRef<mlir::sdy::TensorShardingAttr> argSharding =
+  if (ArrayRef<TensorShardingAttr> argSharding =
           getBlockArgumentEdgeOwnerShardings();
       !argSharding.empty()) {
     return argSharding[index];
@@ -128,9 +123,9 @@ ShardableDataFlowOpInterface::getBlockArgumentEdgeOwnerSharding(
   return nullptr;
 }
 
-mlir::sdy::TensorShardingAttr
-ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(unsigned index) {
-  if (mlir::ArrayRef<mlir::sdy::TensorShardingAttr> resultSharding =
+TensorShardingAttr ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(
+    unsigned index) {
+  if (ArrayRef<TensorShardingAttr> resultSharding =
           getOpResultEdgeOwnerShardings();
       !resultSharding.empty()) {
     return resultSharding[index];
@@ -138,16 +133,48 @@ ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(unsigned index) {
   return nullptr;
 }
 
-mlir::sdy::TensorShardingAttr
-ShardableDataFlowOpInterface::getEdgeOwnerSharding(Value value) {
+TensorShardingAttr ShardableDataFlowOpInterface::getEdgeOwnerSharding(
+    Value value) {
   if (auto blockArg = dyn_cast<BlockArgument>(value)) {
     return getBlockArgumentEdgeOwnerSharding(blockArg.getArgNumber());
   }
   return getOpResultEdgeOwnerSharding(cast<OpResult>(value).getResultNumber());
 }
 
+void ShardableDataFlowOpInterface::setBlockArgumentEdgeOwnerSharding(
+    unsigned index, TensorShardingAttr sharding) {
+  SmallVector<TensorShardingAttr> shardings;
+  if (ArrayRef<TensorShardingAttr> ownerShardings =
+          getBlockArgumentEdgeOwnerShardings();
+      !ownerShardings.empty()) {
+    shardings = llvm::to_vector(ownerShardings);
+    shardings[index] = sharding;
+  } else {
+    shardings = getOpenShardingsWithShardingAtIndex(
+        getContext(),
+        ValueTypeRange<ArrayRef<BlockArgument>>(getBlockArgumentEdgeOwners()),
+        index, sharding);
+  }
+  setBlockArgumentEdgeOwnerShardings(shardings);
+}
+
+void ShardableDataFlowOpInterface::setOpResultEdgeOwnerSharding(
+    unsigned index, TensorShardingAttr sharding) {
+  SmallVector<TensorShardingAttr> shardings;
+  if (ArrayRef<TensorShardingAttr> ownerShardings =
+          getOpResultEdgeOwnerShardings();
+      !ownerShardings.empty()) {
+    shardings = llvm::to_vector(ownerShardings);
+    shardings[index] = sharding;
+  } else {
+    shardings = getOpenShardingsWithShardingAtIndex(
+        getContext(), getOpResultEdgeOwners().getTypes(), index, sharding);
+  }
+  setOpResultEdgeOwnerShardings(shardings);
+}
+
 void ShardableDataFlowOpInterface::setEdgeOwnerSharding(
-    Value value, mlir::sdy::TensorShardingAttr sharding) {
+    Value value, TensorShardingAttr sharding) {
   if (auto blockArg = dyn_cast<BlockArgument>(value)) {
     setBlockArgumentEdgeOwnerSharding(blockArg.getArgNumber(), sharding);
   } else {
@@ -647,28 +674,6 @@ RankedTensorType TensorShardingAttr::getLocalTensorType(
 // TensorShardingPerValueAttr
 //===----------------------------------------------------------------------===//
 
-namespace {
-
-SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
-                                                      TypeRange types,
-                                                      StringRef meshName) {
-  SmallVector<TensorShardingAttr> shardings;
-  shardings.reserve(types.size());
-  for (Type type : types) {
-    int64_t rank = 0;
-    // TODO(tomnatan): remove mlir:: once Attribute::dyn_cast is removed.
-    if (auto tensorType = mlir::dyn_cast<ShapedType>(type)) {
-      assert(tensorType.hasStaticShape());
-      rank = tensorType.getRank();
-    }
-    shardings.push_back(
-        TensorShardingAttr::getFullyOpen(context, rank, meshName));
-  }
-  return shardings;
-}
-
-}  // namespace
-
 TensorShardingPerValueAttr TensorShardingPerValueAttr::getFullyOpen(
     MLIRContext* context, TypeRange types, StringRef meshName) {
   return TensorShardingPerValueAttr::get(
@@ -679,11 +684,9 @@ TensorShardingPerValueAttr
 TensorShardingPerValueAttr::getOpenWithShardingAtIndex(
     MLIRContext* context, TypeRange types, int64_t index,
     TensorShardingAttr sharding) {
-  assert(index >= 0 && index < types.size());
-  SmallVector<TensorShardingAttr> shardings =
-      getFullyOpenShardings(context, types, sharding.getMeshName());
-  shardings[index] = sharding;
-  return TensorShardingPerValueAttr::get(context, shardings);
+  return TensorShardingPerValueAttr::get(
+      context,
+      getOpenShardingsWithShardingAtIndex(context, types, index, sharding));
 }
 
 TensorShardingPerValueAttr TensorShardingPerValueAttr::replaceValueSharding(
@@ -872,14 +875,6 @@ DataFlowEdgeOp DataFlowEdgeOp::getDataFlowEdgeUser(Value root) {
 // NamedComputationOp
 //===----------------------------------------------------------------------===//
 
-void NamedComputationOp::setOpResultEdgeOwnerSharding(
-    unsigned resultIndex, TensorShardingAttr sharding) {
-  TensorShardingPerValueAttr outShardings =
-      getOutShardings().value_or(TensorShardingPerValueAttr::getFullyOpen(
-          getContext(), getResultTypes(), sharding.getMeshName()));
-  setOutShardingsAttr(outShardings.replaceValueSharding(resultIndex, sharding));
-}
-
 void NamedComputationOp::setOpResultEdgeOwnerShardings(
     ArrayRef<TensorShardingAttr> shardings) {
   setOutShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
@@ -901,14 +896,6 @@ NamedComputationOp::getOpResultEdgeOwnerShardings() {
     return outShardings->getShardings();
   }
   return {};
-}
-
-void NamedComputationOp::setBlockArgumentEdgeOwnerSharding(
-    unsigned index, TensorShardingAttr sharding) {
-  TensorShardingPerValueAttr inShardings =
-      getInShardings().value_or(TensorShardingPerValueAttr::getFullyOpen(
-          getContext(), getOperandTypes(), sharding.getMeshName()));
-  setInShardingsAttr(inShardings.replaceValueSharding(index, sharding));
 }
 
 void NamedComputationOp::setBlockArgumentEdgeOwnerShardings(
@@ -938,13 +925,12 @@ ResultRange NamedComputationOp::getOpResultEdgeOwners() { return getResults(); }
 // If the target is a result (e.g., `%r`), return `%a`.
 SmallVector<Value> NamedComputationOp::getEdgeSources(Value target) {
   assert(getOwningOp(target) == getOperation());
-  return mlir::TypeSwitch<Value, SmallVector<Value>>(target)
+  return TypeSwitch<Value, SmallVector<Value>>(target)
       .Case<BlockArgument>(
           [this](BlockArgument blockArg) -> SmallVector<Value> {
             return {getOperand(blockArg.getArgNumber())};
           })
-      .Case<mlir::OpResult>([this](
-                                mlir::OpResult opResult) -> SmallVector<Value> {
+      .Case<OpResult>([this](OpResult opResult) -> SmallVector<Value> {
         return {getBodyTerminatorOperand(*this, opResult.getResultNumber())};
       })
       .Default([](Value _) -> SmallVector<Value> { return {}; });
@@ -966,7 +952,7 @@ Value NamedComputationOp::getEdgeOwnerFromTarget(Value target) {
 // the `BlockArgument` with the same index.
 Value NamedComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
   Operation* sourceOwner = source.getOwner();
-  if (sourceOwner->hasTrait<mlir::OpTrait::IsTerminator>()) {
+  if (sourceOwner->hasTrait<OpTrait::IsTerminator>()) {
     return getResult(source.getOperandNumber());
   }
   assert(sourceOwner == getOperation());

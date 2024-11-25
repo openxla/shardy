@@ -35,6 +35,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
@@ -435,6 +436,34 @@ void removeShardingRules(Operation* rootOp) {
       }
     }
   });
+}
+
+SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
+                                                      TypeRange types,
+                                                      StringRef meshName) {
+  SmallVector<TensorShardingAttr> shardings;
+  shardings.reserve(types.size());
+  for (Type type : types) {
+    int64_t rank = 0;
+    // TODO(tomnatan): remove mlir:: once Attribute::dyn_cast is removed.
+    if (auto tensorType = mlir::dyn_cast<ShapedType>(type)) {
+      assert(tensorType.hasStaticShape());
+      rank = tensorType.getRank();
+    }
+    shardings.push_back(
+        TensorShardingAttr::getFullyOpen(context, rank, meshName));
+  }
+  return shardings;
+}
+
+SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(
+    MLIRContext* context, TypeRange types, int64_t index,
+    TensorShardingAttr sharding) {
+  assert(index >= 0 && index < types.size());
+  SmallVector<TensorShardingAttr> shardings =
+      getFullyOpenShardings(context, types, sharding.getMeshName());
+  shardings[index] = sharding;
+  return shardings;
 }
 
 }  // namespace sdy

@@ -383,6 +383,17 @@ OpTy getEnclosingOfType(Operation* op) {
   return op->getParentOfType<OpTy>();
 }
 
+// Builds an open `TensorSharding` for each type in `types`.
+SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
+                                                      TypeRange types,
+                                                      StringRef meshName);
+
+// Builds an open `TensorSharding` for each type in `types`, but
+// with the sharding at `index` replaced with `sharding`.
+SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(
+    MLIRContext* context, TypeRange types, int64_t index,
+    TensorShardingAttr sharding);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -383,7 +383,6 @@ def NamedComputationOp : Sdy_Op<"named_computation",
      DeclareOpInterfaceMethods<
          ShardableDataFlowOpInterface,
          /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
-                              "setOpResultEdgeOwnerSharding",
                               "setOpResultEdgeOwnerShardings"]>]> {
   let summary = "named computation operation";
   let description = [{

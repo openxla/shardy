@@ -63,11 +63,6 @@ namespace details {
 // `ShardableDataFlowOpInterface`.
 ArrayRef<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(Operation* op);
 
-// Default implementation of the `setOpResultEdgeOwnerSharding` method of
-// `ShardableDataFlowOpInterface`.
-void setOpResultEdgeOwnerShardingImpl(Operation* op, unsigned index,
-                                      TensorShardingAttr sharding);
-
 // Default implementation of the `setOpResultEdgeOwnerShardings` method of
 // `ShardableDataFlowOpInterface`.
 void setOpResultEdgeOwnerShardingsImpl(Operation* op,
