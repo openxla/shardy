@@ -111,6 +111,22 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{
+        Transforms the `sharding` of the target depending on `transformType`
+
+        See `DataFlowShardingTransformType` for more information.
+      }],
+      /*retType=*/"mlir::sdy::TensorShardingAttr",
+      /*methodName=*/"transformTargetSharding",
+      /*args=*/(ins "mlir::Value":$target,
+                    "mlir::sdy::TensorShardingAttr":$sharding,
+                    "mlir::sdy::DataFlowShardingTransformType":$transformType),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return sharding;
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
         Gets all block argument edge owners.
       }],
       /*retType=*/"mlir::ArrayRef<mlir::BlockArgument>",

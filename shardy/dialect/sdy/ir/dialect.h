@@ -57,6 +57,18 @@ limitations under the License.
 // which cannot be inlined due to cyclic dependencies on helper functions.
 namespace mlir {
 namespace sdy {
+
+// Specifies whether the dataflow edge owner sharding is being transformed
+// before or after edge propagation.
+enum class DataFlowShardingTransformType {
+  // Before edge propagation is when the value of the shardings are inspected
+  // for propagation.
+  kBeforeEdgePropagation,
+  // After edge propagation is when the shardings are set back on the data flow
+  // edge owner.
+  kAfterEdgePropagation
+};
+
 namespace details {
 
 // Default implementation of the `getOpResultEdgeOwnerShardings` method of

@@ -113,6 +113,18 @@ DataFlowEdgeOp getDataFlowEdge(OpOperand& source) {
   return DataFlowEdgeOp::getDataFlowEdgeUser(getDataFlowEdgeOwner(source));
 }
 
+TensorShardingAttr transformTargetSharding(
+    DataFlowEdgeOp dataFlowEdge, TensorShardingAttr sharding,
+    DataFlowShardingTransformType transformType) {
+  Value input = dataFlowEdge.getInput();
+  if (ShardableDataFlowOpInterface shardableDataFlowOp =
+          getOwningShardableDataFlowOp(input)) {
+    return shardableDataFlowOp.transformTargetSharding(input, sharding,
+                                                       transformType);
+  }
+  return sharding;
+}
+
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge) {
   Value input = dataFlowEdge.getInput();
   if (ShardableDataFlowOpInterface shardableDataFlowOp =

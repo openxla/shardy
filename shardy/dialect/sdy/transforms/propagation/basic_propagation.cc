@@ -470,11 +470,23 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
     // The sharding of `dataFlowEdgeOp.getResult()` is the sharding of all
     // targets.
     return propagateTensorShardings(
-        sources, dataFlowEdgeOp.getResult(),
+        sources, dataFlowEdgeOp.getResult(), getShardings(sources),
+        transformTargetSharding(
+            dataFlowEdgeOp, dataFlowEdgeOp.getShardingAttr(),
+            DataFlowShardingTransformType::kBeforeEdgePropagation),
+        [&](TensorShardingAttr sharding, int64_t index) {
+          setSharding(sources[index], sharding);
+        },
+        [&](TensorShardingAttr sharding, int64_t _) {
+          dataFlowEdgeOp.setShardingAttr(transformTargetSharding(
+              dataFlowEdgeOp, sharding,
+              DataFlowShardingTransformType::kAfterEdgePropagation));
+        },
         createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
                                    sources.size()),
-        dataFlowEdgeOp, symbolTable, rewriter, factorPropagation,
-        shardingGroupMap);
+        PropagationDirection::BOTH, factorPropagation, shardingGroupMap,
+        /*conservativePropagation=*/false, dataFlowEdgeOp, symbolTable,
+        &rewriter);
   }
 
  private:

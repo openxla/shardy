@@ -55,6 +55,13 @@ DataFlowEdgeOp getDataFlowEdge(Value target);
 // `DataFlowEdgeOp`, otherwise returns `nullptr`.
 DataFlowEdgeOp getDataFlowEdge(OpOperand& source);
 
+// Transforms the `sharding` depending on `transformType`.
+//
+// See `DataFlowShardingTransformType` for more information.
+TensorShardingAttr transformTargetSharding(
+    DataFlowEdgeOp dataFlowEdge, TensorShardingAttr sharding,
+    DataFlowShardingTransformType transformType);
+
 // Returns all sources of the given `dataFlowEdge`.
 SmallVector<Value> getDataFlowSources(DataFlowEdgeOp dataFlowEdge);
 
