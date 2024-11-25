@@ -26,6 +26,13 @@ Options:
     debugging
   * `-conservative-propagation` : whether to disallow split axes and
     non-divisible sharding axes during propagation
+  * `-debug-sharding-origins` : whether to save information about the origin
+    of a sharding on the MLIR module. These would be the shardings on the
+    function inputs, outputs, sharding constraints and manual computations
+    before propagation.
+  * `-debug-edge-source-sharding` : whether to save information about the
+    edge source of a sharding on the MLIR module. These are what
+    operand/result introduced a sharding on some op result.
 ### `-sdy-op-priority-propagate`
 
 _Runs the op-priority propagation algorithm._
