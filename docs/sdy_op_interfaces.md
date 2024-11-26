@@ -46,7 +46,7 @@ sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`,
 #### `getBlockArgumentEdgeOwnerShardings`
 
 ```c++
-mlir::ArrayRef<mlir::sdy::TensorShardingAttr> getBlockArgumentEdgeOwnerShardings();
+mlir::SmallVector<mlir::sdy::TensorShardingAttr> getBlockArgumentEdgeOwnerShardings();
 ```
 Returns the shardings of all block argument data flow edge owners.
 
@@ -64,7 +64,7 @@ NOTE: This method *must* be implemented by the user.
 #### `getOpResultEdgeOwnerShardings`
 
 ```c++
-mlir::ArrayRef<mlir::sdy::TensorShardingAttr> getOpResultEdgeOwnerShardings();
+mlir::SmallVector<mlir::sdy::TensorShardingAttr> getOpResultEdgeOwnerShardings();
 ```
 Returns the shardings of all op result data flow edge owners.
 

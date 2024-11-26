@@ -219,6 +219,8 @@ the body on any free axes - those not in the manual_axes list.
 
 Traits: `IsolatedFromAbove`, `RecursiveMemoryEffects`, `SingleBlockImplicitTerminator<ReturnOp>`, `SingleBlock`
 
+Interfaces: `ShardableDataFlowOpInterface`
+
 #### Attributes:
 
 <table>
