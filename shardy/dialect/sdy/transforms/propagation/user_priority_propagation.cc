@@ -20,6 +20,7 @@ limitations under the License.
 #include <iterator>
 #include <memory>
 #include <utility>
+#include <variant>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
@@ -36,6 +37,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/common/file_utils.h"
+#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
@@ -175,6 +177,12 @@ getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp,
   llvm::SmallDenseSet<int64_t> prioritiesInSharding;
   transformShardings(moduleOp, [&](TensorShardingAttr sharding,
                                    const ValueOrFuncResult& valueOrFuncResult) {
+    // TODO(b/380881922): We should be adding the data flow edges into the map
+    // to make sure the in/out shardings on ManualComputationOp are updated.
+    if (auto* value = std::get_if<Value>(&valueOrFuncResult);
+        value && getDataFlowEdge(*value)) {
+      return sharding;
+    }
     clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
     for (int64_t priority : prioritiesInSharding) {
       priorityToShardingReferences[priority].emplace_back(valueOrFuncResult,

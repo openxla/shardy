@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-basic-propagate 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-basic-propagate -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 

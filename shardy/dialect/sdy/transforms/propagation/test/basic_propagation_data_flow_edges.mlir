@@ -657,3 +657,61 @@ func.func @named_computation_inside_out_propagation(%arg0: tensor<8x2xi32>) -> t
   %2 = sdy.data_flow_edge %1 : tensor<8x2xi32>
   return %2 : tensor<8x2xi32>
 }
+
+// Make sure the in_sharding isn't updated, only the operand and the internal
+// DataFlowEdgeOp.
+//
+// CHECK-LABEL: func @manual_computation_update_in_sharding_edge
+// CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"b", "a", ?}, {"c", ?}]>})
+// CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>}) {
+func.func @manual_computation_update_in_sharding_edge(
+    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{?}, {"c", ?}]>}
+    ) -> tensor<32x32xf32> {
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>]
+  // CHECK-SAME:     out_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>]
+  // CHECK-SAME:     manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2_c_2, [{"a", ?}, {"c", ?}]> : tensor<16x32xf32>
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[EDGE_1]], %[[EDGE_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {"c", ?}]>]>} : tensor<16x32xf32>
+  // CHECK-NEXT:   %[[CC:.*]] = stablehlo.custom_call @sdy_testonly(%[[ADD]]) : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  // CHECK-NEXT:   sdy.return %[[CC]] : tensor<16x32xf32>
+  // CHECK-NEXT: } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %[[MC]] sharding=<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]> : tensor<32x32xf32>
+  // CHECK-NEXT: return %[[EDGE_2]] : tensor<32x32xf32>
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>] out_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>] manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+    %2 = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2_c_2, [{?}, {?}]> : tensor<16x32xf32>
+    %3 = stablehlo.add %2, %2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
+    %4 = stablehlo.custom_call @sdy_testonly(%3) : (tensor<16x32xf32>) -> tensor<16x32xf32>
+    sdy.return %4 : tensor<16x32xf32>
+  } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  %1 = sdy.data_flow_edge %0 sharding=<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]> : tensor<32x32xf32>
+  return %1 : tensor<32x32xf32>
+}
+
+// Make sure the out_sharding isn't updated, only the external DataFlowEdgeOp
+// and the internal AddOp.
+//
+// CHECK-LABEL: func @manual_computation_update_out_sharding_edge
+// CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>})
+// CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"b", "a", ?}, {"c", ?}]>}) {
+func.func @manual_computation_update_out_sharding_edge(%arg0: tensor<32x32xf32>) -> tensor<32x32xf32> {
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>]
+  // CHECK-SAME:     out_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>]
+  // CHECK-SAME:     manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2_c_2, [{?}, {?}]> : tensor<16x32xf32>
+  // CHECK-NEXT:   %[[CC:.*]] = stablehlo.custom_call @sdy_testonly(%[[EDGE_1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {"c", ?}]>]>} : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[CC]], %[[CC]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {"c", ?}]>]>} : tensor<16x32xf32>
+  // CHECK-NEXT:   sdy.return %[[ADD]] : tensor<16x32xf32>
+  // CHECK-NEXT: } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %[[MC]] sharding=<@mesh_a_2_b_2_c_2, [{"b", "a", ?}, {"c", ?}]> : tensor<32x32xf32>
+  // CHECK-NEXT: return %[[EDGE_2]] : tensor<32x32xf32>
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>] out_shardings=[<@mesh_a_2_b_2_c_2, [{"b", ?}, {?}]>] manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+    %2 = sdy.data_flow_edge %arg1 sharding=<@mesh_a_2_b_2_c_2, [{?}, {?}]> : tensor<16x32xf32>
+    %3 = stablehlo.custom_call @sdy_testonly(%2) : (tensor<16x32xf32>) -> tensor<16x32xf32>
+    %4 = stablehlo.add %3, %3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
+    sdy.return %4 : tensor<16x32xf32>
+  } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  %1 = sdy.data_flow_edge %0 sharding=<@mesh_a_2_b_2_c_2, [{?}, {"c", ?}]> : tensor<32x32xf32>
+  return %1 : tensor<32x32xf32>
+}

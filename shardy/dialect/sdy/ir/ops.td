@@ -123,7 +123,11 @@ def Sdy_ReturnOp : Sdy_Op<"return", [Pure, Terminator]> {
 
 def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
-   IsolatedFromAbove]> {
+   IsolatedFromAbove, DeclareOpInterfaceMethods<
+         ShardableDataFlowOpInterface,
+         /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
+                              "setOpResultEdgeOwnerShardings",
+                              "transformTargetSharding"]>]> {
   let summary = "Multi-device parallelism operation with manual collectives";
   let description = [{
     Jump into a region written in terms of per-device local code with explicit
@@ -179,17 +183,6 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
     // Same as `getOutSharding`, but removes any prefixed manual axes from each
     // dim sharding.
     TensorShardingAttr getOutShardingWithoutManualAxes(int64_t resultIndex);
-
-    // Same as `setInSharding`, but adds any prefixed manual axes that were on the
-    // original in-sharding.
-    void setInShardingAddingManualAxes(
-      int64_t operandIndex, TensorShardingAttr sharding);
-
-    // Same as `setOutSharding`, but adds any prefixed manual axes that were on
-    // the original out-sharding.
-    void setOutShardingAddingManualAxes(
-      int64_t resultIndex, TensorShardingAttr sharding);
-
   }];
 }
 

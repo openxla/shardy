@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <string>
@@ -97,8 +98,9 @@ void SdyDialect::initialize() {
 
 namespace details {
 
-ArrayRef<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(Operation* op) {
-  return getShardings(op);
+SmallVector<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(
+    Operation* op) {
+  return llvm::to_vector(getShardings(op));
 }
 
 void setOpResultEdgeOwnerShardingsImpl(Operation* op,
@@ -108,6 +110,50 @@ void setOpResultEdgeOwnerShardingsImpl(Operation* op,
 
 }  // namespace details
 
+namespace {
+
+// Gets the sources given a target value.
+//
+// If the target is a `BlockArgument`, returns the corresponding operand.
+// If the target is an `OpResult`, returns the corresponding operand of the
+// terminator.
+// Else returns an empty vector.
+template <typename RegionOpTy>
+SmallVector<Value> getEdgeSourcesFromRegionBasedOp(Value target,
+                                                   RegionOpTy op) {
+  static_assert(
+      OpTrait::template hasSingleBlockImplicitTerminator<RegionOpTy>::value);
+  assert(getOwningOp(target) == op.getOperation());
+  return TypeSwitch<Value, SmallVector<Value>>(target)
+      .Case<BlockArgument>([op](BlockArgument blockArg) -> SmallVector<Value> {
+        return {op->getOperand(blockArg.getArgNumber())};
+      })
+      .template Case<OpResult>([op](OpResult opResult) -> SmallVector<Value> {
+        return {getBodyTerminatorOperand(op, opResult.getResultNumber())};
+      })
+      .Default([](Value _) -> SmallVector<Value> { return {}; });
+}
+
+// Returns the edge owner given a `source`.
+//
+// If the `source` is an operand of a terminator, return the corresponding
+// result.
+// Otherwise, it should be an operand of the `op`, so return the `BlockArgument`
+// with the same index.
+template <typename RegionOpTy>
+Value getEdgeOwnerFromSource(OpOperand& source, RegionOpTy op) {
+  static_assert(
+      OpTrait::template hasSingleBlockImplicitTerminator<RegionOpTy>::value);
+  Operation* sourceOwner = source.getOwner();
+  if (sourceOwner->hasTrait<OpTrait::IsTerminator>()) {
+    return op->getResult(source.getOperandNumber());
+  }
+  assert(sourceOwner == op);
+  return op->getOperand(source.getOperandNumber());
+}
+
+}  // namespace
+
 //===----------------------------------------------------------------------===//
 // ShardableDataFlowOpInterface
 //===----------------------------------------------------------------------===//
@@ -115,20 +161,20 @@ void setOpResultEdgeOwnerShardingsImpl(Operation* op,
 TensorShardingAttr
 ShardableDataFlowOpInterface::getBlockArgumentEdgeOwnerSharding(
     unsigned index) {
-  if (ArrayRef<TensorShardingAttr> argSharding =
+  if (SmallVector<TensorShardingAttr> argShardings =
           getBlockArgumentEdgeOwnerShardings();
-      !argSharding.empty()) {
-    return argSharding[index];
+      !argShardings.empty()) {
+    return argShardings[index];
   }
   return nullptr;
 }
 
 TensorShardingAttr ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(
     unsigned index) {
-  if (ArrayRef<TensorShardingAttr> resultSharding =
+  if (SmallVector<TensorShardingAttr> resultShardings =
           getOpResultEdgeOwnerShardings();
-      !resultSharding.empty()) {
-    return resultSharding[index];
+      !resultShardings.empty()) {
+    return resultShardings[index];
   }
   return nullptr;
 }
@@ -144,7 +190,7 @@ TensorShardingAttr ShardableDataFlowOpInterface::getEdgeOwnerSharding(
 void ShardableDataFlowOpInterface::setBlockArgumentEdgeOwnerSharding(
     unsigned index, TensorShardingAttr sharding) {
   SmallVector<TensorShardingAttr> shardings;
-  if (ArrayRef<TensorShardingAttr> ownerShardings =
+  if (SmallVector<TensorShardingAttr> ownerShardings =
           getBlockArgumentEdgeOwnerShardings();
       !ownerShardings.empty()) {
     shardings = llvm::to_vector(ownerShardings);
@@ -161,7 +207,7 @@ void ShardableDataFlowOpInterface::setBlockArgumentEdgeOwnerSharding(
 void ShardableDataFlowOpInterface::setOpResultEdgeOwnerSharding(
     unsigned index, TensorShardingAttr sharding) {
   SmallVector<TensorShardingAttr> shardings;
-  if (ArrayRef<TensorShardingAttr> ownerShardings =
+  if (SmallVector<TensorShardingAttr> ownerShardings =
           getOpResultEdgeOwnerShardings();
       !ownerShardings.empty()) {
     shardings = llvm::to_vector(ownerShardings);
@@ -457,7 +503,7 @@ DimensionShardingAttr DimensionShardingAttr::sliceShardingAxes(
     // NOLINTNEXTLINE(readability-identifier-naming)
     size_t N, size_t M) const {
   return DimensionShardingAttr::get(getContext(), getAxes().slice(N, M),
-                                    getIsClosed());
+                                    getIsClosed(), getPriority());
 }
 
 DimensionShardingAttr DimensionShardingAttr::dropFrontShardingAxes(
@@ -591,6 +637,12 @@ TensorShardingAttr TensorShardingAttr::replaceDimSharding(
   shardings[dim] = sharding;
   return TensorShardingAttr::get(getContext(), getMeshOrRef(), shardings,
                                  getReplicatedAxes());
+}
+
+TensorShardingAttr TensorShardingAttr::replaceReplicatedAxes(
+    ArrayRef<AxisRefAttr> replicatedAxes) const {
+  return TensorShardingAttr::get(getContext(), getMeshOrRef(),
+                                 getDimShardings(), replicatedAxes);
 }
 
 TensorShardingAttr TensorShardingAttr::getSharded(int64_t dim,
@@ -735,9 +787,10 @@ using ManualComputationShardingEraserFn = std::function<DimensionShardingAttr(
 TensorShardingAttr eraseAxesFromManualComputationSharding(
     TensorShardingAttr outerManualSharding, ArrayRef<StringAttr> manualAxes,
     ManualComputationShardingEraserFn shardingEraser) {
-  TensorShardingAttr returnedSharding = outerManualSharding;
-  for (auto [dimIndex, dimSharding] :
-       llvm::enumerate(outerManualSharding.getDimShardings())) {
+  SmallVector<DimensionShardingAttr> newDimShardings;
+  newDimShardings.reserve(outerManualSharding.getRank());
+  for (DimensionShardingAttr dimSharding :
+       outerManualSharding.getDimShardings()) {
     ArrayRef<AxisRefAttr> dimAxes = dimSharding.getAxes();
     // Axes in the range [0, firstFreeAxis) are manual axes, and
     // [firstFreeAxis, dimAxes.size()) are free axes.
@@ -745,12 +798,19 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
         llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
           return llvm::is_contained(manualAxes, axis.getName());
         });
-    returnedSharding = returnedSharding.replaceDimSharding(
-        dimIndex, shardingEraser(returnedSharding.getDimSharding(dimIndex),
-                                 firstFreeAxisIt - dimAxes.begin()));
+    newDimShardings.push_back(
+        shardingEraser(dimSharding, firstFreeAxisIt - dimAxes.begin()));
   }
-
-  return returnedSharding;
+  // Grab any replicated axes that are not manual axes. Can't use
+  // `partition_point` as there is no defined order for replicated axes.
+  SmallVector<AxisRefAttr> newReplicatedAxes;
+  llvm::copy_if(outerManualSharding.getReplicatedAxes(),
+                std::back_inserter(newReplicatedAxes), [&](AxisRefAttr axis) {
+                  return !llvm::is_contained(manualAxes, axis.getName());
+                });
+  return TensorShardingAttr::get(outerManualSharding.getContext(),
+                                 outerManualSharding.getMeshOrRef(),
+                                 newDimShardings, newReplicatedAxes);
 }
 
 // Removes free axes from the sharding.
@@ -778,7 +838,6 @@ TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
   return eraseAxesFromManualComputationSharding(
       outerManualSharding, manualAxes,
       std::mem_fn(&DimensionShardingAttr::dropFrontShardingAxes));
-  ;
 }
 
 // Re-adds any manual axes after the new sharding is determined across the
@@ -807,11 +866,11 @@ TensorShardingAttr addFreeAxesToManualComputationSharding(
         resultDimSharding.getContext(),
         llvm::to_vector(llvm::concat<const AxisRefAttr>(
             resultDimSharding.getAxes(), newDimSharding.getAxes())),
-        newDimSharding.getIsClosed());
+        newDimSharding.getIsClosed(), newDimSharding.getPriority());
   }
-  return TensorShardingAttr::get(
-      returnedSharding.getContext(), returnedSharding.getMeshOrRef(),
-      resultDimShardings, returnedSharding.getReplicatedAxes());
+  return TensorShardingAttr::get(newSharding.getContext(),
+                                 newSharding.getMeshOrRef(), resultDimShardings,
+                                 outerManualSharding.getReplicatedAxes());
 }
 
 }  // namespace
@@ -824,20 +883,6 @@ TensorShardingAttr ManualComputationOp::getInShardingWithoutManualAxes(
 TensorShardingAttr ManualComputationOp::getOutShardingWithoutManualAxes(
     int64_t resultIndex) {
   return eraseManualAxes(getOutSharding(resultIndex), getManualAxes());
-}
-
-void ManualComputationOp::setInShardingAddingManualAxes(
-    int64_t operandIndex, TensorShardingAttr sharding) {
-  setInSharding(operandIndex,
-                addFreeAxesToManualComputationSharding(
-                    getInSharding(operandIndex), sharding, getManualAxes()));
-}
-
-void ManualComputationOp::setOutShardingAddingManualAxes(
-    int64_t resultIndex, TensorShardingAttr sharding) {
-  setOutSharding(resultIndex,
-                 addFreeAxesToManualComputationSharding(
-                     getOutSharding(resultIndex), sharding, getManualAxes()));
 }
 
 void ManualComputationOp::setInShardings(
@@ -861,6 +906,119 @@ void ManualComputationOp::setOutSharding(int64_t resultIndex,
       getOutShardings().replaceValueSharding(resultIndex, sharding));
 }
 
+SmallVector<TensorShardingAttr>
+ManualComputationOp::getBlockArgumentEdgeOwnerShardings() {
+  SmallVector<TensorShardingAttr> shardings;
+  shardings.reserve(getInShardings().size());
+  for (int64_t i = 0; i < getInShardings().size(); ++i) {
+    shardings.push_back(getInShardingWithoutManualAxes(i));
+  }
+  return shardings;
+}
+
+void ManualComputationOp::setBlockArgumentEdgeOwnerShardings(
+    ArrayRef<TensorShardingAttr> shardings) {
+  // TODO(bartchr): see if we can use a `to_vector`+`map_iterator` here.
+  ArrayRef<StringAttr> manualAxes = getManualAxes();
+  SmallVector<TensorShardingAttr> shardingsWithManualAxes;
+  shardingsWithManualAxes.reserve(shardings.size());
+  for (auto [i, sharding] : llvm::enumerate(shardings)) {
+    shardingsWithManualAxes.push_back(addFreeAxesToManualComputationSharding(
+        getInSharding(i), sharding, manualAxes));
+  }
+  setInShardings(shardingsWithManualAxes);
+}
+
+SmallVector<TensorShardingAttr>
+ManualComputationOp::getOpResultEdgeOwnerShardings() {
+  return llvm::to_vector(getOutShardings().getShardings());
+}
+
+void ManualComputationOp::setOpResultEdgeOwnerShardings(
+    ArrayRef<TensorShardingAttr> shardings) {
+  setOutShardings(shardings);
+}
+
+// Transforms the `sharding` of the target depending on `transformType`.
+//
+// 1) `transformType` == `kBeforeEdgePropagation`:
+//   a) If the target is a block argument:
+//       - add manual axes to the sharding.
+//   b) If the target is a result:
+//       - remove manual axes from the sharding.
+// 2) `transformType` == `kAfterEdgePropagation`:
+//   a) If the target is a block argument:
+//       - remove manual axes from the sharding.
+//   b) If the target is a result:
+//       - add manual axes to the sharding.
+TensorShardingAttr ManualComputationOp::transformTargetSharding(
+    Value target, TensorShardingAttr sharding,
+    DataFlowShardingTransformType transformType) {
+  switch (transformType) {
+    case DataFlowShardingTransformType::kBeforeEdgePropagation: {
+      if (auto blockArg = dyn_cast<BlockArgument>(target)) {
+        return addFreeAxesToManualComputationSharding(
+            getInSharding(blockArg.getArgNumber()), sharding, getManualAxes());
+      }
+      return eraseManualAxes(sharding, getManualAxes());
+    }
+    case DataFlowShardingTransformType::kAfterEdgePropagation: {
+      if (isa<BlockArgument>(target)) {
+        return eraseManualAxes(sharding, getManualAxes());
+      }
+      return addFreeAxesToManualComputationSharding(
+          getOutSharding(cast<OpResult>(target).getResultNumber()), sharding,
+          getManualAxes());
+    }
+  }
+  llvm_unreachable("received an unexpected target type.");
+  return nullptr;
+}
+
+ArrayRef<BlockArgument> ManualComputationOp::getBlockArgumentEdgeOwners() {
+  return getBody().getArguments();
+}
+
+ResultRange ManualComputationOp::getOpResultEdgeOwners() {
+  return getResults();
+}
+
+// Gets the sources given a target value.
+//
+// Note that the return value is a vector, for `ManualComputationOp`s there can
+// only be one value but sdy's interface expects a vector.
+//
+// For example, given the following:
+// ```
+// %r = sdy.manual_computation ...attributes... (%operand0) (%arg0)
+//   %a = tanh(%arg0)
+//   sdy.return %a
+// }
+// ```
+// If the target is a block argument (e.g., `%operand0`), return `%arg0`.
+// If the target is a result (e.g., `%r`), return `%a`.
+SmallVector<Value> ManualComputationOp::getEdgeSources(Value target) {
+  return getEdgeSourcesFromRegionBasedOp(target, *this);
+}
+
+// Returns the edge owner value given a `target`.
+//
+// For `NamedComputationOp`s, there is only one target per data flow edge which
+// is also the edge owner.
+Value ManualComputationOp::getEdgeOwnerFromTarget(Value target) {
+  assert(getOwningOp(target) == getOperation());
+  return target;
+}
+
+// Returns the edge owner given a `source`.
+//
+// If the `source` is an operand of a terminator, return the corresponding
+// result. Otherwise it should be an operand of the `ManualComputationOp`,
+// return the `BlockArgument` with the same index.
+Value ManualComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
+  return sdy::getEdgeOwnerFromSource(source, *this);
+}
+
 //===----------------------------------------------------------------------===//
 // DataFlowEdgeOp
 //===----------------------------------------------------------------------===//
@@ -880,20 +1038,20 @@ void NamedComputationOp::setOpResultEdgeOwnerShardings(
   setOutShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
 }
 
-ArrayRef<TensorShardingAttr>
+SmallVector<TensorShardingAttr>
 NamedComputationOp::getBlockArgumentEdgeOwnerShardings() {
   if (std::optional<TensorShardingPerValueAttr> inShardings =
           getInShardings()) {
-    return inShardings->getShardings();
+    return llvm::to_vector(inShardings->getShardings());
   }
   return {};
 }
 
-ArrayRef<TensorShardingAttr>
+SmallVector<TensorShardingAttr>
 NamedComputationOp::getOpResultEdgeOwnerShardings() {
   if (std::optional<TensorShardingPerValueAttr> outShardings =
           getOutShardings()) {
-    return outShardings->getShardings();
+    return llvm::to_vector(outShardings->getShardings());
   }
   return {};
 }
@@ -924,16 +1082,7 @@ ResultRange NamedComputationOp::getOpResultEdgeOwners() { return getResults(); }
 // If the target is a block argument (e.g., `%operand0`), return `%arg0`.
 // If the target is a result (e.g., `%r`), return `%a`.
 SmallVector<Value> NamedComputationOp::getEdgeSources(Value target) {
-  assert(getOwningOp(target) == getOperation());
-  return TypeSwitch<Value, SmallVector<Value>>(target)
-      .Case<BlockArgument>(
-          [this](BlockArgument blockArg) -> SmallVector<Value> {
-            return {getOperand(blockArg.getArgNumber())};
-          })
-      .Case<OpResult>([this](OpResult opResult) -> SmallVector<Value> {
-        return {getBodyTerminatorOperand(*this, opResult.getResultNumber())};
-      })
-      .Default([](Value _) -> SmallVector<Value> { return {}; });
+  return getEdgeSourcesFromRegionBasedOp(target, *this);
 }
 
 // Returns the edge owner value given a `target`.
@@ -951,12 +1100,7 @@ Value NamedComputationOp::getEdgeOwnerFromTarget(Value target) {
 // result. Otherwise it should be an operand of the `NamedComputationOp`, return
 // the `BlockArgument` with the same index.
 Value NamedComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
-  Operation* sourceOwner = source.getOwner();
-  if (sourceOwner->hasTrait<OpTrait::IsTerminator>()) {
-    return getResult(source.getOperandNumber());
-  }
-  assert(sourceOwner == getOperation());
-  return getOperand(source.getOperandNumber());
+  return sdy::getEdgeOwnerFromSource(source, *this);
 }
 
 }  // namespace sdy

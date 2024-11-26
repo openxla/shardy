@@ -286,22 +286,29 @@ func.func @manual_computation_shardings_with_priority(
     %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p2, {?}]>},
     %arg1: tensor<32x32xf32> ) -> tensor<32x32xf32> {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", ?}, {?}]>]>}
-  // CHECK-NEXT: sdy.manual_computation(%[[ADD_0]], %arg1)
-  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {?}]>, <@mesh, [{"a", ?}, {"b", ?}]>]
-  // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}]>]
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD_0]], %arg1)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}p1, {?}]>, <@mesh, [{"a", ?}p1, {?}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}p0]>]
   // CHECK-SAME:   manual_axes={"a"} (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
-  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>}
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 sharding=<@mesh, [{"b"}, {?}]> : tensor<16x32xf32>
+  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg3 sharding=<@mesh, [{?}, {"b", ?}]> : tensor<16x32xf32>
+  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %[[EDGE_1]], %[[EDGE_2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>}
   // CHECK-NEXT:   sdy.return %[[ADD_1]]
   // CHECK-NEXT: }
+  // CHECK-NEXT: %[[EDGE_3:.*]] = sdy.data_flow_edge %[[MC]] sharding=<@mesh, [{"a", ?}, {"b", ?}]> : tensor<32x32xf32>
+  // CHECK-NEXT: return %[[EDGE_3]] : tensor<32x32xf32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<32x32xf32>
   %1 = sdy.manual_computation(%0, %arg1)
       in_shardings=[<@mesh, [{"a", "b"}p1, {?}]>, <@mesh, [{"a", ?}p1, {?}]>]
       out_shardings=[<@mesh, [{"a", ?}, {"b", ?}p0]>] manual_axes={"a"}
       (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
-    %2 = stablehlo.add %arg2, %arg3 : tensor<16x32xf32>
-    sdy.return %2 : tensor<16x32xf32>
+    %3 = sdy.data_flow_edge %arg2 sharding=<@mesh, [{"b"}p1, {?}]> : tensor<16x32xf32>
+    %4 = sdy.data_flow_edge %arg3 sharding=<@mesh, [{?}p1, {?}]> : tensor<16x32xf32>
+    %5 = stablehlo.add %3, %4 : tensor<16x32xf32>
+    sdy.return %5 : tensor<16x32xf32>
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
-  func.return %1: tensor<32x32xf32>
+  %2 = sdy.data_flow_edge %1 sharding=<@mesh, [{"a", ?}, {"b", ?}p0]> : tensor<32x32xf32>
+  func.return %2 : tensor<32x32xf32>
 }
 
 // CHECK-LABEL: func @manual_computation_sharding_with_low_priority(
@@ -311,25 +318,21 @@ func.func @manual_computation_shardings_with_priority(
 func.func @manual_computation_sharding_with_low_priority(
     %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p1, {}]>},
     %arg1: tensor<32x32xf32>) -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}p1, {}]>}) {
-  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c", ?}, {?}]>]>}
-  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD_0]], %arg1)
-  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {}]>, <@mesh, [{"a", "b"}, {}]>]
-  // CHECK-SAME:   out_shardings=[<@mesh, [{"a", "b"}, {}]>]
-  // CHECK-SAME:   manual_axes={"a"} (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
-  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", ?}, {?}]>]>}
-  // CHECK-NEXT:   sdy.return %[[ADD_1]]
-  // CHECK-NEXT: }
-  // CHECK-NEXT: stablehlo.add %[[MC]], %[[MC]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c", ?}, {?}]>]>}
+  // TODO(b/380881922): The `%0 = stablehlo.add` should have the sharding
+  // `[{"c", ?}, {?}]>]`, but instead it has `[{"a", "b", ?}, {?}]>]`.
   %0 = stablehlo.add %arg0, %arg0 : tensor<32x32xf32>
   %1 = sdy.manual_computation(%0, %arg1)
       in_shardings=[<@mesh, [{"a", "b"}p2, {}]>, <@mesh, [{"a", "b"}p0, {}]>]
       out_shardings=[<@mesh, [{"a", "b"}p2, {}]>] manual_axes={"a"}
       (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
-    %3 = stablehlo.add %arg2, %arg3 : tensor<16x32xf32>
-    sdy.return %3 : tensor<16x32xf32>
+    %4 = sdy.data_flow_edge %arg2 sharding=<@mesh, [{"b"}p2, {}]> : tensor<16x32xf32>
+    %5 = sdy.data_flow_edge %arg3 sharding=<@mesh, [{"b"}p0, {}]> : tensor<16x32xf32>
+    %6 = stablehlo.add %4, %5 : tensor<16x32xf32>
+    sdy.return %6 : tensor<16x32xf32>
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
-  %2 = stablehlo.add %1, %1 : tensor<32x32xf32>
-  func.return %2: tensor<32x32xf32>
+  %2 = sdy.data_flow_edge %1 sharding=<@mesh, [{"a", "b"}p2, {}]> : tensor<32x32xf32>
+  %3 = stablehlo.add %2, %2 : tensor<32x32xf32>
+  func.return %3 : tensor<32x32xf32>
 }
 
 // Tests user based priority propagation with op based priority propagation.

@@ -59,11 +59,10 @@ void processSharding(const ValueOrFuncResult& valueOrFuncResult,
                      bool transformShardings,
                      TransformShardingForTensorFn callback) {
   if (auto* value = std::get_if<Value>(&valueOrFuncResult)) {
-    processSharding(
-        getSharding(*value, /*removeManualAxes=*/false), valueOrFuncResult,
-        transformShardings, callback, [&](TensorShardingAttr newSharding) {
-          setSharding(*value, newSharding, /*addManualAxes=*/false);
-        });
+    processSharding(getSharding(*value), valueOrFuncResult, transformShardings,
+                    callback, [&](TensorShardingAttr newSharding) {
+                      setSharding(*value, newSharding);
+                    });
   } else {
     auto [funcOp, resNum] = std::get<FuncResult>(valueOrFuncResult);
     processSharding(
@@ -143,22 +142,6 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                   [&](ArrayRef<TensorShardingAttr> newShardings) {
                     shardableDataFlowOp.setOpResultEdgeOwnerShardings(
                         newShardings);
-                  });
-            })
-        .Case<ManualComputationOp>(
-            [&](ManualComputationOp manualComputationOp) {
-              processShardings(
-                  manualComputationOp.getInShardings(),
-                  manualComputationOp.getBody().getArguments(),
-                  transformShardings, callback,
-                  [&](TensorShardingPerValueAttr newShardings) {
-                    manualComputationOp.setInShardingsAttr(newShardings);
-                  });
-              processShardings(
-                  manualComputationOp.getOutShardings(),
-                  manualComputationOp.getResults(), transformShardings,
-                  callback, [&](TensorShardingPerValueAttr newShardings) {
-                    manualComputationOp.setOutShardingsAttr(newShardings);
                   });
             })
         .Default([&](Operation* op) {

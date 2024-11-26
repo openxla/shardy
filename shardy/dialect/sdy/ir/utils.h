@@ -222,7 +222,7 @@ Value getShardableValue(Value value);
 //
 // If `removeManualAxes` is true, then manual axes are removed from the returned
 // sharding if `value` is a block argument of a `ManualComputationOp`.
-TensorShardingAttr getSharding(Value value, bool removeManualAxes = true);
+TensorShardingAttr getSharding(Value value);
 
 // Returns the sharding of the given `value`, or a fully open empty
 // `TensorShardingAttr` if `value` doesn't have a sharding.
@@ -247,8 +247,7 @@ void replaceShardingAtIndex(Operation* op, unsigned index,
 //
 // If `addManualAxes` is true, then the manual axes are added to the given
 // `sharding` if `value` is a block argument of a `ManualComputationOp`.
-void setSharding(Value value, TensorShardingAttr sharding,
-                 bool addManualAxes = true);
+void setSharding(Value value, TensorShardingAttr sharding);
 
 // Return the sharding of the `resNum` result of the given `funcOp`.
 TensorShardingAttr getFuncResultSharding(func::FuncOp funcOp, int64_t resNum);

@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-sink-data-flow-edges | FileCheck %s
 
-sdy.mesh @mesh = <["a"=2, "b"=2]>
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 sdy.mesh @other_mesh = <["c"=4]>
 
 // TODO(tomnatan): once ops like while are allowed to have shardings with
@@ -181,4 +181,71 @@ func.func @named_computation_multiple_inputs_outputs_override(%arg0: tensor<8x2x
   %1 = sdy.data_flow_edge %0#0 sharding=<@mesh, [{"b"}, {}]> : tensor<8x2xi32>
   %2 = sdy.data_flow_edge %0#1 sharding=<@mesh, [{?}, {}]> : tensor<4x2xi32>
   return %1, %2 : tensor<8x2xi32>, tensor<4x2xi32>
+}
+
+
+// CHECK-LABEL: func @manual_computation_with_manual_axes
+func.func @manual_computation_with_manual_axes(
+    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>})
+    -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>}) {
+  // CHECK-NEXT: %0 = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@mesh, [{"b", "a", ?}, {?}]>]
+  // CHECK-SAME:     out_shardings=[<@mesh, [{"b", "a", ?}, {?}]>]
+  // CHECK-SAME:     manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+  // CHECK-NEXT:   %1 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
+  // CHECK-NEXT:   sdy.return %1 : tensor<16x32xf32>
+  // CHECK-NEXT: } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK-NEXT: return %0 : tensor<32x32xf32>
+  %0 = sdy.manual_computation(%arg0)
+      in_shardings=[<@mesh, [{"b", ?}, {?}]>]
+      out_shardings=[<@mesh, [{"b", ?}, {?}]>]
+      manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+    %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{"a", ?}, {?}]> : tensor<16x32xf32>
+    %3 = stablehlo.add %2, %2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
+    sdy.return %3 : tensor<16x32xf32>
+  } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{"b", "a", ?}, {?}]> : tensor<32x32xf32>
+  return %1 : tensor<32x32xf32>
+}
+
+// CHECK-LABEL: func @manual_computation_update_in_out_shardings
+func.func @manual_computation_update_in_out_shardings(
+    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {"c", ?}]>})
+    -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {"c", ?}]>}) {
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@mesh, [{"a", "b", ?}, {"c", ?}]>]
+  // CHECK-SAME:     out_shardings=[<@mesh, [{"a", "b", ?}, {"c", ?}]>]
+  // CHECK-SAME:     manual_axes={} (%arg1: tensor<32x32xf32>) {
+  // CHECK-NEXT:   sdy.return %arg1 : tensor<32x32xf32>
+  // CHECK-NEXT: } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK-NEXT: return %[[MC]] : tensor<32x32xf32>
+  %0 = sdy.manual_computation(%arg0)
+      in_shardings=[<@mesh, [{"a", ?}, {?}]>]
+      out_shardings=[<@mesh, [{"a", ?}, {?}]>]
+      manual_axes={} (%arg1: tensor<32x32xf32>) {
+    %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{"a", "b", ?}, {"c", ?}]> : tensor<32x32xf32>
+    sdy.return %2 : tensor<32x32xf32>
+  } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{"a", "b", ?}, {"c", ?}]> : tensor<32x32xf32>
+  return %1 : tensor<32x32xf32>
+}
+
+// Don't need to preserve any of the debug info on the edges as they will be
+// on the ops that used them.
+//
+// CHECK-LABEL: func @manual_computation_origin_debug_info
+func.func @manual_computation_origin_debug_info(%arg0: tensor<32x32x32xf32>) -> tensor<32x32x32xf32> {
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]
+  // CHECK-SAME:     out_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]
+  // CHECK-SAME:     manual_axes={} (%arg1: tensor<32x32x32xf32>) {
+  // CHECK-NEXT:   sdy.return %arg1 : tensor<32x32x32xf32>
+  // CHECK-NEXT: } {sdy.origin_sharding_name = "mc_0"} : (tensor<32x32x32xf32>) -> tensor<32x32x32xf32>
+  // CHECK-NEXT: return %[[MC]] : tensor<32x32x32xf32>
+  %1 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a", ?}, {?}, {?}]>] out_shardings=[<@mesh, [{?}, {"b", ?}, {?}]>] manual_axes={} (%arg1: tensor<32x32x32xf32>) {
+    %3 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{"a", ?}, {"b", ?}, {?}]> {sdy.origin_sharding = {a = "mc_0_input: 0", b = "mc_0_output: 0"}} : tensor<32x32x32xf32>
+    sdy.return %3 : tensor<32x32x32xf32>
+  } {sdy.origin_sharding_name = "mc_0"} : (tensor<32x32x32xf32>) -> tensor<32x32x32xf32>
+  %2 = sdy.data_flow_edge %1 sharding=<@mesh, [{"a", ?}, {"b", ?}, {?}]> {sdy.origin_sharding = {a = "mc_0_input: 0", b = "mc_0_output: 0"}} : tensor<32x32x32xf32>
+  return %2 : tensor<32x32x32xf32>
 }

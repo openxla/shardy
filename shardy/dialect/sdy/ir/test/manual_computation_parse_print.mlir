@@ -152,3 +152,23 @@ func.func @manual_computation_nested(%arg0: tensor<16x32xf32>) -> tensor<8x32xf3
   } : (tensor<16x32xf32>) -> tensor<8x32xf32>
   func.return %0: tensor<8x32xf32>
 }
+
+// CHECK-LABEL: func @replicated_axes_free_before_manual
+func.func @replicated_axes_free_before_manual(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@meshA, [{"a", ?}, {?}]>]
+  // CHECK-SAME:     out_shardings=[<@meshA, [{?}, {?}], replicated={"a", "b"}>]
+  // CHECK-SAME:     manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
+  // CHECK-NEXT:   sdy.return %[[ADD]] : tensor<16x32xf32>
+  // CHECK-NEXT:   } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  // CHECK-NEXT: return %[[MC]] : tensor<16x32xf32>
+  %0 = sdy.manual_computation(%arg0)
+      in_shardings=[<@meshA, [{"a", ?}, {?}]>]
+      out_shardings=[<@meshA, [{?}, {?}], replicated={"a", "b"}>]
+      manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
+    sdy.return %1 : tensor<16x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}

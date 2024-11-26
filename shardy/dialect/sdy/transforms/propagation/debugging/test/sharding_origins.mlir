@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-aggressive-propagate="debug-sharding-origins=true" 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-aggressive-propagate="debug-sharding-origins=true" -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
@@ -136,7 +136,7 @@ func.func @manual_computation_no_manual_axes(%arg0: tensor<32x32x32xf32>) -> ten
   // CHECK-SAME:     sdy.origin_sharding = {a = "mc_0_input: 0", b = "mc_0_output: 0"},
   // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]>}
   // CHECK-NEXT:   sdy.return %[[ADD]]
-  // CHECK-NEXT: } {sdy.origin_sharding = {a = "mc_0_input: 0", b = "mc_0_output: 0"}, sdy.origin_sharding_name = "mc_0"}
+  // CHECK-NEXT: } {sdy.origin_sharding_name = "mc_0"}
   // CHECK-NEXT: %[[SUB_2:.*]] = stablehlo.subtract %[[MC]], %[[MC]] {
   // CHECK-SAME:   sdy.origin_sharding = {a = "mc_0_input: 0", b = "mc_0_output: 0"},
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]>}

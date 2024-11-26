@@ -535,6 +535,13 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     TensorShardingAttr replaceDimSharding(
         int64_t dim, DimensionShardingAttr sharding) const;
 
+    // Sets the replicated axes to `replicatedAxes`.
+    //
+    // Attributes are immutable, so we can't update the sharding in place and
+    // must return a new instance.
+    TensorShardingAttr replaceReplicatedAxes(
+        ArrayRef<AxisRefAttr> replicatedAxes) const;
+
     // Shards dimension `dim` further along `axisName`.
     //
     // Assumes `canShard(dim, axisName)` is true.

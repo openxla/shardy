@@ -109,20 +109,24 @@ func.func @data_flow_edge(%arg0: tensor<32x96xf32> {sdy.sharding = #sdy.sharding
 // CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
 func.func @manual_computation(%arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}, %arg1: tensor<32x32xf32>) -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>}) {
   // CHECK:               %[[MC:.*]] = sdy.manual_computation(%arg0, %arg1)
-  // CHECK-SAME{LITERAL}:     in_shardings=[<@mesh, [{"a", ?}, {?}]>, <@mesh, [{?}, {"b", ?}]>]
-  // CHECK-SAME{LITERAL}:     out_shardings=[<@mesh, [{"a", ?}, {"b", ?}]>]
+  // CHECK-SAME{LITERAL}:     in_shardings=[<@mesh, [{?}, {?}]>, <@mesh, [{?}, {?}]>]
+  // CHECK-SAME{LITERAL}:     out_shardings=[<@mesh, [{"a", ?}, {?}]>]
   // CHECK-SAME{LITERAL}:     manual_axes={}
   // CHECK-SAME:              (%arg2: tensor<32x32xf32>, %arg3: tensor<32x32xf32>) {
   %0 = sdy.manual_computation(%arg0, %arg1) in_shardings=[<@mesh, [{?}, {?}]>, <@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{"a", ?}, {?}]>] manual_axes={} (%arg2: tensor<32x32xf32>, %arg3: tensor<32x32xf32>) {
-    // CHECK:      %[[DOT:.*]] = stablehlo.dot_general %arg2, %arg3, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
+    // CHECK-NEXT: %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 sharding=<@mesh, [{"a", ?}, {?}]> : tensor<32x32xf32>
+    // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %arg3 sharding=<@mesh, [{?}, {"b", ?}]> : tensor<32x32xf32>
+    // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[EDGE_1]], %[[EDGE_2]], contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
     // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[DOT]], %[[DOT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
     // CHECK_NEXT sdy.return %[[ADD_1]]
-    %1 = stablehlo.dot_general %arg2, %arg3, contracting_dims = [1] x [0] : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
-    %2 = stablehlo.add %1, %1 : tensor<32x32xf32>
-    sdy.return %2 : tensor<32x32xf32>
+    %1 = sdy.data_flow_edge %arg2 sharding=<@mesh, [{?}, {?}]> : tensor<32x32xf32>
+    %2 = sdy.data_flow_edge %arg3 sharding=<@mesh, [{?}, {?}]> : tensor<32x32xf32>
+    %3 = stablehlo.dot_general %1, %2, contracting_dims = [1] x [0] : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
+    %4 = stablehlo.add %3, %3 : tensor<32x32xf32>
+    sdy.return %4 : tensor<32x32xf32>
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
-  // CHECK: %[[RET:.*]] = stablehlo.add %[[MC]], %[[MC]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
-  // CHECK-NEXT: return %[[RET]] : tensor<32x32xf32>
-  %3 = stablehlo.add %0, %0 : tensor<32x32xf32>
-  func.return %3: tensor<32x32xf32>
+  // CHECK: %[[EDGE_3:.*]] = sdy.data_flow_edge %0 sharding=<@mesh, [{"a", ?}, {"b", ?}]> : tensor<32x32xf32>
+  // CHECK-NEXT: return %[[EDGE_3]] : tensor<32x32xf32>
+  %4 = sdy.data_flow_edge %0 sharding=<@mesh, [{"a", ?}, {?}]> : tensor<32x32xf32>
+  func.return %4: tensor<32x32xf32>
 }

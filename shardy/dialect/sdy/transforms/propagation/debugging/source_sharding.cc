@@ -16,6 +16,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <string>
 
@@ -279,16 +280,23 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
   moduleOp.walk([&](ManualComputationOp manualComputationOp) {
     for (auto [i, sharding] :
          llvm::enumerate(manualComputationOp.getInShardings().getShardings())) {
+      // Assuming that the edges live as the only use of the block arguments.
+      DataFlowEdgeOp edge = DataFlowEdgeOp::getDataFlowEdgeUser(
+          manualComputationOp.getBody().getArgument(i));
+      assert(edge);
       saveShardingOrigins(mappings->valueToOriginShardingMap, sharding,
-                          OriginShardingType::MC_INPUT,
-                          manualComputationOp.getBody().getArgument(i), i,
+                          OriginShardingType::MC_INPUT, edge.getResult(), i,
                           sourceId);
     }
     for (auto [i, sharding] : llvm::enumerate(
              manualComputationOp.getOutShardings().getShardings())) {
+      // Assuming that the edges live as the only use of the op results.
+      DataFlowEdgeOp edge =
+          DataFlowEdgeOp::getDataFlowEdgeUser(manualComputationOp.getResult(i));
+      assert(edge);
       saveShardingOrigins(mappings->valueToOriginShardingMap, sharding,
-                          OriginShardingType::MC_OUTPUT,
-                          manualComputationOp.getResult(i), i, sourceId);
+                          OriginShardingType::MC_OUTPUT, edge.getResult(), i,
+                          sourceId);
     }
     manualComputationOp->setAttr(
         kOriginShardingNameAttr,

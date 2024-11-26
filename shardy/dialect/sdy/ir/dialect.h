@@ -73,7 +73,8 @@ namespace details {
 
 // Default implementation of the `getOpResultEdgeOwnerShardings` method of
 // `ShardableDataFlowOpInterface`.
-ArrayRef<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(Operation* op);
+SmallVector<TensorShardingAttr> getOpResultEdgeOwnerShardingsImpl(
+    Operation* op);
 
 // Default implementation of the `setOpResultEdgeOwnerShardings` method of
 // `ShardableDataFlowOpInterface`.

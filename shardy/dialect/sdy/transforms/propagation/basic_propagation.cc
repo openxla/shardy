@@ -495,117 +495,6 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
   const ShardingGroupMap& shardingGroupMap;
 };
 
-// The `ManualComputationOp` has no sharding rule, and also has a body, so like
-// `WhileOp` and `CaseOp`, we need a special rewrite pattern for it. Given the
-// following:
-// ```
-// y_0, ..., y_n = sdy.manual_computation (x_0, ..., x_n)
-//                 in_shardings=[...],
-//                 out_shardings=[...],
-//                 manual_axes={...},
-//                 ((body_arg_0,..., body_arg_n) {
-//                   %inside = op(body_arg_0)
-//                   ...
-//                   sdy.return result_arg_0, ..., result_arg_n
-//                 })
-// ...
-// %z = op(..., y_i, ...)
-// ```
-// This pattern propagates between:
-// - `x_i`/`in_shardings[i]` and `body_arg_i`,
-// - `result_arg_i` and `y_i`/`out_shardings[i]`
-//
-// This makes sure any sharding inside the body propagates out. For propagating
-// an `in_sharding` into the body, e.g. to `%inside`, then the
-// `PropagateRegisteredOp` RewritePattern handles this case. Same for
-// propagating from `y_i` to `%z`.
-class PropagateManualComputationOp
-    : public OpRewritePattern<ManualComputationOp> {
- public:
-  explicit PropagateManualComputationOp(
-      MLIRContext* context, const SymbolTable& symbolTable,
-      const FactorPropagation& factorPropagation,
-      const ShardingGroupMap& shardingGroupMap)
-      : OpRewritePattern<ManualComputationOp>(context),
-        symbolTable(symbolTable),
-        factorPropagation(factorPropagation),
-        shardingGroupMap(shardingGroupMap) {}
-
-  LogicalResult matchAndRewrite(ManualComputationOp manualComputationOp,
-                                PatternRewriter& rewriter) const override {
-    bool updated = false;
-
-    // 1. Propagate between the operands of the `ManualComputationOp` and the
-    //    block arguments (specifically the `in_shardings`, but we use the op's
-    //    block arguments as an alias for them).
-    for (BlockArgument blockArg :
-         manualComputationOp.getBody().getArguments()) {
-      const int64_t argNumber = blockArg.getArgNumber();
-      Value operand = manualComputationOp->getOperand(argNumber);
-      updated |=
-          propagateTensorShardings(
-              operand, blockArg,
-              // Since this is propagating outside of the region of the
-              // `ManualComputationOp`, make sure we keep the manual axes
-              // as we may be able to propagate those backwards.
-              // `getSharding` on the block arg would remove them, so
-              // need to get the right `in_shardings` explicitly using
-              // `getInSharding`.
-              getSharding(operand),
-              manualComputationOp.getInSharding(argNumber),
-              [&operand](TensorShardingAttr sharding) {
-                setSharding(operand, sharding);
-              },
-              // Similarly as above, since `setSharding` will add the
-              // manual axes back, but they already exist, we set the
-              // `in_shardings` explicitly using `setInSharding`.
-              [&manualComputationOp, argNumber](TensorShardingAttr sharding) {
-                manualComputationOp.setInSharding(argNumber, sharding);
-              },
-              createIdentityShardingRule(
-                  cast<RankedTensorType>(operand.getType())),
-              manualComputationOp, symbolTable, &rewriter, factorPropagation,
-              shardingGroupMap)
-              .succeeded();
-    }
-
-    // 2. Propagate between the uses of the `ManualComputationOp` and the
-    //    terminator of the body.
-    for (OpOperand& returnValue :
-         getBodyTerminatorOpOperands(manualComputationOp)) {
-      const int64_t operandNumber = returnValue.getOperandNumber();
-      OpResult opResult = manualComputationOp->getResult(operandNumber);
-      // Since this is propagating on the border of the local region of manual
-      // axes and global program, only use shardings without the manual axes.
-      // `setSharding` will add them back for `out_shardings`.
-      updated |=
-          propagateTensorShardings(
-              returnValue.get(), opResult, getSharding(returnValue.get()),
-              manualComputationOp.getOutShardingWithoutManualAxes(
-                  operandNumber),
-              [&returnValue](TensorShardingAttr sharding) {
-                setSharding(returnValue.get(), sharding);
-              },
-              [&](TensorShardingAttr sharding) {
-                manualComputationOp.setOutShardingAddingManualAxes(
-                    operandNumber, sharding);
-              },
-              createIdentityShardingRule(
-                  cast<RankedTensorType>(opResult.getType())),
-              manualComputationOp, symbolTable, &rewriter, factorPropagation,
-              shardingGroupMap)
-              .succeeded();
-    }
-
-    return success(updated);
-  }
-
- private:
-  const SymbolTable& symbolTable;
-  const FactorPropagation& factorPropagation;
-  const ShardingGroupMap& shardingGroupMap;
-};
-
 // Propagates through a `PropagationBarrierOp` accounting for the direction in
 // which it blocks propagation.
 class PropagatePropagationBarrier
@@ -685,8 +574,7 @@ LogicalResult BasicPropagationPassImpl::propagate(
   }
   MLIRContext* context = moduleOp.getContext();
   RewritePatternSet patterns(context);
-  patterns.add<PropagateDataFlowEdgeOp, PropagateManualComputationOp,
-               PropagatePropagationBarrier>(
+  patterns.add<PropagateDataFlowEdgeOp, PropagatePropagationBarrier>(
       context, symbolTable, factorPropagation, shardingGroupMap);
   patterns.add<PropagateRegisteredOp>(
       context, symbolTable, getDirectionToPropagate, conservativePropagation,

@@ -68,11 +68,13 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   let cppNamespace = "::mlir::sdy";
 
   let methods = [
+    // TODO(b/380924978): Delete this method in favor of a new method returning
+    // a single sharding.
     InterfaceMethod<
       /*desc=*/[{
         Returns the shardings of all block argument data flow edge owners.
       }],
-      /*retType=*/"mlir::ArrayRef<mlir::sdy::TensorShardingAttr>",
+      /*retType=*/"mlir::SmallVector<mlir::sdy::TensorShardingAttr>",
       /*methodName=*/"getBlockArgumentEdgeOwnerShardings"
     >,
     InterfaceMethod<
@@ -83,11 +85,13 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
       /*methodName=*/"setBlockArgumentEdgeOwnerShardings",
       /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings)
     >,
+    // TODO(b/380924978): Delete this method in favor of a new method returning
+    // a single sharding.
     InterfaceMethod<
       /*desc=*/[{
         Returns the shardings of all op result data flow edge owners.
       }],
-      /*retType=*/"mlir::ArrayRef<mlir::sdy::TensorShardingAttr>",
+      /*retType=*/"mlir::SmallVector<mlir::sdy::TensorShardingAttr>",
       /*methodName=*/"getOpResultEdgeOwnerShardings",
       /*args=*/(ins),
       /*methodBody=*/"",
