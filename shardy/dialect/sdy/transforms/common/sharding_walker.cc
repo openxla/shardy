@@ -125,6 +125,22 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                             callback);
           }
         })
+        .Case<ManualComputationOp>(
+            [&](ManualComputationOp manualComputationOp) {
+              processShardings(
+                  manualComputationOp.getInShardings(),
+                  manualComputationOp.getBody().getArguments(),
+                  transformShardings, callback,
+                  [&](TensorShardingPerValueAttr newShardings) {
+                    manualComputationOp.setInShardingsAttr(newShardings);
+                  });
+              processShardings(
+                  manualComputationOp.getOutShardings(),
+                  manualComputationOp.getResults(), transformShardings,
+                  callback, [&](TensorShardingPerValueAttr newShardings) {
+                    manualComputationOp.setOutShardingsAttr(newShardings);
+                  });
+            })
         .Case<ShardableDataFlowOpInterface>(
             [&](ShardableDataFlowOpInterface shardableDataFlowOp) {
               processShardings(
