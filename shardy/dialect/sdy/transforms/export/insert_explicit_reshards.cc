@@ -356,14 +356,22 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
 struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
   int64_t count = 0;
+  // The size of the source tensor. In case the factor-axes pair has multiple
+  // source tensors, the size of the largest one. A tensor is a source for a
+  // factor-axes pair if the axes is a prefix of the factor sharding on the
+  // tensor.
+  int64_t sourceTensorSize = 0;
   // The size of axes to shard further. Hence, if the factor is already assigned
   // to axes A, and this factor-axes pair has axes B, the size of further
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
   int64_t shardingSize = 0;
 
   FactorAxesCandidate(FactorAxesPair factorAxes, int64_t count,
-                      int64_t shardingSize)
-      : factorAxes(factorAxes), count(count), shardingSize(shardingSize) {}
+                      int64_t sourceTensorSize, int64_t shardingSize)
+      : factorAxes(factorAxes),
+        count(count),
+        sourceTensorSize(sourceTensorSize),
+        shardingSize(shardingSize) {}
 
   FactorAxesCandidate() = default;
 
@@ -371,10 +379,14 @@ struct FactorAxesCandidate {
     if (count != rhs.count) {
       return count < rhs.count;
     }
+    if (sourceTensorSize != rhs.sourceTensorSize) {
+      return sourceTensorSize < rhs.sourceTensorSize;
+    }
     if (shardingSize != rhs.shardingSize) {
       return shardingSize < rhs.shardingSize;
     }
-    // TODO(enver): Tie-break based on sharded tensor sizes, instead.
+    // The following also ensures that, for two axes, if one is a strict prefix
+    // of another, the strict prefix one is smaller.
     return factorAxes < rhs.factorAxes;
   }
 };
@@ -382,20 +394,27 @@ struct FactorAxesCandidate {
 using FactorAxesCandidatesMap =
     DenseMap<FactorAxesPair, FactorAxesCandidate, FactorAxesPairInfo>;
 
-void incrementFactorAxesCounts(FactorAxesCandidatesMap& factorAxesCounts,
+// Increment the count for the factor-axes pair, also modify source tensor size
+// to keep the largest.
+void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
                                const FactorAxesPair& factorAxes,
-                               MeshAttr mesh) {
-  auto factorAxesCountIt = factorAxesCounts.find(factorAxes);
-  if (factorAxesCountIt != factorAxesCounts.end()) {
-    factorAxesCountIt->second.count++;
+                               int64_t sourceTensorSize, MeshAttr mesh) {
+  if (auto factorAxesCountIt = factorAxesCounts.find(factorAxes);
+      factorAxesCountIt != factorAxesCounts.end()) {
+    FactorAxesCandidate& candidate = factorAxesCountIt->second;
+    candidate.count++;
+    candidate.sourceTensorSize =
+        std::max(factorAxesCountIt->second.sourceTensorSize, sourceTensorSize);
     return;
   }
   factorAxesCounts.try_emplace(factorAxes, factorAxes, /*count=*/1,
+                               sourceTensorSize,
                                factorAxes.axes.getShardingSize(mesh));
 }
 
 SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
-    const ShardingProjection& projection, int64_t numFactors, MeshAttr mesh) {
+    const ShardingProjection& projection, int64_t numFactors,
+    ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   // Find sets of candidate axes per factor.
   SmallVector<DenseSet<AxesWithTail, AxesWithTailInfo>> axesSets(numFactors);
   for (const TensorFactorShardings& tensorFactorSharding :
@@ -416,9 +435,9 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
 
   // Count factor-axes pairs.
   FactorAxesCandidatesMap factorAxesCandidatesMap;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
-                                                 projection.getResults())) {
+  for (const auto& [tensorIndex, tensorFactorSharding] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           projection.getOperands(), projection.getResults()))) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
       if (factorSharding.axisRefs.empty()) {
@@ -426,12 +445,14 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
       }
       FactorAxesPair factorAxes(factorIndex,
                                 AxesWithTail(factorSharding.axisRefs));
-      incrementFactorAxesCounts(factorAxesCandidatesMap, factorAxes, mesh);
+      updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxes,
+                                tensorSizes[tensorIndex], mesh);
       // Increment counts for all its strict prefixes.
       for (const AxesWithTail& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
-          incrementFactorAxesCounts(factorAxesCandidatesMap,
-                                    FactorAxesPair(factorIndex, axes), mesh);
+          updateFactorAxesCandidate(factorAxesCandidatesMap,
+                                    FactorAxesPair(factorIndex, axes),
+                                    tensorSizes[tensorIndex], mesh);
         }
       }
     }
@@ -451,10 +472,11 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
 // or with an axis that overlaps with the picked axis. Continue iterating
 // until the list is empty.
 SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
-    const ShardingProjection& projection, int64_t numFactors, MeshAttr mesh) {
+    const ShardingProjection& projection, int64_t numFactors,
+    ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   SmallVector<AxesWithTail> factorAxisRefs(numFactors);
   SmallVector<FactorAxesCandidate> factorAxesCandidates =
-      findFactorAxesCandidates(projection, numFactors, mesh);
+      findFactorAxesCandidates(projection, numFactors, tensorSizes, mesh);
   // TODO(enver): Instead of taking an axes-array with the largest count, take
   // a prefix with the largest count.  For example, if a factor appears in 2
   // tensors, and one has sharding [x,y] and the other has sharding [x,z],
@@ -522,8 +544,33 @@ SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
 }
 
 SmallVector<AxesWithTail> findCommonAxes(const ShardingProjection& projection,
-                                         int64_t numFactors, MeshAttr mesh) {
-  return findCommonAxesUsingMajorityVoteHeuristic(projection, numFactors, mesh);
+                                         int64_t numFactors,
+                                         ArrayRef<int64_t> tensorSizes,
+                                         MeshAttr mesh) {
+  return findCommonAxesUsingMajorityVoteHeuristic(projection, numFactors,
+                                                  tensorSizes, mesh);
+}
+
+// TODO(enver): Convert it to a OpShardingRuleAttr method.
+// TODO(enver): Instead use ShapedType::getNumElements, as the factors might not
+// be the exact size of the dim, e.g. concat.
+SmallVector<int64_t> getTensorSizes(OpShardingRuleAttr shardingRule) {
+  SmallVector<int64_t> tensorSizes;
+  tensorSizes.reserve(shardingRule.getNumOperands() +
+                      shardingRule.getNumResults());
+  for (const TensorMappingAttr& tensorMapping :
+       llvm::concat<const TensorMappingAttr>(
+           shardingRule.getOperandMappings(),
+           shardingRule.getResultMappings())) {
+    int64_t tensorSize = 1;
+    for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
+      for (int64_t factorIndex : dimMapping.getFactorIndices()) {
+        tensorSize *= shardingRule.getFactorSize(factorIndex);
+      }
+    }
+    tensorSizes.push_back(tensorSize);
+  }
+  return tensorSizes;
 }
 
 struct InsertExplicitReshardsPass
@@ -607,8 +654,9 @@ struct InsertExplicitReshardsPass
 
       UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                                   shardingRule.getNumResults());
-      for (const auto& [index, axes] : llvm::enumerate(findCommonAxes(
-               shardingProjection, shardingRule.getNumFactors(), mesh))) {
+      for (const auto& [index, axes] : llvm::enumerate(
+               findCommonAxes(shardingProjection, shardingRule.getNumFactors(),
+                              getTensorSizes(shardingRule), mesh))) {
         // TODO(enver): Add unit tests to test overflow axes are cleared after
         // handling the case that some factors have overflow axes.
         updateTensorShardings |= shardingProjection.updateSharding(
