@@ -16,6 +16,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
 
+#include <cassert>
 #include <cstdint>
 #include <optional>
 
@@ -32,24 +33,16 @@ bool AxisListRef::operator<(const AxisListRef& rhs) const {
   if (size() != rhs.size()) {
     return size() < rhs.size();
   }
-  for (auto [axisRef, rhsAxisRef] : llvm::zip_equal(axisRefs, rhs.axisRefs)) {
+  for (auto [axisRef, rhsAxisRef] : llvm::zip_equal(*this, rhs)) {
     if (axisRef != rhsAxisRef) {
       return axisRef < rhsAxisRef;
     }
-  }
-  if (tailAxisRef != rhs.tailAxisRef) {
-    return tailAxisRef < rhs.tailAxisRef;
   }
   return false;
 }
 
 SmallVector<AxisRefAttr> AxisListRef::toVector() const {
-  if (empty()) {
-    return {};
-  }
-  SmallVector<AxisRefAttr> resultAxes = llvm::to_vector(axisRefs);
-  resultAxes.push_back(tailAxisRef);
-  return resultAxes;
+  return llvm::to_vector(*this);
 }
 
 // Checks if this axes is a strict prefix of the axes of `rhs`.
@@ -73,14 +66,11 @@ bool AxisListRef::strictPrefixOf(const AxisListRef& rhs) const {
 
 // Returns the product of the sharding sizes of all individual axes
 int64_t AxisListRef::getShardingSize(MeshAttr mesh) const {
-  if (empty()) {
-    return 1;
-  }
   int64_t shardingSize = 1;
-  for (AxisRefAttr axisRef : axisRefs) {
+  for (AxisRefAttr axisRef : *this) {
     shardingSize *= axisRef.getSize(mesh);
   }
-  return shardingSize * tailAxisRef.getSize(mesh);
+  return shardingSize;
 };
 
 void AxisListRef::clear() {
@@ -90,49 +80,36 @@ void AxisListRef::clear() {
 
 void AxisListRef::trim(int64_t newSizeExcludingNewTail,
                        std::optional<AxisRefAttr> newTailAxisRef) {
-  if (!newTailAxisRef) {
-    if (newSizeExcludingNewTail == 0) {
-      clear();
-    } else {
-      tailAxisRef = axisRefs[newSizeExcludingNewTail - 1];
-      axisRefs = axisRefs.take_front(newSizeExcludingNewTail - 1);
-    }
-    return;
+  assert(newSizeExcludingNewTail < size() &&
+         "new size is not strictly smaller than size()");
+  if (newTailAxisRef) {
+    axisRefs = axisRefs.take_front(newSizeExcludingNewTail);
+    tailAxisRef = *newTailAxisRef;
+  } else if (newSizeExcludingNewTail == 0) {
+    clear();
+  } else {
+    tailAxisRef = axisRefs[newSizeExcludingNewTail - 1];
+    axisRefs = axisRefs.take_front(newSizeExcludingNewTail - 1);
   }
-  axisRefs = axisRefs.take_front(newSizeExcludingNewTail);
-  tailAxisRef = *newTailAxisRef;
 }
 
 std::optional<AxisRefAttr> AxisListRef::getPrefixOfInputWithoutOverlap(
     AxisRefAttr axisRef) const {
-  if (empty()) {
-    return axisRef;
-  }
   AxisRefAttr prefixAxisRef = axisRef;
-  for (AxisRefAttr againstAxisRef : axisRefs) {
+  for (AxisRefAttr againstAxisRef : *this) {
     SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
         prefixAxisRef, prefixAxisRef.getPrefixWithoutOverlap(againstAxisRef));
   }
-  SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
-      prefixAxisRef, prefixAxisRef.getPrefixWithoutOverlap(tailAxisRef));
   return prefixAxisRef;
 }
 
 bool AxisListRef::truncateWithoutOverlap(const AxisListRef& rhs) {
-  if (empty()) {
-    return false;
-  }
-  for (const auto& [axisRefIndex, axisRef] : llvm::enumerate(axisRefs)) {
+  for (const auto [axisRefIndex, axisRef] : llvm::enumerate(*this)) {
     if (auto prefixAxisRef = rhs.getPrefixOfInputWithoutOverlap(axisRef);
         prefixAxisRef != axisRef) {
       trim(axisRefIndex, prefixAxisRef);
       return true;
     }
-  }
-  if (auto prefixAxisRef = rhs.getPrefixOfInputWithoutOverlap(tailAxisRef);
-      prefixAxisRef != tailAxisRef) {
-    trim(axisRefs.size(), prefixAxisRef);
-    return true;
   }
   return false;
 }

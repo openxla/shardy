@@ -21,6 +21,68 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+// This iterator is intended to be used by the `AxisListRef` class to
+// enable iteration over the axes held by instances of `AxisListRef`.
+// Note that dereferencing this iterator yields a reference to `AxisRefAttr`.
+class AxisListRefIterator {
+ public:
+  // Required for `std::iterator_traits`:
+  using value_type = const AxisRefAttr;
+  using difference_type = int;
+  using pointer = const AxisRefAttr*;
+  using reference = const AxisRefAttr&;
+  using iterator_category = std::forward_iterator_tag;
+  using AxisRefAttrIterator = ArrayRef<AxisRefAttr>::const_iterator;
+
+  explicit AxisListRefIterator(AxisRefAttrIterator axisListCurrent,
+                               AxisRefAttrIterator axisListEnd,
+                               bool isTailIterated,
+                               const AxisRefAttr& tailAxisRef)
+      : axisListCurrent(axisListCurrent),
+        axisListEnd(axisListEnd),
+        isTailIterated(isTailIterated),
+        tailAxisRef(tailAxisRef) {}
+
+  AxisListRefIterator& operator++() {
+    if (axisListCurrent != axisListEnd) {
+      ++axisListCurrent;
+    } else {
+      isTailIterated = true;
+    }
+    return *this;
+  }
+
+  bool operator==(const AxisListRefIterator& other) const {
+    return axisListCurrent == other.axisListCurrent &&
+           axisListEnd == other.axisListEnd &&
+           isTailIterated == other.isTailIterated &&
+           tailAxisRef == other.tailAxisRef;
+  }
+
+  bool operator!=(const AxisListRefIterator& other) const {
+    return !(*this == other);
+  }
+
+  reference operator*() const {
+    if (axisListCurrent != axisListEnd) {
+      return *axisListCurrent;
+    }
+    if (isTailIterated) {
+      // If this iterator is at the end, its behaviour should be similar to
+      // derefercing the end of AxisRefAttrIterator, and as a workaround,
+      // it is dereferencing `axisListEnd`.
+      return *axisListEnd;
+    }
+    return tailAxisRef;
+  }
+
+ private:
+  AxisRefAttrIterator axisListCurrent;
+  AxisRefAttrIterator axisListEnd;
+  bool isTailIterated;
+  const AxisRefAttr& tailAxisRef;
+};
+
 // A reference to a list of AxisRefs, that provides API for trimming the list
 // such that the last AxisRef can be replaced, while keeping it a reference.
 //
@@ -34,9 +96,6 @@ class AxisListRef {
 
   AxisListRef() = default;
   AxisListRef(bool isTombstone) : isTombstone(isTombstone) {}
-
-  // TODO(enver): Define an iterator that iterates on the concatenation of
-  // axisRefs and tail, and use it for the methods below.
 
   // Checks if the axes is empty.
   bool empty() const {
@@ -78,6 +137,16 @@ class AxisListRef {
   // which happens if `this` did not overlap with `rhs` in the first place.
   bool truncateWithoutOverlap(const AxisListRef& rhs);
 
+  using const_iterator = AxisListRefIterator;
+  const_iterator begin() const {
+    return const_iterator(axisRefs.begin(), axisRefs.end(),
+                          /*isTailIterated=*/empty(), tailAxisRef);
+  }
+  const_iterator end() const {
+    return const_iterator(axisRefs.end(), axisRefs.end(),
+                          /*isTailIterated=*/true, tailAxisRef);
+  }
+
  private:
   // Returns prefix of input `axisRef` that does not overlap with this axes.
   // TODO(enver): Move this method to utilities.
@@ -99,8 +168,10 @@ class AxisListRef {
   //
   // Assumes that:
   //  1. `this` AxisListRef is non-empty, and
-  //  2. `newSize` is strictly smaller than size().
+  //  2. `newSizeExcludingNewTail` is strictly smaller than size().
   //  3. Input `newTailAxisRef` is a prefix of the (`newSize`+1)st axis.
+  // TODO(enver): It is a bit confusing to have two 'New' in the name of
+  // `newSizeExcludingNewTail`.
   void trim(int64_t newSizeExcludingNewTail,
             std::optional<AxisRefAttr> newTailAxisRef);
   // Clears this AxisListRef.

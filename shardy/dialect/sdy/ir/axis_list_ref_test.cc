@@ -160,6 +160,56 @@ TEST_F(AxisListRefTest, TruncateWithoutOverlap_SubAxisOnLastElement) {
             createAxisListRef({createAxis("a"), createSubAxis("b", 1, 4)}));
 }
 
+TEST_F(AxisListRefTest, LessThan_SameSizeSmaller) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createAxis("a"), createAxis("c")});
+  EXPECT_TRUE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_StrictPrefix) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createAxis("b"), createAxis("c")});
+  EXPECT_TRUE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_SubAxisStrictPrefix) {
+  AxisListRef axes =
+      createAxisListRef({createAxis("a"), createSubAxis("b", 1, 2)});
+  AxisListRef against = createAxisListRef({createAxis("a"), createAxis("b")});
+  EXPECT_TRUE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_SmallerSize) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("c")});
+  AxisListRef against =
+      createAxisListRef({createAxis("a"), createAxis("b"), createAxis("c")});
+  EXPECT_TRUE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_Equal) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("c")});
+  AxisListRef against = createAxisListRef({createAxis("a"), createAxis("c")});
+  EXPECT_FALSE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_EmptyAgainstEmpty) {
+  AxisListRef axes = createAxisListRef({});
+  AxisListRef against = createAxisListRef({});
+  EXPECT_FALSE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_EmptyAgainstNonEmpty) {
+  AxisListRef axes = createAxisListRef({});
+  AxisListRef against = createAxisListRef({createAxis("a")});
+  EXPECT_TRUE(axes < against);
+}
+
+TEST_F(AxisListRefTest, LessThan_NonEmptyAgainstEmpty) {
+  AxisListRef axes = createAxisListRef({createAxis("a")});
+  AxisListRef against = createAxisListRef({});
+  EXPECT_FALSE(axes < against);
+}
+
 // TODO(enver): Add unit tests for all methods.
 
 }  // namespace
