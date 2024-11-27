@@ -40,14 +40,124 @@ class AxisListRefTest : public ::testing::Test {
     return AxisRefAttr::get(&context, name, preSize, size);
   }
 
+  AxisListRef createAxisListRef(SmallVector<AxisRefAttr> axisRefs) {
+    if (axisRefs.empty()) {
+      return AxisListRef();
+    }
+    backingData.push_back(axisRefs);
+    return AxisListRef(backingData.back());
+  }
+
+  SmallVector<SmallVector<AxisRefAttr>> backingData;
   MLIRContext context;
 };
 
-TEST_F(AxisListRefTest, Empty) { EXPECT_TRUE(AxisListRef().empty()); }
+TEST_F(AxisListRefTest, Empty) {
+  AxisListRef axes = createAxisListRef({});
+  EXPECT_TRUE(axes.empty());
+}
 
-TEST_F(AxisListRefTest, NonEmpty) {
-  SmallVector<AxisRefAttr> backingAxes({createAxis("a")});
-  EXPECT_FALSE(AxisListRef(backingAxes).empty());
+TEST_F(AxisListRefTest, Empty_NotEmpty) {
+  AxisListRef axes = createAxisListRef({createAxis("a")});
+  EXPECT_FALSE(axes.empty());
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap) {
+  AxisListRef axes =
+      createAxisListRef({createAxis("a"), createAxis("b"), createAxis("c"),
+                         createAxis("d"), createAxis("e")});
+  AxisListRef against =
+      createAxisListRef({createAxis("c"), createAxis("e"), createAxis("f")});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createAxis("a"), createAxis("b")}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_AgainstOrderDoesNotMatter) {
+  AxisListRef axes =
+      createAxisListRef({createAxis("a"), createAxis("b"), createAxis("c"),
+                         createAxis("d"), createAxis("e")});
+  AxisListRef against =
+      createAxisListRef({createAxis("f"), createAxis("e"), createAxis("c")});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createAxis("a"), createAxis("b")}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_NoOverlap) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createAxis("c")});
+  EXPECT_FALSE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createAxis("a"), createAxis("b")}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_EmptyTruncateOnEmpty) {
+  AxisListRef axes = createAxisListRef({});
+  AxisListRef against = createAxisListRef({});
+  EXPECT_FALSE(axes.truncateWithoutOverlap(against));
+  EXPECT_TRUE(axes.empty());
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_EmptyTruncateOnNonEmpty) {
+  AxisListRef axes = createAxisListRef({});
+  AxisListRef against = createAxisListRef({createAxis("a")});
+  EXPECT_FALSE(axes.truncateWithoutOverlap(against));
+  EXPECT_TRUE(axes.empty());
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_NonEmptyTruncateOnEmpty) {
+  AxisListRef axes = createAxisListRef({createAxis("a")});
+  AxisListRef against = createAxisListRef({});
+  EXPECT_FALSE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createAxis("a")}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_AgainstSame) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createAxis("a"), createAxis("b")});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_TRUE(axes.empty());
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_AxesIsSingleton) {
+  AxisListRef axes = createAxisListRef({createAxis("a")});
+  AxisListRef against = createAxisListRef({createAxis("a"), createAxis("b")});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_TRUE(axes.empty());
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_AgainstPrefix) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createAxis("a")});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_TRUE(axes.empty());
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_AgainstSuffix) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createAxis("b")});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createAxis("a")}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_SubAxis) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createSubAxis("a", 4, 2)});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createSubAxis("a", 1, 4)}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_SubAxisAndAxesIsSingleton) {
+  AxisListRef axes = createAxisListRef({createAxis("a")});
+  AxisListRef against = createAxisListRef({createSubAxis("a", 4, 2)});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes, createAxisListRef({createSubAxis("a", 1, 4)}));
+}
+
+TEST_F(AxisListRefTest, TruncateWithoutOverlap_SubAxisOnLastElement) {
+  AxisListRef axes = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef against = createAxisListRef({createSubAxis("b", 4, 2)});
+  EXPECT_TRUE(axes.truncateWithoutOverlap(against));
+  EXPECT_EQ(axes,
+            createAxisListRef({createAxis("a"), createSubAxis("b", 1, 4)}));
 }
 
 // TODO(enver): Add unit tests for all methods.

@@ -28,12 +28,6 @@ namespace sdy {
 // is also a prefix sub-axis of an axis in the original list.
 class AxisListRef {
  public:
-  // Assumes that input `tailAxisRef` is non-empty.
-  // TODO(enver): Drop this ctor, or make it private, as it is not used at the
-  // moment.
-  AxisListRef(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
-      : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
-
   // Assumes that input `axisRefs` is non-empty.
   AxisListRef(ArrayRef<AxisRefAttr> axisRefs)
       : axisRefs(axisRefs.drop_back()), tailAxisRef(axisRefs.back()) {}
@@ -59,9 +53,6 @@ class AxisListRef {
     return axisRefs == rhs.axisRefs && tailAxisRef == rhs.tailAxisRef;
   }
 
-  // Checks if any two axes, one from this, and the other from `rhs`, overlap.
-  bool overlaps(const AxisListRef& rhs) const;
-
   SmallVector<AxisRefAttr> toVector() const;
 
   std::pair<ArrayRef<AxisRefAttr>, AxisRefAttr> toPair() const {
@@ -78,11 +69,43 @@ class AxisListRef {
   // the `prefix`.
   //
   // Assumes `prefix` is a prefix of this `AxisListRef`.
-  int64_t getShardingSize(MeshAttr mesh, const AxisListRef& prefix) const {
+  int64_t getExpandedShardingSize(MeshAttr mesh,
+                                  const AxisListRef& prefix) const {
     return getShardingSize(mesh) / prefix.getShardingSize(mesh);
   }
+  // Truncates `this` to its largest prefix so that it does not overlap with
+  // `rhs`. Returns true if `this` has been truncated, and false otherwise,
+  // which happens if `this` did not overlap with `rhs` in the first place.
+  bool truncateWithoutOverlap(const AxisListRef& rhs);
 
  private:
+  // Returns prefix of input `axisRef` that does not overlap with this axes.
+  // TODO(enver): Move this method to utilities.
+  // TODO(enver): Instead make this a method of AxisRefAttr, after moving
+  // AxesWithTail to a general data structure in Shardy.
+  // TODO(enver): Reuse getPrefixOfInputWithout method on
+  // shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.cc,
+  // instead, after an iterater is added.
+  std::optional<AxisRefAttr> getPrefixOfInputWithoutOverlap(
+      AxisRefAttr axisRef) const;
+
+  // Trims axes to have the first `newSizeExcludingNewTail` axes and, in case
+  // non-empty, `newTailAxisRef` as an additional final axis.
+
+  // As a result, `newSizeExcludingNewTail` is the new size of AxisListRef
+  // excluding `newTailAxisRef`. That is, if `newTailAxisRef` is non-empty then
+  // the new size of AxisListRef equals to `newSizeExcludingNewTail`+1,
+  // otherwise it equals to `newSizeExcludingNewTail`.
+  //
+  // Assumes that:
+  //  1. `this` AxisListRef is non-empty, and
+  //  2. `newSize` is strictly smaller than size().
+  //  3. Input `newTailAxisRef` is a prefix of the (`newSize`+1)st axis.
+  void trim(int64_t newSizeExcludingNewTail,
+            std::optional<AxisRefAttr> newTailAxisRef);
+  // Clears this AxisListRef.
+  void clear();
+
   // The axes that this FactorAxesPair holds is defined by `axisRefs` and
   // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is
   // empty, then `axisRefs` is empty as well.
@@ -91,9 +114,6 @@ class AxisListRef {
   // TODO(enver): Use ArrayRef::getTombstoneKey or AxisRefAttr::getTombstoneKey,
   // either for `axisRefs` or `tailAxisRef` respectively, instead.
   bool isTombstone = false;
-  // Checks if `axisRef` overlaps with axes of this FactorAxesPair.
-  // Assumes `axisRef` is non-empty.
-  bool overlaps(AxisRefAttr axisRef) const;
 };
 
 struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {

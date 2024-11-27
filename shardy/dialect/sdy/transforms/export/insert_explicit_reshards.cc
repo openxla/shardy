@@ -184,15 +184,6 @@ struct FactorAxesPair {
   }
 
   bool empty() const { return factorIndex == kEmptyFactorIndex; }
-
-  // Checks if any two axes, one from this, and the other from `rhs`, overlap.
-  bool overlaps(const FactorAxesPair& rhs) const {
-    return axes.overlaps(rhs.axes);
-  }
-
-  void assignTo(SmallVector<AxisListRef>& axesPerFactor) const {
-    axesPerFactor[factorIndex] = axes;
-  }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
@@ -332,6 +323,7 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors,
     ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   SmallVector<AxisListRef> factorAxisRefs(numFactors);
+  // TODO(enver): Use priority queue for a better performance.
   SmallVector<FactorAxesCandidate> factorAxesCandidates =
       findFactorAxesCandidates(projection, numFactors, tensorSizes, mesh);
   // TODO(enver): Instead of taking an axes-array with the largest count, take
@@ -344,7 +336,7 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
   FactorAxesPair bestFactorAxes;
   while (!factorAxesCandidates.empty()) {
     if (!bestFactorAxes.empty()) {
-      bestFactorAxes.assignTo(factorAxisRefs);
+      factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
     }
     // TODO(enver): Tie-breaking currently depends on the order of iteration.
     // Consider some heuristic for breaking ties.
@@ -376,20 +368,41 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
           // factor-axes pair, as we remove all factor-axes pair who can
           // not expand from the picked axes for the picked factor from
           // map at each iteration.
-          candidate.shardingSize = candidate.factorAxes.axes.getShardingSize(
-              mesh,
-              /*prefix=*/bestFactorAxes.axes);
+          candidate.shardingSize =
+              candidate.factorAxes.axes.getExpandedShardingSize(
+                  mesh,
+                  /*prefix=*/bestFactorAxes.axes);
           nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
           candidateIndex++;
         }
         continue;
       }
-      if (candidate.factorAxes.overlaps(bestFactorAxes)) {
-        // Clear the count of overlapping axis, effectively erasing.
-        // TODO(enver): Instead of removing from the list, trim the axisRefs,
-        // to use the largest prefix that does not overlap with bestAxisRefs.
-        factorAxesCandidates[candidateIndex] = factorAxesCandidates.back();
-        factorAxesCandidates.pop_back();
+      if (candidate.factorAxes.axes.truncateWithoutOverlap(
+              bestFactorAxes.axes)) {
+        // In case the axes is trimmed up to the current assignment then we
+        // can drop it from the list as it would not be expanding on the current
+        // assignment.
+        // Note that it is guaranteed that the current assignment of candidate's
+        // factor is a prefix of `prefixAxes` as
+        //   1. We only keep the candidates with axes that can expand on the
+        //   current assignment of its factor, and
+        //   2. We trim the axes of candidates that overlaps with any of the
+        //   current assignment (and hence the picked axes do not overlap with
+        //   the current assignment of candidate's factor).
+        if (candidate.factorAxes.axes ==
+            factorAxisRefs[candidate.factorAxes.factorIndex]) {
+          factorAxesCandidates[candidateIndex] = factorAxesCandidates.back();
+          factorAxesCandidates.pop_back();
+        } else {
+          // Trim the axes to use the largest prefix that does not overlap
+          // with the picked one.
+          candidate.shardingSize =
+              candidate.factorAxes.axes.getExpandedShardingSize(
+                  mesh,
+                  /*prefix=*/factorAxisRefs[candidate.factorAxes.factorIndex]);
+          nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
+          candidateIndex++;
+        }
         continue;
       }
       nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);

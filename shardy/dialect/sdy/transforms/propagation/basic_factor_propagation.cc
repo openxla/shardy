@@ -44,6 +44,7 @@ namespace {
 
 // Returns the largest prefix of `axisRef` that does not overlap with any axes
 // in `otherAxisRefs`.
+// TODO(enver): Move to ir/utils and use in AxisListRef methods.
 std::optional<AxisRefAttr> getPrefixWithoutOverlap(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs) {
   AxisRefAttr result = axisRef;

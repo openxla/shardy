@@ -218,6 +218,7 @@ cc_library(
     hdrs = ["axis_list_ref.h"],
     deps = [
         ":dialect",
+        "//shardy/dialect/sdy/transforms/common:macros",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Support",
     ],

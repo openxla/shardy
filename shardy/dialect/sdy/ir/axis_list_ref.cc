@@ -17,11 +17,13 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
 
 #include <cstdint>
+#include <optional>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/common/macros.h"
 
 namespace mlir {
 namespace sdy {
@@ -39,32 +41,6 @@ bool AxisListRef::operator<(const AxisListRef& rhs) const {
     return tailAxisRef < rhs.tailAxisRef;
   }
   return false;
-}
-
-// Checks if `axisRef` overlaps with axes of this FactorAxesPair.
-// Assumes `axisRef` is non-empty.
-bool AxisListRef::overlaps(AxisRefAttr axisRef) const {
-  if (empty()) {
-    return false;
-  }
-  if (axisRef.overlaps(tailAxisRef)) {
-    return true;
-  }
-  return llvm::any_of(axisRefs, [&](AxisRefAttr againstAxisRef) {
-    return axisRef.overlaps(againstAxisRef);
-  });
-}
-
-// Checks if any two axes, one from this, and the other from `rhs`, overlap.
-bool AxisListRef::overlaps(const AxisListRef& rhs) const {
-  if (empty()) {
-    return false;
-  }
-  if (rhs.overlaps(tailAxisRef)) {
-    return true;
-  }
-  return llvm::any_of(
-      axisRefs, [&](AxisRefAttr axisRef) { return rhs.overlaps(axisRef); });
 }
 
 SmallVector<AxisRefAttr> AxisListRef::toVector() const {
@@ -106,6 +82,60 @@ int64_t AxisListRef::getShardingSize(MeshAttr mesh) const {
   }
   return shardingSize * tailAxisRef.getSize(mesh);
 };
+
+void AxisListRef::clear() {
+  axisRefs = {};
+  tailAxisRef = AxisRefAttr();
+}
+
+void AxisListRef::trim(int64_t newSizeExcludingNewTail,
+                       std::optional<AxisRefAttr> newTailAxisRef) {
+  if (!newTailAxisRef) {
+    if (newSizeExcludingNewTail == 0) {
+      clear();
+    } else {
+      tailAxisRef = axisRefs[newSizeExcludingNewTail - 1];
+      axisRefs = axisRefs.take_front(newSizeExcludingNewTail - 1);
+    }
+    return;
+  }
+  axisRefs = axisRefs.take_front(newSizeExcludingNewTail);
+  tailAxisRef = *newTailAxisRef;
+}
+
+std::optional<AxisRefAttr> AxisListRef::getPrefixOfInputWithoutOverlap(
+    AxisRefAttr axisRef) const {
+  if (empty()) {
+    return axisRef;
+  }
+  AxisRefAttr prefixAxisRef = axisRef;
+  for (AxisRefAttr againstAxisRef : axisRefs) {
+    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+        prefixAxisRef, prefixAxisRef.getPrefixWithoutOverlap(againstAxisRef));
+  }
+  SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+      prefixAxisRef, prefixAxisRef.getPrefixWithoutOverlap(tailAxisRef));
+  return prefixAxisRef;
+}
+
+bool AxisListRef::truncateWithoutOverlap(const AxisListRef& rhs) {
+  if (empty()) {
+    return false;
+  }
+  for (const auto& [axisRefIndex, axisRef] : llvm::enumerate(axisRefs)) {
+    if (auto prefixAxisRef = rhs.getPrefixOfInputWithoutOverlap(axisRef);
+        prefixAxisRef != axisRef) {
+      trim(axisRefIndex, prefixAxisRef);
+      return true;
+    }
+  }
+  if (auto prefixAxisRef = rhs.getPrefixOfInputWithoutOverlap(tailAxisRef);
+      prefixAxisRef != tailAxisRef) {
+    trim(axisRefs.size(), prefixAxisRef);
+    return true;
+  }
+  return false;
+}
 
 }  // namespace sdy
 }  // namespace mlir
