@@ -279,7 +279,7 @@ LogicalResult propagateTensorShardings(
   }
 
   op->getContext()->executeAction<SourceShardingAction>(
-      [&]() {
+      [&, &updateOperand = updateOperand, &updateResult = updateResult]() {
         updateTensorShardings(
             operands, results, operandShardings, resultShardings,
             setOperandShardingCallback, setResultShardingCallback, shardingRule,
