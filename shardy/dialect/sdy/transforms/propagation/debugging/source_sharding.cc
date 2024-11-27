@@ -346,7 +346,14 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
     llvm_unreachable("unknown EdgeSource");
   };
   auto updateEdgeMap = [&](AxisRefAttr newAxisRef, Value value) {
-    EdgeSource source = axisToEdgeSourceMap.at(newAxisRef);
+    // Axis may not be in the map for region ops like `ManualComputationOp`
+    // where the `out_sharding` refers to a manual axis, but the body's
+    // `ReturnOp` doesn't have the manual axis.
+    auto it = axisToEdgeSourceMap.find(newAxisRef);
+    if (it == axisToEdgeSourceMap.end()) {
+      return;
+    }
+    EdgeSource source = it->getSecond();
     if (mappings->debugEdgeSourceSharding) {
       mappings->valueToEdgeSourceMap[value][newAxisRef] = source;
     }
@@ -369,7 +376,11 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
       }
       for (auto [oldDimSharding, newDimSharding] : llvm::zip_equal(
                oldSharding.getDimShardings(), newSharding.getDimShardings())) {
-        if (oldDimSharding == newDimSharding) {
+        // Skip if the sharding is empty or didn't change. The sharding may
+        // be empty when data flow ops are added for the block arguments of
+        // `ManualComputationOp`s, where the `in_sharding` only refers to
+        // manual axes.
+        if (newDimSharding.emptyAxes() || oldDimSharding == newDimSharding) {
           continue;
         }
         const int oldDimShardingSize = oldDimSharding.getAxes().size();

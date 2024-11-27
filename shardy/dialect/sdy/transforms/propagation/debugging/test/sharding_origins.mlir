@@ -150,6 +150,38 @@ func.func @manual_computation_no_manual_axes(%arg0: tensor<32x32x32xf32>) -> ten
   return %2: tensor<32x32x32xf32>
 }
 
+// TODO(b/381281685): save the changes to the in/out shardings on the
+// ManualComputationOp.
+// CHECK-LABEL: manual_computation_manual_axes
+// CHECK-SAME:    %arg0: tensor<32x32x32xf32> {sdy.origin_sharding = {a = "mc_1_input: 0", b = "mc_1_input: 0"},
+// CHECK-SAME:                                 sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}, {?}]>}
+// CHECK-SAME:    -> (tensor<32x32x32xf32> {sdy.origin_sharding = {a = "mc_1_output: 0", b = "mc_1_input: 0"},
+// CHECK-SAME:                              sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}, {?}]>}) {
+func.func @manual_computation_manual_axes(%arg0: tensor<32x32x32xf32>) -> tensor<32x32x32xf32> {
+  // CHECK-NEXT: %[[SUB:.*]] = stablehlo.subtract %arg0, %arg0 {sdy.origin_sharding = {a = "mc_1_input: 0", b = "mc_1_input: 0"},
+  // CHECK-SAME:                                                sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]>}
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[SUB]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]
+  // CHECK-SAME:   manual_axes={"a"} (%arg1: tensor<16x32x32xf32>) {
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg1 {
+  // CHECK-SAME:     sdy.origin_sharding = {b = "mc_1_input: 0"},
+  // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}, {?}]>]>}
+  // CHECK-NEXT:   sdy.return %[[ADD]]
+  // CHECK-NEXT: } {sdy.origin_sharding_name = "mc_1"}
+  // CHECK-NEXT: %[[SUB_2:.*]] = stablehlo.subtract %[[MC]], %[[MC]] {
+  // CHECK-SAME:   sdy.origin_sharding = {a = "mc_1_output: 0", b = "mc_1_input: 0"},
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]>}
+  // CHECK-NEXT: return %[[SUB_2]]
+  %0 = stablehlo.subtract %arg0, %arg0 : tensor<32x32x32xf32>
+  %1 = sdy.manual_computation(%0) in_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>] out_shardings=[<@mesh, [{"a", ?}, {?}, {?}]>] manual_axes={"a"} (%arg1: tensor<16x32x32xf32>) {
+    %3 = stablehlo.add %arg1, %arg1 : tensor<16x32x32xf32>
+    sdy.return %3 : tensor<16x32x32xf32>
+  } : (tensor<32x32x32xf32>) -> tensor<32x32x32xf32>
+  %2 = stablehlo.subtract %1, %1 : tensor<32x32x32xf32>
+  return %2: tensor<32x32x32xf32>
+}
+
 
 // Show that when an axis came from multiple sources, we just use the first we
 // see left to right, from operands to results.
@@ -212,10 +244,6 @@ func.func @real_conflict_across_factors_diff_tensors_size(
 }
 
 // TODO(b/379279614): support ops with multiple results.
-
-// TODO(b/379279617): After `ManualComputationOp` implements the
-// `ShardableDataFlowOpInterface`, add a test for manual computation with
-// manual axes.
 
 // TODO(b/379279614): add test for while loop with multiple results, need to make
 // sure the origin sharding info is preserved after sinking the dataflow edge
