@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/axis_list_ref.h"
 #include "shardy/dialect/sdy/ir/constants.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/dialect.h"    // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"      // IWYU pragma: keep
@@ -156,158 +157,14 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
   }
 }
 
-struct AxesWithTail {
-  // The axes that this FactorAxesPair holds is defined by `axisRefs` and
-  // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is
-  // empty, then `axisRefs` is empty as well.
-  ArrayRef<AxisRefAttr> axisRefs;
-  AxisRefAttr tailAxisRef;
-  bool isTombstone = false;
-
-  // Assumes that input `tailAxisRef` is non-empty.
-  AxesWithTail(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
-      : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
-
-  // Assumes that input `axisRefs` is non-empty.
-  AxesWithTail(ArrayRef<AxisRefAttr> axisRefs)
-      : axisRefs(axisRefs.drop_back()), tailAxisRef(axisRefs.back()) {}
-
-  AxesWithTail() = default;
-  AxesWithTail(bool isTombstone) : isTombstone(isTombstone) {}
-
-  // TODO(enver): Define an iterator that iterates on the concatenation of
-  // axisRefs and tail, and use it for the methods below.
-
-  // Checks if the axes is empty.
-  bool empty() const {
-    // If `tailAxisRef` is empty, then `axisRefs` is empty as well. Hence, it is
-    // sufficient to check if `tailAxisRef` empty.
-    return !tailAxisRef;
-  }
-
-  int64_t size() const { return empty() ? 0 : axisRefs.size() + 1; }
-
-  bool operator<(const AxesWithTail& rhs) const {
-    if (size() != rhs.size()) {
-      return size() < rhs.size();
-    }
-    for (auto [axisRef, rhsAxisRef] : llvm::zip_equal(axisRefs, rhs.axisRefs)) {
-      if (axisRef != rhsAxisRef) {
-        return axisRef < rhsAxisRef;
-      }
-    }
-    if (tailAxisRef != rhs.tailAxisRef) {
-      return tailAxisRef < rhs.tailAxisRef;
-    }
-    return false;
-  }
-
-  bool operator==(const AxesWithTail& rhs) const {
-    return axisRefs == rhs.axisRefs && tailAxisRef == rhs.tailAxisRef;
-  }
-
-  // Checks if `axisRef` overlaps with axes of this FactorAxesPair.
-  // Assumes `axisRef` is non-empty.
-  bool overlaps(AxisRefAttr axisRef) const {
-    if (empty()) {
-      return false;
-    }
-    if (axisRef.overlaps(tailAxisRef)) {
-      return true;
-    }
-    return llvm::any_of(axisRefs, [&](AxisRefAttr againstAxisRef) {
-      return axisRef.overlaps(againstAxisRef);
-    });
-  }
-
-  // Checks if any two axes, one from this, and the other from `rhs`, overlap.
-  bool overlaps(const AxesWithTail& rhs) const {
-    if (empty()) {
-      return false;
-    }
-    if (rhs.overlaps(tailAxisRef)) {
-      return true;
-    }
-    return llvm::any_of(
-        axisRefs, [&](AxisRefAttr axisRef) { return rhs.overlaps(axisRef); });
-  }
-
-  SmallVector<AxisRefAttr> toVector() const {
-    if (empty()) {
-      return {};
-    }
-    SmallVector<AxisRefAttr> resultAxes = llvm::to_vector(axisRefs);
-    resultAxes.push_back(tailAxisRef);
-    return resultAxes;
-  }
-
-  std::pair<ArrayRef<AxisRefAttr>, AxisRefAttr> toPair() const {
-    return std::make_pair(axisRefs, tailAxisRef);
-  }
-
-  // Checks if this axes is a strict prefix of the axes of `rhs`.
-  bool strictPrefixOf(const AxesWithTail& rhs) const {
-    if (empty()) {
-      return !rhs.empty();
-    }
-    if (size() > rhs.size()) {
-      return false;
-    }
-    for (auto [axisRef, rhsAxisRef] : llvm::zip(axisRefs, rhs.axisRefs)) {
-      if (axisRef != rhsAxisRef) {
-        return false;
-      }
-    }
-    if (size() == rhs.size()) {
-      return tailAxisRef.strictPrefixOf(rhs.tailAxisRef);
-    }
-    return tailAxisRef.prefixOf(rhs.axisRefs[axisRefs.size()]);
-  }
-
-  // Returns the product of the sharding sizes of all individual axes
-  int64_t getShardingSize(MeshAttr mesh) const {
-    if (empty()) {
-      return 1;
-    }
-    int64_t shardingSize = 1;
-    for (AxisRefAttr axisRef : axisRefs) {
-      shardingSize *= axisRef.getSize(mesh);
-    }
-    return shardingSize * tailAxisRef.getSize(mesh);
-  }
-
-  // Returns the product of the sharding sizes of all individual axes excluding
-  // the `prefix`.
-  //
-  // Assumes `prefix` is a prefix of this `AxesWithTail`.
-  int64_t getShardingSize(MeshAttr mesh, const AxesWithTail& prefix) const {
-    return getShardingSize(mesh) / prefix.getShardingSize(mesh);
-  }
-};
-
-struct AxesWithTailInfo : public llvm::DenseMapInfo<AxesWithTail> {
-  static unsigned getHashValue(const AxesWithTail& m) {
-    return llvm::hash_value(m.toPair());
-  }
-  static bool isEqual(const AxesWithTail& lhs, const AxesWithTail& rhs) {
-    return lhs == rhs;
-  }
-
-  static inline AxesWithTail getEmptyKey() { return AxesWithTail(); }
-
-  static inline AxesWithTail getTombstoneKey() {
-    return AxesWithTail(/*isTombstone=*/true);
-  }
-};
-
 struct FactorAxesPair {
   constexpr static int64_t kEmptyFactorIndex = -1;
   constexpr static int64_t kTombstoneFactorIndex = -2;
 
   int64_t factorIndex = kEmptyFactorIndex;
-  AxesWithTail axes;
+  AxisListRef axes;
 
-  FactorAxesPair(int64_t factorIndex, AxesWithTail axes)
+  FactorAxesPair(int64_t factorIndex, AxisListRef axes)
       : factorIndex(factorIndex), axes(axes) {}
 
   // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
@@ -333,7 +190,7 @@ struct FactorAxesPair {
     return axes.overlaps(rhs.axes);
   }
 
-  void assignTo(SmallVector<AxesWithTail>& axesPerFactor) const {
+  void assignTo(SmallVector<AxisListRef>& axesPerFactor) const {
     axesPerFactor[factorIndex] = axes;
   }
 };
@@ -416,7 +273,7 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
     const ShardingProjection& projection, int64_t numFactors,
     ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   // Find sets of candidate axes per factor.
-  SmallVector<DenseSet<AxesWithTail, AxesWithTailInfo>> axesSets(numFactors);
+  SmallVector<DenseSet<AxisListRef, AxisListRefInfo>> axesSets(numFactors);
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -424,7 +281,7 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
          tensorFactorSharding.factorIndexToSharding) {
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
       while (!axisRefs.empty()) {
-        axesSets[factorIndex].insert(AxesWithTail(axisRefs));
+        axesSets[factorIndex].insert(AxisListRef(axisRefs));
         axisRefs = axisRefs.drop_back();
       }
     }
@@ -444,11 +301,11 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
         continue;
       }
       FactorAxesPair factorAxes(factorIndex,
-                                AxesWithTail(factorSharding.axisRefs));
+                                AxisListRef(factorSharding.axisRefs));
       updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxes,
                                 tensorSizes[tensorIndex], mesh);
       // Increment counts for all its strict prefixes.
-      for (const AxesWithTail& axes : axesSets[factorIndex]) {
+      for (const AxisListRef& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
           updateFactorAxesCandidate(factorAxesCandidatesMap,
                                     FactorAxesPair(factorIndex, axes),
@@ -471,10 +328,10 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
 // delete all the pairs from the list that is either with the picked factor,
 // or with an axis that overlaps with the picked axis. Continue iterating
 // until the list is empty.
-SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
+SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors,
     ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
-  SmallVector<AxesWithTail> factorAxisRefs(numFactors);
+  SmallVector<AxisListRef> factorAxisRefs(numFactors);
   SmallVector<FactorAxesCandidate> factorAxesCandidates =
       findFactorAxesCandidates(projection, numFactors, tensorSizes, mesh);
   // TODO(enver): Instead of taking an axes-array with the largest count, take
@@ -543,10 +400,10 @@ SmallVector<AxesWithTail> findCommonAxesUsingMajorityVoteHeuristic(
   return factorAxisRefs;
 }
 
-SmallVector<AxesWithTail> findCommonAxes(const ShardingProjection& projection,
-                                         int64_t numFactors,
-                                         ArrayRef<int64_t> tensorSizes,
-                                         MeshAttr mesh) {
+SmallVector<AxisListRef> findCommonAxes(const ShardingProjection& projection,
+                                        int64_t numFactors,
+                                        ArrayRef<int64_t> tensorSizes,
+                                        MeshAttr mesh) {
   return findCommonAxesUsingMajorityVoteHeuristic(projection, numFactors,
                                                   tensorSizes, mesh);
 }

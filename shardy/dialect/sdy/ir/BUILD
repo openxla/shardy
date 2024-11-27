@@ -211,3 +211,28 @@ cc_library(
         "@stablehlo//:stablehlo_ops",
     ],
 )
+
+cc_library(
+    name = "axis_list_ref",
+    srcs = ["axis_list_ref.cc"],
+    hdrs = ["axis_list_ref.h"],
+    deps = [
+        ":dialect",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_test(
+    name = "axis_list_ref_test",
+    srcs = ["axis_list_ref_test.cc"],
+    deps = [
+        ":axis_list_ref",
+        ":dialect",
+        ":register",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
