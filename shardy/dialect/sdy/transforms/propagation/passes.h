@@ -44,11 +44,6 @@ namespace sdy {
 void addPropagationPipeline(OpPassManager& pm,
                             const PropagationOptions& options = {});
 
-// TODO(bartchr): delete this once cl/651336079 is submitted and propagated to
-// XLA.
-void addPropagationPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
-                            bool conservativePropagation = false);
-
 // Register the sdy-propagation-pipeline.
 void registerPropagationPipeline();
 

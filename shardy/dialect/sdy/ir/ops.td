@@ -254,7 +254,7 @@ def Sdy_ConstantOp : Sdy_Op<"constant",
 // TODO(tomnatan): consider moving this to an sdy_internal dialect
 // TODO((b/330339693): update doc based on the interface we define with dialects
 // like stablehlo.
-def DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
+def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
   [SameOperandsAndResultType]> {
   let summary = "data flow edge op.";
 
@@ -339,7 +339,7 @@ def DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
 // PropagationBarrierOp
 //===----------------------------------------------------------------------===//
 
-def PropagationBarrierOp : Sdy_Op<"propagation_barrier",
+def Sdy_PropagationBarrierOp : Sdy_Op<"propagation_barrier",
   [Pure, Elementwise, SameOperandsAndResultType]> {
   let summary = "Propagation barrier operation";
 
@@ -370,7 +370,7 @@ def PropagationBarrierOp : Sdy_Op<"propagation_barrier",
 // NamedComputationOp
 //===----------------------------------------------------------------------===//
 
-def NamedComputationOp : Sdy_Op<"named_computation",
+def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
     [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
      RecursivelySpeculatable, IsolatedFromAbove,
      DeclareOpInterfaceMethods<
@@ -420,7 +420,7 @@ def NamedComputationOp : Sdy_Op<"named_computation",
 }
 
 
-def AllGatherOp : Sdy_Op<"all_gather",
+def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     [SameOperandsAndResultType]> {
   let summary = "Gathers chunks of a tensor along axes";
   let description = [{

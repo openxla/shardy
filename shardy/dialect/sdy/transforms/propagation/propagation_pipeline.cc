@@ -32,23 +32,13 @@ void addPropagationPipeline(OpPassManager& pm,
   addExportPipeline(pm, options.dumpDirectory);
 }
 
-// TODO(bartchr): delete this once cl/651336079 is submitted and propagated to
-// XLA.
-void addPropagationPipeline(OpPassManager& pm, StringRef dumpDirectory,
-                            bool conservativePropagation) {
-  addPropagationPipeline(pm, PropagationOptions{
-                                 /*keepShardingRules=*/false, dumpDirectory,
-                                 conservativePropagation});
-}
-
 void registerPropagationPipeline() {
   PassPipelineRegistration<>(
       "sdy-propagation-pipeline",
       "Runs the SDY propagation pass, preceded by a sequence of import passes "
       "needed as a pre-processing step for propagation",
       [](OpPassManager& pm) {
-        return addPropagationPipeline(pm, /*dumpDirectory */ "",
-                                      /*conservativePropagation=*/false);
+        return addPropagationPipeline(pm);
       });
 }
 

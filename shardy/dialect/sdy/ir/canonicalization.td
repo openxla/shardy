@@ -26,7 +26,7 @@ def ReshardOfReshardPattern :
         (Sdy_ReshardOp $tensor, $outer_sharding), [(HasOneUse:$inner_reshard)]>;
 
 
-def AllGatherNoopPattern : Pat<(AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$gatheringAxes, $resultSharding),
+def AllGatherNoopPattern : Pat<(Sdy_AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$gatheringAxes, $resultSharding),
                                (replaceWithValue $tensor)>;
 
 #endif  // SDY_CANONICALIZATION
