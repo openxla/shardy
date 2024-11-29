@@ -30,7 +30,10 @@ namespace {
 // TODO(enver): Expose a base test class with create axis methods.
 class AxisListRefTest : public ::testing::Test {
  protected:
-  void SetUp() override { loadAllRequiredDialects(&context); }
+  void SetUp() override {
+    loadAllRequiredDialects(&context);
+    backingData.reserve(10);
+  }
 
   AxisRefAttr createAxis(StringRef name) {
     return AxisRefAttr::get(&context, name);
