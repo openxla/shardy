@@ -23,9 +23,12 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
+void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
+                       bool skipConvertToReshard) {
   pm.addPass(createRemoveShardingGroupsPass());
-  pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
+  if (!skipConvertToReshard) {
+    pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
+  }
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addNestedPass<func::FuncOp>(
       createUpdateNonDivisibleInputOutputShardingsPass());

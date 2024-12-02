@@ -42,7 +42,8 @@ namespace sdy {
 // The added propagation pass is the top-level layer of propagation, which
 // includes all conflict resolution strategies in a hierarchy.
 void addPropagationPipeline(OpPassManager& pm,
-                            const PropagationOptions& options = {});
+                            const PropagationOptions& options = {},
+                            bool skipConvertToReshard = false);
 
 // Register the sdy-propagation-pipeline.
 void registerPropagationPipeline();
