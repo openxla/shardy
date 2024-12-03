@@ -309,7 +309,7 @@ Example:
 
 Traits: `IsolatedFromAbove`, `RecursiveMemoryEffects`, `RecursivelySpeculatableImplTrait`, `SingleBlockImplicitTerminator<ReturnOp>`, `SingleBlock`
 
-Interfaces: `ConditionallySpeculatable`, `ShardableDataFlowOpInterface`
+Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `ShardableDataFlowOpInterface`
 
 #### Attributes:
 
@@ -531,6 +531,8 @@ members will be sharded in exactly the same way. This operation takes the
 argument group ID and returns no result, but instead modifies the internal
 sharding group representation to add the input tensor to the group with the
 given ID.
+
+Interfaces: `InferTypeOpInterface`
 
 #### Attributes:
 
