@@ -172,3 +172,25 @@ func.func @replicated_axes_free_before_manual(%arg0: tensor<16x32xf32>) -> tenso
   } : (tensor<16x32xf32>) -> tensor<16x32xf32>
   func.return %0: tensor<16x32xf32>
 }
+
+// CHECK-LABEL: func @manual_computation_dynamic_shapes
+func.func @manual_computation_dynamic_shapes(%arg0: tensor<16x32xf32>) -> tensor<?x32xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<?x32xf32>
+  // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD]])
+  // CHECK-SAME:     in_shardings=[<@meshA, [{"a", ?}, {?}]>]
+  // CHECK-SAME:     out_shardings=[<@meshA, [{"a", ?}, {?}]>]
+  // CHECK-SAME:     manual_axes={"a"} (%arg1: tensor<?x32xf32>) {
+  // CHECK-NEXT:   %[[INNER_ADD:.*]] = stablehlo.add %arg1, %arg1 : tensor<?x32xf32>
+  // CHECK-NEXT:   sdy.return %[[INNER_ADD]] : tensor<?x32xf32>
+  // CHECK-NEXT: } : (tensor<?x32xf32>) -> tensor<?x32xf32>
+  // CHECK-NEXT: return %[[MC]] : tensor<?x32xf32>
+  %0 = stablehlo.add %arg0, %arg0 : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<?x32xf32>
+  %1 = sdy.manual_computation(%0)
+      in_shardings=[<@meshA, [{"a", ?}, {?}]>]
+      out_shardings=[<@meshA, [{"a", ?}, {?}]>]
+      manual_axes={"a"} (%arg1: tensor<?x32xf32>) {
+    %2 = stablehlo.add %arg1, %arg1 : tensor<?x32xf32>
+    sdy.return %2 : tensor<?x32xf32>
+  } : (tensor<?x32xf32>) -> tensor<?x32xf32>
+  return %1: tensor<?x32xf32>
+}

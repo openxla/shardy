@@ -48,7 +48,7 @@ def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
 }
 
 def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
-  [Elementwise, SameOperandsAndResultType]> {
+  [Elementwise, SameOperandsAndResultType, InferTypeOpInterface]> {
   let summary = "Constrains a tensor to the specified sharding";
   let description = [{
     Attaches a sharding to an intermediate tensor (e.g. the result of a matmul)
@@ -78,7 +78,7 @@ def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
 }
 
 def Sdy_ReshardOp : Sdy_Op<"reshard",
-  [Pure, Elementwise, SameOperandsAndResultType]> {
+  [Pure, Elementwise, SameOperandsAndResultType, InferTypeOpInterface]> {
   let summary = "Reshards a tensor to a different sharding";
   let description = [{
     Reshards the input tensor with the specified sharding, which is different
@@ -124,10 +124,10 @@ def Sdy_ReturnOp : Sdy_Op<"return", [Pure, Terminator]> {
 def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
    IsolatedFromAbove, DeclareOpInterfaceMethods<
-         ShardableDataFlowOpInterface,
-         /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
-                              "setOpResultEdgeOwnerShardings",
-                              "transformTargetSharding"]>]> {
+       ShardableDataFlowOpInterface,
+       /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
+                            "setOpResultEdgeOwnerShardings",
+                            "transformTargetSharding"]>]> {
   let summary = "Multi-device parallelism operation with manual collectives";
   let description = [{
     Jump into a region written in terms of per-device local code with explicit
@@ -189,7 +189,7 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
 def Sdy_ShardingGroupOp : Sdy_Op<"sharding_group",
   // Op is non-pure since it modifies the internal representation of the
   // sharding group.
-  []>{
+  [DeclareOpInterfaceMethods<InferTypeOpInterface>]>{
   let summary = "Constrains tensors in the group to have the same sharding.";
   let description = [{
     This op provides an interface to assign tensors to sharding groups (
@@ -340,7 +340,8 @@ def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
 //===----------------------------------------------------------------------===//
 
 def Sdy_PropagationBarrierOp : Sdy_Op<"propagation_barrier",
-  [Pure, Elementwise, SameOperandsAndResultType]> {
+  [Pure, Elementwise, SameOperandsAndResultType,
+   DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "Propagation barrier operation";
 
   let description = [{
@@ -373,6 +374,7 @@ def Sdy_PropagationBarrierOp : Sdy_Op<"propagation_barrier",
 def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
     [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
      RecursivelySpeculatable, IsolatedFromAbove,
+     DeclareOpInterfaceMethods<InferTypeOpInterface>,
      DeclareOpInterfaceMethods<
          ShardableDataFlowOpInterface,
          /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
@@ -421,7 +423,8 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
 
 
 def Sdy_AllGatherOp : Sdy_Op<"all_gather",
-    [SameOperandsAndResultType]> {
+    [SameOperandsAndResultType,
+     DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "Gathers chunks of a tensor along axes";
   let description = [{
     Gathers chunks of a tensor along axes specified in `gatheringAxes`.

@@ -704,22 +704,40 @@ TensorShardingAttr TensorShardingAttr::getFullyOpenLike(
 }
 
 RankedTensorType TensorShardingAttr::getLocalTensorType(
-    RankedTensorType globalTensorType, MeshAttr mesh) {
+    RankedTensorType globalTensorType, MeshAttr mesh) const {
+  assert(globalTensorType.hasStaticShape());
   if (getDimShardings().empty()) {
     return globalTensorType;
   }
   SmallVector<int64_t> localShape;
   localShape.reserve(globalTensorType.getRank());
 
-  for (auto [dim, dimSharding] : llvm::enumerate(getDimShardings())) {
+  for (auto [globalDimSize, dimSharding] :
+       llvm::zip_equal(globalTensorType.getShape(), getDimShardings())) {
     int64_t shardSize = dimSharding.getShardedSize(mesh);
-    int64_t dimSize = globalTensorType.getDimSize(dim);
-    // We allow non divisible sharding
-    int64_t localSize = (dimSize + shardSize - 1) / shardSize;
+    // We allow non divisible sharding.
+    int64_t localSize = (globalDimSize + shardSize - 1) / shardSize;
     localShape.push_back(localSize);
   }
   return RankedTensorType::get(ArrayRef<int64_t>(localShape),
                                globalTensorType.getElementType());
+}
+
+RankedTensorType TensorShardingAttr::getGlobalTensorType(
+    RankedTensorType localTensorType, MeshAttr mesh) const {
+  assert(localTensorType.hasStaticShape());
+  if (getDimShardings().empty()) {
+    return localTensorType;
+  }
+  SmallVector<int64_t> globalShape;
+  globalShape.reserve(localTensorType.getRank());
+
+  for (auto [localDimSize, dimSharding] :
+       llvm::zip_equal(localTensorType.getShape(), getDimShardings())) {
+    globalShape.push_back(dimSharding.getShardedSize(mesh) * localDimSize);
+  }
+  return RankedTensorType::get(ArrayRef<int64_t>(globalShape),
+                               localTensorType.getElementType());
 }
 
 //===----------------------------------------------------------------------===//
@@ -749,96 +767,10 @@ TensorShardingPerValueAttr TensorShardingPerValueAttr::replaceValueSharding(
 }
 
 //===----------------------------------------------------------------------===//
-// ConstantOp
-//===----------------------------------------------------------------------===//
-
-LogicalResult ConstantOp::inferReturnTypes(
-    MLIRContext*, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange,
-    SmallVectorImpl<Type>& inferredReturnTypes) {
-  ConstantOpAdaptor adaptor(operands, attributes, properties);
-  return hlo::inferConstantOp(location, adaptor.getValue(),
-                              inferredReturnTypes);
-}
-
-bool ConstantOp::isCompatibleReturnTypes(TypeRange l, TypeRange r) {
-  return stablehlo::ConstantOp::isCompatibleReturnTypes(l, r);
-}
-
-//===----------------------------------------------------------------------===//
 // ManualComputationOp
 //===----------------------------------------------------------------------===//
 
 namespace {
-
-// Callback that removes free (non-manual) axes from a
-// `dimSharding` in a `ManualComputationOp` at `firstFreeAxisIndex`.
-//
-// Some use cases are removing all axes up to `firstFreeAxisIndex` or removing
-// all axes from `firstFreeAxisIndex`. This needs to happen on many different
-// `DimShardingAttr`s in the `in_shardings` and `out_shardings` of a
-// `ManualComputationOp`.
-using ManualComputationShardingEraserFn = std::function<DimensionShardingAttr(
-    DimensionShardingAttr dimSharding, int64_t firstFreeAxisIndex)>;
-
-// Calls a dimension sharding erasing callback on the first free axis in
-// a dimension. This uses the invariant that shardings are prefixed with any
-// manual axes.
-TensorShardingAttr eraseAxesFromManualComputationSharding(
-    TensorShardingAttr outerManualSharding, ArrayRef<StringAttr> manualAxes,
-    ManualComputationShardingEraserFn shardingEraser) {
-  SmallVector<DimensionShardingAttr> newDimShardings;
-  newDimShardings.reserve(outerManualSharding.getRank());
-  for (DimensionShardingAttr dimSharding :
-       outerManualSharding.getDimShardings()) {
-    ArrayRef<AxisRefAttr> dimAxes = dimSharding.getAxes();
-    // Axes in the range [0, firstFreeAxis) are manual axes, and
-    // [firstFreeAxis, dimAxes.size()) are free axes.
-    llvm::ArrayRef<AxisRefAttr>::const_iterator firstFreeAxisIt =
-        llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
-          return llvm::is_contained(manualAxes, axis.getName());
-        });
-    newDimShardings.push_back(
-        shardingEraser(dimSharding, firstFreeAxisIt - dimAxes.begin()));
-  }
-  // Grab any replicated axes that are not manual axes. Can't use
-  // `partition_point` as there is no defined order for replicated axes.
-  SmallVector<AxisRefAttr> newReplicatedAxes;
-  llvm::copy_if(outerManualSharding.getReplicatedAxes(),
-                std::back_inserter(newReplicatedAxes), [&](AxisRefAttr axis) {
-                  return !llvm::is_contained(manualAxes, axis.getName());
-                });
-  return TensorShardingAttr::get(outerManualSharding.getContext(),
-                                 outerManualSharding.getMeshOrRef(),
-                                 newDimShardings, newReplicatedAxes);
-}
-
-// Removes free axes from the sharding.
-//
-// Guaranteed by verification that all in/out shardings in a
-// `ManualComputationOp` are prefixed with the manual axes. So this removes the
-// suffix of free axes (if any exist) from each dim sharding.
-TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
-                                 ArrayRef<StringAttr> manualAxes) {
-  return eraseAxesFromManualComputationSharding(
-      outerManualSharding, manualAxes,
-      std::mem_fn(&DimensionShardingAttr::takeFrontShardingAxes));
-}
-
-// Removes manual axes from the sharding.
-//
-// Guaranteed by verification that all in/out shardings in a
-// `ManualComputationOp` are prefixed with the manual axes. So this removes the
-// prefix of manual axes (if any exist) from each dim sharding.
-TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
-                                   ArrayRef<StringAttr> manualAxes) {
-  if (manualAxes.empty()) {
-    return outerManualSharding;
-  }
-  return eraseAxesFromManualComputationSharding(
-      outerManualSharding, manualAxes,
-      std::mem_fn(&DimensionShardingAttr::dropFrontShardingAxes));
-}
 
 // Re-adds any manual axes after the new sharding is determined across the
 // `ManualComputationOp` barrier.
@@ -1020,6 +952,35 @@ Value ManualComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
 }
 
 //===----------------------------------------------------------------------===//
+// ShardingGroupOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult ShardingGroupOp::inferReturnTypes(MLIRContext*,
+                                                std::optional<Location>,
+                                                ValueRange, DictionaryAttr,
+                                                OpaqueProperties, RegionRange,
+                                                SmallVectorImpl<Type>&) {
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// ConstantOp
+//===----------------------------------------------------------------------===//
+
+bool ConstantOp::isCompatibleReturnTypes(TypeRange l, TypeRange r) {
+  return stablehlo::ConstantOp::isCompatibleReturnTypes(l, r);
+}
+
+LogicalResult ConstantOp::inferReturnTypes(
+    MLIRContext* context, std::optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
+  ConstantOpAdaptor adaptor(operands, attributes, properties);
+  inferredReturnTypes.push_back(adaptor.getValue().getType());
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // DataFlowEdgeOp
 //===----------------------------------------------------------------------===//
 
@@ -1101,6 +1062,16 @@ Value NamedComputationOp::getEdgeOwnerFromTarget(Value target) {
 // the `BlockArgument` with the same index.
 Value NamedComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
   return sdy::getEdgeOwnerFromSource(source, *this);
+}
+
+LogicalResult NamedComputationOp::inferReturnTypes(
+    MLIRContext*, std::optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    SmallVectorImpl<Type>& inferredReturnTypes) {
+  NamedComputationOpAdaptor adaptor(operands, attributes, properties, regions);
+  llvm::copy(getBodyTerminatorOperands(adaptor).getTypes(),
+             std::back_inserter(inferredReturnTypes));
+  return success();
 }
 
 }  // namespace sdy

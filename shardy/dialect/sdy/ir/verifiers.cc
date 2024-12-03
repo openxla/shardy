@@ -763,8 +763,6 @@ LogicalResult verifyManualComputationValue(
   for (auto [valueIndex, valueEntry] : llvm::enumerate(llvm::zip_equal(
            globalTypes, localTypes, shardingPerValueAttr.getShardings()))) {
     auto [globalType, localType, sharding] = valueEntry;
-    auto globalRankedType = cast<RankedTensorType>(globalType);
-    auto localRankedType = cast<RankedTensorType>(localType);
 
     // 5. Verify the manual axes come before any free axes in each dim sharding.
     for (auto [dim, dimSharding] :
@@ -782,19 +780,26 @@ LogicalResult verifyManualComputationValue(
       }
     }
 
+
     // 6. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     SmallVector<int64_t> newDimSizes;
+    auto globalRankedType = mlir::cast<RankedTensorType>(globalType);
     for (auto [dimensionSize, dimSharding] : llvm::zip_equal(
              globalRankedType.getShape(), sharding.getDimShardings())) {
-      // Safe to call `getMesh` because the sharding was already verified.
-      newDimSizes.push_back(dimensionSize / accumulatedManualAxesSize(
-                                                op, dimSharding.getAxes(),
-                                                manualAxesSet,
-                                                sharding.getMesh(symbolTable)));
+      if (dimensionSize == ShapedType::kDynamic) {
+        newDimSizes.push_back(ShapedType::kDynamic);
+      } else {
+        // Safe to call `getMesh` because the sharding was already verified.
+        newDimSizes.push_back(
+            dimensionSize /
+            accumulatedManualAxesSize(op, dimSharding.getAxes(), manualAxesSet,
+                                      sharding.getMesh(symbolTable)));
+      }
     }
     auto expectedLocalRankedType =
         RankedTensorType::get(newDimSizes, globalRankedType.getElementType());
+    auto localRankedType = mlir::cast<RankedTensorType>(localType);
     if (expectedLocalRankedType != localRankedType) {
       return op->emitOpError(valueKindStr)
              << " shape, corresponding sharding, and region " << valueKindStr

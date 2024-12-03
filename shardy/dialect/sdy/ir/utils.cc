@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
+#include <iterator>
 #include <optional>
 #include <string>
 
@@ -424,6 +426,69 @@ SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(
       getFullyOpenShardings(context, types, sharding.getMeshName());
   shardings[index] = sharding;
   return shardings;
+}
+
+namespace {
+
+// Callback that removes free (non-manual) axes from a
+// `dimSharding` in a `ManualComputationOp` at `firstFreeAxisIndex`.
+//
+// Some use cases are removing all axes up to `firstFreeAxisIndex` or removing
+// all axes from `firstFreeAxisIndex`. This needs to happen on many different
+// `DimShardingAttr`s in the `in_shardings` and `out_shardings` of a
+// `ManualComputationOp`.
+using ManualComputationShardingEraserFn = std::function<DimensionShardingAttr(
+    DimensionShardingAttr dimSharding, int64_t firstFreeAxisIndex)>;
+
+// Calls a dimension sharding erasing callback on the first free axis in
+// a dimension. This uses the invariant that shardings are prefixed with any
+// manual axes.
+TensorShardingAttr eraseAxesFromManualComputationSharding(
+    TensorShardingAttr outerManualSharding, ArrayRef<StringAttr> manualAxes,
+    ManualComputationShardingEraserFn shardingEraser) {
+  SmallVector<DimensionShardingAttr> newDimShardings;
+  newDimShardings.reserve(outerManualSharding.getRank());
+  for (DimensionShardingAttr dimSharding :
+       outerManualSharding.getDimShardings()) {
+    ArrayRef<AxisRefAttr> dimAxes = dimSharding.getAxes();
+    // Axes in the range [0, firstFreeAxis) are manual axes, and
+    // [firstFreeAxis, dimAxes.size()) are free axes.
+    llvm::ArrayRef<AxisRefAttr>::const_iterator firstFreeAxisIt =
+        llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
+          return llvm::is_contained(manualAxes, axis.getName());
+        });
+    newDimShardings.push_back(
+        shardingEraser(dimSharding, firstFreeAxisIt - dimAxes.begin()));
+  }
+  // Grab any replicated axes that are not manual axes. Can't use
+  // `partition_point` as there is no defined order for replicated axes.
+  SmallVector<AxisRefAttr> newReplicatedAxes;
+  llvm::copy_if(outerManualSharding.getReplicatedAxes(),
+                std::back_inserter(newReplicatedAxes), [&](AxisRefAttr axis) {
+                  return !llvm::is_contained(manualAxes, axis.getName());
+                });
+  return TensorShardingAttr::get(outerManualSharding.getContext(),
+                                 outerManualSharding.getMeshOrRef(),
+                                 newDimShardings, newReplicatedAxes);
+}
+
+}  // namespace
+
+TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
+                                   ArrayRef<StringAttr> manualAxes) {
+  if (manualAxes.empty()) {
+    return outerManualSharding;
+  }
+  return eraseAxesFromManualComputationSharding(
+      outerManualSharding, manualAxes,
+      std::mem_fn(&DimensionShardingAttr::dropFrontShardingAxes));
+}
+
+TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
+                                 ArrayRef<StringAttr> manualAxes) {
+  return eraseAxesFromManualComputationSharding(
+      outerManualSharding, manualAxes,
+      std::mem_fn(&DimensionShardingAttr::takeFrontShardingAxes));
 }
 
 }  // namespace sdy

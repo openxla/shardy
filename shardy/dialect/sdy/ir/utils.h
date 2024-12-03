@@ -393,6 +393,22 @@ SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(
     MLIRContext* context, TypeRange types, int64_t index,
     TensorShardingAttr sharding);
 
+// Removes manual axes from the sharding.
+//
+// Guaranteed by verification that all in/out shardings in a
+// `ManualComputationOp` are prefixed with the manual axes. So this removes the
+// prefix of manual axes (if any exist) from each dim sharding.
+TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
+                                   ArrayRef<StringAttr> manualAxes);
+
+// Removes free axes from the sharding.
+//
+// Guaranteed by verification that all in/out shardings in a
+// `ManualComputationOp` are prefixed with the manual axes. So this removes the
+// suffix of free axes (if any exist) from each dim sharding.
+TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
+                                 ArrayRef<StringAttr> manualAxes);
+
 }  // namespace sdy
 }  // namespace mlir
 

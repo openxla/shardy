@@ -274,3 +274,29 @@ func.func @free_axes_before_manual_dim_sharding(%arg0: tensor<16x32xf32>) -> ten
   } : (tensor<16x32xf32>) -> tensor<16x16xf32>
   func.return %0: tensor<16x16xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+func.func @global_dynamic_local_static_shape(%arg0: tensor<?x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op operand shape, corresponding sharding, and region operand shape at index 0 must match. Expected local shape 'tensor<?x32xf32>', actual local shape 'tensor<16x32xf32>'}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a"} (%arg1: tensor<16x32xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
+    sdy.return %1 : tensor<16x32xf32>
+  } : (tensor<?x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+func.func @correct_dynamic_dim_static_dim_mismatch(%arg0: tensor<?x32xf32>) -> tensor<?x64xf32> {
+  // expected-error @+1 {{op result shape, corresponding sharding, and region result shape at index 0 must match. Expected local shape 'tensor<?x64xf32>', actual local shape 'tensor<?x32xf32>'}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a"} (%arg1: tensor<?x32xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<?x32xf32>
+    sdy.return %1 : tensor<?x32xf32>
+  } : (tensor<?x32xf32>) -> tensor<?x64xf32>
+  func.return %0: tensor<?x64xf32>
+}

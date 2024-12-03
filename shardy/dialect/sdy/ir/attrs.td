@@ -603,7 +603,16 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
     // mesh and tensor type.
     RankedTensorType getLocalTensorType(RankedTensorType globalTensorType,
-                                        MeshAttr mesh);
+                                        MeshAttr mesh) const;
+
+    // Gets the global tensor type from a local RankedTensorType w.r.t. the
+    // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
+    // mesh and tensor type.
+    //
+    // NOTE: this doesn't take into account padding. Each dimension of
+    // `localTensorType` will be a multiple of the global tensor type returned.
+    RankedTensorType getGlobalTensorType(RankedTensorType localTensorType,
+                                         MeshAttr mesh) const;
     }];
 }
 
