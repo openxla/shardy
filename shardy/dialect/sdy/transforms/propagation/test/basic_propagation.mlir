@@ -19,6 +19,44 @@ sdy.mesh @mesh_a_2_b_3_c_2 = <["a"=2, "b"=3, "c"=2]>
 sdy.mesh @mesh_a_2_b_3_c_2_d_2 = <["a"=2, "b"=3, "c"=2, "d"=2]>
 sdy.mesh @mesh_a_3_another = <["a"=3]>
 
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @main(%arg0: tensor<2x4x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}, {?}]>},
+                %arg1: tensor<2x16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}, {?}]>}) -> (tensor<2x4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"x"}, {?}]>}) {
+  %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1] :
+    (tensor<2x4x16xf32>, tensor<2x16x32xf32>) -> tensor<2x4x32xf32>
+  return %0 : tensor<2x4x32xf32>
+}
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @main(%arg0: tensor<4x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>}) -> (tensor<4x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}, {"x"}]>}) {
+  %0 = stablehlo.add %arg0, %arg0 : tensor<4x4x4xf32>
+  return %0 : tensor<4x4x4xf32>
+}
+
+func.func @main(%arg0: tensor<4x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>}) -> (tensor<4x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}, {"x"}]>}) {
+  %r = sdy.reshard %arg0 <@mesh, [{"y", ?}, {?}, {"x", ?}]>
+  %0 = stablehlo.add %r, %r {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y", ?}, {?}, {"x", ?}]>]>} : tensor<4x4x4xf32>
+  return %0 : tensor<4x4x4xf32>
+}
+
+func.func @main(%arg0: tensor<4x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>}) -> (tensor<4x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}, {"x"}]>}) {
+  %a1 = sdy.all_to_all %arg0 <@mesh, [{"y"}, {"x"}, {}]>
+  %a2 = sdy.all_to_all %a1 <@mesh, [{"y"}, {}, {"x"}]>
+  %0 = stablehlo.add %a2, %a2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y", ?}, {?}, {"x", ?}]>]>} : tensor<4x4x4xf32>
+  return %0 : tensor<4x4x4xf32>
+}
+
+sdy.mesh @mesh = <["a"=2, "b"=4, "c"=16, "d"=4]>
+
+func.func @main(%arg0: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+                %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"c"}]>}) -> tensor<4x32xf32> {
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] :
+    (tensor<4x16xf32>, tensor<16x32xf32>) -> tensor<4x32xf32>
+  return %0 : tensor<4x32xf32>
+}
+
 // CHECK-LABEL: func @simple(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>},
