@@ -8,6 +8,8 @@ toc:
     path: /shardy/overview
   - title: Use Shardy from JAX
     path: /shardy/getting_started_jax
+  - title: Dialect-agnostic sharding
+    path: /shardy/dialect_agnostic_sharding
 - title: Concepts
   section:
   - title: Sharding representation
