@@ -29,6 +29,8 @@ include "shardy/dialect/sdy/ir/dialect.td"
 // split.
 def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
                                  "manual_axes", "StringAttr"> {
+  let mnemonic = "manual_axes";
+  let summary = "Manual axes definition PLACEHOLDER";
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
 }
 
@@ -133,6 +135,8 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   }];
 }
 
+def Sdy_SubAxisInfoP : OptionalParameter<"SubAxisInfoAttr", "sub axis info PLACEHOLDER">;
+
 def Sdy_SubAxisInfo : AttrDef<Sdy_Dialect, "SubAxisInfo"> {
   let mnemonic = "sub_axis_info";
   let summary = "Info about how this sub-axis is derived from the full axis";
@@ -171,7 +175,7 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let summary = "Reference to either a full axis or a split sub-axis";
   let parameters = (ins
       StringRefParameter<"name">:$name,
-      OptionalParameter<"SubAxisInfoAttr">:$sub_axis_info
+      Sdy_SubAxisInfoP:$sub_axis_info
   );
   let assemblyFormat = "`` $name (`` `:` `` $sub_axis_info^)?";
 
@@ -698,6 +702,7 @@ def Sdy_TensorMapping : AttrDef<Sdy_Dialect, "TensorMapping"> {
   }];
 }
 
+def Sdy_TensorMappings : OptionalArrayRefParameter<"TensorMappingAttr", "list of tensor mappings PLACEHOLDER">;
 
 def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
   let mnemonic = "op_sharding_rule";
@@ -736,8 +741,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 
   let parameters = (ins
       OptionalArrayRefParameter<"int64_t">:$factor_sizes,
-      OptionalArrayRefParameter<"TensorMappingAttr">:$operand_mappings,
-      OptionalArrayRefParameter<"TensorMappingAttr">:$result_mappings,
+      Sdy_TensorMappings:$operand_mappings,
+      Sdy_TensorMappings:$result_mappings,
       DefaultValuedParameter<"bool", "false">:$is_custom_rule
   );
 
