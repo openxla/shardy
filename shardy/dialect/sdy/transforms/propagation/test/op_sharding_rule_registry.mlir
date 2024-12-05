@@ -165,6 +165,13 @@ func.func @conv_feature_group_count(%arg0: tensor<8x224x224x192xf32>, %arg1: ten
   return %0 : tensor<8x112x112x256xf32>
 }
 
+// CHECK-LABEL: func @custom_call_compact_wy_helper
+func.func @custom_call_compact_wy_helper(%arg0: tensor<128x128xf32>) -> tensor<128x128xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=128, j=128}>
+  %0 = stablehlo.custom_call @CompactWyHelper(%arg0) : (tensor<128x128xf32>) -> tensor<128x128xf32>
+  return %0 : tensor<128x128xf32>
+}
+
 // CHECK-LABEL: func @custom_call_x64_combine
 func.func @custom_call_x64_combine(%arg0: tensor<8x2xui32>, %arg1: tensor<8x2xui32>) -> tensor<8x2xui64> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j]) {i=8, j=2}>
@@ -204,6 +211,13 @@ func.func @custom_call_eigh(%arg0: tensor<8x4x4xf32>) -> (tensor<8x4x4xf32>, ten
 func.func @custom_call_qr(%arg0: tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>) {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k], [i, l]) {i=8, j=5, k=3, l=1}>
   %0:2 = stablehlo.custom_call @Qr(%arg0) : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
+  return %0#0, %0#1 : tensor<8x5x3xf32>, tensor<8x3xf32>
+}
+
+// CHECK-LABEL: func @custom_call_qr_decomposition_block
+func.func @custom_call_qr_decomposition_block(%arg0: tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k], [i, l]) {i=8, j=5, k=3, l=1}>
+  %0:2 = stablehlo.custom_call @QrDecompositionBlock(%arg0) : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
   return %0#0, %0#1 : tensor<8x5x3xf32>, tensor<8x3xf32>
 }
 

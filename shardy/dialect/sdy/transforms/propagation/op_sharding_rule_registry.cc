@@ -375,11 +375,14 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "tpu_custom_call") {
           return OpShardingRuleAttr();
         }
-        if (callTargetName == "X64Combine" ||
+        if (callTargetName == "Cholesky" ||
+            callTargetName == "CompactWyHelper" ||
+            callTargetName == "InvertDiagBlocksLowerTriangular" ||
+            callTargetName == "InvertDiagBlocksUpperTriangular" ||
+            callTargetName == "LayoutConstraint" ||
             callTargetName == "MoveToDevice" ||
-            callTargetName == "MoveToHost" || callTargetName == "mhlo.tan" ||
-            callTargetName == "mhlo.erf" ||
-            callTargetName == "LayoutConstraint") {
+            callTargetName == "MoveToHost" || callTargetName == "mhlo.erf" ||
+            callTargetName == "mhlo.tan" || callTargetName == "X64Combine") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         if (callTargetName == "Eigh") {
@@ -404,7 +407,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          inShape[nonBatchDim2])
               .build();
         }
-        if (callTargetName == "Qr") {
+        if (callTargetName == "Qr" ||
+            callTargetName == "QrDecompositionBlock") {
           assert(customCall.getNumOperands() == 1 &&
                  customCall.getNumResults() == 2);
           // See `jax.lax.linalg.qr` for more information.
