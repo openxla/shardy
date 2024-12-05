@@ -109,8 +109,8 @@ def ConstantSplitterPass : Pass<"sdy-constant-splitter", "func::FuncOp"> {
       defined by constant sub-computations (recursively), along with the entire
       sub-computations that define its operands.
 
-    Note that within a constant sub-computation, a value can have multiple uses
-    within that sub-computation.
+    Note that within a constant sub-computation, each value must only have a
+    single use.
 
     NOTE: This pass is the MLIR equivalent of xla::HloConstantSplitter,
     needed for the purpose of Shardy Propagation.

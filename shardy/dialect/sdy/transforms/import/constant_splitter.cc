@@ -45,6 +45,20 @@ namespace {
 
 using func::FuncOp;
 
+// Returns true if `value` has multiple uses that are not by `ShardingGroupOp`.
+bool hasMultipleRealUses(Value value) {
+  bool seenUse = false;
+  for (Operation* user : value.getUsers()) {
+    if (!isa<ShardingGroupOp>(user)) {
+      if (seenUse) {
+        return true;
+      }
+      seenUse = true;
+    }
+  }
+  return false;
+}
+
 void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
                              OpBuilder& builder) {
   for (Operation* user : opResult.getUsers()) {
@@ -146,10 +160,10 @@ struct ConstantSplitterPass
         return;
       }
       if (isConstantExpression(op, constantOps)) {
+        // `op` is a constant expression.
         constantOps.insert(op);
-        return;
       }
-      // `op` is not a constant expression.
+
       for (OpOperand& operand : op->getOpOperands()) {
         // For each operand that is produced by a constant sub-computation
         // (exists in `constantOps`) that has multiples uses, we recursively
@@ -159,7 +173,7 @@ struct ConstantSplitterPass
         // user.
         if (auto defOpResult = dyn_cast<OpResult>(operand.get());
             defOpResult && constantOps.contains(defOpResult.getOwner()) &&
-            !defOpResult.hasOneUse()) {
+            hasMultipleRealUses(defOpResult)) {
           operand.set(cloneSubComputation(defOpResult));
         }
       }
