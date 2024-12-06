@@ -93,6 +93,28 @@ func.func @constant_broadcast_multiple_users(%arg0: tensor<5x8xi32>) -> (tensor<
   return %2, %3 : tensor<4x5xi32>, tensor<4x8xi32>
 }
 
+// CHECK-LABEL: func @multiple_broadcasts_using_the_same_const_sub_computation
+func.func @multiple_broadcasts_using_the_same_const_sub_computation(%arg0: tensor<5x8xi32>) -> (tensor<3x5xi32>, tensor<2x4xi32>) {
+  // CHECK-NEXT: %[[IOTA_0:.*]] = stablehlo.iota dim = 0
+  // CHECK-NEXT: %[[IOTA_1:.*]] = stablehlo.iota dim = 0
+  // CHECK-NEXT: %[[IOTA_2:.*]] = stablehlo.iota dim = 0
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %[[IOTA_0]], %[[IOTA_0]]
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[IOTA_1]], %[[IOTA_1]]
+  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[IOTA_2]], %[[IOTA_2]]
+  // CHECK-NEXT: %[[BROADCAST_0:.*]] = stablehlo.broadcast_in_dim %[[ADD_0]], dims = [1] : (tensor<5xi32>) -> tensor<2x5xi32>
+  // CHECK-NEXT: %[[BROADCAST_1:.*]] = stablehlo.broadcast_in_dim %[[ADD_2]], dims = [1] : (tensor<5xi32>) -> tensor<3x5xi32>
+  // CHECK-NEXT: %[[BROADCAST_2:.*]] = stablehlo.broadcast_in_dim %[[ADD_1]], dims = [0] : (tensor<5xi32>) -> tensor<5x4xi32>
+  // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[BROADCAST_0]], %[[BROADCAST_2]]
+  // CHECK-NEXT: return %[[BROADCAST_1]], %[[DOT_GENERAL]]
+  %0 = stablehlo.iota dim = 0 : tensor<5xi32>
+  %1 = stablehlo.add %0, %0 : tensor<5xi32>
+  %2 = stablehlo.broadcast_in_dim %1, dims = [1] : (tensor<5xi32>) -> tensor<2x5xi32>
+  %3 = stablehlo.broadcast_in_dim %1, dims = [1] : (tensor<5xi32>) -> tensor<3x5xi32>
+  %4 = stablehlo.broadcast_in_dim %1, dims = [0] : (tensor<5xi32>) -> tensor<5x4xi32>
+  %5 = stablehlo.dot_general %2, %4, contracting_dims = [1] x [0] : (tensor<2x5xi32>, tensor<5x4xi32>) -> tensor<2x4xi32>
+  return %3, %5 : tensor<3x5xi32>, tensor<2x4xi32>
+}
+
 // CHECK-LABEL: func @constant_slice_multiple_users
 func.func @constant_slice_multiple_users(%arg0: tensor<8xi32>) -> (tensor<8xi32>, tensor<8xi32>) {
   // CHECK-NEXT: %[[IOTA_0:.*]] = stablehlo.iota dim = 0
@@ -119,11 +141,11 @@ func.func @splits_parts_of_const_sub_computation(%arg0: tensor<5x8xi32>) -> (ten
   // CHECK-NEXT: %[[IOTA_1:.*]] = stablehlo.iota dim = 0
   // CHECK-NEXT: %[[IOTA_2:.*]] = stablehlo.iota dim = 0
   // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<2>
-  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %[[IOTA_1]], %[[IOTA_1]]
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %[[IOTA_0]], %[[IOTA_0]]
   // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[IOTA_2]], %[[IOTA_2]]
-  // CHECK-NEXT: %[[MAX:.*]] = stablehlo.maximum %[[ADD_1]], %[[CONST]]
+  // CHECK-NEXT: %[[MAX:.*]] = stablehlo.maximum %[[ADD_0]], %[[CONST]]
   // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[MAX]], %arg0
-  // CHECK-NEXT: return %[[IOTA_0]], %[[ADD_0]], %[[DOT_GENERAL]]
+  // CHECK-NEXT: return %[[IOTA_1]], %[[ADD_1]], %[[DOT_GENERAL]]
   %0 = stablehlo.iota dim = 0 : tensor<4x5xi32>
   %1 = stablehlo.constant dense<2> : tensor<4x5xi32>
   %2 = stablehlo.add %0, %0 : tensor<4x5xi32>
@@ -157,8 +179,6 @@ func.func @splits_sharding_groups(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>
   // CHECK-NEXT: sdy.sharding_group %[[CONST_1]] group_id=0
   // CHECK-NEXT: %[[CONST_2:.*]] = sdy.constant dense<1.000000e+00>
   // CHECK-NEXT: sdy.sharding_group %[[CONST_2]] group_id=0
-  // CHECK-NEXT: %[[CONST_3:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: sdy.sharding_group %[[CONST_3]] group_id=0
   // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[CONST_0]], %arg0
   // CHECK-NEXT: sdy.sharding_group %[[DOT_GENERAL]] group_id=1
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CONST_1]], %[[DOT_GENERAL]]

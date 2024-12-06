@@ -48,8 +48,16 @@ using func::FuncOp;
 void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
                              OpBuilder& builder) {
   for (Operation* user : opResult.getUsers()) {
-    if (auto shardingGroupOp = dyn_cast<ShardingGroupOp>(user)) {
-      builder.clone(*shardingGroupOp, mapping);
+    if (isa<ShardingGroupOp>(user)) {
+      builder.clone(*user, mapping);
+    }
+  }
+}
+
+void eraseShardingGroupUsers(Operation* op) {
+  for (Operation* user : llvm::make_early_inc_range(op->getUsers())) {
+    if (isa<ShardingGroupOp>(user)) {
+      user->erase();
     }
   }
 }
@@ -59,7 +67,7 @@ void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
 // - A broadcast, slice, or pure element-wise op whose operands are all
 // constants (exist in `constantOps`).
 bool isConstantExpression(Operation* op,
-                          const llvm::DenseSet<Operation*>& constantOps) {
+                          const llvm::SetVector<Operation*>& constantOps) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
@@ -74,6 +82,10 @@ bool isConstantExpression(Operation* op,
 // Recursively clones all operands of the given op, that are not already mapped
 // in `mapping`, and finally clones the op itself.
 void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
+  if (mapping.lookupOrNull(opResult)) {
+    return;
+  }
+
   Operation* op = opResult.getOwner();
   for (Value operand : op->getOperands()) {
     if (auto defOpResult = dyn_cast<OpResult>(operand)) {
@@ -81,12 +93,10 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
     }
   }
 
-  if (!mapping.lookupOrNull(opResult)) {
-    // This will insert the cloned op right before the original op.
-    OpBuilder builder(op);
-    builder.clone(*op, mapping);
-    cloneShardingGroupUsers(opResult, mapping, builder);
-  }
+  // This will insert the cloned op right before the original op.
+  OpBuilder builder(op);
+  builder.clone(*op, mapping);
+  cloneShardingGroupUsers(opResult, mapping, builder);
 }
 
 // Recursively clones all operands of the given op, that are not already cloned,
@@ -140,7 +150,7 @@ struct ConstantSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    llvm::DenseSet<Operation*> constantOps;
+    llvm::SetVector<Operation*> constantOps;
     funcOp.walk([&](Operation* op) {
       if (isa<ShardingGroupOp>(op)) {
         return;
@@ -158,12 +168,20 @@ struct ConstantSplitterPass
         // end of this walk, all constant sub-computations will have a single
         // user.
         if (auto defOpResult = dyn_cast<OpResult>(operand.get());
-            defOpResult && constantOps.contains(defOpResult.getOwner()) &&
-            !defOpResult.hasOneUse()) {
+            defOpResult && constantOps.contains(defOpResult.getOwner())) {
           operand.set(cloneSubComputation(defOpResult));
         }
       }
     });
+
+    // Since for every op in `constantOps` that has a use that isn't in
+    // `constantOps`, we replaced the use with a clone of the entire
+    // sub-computation, we can now erase all ops in `constantOps` as long as we
+    // iterate in reverse order.
+    for (Operation* op : llvm::reverse(constantOps)) {
+      eraseShardingGroupUsers(op);
+      op->erase();
+    }
   }
 
  private:
