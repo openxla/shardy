@@ -57,9 +57,9 @@ void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
 // Returns true if the given op is either:
 // - A constant or iota op.
 // - A broadcast, slice, or pure element-wise op whose operands are all
-// constants (exist in `constantOps`).
-bool isConstantExpression(Operation* op,
-                          const llvm::DenseSet<Operation*>& constantOps) {
+// constants (exist in `constantOpsUsed`).
+bool isConstantExpression(
+    Operation* op, const llvm::DenseMap<Operation*, bool>& constantOpsUsed) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
@@ -67,36 +67,68 @@ bool isConstantExpression(Operation* op,
           isElementwise(op)) &&
          isPure(op) && llvm::all_of(op->getOperands(), [&](Value operand) {
            return operand.getDefiningOp() &&
-                  constantOps.contains(operand.getDefiningOp());
+                  constantOpsUsed.contains(operand.getDefiningOp());
          });
 }
 
-// Recursively clones all operands of the given op, that are not already mapped
-// in `mapping`, and finally clones the op itself.
-void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
-  Operation* op = opResult.getOwner();
+bool isConstantOrItsPredecessorsUsed(
+    Operation* op, const llvm::DenseMap<Operation*, bool>& constantOpsUsed) {
+  if (constantOpsUsed.at(op)) {
+    return true;
+  }
+  return llvm::any_of(op->getOperands(), [&](Value operand) {
+    if (auto defOpResult = dyn_cast<OpResult>(operand)) {
+      return isConstantOrItsPredecessorsUsed(defOpResult.getOwner(),
+                                             constantOpsUsed);
+    }
+    return false;
+  });
+}
+
+void markConstantAndItsPredecessorsUsed(
+    Operation* op, llvm::DenseMap<Operation*, bool>& constantOpsUsed) {
+  constantOpsUsed[op] = true;
   for (Value operand : op->getOperands()) {
     if (auto defOpResult = dyn_cast<OpResult>(operand)) {
-      cloneSubComputation(defOpResult, mapping);
+      markConstantAndItsPredecessorsUsed(defOpResult.getOwner(),
+                                         constantOpsUsed);
+    }
+  }
+}
+
+// If the given op is already in `mapping`, returns the mapped value.
+//
+// Otherwise, apply this function recursively on all operands. And then,
+// * If the op is used, clone the op and replace the operand with the cloned op.
+// * If the op is not used, replace the operand with the original op.
+Value cloneSubComputation(
+    OpResult opResult, IRMapping& mapping,
+    const llvm::DenseMap<Operation*, bool>& constantOpsUsed) {
+  if (mapping.lookupOrNull(opResult)) {
+    return mapping.lookup(opResult);
+  }
+
+  Operation* op = opResult.getOwner();
+  SmallVector<Value> newOperands;
+  for (Value operand : op->getOperands()) {
+    if (auto defOpResult = dyn_cast<OpResult>(operand)) {
+      newOperands.push_back(
+          cloneSubComputation(defOpResult, mapping, constantOpsUsed));
+    } else {
+      newOperands.push_back(operand);
     }
   }
 
-  if (!mapping.lookupOrNull(opResult)) {
+  if (constantOpsUsed.at(op)) {
     // This will insert the cloned op right before the original op.
     OpBuilder builder(op);
     builder.clone(*op, mapping);
     cloneShardingGroupUsers(opResult, mapping, builder);
+    return mapping.lookup(opResult);
   }
-}
 
-// Recursively clones all operands of the given op, that are not already cloned,
-// and finally clones the op itself.
-//
-// Returns the cloned op result.
-Value cloneSubComputation(OpResult opResult) {
-  IRMapping mapping;
-  cloneSubComputation(opResult, mapping);
-  return mapping.lookup(opResult);
+  op->setOperands(newOperands);
+  return opResult;
 }
 
 // Converts stablehlo::ConstantOp to sdy::ConstantOp.
@@ -140,27 +172,33 @@ struct ConstantSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    llvm::DenseSet<Operation*> constantOps;
+    llvm::DenseMap<Operation*, bool> constantOpsUsed;
     funcOp.walk([&](Operation* op) {
       if (isa<ShardingGroupOp>(op)) {
         return;
       }
-      if (isConstantExpression(op, constantOps)) {
-        constantOps.insert(op);
+      if (isConstantExpression(op, constantOpsUsed)) {
+        constantOpsUsed[op] = false;
         return;
       }
-      // `op` is not a constant expression.
+
       for (OpOperand& operand : op->getOpOperands()) {
-        // For each operand that is produced by a constant sub-computation
-        // (exists in `constantOps`) that has multiples uses, we recursively
-        // clone the sub-computation whose root is the defining op, and replace
-        // the operand with the cloned defining op. This will ensure that by the
-        // end of this walk, all constant sub-computations will have a single
-        // user.
         if (auto defOpResult = dyn_cast<OpResult>(operand.get());
-            defOpResult && constantOps.contains(defOpResult.getOwner()) &&
-            !defOpResult.hasOneUse()) {
-          operand.set(cloneSubComputation(defOpResult));
+            defOpResult && constantOpsUsed.contains(defOpResult.getOwner())) {
+          // `op` is not a constant expression, but its `operand` is a constant
+          // expression.
+          if (isConstantOrItsPredecessorsUsed(defOpResult.getOwner(),
+                                              constantOpsUsed)) {
+            // If this operand or its predecessors are marked as used, we need
+            // to clone the used constant sub-computation.
+            IRMapping mapping;
+            operand.set(
+                cloneSubComputation(defOpResult, mapping, constantOpsUsed));
+          }
+          // Mark the constant and its predecessors as used, so that they cannot
+          // be used by other non-constant expressions.
+          markConstantAndItsPredecessorsUsed(defOpResult.getOwner(),
+                                             constantOpsUsed);
         }
       }
     });
