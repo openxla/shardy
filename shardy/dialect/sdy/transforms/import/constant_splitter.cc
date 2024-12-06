@@ -73,7 +73,11 @@ bool isConstantExpression(Operation* op,
 
 // Recursively clones all operands of the given op, that are not already mapped
 // in `mapping`, and finally clones the op itself.
-void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
+Value cloneSubComputation(OpResult opResult, IRMapping& mapping) {
+  if (mlir::Value value = mapping.lookupOrNull(opResult)) {
+    return value;
+  }
+
   Operation* op = opResult.getOwner();
   for (Value operand : op->getOperands()) {
     if (auto defOpResult = dyn_cast<OpResult>(operand)) {
@@ -81,21 +85,10 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
     }
   }
 
-  if (!mapping.lookupOrNull(opResult)) {
-    // This will insert the cloned op right before the original op.
-    OpBuilder builder(op);
-    builder.clone(*op, mapping);
-    cloneShardingGroupUsers(opResult, mapping, builder);
-  }
-}
-
-// Recursively clones all operands of the given op, that are not already cloned,
-// and finally clones the op itself.
-//
-// Returns the cloned op result.
-Value cloneSubComputation(OpResult opResult) {
-  IRMapping mapping;
-  cloneSubComputation(opResult, mapping);
+  // This will insert the cloned op right before the original op.
+  OpBuilder builder(op);
+  builder.clone(*op, mapping);
+  cloneShardingGroupUsers(opResult, mapping, builder);
   return mapping.lookup(opResult);
 }
 
@@ -160,7 +153,8 @@ struct ConstantSplitterPass
         if (auto defOpResult = dyn_cast<OpResult>(operand.get());
             defOpResult && constantOps.contains(defOpResult.getOwner()) &&
             !defOpResult.hasOneUse()) {
-          operand.set(cloneSubComputation(defOpResult));
+          IRMapping mapping;
+          operand.set(cloneSubComputation(defOpResult, mapping));
         }
       }
     });
