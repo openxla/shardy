@@ -159,16 +159,14 @@ struct ConstantSplitterPass
         constantOps.insert(op);
         return;
       }
-      // `op` is not a constant expression.
       for (OpOperand& operand : op->getOpOperands()) {
-        // For each operand that is produced by a constant sub-computation
-        // (exists in `constantOps`) that has multiples uses, we recursively
-        // clone the sub-computation whose root is the defining op, and replace
-        // the operand with the cloned defining op. This will ensure that by the
-        // end of this walk, all constant sub-computations will have a single
-        // user.
         if (auto defOpResult = dyn_cast<OpResult>(operand.get());
             defOpResult && constantOps.contains(defOpResult.getOwner())) {
+          // `op` is not a constant expression, while its `operand` is. We
+          // recursively clone the sub-computation whose root is `defOpResult`,
+          // and replace the `operand` with the cloned defining op. The cloned
+          // constant sub-computation has only one user `op`, so that it is
+          // isolated from the rest of the computation.
           operand.set(cloneSubComputation(defOpResult));
         }
       }
