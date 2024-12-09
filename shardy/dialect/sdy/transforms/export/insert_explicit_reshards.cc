@@ -323,13 +323,8 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors,
     ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   SmallVector<AxisListRef> factorAxisRefs(numFactors);
-  // TODO(enver): Use priority queue for a better performance.
   SmallVector<FactorAxesCandidate> factorAxesCandidates =
       findFactorAxesCandidates(projection, numFactors, tensorSizes, mesh);
-  // TODO(enver): Instead of taking an axes-array with the largest count, take
-  // a prefix with the largest count.  For example, if a factor appears in 2
-  // tensors, and one has sharding [x,y] and the other has sharding [x,z],
-  // then the count of [x] prefix will be two for this factor.
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
   // The first iteration is to find the initial best.
@@ -338,8 +333,6 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
     if (!bestFactorAxes.empty()) {
       factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
     }
-    // TODO(enver): Tie-breaking currently depends on the order of iteration.
-    // Consider some heuristic for breaking ties.
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
     FactorAxesCandidate nextBestFactorAxes;
