@@ -767,6 +767,29 @@ TensorShardingPerValueAttr TensorShardingPerValueAttr::replaceValueSharding(
 }
 
 //===----------------------------------------------------------------------===//
+// OpShardingRuleAttr
+//===----------------------------------------------------------------------===//
+
+// TODO(enver): Instead use ShapedType::getNumElements, as the factors might not
+// be the exact size of the dim, e.g. concat.
+SmallVector<int64_t> OpShardingRuleAttr::getTensorSizes() const {
+  SmallVector<int64_t> tensorSizes;
+  tensorSizes.reserve(getNumOperands() + getNumResults());
+  for (const TensorMappingAttr& tensorMapping :
+       llvm::concat<const TensorMappingAttr>(getOperandMappings(),
+                                             getResultMappings())) {
+    int64_t tensorSize = 1;
+    for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
+      for (int64_t factorIndex : dimMapping.getFactorIndices()) {
+        tensorSize *= getFactorSize(factorIndex);
+      }
+    }
+    tensorSizes.push_back(tensorSize);
+  }
+  return tensorSizes;
+}
+
+//===----------------------------------------------------------------------===//
 // ManualComputationOp
 //===----------------------------------------------------------------------===//
 

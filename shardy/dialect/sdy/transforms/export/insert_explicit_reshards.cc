@@ -421,28 +421,6 @@ SmallVector<AxisListRef> findCommonAxes(const ShardingProjection& projection,
                                                   tensorSizes, mesh);
 }
 
-// TODO(enver): Convert it to a OpShardingRuleAttr method.
-// TODO(enver): Instead use ShapedType::getNumElements, as the factors might not
-// be the exact size of the dim, e.g. concat.
-SmallVector<int64_t> getTensorSizes(OpShardingRuleAttr shardingRule) {
-  SmallVector<int64_t> tensorSizes;
-  tensorSizes.reserve(shardingRule.getNumOperands() +
-                      shardingRule.getNumResults());
-  for (const TensorMappingAttr& tensorMapping :
-       llvm::concat<const TensorMappingAttr>(
-           shardingRule.getOperandMappings(),
-           shardingRule.getResultMappings())) {
-    int64_t tensorSize = 1;
-    for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
-      for (int64_t factorIndex : dimMapping.getFactorIndices()) {
-        tensorSize *= shardingRule.getFactorSize(factorIndex);
-      }
-    }
-    tensorSizes.push_back(tensorSize);
-  }
-  return tensorSizes;
-}
-
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -526,7 +504,7 @@ struct InsertExplicitReshardsPass
                                                   shardingRule.getNumResults());
       for (const auto& [index, axes] : llvm::enumerate(
                findCommonAxes(shardingProjection, shardingRule.getNumFactors(),
-                              getTensorSizes(shardingRule), mesh))) {
+                              shardingRule.getTensorSizes(), mesh))) {
         // TODO(enver): Add unit tests to test overflow axes are cleared after
         // handling the case that some factors have overflow axes.
         updateTensorShardings |= shardingProjection.updateSharding(
