@@ -95,7 +95,6 @@ class AxisListRef {
       : axisRefs(axisRefs.drop_back()), tailAxisRef(axisRefs.back()) {}
 
   AxisListRef() = default;
-  AxisListRef(bool isTombstone) : isTombstone(isTombstone) {}
 
   // Checks if the axes is empty.
   bool empty() const {
@@ -147,7 +146,12 @@ class AxisListRef {
                           /*isTailIterated=*/true, tailAxisRef);
   }
 
+  friend struct AxisListRefInfo;
+
  private:
+  // Creates an AxisListRef with given `axisRefs` and `tailAxisRef`.
+  AxisListRef(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
+      : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
   // Returns prefix of input `axisRef` that does not overlap with this axes.
   // TODO(enver): Move this method to utilities.
   // TODO(enver): Instead make this a method of AxisRefAttr, after moving
@@ -182,9 +186,6 @@ class AxisListRef {
   // empty, then `axisRefs` is empty as well.
   ArrayRef<AxisRefAttr> axisRefs;
   AxisRefAttr tailAxisRef;
-  // TODO(enver): Use ArrayRef::getTombstoneKey or AxisRefAttr::getTombstoneKey,
-  // either for `axisRefs` or `tailAxisRef` respectively, instead.
-  bool isTombstone = false;
 };
 
 struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {
@@ -198,7 +199,9 @@ struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {
   static inline AxisListRef getEmptyKey() { return AxisListRef(); }
 
   static inline AxisListRef getTombstoneKey() {
-    return AxisListRef(/*isTombstone=*/true);
+    return AxisListRef(
+        /*axisRefs=*/DenseMapInfo<ArrayRef<AxisRefAttr>>::getTombstoneKey(),
+        /*tailAxisRef=*/AxisRefAttr());
   }
 };
 
