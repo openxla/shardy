@@ -228,13 +228,6 @@ func.func @custom_call_householder_product(%arg0: tensor<8x12x16xf32>, %arg1: te
   return %0 : tensor<8x12x16xf32>
 }
 
-// CHECK-LABEL: func @custom_call_tan
-func.func @custom_call_tan(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>
-  %0 = stablehlo.custom_call @mhlo.tan (%arg0) {backend_config = ""} : (tensor<8x4xf32>) -> tensor<8x4xf32>
-  return %0 : tensor<8x4xf32>
-}
-
 // CHECK-LABEL: func @custom_call_erf
 func.func @custom_call_erf(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>
