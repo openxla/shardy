@@ -32,7 +32,7 @@ def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
   let mnemonic = "manual_axes";
   let summary = "A list of axes that a ManualComputationOp is manual on";
   let parameters = (ins
-      ArrayRefParameter<"StringAttr", "value">:$value
+      OptionalArrayRefParameter<"StringAttr", "value">:$value
   );
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
 }
@@ -790,18 +790,18 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
                                  "axis_ref_list", "AxisRefAttr"> {
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
-  let summary = "List of axis refs";
+  let summary = "List of axis refs"
   let parameters = (ins
-      ArrayRefParameter<"AxisRefAttr", "axis refs">:$value
+      OptionalArrayRefParameter<"AxisRefAttr", "axis refs">:$value
   );
 }
 
 def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
                                  "list_of_axis_ref_lists", "AxisRefListAttr"> {
-    let summary = "List of axis ref lists";
-    let parameters = (ins
-        ArrayRefParameter<"AxisRefListAttr", "axis ref lists">:$value
-    );
+  let summary = "List of axis ref lists";
+  let parameters = (ins
+      OptionalArrayRefParameter<"AxisRefListAttr", "axis ref lists">:$value
+  );
 }
 
 def Sdy_EmptyAxesPerDim : AttrConstraint<
