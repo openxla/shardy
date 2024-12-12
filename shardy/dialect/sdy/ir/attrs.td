@@ -790,7 +790,7 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
                                  "axis_ref_list", "AxisRefAttr"> {
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
-  let summary = "List of axis refs"
+  let summary = "List of axis refs";
   let parameters = (ins
       OptionalArrayRefParameter<"AxisRefAttr", "axis refs">:$value
   );
