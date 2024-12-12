@@ -375,7 +375,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "tpu_custom_call") {
           return OpShardingRuleAttr();
         }
-        if (callTargetName == "Cholesky" ||
+        if (callTargetName == "annotate_device_placement" ||
+            callTargetName == "Cholesky" ||
             callTargetName == "CompactWyHelper" ||
             callTargetName == "InvertDiagBlocksLowerTriangular" ||
             callTargetName == "InvertDiagBlocksUpperTriangular" ||
