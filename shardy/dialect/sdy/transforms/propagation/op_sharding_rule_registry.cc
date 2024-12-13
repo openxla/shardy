@@ -863,23 +863,36 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             .addPointwise(getTensorShape(select.getResult()))
             .build();
       })
-      .Case<stablehlo::SliceOp>(
-          [conservativePropagation](stablehlo::SliceOp slice) {
-            // If `conservativePropagation` is false, we propagate through
-            // sliced dimensions, even though that would require communication.
-            //
-            // This is different from `DynamicSliceOp`, where we don't
-            // propagate through sliced dimensions regardless of
-            // `conservativePropagation`, and the reason is that for `SliceOp`
-            // the start indices are static, so we know how to shift the data
-            // to keep the sliced dimension sharded.
-            return OpShardingRuleBuilder(slice)
-                .addPointwiseIfDimSizesMatch(
-                    getTensorShape(slice.getOperand()),
-                    getTensorShape(slice.getResult()),
-                    /*alwaysAddFactor=*/!conservativePropagation)
-                .build();
-          })
+      .Case<stablehlo::SliceOp>([conservativePropagation](
+                                    stablehlo::SliceOp slice) {
+        // If `conservativePropagation` is false, we propagate through
+        // sliced dimensions, even though that would require communication.
+        //
+        // There is an exception. If the input dimension size is larger than 1
+        // and the output dimension size is 1, we do not propagate through this
+        // sliced dimension.
+        //
+        // This is different from `DynamicSliceOp`, where we don't
+        // propagate through sliced dimensions regardless of
+        // `conservativePropagation`, and the reason is that for `SliceOp`
+        // the start indices are static, so we know how to shift the data
+        // to keep the sliced dimension sharded.
+        ArrayRef<int64_t> inShape = getTensorShape(slice.getOperand());
+        ArrayRef<int64_t> outShape = getTensorShape(slice.getResult());
+        auto onMismatchFn = [&](int64_t dim, OpShardingRuleBuilder& builder) {
+          if (conservativePropagation) {
+            return;
+          }
+          if (inShape[dim] != 1 && outShape[dim] == 1) {
+            return;
+          }
+          builder.addFactor(dim, inShape[dim]);
+        };
+        return OpShardingRuleBuilder(slice)
+            .addPointwiseIfDimSizesMatch(
+                inShape, outShape, /*alwaysAddFactor=*/false, onMismatchFn)
+            .build();
+      })
       .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
         // If the input is sharded along the sort dimension, and any of the
         // non-sort dimensions has size >1, the partitioner will add an
