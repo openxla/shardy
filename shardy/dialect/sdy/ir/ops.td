@@ -273,6 +273,22 @@ def DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
 
     An op can have multiple data flow edges that are orthogonal to one another.
 
+    For example:
+
+
+    ```mlir
+      y_0, ..., y_n = while (x_0, ..., x_n)
+                      ((pred_arg_0,... , pred_arg_n) { ... })
+                      ((body_arg_0,..., body_arg_n) {
+                        ...
+                        return return_value_0, ..., return_value_n
+                      })
+    ```
+
+    This while op has n data flow edges, the i-th data flow edges is between
+    sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`,
+    `body_arg_i`.
+
     An `sdy.data_flow_edge` takes as input the root target of an edge (can be
     any of the targets, but preferably an op result rather than a block
     argument), which shouldn't have any other uses. This op isn't pure because
