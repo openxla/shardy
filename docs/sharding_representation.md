@@ -100,9 +100,7 @@ Each dimension of a tensor can either be open or closed.
 An open dimension is open for propagation to further shard it along additional
 axes, i.e. the specified dimension sharding doesn't have to be the final
 sharding of that dimension. This is similar (but not exactly the same as) to
-
-* [`jax.sharding.PartitionSpec.UNCONSTRAINED`](https://jax.readthedocs.io/en/latest/jax.sharding.html#jax.sharding.PartitionSpec)
-* GSPMD's `unspecified_dims`
+GSPMD's `unspecified_dims`.
 
 If a dimension is open we add a `?` following the axes that the dimension is
 already sharded on (see example below).
@@ -373,7 +371,7 @@ For example:
 ```
 
 Priorities give users more fine grained control over propagation, e.g., batch
-parallelism first, then [megatron](https://github.com/NVIDIA/Megatron-LM), and
+parallelism first, then [megatron](arxiv.org/abs/1909.08053), and
 finally [ZeRO](https://arxiv.org/abs/1910.02054) sharding. This allows for
 strong guarantees about what's partitioned and allows for better debuggability
 by having more fine grained sharding strategies (can see how the program looks

@@ -101,7 +101,7 @@ factor. However, it is not enough for reshapes.
 
 The following reshape merges two dimensions into one:
 
-```c++
+```mlir
 %out = mhlo.reshape(%in) : (tensor<2x4x32xf32>) -> tensor<8x32xf32>
 ```
 
@@ -121,7 +121,7 @@ need a single dimension to reference multiple factors:
 
 The same can be done if the reshape were to split a dimension:
 
-```c++
+```mlir
 %out = mhlo.reshape(%in) : (tensor<8x32xf32>) -> tensor<2x4x32xf32>
 ```
 
@@ -137,7 +137,7 @@ which is why we are calling the factors `(i,j,k)` factors.
 These factors can also work with cases where there is no full dimension that
 corresponds to one of the factors:
 
-```c++
+```mlir
 %out = mhlo.reshape(%in) : (tensor<8x4xf32>) -> tensor<2x16xf32>
 // ((ij), k) -> (i,(jk)) : i=2, j=4, k=4
 ```
@@ -218,17 +218,17 @@ T0  | "a", **"b"** | **"c"**  | "f" |
 T1  | "a", "b"     | "c", "d" | "g" |
 T2  | **"a", "b"** | "c", "e" |     |
 
-### Data flow edge ops
+### Data flow ops
 
 The above propagation step description applies to most ops. However, there are
 cases where a sharding rule is not appropriate. For those cases, Shardy defines
-_data flow edge_ ops.
+_data flow _ ops.
 
 A data flow edge of some op X defines a bridge between a set of *sources* and a
 set of *targets*, such that all sources and targets should be sharded in the
-same way. Examples of such ops are `OptimizationBarrierOp`, `WhileOp`, and
-`CaseOp`. Ultimately, any op that implements [ShardableDataFlowOpInterface](sdy_op_interfaces#shardabledataflowopinterface_shardabledataflowopinterface)
-is considered a data flow edge op.
+same way. Examples of such ops are `stablehlo::OptimizationBarrierOp`,
+`stablehlo::WhileOp`, `stablehlo::CaseOp` and also [`sdy::ManualComputationOp`](./sdy_dialect#sdymanual_computation_sdymanualcomputationop). Ultimately, any op that implements [ShardableDataFlowOpInterface](sdy_op_interfaces#shardabledataflowopinterface_shardabledataflowopinterface)
+is considered a data flow op.
 
 An op can have multiple data flow edges that are orthogonal to one another. For
 example:
@@ -246,10 +246,29 @@ This while op has `n` data flow edges: the i-th data flow edges is between
 sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`,
 `body_arg_i`.
 
-Propagation will propagate shardings between all sources and targets of a
+Shardy will propagate shardings between all sources and targets of a
 `sdy.data_flow_edge` as if it was a regular op with the sources as operands
 and targets as results, and an identity `sdy.op_sharding_rule`. That means
 that forward propagation is from sources to targets and backwards
 propagation is from targets to sources.
 
-See [sdy.data_flow_edge](./sdy_dialect.md#sdy.data_flow_edge) for more information.
+Several methods must be implemented by the user describing how to get and set
+shardings to arguments and results of the `ShardableDataFLowOpInterface` op
+through their _owners_. An owner is a user-specified target of the data flow
+edge used by Shardy's propagation. The user can choose it arbitrarily but it
+needs to be static.
+
+For example, given the `custom_op` defined below:
+
+```c
+  y_1, ..., y_n = custom_op (x_1, ..., x_n)
+                  ((body_arg_1,..., body_arg_n) {
+                    ...
+                    return return_value_1, ..., return_value_n
+                  })
+```
+
+This custom_op has two types for data flow edges: `n` edges each between
+`return_value_i` (sources) and `y_i` (targets) and `n` edges between `x_i`
+(sources) and `body_arg_i` (targets). In this case, the edge owners are the same
+as the targets.
