@@ -360,9 +360,9 @@ TEST_F(ShardingProjectionBuildTest, FactorWithSmallerSizeThanDimOverflows) {
     sdy.mesh @mesh = <["a"=2, "b"=4, "c"=2, "d"=4, "e"=2]>
 
     func.func @main(%arg0: tensor<32x4x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}, {"b", "d":(2)2, "e"}]>})
-        -> tensor<32x1x2xf32> {
-      %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:6] : (tensor<32x4x16xf32>) -> tensor<32x1x2xf32>
-      return %0 : tensor<32x1x2xf32>
+        -> tensor<32x2x2xf32> {
+      %0 = stablehlo.slice %arg0 [0:32, 0:2, 4:6] : (tensor<32x4x16xf32>) -> tensor<32x2x2xf32>
+      return %0 : tensor<32x2x2xf32>
     })mlir";
 
   OwningOpRef<ModuleOp> module =
