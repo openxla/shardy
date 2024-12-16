@@ -229,7 +229,18 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        EmitErrorFn emitError,
                                        bool checkDivisibility,
                                        ManualAxisToOwner alreadyManualAxes) {
+  if (mesh.isMaximal()) {
+    // TODO(bartchr): add some checks after XLA change lands.
+    return success();
+  }
   auto tensorType = dyn_cast<ShapedType>(type);
+  if (auto tupleType = dyn_cast<TupleType>(type)) {
+    if (tupleType.size() != 1) {
+      return emitError("ops can only have a sharding for a tuple of size 1: ")
+          << tupleType;
+    }
+    tensorType = dyn_cast<ShapedType>(tupleType.getType(0));
+  }
   if (!tensorType) {
     if (shardingAttr.getRank() != 0 ||
         !shardingAttr.getReplicatedAxes().empty()) {

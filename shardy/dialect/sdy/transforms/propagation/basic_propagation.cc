@@ -27,6 +27,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
@@ -536,8 +537,8 @@ struct BasicPropagationPass
   }
 };
 
-// Verifies that all shapes are static in the module.
-bool allShapesStatic(ModuleOp moduleOp) {
+// Verifies that all shapes are static and there aren't any tuple types.
+bool allValidShapes(ModuleOp moduleOp) {
   return !moduleOp
               .walk([](Operation* op) {
                 for (Type type : op->getResultTypes()) {
@@ -547,6 +548,12 @@ bool allShapesStatic(ModuleOp moduleOp) {
                         "Shardy propagation only supports ranked tensors with "
                         "a static shape. type: ")
                         << tensorType;
+                    return WalkResult::interrupt();
+                  }
+                  if (auto tupleType = dyn_cast<TupleType>(type)) {
+                    op->emitError(
+                        "Shardy propagation doesn't support tuples: ")
+                        << tupleType;
                     return WalkResult::interrupt();
                   }
                 }
@@ -618,7 +625,7 @@ void BasicPropagationPassImpl::runOnOperation() {
 
   SymbolTable symbolTable(moduleOp);
 
-  if (!allShapesStatic(moduleOp)) {
+  if (!allValidShapes(moduleOp)) {
     return signalPassFailure();
   }
 
