@@ -100,7 +100,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Result | Description |
 | :----: | ----------- |
-| `output` | tensor of any type values
+| `output` | statically shaped tensor of any type values
 
 
 ### `sdy.data_flow_edge` (sdy::DataFlowEdgeOp)
@@ -122,6 +122,7 @@ such that all sources and targets should be sharded in the same way.
 An op can have multiple data flow edges that are orthogonal to one another.
 
 For example:
+
 
 ```mlir
   y_0, ..., y_n = while (x_0, ..., x_n)
