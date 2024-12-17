@@ -222,7 +222,7 @@ T2  | **"a", "b"** | "c", "e" |     |
 
 The above propagation step description applies to most ops. However, there are
 cases where a sharding rule is not appropriate. For those cases, Shardy defines
-_data flow _ ops.
+_data flow_ ops.
 
 A data flow edge of some op X defines a bridge between a set of *sources* and a
 set of *targets*, such that all sources and targets should be sharded in the
@@ -247,16 +247,16 @@ sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`,
 `body_arg_i`.
 
 Shardy will propagate shardings between all sources and targets of a
-`sdy.data_flow_edge` as if it was a regular op with the sources as operands
+data flow edge as if it was a regular op with the sources as operands
 and targets as results, and an identity `sdy.op_sharding_rule`. That means
 that forward propagation is from sources to targets and backwards
 propagation is from targets to sources.
 
-Several methods must be implemented by the user describing how to get and set
-shardings to arguments and results of the `ShardableDataFLowOpInterface` op
-through their _owners_. An owner is a user-specified target of the data flow
-edge used by Shardy's propagation. The user can choose it arbitrarily but it
-needs to be static.
+Several methods must be implemented by the user describing how to get the sources
+and targets of each data flow edge through their _owner_, and also how to get and
+set the shardings of edge _owners_. An owner is a user-specified target of the
+data flow edge used by Shardy's propagation. The user can choose it arbitrarily
+but it needs to be static.
 
 For example, given the `custom_op` defined below:
 
