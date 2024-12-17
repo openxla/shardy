@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -300,16 +301,23 @@ PYBIND11_MODULE(_sdy, m) {
           "get",
           [](py::object cls, const std::vector<int64_t>& factorSizes,
              const std::vector<MlirAttribute>& operandMappings,
-             const std::vector<MlirAttribute>& resultMappings, bool isCustom,
+             const std::vector<MlirAttribute>& resultMappings,
+             const std::vector<int64_t>& reductionFactors,
+             const std::vector<int64_t>& needReplicationFactors, bool isCustom,
              MlirContext ctx) {
             return cls(sdyOpShardingRuleAttrGet(
                 ctx, factorSizes.size(), factorSizes.data(),
                 operandMappings.size(), operandMappings.data(),
-                resultMappings.size(), resultMappings.data(), isCustom));
+                resultMappings.size(), resultMappings.data(),
+                reductionFactors.size(), reductionFactors.data(),
+                needReplicationFactors.size(), needReplicationFactors.data(),
+                isCustom));
           },
           py::arg("cls"), py::arg("factor_sizes"), py::arg("operand_mappings"),
-          py::arg("result_mappings"), py::arg("is_custom") = false,
-          py::arg("context") = py::none(),
+          py::arg("result_mappings"),
+          py::arg("reduction_factors") = std::vector<int64_t>(),
+          py::arg("need_replication_factors") = std::vector<int64_t>(),
+          py::arg("is_custom") = false, py::arg("context") = py::none(),
           "Creates a OpShardingRuleAttr with the factor sizes and mappings for "
           "operands and results.")
       .def_property_readonly("is_custom",
@@ -330,11 +338,26 @@ PYBIND11_MODULE(_sdy, m) {
                                    sdyOpShardingRuleAttrGetOperandMappingsSize,
                                    sdyOpShardingRuleAttrGetOperandMappingsElem);
                              })
-      .def_property_readonly("result_mappings", [](MlirAttribute self) {
-        return propertyVector<MlirAttribute>(
-            self, sdyOpShardingRuleAttrGetResultMappingsSize,
-            sdyOpShardingRuleAttrGetResultMappingsElem);
-      });
+      .def_property_readonly("result_mappings",
+                             [](MlirAttribute self) {
+                               return propertyVector<MlirAttribute>(
+                                   self,
+                                   sdyOpShardingRuleAttrGetResultMappingsSize,
+                                   sdyOpShardingRuleAttrGetResultMappingsElem);
+                             })
+      .def_property_readonly(
+          "reduction_factors",
+          [](MlirAttribute self) {
+            return propertyVector<intptr_t>(
+                self, sdyOpShardingRuleAttrGetReductionFactorsSize,
+                sdyOpShardingRuleAttrGetReductionFactorsElem);
+          })
+      .def_property_readonly(
+          "need_replication_factors", [](MlirAttribute self) {
+            return propertyVector<intptr_t>(
+                self, sdyOpShardingRuleAttrGetNeedReplicationFactorsSize,
+                sdyOpShardingRuleAttrGetNeedReplicationFactorsElem);
+          });
 
   mlir::python::adaptors::mlir_attribute_subclass(m, "ManualAxesAttr",
                                                   sdyAttributeIsAManualAxesAttr)

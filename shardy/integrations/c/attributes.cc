@@ -309,17 +309,19 @@ bool sdyAttributeIsAOpShardingRuleAttr(MlirAttribute attr) {
   return mlir::isa<sdy::OpShardingRuleAttr>(unwrap(attr));
 }
 
-MlirAttribute sdyOpShardingRuleAttrGet(MlirContext ctx, intptr_t nFactorSizes,
-                                       const int64_t* factorSizes,
-                                       intptr_t nOperandMappings,
-                                       const MlirAttribute* operandMappings,
-                                       intptr_t nResultMappings,
-                                       const MlirAttribute* resultMappings,
-                                       bool isCustomRule) {
+MlirAttribute sdyOpShardingRuleAttrGet(
+    MlirContext ctx, intptr_t nFactorSizes, const int64_t* factorSizes,
+    intptr_t nOperandMappings, const MlirAttribute* operandMappings,
+    intptr_t nResultMappings, const MlirAttribute* resultMappings,
+    intptr_t nReductionFactors, const int64_t* reductionFactors,
+    intptr_t nNeedReplicationFactors, const int64_t* needReplicationFactors,
+    bool isCustomRule) {
   return wrap(sdy::OpShardingRuleAttr::get(
       unwrap(ctx), mlir::ArrayRef(factorSizes, nFactorSizes),
       unwrapAttrs<sdy::TensorMappingAttr>(operandMappings, nOperandMappings),
       unwrapAttrs<sdy::TensorMappingAttr>(resultMappings, nResultMappings),
+      mlir::ArrayRef(reductionFactors, nReductionFactors),
+      mlir::ArrayRef(needReplicationFactors, nNeedReplicationFactors),
       isCustomRule));
 }
 
@@ -354,6 +356,27 @@ MlirAttribute sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr,
                                                          intptr_t pos) {
   return wrap(
       unwrapAttr<sdy::OpShardingRuleAttr>(attr).getResultMappings()[pos]);
+}
+
+int64_t sdyOpShardingRuleAttrGetReductionFactorsSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getReductionFactors().size();
+}
+
+intptr_t sdyOpShardingRuleAttrGetReductionFactorsElem(MlirAttribute attr,
+                                                      intptr_t pos) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getReductionFactors()[pos];
+}
+
+int64_t sdyOpShardingRuleAttrGetNeedReplicationFactorsSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr)
+      .getNeedReplicationFactors()
+      .size();
+}
+
+intptr_t sdyOpShardingRuleAttrGetNeedReplicationFactorsElem(MlirAttribute attr,
+                                                            intptr_t pos) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr)
+      .getNeedReplicationFactors()[pos];
 }
 
 //===----------------------------------------------------------------------===//
