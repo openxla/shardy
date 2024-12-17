@@ -237,7 +237,7 @@ def Sdy_ConstantOp : Sdy_Op<"constant",
   );
 
   let results = (outs
-    AnyTensor:$output
+    AnyStaticShapeTensor:$output
   );
 
   let hasCustomAssemblyFormat = 1;
