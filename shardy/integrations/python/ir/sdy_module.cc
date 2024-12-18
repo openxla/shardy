@@ -22,7 +22,12 @@ limitations under the License.
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
-#include "mlir/Bindings/Python/PybindAdaptors.h"  // IWYU pragma: keep
+#include "mlir/Bindings/Python/NanobindAdaptors.h"  // IWYU pragma: keep
+#include "nanobind/nanobind.h"
+#include "nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "nanobind/stl/string.h"    // IWYU pragma: keep
+#include "nanobind/stl/variant.h"   // IWYU pragma: keep
+#include "nanobind/stl/vector.h"    // IWYU pragma: keep
 #include "shardy/integrations/c/attributes.h"
 #include "shardy/integrations/c/dialect.h"
 
@@ -31,7 +36,7 @@ namespace sdy {
 
 namespace {
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 // Returns a vector containing elements with type T extracted from an attribute
 // using the two provided callbacks.
@@ -48,8 +53,8 @@ std::vector<T> propertyVector(
   return result;
 }
 
-py::str toPyString(MlirStringRef mlirStringRef) {
-  return py::str(mlirStringRef.data, mlirStringRef.length);
+nb::str toPyString(MlirStringRef mlirStringRef) {
+  return nb::str(mlirStringRef.data, mlirStringRef.length);
 }
 
 MlirStringRef toStringRef(const std::string& s) {
@@ -65,7 +70,7 @@ MlirAttribute toMeshOrRefAttr(
   return std::get<MlirAttribute>(meshOrRef);
 }
 
-PYBIND11_MODULE(_sdy, m) {
+NB_MODULE(_sdy, m) {
   m.doc() = "SDY main Python extension";
 
   //
@@ -81,22 +86,22 @@ PYBIND11_MODULE(_sdy, m) {
           mlirDialectHandleLoadDialect(dialect, context);
         }
       },
-      py::arg("context"), py::arg("load") = true);
+      nb::arg("context"), nb::arg("load") = true);
 
   //
   // Attributes.
   //
 
-  mlir::python::adaptors::mlir_attribute_subclass(m, "MeshAxisAttr",
-                                                  sdyAttributeIsAMeshAxisAttr)
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
+      m, "MeshAxisAttr", sdyAttributeIsAMeshAxisAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::string& name, int64_t size,
+          [](nb::object cls, const std::string& name, int64_t size,
              MlirContext ctx) {
             return cls(sdyMeshAxisAttrGet(ctx, toStringRef(name), size));
           },
-          py::arg("cls"), py::arg("name"), py::arg("size"),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("name"), nb::arg("size"),
+          nb::arg("context").none() = nb::none(),
           "Creates a MeshAxisAttr with the given axis name and size.")
       .def_property_readonly("name",
                              [](MlirAttribute self) {
@@ -106,38 +111,39 @@ PYBIND11_MODULE(_sdy, m) {
         return sdyMeshAxisAttrGetSize(self);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(m, "MeshAttr",
-                                                  sdyAttributeIsAMeshAttr)
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
+      m, "MeshAttr", sdyAttributeIsAMeshAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<MlirAttribute>& meshAxes,
-             const std::vector<int64_t>& deviceIds,
-             MlirContext ctx) {
+          [](nb::object cls, const std::vector<MlirAttribute>& meshAxes,
+             const std::vector<int64_t>& deviceIds, MlirContext ctx) {
             return cls(sdyMeshAttrGet(ctx, meshAxes.size(), meshAxes.data(),
                                       deviceIds.size(), deviceIds.data()));
           },
-          py::arg("cls"), py::arg("mesh_axes"),
-          py::arg("device_ids") = std::vector<int64_t>(),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("mesh_axes"),
+          nb::arg("device_ids") = std::vector<int64_t>(),
+          nb::arg("context").none() = nb::none(),
           "Creates a MeshAttr with the given mesh axes.")
-      .def_property_readonly("device_ids", [](MlirAttribute self) {
-        return propertyVector<int64_t>(self, sdyMeshAttrGetDeviceIdsSize,
-                                             sdyMeshAttrGetDeviceIdsElem);
-      })
+      .def_property_readonly("device_ids",
+                             [](MlirAttribute self) {
+                               return propertyVector<int64_t>(
+                                   self, sdyMeshAttrGetDeviceIdsSize,
+                                   sdyMeshAttrGetDeviceIdsElem);
+                             })
       .def_property_readonly("axes", [](MlirAttribute self) {
         return propertyVector<MlirAttribute>(self, sdyMeshAttrGetAxesSize,
                                              sdyMeshAttrGetAxesElem);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "SubAxisInfoAttr", sdyAttributeIsASubAxisInfoAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, int64_t preSize, int64_t size, MlirContext ctx) {
+          [](nb::object cls, int64_t preSize, int64_t size, MlirContext ctx) {
             return cls(sdySubAxisInfoAttrGet(ctx, preSize, size));
           },
-          py::arg("cls"), py::arg("pre_size"), py::arg("size"),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("pre_size"), nb::arg("size"),
+          nb::arg("context").none() = nb::none(),
           "Creates a SubAxisInfoAttr with the given pre-size and size.")
       .def_property_readonly(
           "pre_size",
@@ -146,20 +152,20 @@ PYBIND11_MODULE(_sdy, m) {
         return sdySubAxisInfoAttrGetSize(self);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(m, "AxisRefAttr",
-                                                  sdyAttributeIsAnAxisRefAttr)
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
+      m, "AxisRefAttr", sdyAttributeIsAnAxisRefAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::string& name,
+          [](nb::object cls, const std::string& name,
              std::optional<MlirAttribute> subAxisInfoAttr, MlirContext ctx) {
             return cls(sdyAxisRefAttrGet(ctx, toStringRef(name),
                                          subAxisInfoAttr.has_value()
                                              ? *subAxisInfoAttr
                                              : MlirAttribute()));
           },
-          py::arg("cls"), py::arg("name"),
-          py::arg("sub_axis_info") = py::none(),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("name"),
+          nb::arg("sub_axis_info").none() = nb::none(),
+          nb::arg("context").none() = nb::none(),
           "Creates an AxisRefAttr with the given name and SubAxisInfoAttr.")
       .def_property_readonly("name",
                              [](MlirAttribute self) {
@@ -171,18 +177,19 @@ PYBIND11_MODULE(_sdy, m) {
                                           : std::optional(subAxisInfo);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "DimensionShardingAttr", sdyAttributeIsADimensionShardingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<MlirAttribute>& axes,
+          [](nb::object cls, const std::vector<MlirAttribute>& axes,
              bool isClosed, std::optional<int64_t> priority, MlirContext ctx) {
             return cls(sdyDimensionShardingAttrGet(
                 ctx, axes.size(), axes.data(), isClosed,
                 priority.has_value() ? *priority : -1));
           },
-          py::arg("cls"), py::arg("axes"), py::arg("is_closed"),
-          py::arg("priority") = py::none(), py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("axes"), nb::arg("is_closed"),
+          nb::arg("priority").none() = nb::none(),
+          nb::arg("context").none() = nb::none(),
           "Creates a DimensionShardingAttr with the given axes, whether it's "
           "closed, and priority.")
       .def_property_readonly("axes",
@@ -200,11 +207,11 @@ PYBIND11_MODULE(_sdy, m) {
         return priority == -1 ? std::nullopt : std::optional(priority);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "TensorShardingAttr", sdyAttributeIsATensorShardingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls,
+          [](nb::object cls,
              const std::variant<std::string, MlirAttribute>& meshOrRef,
              const std::vector<MlirAttribute>& dimensionShardings,
              const std::vector<MlirAttribute>& replicatedAxes,
@@ -214,10 +221,10 @@ PYBIND11_MODULE(_sdy, m) {
                 dimensionShardings.data(), replicatedAxes.size(),
                 replicatedAxes.data()));
           },
-          py::arg("cls"), py::arg("mesh_or_ref"),
-          py::arg("dimension_shardings"),
-          py::arg("replicated_axes") = std::vector<MlirAttribute>(),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("mesh_or_ref"),
+          nb::arg("dimension_shardings"),
+          nb::arg("replicated_axes") = std::vector<MlirAttribute>(),
+          nb::arg("context").none() = nb::none(),
           "Creates a TensorShardingAttr with either an inlined mesh or mesh "
           "name, dimension shardings, and replicated axes.")
       .def_property_readonly("mesh_or_ref",
@@ -237,17 +244,18 @@ PYBIND11_MODULE(_sdy, m) {
             sdyTensorShardingAttrGetReplicatedAxesElem);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "TensorShardingPerValueAttr",
       sdyAttributeIsATensorShardingPerValueAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<MlirAttribute>& shardings,
+          [](nb::object cls, const std::vector<MlirAttribute>& shardings,
              MlirContext ctx) {
             return cls(sdyTensorShardingPerValueAttrGet(ctx, shardings.size(),
                                                         shardings.data()));
           },
-          py::arg("cls"), py::arg("shardings"), py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("shardings"),
+          nb::arg("context").none() = nb::none(),
           "Creates a TensorShardingPerValueAttr with the tensor shardings.")
       .def_property_readonly("shardings", [](MlirAttribute self) {
         return propertyVector<MlirAttribute>(
@@ -255,17 +263,17 @@ PYBIND11_MODULE(_sdy, m) {
             sdyTensorShardingPerValueAttrGetShardingsElem);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(m, "DimMappingAttr",
-                                                  sdyAttributeIsADimMappingAttr)
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
+      m, "DimMappingAttr", sdyAttributeIsADimMappingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<int64_t>& factorIndices,
+          [](nb::object cls, const std::vector<int64_t>& factorIndices,
              MlirContext ctx) {
             return cls(sdyDimMappingAttrGet(ctx, factorIndices.size(),
                                             factorIndices.data()));
           },
-          py::arg("cls"), py::arg("factor_indices"),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("factor_indices"),
+          nb::arg("context").none() = nb::none(),
           "Creates a DimMappingAttr with the factor indices.")
       .def_property_readonly("factor_indices", [](MlirAttribute self) {
         return propertyVector<intptr_t>(self,
@@ -273,17 +281,17 @@ PYBIND11_MODULE(_sdy, m) {
                                         sdyDimMappingAttrGetFactorIndicesElem);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "TensorMappingAttr", sdyAttributeIsATensorMappingAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<MlirAttribute>& mappings,
+          [](nb::object cls, const std::vector<MlirAttribute>& mappings,
              MlirContext ctx) {
             return cls(
                 sdyTensorMappingAttrGet(ctx, mappings.size(), mappings.data()));
           },
-          py::arg("cls"), py::arg("dim_mappings"),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("dim_mappings"),
+          nb::arg("context").none() = nb::none(),
           "Creates a TensorMappingAttr with the dim mappings.")
       .def_property_readonly("dim_mappings",
                              [](MlirAttribute self) {
@@ -295,11 +303,11 @@ PYBIND11_MODULE(_sdy, m) {
         return sdyTensorMappingAttrGetRank(self);
       });
 
-  mlir::python::adaptors::mlir_attribute_subclass(
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "OpShardingRuleAttr", sdyAttributeIsAOpShardingRuleAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<int64_t>& factorSizes,
+          [](nb::object cls, const std::vector<int64_t>& factorSizes,
              const std::vector<MlirAttribute>& operandMappings,
              const std::vector<MlirAttribute>& resultMappings,
              const std::vector<int64_t>& reductionFactors,
@@ -313,11 +321,11 @@ PYBIND11_MODULE(_sdy, m) {
                 needReplicationFactors.size(), needReplicationFactors.data(),
                 isCustom));
           },
-          py::arg("cls"), py::arg("factor_sizes"), py::arg("operand_mappings"),
-          py::arg("result_mappings"),
-          py::arg("reduction_factors") = std::vector<int64_t>(),
-          py::arg("need_replication_factors") = std::vector<int64_t>(),
-          py::arg("is_custom") = false, py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("factor_sizes"), nb::arg("operand_mappings"),
+          nb::arg("result_mappings"),
+          nb::arg("reduction_factors") = std::vector<int64_t>(),
+          nb::arg("need_replication_factors") = std::vector<int64_t>(),
+          nb::arg("is_custom") = false, nb::arg("context").none() = nb::none(),
           "Creates a OpShardingRuleAttr with the factor sizes and mappings for "
           "operands and results.")
       .def_property_readonly("is_custom",
@@ -359,25 +367,26 @@ PYBIND11_MODULE(_sdy, m) {
                 sdyOpShardingRuleAttrGetNeedReplicationFactorsElem);
           });
 
-  mlir::python::adaptors::mlir_attribute_subclass(m, "ManualAxesAttr",
-                                                  sdyAttributeIsAManualAxesAttr)
+  mlir::python::nanobind_adaptors::mlir_attribute_subclass(
+      m, "ManualAxesAttr", sdyAttributeIsAManualAxesAttr)
       .def_classmethod(
           "get",
-          [](py::object cls, const std::vector<MlirAttribute>& meshAxes,
+          [](nb::object cls, const std::vector<MlirAttribute>& meshAxes,
              MlirContext ctx) {
-            return cls(sdyManualAxesAttrGet(ctx, meshAxes.size(),
-                                            meshAxes.data()));
+            return cls(
+                sdyManualAxesAttrGet(ctx, meshAxes.size(), meshAxes.data()));
           },
-          py::arg("cls"), py::arg("manual_axes"),
-          py::arg("context") = py::none(),
+          nb::arg("cls"), nb::arg("manual_axes"),
+          nb::arg("context").none() = nb::none(),
           "Creates a ManualAxesAttr with the given manual axes.")
-      .def("__getitem__", [](MlirAttribute &self, unsigned index) {
-        if (index >= sdyManualAxesAttrGetAxesSize(self)) {
-          throw py::index_error();
-        }
-        return toPyString(sdyManualAxesAttrGetAxesElem(self, index));
-      })
-      .def("__len__", [](MlirAttribute &self) {
+      .def("__getitem__",
+           [](MlirAttribute& self, unsigned index) {
+             if (index >= sdyManualAxesAttrGetAxesSize(self)) {
+               throw nb::index_error();
+             }
+             return toPyString(sdyManualAxesAttrGetAxesElem(self, index));
+           })
+      .def("__len__", [](MlirAttribute& self) {
         return sdyManualAxesAttrGetAxesSize(self);
       });
 }
