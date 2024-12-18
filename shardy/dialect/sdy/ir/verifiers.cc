@@ -231,7 +231,15 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        bool checkDivisibility,
                                        ManualAxisToOwner alreadyManualAxes) {
   if (mesh.isMaximal()) {
-    // TODO(bartchr): add some checks after XLA change lands.
+    // A maximal sharding says that this op should be executed on a single
+    // device. Skip checking against the type of the op. Just make sure there
+    // are no dimension shardings and replicated axes.
+    if (!shardingAttr.getDimShardings().empty() ||
+        !shardingAttr.getReplicatedAxes().empty()) {
+      return emitError(
+          "a maximal sharding must have no dimension shardings and "
+          "no replicated axes.");
+    }
     return success();
   }
   auto tensorType = dyn_cast<ShapedType>(type);
