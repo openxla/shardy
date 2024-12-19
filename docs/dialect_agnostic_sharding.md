@@ -25,8 +25,6 @@ def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
 }
 ```
 
-In the future, more interfaces and traits will be added to make Shardy more flexible and dialect-agnostic.
-
 ## Region-based ops (Data flow ops)
 
 Region-based ops required a different approach where sharding rules, which only describe the correspondence between
@@ -47,19 +45,13 @@ def ShardableDataFlowOpInterface :
   getEdgeSources;
   // ...
 }
-
-%0:2 = stablehlo.while(%iterArg = %arg0, %iterArg_2 = %c) 
-  : tensor<32x96xf32>, tensor<i32>
-  cond {
-  // ...
-  stablehlo.return %3 : tensor<i1>
-} do {
-  // ...
-  stablehlo.return %4, %3 : tensor<32x96xf32>, tensor<i32>
-}
 ```
 
 See also [Data flow ops](./propagation#data-flow-ops) for a high-level overview of how we handle data flow ops.
+
+## Interfaces not yet implemented
+
+In the future, more interfaces and traits will be added to make Shardy more flexible and dialect-agnostic.
 
 ## Constant splitting
 
@@ -78,9 +70,9 @@ constant can then have a different sharding that can propagate in isolation to i
 
 To achieve this, Shardy users need to define:
 - A `your_dialect.constant` -> `sdy.constant` pass;
-- A `sdy::ConstantLike` trait, such as [iota ops](https://openxla.org/stablehlo/spec#iota);
-- A `mlir::Elementwise` trait for element-wise ops like `add` and `multiply`;
-- A `sdy::ConstantFoldable` for ops like slice/broadcast. These ops can technically be calculated at compile time, if all
+- A `sdy::ConstantLike` trait, such as [iota](https://openxla.org/stablehlo/spec#iota);
+- A `mlir::Elementwise` trait for element-wise ops like [`add`](https://openxla.org/stablehlo/spec#add) and [`multiply`](https://openxla.org/stablehlo/spec#multiply);
+- A `sdy::ConstantFoldable` for ops like [slice](https://openxla.org/stablehlo/spec#slice)/[broadcast](https://openxla.org/stablehlo/spec#broadcast_in_dim). These ops can technically be calculated at compile time, if all
   their operands/results are constants.
 
 ## Op priorities
