@@ -29,11 +29,7 @@ include "shardy/dialect/sdy/ir/dialect.td"
 // split.
 def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
                                  "manual_axes", "StringAttr"> {
-  let mnemonic = "manual_axes";
   let summary = "A list of axes that a ManualComputationOp is manual on";
-  let parameters = (ins
-      OptionalArrayRefParameter<"StringAttr", "value">:$value
-  );
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
 }
 
