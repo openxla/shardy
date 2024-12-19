@@ -149,8 +149,8 @@ def Sdy_SubAxisInfo : AttrDef<Sdy_Dialect, "SubAxisInfo"> {
     denoted as follows: `(m)k` for pre-size m and size k.
   }];
   let parameters = (ins
-      AttrOrTypeParameter<"int64_t", "pre-size">:$pre_size,
-      AttrOrTypeParameter<"int64_t", "size">:$size
+      AttrOrTypeParameter<"int64_t", "The product of axis sizes to the left of the sub-axis">:$pre_size,
+      AttrOrTypeParameter<"int64_t", "sub-axis size">:$size
   );
   let assemblyFormat = "`(` $pre_size `)` `` $size";
 
@@ -350,8 +350,8 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
 
   let parameters = (ins
     Sdy_AxisRefs:$axes,
-    AttrOrTypeParameter<"bool", "whether this dimension is closed">:$is_closed,
-    OptionalParameter<"std::optional<int64_t>", "priority of this dimension sharding">:$priority
+    AttrOrTypeParameter<"bool", "whether the dimension is closed">:$is_closed,
+    OptionalParameter<"std::optional<int64_t>", "priority of dimension sharding">:$priority
   );
 
   let builders = [
@@ -429,7 +429,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
   }];
   let parameters = (ins
       Sdy_MeshOrRef:$mesh_or_ref,
-      OptionalArrayRefParameter<"DimensionShardingAttr", "dimension sharding">:$dim_shardings,
+      OptionalArrayRefParameter<"DimensionShardingAttr", "dimension shardings">:$dim_shardings,
       Sdy_AxisRefs:$replicated_axes
   );
   let assemblyFormat = [{
@@ -693,7 +693,7 @@ def Sdy_TensorMapping : AttrDef<Sdy_Dialect, "TensorMapping"> {
   let mnemonic = "tensor_mapping";
   let summary = "Factor mappings for each dimension of a tensor.";
   let parameters = (ins
-      OptionalArrayRefParameter<"DimMappingAttr", "dimension mapping">:$dim_mappings
+      OptionalArrayRefParameter<"DimMappingAttr", "dimension mappings">:$dim_mappings
   );
 
   let assemblyFormat = "`` `[` (`]`):($dim_mappings^ `]`)? ``";
@@ -742,7 +742,7 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       OptionalArrayRefParameter<"int64_t", "factor sizes">:$factor_sizes,
       OptionalArrayRefParameter<"TensorMappingAttr", "operand mappings">:$operand_mappings,
       OptionalArrayRefParameter<"TensorMappingAttr", "result mappings">:$result_mappings,
-      DefaultValuedParameter<"bool", "false", "whether this is a stablehlo.custom_call">:$is_custom_rule
+      DefaultValuedParameter<"bool", "false", "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
   );
 
   let assemblyFormat = [{
