@@ -25,11 +25,9 @@ def SinkDataFlowEdgesPass : Pass<"sdy-sink-data-flow-edges", "func::FuncOp"> {
   let description = [{
     Moves the sharding of each `DataFlowEdgeOp` to its input (the root target of
     the edge), and replaces the op with its input.
-
-    TODO(tomnatan): consider moving the sharding to all targets that can have a
-    sharding attached.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+  //TODO(tomnatan): consider moving the sharding to all targets that can have a sharding attached.
 }
 
 def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-input-output-shardings", "func::FuncOp"> {
@@ -54,7 +52,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
 
     After propagation, some operations may still have incompatible shardings.
 
-    Please note, when an axis (or sub-axis) is used to shard non-corresponding
+    Note that when an axis (or sub-axis) is used to shard non-corresponding
     dimensions (e.g. non-contracting dimensions in matmul) across multiple
     tensors, or when an axis shards a dimension in one tensor but not the
     corresponding dimension in the other tensor, it is said that the operation
@@ -66,7 +64,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     and results, and every axis (or sub-axis) can only be used to shard a single
     dimension type.
 
-    A clarifying example:
+    Example:
 
     Input:
     ```mlir
@@ -89,7 +87,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
 
     In the example above, there is a conflict since `lhs` and `rhs` tensors
     are both sharded on axis "x" on their non-contracting dimensions. Here,
-    `rhs` tensor is resharded, before the dot operation, explicitly to be
+    `rhs` tensor is resharded before the dot operation explicitly, to be
     sharded only on its first dimension and on axis "x". This way, the dot
     operation becomes compatible.
   }];
@@ -100,12 +98,12 @@ def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"
   let summary = "Converts ReshardOp into various Shardy collective ops.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
   let description = [{
-   Here we match reshard ops and rewrite them into various Shardy collective
+    Matches reshard ops and rewrites them into various Shardy collective
     ops. After this pass, no reshard ops remain in the module. This pass assumes
-    that xplicit reshards have already been inserted
+    that explicit reshards have already been inserted
     (`sdy-insert-explicit-reshards`).
 
-    A clarifying example:
+    Example:
 
     Input:
     ```mlir
