@@ -356,8 +356,8 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
 
   let parameters = (ins
     Sdy_AxisRefs:$axes,
-    AttrOrTypeParameter<"bool", "whether the dimension is closed">:$is_closed,
-    OptionalParameter<"std::optional<int64_t>", "priority of dimension sharding">:$priority
+    AttrOrTypeParameter<"bool", "If false, this dimension can be further sharded">:$is_closed,
+    OptionalParameter<"std::optional<int64_t>", "the priority used during user priority based propagation">:$priority
   );
 
   let builders = [
