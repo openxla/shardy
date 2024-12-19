@@ -46,7 +46,7 @@ Interfaces: `InferTypeOpInterface`
 
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
-<tr><td><code>gatheringAxes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td></td></tr>
+<tr><td><code>gatheringAxes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
 <tr><td><code>outSharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
@@ -228,7 +228,7 @@ Interfaces: `ShardableDataFlowOpInterface`
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
 <tr><td><code>in_shardings</code></td><td>::mlir::sdy::TensorShardingPerValueAttr</td><td>Tensor sharding per operand/result of an op</td></tr>
 <tr><td><code>out_shardings</code></td><td>::mlir::sdy::TensorShardingPerValueAttr</td><td>Tensor sharding per operand/result of an op</td></tr>
-<tr><td><code>manual_axes</code></td><td>::mlir::sdy::ManualAxesAttr</td><td></td></tr>
+<tr><td><code>manual_axes</code></td><td>::mlir::sdy::ManualAxesAttr</td><td>A list of axes that a ManualComputationOp is manual on</td></tr>
 </table>
 
 #### Operands:
@@ -570,12 +570,12 @@ Syntax:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| name | `::llvm::StringRef` | name |
-| sub_axis_info | `SubAxisInfoAttr` |  |
+| name | `::llvm::StringRef` | the name of this axis |
+| sub_axis_info | `SubAxisInfoAttr` | additional info if this is a sub axis |
 
 ### AxisRefListAttr
 
-
+List of axis refs
 
 Syntax:
 
@@ -605,7 +605,7 @@ i.e. the dimension isn't mapped to any factors.
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| factor_indices | `::llvm::ArrayRef<int64_t>` |  |
+| factor_indices | `::llvm::ArrayRef<int64_t>` | factors this dimension is mapped to |
 
 ### DimensionShardingAttr
 
@@ -622,13 +622,13 @@ highest priority is assumed when the priority is missing in the annotation.
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| axes | `::llvm::ArrayRef<AxisRefAttr>` | list of axis refs |
-| is_closed | `bool` |  |
-| priority | `std::optional<int64_t>` |  |
+| axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
+| is_closed | `bool` | if false, this dimension can be further sharded |
+| priority | `std::optional<int64_t>` | the priority used during user priority based propagation |
 
 ### ListOfAxisRefListsAttr
 
-
+List of axis ref lists
 
 Syntax:
 
@@ -648,7 +648,7 @@ Syntax:
 
 ### ManualAxesAttr
 
-
+A list of axes that a ManualComputationOp is manual on
 
 Syntax:
 
@@ -709,8 +709,8 @@ Here are some examples of meshes:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| axes | `::llvm::ArrayRef<MeshAxisAttr>` |  |
-| device_ids | `::llvm::ArrayRef<int64_t>` |  |
+| axes | `::llvm::ArrayRef<MeshAxisAttr>` | mesh axes |
+| device_ids | `::llvm::ArrayRef<int64_t>` | explicit device ordering or maximal device id |
 
 ### MeshAxisAttr
 
@@ -732,7 +732,7 @@ Syntax:
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
 | name | `::llvm::StringRef` | name |
-| size | `int64_t` |  |
+| size | `int64_t` | size of this axis |
 
 ### OpShardingRuleAttr
 
@@ -790,12 +790,12 @@ for `stablehlo.custom_call` ops.
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| factor_sizes | `::llvm::ArrayRef<int64_t>` |  |
-| operand_mappings | `::llvm::ArrayRef<TensorMappingAttr>` |  |
-| result_mappings | `::llvm::ArrayRef<TensorMappingAttr>` |  |
-| reduction_factors | `::llvm::ArrayRef<int64_t>` |  |
-| need_replication_factors | `::llvm::ArrayRef<int64_t>` |  |
-| is_custom_rule | `bool` |  |
+| factor_sizes | `::llvm::ArrayRef<int64_t>` | sizes of all factors in this rule |
+| operand_mappings | `::llvm::ArrayRef<TensorMappingAttr>` | operand mappings |
+| result_mappings | `::llvm::ArrayRef<TensorMappingAttr>` | result mappings |
+| reduction_factors | `::llvm::ArrayRef<int64_t>` | indices of factors requiring reduction |
+| need_replication_factors | `::llvm::ArrayRef<int64_t>` | indices of factors requiring full replication |
+| is_custom_rule | `bool` | whether the rule is for a stablehlo.custom_call |
 
 ### SubAxisInfoAttr
 
@@ -820,8 +820,8 @@ denoted as follows: `(m)k` for pre-size m and size k.
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| pre_size | `int64_t` |  |
-| size | `int64_t` |  |
+| pre_size | `int64_t` | the product of sub-axis sizes to the left of this sub-axis |
+| size | `int64_t` | size of this sub-axis |
 
 ### TensorMappingAttr
 
@@ -841,7 +841,7 @@ Syntax:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| dim_mappings | `::llvm::ArrayRef<DimMappingAttr>` |  |
+| dim_mappings | `::llvm::ArrayRef<DimMappingAttr>` | dimension mappings |
 
 ### TensorShardingAttr
 
@@ -871,8 +871,8 @@ name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
 | mesh_or_ref | `::mlir::Attribute` | mesh attr or flat mesh symbol reference attr |
-| dim_shardings | `::llvm::ArrayRef<DimensionShardingAttr>` |  |
-| replicated_axes | `::llvm::ArrayRef<AxisRefAttr>` | list of axis refs |
+| dim_shardings | `::llvm::ArrayRef<DimensionShardingAttr>` | dimension shardings |
+| replicated_axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
 
 ### TensorShardingPerValueAttr
 
@@ -892,7 +892,7 @@ Syntax:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| shardings | `::llvm::ArrayRef<TensorShardingAttr>` |  |
+| shardings | `::llvm::ArrayRef<TensorShardingAttr>` | shardings per value |
 
 ## Enums
 
