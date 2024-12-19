@@ -75,7 +75,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
       ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
   }];
   let parameters = (ins
-      OptionalArrayRefParameter<"MeshAxisAttr", "Mesh axes">:$axes,
+      OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
       OptionalArrayRefParameter<"int64_t", "explicit device ordering or maximal device id">: $device_ids
   );
 
@@ -177,7 +177,7 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let mnemonic = "axis_ref";
   let summary = "Reference to either a full axis or a split sub-axis";
   let parameters = (ins
-      StringRefParameter<"name", "the name of this axis">:$name,
+      StringRefParameter<"the name of the axis">:$name,
       OptionalParameter<"SubAxisInfoAttr", "additional info if this is a sub axis">:$sub_axis_info
   );
   let assemblyFormat = "`` $name (`` `:` `` $sub_axis_info^)?";
