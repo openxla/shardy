@@ -115,7 +115,8 @@ OpShardingRuleAttr OpShardingRuleBuilder::build() {
       buildTensorMappingAttrList(resultMappings, factorSizes, context);
 
   auto result = OpShardingRuleAttr::get(
-      context, factorSizes, operandMappingAttrs, resultMappingAttrs);
+      context, factorSizes, operandMappingAttrs, resultMappingAttrs,
+      reductionFactors, needReplicationFactors);
 
   // Erase all added factors, to return the builder to its original state before
   // calling this method.

@@ -115,6 +115,12 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     // number of devices.
     int64_t getTotalSize() const;
 
+    // Returns whether this mesh is a maximal-sharding mesh
+    //
+    // A maximal-sharding mesh is a mesh with an empty axis list and a single
+    // device ID.
+    bool isMaximal() const;
+
     // Returns whether this mesh is a maximal-sharding mesh with `deviceId`.
     //
     // A maximal-sharding mesh is a mesh with an empty axis list and a single
@@ -731,6 +737,11 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     this is mainly for completeness as many ops such as pointwise ops have size
     one dimensions that correspond across operands and results.
 
+    `reduction_factors` contains the indices of factors requiring reduction,
+    such as the contracting dimensions in a dot operation.
+    `need_replication_factors` contains the indices of factors requiring full
+    replication, such as the sorted dimension in a sort operation.
+
     `is_custom_rule` describes whether this is a rule defined by a user for a
     `stablehlo.custom_call` op. The partitioner doesn't know how to partition
     these ops, so a user must tell it how. When it is a custom rule, then the
@@ -742,7 +753,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       OptionalArrayRefParameter<"int64_t", "factor sizes">:$factor_sizes,
       OptionalArrayRefParameter<"TensorMappingAttr", "operand mappings">:$operand_mappings,
       OptionalArrayRefParameter<"TensorMappingAttr", "result mappings">:$result_mappings,
-      DefaultValuedParameter<"bool", "false", "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
+      OptionalArrayRefParameter<"int64_t">:$reduction_factors,
+      OptionalArrayRefParameter<"int64_t">:$need_replication_factors,
+      DefaultValuedParameter<"bool", "false", "whether the rule is for a stablehlo.custom_call>:$is_custom_rule
   );
 
   let assemblyFormat = [{
@@ -750,16 +763,21 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     `(`$operand_mappings`)`
     `` `->` ``
     `(`$result_mappings`)` ``
-    custom<FactorSizes>($factor_sizes)
-    ``custom<IsCustomRule>($is_custom_rule)
+    custom<FactorSizes>($factor_sizes) ``
+    custom<ReductionFactors>($reduction_factors) ``
+    custom<NeedReplicationFactors>($need_replication_factors) ``
+    custom<IsCustomRule>($is_custom_rule)
     `>`
   }];
 
   let builders = [
     AttrBuilder<(ins "ArrayRef<int64_t>":$factor_sizes,
                      "ArrayRef<TensorMappingAttr>":$operand_mappings,
-                     "ArrayRef<TensorMappingAttr>":$result_mappings), [{
+                     "ArrayRef<TensorMappingAttr>":$result_mappings,
+                     "ArrayRef<int64_t>":$reduction_factors,
+                     "ArrayRef<int64_t>":$need_replication_factors), [{
       return $_get($_ctxt, factor_sizes, operand_mappings, result_mappings,
+                   reduction_factors, need_replication_factors,
                    /*is_custom_rule=*/false);
     }]>
   ];

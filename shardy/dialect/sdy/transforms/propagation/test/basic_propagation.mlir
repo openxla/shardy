@@ -673,10 +673,10 @@ func.func @empty_mesh_all_dims_closed(
 
 // CHECK-LABEL: func @maximal_mesh_not_replaced(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, [{?}, {?}]>})
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>})
 func.func @maximal_mesh_not_replaced(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
-    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, [{?}, {?}]>}) -> tensor<8x8xf32> {
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>}) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg1
   // CHECK-NOT: sdy.sharding
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>

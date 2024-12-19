@@ -20,7 +20,7 @@ names and sizes.
 
 The proposed sharding representation is bound to a specific logical mesh by its
 name, and can only reference axis names from that mesh. The sharding of a tensor
-specifies along which axes (of a specific logical mesh), each dimension of the
+specifies along which axes (of a specific logical mesh) each dimension of the
 tensor is sharded, ordered from major to minor. The tensor is replicated along
 all other axes of the mesh.
 
@@ -47,7 +47,7 @@ We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
     that are not used to shard a dimension are implicitly replicated, but the
     sharding can specify axes that are explicitly replicated and therefore
     cannot be used to shard a dimension later on.
-*   [**Axis splitting and sub-axes**](#axis-splitting-and-sub-axes) - a (full)
+*   [**Axis splitting and sub-axes**](#axis_splitting_and_sub-axes) - a (full)
     mesh axis can be split into multiple sub-axes that can be individually used
     to shard a dimension or be explicitly replicated.
 *   [**Multiple logical meshes**](#multiple-logical-meshes) - different
@@ -68,7 +68,7 @@ We expand the basic structure and each key component in this section.
 ### Basic structure
 
 The dimension shardings tell us for each dimension of the tensor, along which
-axes (or [sub-axes](#axis-splitting-and-sub-axes)) it is sharded from major to
+axes (or [sub-axes](#axis_splitting_and_sub-axes)) it is sharded from major to
 minor. All other axes that don't shard a dimension are implicitly replicated (or
 [explicitly replicated](#explicitly-replicated-axes)).
 
@@ -100,9 +100,7 @@ Each dimension of a tensor can either be open or closed.
 An open dimension is open for propagation to further shard it along additional
 axes, i.e. the specified dimension sharding doesn't have to be the final
 sharding of that dimension. This is similar (but not exactly the same as) to
-
-*   [`jax.sharding.PartitionSpec.UNCONSTRAINED`](https://jax.readthedocs.io/en/latest/jax.sharding.html#jax.sharding.PartitionSpec)
-*   GSPMD's `unspecified_dims`
+GSPMD's `unspecified_dims`.
 
 If a dimension is open we add a `?` following the axes that the dimension is
 already sharded on (see example below).
@@ -161,7 +159,7 @@ We can extend our example from above to have an explicitly replicated axis.
 // Since "y" is explicitly replicated, it can't be used to shard the 2nd
 // dimension that is open. However, "z" is implicitly replicated so it can be
 // used to shard that dimension. The local shape of this tensor (i.e. the
-// shape on a single device), would // be tensor<2x8xf32>.
+// shape on a single device), would be tensor<2x8xf32>.
 sharding<@mesh_xyz, [{"x"}, {?}], replicated={"y"}> : tensor<4x8xf32>
 ```
 
@@ -213,13 +211,14 @@ We have a few options for dealing with such cases:
 *   Disallow, and all-gather sub-axes that shard the input/output.
 
 Currently we allow sub-axes on the inputs/outputs in the propagation pipeline.
-Let us know if you want a way to disable this.
+[Let us know](https://github.com/openxla/shardy/issues) if you want a way to
+disable this.
 
 #### Representation
 
 In the same way that we can reference specific full axes from the mesh by their
 name, we can reference specific sub-axes by their size and the product of all
-sub-axis (of the same axis name) sizes to their left (that are major to them) .
+sub-axis (of the same axis name) sizes to their left (that are major to them).
 
 To extract a specific sub-axis of size `k` from a full axis `"x"` of size `n`,
 we effectively reshape the size `n` (in the mesh) into `[m, k, n/(m*k)]` and use
@@ -301,7 +300,7 @@ sharding<@mesh_xyz, [{"x"}, {"y":(2)2}], replicated={"y":(1)2}> : tensor<4x8xf32
 Replicated sub-axis of the same full axis should be ordered in increasing order
 by their pre-size, for example:
 
-```c
+```c++
 replicated={"y":(4)2, "x", "y":(1)2} ~> replicated={"x", "y":(1)2, "y":(4)2}
 ```
 
@@ -342,11 +341,9 @@ assigned to a different mesh, by naively resharding the tensor to match the
 destination mesh. In GSPMD this is what is usually done to resolve conflicting
 meshes.
 
-We provide two examples below:
-
 Users can specify multiple meshes with different named axes (e.g. via
-`jax.sharding.NamedSharding`), that have the same order of devices. In this
-example, `<@mesh_0, "b">` is identical to `<@mesh_1, "z">.`
+`jax.sharding.NamedSharding`), that have the same order of devices. Consider
+this example, `<@mesh_0, "b">` is identical to `<@mesh_1, "z">`:
 
 ```c++
 @mesh_0 = {<["a"=4, "b"=2]>, device_ids=[0, 1, 2, 3, 4, 5, 6, 7]}
@@ -358,8 +355,8 @@ moment (different being different axis names/sizes and `device_ids`).
 
 ### Priorities
 
-Priority is a way to prioritize certain partitioning+propagation decisions over
-others, and allows for incremental partitioning of a program.
+Priority is a way to prioritize certain partitioning and propagation decisions
+over others, and allows for incremental partitioning of a program.
 
 Priorities are values attached to some or all dimensions of a sharding
 representation (replicated axes don't have priorities).
@@ -374,9 +371,10 @@ For example:
 ```
 
 Priorities give users more fine grained control over propagation, e.g., batch
-parallelism first, then megatron, and finally ZeRO sharding. This allows for
-strong guarantees about what's partitioned and allows for better debuggability
-by having more fine grained sharding strategies (can see how the program looks
+parallelism first, then [megatron](arxiv.org/abs/1909.08053), and finally
+[ZeRO](https://arxiv.org/abs/1910.02054) sharding. This allows for strong
+guarantees about what's partitioned and allows for better debuggability by
+having more fine grained sharding strategies (can see how the program looks
 after just megatron in isolation).
 
 We allow attaching a priority to each dimension sharding (0 by default), which

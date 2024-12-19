@@ -38,7 +38,7 @@ We compose multiple conflict resolution strategies in a hierarchy:
     and ignore all others. We also make sure that propagation won't override
     user defined shardings with lower priority (`>i`), even if they are ignored
     during previous iterations.
-2.  **Operation based priorities**. We propagate shardings, based on the
+2.  **Operation based priorities**. We propagate shardings based on the
     operation type. The "pass-through" operations (e.g., element-wise operations
     and reshape) have the highest priority, while operations with shape
     transformation (e.g., dot and reduce) have lower priority.
@@ -61,18 +61,18 @@ user priority, a full op-priority propagation is applied.
 
 The sharding rule introduces an abstraction of every operation that provides the
 actual propagation algorithm with the information it needs to propagate
-shardings from operands to results or across operands, etc., without having to
-reason about specific operation types and their attributes. This is essentially
+shardings from operands to results or across operands without having to reason
+about specific operation types and their attributes. This is essentially
 factoring out the op-specific logic and providing a shared representation (data
 structure) for all ops for the purpose of propagation only. In its simplest
 form, it just provides this function:
 
-```c
+```c++
 GetOpShardingRule(Operation *) -> OpShardingRuleAttr
 ```
 
 The rule allows us to write the propagation algorithm only once in a generic way
-that is based on this data structure (OpShardingRule), instead of replicating
+that is based on this data structure (`OpShardingRule`), instead of replicating
 similar pieces of code across many ops, vastly reducing the possibility for bugs
 or inconsistent behavior across ops.
 
@@ -101,11 +101,11 @@ factor. However, it is not enough for reshapes.
 
 The following reshape merges two dimensions into one:
 
-```
+```mlir
 %out = mhlo.reshape(%in) : (tensor<2x4x32xf32>) -> tensor<8x32xf32>
 ```
 
-Here both dimensions 0 and 1 of the input correspond to dimension 0 of the
+Here, both dimensions 0 and 1 of the input correspond to dimension 0 of the
 output. Say we start by giving factors to the input:
 
 ```
@@ -121,18 +121,25 @@ need a single dimension to reference multiple factors:
 
 The same can be done if the reshape were to split a dimension:
 
+```mlir
+%out = mhlo.reshape(%in) : (tensor<8x32xf32>) -> tensor<2x4x32xf32>
 ```
-%out = mhlo.reshape(%in) : (tensor<8x32xf32>) -> tensor<2x4x32xf32> ((ij), k) -> (i,j,k) : i=2, j=4, k=32
+
+Here,
+
+```
+((ij), k) -> (i,j,k) : i=2, j=4, k=32
 ```
 
 The dimension of size 8 here is essentially composed of the factors 2 and 4,
-which is why we are calling the factors (i,j,k) factors.
+which is why we are calling the factors `(i,j,k)` factors.
 
 These factors can also work with cases where there is no full dimension that
 corresponds to one of the factors:
 
-```
-%out = mhlo.reshape(%in) : (tensor<8x4xf32>) -> tensor<2x16xf32> ((ij), k) -> (i,(jk)) : i=2, j=4, k=4
+```mlir
+%out = mhlo.reshape(%in) : (tensor<8x4xf32>) -> tensor<2x16xf32>
+// ((ij), k) -> (i,(jk)) : i=2, j=4, k=4
 ```
 
 This example also emphasizes why we need to store the factor sizes - since we
@@ -146,16 +153,16 @@ In Shardy, we have the hierarchy of tensors, dimensions, and factors. They
 represent data at different levels. A factor is a sub-dimension. It is an
 internal hierarchy used in sharding propagation. Each dimension may correspond
 to one or more factors. The mapping between dimension and factor is defined by
-OpShardingRule.
+`OpShardingRule`.
 
 ![Schema showing the Shardy propagation algorithm.](images/propagation_algorithm.png)
 
 **Shardy propagates sharding axes along factors instead of dimensions**. To do
-that, we have three steps as shown in the figure below
+that, we have three steps as shown in the figure below:
 
-1.  Project DimSharding to FactorSharding
-2.  Propagate sharding axes in the space of FactorSharding
-3.  Project the updated FactorSharding to get the updated DimSharding
+1.  Project `DimSharding` to `FactorSharding`
+2.  Propagate sharding axes in the space of `FactorSharding`
+3.  Project the updated `FactorSharding` to get the updated `DimSharding`
 
 ![Schema showing sharding propagation across FactorSharding and DimSharding.](images/projected_sharding.png)
 
@@ -210,3 +217,60 @@ along F0, propagate `["c"]` along F1, and propagate nothing along F2.
 T0  | "a", **"b"** | **"c"**  | "f" |
 T1  | "a", "b"     | "c", "d" | "g" |
 T2  | **"a", "b"** | "c", "e" |     |
+
+### Data flow ops
+
+The above propagation step description applies to most ops. However, there are
+cases where a sharding rule is not appropriate. For those cases, Shardy defines
+*data flow* ops.
+
+A data flow edge of some op X defines a bridge between a set of *sources* and a
+set of *targets*, such that all sources and targets should be sharded in the
+same way. Examples of such ops are `stablehlo::OptimizationBarrierOp`,
+`stablehlo::WhileOp`, `stablehlo::CaseOp` and also
+[`sdy::ManualComputationOp`](./sdy_dialect#sdymanual_computation_sdymanualcomputationop).
+Ultimately, any op that implements
+[ShardableDataFlowOpInterface](sdy_op_interfaces#shardabledataflowopinterface_shardabledataflowopinterface)
+is considered a data flow op.
+
+An op can have multiple data flow edges that are orthogonal to one another. For
+example:
+
+```mlir
+    y_0, ..., y_n = while (x_0, ..., x_n)
+                    ((pred_arg_0,... , pred_arg_n) { ... })
+                    ((body_arg_0,..., body_arg_n) {
+                    ...
+                    return return_value_0, ..., return_value_n
+                    })
+```
+
+This while op has `n` data flow edges: the i-th data flow edges is between
+sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`, `body_arg_i`.
+
+Shardy will propagate shardings between all sources and targets of a data flow
+edge as if it was a regular op with the sources as operands and targets as
+results, and an identity `sdy.op_sharding_rule`. That means that forward
+propagation is from sources to targets and backwards propagation is from targets
+to sources.
+
+Several methods must be implemented by the user describing how to get the
+sources and targets of each data flow edge through their *owner*, and also how
+to get and set the shardings of edge *owners*. An owner is a user-specified
+target of the data flow edge used by Shardy's propagation. The user can choose
+it arbitrarily but it needs to be static.
+
+For example, given the `custom_op` defined below:
+
+```c
+  y_1, ..., y_n = custom_op (x_1, ..., x_n)
+                  ((body_arg_1,..., body_arg_n) {
+                    ...
+                    return return_value_1, ..., return_value_n
+                  })
+```
+
+This custom_op has two types for data flow edges: `n` edges each between
+`return_value_i` (sources) and `y_i` (targets) and `n` edges between `x_i`
+(sources) and `body_arg_i` (targets). In this case, the edge owners are the same
+as the targets.

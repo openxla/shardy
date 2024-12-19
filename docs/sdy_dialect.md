@@ -100,7 +100,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Result | Description |
 | :----: | ----------- |
-| `output` | tensor of any type values
+| `output` | statically shaped tensor of any type values
 
 
 ### `sdy.data_flow_edge` (sdy::DataFlowEdgeOp)
@@ -122,6 +122,7 @@ such that all sources and targets should be sharded in the same way.
 An op can have multiple data flow edges that are orthogonal to one another.
 
 For example:
+
 
 ```mlir
   y_0, ..., y_n = while (x_0, ..., x_n)
@@ -744,6 +745,8 @@ Syntax:
   ::llvm::ArrayRef<int64_t>,   # factor_sizes
   ::llvm::ArrayRef<TensorMappingAttr>,   # operand_mappings
   ::llvm::ArrayRef<TensorMappingAttr>,   # result_mappings
+  ::llvm::ArrayRef<int64_t>,   # reduction_factors
+  ::llvm::ArrayRef<int64_t>,   # need_replication_factors
   bool   # is_custom_rule
 >
 ```
@@ -772,6 +775,11 @@ Note that we allow factors with size 1 even though they cannot be sharded,
 this is mainly for completeness as many ops such as pointwise ops have size
 one dimensions that correspond across operands and results.
 
+`reduction_factors` contains the indices of factors requiring reduction,
+such as the contracting dimensions in a dot operation.
+`need_replication_factors` contains the indices of factors requiring full
+replication, such as the sorted dimension in a sort operation.
+
 `is_custom_rule` describes whether this is a rule defined by a user for a
 `stablehlo.custom_call` op. The partitioner doesn't know how to partition
 these ops, so a user must tell it how. When it is a custom rule, then the
@@ -785,6 +793,8 @@ for `stablehlo.custom_call` ops.
 | factor_sizes | `::llvm::ArrayRef<int64_t>` |  |
 | operand_mappings | `::llvm::ArrayRef<TensorMappingAttr>` |  |
 | result_mappings | `::llvm::ArrayRef<TensorMappingAttr>` |  |
+| reduction_factors | `::llvm::ArrayRef<int64_t>` |  |
+| need_replication_factors | `::llvm::ArrayRef<int64_t>` |  |
 | is_custom_rule | `bool` |  |
 
 ### SubAxisInfoAttr

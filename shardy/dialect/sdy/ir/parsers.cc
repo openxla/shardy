@@ -289,6 +289,50 @@ ParseResult parseFactorSizes(AsmParser& parser,
   return success();
 }
 
+namespace {
+
+// Parses factor sizes. In a OpShardingRule, you could have `, type={k, i}`.
+// `k` is index 2, while `i` is index 0. Thus factors would be set to [2, 0].
+ParseResult parseFactorsWithType(AsmParser& parser,
+                                 SmallVector<int64_t>& factors,
+                                 StringRef type) {
+  auto parseElementFn = [&]() -> ParseResult {
+    StringRef factorSymbol;
+    if (parser.parseKeyword(&factorSymbol)) {
+      return failure();
+    }
+    FailureOr<int64_t> factorIndex =
+        parseFactorSymbolIndex(parser, factorSymbol);
+    if (failed(factorIndex)) {
+      return failure();
+    }
+    factors.push_back(*factorIndex);
+    return success();
+  };
+
+  if (!parser.parseOptionalKeyword(type)) {
+    if (parser.parseEqual()) {
+      return failure();
+    }
+    return parser.parseCommaSeparatedList(AsmParser::Delimiter::OptionalBraces,
+                                          parseElementFn);
+  }
+  return success();
+}
+
+}  // namespace
+
+ParseResult parseReductionFactors(AsmParser& parser,
+                                  SmallVector<int64_t>& reductionFactors) {
+  return parseFactorsWithType(parser, reductionFactors, "reduction");
+}
+
+ParseResult parseNeedReplicationFactors(
+    AsmParser& parser, SmallVector<int64_t>& needReplicationFactors) {
+  return parseFactorsWithType(parser, needReplicationFactors,
+                              "need_replication");
+}
+
 ParseResult parseIsCustomRule(AsmParser& parser, bool& isCustomRule) {
   isCustomRule = false;
   if (!parser.parseOptionalComma()) {

@@ -17,7 +17,6 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <optional>
-#include <utility>
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -260,7 +259,66 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
                                factorAxes.axes.getShardingSize(mesh));
 }
 
-SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
+// A container for FactorAxesCandidates where the order of iteration does not
+// matter, and provides methods to insert and remove candidates in constant-time
+// while maintaining the best through explicit calls on its touchAt method.
+class FactorAxesCandidateBag {
+ public:
+  FactorAxesCandidateBag(MeshAttr mesh) : mesh(mesh) {}
+
+  // Returns whether the bag is empty.
+  bool empty() const { return candidates.empty(); }
+
+  // Inserts a new candidate to the bag. Performs in constant-time.
+  void insert(const FactorAxesCandidate& candidate) {
+    candidates.push_back(candidate);
+    bestCandidate = std::max(bestCandidate, candidate);
+  }
+
+  // Updates the sharding size of the one at index as the  product of the
+  // sharding sizes of all individual axes excluding the `prefix`, also update
+  // the best.
+  //
+  // Assumes `prefix` is a prefix of the axes of the candidate at index.
+  void updateShardingSizeAt(const int64_t index,
+                            const AxisListRef& prefix = AxisListRef()) {
+    FactorAxesCandidate& candidate = candidates[index];
+    candidate.shardingSize =
+        candidate.factorAxes.axes.getExpandedShardingSize(mesh, prefix);
+    bestCandidate = std::max(bestCandidate, candidate);
+  }
+
+  // Resets best. Performs in constant-time.
+  void resetBest() { bestCandidate = FactorAxesCandidate(); }
+
+  // Removes candidate at index. Performs in constant-time. After the
+  // operation, the candidates before the index keep being before the index, and
+  // the candidates after the index (except the removed one) keep being after
+  // the index. Assumes that the index is within the bounds and the removed one
+  // is not the best one.
+  //
+  // Since the order of iteration does not matter, it simply swaps the candidate
+  // at index with the last one, hence in the constant time.
+  void removeAt(const int64_t index) {
+    candidates[index] = candidates.back();
+    candidates.pop_back();
+  }
+
+  // Returns the best. Performs in constant-time.
+  FactorAxesCandidate best() const { return bestCandidate; }
+  // Returns the candidate at index. Performs in constant-time.
+  FactorAxesCandidate& at(const int64_t index) { return candidates[index]; }
+  // Returns the number of candidates in the bag.
+  int64_t size() const { return candidates.size(); }
+
+ private:
+  SmallVector<FactorAxesCandidate> candidates;
+  FactorAxesCandidate bestCandidate;
+  // Used for recalculating sharding size of a candidate.
+  MeshAttr mesh;
+};
+
+FactorAxesCandidateBag findFactorAxesCandidates(
     const ShardingProjection& projection, int64_t numFactors,
     ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   // Find sets of candidate axes per factor.
@@ -306,9 +364,9 @@ SmallVector<FactorAxesCandidate> findFactorAxesCandidates(
     }
   }
 
-  SmallVector<FactorAxesCandidate> factorAxesCandidates;
+  FactorAxesCandidateBag factorAxesCandidates(mesh);
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
-    factorAxesCandidates.push_back(candidate);
+    factorAxesCandidates.insert(candidate);
   }
   return factorAxesCandidates;
 }
@@ -323,22 +381,19 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, int64_t numFactors,
     ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
   SmallVector<AxisListRef> factorAxisRefs(numFactors);
-  SmallVector<FactorAxesCandidate> factorAxesCandidates =
+  FactorAxesCandidateBag factorAxesCandidates =
       findFactorAxesCandidates(projection, numFactors, tensorSizes, mesh);
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
-  // The first iteration is to find the initial best.
-  FactorAxesPair bestFactorAxes;
   while (!factorAxesCandidates.empty()) {
-    if (!bestFactorAxes.empty()) {
-      factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
-    }
+    FactorAxesPair bestFactorAxes = factorAxesCandidates.best().factorAxes;
+    factorAxesCandidates.resetBest();
+    factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
-    FactorAxesCandidate nextBestFactorAxes;
     int64_t candidateIndex = 0;
     while (candidateIndex < factorAxesCandidates.size()) {
-      FactorAxesCandidate& candidate = factorAxesCandidates[candidateIndex];
+      FactorAxesCandidate& candidate = factorAxesCandidates.at(candidateIndex);
       // TODO(enver): Relax the overlap check. We need to erase in case of an
       // overlap only if the factor indices appear together in any of the
       // operands or results.
@@ -349,8 +404,7 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
         // Drops when the iterated axes is the same as the best one, as a
         // result the best factor-axis pair removed from the map.
         if (!bestFactorAxes.axes.strictPrefixOf(candidate.factorAxes.axes)) {
-          factorAxesCandidates[candidateIndex] = factorAxesCandidates.back();
-          factorAxesCandidates.pop_back();
+          factorAxesCandidates.removeAt(candidateIndex);
         } else {
           // At each iteration, we pick a factor-axes pair that expands
           // on the existing assignment on `factorAxisRefs`. In order to
@@ -361,12 +415,8 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
           // factor-axes pair, as we remove all factor-axes pair who can
           // not expand from the picked axes for the picked factor from
           // map at each iteration.
-          candidate.shardingSize =
-              candidate.factorAxes.axes.getExpandedShardingSize(
-                  mesh,
-                  /*prefix=*/bestFactorAxes.axes);
-          nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
-          candidateIndex++;
+          factorAxesCandidates.updateShardingSizeAt(
+              candidateIndex++, /*prefix=*/bestFactorAxes.axes);
         }
         continue;
       }
@@ -384,24 +434,18 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
         //   the current assignment of candidate's factor).
         if (candidate.factorAxes.axes ==
             factorAxisRefs[candidate.factorAxes.factorIndex]) {
-          factorAxesCandidates[candidateIndex] = factorAxesCandidates.back();
-          factorAxesCandidates.pop_back();
+          factorAxesCandidates.removeAt(candidateIndex);
         } else {
           // Trim the axes to use the largest prefix that does not overlap
           // with the picked one.
-          candidate.shardingSize =
-              candidate.factorAxes.axes.getExpandedShardingSize(
-                  mesh,
-                  /*prefix=*/factorAxisRefs[candidate.factorAxes.factorIndex]);
-          nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
-          candidateIndex++;
+          factorAxesCandidates.updateShardingSizeAt(
+              candidateIndex++,
+              /*prefix=*/factorAxisRefs[candidate.factorAxes.factorIndex]);
         }
         continue;
       }
-      nextBestFactorAxes = std::max(nextBestFactorAxes, candidate);
-      candidateIndex++;
+      factorAxesCandidates.updateShardingSizeAt(candidateIndex++);
     }
-    bestFactorAxes = nextBestFactorAxes.factorAxes;
   }
   return factorAxisRefs;
 }

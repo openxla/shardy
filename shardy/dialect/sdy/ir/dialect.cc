@@ -262,11 +262,15 @@ int64_t MeshAttr::getTotalSize() const {
 }
 
 bool MeshAttr::isMaximal(int64_t deviceId) const {
-  return getAxes().empty() && getDeviceIds() == ArrayRef<int64_t>(deviceId);
+  return isMaximal() && getMaximalDeviceId() == deviceId;
+}
+
+bool MeshAttr::isMaximal() const {
+  return getAxes().empty() && getDeviceIds().size() == 1;
 }
 
 std::optional<int64_t> MeshAttr::getMaximalDeviceId() const {
-  if (getAxes().empty() && getDeviceIds().size() == 1) {
+  if (isMaximal()) {
     return getDeviceIds().front();
   }
   return std::nullopt;

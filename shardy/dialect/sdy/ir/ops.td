@@ -237,7 +237,7 @@ def Sdy_ConstantOp : Sdy_Op<"constant",
   );
 
   let results = (outs
-    AnyTensor:$output
+    AnyStaticShapeTensor:$output
   );
 
   let hasCustomAssemblyFormat = 1;
@@ -267,6 +267,7 @@ def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
     An op can have multiple data flow edges that are orthogonal to one another.
 
     For example:
+
 
     ```mlir
       y_0, ..., y_n = while (x_0, ..., x_n)

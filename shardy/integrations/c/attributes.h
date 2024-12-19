@@ -200,6 +200,8 @@ MLIR_CAPI_EXPORTED MlirAttribute sdyOpShardingRuleAttrGet(
     MlirContext ctx, intptr_t nFactorSizes, const int64_t* factorSizes,
     intptr_t nOperandMappings, const MlirAttribute* operandMappings,
     intptr_t nResultMappings, const MlirAttribute* resultMappings,
+    intptr_t nReductionFactors, const int64_t* reductionFactors,
+    intptr_t nNeedReplicationFactors, const int64_t* needReplicationFactors,
     bool isCustomRule);
 
 MLIR_CAPI_EXPORTED bool sdyOpShardingRuleAttrGetIsCustom(MlirAttribute attr);
@@ -221,6 +223,18 @@ sdyOpShardingRuleAttrGetResultMappingsSize(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute
 sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr, intptr_t pos);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyOpShardingRuleAttrGetReductionFactorsSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t
+sdyOpShardingRuleAttrGetReductionFactorsElem(MlirAttribute attr, intptr_t pos);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyOpShardingRuleAttrGetNeedReplicationFactorsSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED int64_t sdyOpShardingRuleAttrGetNeedReplicationFactorsElem(
+    MlirAttribute attr, intptr_t pos);
 
 //===----------------------------------------------------------------------===//
 // ManualAxesAttr

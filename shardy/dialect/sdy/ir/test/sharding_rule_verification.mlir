@@ -109,3 +109,35 @@ func.func @duplicate_factor_different_dim(%arg0: tensor<2x2xf32>) -> tensor<4xf3
   %0 = stablehlo.reshape %arg0 {sdy.sharding_rule = #sdy.op_sharding_rule<([i, i])->([ij]) {i=2, j=2}>} : (tensor<2x2xf32>) -> tensor<4xf32>
   return %0 : tensor<4xf32>
 }
+
+// -----
+
+func.func @unsorted_special_factors(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
+  // expected-error@+1 {{indices of special factors must be sorted}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} need_replication={k, i}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
+  func.return %0: tensor<2x8xf32>
+}
+
+// -----
+
+func.func @repeated_special_factors(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
+  // expected-error@+1 {{indices of special factors must be unique}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} need_replication={i, i}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
+  func.return %0: tensor<2x8xf32>
+}
+
+// -----
+
+func.func @invalid_special_factor_index(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
+  // expected-error@+1 {{index must be less than 3, got: 17}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} need_replication={z}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
+  func.return %0: tensor<2x8xf32>
+}
+
+// -----
+
+func.func @invalid_special_factor_index(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
+  // expected-error@+1 {{reduction and need_replication factors must be disjoint}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} reduction={j} need_replication={j}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
+  func.return %0: tensor<2x8xf32>
+}
