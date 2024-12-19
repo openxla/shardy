@@ -76,7 +76,8 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
-      OptionalArrayRefParameter<"int64_t", "explicit device ordering or maximal device id">: $device_ids
+      OptionalArrayRefParameter<"int64_t",
+                                "explicit device ordering or maximal device id">:$device_ids
   );
 
   let assemblyFormat = [{
@@ -151,7 +152,8 @@ def Sdy_SubAxisInfo : AttrDef<Sdy_Dialect, "SubAxisInfo"> {
     denoted as follows: `(m)k` for pre-size m and size k.
   }];
   let parameters = (ins
-      AttrOrTypeParameter<"int64_t", "the product of axis sizes to the left of this sub-axis">:$pre_size,
+      AttrOrTypeParameter<"int64_t",
+                          "the product of sub-axis sizes to the left of this sub-axis">:$pre_size,
       AttrOrTypeParameter<"int64_t", "size of this sub-axis">:$size
   );
   let assemblyFormat = "`(` $pre_size `)` `` $size";
@@ -353,7 +355,8 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
   let parameters = (ins
     Sdy_AxisRefs:$axes,
     AttrOrTypeParameter<"bool", "if false, this dimension can be further sharded">:$is_closed,
-    OptionalParameter<"std::optional<int64_t>", "the priority used during user priority based propagation">:$priority
+    OptionalParameter<"std::optional<int64_t>",
+                      "the priority used during user priority based propagation">:$priority
   );
 
   let builders = [
