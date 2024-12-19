@@ -358,23 +358,24 @@ MlirAttribute sdyOpShardingRuleAttrGetResultMappingsElem(MlirAttribute attr,
       unwrapAttr<sdy::OpShardingRuleAttr>(attr).getResultMappings()[pos]);
 }
 
-int64_t sdyOpShardingRuleAttrGetReductionFactorsSize(MlirAttribute attr) {
+intptr_t sdyOpShardingRuleAttrGetReductionFactorsSize(MlirAttribute attr) {
   return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getReductionFactors().size();
 }
 
-intptr_t sdyOpShardingRuleAttrGetReductionFactorsElem(MlirAttribute attr,
-                                                      intptr_t pos) {
+int64_t sdyOpShardingRuleAttrGetReductionFactorsElem(MlirAttribute attr,
+                                                     intptr_t pos) {
   return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getReductionFactors()[pos];
 }
 
-int64_t sdyOpShardingRuleAttrGetNeedReplicationFactorsSize(MlirAttribute attr) {
+intptr_t sdyOpShardingRuleAttrGetNeedReplicationFactorsSize(
+    MlirAttribute attr) {
   return unwrapAttr<sdy::OpShardingRuleAttr>(attr)
       .getNeedReplicationFactors()
       .size();
 }
 
-intptr_t sdyOpShardingRuleAttrGetNeedReplicationFactorsElem(MlirAttribute attr,
-                                                            intptr_t pos) {
+int64_t sdyOpShardingRuleAttrGetNeedReplicationFactorsElem(MlirAttribute attr,
+                                                           intptr_t pos) {
   return unwrapAttr<sdy::OpShardingRuleAttr>(attr)
       .getNeedReplicationFactors()[pos];
 }
