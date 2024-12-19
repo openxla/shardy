@@ -190,15 +190,7 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let description = [{
     Constraints:
 
-    If `sub_axis_info` is present, it must satisfy the following for each sub-axis:
-    - Its `pre-size` is at least 1.
-    - Its `size` is greater than 1.
-    - Its next `pre-size` must divide the size of the full axis, i.e., both its
-      `pre-size` and `size` divide the size of the full axis, and the sub-axis
-      doesn't go beyond the full axis.
-    - The size of the sub-axis isn't equal to the size of the full axis, in which
-      case the full axis should be used instead.
-    - It doesn't overlap with any other sub-axis or the full axis.
+    If `sub_axis_info` is present, it must satisfy the constraints of `SubAxisInfoAttr`.
   }];
   let parameters = (ins
       StringRefParameter<"name">:$name,
@@ -375,7 +367,10 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
 
     Constraints:
 
-      Elements in `axes` must satisfy the constraints listed in `Sdy_AxisRefList`.
+      - Elements in `axes` must satisfy the constraints listed in `Sdy_AxisRefList`.
+      - If a dimension sharding has a priority:
+        - The priority is greater than or equal to 0.
+        - The dimension has at least one axis if it is closed.
   }];
 
   let parameters = (ins
@@ -465,10 +460,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
       - The number of dimension shardings is equal to the rank of the tensor.
       - Dimensions of size 0 aren't sharded.
       - Replicated axes are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
-      - All dimension shardings and the replicated axes are each a valid axis-ref list (see `Sdy_AxisRefList`).
-      - If a dimension sharding has a priority:
-        - The priority is greater than or equal to 0.
-        - The dimension has at least one axis if it is closed.
+      - All dimension shardings are valid (see `Sdy_DimensionSharding`).
   }];
   let parameters = (ins
       Sdy_MeshOrRef:$mesh_or_ref,
