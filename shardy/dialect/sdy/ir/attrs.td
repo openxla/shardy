@@ -177,7 +177,7 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let mnemonic = "axis_ref";
   let summary = "Reference to either a full axis or a split sub-axis";
   let parameters = (ins
-      StringRefParameter<"the name of the axis">:$name,
+      StringRefParameter<"the name of this axis">:$name,
       OptionalParameter<"SubAxisInfoAttr", "additional info if this is a sub axis">:$sub_axis_info
   );
   let assemblyFormat = "`` $name (`` `:` `` $sub_axis_info^)?";
@@ -751,7 +751,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       OptionalArrayRefParameter<"TensorMappingAttr", "result mappings">:$result_mappings,
       OptionalArrayRefParameter<"int64_t", "indices of factors requiring reduction">:$reduction_factors,
       OptionalArrayRefParameter<"int64_t", "indices of factors requiring full replication">:$need_replication_factors,
-      DefaultValuedParameter<"bool", "false", "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
+      DefaultValuedParameter<"bool", "false",
+                             "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
   );
 
   let assemblyFormat = [{
