@@ -143,12 +143,15 @@ def PopulateOpShardingRulesPass : Pass<"sdy-populate-op-sharding-rules", "func::
     Populates all registered ops with an `OpShardingRuleAttr`, which is used for
     debugging/testing the registered sharding rules. Propagation already does
     this just-in-time, but this pass does it all at once.
-
-    **Options:**
-    - `-conservative-propagation`: whether to disallow split axes and non-divisible
-       sharding axes during propagation.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
-  // TODO(b/347180954): remove conservative propagation once the cost model
-  // supports split axes and padding.
+
+  let options = [
+    // TODO(b/347180954): remove conservative propagation once the cost model
+    // supports split axes and padding.
+    Option<"conservativePropagation", "conservative-propagation", "bool",
+           /*default=*/"false",
+           "whether to disllow rules that can propagate non-divisible sharding "
+           "axes">
+  ];
 }
