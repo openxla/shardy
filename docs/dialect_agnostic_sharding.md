@@ -51,9 +51,10 @@ See also [Data flow ops](./propagation#data-flow-ops) for a high-level overview 
 
 ## Interfaces not yet implemented
 
-In the future, more interfaces and traits will be added to make Shardy more flexible and dialect-agnostic.
+In the future, more interfaces and traits will be added to make Shardy more flexible and dialect-agnostic. We list them
+below.
 
-## Constant splitting
+### Constant splitting
 
 Most tensor programs in MLIR have one instance of a constant that is reused by whatever op that needs that value. This
 makes sense when the constant needed is the same. However, for optimal sharding of a program, we would like to allow
@@ -75,7 +76,7 @@ To achieve this, Shardy users need to define:
 - A `sdy::ConstantFoldable` for ops like [slice](https://openxla.org/stablehlo/spec#slice)/[broadcast](https://openxla.org/stablehlo/spec#broadcast_in_dim). These ops can technically be calculated at compile time, if all
   their operands/results are constants.
 
-## Op priorities
+### Op priorities
 
 In GSPMD, element-wise ops are propagated first, followed by ops like `matmul`. In Shardy, we want to allow users to
 set their own op priorities since we don't know about their dialects _a priori_. As such, we will ask them to pass a
