@@ -709,7 +709,6 @@ TensorShardingAttr TensorShardingAttr::getFullyOpenLike(
 
 RankedTensorType TensorShardingAttr::getLocalTensorType(
     RankedTensorType globalTensorType, MeshAttr mesh) const {
-  assert(globalTensorType.hasStaticShape());
   if (getDimShardings().empty()) {
     return globalTensorType;
   }
@@ -718,10 +717,14 @@ RankedTensorType TensorShardingAttr::getLocalTensorType(
 
   for (auto [globalDimSize, dimSharding] :
        llvm::zip_equal(globalTensorType.getShape(), getDimShardings())) {
-    int64_t shardSize = dimSharding.getShardedSize(mesh);
-    // We allow non divisible sharding.
-    int64_t localSize = (globalDimSize + shardSize - 1) / shardSize;
-    localShape.push_back(localSize);
+    if (ShapedType::isDynamic(globalDimSize)) {
+      localShape.push_back(globalDimSize);
+    } else {
+      int64_t shardSize = dimSharding.getShardedSize(mesh);
+      // We allow non divisible sharding.
+      int64_t localSize = (globalDimSize + shardSize - 1) / shardSize;
+      localShape.push_back(localSize);
+    }
   }
   return RankedTensorType::get(ArrayRef<int64_t>(localShape),
                                globalTensorType.getElementType());
@@ -729,7 +732,6 @@ RankedTensorType TensorShardingAttr::getLocalTensorType(
 
 RankedTensorType TensorShardingAttr::getGlobalTensorType(
     RankedTensorType localTensorType, MeshAttr mesh) const {
-  assert(localTensorType.hasStaticShape());
   if (getDimShardings().empty()) {
     return localTensorType;
   }
@@ -738,7 +740,11 @@ RankedTensorType TensorShardingAttr::getGlobalTensorType(
 
   for (auto [localDimSize, dimSharding] :
        llvm::zip_equal(localTensorType.getShape(), getDimShardings())) {
-    globalShape.push_back(dimSharding.getShardedSize(mesh) * localDimSize);
+    if (ShapedType::isDynamic(localDimSize)) {
+      globalShape.push_back(localDimSize);
+    } else {
+      globalShape.push_back(dimSharding.getShardedSize(mesh) * localDimSize);
+    }
   }
   return RankedTensorType::get(ArrayRef<int64_t>(globalShape),
                                localTensorType.getElementType());
