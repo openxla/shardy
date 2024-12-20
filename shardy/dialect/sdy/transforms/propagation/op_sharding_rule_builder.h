@@ -111,6 +111,9 @@ class OpShardingRuleBuilder {
   // the factor, with its corresponding size stored in `factorSizes`.
   SmallVector<TensorMapping> operandMappings;
   SmallVector<TensorMapping> resultMappings;
+
+  SmallVector<int64_t> reductionFactors;
+  SmallVector<int64_t> needReplicationFactors;
 };
 
 // Creates an identity mapping for an op with `numOperands` operands and

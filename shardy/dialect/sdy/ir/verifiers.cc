@@ -17,6 +17,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <utility>
@@ -230,7 +231,15 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        bool checkDivisibility,
                                        ManualAxisToOwner alreadyManualAxes) {
   if (mesh.isMaximal()) {
-    // TODO(bartchr): add some checks after XLA change lands.
+    // A maximal sharding says that this op should be executed on a single
+    // device. Skip checking against the type of the op. Just make sure there
+    // are no dimension shardings and replicated axes.
+    if (!shardingAttr.getDimShardings().empty() ||
+        !shardingAttr.getReplicatedAxes().empty()) {
+      return emitError(
+          "a maximal sharding must have no dimension shardings and "
+          "no replicated axes.");
+    }
     return success();
   }
   auto tensorType = dyn_cast<ShapedType>(type);
@@ -542,6 +551,30 @@ LogicalResult verifyShardingRuleMapping(Operation* op, TypeRange types,
   return success();
 }
 
+LogicalResult verifyIndicesOfSpecialFactors(Operation* op, int64_t numFactors,
+                                            ArrayRef<int64_t> indices) {
+  if (indices.empty()) {
+    return success();
+  }
+
+  if (!llvm::is_sorted(indices)) {
+    return op->emitOpError("indices of special factors must be sorted");
+  }
+  if (std::adjacent_find(indices.begin(), indices.end()) != indices.end()) {
+    return op->emitOpError("indices of special factors must be unique");
+  }
+
+  if (indices.front() < 0) {
+    return op->emitOpError("index must be non-negative");
+  }
+  if (indices.back() >= numFactors) {
+    return op->emitOpError("index must be less than ")
+           << numFactors << ", got: " << indices.back();
+  }
+
+  return success();
+}
+
 // Verifies the following for an `OpShardingRuleAttr`:
 //
 // - If the rule is custom, the operation the rule is attached to is a
@@ -573,6 +606,29 @@ LogicalResult verifyOpShardingRuleAttr(OpShardingRuleAttr shardingRule,
     return op->emitOpError("has factor ")
            << factorSymbolString(unsetIndex) << "=" << factorSizes[unsetIndex]
            << " that isn't used in operand and result mappings";
+  }
+
+  ArrayRef<int64_t> reductionFactors = shardingRule.getReductionFactors();
+  ArrayRef<int64_t> needReplicationFactors =
+      shardingRule.getNeedReplicationFactors();
+
+  if (failed(verifyIndicesOfSpecialFactors(op, shardingRule.getNumFactors(),
+                                           reductionFactors))) {
+    return failure();
+  }
+  if (failed(verifyIndicesOfSpecialFactors(op, shardingRule.getNumFactors(),
+                                           needReplicationFactors))) {
+    return failure();
+  }
+
+  SmallVector<int64_t> intersection;
+  std::set_intersection(reductionFactors.begin(), reductionFactors.end(),
+                        needReplicationFactors.begin(),
+                        needReplicationFactors.end(),
+                        std::back_inserter(intersection));
+  if (!intersection.empty()) {
+    return op->emitOpError(
+        "reduction and need_replication factors must be disjoint");
   }
 
   return success();

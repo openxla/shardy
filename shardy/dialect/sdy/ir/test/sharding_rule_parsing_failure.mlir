@@ -181,3 +181,35 @@ func.func @no_results(%arg0: tensor<2x8xf32>) -> tensor<2x8xf32> {
   stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->() {i=2, j=8}, custom>} : (tensor<2x8xf32>) -> ()
   func.return %arg0 : tensor<2x8xf32>
 }
+
+// -----
+
+func.func @equality_sign_after_reduction(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32> {
+  // expected-error@+1 {{expected '='}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction: {j}>} : (tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32>
+  func.return %0: tensor<2x5x7xf32>
+}
+
+// -----
+
+func.func @reduce_is_an_unknown_keyword(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32> {
+  // expected-error@+1 {{expected '>'}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduce={j}>} : (tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32>
+  func.return %0: tensor<2x5x7xf32>
+}
+
+// -----
+
+func.func @reduction_should_be_before_need_replication(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32> {
+  // expected-error@+1 {{expected '>'}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} need_replication={i} reduction={j}>} : (tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32>
+  func.return %0: tensor<2x5x7xf32>
+}
+
+// -----
+
+func.func @invalid_dimension_symbol(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32> {
+  // expected-error@+1 {{expecting symbol from 'i' to 'z'. Received: 'a'}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction={a}>} : (tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32>
+  func.return %0: tensor<2x5x7xf32>
+}

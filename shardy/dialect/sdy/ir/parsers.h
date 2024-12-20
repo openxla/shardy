@@ -38,6 +38,16 @@ ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef);
 ParseResult parseFactorSizes(AsmParser& parser,
                              SmallVector<int64_t>& factorSizes);
 
+// Parses the reduction factors of an OpShardingRule. We expect to parse
+// `reduction={i, k}` into a vector [0, 2].
+ParseResult parseReductionFactors(AsmParser& parser,
+                                  SmallVector<int64_t>& reductionFactors);
+
+// Parses the factors needing replication of an OpShardingRule. We expect to
+// parse `need_replication={i, k}` into a vector [0, 2].
+ParseResult parseNeedReplicationFactors(
+    AsmParser& parser, SmallVector<int64_t>& needReplicationFactors);
+
 ParseResult parseIsCustomRule(AsmParser& parser, bool& isCustomRule);
 
 // Parses a single block region without the block id. This is an example of what
