@@ -570,7 +570,7 @@ Syntax:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| name | `::llvm::StringRef` | the name of this axis |
+| name | `::llvm::StringRef` | name of this axis |
 | sub_axis_info | `SubAxisInfoAttr` | additional info if this is a sub axis |
 
 ### AxisRefListAttr
@@ -623,7 +623,7 @@ highest priority is assumed when the priority is missing in the annotation.
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
 | axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
-| is_closed | `bool` | if false, this dimension can be further sharded |
+| is_closed | `bool` | whether this dimension can't be further sharded |
 | priority | `std::optional<int64_t>` | the priority used during user priority based propagation |
 
 ### ListOfAxisRefListsAttr
@@ -793,8 +793,8 @@ for `stablehlo.custom_call` ops.
 | factor_sizes | `::llvm::ArrayRef<int64_t>` | sizes of all factors in this rule |
 | operand_mappings | `::llvm::ArrayRef<TensorMappingAttr>` | operand mappings |
 | result_mappings | `::llvm::ArrayRef<TensorMappingAttr>` | result mappings |
-| reduction_factors | `::llvm::ArrayRef<int64_t>` | indices of factors requiring reduction |
-| need_replication_factors | `::llvm::ArrayRef<int64_t>` | indices of factors requiring full replication |
+| reduction_factors | `::llvm::ArrayRef<int64_t>` | factors requiring reduction |
+| need_replication_factors | `::llvm::ArrayRef<int64_t>` | factors requiring full replication |
 | is_custom_rule | `bool` | whether the rule is for a stablehlo.custom_call |
 
 ### SubAxisInfoAttr
@@ -820,7 +820,7 @@ denoted as follows: `(m)k` for pre-size m and size k.
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| pre_size | `int64_t` | the product of sub-axis sizes to the left of this sub-axis |
+| pre_size | `int64_t` | product of sub-axis sizes to the left of this sub-axis |
 | size | `int64_t` | size of this sub-axis |
 
 ### TensorMappingAttr
@@ -892,7 +892,7 @@ Syntax:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| shardings | `::llvm::ArrayRef<TensorShardingAttr>` | shardings per value |
+| shardings | `::llvm::ArrayRef<TensorShardingAttr>` | sharding per value |
 
 ## Enums
 
