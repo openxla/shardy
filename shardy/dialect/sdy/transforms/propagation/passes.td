@@ -22,20 +22,19 @@ def BasicPropagationPass : PassBase<"sdy-basic-propagate", "BasicPropagationPass
     hierarchy, that doesn't do any conflict resolution, and instead propagates
     axes that are compatible between all operands and results.
 
-    Options:
-      * `-keep-sharding-rules` : whether to keep existing and created op
-        sharding rules
-      * `-module-dump-directory` : where to dump any rewritten modules for
-        debugging
-      * `-conservative-propagation` : whether to disallow split axes and
-        non-divisible sharding axes during propagation
-      * `-debug-sharding-origins` : whether to save information about the origin
-        of a sharding on the MLIR module. These would be the shardings on the
-        function inputs, outputs, sharding constraints and manual computations
-        before propagation.
-      * `-debug-edge-source-sharding` : whether to save information about the
-        edge source of a sharding on the MLIR module. These are what
-        operand/result introduced a sharding on some op result.
+    **Options:**
+    - `-keep-sharding-rules`: whether to keep existing and created op sharding
+      rules.
+    - `-module-dump-directory`: where to dump any rewritten modules for debugging.
+    - `-conservative-propagation`: whether to disallow split axes and non-divisible
+       sharding axes during propagation.
+    - `-debug-sharding-origins`: whether to save information about the origin of a
+       sharding on the MLIR module. These would be the shardings on the function
+       inputs, outputs, sharding constraints and manual computations before
+       propagation.
+    - `-debug-edge-source-sharding`: whether to save information about the edge source
+       of a sharding on the MLIR module. These are what operand/result introduced a
+       sharding on some op result.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -48,9 +47,20 @@ def AggressivePropagationPass : PassBase<"sdy-aggressive-propagate", "Aggressive
     aggressive strategy resolves conflicts. Higher aggressiveness can reduce the
     memory footprint at the cost of potential communication.
 
-    Options:
-      * All options from `BasicPropagationPass`
-      * `-propagation-strategy` : which factor propagation strategy to use
+    **Options:**
+    - `-keep-sharding-rules`: whether to keep existing and created op sharding
+       rules.
+    - `-module-dump-directory`: where to dump any rewritten modules for debugging.
+    - `-conservative-propagation`: whether to disallow split axes and non-divisible
+       sharding axes during propagation.
+    - `-debug-sharding-origins`: whether to save information about the origin of a
+       sharding on the MLIR module. These would be the shardings on the function
+       inputs, outputs, sharding constraints and manual computations before
+       propagation.
+    - `-debug-edge-source-sharding`: whether to save information about the edge source
+       of a sharding on the MLIR module. These are what operand/result introduced a
+       sharding on some op result.
+    - `-propagation-strategy`: which factor propagation strategy to use.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -75,10 +85,22 @@ def OpPriorityPropagationPass : PassBase<"sdy-op-priority-propagate", "OpPriorit
     means that at each op-priority iteration, a full aggressive propagation is
     applied (see `AggressivePropagationPass`).
 
-    Options:
-      * All options from `AggressivePropagationPass`
-      * `-run-op-priority-propagation` : whether to run (or skip) op-priority
-        propagation
+    **Options:**
+    - `-keep-sharding-rules`: whether to keep existing and created op sharding
+       rules.
+    - `-module-dump-directory`: where to dump any rewritten modules for debugging.
+    - `-conservative-propagation`: whether to disallow split axes and non-divisible
+       sharding axes during propagation.
+    - `-debug-sharding-origins`: whether to save information about the origin of a
+       sharding on the MLIR module. These would be the shardings on the function
+       inputs, outputs, sharding constraints and manual computations before
+       propagation.
+    - `-debug-edge-source-sharding`: whether to save information about the edge source
+       of a sharding on the MLIR module. These are what operand/result introduced a
+       sharding on some op result.
+    - `-propagation-strategy`: which factor propagation strategy to use.
+    - `-run-op-priority-propagation`: whether to run (or skip) op-priority
+       propagation.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
@@ -95,8 +117,22 @@ def UserPriorityPropagationPass : PassBase<"sdy-user-priority-propagate", "UserP
     which means that at each user-priority iteration, a full op-priority
     propagation is applied (see `OpPriorityPropagationPass`).
 
-    Options:
-      * All options from `OpPriorityPropagationPass`
+    **Options:**
+    - `-keep-sharding-rules`: whether to keep existing and created op sharding
+       rules.
+    - `-module-dump-directory`: where to dump any rewritten modules for debugging.
+    - `-conservative-propagation`: whether to disallow split axes and non-divisible
+       sharding axes during propagation.
+    - `-debug-sharding-origins`: whether to save information about the origin of a
+       sharding on the MLIR module. These would be the shardings on the function
+       inputs, outputs, sharding constraints and manual computations before
+       propagation.
+    - `-debug-edge-source-sharding`: whether to save information about the edge source
+       of a sharding on the MLIR module. These are what operand/result introduced a
+       sharding on some op result.
+    - `-propagation-strategy`: which factor propagation strategy to use.
+    - `-run-op-priority-propagation`: whether to run (or skip) op-priority
+       propagation.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
