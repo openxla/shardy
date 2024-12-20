@@ -77,7 +77,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
       OptionalArrayRefParameter<"int64_t",
-                                "explicit device ordering or maximal device id">:$device_ids
+          "explicit device ordering or maximal device id">:$device_ids
   );
 
   let assemblyFormat = [{
@@ -153,7 +153,7 @@ def Sdy_SubAxisInfo : AttrDef<Sdy_Dialect, "SubAxisInfo"> {
   }];
   let parameters = (ins
       AttrOrTypeParameter<"int64_t",
-                          "the product of sub-axis sizes to the left of this sub-axis">:$pre_size,
+          "product of sub-axis sizes to the left of this sub-axis">:$pre_size,
       AttrOrTypeParameter<"int64_t", "size of this sub-axis">:$size
   );
   let assemblyFormat = "`(` $pre_size `)` `` $size";
@@ -179,8 +179,9 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let mnemonic = "axis_ref";
   let summary = "Reference to either a full axis or a split sub-axis";
   let parameters = (ins
-      StringRefParameter<"the name of this axis">:$name,
-      OptionalParameter<"SubAxisInfoAttr", "additional info if this is a sub axis">:$sub_axis_info
+      StringRefParameter<"name of this axis">:$name,
+      OptionalParameter<"SubAxisInfoAttr",
+          "additional info if this is a sub axis">:$sub_axis_info
   );
   let assemblyFormat = "`` $name (`` `:` `` $sub_axis_info^)?";
 
@@ -354,9 +355,10 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
 
   let parameters = (ins
     Sdy_AxisRefs:$axes,
-    AttrOrTypeParameter<"bool", "if false, this dimension can be further sharded">:$is_closed,
+    AttrOrTypeParameter<"bool",
+        "whether this dimension can't be further sharded">:$is_closed,
     OptionalParameter<"std::optional<int64_t>",
-                      "the priority used during user priority based propagation">:$priority
+        "the priority used during user priority based propagation">:$priority
   );
 
   let builders = [
@@ -434,7 +436,8 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
   }];
   let parameters = (ins
       Sdy_MeshOrRef:$mesh_or_ref,
-      OptionalArrayRefParameter<"DimensionShardingAttr", "dimension shardings">:$dim_shardings,
+      OptionalArrayRefParameter<"DimensionShardingAttr",
+          "dimension shardings">:$dim_shardings,
       Sdy_AxisRefs:$replicated_axes
   );
   let assemblyFormat = [{
@@ -630,7 +633,8 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
   let mnemonic = "sharding_per_value";
   let summary = "Tensor sharding per operand/result of an op";
   let parameters = (ins
-      OptionalArrayRefParameter<"TensorShardingAttr", "shardings per value">:$shardings
+      OptionalArrayRefParameter<"TensorShardingAttr",
+          "sharding per value">:$shardings
   );
   let assemblyFormat = "`<` `[` (`]`):($shardings^ `]`)? `>`";
 
@@ -680,7 +684,8 @@ def Sdy_DimMapping : AttrDef<Sdy_Dialect, "DimMapping"> {
     i.e. the dimension isn't mapped to any factors.
    }];
   let parameters = (ins
-    OptionalArrayRefParameter<"int64_t", "factors this dimension is mapped to">:$factor_indices
+    OptionalArrayRefParameter<"int64_t",
+        "factors this dimension is mapped to">:$factor_indices
   );
 
   let hasCustomAssemblyFormat = 1;
@@ -698,7 +703,8 @@ def Sdy_TensorMapping : AttrDef<Sdy_Dialect, "TensorMapping"> {
   let mnemonic = "tensor_mapping";
   let summary = "Factor mappings for each dimension of a tensor.";
   let parameters = (ins
-      OptionalArrayRefParameter<"DimMappingAttr", "dimension mappings">:$dim_mappings
+      OptionalArrayRefParameter<"DimMappingAttr",
+          "dimension mappings">:$dim_mappings
   );
 
   let assemblyFormat = "`` `[` (`]`):($dim_mappings^ `]`)? ``";
@@ -749,13 +755,18 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
   }];
 
   let parameters = (ins
-      OptionalArrayRefParameter<"int64_t", "sizes of all factors in this rule">:$factor_sizes,
-      OptionalArrayRefParameter<"TensorMappingAttr", "operand mappings">:$operand_mappings,
-      OptionalArrayRefParameter<"TensorMappingAttr", "result mappings">:$result_mappings,
-      OptionalArrayRefParameter<"int64_t", "indices of factors requiring reduction">:$reduction_factors,
-      OptionalArrayRefParameter<"int64_t", "indices of factors requiring full replication">:$need_replication_factors,
+      OptionalArrayRefParameter<"int64_t",
+          "sizes of all factors in this rule">:$factor_sizes,
+      OptionalArrayRefParameter<"TensorMappingAttr",
+          "operand mappings">:$operand_mappings,
+      OptionalArrayRefParameter<"TensorMappingAttr",
+          "result mappings">:$result_mappings,
+      OptionalArrayRefParameter<"int64_t",
+          "factors requiring reduction">:$reduction_factors,
+      OptionalArrayRefParameter<"int64_t",
+          "factors requiring full replication">:$need_replication_factors,
       DefaultValuedParameter<"bool", "false",
-                             "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
+          "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
   );
 
   let assemblyFormat = [{
