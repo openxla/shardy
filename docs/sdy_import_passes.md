@@ -9,8 +9,6 @@ the module.
 
 The inserted `DataFlowEdgeOp` will take the existing sharding of the owner
 target if it exists.
-
-TODO(b/330339693): update this doc when `getDataFlowEdgeOwners` is removed.
 ### `-sdy-apply-sharding-constraints`
 
 _Applies constraints that dictate the sharding of their input._
@@ -25,8 +23,8 @@ all of the following:
 * The input doesn't have any other users of type `ShardingConstraintOp` or
   `ManualComputationOp` with a different sharding.
 
-Which indicates that the `ShardingConstraintOp` dictates the sharding of
-its input.
+These conditions indicate that the `ShardingConstraintOp` dictates the
+sharding of its input.
 
 Note that the sharding of a `ShardingConstraintOp` will propagate to its
 input or users during propagation regardless of this pass, but since the
@@ -37,12 +35,12 @@ In addition, if a tensor is used by a chain of `ShardingConstraintOp`s that
 satisfy all of the following:
 
 * The tensor isn't produced by a `ShardingConstraintOp` and doesn't have any
-  other users of type `ShardingConstraintOp` or `ManualComputationOp`.
+  other users of type `ShardingConstraintOp` or `ManualComputationOp`;
 * None of the `ShardingConstraintOp`s in the chain have more than one use
-  except the last one.
+  except the last one;
 * The last `ShardingConstraintOp` in the chain doesn't have any users of
   type `ShardingConstraintOp` or `ManualComputationOp` (otherwise it's not
-  the last in the chain).
+  the last in the chain);
 
 then this pass replaces all other uses of the input of the chain, that are
 defined after the last `ShardingConstraintOp` in the chain (and within the
@@ -74,7 +72,7 @@ A constant sub-computation is either:
 Note that within a constant sub-computation, a value can have multiple uses
 within that sub-computation.
 
-NOTE: This pass is the MLIR equivalent of xla::HloConstantSplitter,
+NOTE: This pass is the MLIR equivalent of `xla::HloConstantSplitter`,
 needed for the purpose of Shardy Propagation.
 ### `-sdy-lift-inlined-meshes`
 
@@ -82,22 +80,22 @@ _Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s._
 
 Replaces any inlined `MeshAttr` in a `TensorShardingAttr` with a mesh symbol
 name, referencing either an existing or new `MeshOp` in the module, such
-that no two `MeshOp`s with an identical `MeshAttr` (existing `MeshOp`s are
+that no two `MeshOp`s have an identical `MeshAttr` (existing `MeshOp`s are
 deduped as well).
 
 The name of each new `MeshOp` will either be:
 
 * `maximal_mesh_{device-id}`, for a maximal mesh (i.e., empty axis list and
-  a single device ID).
-* The first available name in [`mesh`, `mesh_0`, `mesh_1`, ...], otherwise.
+  a single device ID), or
+* The first available name in [`mesh`, `mesh_0`, `mesh_1`, ...].
 ### `-sdy-manual-axes-cleanup`
 
 _Cleans up the use of manual axes in `ManualComputationOp`s_
 
-1) For any in/out sharding that hasn't specified a manual axis, add that
+1. For any in/out sharding that hasn't specified a manual axis, add that
    manual axis to its replicated_axes. This is to ensure manual axes are
    always fully specified.
-2) Sorts the manual axes in mesh axis declaration order.
+2. Sorts the manual axes in mesh axis declaration order.
 ### `-sdy-sharding-group-import`
 
 _Canonicalization and validation pass for sharding groups._
@@ -105,7 +103,8 @@ _Canonicalization and validation pass for sharding groups._
 Applies canonicalization and validation to sharding groups upon import.
 Namely these are:
 
-1) Sharding Group Unification -
+1. Sharding Group Unification
+
    Combines sharding groups using the transitive property of group
    membership. Any time that a tensor T is in a sharding group G1 *and*
    sharding group G2, then we can infer that all members in G1 and G2 should
@@ -113,7 +112,8 @@ Namely these are:
    group. The set of canonical group ids after merging will be 0,1,...N-1
    for the minimum set of groups.
 
-2) Sharding Group Validation
+2. Sharding Group Validation
+
    Validates that sharding groups are well formed and conform to assumptions
    within the implementation. This currently asserts that if a sharding
    group contains a `Value` defined inside the block of a

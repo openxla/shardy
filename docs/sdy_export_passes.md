@@ -20,7 +20,7 @@ such as all-reduce or halo-swaps).
 
 After propagation, some operations may still have incompatible shardings.
 
-Please note, when an axis (or sub-axis) is used to shard non-corresponding
+Note that when an axis (or sub-axis) is used to shard non-corresponding
 dimensions (e.g. non-contracting dimensions in matmul) across multiple
 tensors, or when an axis shards a dimension in one tensor but not the
 corresponding dimension in the other tensor, it is said that the operation
@@ -32,7 +32,7 @@ corresponding dimensions become sharded in the same way across all operands
 and results, and every axis (or sub-axis) can only be used to shard a single
 dimension type.
 
-A clarifying example:
+Example:
 
 Input:
 ```mlir
@@ -55,7 +55,7 @@ stablehlo.dot %lhs, %0 {sdy.sharding_per_value=<[<@mesh, \[{"x"}, {}\]>]>}
 
 In the example above, there is a conflict since `lhs` and `rhs` tensors
 are both sharded on axis "x" on their non-contracting dimensions. Here,
-`rhs` tensor is resharded, before the dot operation, explicitly to be
+`rhs` tensor is resharded before the dot operation explicitly, to be
 sharded only on its first dimension and on axis "x". This way, the dot
 operation becomes compatible.
 ### `-sdy-remove-sharding-groups`
@@ -67,32 +67,32 @@ _Removes ShardingGroupOps after propagation._
 
 _Converts ReshardOp into various Shardy collective ops._
 
-Here we match reshard ops and rewrite them into various Shardy collective
- ops. After this pass, no reshard ops remain in the module. This pass assumes
- that xplicit reshards have already been inserted
- (`sdy-insert-explicit-reshards`).
+Matches reshard ops and rewrites them into various Shardy collective
+ops. After this pass, no reshard ops remain in the module. This pass assumes
+that explicit reshards have already been inserted
+(`sdy-insert-explicit-reshards`).
 
- A clarifying example:
+Example:
 
- Input:
- ```mlir
- mesh = <"x"=2, "y"=2, "z"=2>
- %0 : tensor<16x2xf32> {sdy.sharding<@mesh, \[{"x", "y", "z"}, {}\]>
- %1 = sdy.reshard %arg0 <@mesh, \[{"x"}, {}\]> : tensor<16x2xf32>
- ```
+Input:
+```mlir
+mesh = <"x"=2, "y"=2, "z"=2>
+%0 : tensor<16x2xf32> {sdy.sharding<@mesh, \[{"x", "y", "z"}, {}\]>
+%1 = sdy.reshard %arg0 <@mesh, \[{"x"}, {}\]> : tensor<16x2xf32>
+```
 
- Output:
- ```mlir
- mesh = <"x"=2, "y"=2, "z"=2>
- %0 : tensor<16x2xf32> {sdy.sharding<@mesh, \[{"x", "y", "z"}, {}\]>
- %1 = sdy.all_gather  \[{"y", "z"}, {}\] %arg0 out_sharding=<@mesh, \[{"x"}, {}\]> : tensor<16x2xf32>
- ```
+Output:
+```mlir
+mesh = <"x"=2, "y"=2, "z"=2>
+%0 : tensor<16x2xf32> {sdy.sharding<@mesh, \[{"x", "y", "z"}, {}\]>
+%1 = sdy.all_gather  \[{"y", "z"}, {}\] %arg0 out_sharding=<@mesh, \[{"x"}, {}\]> : tensor<16x2xf32>
+```
 
- In the example above, the tensor `%0 : tensor<16x2xf32>` is sharded as
- `\[{"x", "y", "z"}, {}\]`. Then, there's a `reshard` op resharding it as
- `\[{"x"}, {}\]`. On the first axes, since the suffix `{"y", "z"}` is removed
- after the reshard, we infer that we have all-gathered `{"y", "z"}`. The
- second dimension is not changed.
+In the example above, the tensor `%0 : tensor<16x2xf32>` is sharded as
+`\[{"x", "y", "z"}, {}\]`. Then, there's a `reshard` op resharding it as
+`\[{"x"}, {}\]`. On the first axes, since the suffix `{"y", "z"}` is removed
+after the reshard, we infer that we have all-gathered `{"y", "z"}`. The
+second dimension is not changed.
 
 ### `-sdy-sharding-constraint-to-reshard`
 
@@ -105,9 +105,6 @@ _Sinks all `DataFlowEdgeOp` into their input._
 
 Moves the sharding of each `DataFlowEdgeOp` to its input (the root target of
 the edge), and replaces the op with its input.
-
-TODO(tomnatan): consider moving the sharding to all targets that can have a
-sharding attached.
 ### `-sdy-update-non-divisible-input-output-shardings`
 
 _Makes FuncOp inputs/outputs evenly sharded, removing any need for padding due to non-divisible shardings._
