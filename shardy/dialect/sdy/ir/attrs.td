@@ -66,13 +66,13 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
 
   Here are some examples of meshes:
 
-    - An empty mesh represents a placeholder mesh that can be replaced during
-      propagation: <[]>
-    - A mesh with an unnamed axis and an explicit device ID, which is typically
-      used to represent maximal sharding: <[], device_ids=[3]>
-    - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
-    - A mesh with two axes and explicit device IDs specifying the device
-      ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
+  - An empty mesh represents a placeholder mesh that can be replaced during
+    propagation: <[]>
+  - A mesh with an unnamed axis and an explicit device ID, which is typically
+    used to represent maximal sharding: <[], device_ids=[3]>
+  - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
+  - A mesh with two axes and explicit device IDs specifying the device
+    ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
@@ -151,17 +151,15 @@ def Sdy_SubAxisInfo : AttrDef<Sdy_Dialect, "SubAxisInfo"> {
     k_i. Therefore, the sub-axis-info attribute holds those two numbers and is
     denoted as follows: `(m)k` for pre-size m and size k.
 
-    Constraints:
-
-    For each sub-axis:
-    - Its `pre-size` is at least 1.
-    - Its `size` is greater than 1.
-    - Its next `pre-size` must divide the size of the full axis, i.e., both its
-      `pre-size` and `size` divide the size of the full axis, and the sub-axis
-      doesn't go beyond the full axis.
-    - The size of the sub-axis isn't equal to the size of the full axis, in which
-      case the full axis should be used instead.
-    - It doesn't overlap with any other sub-axis or the full axis.
+    **Constraints:**
+    - `pre-size` is at least 1.
+    - `size` is greater than 1.
+    - `pre-size` must divide the size of the full axis, i.e., both `pre-size`
+      and `size` divide the size of the full axis, and the sub-axis doesn't go
+      beyond the full axis.
+    - The size of the sub-axis isn't equal to the size of the full axis, in
+      which case the full axis should be used instead.
+    - This sub-axis doesn't overlap with any other sub-axis or the full axis.
   }];
   let parameters = (ins
       AttrOrTypeParameter<"int64_t",
@@ -191,9 +189,8 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let mnemonic = "axis_ref";
   let summary = "Reference to either a full axis or a split sub-axis";
   let description = [{
-    Constraints:
-
-    If `sub_axis_info` is present, it must satisfy the constraints of `SubAxisInfoAttr`.
+    **Constraints:**
+    - If `sub_axis_info` is present, it must satisfy the constraints of `SubAxisInfoAttr`.
   }];
   let parameters = (ins
       StringRefParameter<"the name of this axis">:$name,
@@ -368,12 +365,11 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
     sharding annotations and a lower value denotes a higher priority. The
     highest priority is assumed when the priority is missing in the annotation.
 
-    Constraints:
-
-      - Elements in `axes` must satisfy the constraints listed in `Sdy_AxisRefList`.
-      - If a dimension sharding has a priority:
-        - The priority is greater than or equal to 0.
-        - The dimension has at least one axis if it is closed.
+    **Constraints:**
+    - Elements in `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - If a dimension sharding has a priority:
+      * The priority is greater than or equal to 0.
+      * The dimension has at least one axis if it is closed.
   }];
 
   let parameters = (ins
@@ -456,15 +452,14 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     The mesh this sharding is bound to can either be specified by a symbol
     name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 
-    Constraints:
-
-      - Elements in `replicated_axes` must satisfy the constraints listed in `Sdy_AxisRefList`.
-      - If `type` isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
-      - The tensor should have a rank.
-      - The number of dimension shardings is equal to the rank of the tensor.
-      - Dimensions of size 0 aren't sharded.
-      - Replicated axes are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
-      - All dimension shardings are valid (see `Sdy_DimensionSharding`).
+    **Constraints:**
+    - Elements in `replicated_axes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - If `type` isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
+    - The tensor should have a rank.
+    - The number of dimension shardings is equal to the rank of the tensor.
+    - Dimensions of size 0 aren't sharded.
+    - Replicated axes are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
+    - All dimension shardings are valid (see `Sdy_DimensionSharding`).
   }];
   let parameters = (ins
       Sdy_MeshOrRef:$mesh_or_ref,
@@ -666,9 +661,8 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
   let description = [{
     A list of `TensorShardingAttr`s, one for each operand/result of an op.
 
-    Constraints:
-
-      - Elements in `shardings` must satisfy the constraints of `Sdy_TensorSharding`.
+    **Constraints:**
+    - Elements in `shardings` must satisfy the constraints of `TensorShardingAttr`.
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"TensorShardingAttr", "shardings per value">:$shardings
@@ -788,9 +782,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     rule is always preserved/never removed. `is_custom_rule` can only be true
     for `stablehlo.custom_call` ops.
 
-    Constraints:
-
-    - Number of mappings and types match.
+    **Constraints:**
+    - Number of operand/result mappings must match the number of
+      operands/results of the op.
     - There is at least one mapping (can't have a rule for an op with no
       operands/results).
     - Rank of each `TensorMappingAttr` matches the rank of the corresponding
@@ -798,7 +792,7 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     - No duplicate factor indices in each `TensorMappingAttr`.
     - Per `DimMappingAttr`:
       * There is at least one factor index.
-      * Factor indices must be in range [0, `factorSizes.size()`).
+      * Factor indices must be in range [0, `$factor_sizes`).
       * If there are multiple factors, none of them can have size 1.
   }];
 
@@ -864,8 +858,7 @@ def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
   let summary = "List of axis refs";
   let description = [{
-    Constraints:
-
+    **Constraints:**
     - There are no duplicate axis-refs.
     - No two adjacent axis-refs are consecutive sub-axes of that same full axis,
       i.e., they can be merged into one sub-axis or the full axis.
