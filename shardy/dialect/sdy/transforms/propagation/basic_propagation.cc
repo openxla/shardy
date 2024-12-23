@@ -592,8 +592,7 @@ LogicalResult BasicPropagationPassImpl::propagate(
   GreedyRewriteConfig config;
   config.useTopDownTraversal = true;
   config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;
-  if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns),
-                                          config))) {
+  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
     return failure();
   }
 
