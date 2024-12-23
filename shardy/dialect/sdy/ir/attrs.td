@@ -77,10 +77,10 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     **Constraints:**
     - Elements in `axes` must not have duplicate names.
     - If `device_ids` is specified:
-      - The product of axis sizes must match the number of devices.
-      - All of its elements must be non-negative.
-      - `device_ids` should not be equal to `iota(product(axis_sizes))`.
-      - Sorted `device_ids` must be `iota(product(axis_sizes))`.
+      * The product of axis sizes must match the number of devices.
+      * All of its elements must be non-negative.
+      * `device_ids` should not be equal to `iota(product(axis_sizes))`.
+      * Sorted `device_ids` must be `iota(product(axis_sizes))`.
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
@@ -725,6 +725,7 @@ def Sdy_DimMapping : AttrDef<Sdy_Dialect, "DimMapping"> {
     - There is at least one factor index.
     - Factor indices must be in range [0, `$factor_sizes`).
     - If there are multiple factors, none of them can have size 1.
+    - No duplicate factor indices.
    }];
   let parameters = (ins
     OptionalArrayRefParameter<"int64_t", "factors this dimension is mapped to">:$factor_indices
@@ -744,6 +745,10 @@ def Sdy_DimMapping : AttrDef<Sdy_Dialect, "DimMapping"> {
 def Sdy_TensorMapping : AttrDef<Sdy_Dialect, "TensorMapping"> {
   let mnemonic = "tensor_mapping";
   let summary = "Factor mappings for each dimension of a tensor.";
+  let description = [{
+      **Constraints:**
+      - Elements in `dim_mappings` must satisfy the constraints in `DimMappingAttr`.
+  }];
   let parameters = (ins
       OptionalArrayRefParameter<"DimMappingAttr", "dimension mappings">:$dim_mappings
   );
@@ -801,7 +806,6 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       operands/results).
     - Rank of each `TensorMappingAttr` matches the rank of the corresponding
       tensor type.
-    - No duplicate factor indices in each `TensorMappingAttr`.
     - Elements in `reduction_factors` and `need_replication_factors` must
       be in range [0, `$factor_sizes`].
     - No duplicate factor indices in each of `reduction_factors` or
@@ -884,7 +888,7 @@ def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
   let summary = "List of axis ref lists";
 }
 
-def Sdy_EmptyAxesPerDim : AttrConstraint<
+def Sdy_EmptyAxesPerDim<
     CPred<"$_self.isa<ListOfAxisRefListsAttr>() && "
           "llvm::all_of($_self.cast<ListOfAxisRefListsAttr>(),"
           "               [](const AxisRefListAttr& al) { return al.size() == 0; })">,
