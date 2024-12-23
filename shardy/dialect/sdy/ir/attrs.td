@@ -748,6 +748,7 @@ def Sdy_TensorMapping : AttrDef<Sdy_Dialect, "TensorMapping"> {
   let description = [{
       **Constraints:**
       - Elements in `dim_mappings` must satisfy the constraints in `DimMappingAttr`.
+      - No duplicate factors indices across dimensions.
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"DimMappingAttr", "dimension mappings">:$dim_mappings
@@ -806,11 +807,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       operands/results).
     - Rank of each `TensorMappingAttr` matches the rank of the corresponding
       tensor type.
-    - Elements in `reduction_factors` and `need_replication_factors` must
-      be in range [0, `$factor_sizes`].
-    - No duplicate factor indices in each of `reduction_factors` or
-      `need_replication_factors`, and no duplicate factor indices across both
-      `reduction_factors` and `need_replication_factors`.
+    - For each group of factors (`reduction_factors`, `need_replication_factors`):
+      * Elements must be in range [0, `$factor_sizes`].
+      * No duplicate factor indices within each group and across groups.
   }];
 
   let parameters = (ins
