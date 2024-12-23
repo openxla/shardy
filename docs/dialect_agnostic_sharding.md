@@ -1,15 +1,15 @@
 # Dialect-agnostic Sharding
 
 The long term goal is to make Shardy a completely standalone component, able to work with any MLIR dialect. Currently,
-we directly depend on StableHLO, but we are making progress towards lifting that through various
+Shardy directly depends on StableHLO, but we are making progress towards lifting that through various
 abstractions and interfaces to make Shardy more flexible.
 
 ## Sharding Rules
 
-A _Sharding rule_ encodes how we can propagate through an operation. Since Shardy now depends on StableHLO, it defines
-sharding rules for each op. In addition, Shardy provides the [`ShardingRuleOpInterface`](./sdy_op_interfaces#shardingruleopinterface_shardingruleopinterface)
-which can be used by dialect owners in their operations to define their own sharding rules. As long as an operation
-implements this interface, Shardy will be able to propagate through it.
+A _sharding rule_ encodes how we propagate through an operation. Since Shardy now depends on StableHLO, it defines
+sharding rules for each stablehlo op. In addition, Shardy provides the [`ShardingRuleOpInterface`](./sdy_op_interfaces#shardingruleopinterface_shardingruleopinterface)
+which can be used by dialect owners in their operations to define sharding rules for their own operations. As long as an
+operation implements this interface, Shardy will be able to propagate through it.
 
 ```mlir
 def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
@@ -27,7 +27,7 @@ def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
 
 ## Region-based ops (Data flow ops)
 
-Region-based ops required a different approach where sharding rules, which only describe the correspondence between
+Region-based ops require a different approach where sharding rules, which only describe the correspondence between
 operands and results, are not enough. In these cases, we need to describe how the sharding is propagated through the
 regions of the op.
 
