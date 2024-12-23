@@ -453,8 +453,8 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     ```
 
     **Constraints:**
-    - Both operand and result shardings should be bound to the same `MeshAttr`.
     - Elements in `gatheringAxes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - Both operand and result shardings should be bound to the same `MeshAttr`.
   }];
 
   let arguments = (ins
