@@ -37,6 +37,9 @@ Example:
 %2 = sdy.all_gather gathering_axes=[{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
 ```
 
+**Constraints:**
+- Elements in `gatheringAxes` must satisfy the constraints listed in `AxisRefListAttr`.
+- Both operand and result shardings should be bound to the same `MeshAttr`.
 
 Traits: `SameOperandsAndResultType`
 
@@ -122,7 +125,6 @@ such that all sources and targets should be sharded in the same way.
 An op can have multiple data flow edges that are orthogonal to one another.
 
 For example:
-
 
 ```mlir
   y_0, ..., y_n = while (x_0, ..., x_n)
@@ -217,6 +219,13 @@ communication.
 
 The body is local wrt the manual_axes. Propagation will occur through
 the body on any free axes - those not in the manual_axes list.
+
+**Constraints:**
+- Elements in `in_shardings` and `out_shardings` must satisfy the constraints listed in `TensorShardingAttr`.
+- The number of global and local tensor inputs/outputs of the op region must match.
+- The manual axes must come before any free axes in each dim sharding.
+- The global and local shapes of the op regions arguments/results must match.
+- No manual axes are split.
 
 Traits: `IsolatedFromAbove`, `RecursiveMemoryEffects`, `SingleBlockImplicitTerminator<ReturnOp>`, `SingleBlock`
 
@@ -564,7 +573,9 @@ Syntax:
 >
 ```
 
-
+**Constraints:**
+- `name` must be present in the bound `MeshAttr`.
+- If `sub_axis_info` is present, it must satisfy the constraints of `SubAxisInfoAttr`.
 
 #### Parameters:
 
@@ -585,7 +596,11 @@ Syntax:
 >
 ```
 
-
+**Constraints:**
+- Elements in `value` must satisfy the constraints of `AxisRefAttr`.
+- There are no duplicate axis-refs or sub-axes that overlap with one another.
+- No two adjacent axis-refs are consecutive sub-axes of that same full axis,
+  i.e., they can be merged into one sub-axis or the full axis.
 
 #### Parameters:
 
@@ -597,9 +612,14 @@ Syntax:
 
 List of factor indices for a dimension
 
-All factor indices must be in the range [0, num_factors) and an empty list
-indicates that this is a null mapping (this is parsed/printed with `*`),
-i.e. the dimension isn't mapped to any factors.
+An empty list indicates that this is a null mapping (this is parsed/printed
+with `*`), i.e. the dimension isn't mapped to any factors.
+
+**Constraints:**
+- There is at least one factor index.
+- Factor indices must be in range [0, `$factor_sizes`).
+- If there are multiple factors, none of them can have size 1.
+- No duplicate factor indices.
 
 #### Parameters:
 
@@ -617,6 +637,12 @@ optional integer denoting the priority of this dimension sharding, which
 will respected during sharding propagation. Priorities originate from user
 sharding annotations and a lower value denotes a higher priority. The
 highest priority is assumed when the priority is missing in the annotation.
+
+**Constraints:**
+- Elements in `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+- If a dimension sharding has a priority:
+  * The priority is greater than or equal to 0.
+  * The dimension has at least one axis if it is closed.
 
 #### Parameters:
 
@@ -679,31 +705,39 @@ Syntax:
 >
 ```
 
-  A mesh is a list of axes and an optional list of device IDs specifying the
-  device ordering.
+A mesh is a list of axes and an optional list of device IDs specifying the
+device ordering.
 
-  If the list of axes is empty, the mesh has an implicit unnamed axis of
-  size 1. In this case, if a device ID list is not provided, the implicit
-  device ID list is [0]; if a device ID list is provided, it must
-  contains a single integer of any non-negative value. We call this
-  maximal-sharding case.
+If the list of axes is empty, the mesh has an implicit unnamed axis of
+size 1. In this case, if a device ID list is not provided, the implicit
+device ID list is [0]; if a device ID list is provided, it must
+contains a single integer of any non-negative value. We call this
+maximal-sharding case.
 
-  For all non-maximal-sharding cases, if a device ID list is specified, the
-  product of the axis sizes should match the number of devices. If a device ID
-  list is not specified, the implicit device ID list is iota(product(axes)).
-  For simplicity, we also disallow specifying a device ID list that is the
-  same as iota(product(axes)); in this case, a device ID list shouldn't be
-  specified.
+For all non-maximal-sharding cases, if a device ID list is specified, the
+product of the axis sizes should match the number of devices. If a device ID
+list is not specified, the implicit device ID list is iota(product(axes)).
+For simplicity, we also disallow specifying a device ID list that is the
+same as iota(product(axes)); in this case, a device ID list shouldn't be
+specified.
 
 Here are some examples of meshes:
 
-  - An empty mesh represents a placeholder mesh that can be replaced during
-    propagation: <[]>
-  - A mesh with an unnamed axis and an explicit device ID, which is typically
-    used to represent maximal sharding: <[], device_ids=[3]>
-  - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
-  - A mesh with two axes and explicit device IDs specifying the device
-    ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
+- An empty mesh represents a placeholder mesh that can be replaced during
+  propagation: <[]>
+- A mesh with an unnamed axis and an explicit device ID, which is typically
+  used to represent maximal sharding: <[], device_ids=[3]>
+- A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
+- A mesh with two axes and explicit device IDs specifying the device
+  ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
+
+**Constraints:**
+- Elements in `axes` must not have duplicate names.
+- If `device_ids` is specified:
+  * The product of axis sizes must match the number of devices.
+  * All of its elements must be non-negative.
+  * `device_ids` should not be equal to `iota(product(axis_sizes))`.
+  * Sorted `device_ids` must be `iota(product(axis_sizes))`.
 
 #### Parameters:
 
@@ -786,6 +820,17 @@ these ops, so a user must tell it how. When it is a custom rule, then the
 rule is always preserved/never removed. `is_custom_rule` can only be true
 for `stablehlo.custom_call` ops.
 
+**Constraints:**
+- Number of operand/result mappings must match the number of
+  operands/results of the op.
+- There is at least one mapping (can't have a rule for an op with no
+  operands/results).
+- Rank of each `TensorMappingAttr` matches the rank of the corresponding
+  tensor type.
+- For each group of factors (`reduction_factors`, `need_replication_factors`):
+  * Elements must be in range [0, `$factor_sizes`].
+  * No duplicate factor indices within each group and across groups.
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -816,6 +861,15 @@ axis sizes to its left `m=prod(k_1,...,k_(i-1))` (aka pre-size) and size
 k_i. Therefore, the sub-axis-info attribute holds those two numbers and is
 denoted as follows: `(m)k` for pre-size m and size k.
 
+**Constraints:**
+- `pre-size` is at least 1.
+- `size` is greater than 1.
+- `pre-size` must divide the size of the full axis, i.e., both `pre-size`
+  and `size` divide the size of the full axis, and the sub-axis doesn't go
+  beyond the full axis.
+- The size of the sub-axis isn't equal to the size of the corresponding full
+  axis, in which case the full axis should be used instead.
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -835,7 +889,9 @@ Syntax:
 >
 ```
 
-
+**Constraints:**
+- Elements in `dim_mappings` must satisfy the constraints in `DimMappingAttr`.
+- No duplicate factors indices across dimensions.
 
 #### Parameters:
 
@@ -866,6 +922,15 @@ explicitly (if they appear in the list of replicated axes) replicated.
 The mesh this sharding is bound to can either be specified by a symbol
 name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 
+**Constraints:**
+- Elements in `dim_shardings` must satisfy the constraints listed in `DimensionShardingAttr`.
+- Elements in `replicated_axes` must satisfy the constraints listed in `AxisRefListAttr`.
+- If the corresponding tensor type isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
+- The tensor should have a rank.
+- The number of dimension shardings is equal to the rank of the tensor.
+- Dimensions of size 0 aren't sharded.
+- Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -886,7 +951,10 @@ Syntax:
 >
 ```
 
+A list of `TensorShardingAttr`s, one for each operand/result of an op.
 
+**Constraints:**
+- Elements in `shardings` must satisfy the constraints of `TensorShardingAttr`.
 
 #### Parameters:
 
