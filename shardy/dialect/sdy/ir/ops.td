@@ -139,11 +139,10 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
     the body on any free axes - those not in the manual_axes list.
 
     **Constraints:**
-    - The in/out shardings of the op values (operands/results) must be valid
-      w.r.t the corresponding global type
-    - The number of global and local tensor inputs/outputs of the op region must match
-    - The manual axes must come before any free axes in each dim sharding
-    - The global and local shapes of the op regions arguments/results must match
+    - Elements in `in_shardings` and `out_shardings` must satisfy the constraints listed in `TensorShardingAttr`.
+    - The number of global and local tensor inputs/outputs of the op region must match.
+    - The manual axes must come before any free axes in each dim sharding.
+    - The global and local shapes of the op regions arguments/results must match.
     - No manual axes are split.
   }];
 
@@ -454,9 +453,8 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     ```
 
     **Constraints:**
-    - `MeshAttr` of result and operand is the same
-    - All axis names in `gatheringAxes` are present.
-    - Each item in `gatheringAxes` must satisfy the constraints for `Sdy_AxisRefList`.
+    - Both operand and result shardings should be bound to the same `MeshAttr`.
+    - Elements in `gatheringAxes` must satisfy the constraints listed in `AxisRefListAttr`.
   }];
 
   let arguments = (ins
