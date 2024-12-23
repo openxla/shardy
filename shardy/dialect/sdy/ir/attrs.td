@@ -76,8 +76,11 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
 
     **Constraints:**
     - Elements in `axes` must not have duplicate names.
-    - The product of axis sizes must match the number of devices.
-    - If `device_ids` is specified, all of its elements must be non-negative.
+    - If `device_ids` is specified:
+      - The product of axis sizes must match the number of devices.
+      - All of its elements must be non-negative.
+      - `device_ids` should not be equal to `iota(product(axis_sizes))`.
+      - Sorted `device_ids` must be `iota(product(axis_sizes))`.
   }];
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
@@ -464,7 +467,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     - The tensor should have a rank.
     - The number of dimension shardings is equal to the rank of the tensor.
     - Dimensions of size 0 aren't sharded.
-    - Replicated axes are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
+    - Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
   }];
   let parameters = (ins
       Sdy_MeshOrRef:$mesh_or_ref,
@@ -792,8 +795,6 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     for `stablehlo.custom_call` ops.
 
     **Constraints:**
-    - Elements in `reduction_factors` and `need_replication_factors` must
-      satisfy the constraints of `DimMappingAttr`.
     - Number of operand/result mappings must match the number of
       operands/results of the op.
     - There is at least one mapping (can't have a rule for an op with no
@@ -801,6 +802,11 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     - Rank of each `TensorMappingAttr` matches the rank of the corresponding
       tensor type.
     - No duplicate factor indices in each `TensorMappingAttr`.
+    - Elements in `reduction_factors` and `need_replication_factors` must
+      be in range [0, `$factor_sizes`].
+    - No duplicate factor indices in each of `reduction_factors` or
+      `need_replication_factors`, and no duplicate factor indices across both
+      `reduction_factors` and `need_replication_factors`.
   }];
 
   let parameters = (ins
@@ -867,7 +873,7 @@ def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
   let description = [{
     **Constraints:**
     - Elements in `value` must satisfy the constraints of `AxisRefAttr`.
-    - There are no duplicate axis-refs.
+    - There are no duplicate axis-refs or sub-axes that overlap with one another.
     - No two adjacent axis-refs are consecutive sub-axes of that same full axis,
       i.e., they can be merged into one sub-axis or the full axis.
   }];
