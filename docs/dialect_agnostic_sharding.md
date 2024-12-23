@@ -25,15 +25,15 @@ def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
 }
 ```
 
-## Region-based ops (Data flow ops)
+## Data flow ops
 
-Region-based ops require a different approach where sharding rules, which only describe the correspondence between
+Some ops, e.g., region-based ops, require a different approach where sharding rules, which only describe the correspondence between
 operands and results, are not enough. In these cases, we need to describe how the sharding is propagated through the
 regions of the op.
 
 Shardy defines a [`ShardableDataFlowOpInterface`](./sdy_op_interfaces#shardabledataflowopinterface_shardabledataflowopinterface)
 so that dialect owners can describe the propagation of sharding through the regions of their ops. This interface provides
-methods to get and set the sharding information for block arguments, op results, and edge sources.
+methods to get and set shardings of edge owners.
 
 ```mlir
 def ShardableDataFlowOpInterface :
