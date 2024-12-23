@@ -888,7 +888,7 @@ def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
   let summary = "List of axis ref lists";
 }
 
-def Sdy_EmptyAxesPerDim<
+def Sdy_EmptyAxesPerDim : AttrConstraint<
     CPred<"$_self.isa<ListOfAxisRefListsAttr>() && "
           "llvm::all_of($_self.cast<ListOfAxisRefListsAttr>(),"
           "               [](const AxisRefListAttr& al) { return al.size() == 0; })">,
