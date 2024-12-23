@@ -137,6 +137,13 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
 
     The body is local wrt the manual_axes. Propagation will occur through
     the body on any free axes - those not in the manual_axes list.
+
+    **Constraints:**
+    - Elements in `in_shardings` and `out_shardings` must satisfy the constraints listed in `TensorShardingAttr`.
+    - The number of global and local tensor inputs/outputs of the op region must match.
+    - The manual axes must come before any free axes in each dim sharding.
+    - The global and local shapes of the op regions arguments/results must match.
+    - No manual axes are split.
   }];
 
   let arguments = (ins
@@ -267,7 +274,6 @@ def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
     An op can have multiple data flow edges that are orthogonal to one another.
 
     For example:
-
 
     ```mlir
       y_0, ..., y_n = while (x_0, ..., x_n)
@@ -446,6 +452,9 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     %2 = sdy.all_gather gathering_axes=[{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
     ```
 
+    **Constraints:**
+    - Elements in `gatheringAxes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - Both operand and result shardings should be bound to the same `MeshAttr`.
   }];
 
   let arguments = (ins
