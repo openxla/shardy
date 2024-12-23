@@ -157,9 +157,8 @@ def Sdy_SubAxisInfo : AttrDef<Sdy_Dialect, "SubAxisInfo"> {
     - `pre-size` must divide the size of the full axis, i.e., both `pre-size`
       and `size` divide the size of the full axis, and the sub-axis doesn't go
       beyond the full axis.
-    - The size of the sub-axis isn't equal to the size of the full axis, in
-      which case the full axis should be used instead.
-    - This sub-axis doesn't overlap with any other sub-axis or the full axis.
+    - The size of the sub-axis isn't equal to the size of the corresponding full
+      axis, in which case the full axis should be used instead.
   }];
   let parameters = (ins
       AttrOrTypeParameter<"int64_t",

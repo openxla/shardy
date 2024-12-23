@@ -143,7 +143,7 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
       w.r.t the corresponding global type
     - The number of global and local tensor inputs/outputs of the op region must match
     - The manual axes must come before any free axes in each dim sharding
-    - The global shape and local shapes of the op regions arguments/results must match
+    - The global and local shapes of the op regions arguments/results must match
     - No manual axes are split.
   }];
 
