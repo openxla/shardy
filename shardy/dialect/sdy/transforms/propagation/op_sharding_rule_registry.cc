@@ -537,7 +537,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         for (auto [lhsDim, rhsDim] :
              llvm::zip_equal(lhsContractingDims, rhsContractingDims)) {
           builder.addFactor({lhsDim, rhsDim}, kNullDim,
-                            lhsType.getDimSize(lhsDim));
+                            lhsType.getDimSize(lhsDim), FactorType::kReduction);
         }
 
         return builder.build();
@@ -563,7 +563,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
 
         // Contracting dimension.
         builder.addFactor({isLhsMatrix ? 1 : 0, 0}, kNullDim,
-                          rhsType.getDimSize(0));
+                          rhsType.getDimSize(0), FactorType::kReduction);
 
         return builder.build();
       })
@@ -667,13 +667,15 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // Dimension that is being reduced. Can have a mapping for the
             // inputs.
             resultDims.assign(numInputs, kNullDim);
+            builder.addFactor(operandDims, resultDims, dimSize,
+                              FactorType::kReduction);
           } else {
             // Not a reduced dimension. So have a mapping b/w the operand and
             // result.
             assert(resultType.getDimSize(outDim) == dimSize);
             resultDims.assign(numInputs, outDim++);
+            builder.addFactor(operandDims, resultDims, dimSize);
           }
-          builder.addFactor(operandDims, resultDims, dimSize);
         }
         assert(outDim == resultType.getRank());
         return builder.build();
@@ -827,11 +829,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             dimNums.getScatterIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                 int64_t factorSize) {
+              const bool needReduction = inputDim == kNullDim &&
+                                         indicesDim != kNullDim &&
+                                         slicesDim != kNullDim;
               builder.addFactor(
                   createOperandDimsForScatter(numInputs, inputDim, indicesDim,
                                               /*updateDim=*/slicesDim),
                   /*resultDims=*/SmallVector<int64_t>(numInputs, inputDim),
-                  factorSize);
+                  factorSize,
+                  needReduction ? FactorType::kReduction
+                                : FactorType::kElementwise);
             });
         return builder.build();
       })
@@ -887,17 +894,20 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         // replicated during the sort. Therefore, we add a factor for the sort
         // dimension.
         ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());
+        bool propagatingAlongSortDim =
+            llvm::any_of(llvm::enumerate(shape), [&](auto dimAndSize) {
+              return dimAndSize.index() != sort.getDimension() &&
+                     dimAndSize.value() > 1;
+            });
+        OpShardingRuleBuilder builder(sort);
         for (auto [dim, dimSize] : llvm::enumerate(shape)) {
-          if (dim != sort.getDimension() && dimSize > 1) {
-            return OpShardingRuleBuilder::buildPointwise(sort);
+          if (dim != sort.getDimension()) {
+            builder.addFactor(dim, dimSize);
+          } else if (propagatingAlongSortDim) {
+            builder.addFactor(dim, dimSize, FactorType::kNeedReplication);
           }
         }
-
-        // Otherwise, add a factor for all dimensions except the sort.
-        return OpShardingRuleBuilder(sort)
-            .addPointwiseIf(
-                shape, [&](int64_t dim) { return dim != sort.getDimension(); })
-            .build();
+        return builder.build();
       })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);
