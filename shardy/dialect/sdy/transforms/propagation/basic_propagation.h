@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
@@ -43,17 +44,6 @@ using GetDirectionToPropagateFn =
 
 // A function that returns `PropagationDirection::BOTH` for all operations.
 PropagationDirection propagateAny(Operation* op);
-
-// TODO(bartchr): - Rename to PropagationPipelineOptions.
-struct PropagationOptions {
-  bool keepShardingRules = false;
-  StringRef dumpDirectory = "";
-  bool conservativePropagation = false;
-  bool debugShardingOrigins = false;
-  bool debugEdgeSourceSharding = false;
-  bool skipConvertToReshard = false;
-  bool skipInline = false;
-};
 
 // The implementation class for the basic propagation pass.
 //

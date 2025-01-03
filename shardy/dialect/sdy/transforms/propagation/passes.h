@@ -25,7 +25,6 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 
 // IWYU pragma: end_keep
 
@@ -35,6 +34,25 @@ namespace sdy {
 #define GEN_PASS_DECL
 #define GEN_PASS_REGISTRATION
 #include "shardy/dialect/sdy/transforms/propagation/passes.h.inc"
+
+struct PropagationOptions {
+  // Whether to keep existing and created `sdy::OpShardingRuleAttr` on ops.
+  bool keepShardingRules = false;
+  // The system directory to dump various rewritten modules for debugging.
+  StringRef dumpDirectory = "";
+  // Whether to avoid shardings that may cause values to be non-divisible by its
+  // dimension sharding.
+  bool conservativePropagation = false;
+  // Whether to save debug information about the sharding origins on the module.
+  bool debugShardingOrigins = false;
+  // Whether to save debug information about the edge shardings on the module.
+  bool debugEdgeSourceSharding = false;
+  // Whether to avoid converting `sdy::ShardingConstraintOp` to
+  // `sdy::ReshardOp`.
+  bool skipConvertToReshard = false;
+  // Whether to skip inlining in the module.
+  bool skipInline = false;
+};
 
 // Adds the SDY propagation pass, preceded by a sequence of import passes needed
 // as a pre-processing step for propagation.
