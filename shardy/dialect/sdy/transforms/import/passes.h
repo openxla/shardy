@@ -37,7 +37,8 @@ namespace sdy {
 
 // Adds a sequence of import passes needed as a pre-processing step for SDY
 // propagation.
-void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory = "");
+void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
+                       bool skipInline = false);
 
 // Register the sdy-import-pipeline.
 void registerImportPipeline();

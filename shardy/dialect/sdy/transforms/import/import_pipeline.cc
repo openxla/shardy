@@ -25,13 +25,16 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory) {
+void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
+                       bool skipInline) {
   pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
                                                "sdy_module_before_sdy_import"));
   // We need to apply the inliner pass so we have a single main function,
   // otherwise we would need to propagate shardings between call ops and callee
   // functions.
-  pm.addPass(createInlinerPass());
+  if (!skipInline) {
+    pm.addPass(createInlinerPass());
+  }
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());

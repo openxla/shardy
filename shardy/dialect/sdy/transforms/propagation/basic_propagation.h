@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_BASIC_PROPAGATION_H_
 #define SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_BASIC_PROPAGATION_H_
 
+#include <stdbool.h>
 #include <functional>
 #include <memory>
 #include <string>
@@ -43,12 +44,15 @@ using GetDirectionToPropagateFn =
 // A function that returns `PropagationDirection::BOTH` for all operations.
 PropagationDirection propagateAny(Operation* op);
 
+// TODO(bartchr): - Rename to PropagationPipelineOptions.
 struct PropagationOptions {
   bool keepShardingRules = false;
   StringRef dumpDirectory = "";
   bool conservativePropagation = false;
   bool debugShardingOrigins = false;
   bool debugEdgeSourceSharding = false;
+  bool skipConvertToReshard = false;
+  bool skipInline = false;
 };
 
 // The implementation class for the basic propagation pass.

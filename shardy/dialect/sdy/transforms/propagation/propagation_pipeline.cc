@@ -26,11 +26,10 @@ namespace mlir {
 namespace sdy {
 
 void addPropagationPipeline(OpPassManager& pm,
-                            const PropagationOptions& options,
-                            bool skipConvertToReshard) {
-  addImportPipeline(pm, options.dumpDirectory);
+                            const PropagationOptions& options) {
+  addImportPipeline(pm, options.dumpDirectory, options.skipInline);
   pm.addPass(createUserPriorityPropagationPass(options));
-  addExportPipeline(pm, options.dumpDirectory, skipConvertToReshard);
+  addExportPipeline(pm, options.dumpDirectory, options.skipConvertToReshard);
 }
 
 void registerPropagationPipeline() {
