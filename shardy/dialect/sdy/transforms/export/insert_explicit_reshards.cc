@@ -537,6 +537,14 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      // GSPMD partitioner adds extra collective permute when an explicit
+      // reshards added for the case that the operand is not sharded but the
+      // result is sharded on the reversing dimension.
+      // TODO(enver): Handle ReverseOp.
+      if (isa<stablehlo::ReverseOp>(op)) {
+        return;
+      }
+
       UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                                   shardingRule.getNumResults());
       for (const auto& [index, axes] : llvm::enumerate(

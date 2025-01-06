@@ -450,3 +450,10 @@ func.func @dot_genaral_overlaps_and_trimmable_on_subaxis_multiple_axes(%arg0: te
   return %0 : tensor<64x8x16xf32>
 }
 
+
+// CHECK-LABEL: func @reverse
+func.func @reverse(%arg0: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) -> tensor<4x32xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.reverse %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=32}>} : tensor<4x32xf32>
+  return %0 : tensor<4x32xf32>
+}
