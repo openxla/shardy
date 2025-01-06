@@ -532,6 +532,14 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      // GSPMD partitioner adds extra all-gathers when an explicit
+      // reshards added for the case that the operand is not sharded but the
+      // result is sharded on the cholesky-factorization dimensions.
+      // TODO(enver): Handle CholeskyOp.
+      if (isa<stablehlo::CholeskyOp>(op)) {
+        return;
+      }
+
       // Checks if factors are sharded the same way across operands and results.
       if (hasCompatibleFactorShardings(shardingProjection)) {
         return;
