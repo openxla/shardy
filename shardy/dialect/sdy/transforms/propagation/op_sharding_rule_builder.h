@@ -37,6 +37,21 @@ namespace sdy {
 // a certain factor.
 const int kNullDim = -1;
 
+// Represents the type of a factor.
+enum class FactorType {
+  // The default type, containing the pass-through factors and other unset
+  // factors.
+  kDefault,
+
+  // If we have sharding along reduction dimensions, the partitioner will add
+  // all-reduce operations.
+  kReduction,
+
+  // If we have sharding along a dimension that needs replication, the
+  // partitioner will make this dimension replicated.
+  kNeedReplication,
+};
+
 // The factor mappings that compose a dimension of a tensor.
 struct DimMapping {
   SmallVector<int64_t> factorIndices;
@@ -68,20 +83,22 @@ class OpShardingRuleBuilder {
   // Generic builder for any pointwise op (e.g. tanh, add, and, ceiling, etc.)
   static OpShardingRuleAttr buildPointwise(Operation* op);
 
-  // Adds a new factor of size `factorSize`, and maps it to the corresponding
-  // dimension of each operand/result as specified by `operandDims` and
-  // `resultDims`.
+  // Adds a new factor of size `factorSize` and type `factorType`, and maps it
+  // to the corresponding dimension of each operand/result as specified by
+  // `operandDims` and `resultDims`.
   //
   // Skips operands and results with corresponding dimension `kNullDim`.
-  OpShardingRuleBuilder& addFactor(ArrayRef<int64_t> operandDims,
-                                   ArrayRef<int64_t> resultDims,
-                                   int64_t factorSize);
+  OpShardingRuleBuilder& addFactor(
+      ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
+      int64_t factorSize, FactorType factorType = FactorType::kDefault);
 
   // Same as addFactor above, but updates the same dimension for all operands
   // and results that have rank at least 1.
   //
   // Useful when creating rules for pointwise ops.
-  OpShardingRuleBuilder& addFactor(int64_t dim, int64_t factorSize);
+  OpShardingRuleBuilder& addFactor(
+      int64_t dim, int64_t factorSize,
+      FactorType factorType = FactorType::kDefault);
 
   // Adds a pointwise factor for all dimensions of all operands/results that
   // have rank at least 1.
@@ -105,6 +122,8 @@ class OpShardingRuleBuilder {
           onMismatchFn = [](int64_t dim, OpShardingRuleBuilder& builder) {});
 
  private:
+  void updateFactorType(FactorType factorType, int64_t factorIndex);
+
   MLIRContext* context;
   SmallVector<int64_t> factorSizes;
   // The mappings of factor sizes for each operand/result. Specify the index of

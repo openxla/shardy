@@ -23,6 +23,7 @@ limitations under the License.
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
@@ -143,18 +144,35 @@ OpShardingRuleAttr OpShardingRuleBuilder::buildPointwise(Operation* op) {
   return builder.build();
 }
 
+void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
+                                             int64_t factorIndex) {
+  switch (factorType) {
+    case FactorType::kReduction:
+      reductionFactors.push_back(factorIndex);
+      return;
+    case FactorType::kNeedReplication:
+      needReplicationFactors.push_back(factorIndex);
+      return;
+    case FactorType::kDefault:
+      return;
+  }
+  llvm_unreachable("unknown FactorType");
+}
+
 OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(
     ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
-    int64_t factorSize) {
+    int64_t factorSize, FactorType factorType) {
   int64_t factorIndex = factorSizes.size();
   mapDimsToFactor(operandMappings, operandDims, factorIndex);
   mapDimsToFactor(resultMappings, resultDims, factorIndex);
   factorSizes.push_back(factorSize);
+  updateFactorType(factorType, factorIndex);
   return *this;
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
-                                                        int64_t factorSize) {
+                                                        int64_t factorSize,
+                                                        FactorType factorType) {
   int64_t factorIndex = factorSizes.size();
   for (TensorMapping& tensorMapping :
        llvm::concat<TensorMapping>(operandMappings, resultMappings)) {
@@ -165,6 +183,7 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
     tensorMapping[dim].factorIndices.push_back(factorIndex);
   }
   factorSizes.push_back(factorSize);
+  updateFactorType(factorType, factorIndex);
   return *this;
 }
 
