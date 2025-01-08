@@ -592,8 +592,14 @@ LogicalResult BasicPropagationPassImpl::propagate(
   GreedyRewriteConfig config;
   config.useTopDownTraversal = true;
   config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;
-  if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns),
-                                          config))) {
+  config.fold = false;
+  config.cseConstants = false;
+  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
+    // We should always converge in 2 iterations, if we don't, something is
+    // wrong.
+    moduleOp->emitError("Failed to converge after ")
+        << config.maxIterations
+        << " iterations. please contact the Shardy team.";
     return failure();
   }
 
