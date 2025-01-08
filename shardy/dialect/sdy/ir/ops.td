@@ -127,7 +127,10 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
        ShardableDataFlowOpInterface,
        /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
                             "setOpResultEdgeOwnerShardings",
-                            "transformTargetSharding"]>]> {
+                            "transformTargetSharding",
+                            "getBlockArgumentEdgeOwners",
+                            "setBlockArgumentEdgeOwnerShardings",
+                            "getBlockArgumentEdgeOwnerShardings"]>]> {
   let summary = "Multi-device parallelism operation with manual collectives";
   let description = [{
     Jump into a region written in terms of per-device local code with explicit
@@ -385,7 +388,10 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
      DeclareOpInterfaceMethods<
          ShardableDataFlowOpInterface,
          /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
-                              "setOpResultEdgeOwnerShardings"]>]> {
+                              "setOpResultEdgeOwnerShardings",
+                              "getBlockArgumentEdgeOwners",
+                              "setBlockArgumentEdgeOwnerShardings",
+                              "getBlockArgumentEdgeOwnerShardings"]>]> {
   let summary = "named computation operation";
   let description = [{
     Groups a computation, i.e. a block of operations, and gives it a name.

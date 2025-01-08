@@ -75,7 +75,10 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
         Returns the shardings of all block argument data flow edge owners.
       }],
       /*retType=*/"mlir::SmallVector<mlir::sdy::TensorShardingAttr>",
-      /*methodName=*/"getBlockArgumentEdgeOwnerShardings"
+      /*methodName=*/"getBlockArgumentEdgeOwnerShardings",
+      /*args=*/(ins),
+      /*methodBody=*/[{}],
+      /*defaultImplementation=*/[{return {};}]
     >,
     InterfaceMethod<
       /*desc=*/[{
@@ -83,7 +86,9 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
       }],
       /*retType=*/"void",
       /*methodName=*/"setBlockArgumentEdgeOwnerShardings",
-      /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings)
+      /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings),
+      /*methodBody=*/[{}],
+      /*defaultImplementation=*/[{return;}]
     >,
     // TODO(b/380924978): Delete this method in favor of a new method returning
     // a single sharding.
@@ -134,7 +139,10 @@ def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
         Gets all block argument edge owners.
       }],
       /*retType=*/"mlir::ArrayRef<mlir::BlockArgument>",
-      /*methodName=*/"getBlockArgumentEdgeOwners"
+      /*methodName=*/"getBlockArgumentEdgeOwners",
+      /*args=*/(ins),
+      /*methodBody=*/[{}],
+      /*defaultImplementation=*/[{return {};}]
     >,
     InterfaceMethod<
       /*desc=*/[{
