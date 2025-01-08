@@ -27,6 +27,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Action.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -35,6 +36,7 @@ limitations under the License.
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
+#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 
@@ -64,6 +66,30 @@ void saveEdgeSources(EdgeSourceType type,
   }
 }
 
+std::string manualComputationOriginName(OriginShardingType type, StringRef name,
+                                        int64_t index) {
+  switch (type) {
+    case OriginShardingType::MC_INPUT: {
+      return llvm::formatv("{0}_input: {1}", name, index);
+    }
+    case OriginShardingType::MC_OUTPUT: {
+      return llvm::formatv("{0}_output: {1}", name, index);
+    }
+    default:
+      unreachableFormatv(
+          "Passed in type {0} for manual computation origin name. Only "
+          "MC_INPUT and MC_OUTPUT are supported.",
+          type);
+  }
+  llvm_unreachable("unknown OriginShardingType");
+}
+
+std::string manualComputationOriginName(OriginShardingType type,
+                                        int64_t sourceId, int64_t index) {
+  return manualComputationOriginName(
+      type, llvm::formatv("mc_{0}", sourceId).str(), index);
+}
+
 // Converts the `source` to a `StringAttr`.
 StringAttr shardingOriginToString(OriginSharding source, MLIRContext* context) {
   std::string typeString;
@@ -80,15 +106,11 @@ StringAttr shardingOriginToString(OriginSharding source, MLIRContext* context) {
       typeString = "output";
       break;
     }
-    case OriginShardingType::MC_INPUT: {
-      return StringAttr::get(
-          context,
-          llvm::formatv("mc_{0}_input: {1}", source.sourceId, source.index));
-    }
+    case OriginShardingType::MC_INPUT:
     case OriginShardingType::MC_OUTPUT: {
       return StringAttr::get(
-          context,
-          llvm::formatv("mc_{0}_output: {1}", source.sourceId, source.index));
+          context, manualComputationOriginName(source.type, source.sourceId,
+                                               source.index));
     }
   }
   return StringAttr::get(context,
@@ -113,10 +135,23 @@ SmallVector<NamedAttribute> createOriginShardingEntries(
   return entries;
 }
 
+// Gets the existing `kShardingOriginsAttr` on the `op` or creates a new
+// `ArrayAttr` with `op->getNumResults()` dictionaries.
+SmallVector<Attribute> getOriginShardingDicts(Operation* op, Builder& builder) {
+  auto resultDicts = op->getAttrOfType<ArrayAttr>(kShardingOriginsAttr);
+  if (!resultDicts) {
+    SmallVector<Attribute> newResultDicts(op->getNumResults(),
+                                          builder.getDictionaryAttr({}));
+    resultDicts = builder.getArrayAttr(newResultDicts);
+  }
+  return SmallVector<Attribute>(resultDicts.getValue());
+}
+
 // Saves the originating sharding debug information on the `moduleOp`.
 void saveShardingOriginsOnModule(ModuleOp moduleOp,
                                  ShardingDebugMappings* mappings) {
   MLIRContext* context = moduleOp.getContext();
+  Builder builder(context);
   for (auto [value, axisToOriginSharding] :
        mappings->valueToOriginShardingMap) {
     Operation* owningOp = getOwningOp(value);
@@ -141,18 +176,28 @@ void saveShardingOriginsOnModule(ModuleOp moduleOp,
         createOriginShardingEntries(axisToOriginSharding, context);
     if (terminatorOperand) {
       int64_t operandNumber = terminatorOperand->getOperandNumber();
-      funcOp.setResultAttr(operandNumber, kOriginShardingAttr,
-                           DictionaryAttr::get(context, entries));
+      funcOp.setResultAttr(operandNumber, kShardingOriginsAttr,
+                           builder.getDictionaryAttr(entries));
     }
     TypeSwitch<Operation*, void>(owningOp)
         .Case<func::FuncOp>([&, value = value](func::FuncOp funcOp) {
           funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
-                            kOriginShardingAttr,
-                            DictionaryAttr::get(context, entries));
+                            kShardingOriginsAttr,
+                            builder.getDictionaryAttr(entries));
+        })
+        .Case<ShardingConstraintOp, DataFlowEdgeOp>([&](Operation* op) {
+          op->setAttr(kShardingOriginsAttr, builder.getDictionaryAttr(entries));
         })
         .Default([&](Operation* op) {
-          op->setAttr(kOriginShardingAttr,
-                      DictionaryAttr::get(context, entries));
+          auto result = cast<OpResult>(value);
+          // Need to handle the case where the generic `op` has multiple
+          // results, so multiple dictionaries.
+          SmallVector<Attribute> newResultDicts =
+              getOriginShardingDicts(op, builder);
+          newResultDicts[result.getResultNumber()] =
+              builder.getDictionaryAttr(entries);
+          op->setAttr(kShardingOriginsAttr,
+                      builder.getArrayAttr(newResultDicts));
         });
   }
 }
@@ -173,7 +218,7 @@ void saveShardingOrigins(ValueToOriginShardingMap& valueToOriginShardingMap,
   }
 }
 
-// Creates a new dictionary for `kOriginShardingAttr` on the function inputs
+// Creates a new dictionary for `kShardingOriginsAttr` on the function inputs
 // and outputs, setting the origin to `self` if the previous origin was the
 // same as the `valueIndex` for the given `type`.
 DictionaryAttr convertFuncOriginsToSelf(int64_t valueIndex,
@@ -194,44 +239,65 @@ DictionaryAttr convertFuncOriginsToSelf(int64_t valueIndex,
   return DictionaryAttr::get(context, entries);
 }
 
+void setOpOriginsToSelf(Operation* op, StringRef originName) {
+  MLIRContext* context = op->getContext();
+  if (auto dictAttr = op->getAttrOfType<DictionaryAttr>(kShardingOriginsAttr)) {
+    SmallVector<NamedAttribute> entries(dictAttr.getValue());
+    for (auto& entry : entries) {
+      if (cast<StringAttr>(entry.getValue()) == originName) {
+        entry =
+            NamedAttribute(entry.getName(), StringAttr::get(context, "self"));
+      }
+    }
+    op->setAttr(kShardingOriginsAttr, DictionaryAttr::get(context, entries));
+  }
+}
+
 // For `ShardingConstraintOp`s and `FuncOp` inputs/outputs, instead of saying
 // that the existing axes at the start came from `constraint_0` or `input: 0`,
 // we say that they came from `self`. Then it's not circular/clearer to
 // understand.
 void overrideOriginsToSelf(ModuleOp moduleOp) {
-  MLIRContext* context = moduleOp.getContext();
   moduleOp.walk([&](ShardingConstraintOp shardingConstraintOp) {
-    if (auto dictAttr = shardingConstraintOp->getAttrOfType<DictionaryAttr>(
-            kOriginShardingAttr)) {
-      auto originName = shardingConstraintOp->getAttrOfType<StringAttr>(
-          kOriginShardingNameAttr);
-      SmallVector<NamedAttribute> entries(dictAttr.getValue());
-      for (auto& entry : entries) {
-        if (cast<StringAttr>(entry.getValue()) == originName) {
-          entry =
-              NamedAttribute(entry.getName(), StringAttr::get(context, "self"));
-        }
-      }
-      shardingConstraintOp->setAttr(kOriginShardingAttr,
-                                    DictionaryAttr::get(context, entries));
-    }
+    setOpOriginsToSelf(shardingConstraintOp,
+                       shardingConstraintOp->getAttrOfType<StringAttr>(
+                           kShardingOriginNameAttr));
   });
   moduleOp.walk([&](func::FuncOp funcOp) {
-    for (int64_t valueIndex = 0; valueIndex < funcOp.getNumArguments();
-         ++valueIndex) {
-      funcOp.setArgAttr(
-          valueIndex, kOriginShardingAttr,
-          convertFuncOriginsToSelf(valueIndex, OriginShardingType::INPUT,
-                                   funcOp.getArgAttrOfType<DictionaryAttr>(
-                                       valueIndex, kOriginShardingAttr)));
+    for (int64_t operandIndex = 0; operandIndex < funcOp.getNumArguments();
+         ++operandIndex) {
+      if (DictionaryAttr newDict = convertFuncOriginsToSelf(
+              operandIndex, OriginShardingType::INPUT,
+              funcOp.getArgAttrOfType<DictionaryAttr>(operandIndex,
+                                                      kShardingOriginsAttr))) {
+        funcOp.setArgAttr(operandIndex, kShardingOriginsAttr, newDict);
+      }
     }
-    for (int64_t valueIndex = 0; valueIndex < funcOp.getNumResults();
-         ++valueIndex) {
-      funcOp.setResultAttr(
-          valueIndex, kOriginShardingAttr,
-          convertFuncOriginsToSelf(valueIndex, OriginShardingType::OUTPUT,
-                                   funcOp.getResultAttrOfType<DictionaryAttr>(
-                                       valueIndex, kOriginShardingAttr)));
+    for (int64_t resultIndex = 0; resultIndex < funcOp.getNumResults();
+         ++resultIndex) {
+      if (DictionaryAttr newDict = convertFuncOriginsToSelf(
+              resultIndex, OriginShardingType::OUTPUT,
+              funcOp.getResultAttrOfType<DictionaryAttr>(
+                  resultIndex, kShardingOriginsAttr))) {
+        funcOp.setResultAttr(resultIndex, kShardingOriginsAttr, newDict);
+      }
+    }
+  });
+  moduleOp.walk([&](ManualComputationOp manualComputationOp) {
+    auto originName =
+        manualComputationOp->getAttrOfType<StringAttr>(kShardingOriginNameAttr);
+    for (BlockArgument blockArg :
+         manualComputationOp.getBody().getArguments()) {
+      setOpOriginsToSelf(getDataFlowEdge(blockArg),
+                         manualComputationOriginName(
+                             OriginShardingType::MC_INPUT,
+                             originName.getValue(), blockArg.getArgNumber()));
+    }
+    for (OpResult result : manualComputationOp.getResults()) {
+      setOpOriginsToSelf(getDataFlowEdge(result),
+                         manualComputationOriginName(
+                             OriginShardingType::MC_OUTPUT,
+                             originName.getValue(), result.getResultNumber()));
     }
   });
 }
@@ -270,7 +336,7 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
                         OriginShardingType::CONSTRAINT,
                         shardingConstraintOp.getResult(), 0, sourceId);
     shardingConstraintOp->setAttr(
-        kOriginShardingNameAttr,
+        kShardingOriginNameAttr,
         shardingOriginToString(OriginSharding{OriginShardingType::CONSTRAINT,
                                               /*index=*/0, sourceId},
                                context));
@@ -299,7 +365,7 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
                           sourceId);
     }
     manualComputationOp->setAttr(
-        kOriginShardingNameAttr,
+        kShardingOriginNameAttr,
         StringAttr::get(context, llvm::formatv("mc_{0}", sourceId)));
     ++sourceId;
   });
@@ -328,19 +394,23 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
                   axisToEdgeSourceMap);
   saveEdgeSources(RESULT, sourceShardingAction.oldResultShardings,
                   axisToEdgeSourceMap);
-
   // If the new and old shardings are different, something was propagated to it.
   // Find and save it.
   auto lookUpOriginSharding = [&](EdgeSource edgeSource,
                                   AxisRefAttr axisRef) -> OriginSharding {
     switch (edgeSource.type) {
+      // NOTE: need to call `getShardableValue` in case the operand/result is
+      // part of a `ShardableDataFlowOpInterface` and the `Value` the sharding
+      // lives on is a `DataFlowEdgeOp` instead of the `edgeSource` itself.
       case OPERAND:
         return mappings->valueToOriginShardingMap
-            .at(sourceShardingAction.operands[edgeSource.index])
+            .at(getShardableValue(
+                sourceShardingAction.operands[edgeSource.index]))
             .at(axisRef);
       case RESULT:
         return mappings->valueToOriginShardingMap
-            .at(sourceShardingAction.results[edgeSource.index])
+            .at(getShardableValue(
+                sourceShardingAction.results[edgeSource.index]))
             .at(axisRef);
     }
     llvm_unreachable("unknown EdgeSource");

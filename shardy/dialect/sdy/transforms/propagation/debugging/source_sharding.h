@@ -46,7 +46,7 @@ struct OriginSharding {
   OriginShardingType type;
   int64_t index;
   // If the origin is a `sdy.sharding_constraint` or `sdy.ManualComputationOp`,
-  // this is the unique id used in the `kOriginShardingNameAttr` to identify
+  // this is the unique id used in the `kShardingOriginNameAttr` to identify
   // the origin.
   int64_t sourceId = 0;
 };

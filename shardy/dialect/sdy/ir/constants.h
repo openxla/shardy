@@ -33,11 +33,21 @@ inline constexpr StringRef kShardingRuleAttr = "sdy.sharding_rule";
 
 // Attribute name for saving which input/output/sharding_constraint sharding
 // caused a value to be sharded a certain way.
-inline constexpr StringRef kOriginShardingAttr = "sdy.origin_sharding";
+inline constexpr StringRef kShardingOriginsAttr = "sdy.sharding_origins";
+
+// Attribute name like `kShardingOriginsAttr` but for
+// `ShardableDataFlowOpInterface` op block arguments.
+inline constexpr StringRef kBlockArgShardingOriginsAttr =
+    "sdy.block_arg_sharding_origins";
+
+// Attribute name like `kShardingOriginsAttr` but for
+// `ShardableDataFlowOpInterface` op results.
+inline constexpr StringRef kResultShardingOriginsAttr =
+    "sdy.result_sharding_origins";
 
 // Attribute name for the unique name of a sharding origin. Is either an
 // `sdy.sharding_constraint`, or `sdy.ManualComputationOp` input/output.
-inline constexpr StringRef kOriginShardingNameAttr = "sdy.origin_sharding_name";
+inline constexpr StringRef kShardingOriginNameAttr = "sdy.sharding_origin_name";
 
 // Default priority for a `DimensionShardingAttr` that doesn't have a
 // user-defined priority.

@@ -15,10 +15,14 @@ limitations under the License.
 
 #include <cassert>
 #include <memory>  // IWYU pragma: keep
+#include <tuple>
+#include <utility>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
@@ -79,6 +83,45 @@ SmallVector<TensorShardingAttr> getShardingsFromDataFlowEdges(
   return shardings;
 }
 
+// Saves an array of all the origin sharding dictionaries for the given
+// `edgeOwners` on `op`. If non exist, nothing is saved.
+//
+// For debugging the origin shardings, we want to preserve the origin sharding
+// dictionaries from the `DataFlowEdgeOp`s on the owning op so that they are
+// preserved after the propagation pipeline.
+//
+// See the `debug-sharding-origins` config on propagation for more details.
+//
+// TODO(b/388458831): add `saveDebugPropagationInfo` to the pass and pass it in
+// here. Can then reserve the right size for `originShardingDicts` and not need
+// the `exists` boolean.
+void buildOriginShardingDictsFromDataFlowEdges(ValueRange edgeOwners,
+                                               Operation* op,
+                                               StringRef attrName,
+                                               IRRewriter& rewriter) {
+  SmallVector<Attribute> originShardingDicts;
+  // TODO(b/388458831): pass through a boolean indicating whether the origin
+  // sharding debug information is enabled.
+  bool exists = false;
+  for (Value edgeOwner : edgeOwners) {
+    DictionaryAttr dict;
+    if (DataFlowEdgeOp dataFlowEdgeOp =
+            DataFlowEdgeOp::getDataFlowEdgeUser(edgeOwner)) {
+      dict =
+          dataFlowEdgeOp->getAttrOfType<DictionaryAttr>(kShardingOriginsAttr);
+    }
+    if (!dict) {
+      dict = rewriter.getDictionaryAttr({});
+    } else {
+      exists = true;
+    }
+    originShardingDicts.push_back(dict);
+  }
+  if (exists) {
+    op->setAttr(attrName, rewriter.getArrayAttr(originShardingDicts));
+  }
+}
+
 struct SinkDataFlowEdgesPass
     : public impl::SinkDataFlowEdgesPassBase<SinkDataFlowEdgesPass> {
   using SinkDataFlowEdgesPassBase::SinkDataFlowEdgesPassBase;
@@ -103,17 +146,24 @@ struct SinkDataFlowEdgesPass
       if (!isDataFlowOp(op)) {
         return WalkResult::advance();
       }
+      ArrayRef<BlockArgument> blockArgOwners =
+          getDataFlowEdgeBlockArgumentOwners(op);
       if (SmallVector<TensorShardingAttr> blockArgShardings =
-              getShardingsFromDataFlowEdges(
-                  getDataFlowEdgeBlockArgumentOwners(op));
+              getShardingsFromDataFlowEdges(blockArgOwners);
           !blockArgShardings.empty()) {
         setBlockArgumentEdgeOwnerShardings(op, blockArgShardings);
       }
+      buildOriginShardingDictsFromDataFlowEdges(
+          blockArgOwners, op, kBlockArgShardingOriginsAttr, rewriter);
+
+      ResultRange resultOwners = getDataFlowEdgeResultOwners(op);
       if (SmallVector<TensorShardingAttr> resultShardings =
-              getShardingsFromDataFlowEdges(getDataFlowEdgeResultOwners(op));
+              getShardingsFromDataFlowEdges(resultOwners);
           !resultShardings.empty()) {
         setOpResultEdgeOwnerShardings(op, resultShardings);
       }
+      buildOriginShardingDictsFromDataFlowEdges(
+          resultOwners, op, kResultShardingOriginsAttr, rewriter);
       return WalkResult::advance();
     });
   }
