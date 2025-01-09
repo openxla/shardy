@@ -271,17 +271,21 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       })
       .Case<stablehlo::ConcatenateOp>(
           [conservativePropagation](stablehlo::ConcatenateOp concat) {
-            // If `conservativePropagation` is false, we propagate through
-            // concat dimension, even though that would require communication.
             // TODO(tomnatan): once strided-view is supported, consider adding
             // compound factors using GCD.
-            return OpShardingRuleBuilder(concat)
-                .addPointwiseIf(getTensorShape(concat.getResult()),
-                                [&](int64_t dim) {
-                                  return !conservativePropagation ||
-                                         dim != concat.getDimension();
-                                })
-                .build();
+            OpShardingRuleBuilder builder(concat);
+            for (auto [dim, dimSize] :
+                 llvm::enumerate(getTensorShape(concat.getResult()))) {
+              if (dim != concat.getDimension()) {
+                builder.addFactor(dim, dimSize);
+              } else if (!conservativePropagation) {
+                // Concat dimension needs replication.
+                builder.addFactor(dim, dimSize, FactorType::kNeedReplication);
+              }
+              // If we are in conservative propagation, we do not add a factor
+              // for the concat dimension.
+            }
+            return builder.build();
           })
       .Case<stablehlo::ConvolutionOp>([conservativePropagation](
                                           stablehlo::ConvolutionOp conv) {
