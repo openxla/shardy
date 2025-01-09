@@ -74,6 +74,13 @@ func.func @broadcast_in_dim_input_dim_expanded(%arg0: tensor<2x1x13xf32>) -> ten
   return %0 :  tensor<2x64x13xf32>
 }
 
+// CHECK-LABEL: func @broadcast_in_dim_all_dim_types_in_one
+func.func @broadcast_in_dim_all_dim_types_in_one(%arg0: tensor<2x3x5x1x7xf32>) -> tensor<2x5x3x11x7x13xf32> {
+  // CHECK: {sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, j, l, n])->([i, j, k, m, n, o]) {i=2, j=5, k=3, l=1, m=11, n=7, o=13}>}
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [0, 2, 1, 3, 4] : (tensor<2x3x5x1x7xf32>) -> tensor<2x5x3x11x7x13xf32>
+  return %0 :  tensor<2x5x3x11x7x13xf32>
+}
+
 // CHECK-LABEL: func @cholesky
 func.func @cholesky(%arg0: tensor<2x4x8x8xf32>) -> tensor<2x4x8x8xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, j, k, l]) {i=2, j=4, k=8, l=8} need_replication={k, l}>
