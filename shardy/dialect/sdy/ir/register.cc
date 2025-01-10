@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -26,7 +27,8 @@ namespace mlir {
 namespace sdy {
 
 void registerAllDialects(DialectRegistry& registry) {
-  registry.insert<SdyDialect, func::FuncDialect, stablehlo::StablehloDialect>();
+  registry.insert<SdyDialect, func::FuncDialect, tensor::TensorDialect,
+                  stablehlo::StablehloDialect>();
 }
 
 void loadAllRequiredDialects(MLIRContext* context) {

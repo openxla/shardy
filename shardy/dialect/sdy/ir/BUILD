@@ -209,6 +209,7 @@ cc_library(
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:TensorDialect",
         "@stablehlo//:stablehlo_ops",
     ],
 )
