@@ -772,7 +772,9 @@ TensorShardingPerValueAttr::getOpenWithShardingAtIndex(
 TensorShardingPerValueAttr TensorShardingPerValueAttr::replaceValueSharding(
     int64_t index, TensorShardingAttr sharding) const {
   SmallVector<TensorShardingAttr> shardings(getShardings());
-  shardings[index] = sharding;
+  if (shardings[index] != sharding) {
+    shardings[index] = sharding;
+  }
   return TensorShardingPerValueAttr::get(getContext(), shardings);
 }
 
