@@ -416,11 +416,25 @@ func.func @fft(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f3
   return %0 : tensor<8x32x64xcomplex<f32>>
 }
 
-// CHECK-LABEL: func @fft_truncated_result
-func.func @fft_truncated_result(%arg0: tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>> {
+// CHECK-LABEL: func @fft_inverse
+func.func @fft_inverse(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64}>
+  %0  = stablehlo.fft %arg0, type = IFFT, length = [32, 64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
+  return %0 : tensor<8x32x64xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_real_truncated_result
+func.func @fft_real_truncated_result(%arg0: tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, l]) {i=8, j=32, k=1, l=1}>
   %0  = stablehlo.fft %arg0, type = RFFT, length = [32, 64] : (tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>>
   return %0 : tensor<8x32x33xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_inverse_real_expanded_result
+func.func @fft_inverse_real_expanded_result(%arg0: tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, l]) {i=8, j=32, k=1, l=1}>
+  %0  = stablehlo.fft %arg0, type = IRFFT, length = [32, 64] : (tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32>
+  return %0 : tensor<8x32x64xf32>
 }
 
 // CHECK-LABEL: @gather
