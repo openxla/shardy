@@ -251,17 +251,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           })
       .Case<stablehlo::CholeskyOp>([](stablehlo::CholeskyOp cholesky) {
         ArrayRef<int64_t> shape = getTensorShape(cholesky.getOperand());
-        OpShardingRuleBuilder builder(cholesky);
+        // The first (n - 2) dimensions are batch dimensions. The last 2
+        // dimensions are decomposition dimensions, which need replication.
         int64_t numBatchDims = shape.size() - 2;
-        for (int64_t i = 0; i < numBatchDims; ++i) {
-          // The first (n - 2) dimensions are batch dimensions.
-          builder.addFactor(i, shape[i]);
-        }
-        for (int64_t i = numBatchDims; i < shape.size(); ++i) {
-          // The last 2 dimensions are the decomposition dimensions.
-          builder.addFactor(i, shape[i], FactorType::kNeedReplication);
-        }
-        return builder.build();
+        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
+          return dim < numBatchDims ? FactorType::kDefault
+                                    : FactorType::kNeedReplication;
+        };
+        return OpShardingRuleBuilder(cholesky)
+            .addPointwise(shape, getFactorType)
+            .build();
       })
       .Case<stablehlo::ClampOp>([](stablehlo::ClampOp clamp) {
         // The `min` and `max` operands may be scalars.
@@ -273,19 +272,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           [conservativePropagation](stablehlo::ConcatenateOp concat) {
             // TODO(tomnatan): once strided-view is supported, consider adding
             // compound factors using GCD.
-            OpShardingRuleBuilder builder(concat);
-            for (auto [dim, dimSize] :
-                 llvm::enumerate(getTensorShape(concat.getResult()))) {
-              if (dim != concat.getDimension()) {
-                builder.addFactor(dim, dimSize);
-              } else if (!conservativePropagation) {
-                // Concat dimension needs replication.
-                builder.addFactor(dim, dimSize, FactorType::kNeedReplication);
-              }
+
+            std::function<bool(int64_t)> pred = [&](int64_t dim) {
               // If we are in conservative propagation, we do not add a factor
               // for the concat dimension.
-            }
-            return builder.build();
+              return !conservativePropagation || dim != concat.getDimension();
+            };
+            std::function<FactorType(int64_t)> getFactorType =
+                [&](int64_t dim) {
+                  // Concat dimension needs replication.
+                  return dim == concat.getDimension()
+                             ? FactorType::kNeedReplication
+                             : FactorType::kDefault;
+                };
+            return OpShardingRuleBuilder(concat)
+                .addPointwiseIf(getTensorShape(concat.getResult()), pred,
+                                getFactorType)
+                .build();
           })
       .Case<stablehlo::ConvolutionOp>([conservativePropagation](
                                           stablehlo::ConvolutionOp conv) {
@@ -909,27 +912,24 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           })
       .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
         ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());
+        // TODO(b/387351742). We should always add a factor of type
+        // kNeedReplication for the sort dimension. Currently, we only add it if
+        // we have batch dimensions with size > 1.
         bool propagatingAlongSortDim =
             llvm::any_of(llvm::enumerate(shape), [&](auto dimAndSize) {
               return dimAndSize.index() != sort.getDimension() &&
                      dimAndSize.value() > 1;
             });
-        OpShardingRuleBuilder builder(sort);
-        for (auto [dim, dimSize] : llvm::enumerate(shape)) {
-          if (dim != sort.getDimension()) {
-            // Always add a element-wise factor for non-sort (batch) dimensions.
-            builder.addFactor(dim, dimSize);
-          } else if (propagatingAlongSortDim) {
-            // If there exists a non-sort (batch) dimension with size >1, the
-            // partitioner can add an all-to-all before and after the sort to
-            // make the sort dimension replicated. Thus, we propagate sharding
-            // along the sort dimension.
-            builder.addFactor(dim, dimSize, FactorType::kNeedReplication);
-          }
-          // TODO(b/387351742). Add a factor for the sort dimension if
-          // `propagatingAlongSortDim` is false.
-        }
-        return builder.build();
+        std::function<bool(int64_t)> pred = [&](int64_t dim) {
+          return propagatingAlongSortDim || dim != sort.getDimension();
+        };
+        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
+          return dim == sort.getDimension() ? FactorType::kNeedReplication
+                                            : FactorType::kDefault;
+        };
+        return OpShardingRuleBuilder(sort)
+            .addPointwiseIf(shape, pred, getFactorType)
+            .build();
       })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);

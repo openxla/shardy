@@ -188,18 +188,20 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwise(
-    ArrayRef<int64_t> shape) {
+    ArrayRef<int64_t> shape,
+    std::function<FactorType(int64_t)> getFactorType) {
   for (auto [dim, dimSize] : llvm::enumerate(shape)) {
-    addFactor(dim, dimSize);
+    addFactor(dim, dimSize, getFactorType(dim));
   }
   return *this;
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIf(
-    ArrayRef<int64_t> shape, std::function<bool(int64_t)> pred) {
+    ArrayRef<int64_t> shape, std::function<bool(int64_t)> pred,
+    std::function<FactorType(int64_t)> getFactorType) {
   for (auto [dim, dimSize] : llvm::enumerate(shape)) {
     if (pred(dim)) {
-      addFactor(dim, dimSize);
+      addFactor(dim, dimSize, getFactorType(dim));
     }
   }
   return *this;
