@@ -532,6 +532,24 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      // Return without inserting reshards for operations with special
+      // dimensions.
+      // TODO(enver): Insert explicit reshards if special dimensions are
+      // unsharded, or all speical dimensions need replication and annotated as
+      // such on the sharding rule.
+      if (isa<stablehlo::CholeskyOp, stablehlo::ReverseOp,
+              stablehlo::BitcastConvertOp, stablehlo::BroadcastInDimOp,
+              stablehlo::ConcatenateOp, stablehlo::DynamicSliceOp,
+              stablehlo::DynamicUpdateSliceOp, stablehlo::PadOp,
+              stablehlo::SliceOp, stablehlo::SortOp, stablehlo::TransposeOp,
+              stablehlo::TriangularSolveOp, stablehlo::FftOp,
+              stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
+              stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
+              stablehlo::ReshapeOp, stablehlo::ConvolutionOp,
+              stablehlo::CustomCallOp>(op)) {
+        return;
+      }
+
       // Checks if factors are sharded the same way across operands and results.
       if (hasCompatibleFactorShardings(shardingProjection)) {
         return;

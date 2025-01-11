@@ -450,3 +450,224 @@ func.func @dot_genaral_overlaps_and_trimmable_on_subaxis_multiple_axes(%arg0: te
   return %0 : tensor<64x8x16xf32>
 }
 
+// CHECK-LABEL: func @cholesky
+func.func @cholesky(%arg0: tensor<2x4x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {}]>}) -> tensor<2x4x8x8xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.cholesky %arg0, lower = true : (tensor<2x4x8x8xf32>) -> tensor<2x4x8x8xf32>
+  return %0 :  tensor<2x4x8x8xf32>
+}
+
+// CHECK-LABEL: func @reverse
+func.func @reverse(%arg0: tensor<4x32x8x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {}]>}) -> tensor<4x32x8x2xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.reverse %arg0, dims = [1, 3] : tensor<4x32x8x2xf32>
+  return %0 : tensor<4x32x8x2xf32>
+}
+
+// CHECK-LABEL: func @bitcast_convert_upcast
+func.func @bitcast_convert_upcast(%arg0: tensor<4x2x2xui32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<4x2xui64> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.bitcast_convert %arg0 : (tensor<4x2x2xui32>) -> tensor<4x2xui64>
+  return %0 :  tensor<4x2xui64>
+}
+
+// CHECK-LABEL: func @bitcast_convert_downcast
+func.func @bitcast_convert_downcast(%arg0: tensor<4x2xui64> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<4x2x2xui32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.bitcast_convert %arg0 : (tensor<4x2xui64>) -> tensor<4x2x2xui32>
+  return %0 :  tensor<4x2x2xui32>
+}
+
+// CHECK-LABEL: func @broadcast_in_dim
+func.func @broadcast_in_dim(%arg0: tensor<2x3x5x1x7xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {}, {}]>}) -> tensor<2x5x3x11x7x13xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [0, 2, 1, 3, 4] : (tensor<2x3x5x1x7xf32>) -> tensor<2x5x3x11x7x13xf32>
+  return %0 :  tensor<2x5x3x11x7x13xf32>
+}
+
+// CHECK-LABEL: func @concatenate
+func.func @concatenate(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<4x48x256xf32>) -> tensor<4x80x256xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  return %0 : tensor<4x80x256xf32>
+}
+
+// CHECK-LABEL: func @dynamic_slice
+func.func @dynamic_slice(%arg0: tensor<32x4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<i32>, %arg2: tensor<i32>, %arg3: tensor<i32>) -> tensor<32x1x2xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, %arg3, sizes = [32, 1, 2] : (tensor<32x4x8xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x1x2xf32>
+  return %0 : tensor<32x1x2xf32>
+}
+
+// CHECK-LABEL: func @dynamic_update_slice
+func.func @dynamic_update_slice(%arg0: tensor<32x4x8xf32>  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<32x1x2xf32>, %arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>) -> tensor<32x4x8xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3, %arg4 : (tensor<32x4x8xf32>, tensor<32x1x2xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x4x8xf32>
+  return %0 : tensor<32x4x8xf32>
+}
+
+// CHECK-LABEL: func @pad
+func.func @pad(%arg0: tensor<28x28x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"x"}]>}, %arg1: tensor<f32>) -> tensor<30x26x16xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.pad %arg0, %arg1, low = [1, -1, 0], high = [1, -1, 0], interior = [0, 0, 0] : (tensor<28x28x16xf32>, tensor<f32>) -> tensor<30x26x16xf32>
+  return %0 : tensor<30x26x16xf32>
+}
+
+// CHECK-LABEL: func @slice
+func.func @slice(%arg0: tensor<32x4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<32x1x2xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:8:2] : (tensor<32x4x8xf32>) -> tensor<32x1x2xf32>
+  return %0 : tensor<32x1x2xf32>
+}
+
+// CHECK-LABEL: func @sort
+func.func @sort(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>) {
+  // CHECK-NOT: sdy.reshard
+  %0:2 = "stablehlo.sort"(%arg0, %arg1) ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<f32>, %arg5: tensor<f32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {dimension = 0 : i64, is_stable = true} : (tensor<4x32x8xi32>, tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>)
+  return %0#0, %0#1 : tensor<4x32x8xi32>, tensor<4x32x8xf32>
+}
+
+// CHECK-LABEL: func @sort_all_other_dims_size_one
+func.func @sort_all_other_dims_size_one(%arg0: tensor<1x4x1xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<1x4x1xi32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = "stablehlo.sort"(%arg0) ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {dimension = 1 : i64, is_stable = true} : (tensor<1x4x1xi32>) -> tensor<1x4x1xi32>
+  return %0 : tensor<1x4x1xi32>
+}
+
+// CHECK-LABEL: func @transpose
+func.func @transpose(%arg0: tensor<256x32x64x100xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}, {}]>}) -> tensor<100x32x256x64xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.transpose %arg0, dims = [3, 1, 0, 2] : (tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf32>
+  return %0 : tensor<100x32x256x64xf32>
+}
+
+// CHECK-LABEL: func @triangular_solve
+func.func @triangular_solve(%arg0: tensor<8x3x3xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<8x3x5xf32>) -> tensor<8x3x5xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = "stablehlo.triangular_solve"(%arg0, %arg1) {
+    left_side = true,
+    lower = true,
+    unit_diagonal = false,
+    transpose_a = #stablehlo<transpose NO_TRANSPOSE>
+  } : (tensor<8x3x3xf32>, tensor<8x3x5xf32>) -> tensor<8x3x5xf32>
+  return %0 : tensor<8x3x5xf32>
+}
+
+// CHECK-LABEL: func @fft_complex
+func.func @fft_complex(%arg0: tensor<8x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<8x32x64xcomplex<f32>> {
+  // CHECK-NOT: sdy.reshard
+  %0  = stablehlo.fft %arg0, type = FFT, length = [32, 64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
+  return %0 : tensor<8x32x64xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_real
+func.func @fft_real(%arg0: tensor<8x32x64xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<8x32x33xcomplex<f32>> {
+  // CHECK-NOT: sdy.reshard
+  %0  = stablehlo.fft %arg0, type = RFFT, length = [32, 64] : (tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>>
+  return %0 : tensor<8x32x33xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @reduce_window
+func.func @reduce_window(%arg0: tensor<48x48x3xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<48x48x3xi32>, %arg2: tensor<f32>, %arg3: tensor<i32>)
+    -> (tensor<16x48x1xf32>, tensor<16x48x1xi32>) {
+  // CHECK-NOT: sdy.reshard
+  %0:2 = "stablehlo.reduce_window"(%arg0, %arg1, %arg2, %arg3) ({
+  ^bb0(%arg4: tensor<f32>, %arg5 : tensor<i32>, %arg6: tensor<f32>, %arg7 : tensor<i32>):
+    %1 = stablehlo.maximum %arg4, %arg6 : tensor<f32>
+    %2 = stablehlo.maximum %arg5, %arg7 : tensor<i32>
+    stablehlo.return %1, %2 : tensor<f32>, tensor<i32>
+  }) {window_dimensions = array<i64: 3, 1, 3>,
+      window_strides = array<i64: 3, 1, 3>,
+      padding = dense<[[0, 0], [2, -2], [0, 0]]> : tensor<3x2xi64>}
+      : (tensor<48x48x3xf32>, tensor<48x48x3xi32>, tensor<f32>, tensor<i32>) -> (tensor<16x48x1xf32>, tensor<16x48x1xi32>)
+  func.return %0#0, %0#1 : tensor<16x48x1xf32>, tensor<16x48x1xi32>
+}
+
+// CHECK-LABEL: @scatter_single_input
+func.func @scatter_single_input(%arg0: tensor<3x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<2x3x2xi64>, %arg2: tensor<2x3x2x2xf32>) -> tensor<3x4x2xf32>{
+  // CHECK-NOT: sdy.reshard
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+    ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+      %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
+      stablehlo.return %1 : tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [2, 3],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [1, 0],
+      index_vector_dim = 2>,
+    indices_are_sorted = false,
+    unique_indices = false
+  } : (tensor<3x4x2xf32>, tensor<2x3x2xi64>, tensor<2x3x2x2xf32>) -> tensor<3x4x2xf32>
+  return %0 : tensor<3x4x2xf32>
+}
+
+// CHECK-LABEL: func @select_and_scatter
+func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {}]>}, %arg1: tensor<10x12x12x64xf32>, %arg2: tensor<f32>)
+   -> tensor<10x24x24x64xf32> {
+  %1 = "stablehlo.select_and_scatter"(%arg0, %arg1, %arg2) ({
+  // CHECK-NOT: sdy.reshard
+  ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+    %2 = stablehlo.compare GT, %arg3, %arg4 :(tensor<f32>, tensor<f32>) -> tensor<i1>
+    stablehlo.return %2 : tensor<i1>
+  },  {
+  ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+    %2 = stablehlo.add %arg3, %arg4 : tensor<f32>
+    stablehlo.return %2 : tensor<f32>
+  }) {
+    window_dimensions = array<i64: 1, 2, 2, 1>,
+    window_strides = array<i64: 1, 2, 2, 1>
+  } : (tensor<10x24x24x64xf32>, tensor<10x12x12x64xf32>, tensor<f32>) -> tensor<10x24x24x64xf32>
+  return %1 : tensor<10x24x24x64xf32>
+}
+
+// CHECK-LABEL: @gather
+func.func @gather(%arg0: tensor<3x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"x"}]>}, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [2, 3],
+      collapsed_slice_dims = [0],
+      start_index_map = [1, 0],
+      index_vector_dim = 2>,
+    slice_sizes = array<i64: 1, 2, 2>,
+    indices_are_sorted = false
+  } : (tensor<3x4x2xf32>, tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32>
+  return %0 : tensor<2x3x2x2xf32>
+}
+
+// CHECK-LABEL: func @reshape
+func.func @reshape(%arg0: tensor<16x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.reshape %arg0 : (tensor<16x2x4xf32>) -> tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @convolution
+func.func @convolution(%arg0 : tensor<2x224x224x192xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {}]>}, %arg1 : tensor<3x3x192x64xf32>) -> tensor<2x112x112x64xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [2, 2], pad = [[0, 1], [0, 1]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      lhs_dilations = dense<1> : tensor<2xi64>,
+      rhs_dilations = dense<1> : tensor<2xi64>
+    } : (tensor<2x224x224x192xf32>, tensor<3x3x192x64xf32>) -> tensor<2x112x112x64xf32>
+  return %0 : tensor<2x112x112x64xf32>
+}
+
+// CHECK-LABEL: func @custom_call
+func.func @custom_call(%arg0: tensor<128x128xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<128x128xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.custom_call @CompactWyHelper(%arg0) : (tensor<128x128xf32>) -> tensor<128x128xf32>
+  return %0 : tensor<128x128xf32>
+}
