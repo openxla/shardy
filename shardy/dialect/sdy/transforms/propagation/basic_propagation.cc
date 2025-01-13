@@ -27,8 +27,8 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
@@ -51,6 +51,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
@@ -255,17 +256,6 @@ LogicalResult propagateTensorShardings(
   }
   MeshAttr mesh = getMeshAttr(op, meshName.value());
   assert(mesh && "unknown mesh");
-
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      operandShardings, resultShardings, shardingRule, mesh);
-
-  auto [updateOperand, updateResult] =
-      factorPropagation.propagateFactorShardings(
-          shardingProjection, direction, shardingRule.getFactorSizes(), mesh,
-          op, conservativePropagation);
-
-  // We need to update the tensor sharding attributes explicitly, as we have
-  // been modifying our internal `shardingProjection` so far.
   std::optional<NotifyOpModifiedCallback> notifyOpModified = std::nullopt;
   if (rewriter) {
     notifyOpModified = [op, rewriter](Operation* modifiedOp) {
@@ -278,18 +268,37 @@ LogicalResult propagateTensorShardings(
       }
     };
   }
+  ShardingProjection shardingProjection = ShardingProjection::build(
+      operandShardings, resultShardings, shardingRule, mesh);
+  bool anyUpdated = false;
+  auto updateShardings = [&]() {
+    auto [updateOperand, updateResult] =
+        factorPropagation.propagateFactorShardings(
+            shardingProjection, direction, shardingRule.getFactorSizes(), mesh,
+            op, conservativePropagation);
 
-  op->getContext()->executeAction<SourceShardingAction>(
-      [&, &updateOperand = updateOperand, &updateResult = updateResult]() {
-        updateTensorShardings(
-            operands, results, operandShardings, resultShardings,
-            setOperandShardingCallback, setResultShardingCallback, shardingRule,
-            shardingProjection, updateOperand, updateResult, meshName.value(),
-            mesh, shardingGroupMap, notifyOpModified);
-      },
-      /*IRUnits=*/{op}, operands, results, operandShardings, resultShardings);
+    // We need to update the tensor sharding attributes explicitly, as we
+    // have been modifying our internal `shardingProjection` so far.
+    updateTensorShardings(operands, results, operandShardings, resultShardings,
+                          setOperandShardingCallback, setResultShardingCallback,
+                          shardingRule, shardingProjection, updateOperand,
+                          updateResult, meshName.value(), mesh,
+                          shardingGroupMap, notifyOpModified);
+    anyUpdated = updateOperand.any() || updateResult.any();
+  };
+  MLIRContext* context = op->getContext();
+  // NOTE: assuming the existence of an action handler is the
+  // `SourceShardingHandler`. Need to check for it here to avoid copying
+  // `shardingProjection` when debugging is disabled.
+  if (context->hasActionHandler()) {
+    context->executeAction<SourceShardingAction>(
+        updateShardings,
+        /*IRUnits=*/{op}, operands, results, operandShardings, resultShardings,
+        shardingProjection);
+  } else {
+    updateShardings();
+  }
 
-  bool anyUpdated = updateOperand.any() || updateResult.any();
   if (rewriter && !anyUpdated) {
     return rewriter->notifyMatchFailure(op, [](Diagnostic& diag) {
       diag << "Couldn't update any of the factor shardings";

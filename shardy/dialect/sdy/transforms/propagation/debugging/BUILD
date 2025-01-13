@@ -8,6 +8,7 @@ cc_library(
     hdrs = ["source_sharding.h"],
     deps = [
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",

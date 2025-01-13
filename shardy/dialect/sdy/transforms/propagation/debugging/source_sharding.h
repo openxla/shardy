@@ -19,8 +19,8 @@ limitations under the License.
 #include <cstdint>
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/Action.h"
-#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Unit.h"
@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
@@ -93,12 +94,15 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
   SourceShardingAction(ArrayRef<IRUnit> irUnits, ValueRange operands,
                        ValueRange results,
                        ArrayRef<TensorShardingAttr> oldOperandShardings,
-                       ArrayRef<TensorShardingAttr> oldResultShardings)
+                       ArrayRef<TensorShardingAttr> oldResultShardings,
+                       const ShardingProjection& shardingProjection)
       : Base(irUnits),
         operands(operands),
         results(results),
         oldOperandShardings(oldOperandShardings),
-        oldResultShardings(oldResultShardings) {}
+        oldResultShardings(oldResultShardings),
+        oldShardingProjection(shardingProjection),
+        newShardingProjection(shardingProjection) {}
 
   static constexpr StringLiteral tag = "SourceShardingAction";
   static constexpr StringLiteral desc =
@@ -108,6 +112,11 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
 
   ValueRange operands, results;
   ArrayRef<TensorShardingAttr> oldOperandShardings, oldResultShardings;
+  // NOTE: `oldShardingProjection` is a copy while `newShardingProjection` is a
+  // reference as when the action is executed, we want to see how the old and
+  // new sharding projections differ.
+  const ShardingProjection oldShardingProjection;
+  const ShardingProjection& newShardingProjection;
 };
 
 // Handles `SourceShardingAction`s, figuring out what operand/result shardings
