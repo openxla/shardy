@@ -398,7 +398,7 @@ bool AxisRefAttr::contains(AxisRefAttr other) const {
 }
 
 bool AxisRefAttr::strictlyContains(AxisRefAttr other) const {
-  return contains(other) && *this != other;
+  return *this != other && contains(other);
 }
 
 bool AxisRefAttr::prefixOf(AxisRefAttr other) const {
@@ -407,7 +407,23 @@ bool AxisRefAttr::prefixOf(AxisRefAttr other) const {
 }
 
 bool AxisRefAttr::strictPrefixOf(AxisRefAttr other) const {
-  return prefixOf(other) && *this != other;
+  return *this != other && prefixOf(other);
+}
+
+bool AxisRefAttr::suffixOf(AxisRefAttr other, MeshAttr mesh) const {
+  if (!other.contains(*this)) {
+    return false;
+  }
+  int64_t thisNextPreSize =
+      getSubAxisInfo() ? getSubAxisInfo().getNextPreSize() : getSize(mesh);
+  int64_t otherNextPreSize = other.getSubAxisInfo()
+                                 ? other.getSubAxisInfo().getNextPreSize()
+                                 : other.getSize(mesh);
+  return thisNextPreSize == otherNextPreSize;
+}
+
+bool AxisRefAttr::strictSuffixOf(AxisRefAttr other, MeshAttr mesh) const {
+  return *this != other && suffixOf(other, mesh);
 }
 
 bool AxisRefAttr::overlaps(AxisRefAttr other) const {

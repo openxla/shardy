@@ -135,6 +135,42 @@ TEST_F(DialectTest, AxisRefAttrPrefixOf) {
   isNotPrefix(createSubAxis("x", 1, 4), createSubAxis("x", 2, 4));
 }
 
+TEST_F(DialectTest, AxisRefAttrSuffixOf) {
+  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 8),
+                                       MeshAxisAttr::get(&context, "y", 2)});
+  auto strictSuffixOf = [mesh](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_TRUE(a.strictSuffixOf(b, mesh));
+    EXPECT_TRUE(a.suffixOf(b, mesh));
+    EXPECT_FALSE(b.suffixOf(a, mesh));
+    EXPECT_FALSE(b.strictSuffixOf(a, mesh));
+  };
+  strictSuffixOf(createSubAxis("x", 2, 4), createAxis("x"));
+  strictSuffixOf(createSubAxis("x", 4, 2), createSubAxis("x", 2, 4));
+  strictSuffixOf(createSubAxis("x", 2, 2), createSubAxis("x", 1, 4));
+
+  auto equals = [mesh](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_TRUE(a == b);
+    EXPECT_TRUE(a.suffixOf(b, mesh));
+    EXPECT_TRUE(b.suffixOf(a, mesh));
+    EXPECT_FALSE(a.strictSuffixOf(b, mesh));
+    EXPECT_FALSE(b.strictSuffixOf(a, mesh));
+  };
+  equals(createAxis("x"), createAxis("x"));
+  equals(createSubAxis("x", 2, 4), createSubAxis("x", 2, 4));
+
+  auto isNotSuffix = [mesh](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_FALSE(a.suffixOf(b, mesh));
+    EXPECT_FALSE(b.suffixOf(a, mesh));
+    EXPECT_FALSE(a.strictSuffixOf(b, mesh));
+    EXPECT_FALSE(b.strictSuffixOf(a, mesh));
+  };
+  isNotSuffix(createAxis("x"), createAxis("y"));
+  isNotSuffix(createSubAxis("x", 1, 2), createSubAxis("x", 2, 4));
+  isNotSuffix(createSubAxis("x", 1, 4), createSubAxis("x", 2, 4));
+  isNotSuffix(createSubAxis("x", 1, 4), createAxis("x"));
+  isNotSuffix(createSubAxis("x", 2, 2), createAxis("x"));
+}
+
 TEST_F(DialectTest, AxisRefAttrOverlaps) {
   auto checkOverlaps = [](AxisRefAttr a, AxisRefAttr b, bool expected) {
     EXPECT_EQ(a.overlaps(b), expected);

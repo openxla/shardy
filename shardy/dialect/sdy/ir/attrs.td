@@ -198,7 +198,8 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
   let description = [{
     **Constraints:**
     - `name` must be present in the bound `MeshAttr`.
-    - If `sub_axis_info` is present, it must satisfy the constraints of `SubAxisInfoAttr`.
+    - If `sub_axis_info` is present, it must satisfy the constraints of
+      `SubAxisInfoAttr`.
   }];
   let parameters = (ins
       StringRefParameter<"name of this axis">:$name,
@@ -292,6 +293,35 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     //  "a":(1)2, "b"      -> false
     bool strictPrefixOf(AxisRefAttr other) const;
 
+    // Returns whether this axis or sub-axis is a suffix of `other`, i.e.,
+    // `other` is equal to this axis ref or can be split into two sub-axes such
+    // that the minor one is this sub-axis.
+    //
+    // For example:
+    //  "a", "a"           -> true
+    //  "a":(2)4, "a"      -> true (size("a") == 8)
+    //  "a":(2)4, "a":(1)8 -> true
+    //  "a", "b"           -> false
+    //  "a", "a":(2)4      -> false
+    //  "a":(1)8, "a":(2)4 -> false
+    //  "a":(1)2, "a":(2)4 -> false
+    //  "a":(1)4, "a"      -> false
+    bool suffixOf(AxisRefAttr other, MeshAttr mesh) const;
+
+    // Returns whether this axis or sub-axis is a strict suffix of `other`.
+    // "a.strictSuffixOf(b)" is equivalent to "a.suffixOf(b) && a != b".
+    //
+    // For example:
+    //  "a":(2)4, "a"      -> true (size("a") == 8)
+    //  "a":(2)4, "a":(1)8 -> true
+    //  "a", "a"           -> false
+    //  "a", "b"           -> false
+    //  "a", "a":(2)4      -> false
+    //  "a":(1)8, "a":(2)4 -> false
+    //  "a":(1)2, "a":(2)4 -> false
+    //  "a":(1)4, "a"      -> false
+    bool strictSuffixOf(AxisRefAttr other, MeshAttr mesh) const;
+
     // Returns whether this axis or sub-axis overlaps with `other`, i.e., they
     // are equal or there is a sub-axis that is contained in both axis refs.
     //
@@ -328,11 +358,11 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     // axes do not have common prefix, return `std::nullopt`.
     //
     // For example:
-    //  "a", "a" -> "a"
-    //  "a", "b" -> std::nullopt
+    //  "a", "a"           -> "a"
+    //  "a", "b"           -> std::nullopt
     //  "a":(1)2, "a":(2)4 -> std::nullopt
-    //  "a":(1)4, "a" -> "a":(1)4
-    //  "a", "a":(1)4 -> "a":(1)4
+    //  "a":(1)4, "a"      -> "a":(1)4
+    //  "a", "a":(1)4      -> "a":(1)4
     //  "a":(1)2, "a":(1)4 -> "a":(1)2
     //  "a":(2)8, "a":(2)4 -> "a":(2)4
     std::optional<AxisRefAttr> getGreatestCommonPrefix(AxisRefAttr other) const;
