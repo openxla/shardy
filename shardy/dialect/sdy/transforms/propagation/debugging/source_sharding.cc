@@ -270,7 +270,7 @@ void saveShardingOriginsOnModule(ModuleOp moduleOp,
         .Case<ShardingConstraintOp, DataFlowEdgeOp>([&](Operation* op) {
           op->setAttr(kShardingOriginsAttr, builder.getDictionaryAttr(entries));
         })
-        .Default([&](Operation* op) {
+        .Default([&, value = value](Operation* op) {
           auto result = cast<OpResult>(value);
           // Need to handle the case where the generic `op` has multiple
           // results, so multiple dictionaries.
