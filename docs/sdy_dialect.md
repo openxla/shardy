@@ -16,30 +16,35 @@ _Gathers chunks of a tensor along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_gather` $gatheringAxes $tensor `out_sharding````=```$outSharding attr-dict `:` type($result)
+operation ::= `sdy.all_gather` $gathering_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
 ```
 
-Gathers chunks of a tensor along axes specified in `gatheringAxes`.
+Gathers chunks of a tensor along axes specified in `gathering_axes`.
 
-The `gatheringAxes` is a list of lists of axes. Each inner list specifies
+The `gathering_axes` is a list of lists of axes. Each inner list specifies
 the axes along which a separate gather should be performed. The outer list
 is over the dimensions of the tensor. It will be applied to the sharding of
-the operand (`tensor`) to obtain the sharding of the result (`outSharding`).
+the operand (`tensor`) to obtain the sharding of the result (`out_sharding`).
 
-Note that `outSharding` is not used to determine the sharding of the result.
-Instead, the sharding of the result is determined by the sharding of the
-operand and the `gatheringAxes`, and `outSharding` must match this inferred
-sharding.
+Note that `out_sharding` is not used to determine the sharding of the
+result. Instead, the sharding of the result is determined by the sharding of
+the operand and the `gathering_axes`, and `out_sharding` must match this
+inferred sharding.
 
 Example:
 ```mlir
 %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\]>]>} : tensor<8x8xf32>
-%2 = sdy.all_gather gathering_axes=[{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
+%2 = sdy.all_gather [{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
 ```
 
 **Constraints:**
-- Elements in `gatheringAxes` must satisfy the constraints listed in `AxisRefListAttr`.
+- Elements in `gatheringAxes` must satisfy the constraints listed in
+  `AxisRefListAttr`.
+- `out_sharding` must satisfy the constraints listed in
+  `TensorShardingAttr`.
+- The operand must have a sharding.
 - Both operand and result shardings should be bound to the same `MeshAttr`.
+- Applying `gathering_axes` to the operand sharding gets `out_sharding`.
 
 Traits: `SameOperandsAndResultType`
 
@@ -49,8 +54,8 @@ Interfaces: `InferTypeOpInterface`
 
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
-<tr><td><code>gatheringAxes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
-<tr><td><code>outSharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+<tr><td><code>gathering_axes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
 #### Operands:
@@ -575,7 +580,8 @@ Syntax:
 
 **Constraints:**
 - `name` must be present in the bound `MeshAttr`.
-- If `sub_axis_info` is present, it must satisfy the constraints of `SubAxisInfoAttr`.
+- If `sub_axis_info` is present, it must satisfy the constraints of
+  `SubAxisInfoAttr`.
 
 #### Parameters:
 
