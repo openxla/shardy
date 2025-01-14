@@ -310,6 +310,9 @@ TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName) {
 }
 
 void setSharding(Value value, TensorShardingAttr sharding) {
+  if (!sharding) {
+    return;
+  }
   value = getShardableValue(value);
   assert(value && "value should exist if its sharding is updated");
   TypeSwitch<Operation*>(getOwningOp(value))
