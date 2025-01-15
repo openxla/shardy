@@ -208,9 +208,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // bitwidth.
             ArrayRef<int64_t> shape =
                 inShape.size() < outShape.size() ? inShape : outShape;
-            return OpShardingRuleBuilder(bitcastConvert)
-                .addPointwise(shape)
-                .build();
+            OpShardingRuleBuilder builder(bitcastConvert);
+            builder.addPointwise(shape);
+            if (inShape.size() < outShape.size()) {
+              builder.addFactor(kNullDim, outShape.size() - 1, outShape.back(),
+                                FactorType::kNeedReplication);
+            } else if (inShape.size() > outShape.size()) {
+              builder.addFactor(inShape.size() - 1, kNullDim, inShape.back(),
+                                FactorType::kNeedReplication);
+            }
+            return builder.build();
           })
       .Case<stablehlo::BroadcastInDimOp>(
           [](stablehlo::BroadcastInDimOp broadcast) {
@@ -959,12 +966,15 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
               builder
                   // A non-contracting dim
                   .addFactor({aNonContractingDim, dim1}, kNullDim,
-                             aShape[aNonContractingDim])
+                             aShape[aNonContractingDim],
+                             FactorType::kNeedReplication)
                   // Result non-contracting dim
-                  .addFactor({kNullDim, dim2}, dim2, bShape[dim2])
+                  .addFactor({kNullDim, dim2}, dim2, bShape[dim2],
+                             FactorType::kNeedReplication)
                   // Contracting dim
                   .addFactor({aContractingDim, kNullDim}, dim1,
-                             aShape[aContractingDim]);
+                             aShape[aContractingDim],
+                             FactorType::kNeedReplication);
             } else {
               // The equation is `result @ op(a) = b`, where op(a) is determined
               // by `isATransposed`.
@@ -972,13 +982,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
               int64_t aContractingDim = isATransposed ? dim2 : dim1;
               builder
                   // Result non-contracting dim
-                  .addFactor({kNullDim, dim1}, dim1, bShape[dim1])
+                  .addFactor({kNullDim, dim1}, dim1, bShape[dim1],
+                             FactorType::kNeedReplication)
                   // A non-contracting dim
                   .addFactor({aNonContractingDim, dim2}, kNullDim,
-                             aShape[aNonContractingDim])
+                             aShape[aNonContractingDim],
+                             FactorType::kNeedReplication)
                   // Contracting dim
                   .addFactor({aContractingDim, kNullDim}, dim2,
-                             aShape[aContractingDim]);
+                             aShape[aContractingDim],
+                             FactorType::kNeedReplication);
             }
             return builder.build();
           })

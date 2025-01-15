@@ -27,7 +27,7 @@ func.func @scalar_op(%arg0: tensor<f32>) -> tensor<f32> {
 
 // CHECK-LABEL: func @bitcast_convert_upcast
 func.func @bitcast_convert_upcast(%arg0: tensor<4x2x2xui32>) -> tensor<4x2xui64> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j]) {i=4, j=2, k=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j]) {i=4, j=2, k=2} need_replication={k}>
   %0 = stablehlo.bitcast_convert %arg0 : (tensor<4x2x2xui32>) -> tensor<4x2xui64>
   return %0 :  tensor<4x2xui64>
 }
@@ -41,7 +41,7 @@ func.func @bitcast_convert_equal(%arg0: tensor<4x2x2xui32>) -> tensor<4x2x2xui32
 
 // CHECK-LABEL: func @bitcast_convert_downcast
 func.func @bitcast_convert_downcast(%arg0: tensor<4x2xui64>) -> tensor<4x2x2xui32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j, k]) {i=4, j=2, k=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j, k]) {i=4, j=2, k=2} need_replication={k}>
   %0 = stablehlo.bitcast_convert %arg0 : (tensor<4x2xui64>) -> tensor<4x2x2xui32>
   return %0 :  tensor<4x2x2xui32>
 }
@@ -822,7 +822,7 @@ func.func @transpose(%arg0: tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf
 
 // CHECK-LABEL: func @triangular_solve_left_side_no_transpose
 func.func @triangular_solve_left_side_no_transpose(%arg0: tensor<8x3x3xf32>, %arg1: tensor<8x3x5xf32>) -> tensor<8x3x5xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, j, k])->([i, l, k]) {i=8, j=3, k=5, l=3}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, j, k])->([i, l, k]) {i=8, j=3, k=5, l=3} need_replication={j, k, l}>
   %0 = "stablehlo.triangular_solve"(%arg0, %arg1) {
     left_side = true,
     lower = true,
@@ -834,7 +834,7 @@ func.func @triangular_solve_left_side_no_transpose(%arg0: tensor<8x3x3xf32>, %ar
 
 // CHECK-LABEL: func @triangular_solve_right_side_no_transpose
 func.func @triangular_solve_right_side_no_transpose(%arg0: tensor<8x3x3xf32>, %arg1: tensor<8x5x3xf32>) -> tensor<8x5x3xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, k], [i, j, k])->([i, j, l]) {i=8, j=5, k=3, l=3}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, k], [i, j, k])->([i, j, l]) {i=8, j=5, k=3, l=3} need_replication={j, k, l}>
   %0 = "stablehlo.triangular_solve"(%arg0, %arg1) {
     left_side = false,
     lower = true,
@@ -846,7 +846,7 @@ func.func @triangular_solve_right_side_no_transpose(%arg0: tensor<8x3x3xf32>, %a
 
 // CHECK-LABEL: func @triangular_solve_left_side_transpose
 func.func @triangular_solve_left_side_transpose(%arg0: tensor<8x3x3xf32>, %arg1: tensor<8x3x5xf32>) -> tensor<8x3x5xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, j], [i, j, k])->([i, l, k]) {i=8, j=3, k=5, l=3}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, j], [i, j, k])->([i, l, k]) {i=8, j=3, k=5, l=3} need_replication={j, k, l}>
   %0 = "stablehlo.triangular_solve"(%arg0, %arg1) {
     left_side = true,
     lower = true,
@@ -858,7 +858,7 @@ func.func @triangular_solve_left_side_transpose(%arg0: tensor<8x3x3xf32>, %arg1:
 
 // CHECK-LABEL: func @triangular_solve_right_side_transpose
 func.func @triangular_solve_right_side_transpose(%arg0: tensor<8x3x3xf32>, %arg1: tensor<8x5x3xf32>) -> tensor<8x5x3xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, l], [i, j, k])->([i, j, l]) {i=8, j=5, k=3, l=3}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, l], [i, j, k])->([i, j, l]) {i=8, j=5, k=3, l=3} need_replication={j, k, l}>
   %0 = "stablehlo.triangular_solve"(%arg0, %arg1) {
     left_side = false,
     lower = true,
