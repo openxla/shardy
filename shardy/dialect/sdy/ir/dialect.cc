@@ -51,7 +51,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/printers.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
-#include "stablehlo/dialect/TypeInference.h"
 
 namespace mlir {
 namespace sdy {
@@ -787,6 +786,9 @@ TensorShardingPerValueAttr::getOpenWithShardingAtIndex(
 
 TensorShardingPerValueAttr TensorShardingPerValueAttr::replaceValueSharding(
     int64_t index, TensorShardingAttr sharding) const {
+  if (getSharding(index) == sharding) {
+    return *this;
+  }
   SmallVector<TensorShardingAttr> shardings(getShardings());
   shardings[index] = sharding;
   return TensorShardingPerValueAttr::get(getContext(), shardings);
