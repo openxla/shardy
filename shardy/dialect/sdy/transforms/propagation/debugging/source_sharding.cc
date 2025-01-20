@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 
@@ -75,7 +76,8 @@ std::optional<int64_t> findNewAxisRefMatch(
 // ones. So if no operand/result sharding changes, the map will be empty.
 FactorsToEdgeSourceMap createSourceMap(
     const ShardingProjection& oldShardingProjection,
-    const ShardingProjection& newShardingProjection) {
+    const ShardingProjection& newShardingProjection,
+    OpShardingRuleAttr shardingRule, MeshAttr mesh) {
   FactorsToEdgeSourceMap axisToEdgeSourceMap{
       llvm::SmallVector<AxisToEdgeSourceMap>(
           oldShardingProjection.getNumOperands(), AxisToEdgeSourceMap()),
@@ -97,16 +99,24 @@ FactorsToEdgeSourceMap createSourceMap(
       valueSourceMap.try_emplace(newAxisRefs[oldAxisIndex],
                                  EdgeSource{type, sourceIndex});
     }
-    newAxisRefs = newAxisRefs.drop_front(oldAxisRefs.size());
-    for (AxisRefAttr axisRef : newAxisRefs) {
+    for (AxisRefAttr axisRef : newAxisRefs.drop_front(oldAxisRefs.size())) {
       valueSourceMap.try_emplace(axisRef, EdgeSource{type, sourceIndex});
     }
   };
 
+  MLIRContext* context = mesh.getContext();
+  ArrayRef<int64_t> factorSizes = shardingRule.getFactorSizes();
   auto visitValue =
       [&](const TensorFactorShardings& oldValue,
           const TensorFactorShardings& newValue, int64_t valueIndex,
+          TensorMappingAttr tensorMapping,
           llvm::SmallVector<AxisToEdgeSourceMap>& valueSourceMap) {
+        DenseSet<AxisRefAttr> oldAxes;
+        for (const auto& [_, oldFactorSharding] :
+             oldValue.factorIndexToSharding) {
+          oldAxes.insert(oldFactorSharding.axisRefs.begin(),
+                         oldFactorSharding.axisRefs.end());
+        }
         for (const auto& [factorIndex, oldFactorSharding] :
              oldValue.factorIndexToSharding) {
           const FactorSharding& newFactorSharding =
@@ -114,19 +124,51 @@ FactorsToEdgeSourceMap createSourceMap(
           if (oldFactorSharding.axisRefs == newFactorSharding.axisRefs) {
             continue;
           }
+          SmallVector<AxisRefAttr> newlyIntroducedAxes;
+          // If multiple sub axes can be merged due to a dimension sharding
+          // having multiple factors, each sharded on a sub axis, make sure we
+          // only save the merged one. This can happen during an
+          // `(A, B) -> (AB,)` reshape.
+          TensorShardingAttr tensorSharding = newValue.createTensorShardingAttr(
+              context, tensorMapping, factorSizes, "", mesh);
+          for (DimensionShardingAttr dimSharding :
+               tensorSharding.getDimShardings()) {
+            llvm::copy_if(
+                dimSharding.getAxes(), std::back_inserter(newlyIntroducedAxes),
+                [&](const AxisRefAttr& axisRef) {
+                  // Don't add any axes that were already in the
+                  // old sharding. We just want new axes.
+                  if (oldAxes.contains(axisRef)) {
+                    return false;
+                  }
+                  // We need to avoid any axes that already existed
+                  // in the old sharding, but aren't in the new
+                  // projection as the conflicted. E.g. for a
+                  // contracting dim matmul, if both the LHS/RHS are
+                  // sharded on the same axis on their respective
+                  // non-contracting dims, the dimension sharding
+                  // will contain the conflicting axes, but the
+                  // factor sharding will not. And we don't want this
+                  // axis as it isn't a newly introduced axis.
+                  for (AxisRefAttr newAxisRef : newFactorSharding.axisRefs) {
+                    if (newAxisRef.prefixOf(axisRef)) {
+                      return true;
+                    }
+                  }
+                  return false;
+                });
+          }
           // This factor sharding has changed, let's find who changed it.
           if (std::optional<int64_t> operandSource =
                   findNewAxisRefMatch(newFactorSharding.axisRefs, factorIndex,
                                       oldShardingProjection.getOperands())) {
-            saveEdgeSources(newFactorSharding.axisRefs,
-                            oldFactorSharding.axisRefs,
+            saveEdgeSources(newlyIntroducedAxes, oldFactorSharding.axisRefs,
                             EdgeSourceType::OPERAND, *operandSource,
                             valueSourceMap[valueIndex]);
           } else if (std::optional<int64_t> resultSource = findNewAxisRefMatch(
                          newFactorSharding.axisRefs, factorIndex,
                          oldShardingProjection.getResults())) {
-            saveEdgeSources(newFactorSharding.axisRefs,
-                            oldFactorSharding.axisRefs,
+            saveEdgeSources(newlyIntroducedAxes, oldFactorSharding.axisRefs,
                             EdgeSourceType::RESULT, *resultSource,
                             valueSourceMap[valueIndex]);
           }
@@ -137,14 +179,17 @@ FactorsToEdgeSourceMap createSourceMap(
        llvm::enumerate(llvm::zip_equal(oldShardingProjection.getOperands(),
                                        newShardingProjection.getOperands()))) {
     auto [oldOperand, newOperand] = packedOperands;
-    visitValue(oldOperand, newOperand, i, axisToEdgeSourceMap.operands);
+    visitValue(oldOperand, newOperand, i, shardingRule.getOperandMapping(i),
+               axisToEdgeSourceMap.operands);
   }
   for (auto [i, packedResults] :
        llvm::enumerate(llvm::zip_equal(oldShardingProjection.getResults(),
                                        newShardingProjection.getResults()))) {
     auto [oldResult, newResult] = packedResults;
-    visitValue(oldResult, newResult, i, axisToEdgeSourceMap.results);
+    visitValue(oldResult, newResult, i, shardingRule.getResultMapping(i),
+               axisToEdgeSourceMap.results);
   }
+
   return axisToEdgeSourceMap;
 }
 
@@ -453,6 +498,31 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
   });
 }
 
+OriginSharding lookUpValueOriginSharding(
+    Value value, AxisRefAttr axisRef,
+    const ValueToOriginShardingMap& valueToOriginShardingMap) {
+  // NOTE: need to call `getShardableValue` in case the operand/result is
+  // part of a `ShardableDataFlowOpInterface` and the `Value` the sharding
+  // lives on is a `DataFlowEdgeOp` instead of the `edgeSource` itself.
+  const AxisToOriginShardingMap& axisToOriginSharding =
+      valueToOriginShardingMap.at(getShardableValue(value));
+  if (auto it = axisToOriginSharding.find(axisRef);
+      it != axisToOriginSharding.end()) {
+    return it->second;
+  }
+  // If we can't find the axis, it may mean it's been split due to a
+  // (AC,)->(A, C) reshape or merged due to a (A, C)->(AC) reshape.
+  // In that case, we just return the first sharding origin we find with
+  // the same full axis name.
+  for (auto [otherAxis, originSharding] : axisToOriginSharding) {
+    if (otherAxis.contains(axisRef) || axisRef.contains(otherAxis)) {
+      return originSharding;
+    }
+  }
+  llvm_unreachable("Couldn't find sharding origin");
+  return {};
+}
+
 }  // namespace
 
 ShardingDebugMappings::ShardingDebugMappings(bool debugShardingOrigins,
@@ -473,27 +543,23 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
   }
 
   auto sourceShardingAction = cast<SourceShardingAction>(action);
-  FactorsToEdgeSourceMap factorsToEdgeSources =
-      createSourceMap(sourceShardingAction.oldShardingProjection,
-                      sourceShardingAction.newShardingProjection);
+  FactorsToEdgeSourceMap factorsToEdgeSources = createSourceMap(
+      sourceShardingAction.oldShardingProjection,
+      sourceShardingAction.newShardingProjection,
+      sourceShardingAction.shardingRule, sourceShardingAction.mesh);
   // If the new and old shardings are different, something was propagated to it.
   // Find and save it.
   auto lookUpOriginSharding = [&](EdgeSource edgeSource,
                                   AxisRefAttr axisRef) -> OriginSharding {
     switch (edgeSource.type) {
-      // NOTE: need to call `getShardableValue` in case the operand/result is
-      // part of a `ShardableDataFlowOpInterface` and the `Value` the sharding
-      // lives on is a `DataFlowEdgeOp` instead of the `edgeSource` itself.
       case OPERAND:
-        return mappings->valueToOriginShardingMap
-            .at(getShardableValue(
-                sourceShardingAction.operands[edgeSource.index]))
-            .at(axisRef);
+        return lookUpValueOriginSharding(
+            sourceShardingAction.operands[edgeSource.index], axisRef,
+            mappings->valueToOriginShardingMap);
       case RESULT:
-        return mappings->valueToOriginShardingMap
-            .at(getShardableValue(
-                sourceShardingAction.results[edgeSource.index]))
-            .at(axisRef);
+        return lookUpValueOriginSharding(
+            sourceShardingAction.results[edgeSource.index], axisRef,
+            mappings->valueToOriginShardingMap);
     }
     llvm_unreachable("unknown EdgeSource");
   };

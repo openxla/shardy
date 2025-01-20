@@ -291,10 +291,10 @@ LogicalResult propagateTensorShardings(
   // `SourceShardingHandler`. Need to check for it here to avoid copying
   // `shardingProjection` when debugging is disabled.
   if (context->hasActionHandler()) {
-    context->executeAction<SourceShardingAction>(
-        updateShardings,
-        /*IRUnits=*/{op}, operands, results, operandShardings, resultShardings,
-        shardingProjection);
+    context->executeAction<SourceShardingAction>(updateShardings,
+                                                 /*IRUnits=*/{op}, operands,
+                                                 results, mesh, shardingRule,
+                                                 shardingProjection);
   } else {
     updateShardings();
   }

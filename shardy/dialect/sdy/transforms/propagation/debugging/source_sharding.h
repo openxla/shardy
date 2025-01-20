@@ -92,15 +92,14 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
   using Base = tracing::ActionImpl<SourceShardingAction>;
 
   SourceShardingAction(ArrayRef<IRUnit> irUnits, ValueRange operands,
-                       ValueRange results,
-                       ArrayRef<TensorShardingAttr> oldOperandShardings,
-                       ArrayRef<TensorShardingAttr> oldResultShardings,
+                       ValueRange results, MeshAttr mesh,
+                       OpShardingRuleAttr shardingRule,
                        const ShardingProjection& shardingProjection)
       : Base(irUnits),
         operands(operands),
         results(results),
-        oldOperandShardings(oldOperandShardings),
-        oldResultShardings(oldResultShardings),
+        mesh(mesh),
+        shardingRule(shardingRule),
         oldShardingProjection(shardingProjection),
         newShardingProjection(shardingProjection) {}
 
@@ -111,7 +110,8 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
       "`sdy.sharding_constraint`, or `sdy.ManualComputationOp` input/output.";
 
   ValueRange operands, results;
-  ArrayRef<TensorShardingAttr> oldOperandShardings, oldResultShardings;
+  MeshAttr mesh;
+  OpShardingRuleAttr shardingRule;
   // NOTE: `oldShardingProjection` is a copy while `newShardingProjection` is a
   // reference as when the action is executed, we want to see how the old and
   // new sharding projections differ.

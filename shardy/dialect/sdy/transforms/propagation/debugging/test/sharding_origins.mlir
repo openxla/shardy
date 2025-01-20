@@ -371,5 +371,53 @@ func.func @while_loop_with_multiple_results(
   return %0#0, %0#1 : tensor<8x4xf32>, tensor<8x4xf32>
 }
 
-// TODO(b/379631271): Add test doing a 8->4x4 reshape with axis size 8
-// (introduces a new sub axis).
+// CHECK-LABEL: sub_axes_splitting_reshape
+// CHECK-SAME:    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}]>,
+// CHECK-SAME:                           sdy.sharding_origins = {c = "self"}}
+// CHECK-SAME:  ) -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}, {"c":(4)2, ?}]>,
+// CHECK-SAME:                         sdy.sharding_origins = {"c:(1)4" = "input: 0", "c:(4)2" = "input: 0"}}) {
+func.func @sub_axes_splitting_reshape(
+  %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}]>})
+  -> tensor<4x4xf32> {
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %arg0 {
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c":(1)4, ?}, {"c":(4)2, ?}]>]>,
+  // CHECK-SAME:   sdy.sharding_origins = [{"c:(1)4" = "input: 0", "c:(4)2" = "input: 0"}]
+  // CHECK-SAME: } : (tensor<16xf32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: return %[[RESHAPE]]
+  %0 = stablehlo.reshape %arg0 : (tensor<16xf32>) -> tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}
+
+// CHECK-LABEL: sub_axes_merging_reshape
+// CHECK-SAME:    %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}, {"c":(4)2, ?}]>,
+// CHECK-SAME:                            sdy.sharding_origins = {"c:(1)4" = "self", "c:(4)2" = "self"}}
+// CHECK-SAME:  ) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}]>,
+// CHECK-SAME:                        sdy.sharding_origins = {c = "input: 0"}}) {
+func.func @sub_axes_merging_reshape(
+  %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}, {"c":(4)2, ?}]>})
+  -> tensor<16xf32> {
+  // CHECK-NEXT: stablehlo.reshape %arg0 {
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c", ?}]>]>,
+  // CHECK-SAME:   sdy.sharding_origins = [{c = "input: 0"}]
+  // CHECK-SAME: } : (tensor<4x4xf32>) -> tensor<16xf32>
+  %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
+  return %0 : tensor<16xf32>
+}
+
+// Here the func result axis `"c":(1)4` gets pushed onto the add first, and then
+// the func arg `"c":(1)4` which ends up getting merged.
+//
+// CHECK-LABEL: sub_axes_merge_after_propagation_step
+// CHECK-SAME:    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}]>,
+// CHECK-SAME:                           sdy.sharding_origins = {"c:(1)4" = "self"}}
+// CHECK-SAME:  ) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}]>,
+// CHECK-SAME:                        sdy.sharding_origins = {"c:(1)2" = "self", "c:(1)4" = "input: 0"}}) {
+func.func @sub_axes_merge_after_propagation_step(
+  %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}]>})
+  -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)2, ?}]>}) {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c":(1)4, ?}]>]>,
+  // CHECK-SAME:   sdy.sharding_origins = [{"c:(1)2" = "output: 0", "c:(1)4" = "input: 0"}]} : tensor<16xf32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<16xf32>
+  return %0 : tensor<16xf32>
+}
