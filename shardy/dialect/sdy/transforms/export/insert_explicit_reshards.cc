@@ -546,7 +546,10 @@ struct InsertExplicitReshardsPass
               stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
               stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
               stablehlo::ReshapeOp, stablehlo::ConvolutionOp,
-              stablehlo::CustomCallOp>(op)) {
+              stablehlo::CustomCallOp, stablehlo::ReduceOp,
+              stablehlo::AllReduceOp, stablehlo::AllGatherOp,
+              stablehlo::AllToAllOp, stablehlo::CollectivePermuteOp,
+              stablehlo::ClampOp>(op)) {
         return;
       }
 
