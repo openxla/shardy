@@ -258,7 +258,7 @@ void addRemainingAxes(SmallVector<AxisRefAttr>& currentAxes,
 // or this is the minor-most factor, then moving to the next factor.
 TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, TensorShardingAttr optionalSharding,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh) {
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh, const bool forceIsClosed) {
   TensorFactorShardings result;
   auto& [factorIndexToSharding, replicatedAxes] = result;
   factorIndexToSharding.reserve(factorSizes.size());
@@ -289,7 +289,7 @@ TensorFactorShardings buildTensorFactorShardings(
         break;
       }
 
-      factorSharding.isClosed = isDimClosed;
+      factorSharding.isClosed = forceIsClosed || isDimClosed;
       int64_t remainingFactorSize = factorSizes[factorIndex];
 
       if (factorSharding.isMinorMost) {
@@ -380,19 +380,21 @@ ShardingProjection::ShardingProjection(
 ShardingProjection ShardingProjection::build(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultShardings,
-    OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+    OpShardingRuleAttr shardingRule, MeshAttr mesh, const bool forceIsClosed) {
   ShardingProjection projection;
 
   for (const auto& [operandSharding, operandMapping] :
        llvm::zip_equal(operandShardings, shardingRule.getOperandMappings())) {
     projection.operands.push_back(buildTensorFactorShardings(
-        operandMapping, operandSharding, shardingRule.getFactorSizes(), mesh));
+        operandMapping, operandSharding, shardingRule.getFactorSizes(), mesh,
+        forceIsClosed));
   }
 
   for (const auto& [resultSharding, resultMapping] :
        llvm::zip_equal(resultShardings, shardingRule.getResultMappings())) {
     projection.results.push_back(buildTensorFactorShardings(
-        resultMapping, resultSharding, shardingRule.getFactorSizes(), mesh));
+        resultMapping, resultSharding, shardingRule.getFactorSizes(), mesh,
+        forceIsClosed));
   }
 
   return projection;
@@ -400,9 +402,10 @@ ShardingProjection ShardingProjection::build(
 
 ShardingProjection ShardingProjection::build(Operation* op,
                                              OpShardingRuleAttr shardingRule,
-                                             MeshAttr mesh) {
+                                             MeshAttr mesh,
+                                             const bool forceIsClosed) {
   return build(getShardings(op->getOperands()), getShardings(op->getResults()),
-               shardingRule, mesh);
+               shardingRule, mesh, forceIsClosed);
 }
 
 ShardingProjection ShardingProjection::build(AxesPerFactorRef axesPerFactorRef,

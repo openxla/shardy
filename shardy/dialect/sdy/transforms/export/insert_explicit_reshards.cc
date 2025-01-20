@@ -17,6 +17,7 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <set>
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -94,6 +95,26 @@ bool hasCompatibleFactorShardings(const ShardingProjection& projection,
 
   // TODO(enver): Detect conflicts across different factors.
   return true;
+}
+
+bool hasShardedFactorsThatNeedReplication(const ShardingProjection& projection,
+                                          OpShardingRuleAttr shardingRule) {
+  std::set<int64_t> factorIndicesThatNeedReplication;
+  for (int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
+    factorIndicesThatNeedReplication.insert(factorIndex);
+  }
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(projection.getOperands(),
+                                                 projection.getResults())) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (factorIndicesThatNeedReplication.contains(factorIndex) &&
+          !factorSharding.axisRefs.empty()) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // Insert explicit reshards for operands and results that change by
@@ -529,8 +550,11 @@ struct InsertExplicitReshardsPass
       // that one to find meshes.
       MeshAttr mesh = getMeshAttr(op, meshName.value());
       assert(mesh && "unknown mesh");
-      ShardingProjection shardingProjection =
-          ShardingProjection::build(op, shardingRule, mesh);
+      // TODO(enver): Drop forceIsClosed, instead depend on CloseShardingsPass
+      // that will come before this pass. At that point, note that the missing
+      // shardings should be initialized as closed.
+      ShardingProjection shardingProjection = ShardingProjection::build(
+          op, shardingRule, mesh, /*forceIsClosed=*/true);
 
       // Return without inserting reshards if any factor sharding has overflow
       // axes. This case is not handled yet.
@@ -563,12 +587,11 @@ struct InsertExplicitReshardsPass
       }
 
       // Return without inserting reshards for operations with factors that need
-      // replication.
+      // replication and some of those factors are sharded.
       // TODO(enver): Insert explicit reshards also for the case that the
       // factors that need replication are sharded.
-      if (isa<stablehlo::CholeskyOp, stablehlo::BitcastConvertOp,
-              stablehlo::ConcatenateOp, stablehlo::SortOp,
-              stablehlo::TriangularSolveOp>(op)) {
+      if (hasShardedFactorsThatNeedReplication(shardingProjection,
+                                               shardingRule)) {
         return;
       }
 

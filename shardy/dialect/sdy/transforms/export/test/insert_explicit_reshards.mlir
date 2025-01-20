@@ -452,6 +452,15 @@ func.func @dot_genaral_overlaps_and_trimmable_on_subaxis_multiple_axes(%arg0: te
 
 // CHECK-LABEL: func @cholesky
 func.func @cholesky(%arg0: tensor<2x4x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {}]>}) -> tensor<2x4x8x8xf32> {
+  // CHECK: %[[CHOLESKY:.*]] = stablehlo.cholesky %arg0, lower = true {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}, {}]>]>} : tensor<2x4x8x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[CHOLESKY]] <@mesh, [{}, {}, {}, {}]> : tensor<2x4x8x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<2x4x8x8xf32>
+  %0 = stablehlo.cholesky %arg0, lower = true {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}, {}]>]>} : (tensor<2x4x8x8xf32>) -> tensor<2x4x8x8xf32>
+  return %0 :  tensor<2x4x8x8xf32>
+}
+
+// CHECK-LABEL: func @cholesky_replicated_dim_is_sharded
+func.func @cholesky_replicated_dim_is_sharded(%arg0: tensor<2x4x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}, {"y"}]>}) -> tensor<2x4x8x8xf32> {
   // CHECK-NOT: sdy.reshard
   %0 = stablehlo.cholesky %arg0, lower = true : (tensor<2x4x8x8xf32>) -> tensor<2x4x8x8xf32>
   return %0 :  tensor<2x4x8x8xf32>
@@ -466,6 +475,15 @@ func.func @reverse(%arg0: tensor<4x32x8x2xf32> {sdy.sharding = #sdy.sharding<@me
 
 // CHECK-LABEL: func @bitcast_convert_upcast
 func.func @bitcast_convert_upcast(%arg0: tensor<4x2x2xui32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<4x2xui64> {
+  // CHECK: %[[BITCAST_CONVERT:.*]] = stablehlo.bitcast_convert %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x2x2xui32>) -> tensor<4x2xui64>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[BITCAST_CONVERT]] <@mesh, [{}, {}]> : tensor<4x2xui64>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<4x2xui64>
+  %0 = stablehlo.bitcast_convert %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<4x2x2xui32>) -> tensor<4x2xui64>
+  return %0 :  tensor<4x2xui64>
+}
+
+// CHECK-LABEL: func @bitcast_convert_upcast_casting_dim_is_sharded
+func.func @bitcast_convert_upcast_casting_dim_is_sharded(%arg0: tensor<4x2x2xui32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {"y"}]>}) -> tensor<4x2xui64> {
   // CHECK-NOT: sdy.reshard
   %0 = stablehlo.bitcast_convert %arg0 : (tensor<4x2x2xui32>) -> tensor<4x2xui64>
   return %0 :  tensor<4x2xui64>
@@ -473,8 +491,17 @@ func.func @bitcast_convert_upcast(%arg0: tensor<4x2x2xui32> {sdy.sharding = #sdy
 
 // CHECK-LABEL: func @bitcast_convert_downcast
 func.func @bitcast_convert_downcast(%arg0: tensor<4x2xui64> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<4x2x2xui32> {
+  // CHECK: %[[BITCAST_CONVERT:.*]] = stablehlo.bitcast_convert %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<4x2xui64>) -> tensor<4x2x2xui32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[BITCAST_CONVERT]] <@mesh, [{}, {}, {}]> : tensor<4x2x2xui32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<4x2x2xui32>
+  %0 = stablehlo.bitcast_convert %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}]>]>}: (tensor<4x2xui64>) -> tensor<4x2x2xui32>
+  return %0 :  tensor<4x2x2xui32>
+}
+
+// CHECK-LABEL: func @bitcast_convert_downcast_casting_dim_is_sharded
+func.func @bitcast_convert_downcast_casting_dim_is_sharded(%arg0: tensor<4x2xui64> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<4x2x2xui32>  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {"y"}]>}){
   // CHECK-NOT: sdy.reshard
-  %0 = stablehlo.bitcast_convert %arg0 : (tensor<4x2xui64>) -> tensor<4x2x2xui32>
+  %0 = stablehlo.bitcast_convert %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {"y"}]>]>} : (tensor<4x2xui64>) -> tensor<4x2x2xui32>
   return %0 :  tensor<4x2x2xui32>
 }
 
@@ -485,11 +512,37 @@ func.func @broadcast_in_dim(%arg0: tensor<2x3x5x1x7xf32> {sdy.sharding = #sdy.sh
   return %0 :  tensor<2x5x3x11x7x13xf32>
 }
 
+// CHECK-LABEL: func @concatenate_single_input
+func.func @concatenate_single_input(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}]>}) -> tensor<4x32x256xf32> {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}, {}]> : tensor<4x32x256xf32>
+  // CHECK-NEXT: stablehlo.concatenate %[[RESHARD]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<4x32x256xf32>) -> tensor<4x32x256xf32>
+  %0 = stablehlo.concatenate %arg0, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<4x32x256xf32>) -> tensor<4x32x256xf32>
+  return %0 : tensor<4x32x256xf32>
+}
+
 // CHECK-LABEL: func @concatenate
-func.func @concatenate(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<4x48x256xf32>) -> tensor<4x80x256xf32> {
+func.func @concatenate(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<4x48x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}]>}) -> tensor<4x80x256xf32> {
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}, {}]> : tensor<4x48x256xf32>
+  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %arg0, %[[RESHARD1]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {}, {}]> : tensor<4x80x256xf32>
+  // CHECK-NEXT: return %[[RESHARD2]] : tensor<4x80x256xf32>
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  return %0 : tensor<4x80x256xf32>
+}
+
+// CHECK-LABEL: func @concatenate_replicated_dim_is_sharded
+func.func @concatenate_replicated_dim_is_sharded(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}, %arg1: tensor<4x48x256xf32>) -> tensor<4x80x256xf32> {
   // CHECK-NOT: sdy.reshard
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
   return %0 : tensor<4x80x256xf32>
+}
+
+// CHECK-LABEL: func @add
+func.func @add(%arg0: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<4x32xf32>) -> tensor<4x32xf32> {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}]> : tensor<4x32xf32>
+  // CHECK-NEXT: stablehlo.add %arg0, %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x32xf32>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x32xf32>
+  return %0 : tensor<4x32xf32>
 }
 
 // CHECK-LABEL: func @dynamic_slice
@@ -553,8 +606,22 @@ func.func @sort_single_input_output(%arg0: tensor<4x32x8xi32> {sdy.sharding = #s
   return %0 : tensor<4x32x8xi32>
 }
 
-// CHECK-LABEL: func @sort_compatible
-func.func @sort_compatible(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) -> (tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) {
+// CHECK-LABEL: func @sort_incompatible_on_nonsort_dimensions
+func.func @sort_incompatible_on_nonsort_dimensions(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> (tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) {
+  // CHECK:  %[[SORT:.*]] = "stablehlo.sort"(%arg0) <{dimension = 0 : i64, is_stable = true}>
+  // CHECK:  {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {}]>]>}
+  // CHECK-NEXT:  %[[RESHARD:.*]] = sdy.reshard %[[SORT]] <@mesh, [{}, {"y"}, {}]> : tensor<4x32x8xi32>
+  // CHECK-NEXT:  return %[[RESHARD]] : tensor<4x32x8xi32>
+  %0 = "stablehlo.sort"(%arg0) <{dimension = 0 : i64, is_stable = true}> ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x32x8xi32>) -> (tensor<4x32x8xi32>)
+  return %0 : tensor<4x32x8xi32>
+}
+
+// CHECK-LABEL: func @sort_compatible_on_nonsort_dimension
+func.func @sort_compatible_on_nonsort_dimension(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) -> (tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) {
   // CHECK-NOT: sdy.reshard
   %0 = "stablehlo.sort"(%arg0) <{dimension = 0 : i64, is_stable = true}> ({
     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
@@ -598,13 +665,28 @@ func.func @transpose(%arg0: tensor<256x32x64x100xf32> {sdy.sharding = #sdy.shard
 
 // CHECK-LABEL: func @triangular_solve
 func.func @triangular_solve(%arg0: tensor<8x3x3xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<8x3x5xf32>) -> tensor<8x3x5xf32> {
-  // CHECK-NOT: sdy.reshard
-  %0 = "stablehlo.triangular_solve"(%arg0, %arg1) {
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}, {}]> : tensor<8x3x5xf32>
+  // CHECK-NEXT: %[[TRIANGULAR_SOLVE:.*]] = "stablehlo.triangular_solve"(%arg0, %[[RESHARD1]]) <{left_side = true, lower = true, transpose_a = #stablehlo<transpose NO_TRANSPOSE>, unit_diagonal = false}> {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<8x3x3xf32>, tensor<8x3x5xf32>) -> tensor<8x3x5xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[TRIANGULAR_SOLVE]] <@mesh, [{}, {}, {}]> : tensor<8x3x5xf32>
+  // CHECK-NEXT: return %[[RESHARD2]] : tensor<8x3x5xf32>
+  %0 = "stablehlo.triangular_solve"(%arg0, %arg1) <{
     left_side = true,
     lower = true,
     unit_diagonal = false,
     transpose_a = #stablehlo<transpose NO_TRANSPOSE>
-  } : (tensor<8x3x3xf32>, tensor<8x3x5xf32>) -> tensor<8x3x5xf32>
+  }> {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}]>]>} : (tensor<8x3x3xf32>, tensor<8x3x5xf32>) -> tensor<8x3x5xf32>
+  return %0 : tensor<8x3x5xf32>
+}
+
+// CHECK-LABEL: func @triangular_solve_replicated_dim_is_sharded
+func.func @triangular_solve_replicated_dim_is_sharded(%arg0: tensor<8x3x3xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}, %arg1: tensor<8x3x5xf32>) -> tensor<8x3x5xf32> {
+  // CHECK-NOT: sdy.reshard
+  %0 = "stablehlo.triangular_solve"(%arg0, %arg1) <{
+    left_side = true,
+    lower = true,
+    unit_diagonal = false,
+    transpose_a = #stablehlo<transpose NO_TRANSPOSE>
+  }> {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}]>]>} : (tensor<8x3x3xf32>, tensor<8x3x5xf32>) -> tensor<8x3x5xf32>
   return %0 : tensor<8x3x5xf32>
 }
 
@@ -759,8 +841,8 @@ func.func @clamp_scalar_min_max(%arg0: tensor<f32>, %arg1: tensor<4x8xf32> {sdy.
 
 // CHECK-LABEL: func @select
 func.func @select(%arg0: tensor<4x8xi1>, %arg1: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x", ?}, {?}]> : tensor<4x8xi1>
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh, [{"x", ?}, {?}]> : tensor<4x8xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<4x8xi1>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: %[[SELECT:.*]] = stablehlo.select %[[RESHARD1]], %arg1, %[[RESHARD2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x8xi1>, tensor<4x8xf32>
   // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[SELECT]] <@mesh, [{}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: return %[[RESHARD3]] : tensor<4x8xf32>
@@ -770,7 +852,7 @@ func.func @select(%arg0: tensor<4x8xi1>, %arg1: tensor<4x8xf32> {sdy.sharding = 
 
 // CHECK-LABEL: func @select_scalar_pred
 func.func @select_scalar_pred(%arg0: tensor<i1>, %arg1: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg2 <@mesh, [{"x", ?}, {?}]> : tensor<4x8xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg2 <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: %[[SELECT:.*]] = stablehlo.select %arg0, %arg1, %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<i1>, tensor<4x8xf32>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[SELECT]] <@mesh, [{}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: return %[[RESHARD2]] : tensor<4x8xf32>

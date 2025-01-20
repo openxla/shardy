@@ -110,6 +110,8 @@ struct TensorFactorShardings {
   // `tensorMapping`.
   //
   // Ignores sharding of any factor that needs strided view.
+  //
+  // The result tensor sharding is closed if any of its factors is closed.
   TensorShardingAttr createTensorShardingAttr(MLIRContext* ctx,
                                               TensorMappingAttr tensorMapping,
                                               ArrayRef<int64_t> factorSizes,
@@ -214,13 +216,13 @@ class ShardingProjection {
   static ShardingProjection build(ArrayRef<TensorShardingAttr> operandShardings,
                                   ArrayRef<TensorShardingAttr> resultShardings,
                                   OpShardingRuleAttr shardingRule,
-                                  MeshAttr mesh);
+                                  MeshAttr mesh, bool forceIsClosed = false);
 
   // Builds a `ShardingProjection` for the operand and result shardings of the
   // given `op`, w.r.t. the given `shardingRule`.
   static ShardingProjection build(Operation* op,
                                   OpShardingRuleAttr shardingRule,
-                                  MeshAttr mesh);
+                                  MeshAttr mesh, bool forceIsClosed = false);
 
   // Builds a `ShardingProjection` w.r.t. the given `shardingRule` where factor
   // shardings are the same across all operands and results, and specified by
