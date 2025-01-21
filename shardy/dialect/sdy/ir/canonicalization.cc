@@ -169,5 +169,10 @@ void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
   results.add<AllGatherNoopPattern>(context);
 }
 
+void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                              MLIRContext* context) {
+  results.add<AllSliceNoopPattern>(context);
+}
+
 }  // namespace sdy
 }  // namespace mlir

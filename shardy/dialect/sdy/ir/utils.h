@@ -16,7 +16,6 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_IR_UTILS_H_
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
-#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -25,6 +24,7 @@ limitations under the License.
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
+#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -191,6 +191,15 @@ std::string strippedAttrsString(ArrayRef<AttrTy> attrs,
   });
   result += "]";
   return result;
+}
+
+template <class Container>
+void addAxisOrMerge(Container& container, AxisRefAttr axis, MeshAttr mesh) {
+  if (!container.empty() && container.back().canMerge(axis)) {
+    container.back() = container.back().merge(axis, mesh);
+  } else {
+    container.push_back(axis);
+  }
 }
 
 // Returns the defining op of `value`, if it's an op result, or the parent op

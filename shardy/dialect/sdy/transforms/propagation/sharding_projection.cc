@@ -117,10 +117,9 @@ int64_t addAxesToDimSharding(SmallVector<AxisRefAttr>& dimSharding,
   int64_t totalSize = 1;
   for (auto [axisIndex, axisRef] : llvm::enumerate(axes)) {
     totalSize *= axisRef.getSize(mesh);
-    if (axisIndex == 0 && !dimSharding.empty() &&
-        dimSharding.back().canMerge(axisRef)) {
+    if (axisIndex == 0) {
       // Merge consecutive sub-axes at the boundary between two factors
-      dimSharding.back() = dimSharding.back().merge(axisRef, mesh);
+      addAxisOrMerge(dimSharding, axisRef, mesh);
     } else {
       dimSharding.push_back(axisRef);
     }

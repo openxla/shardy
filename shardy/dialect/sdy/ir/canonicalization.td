@@ -25,8 +25,13 @@ def ReshardOfReshardPattern :
     Pat<(Sdy_ReshardOp (Sdy_ReshardOp:$inner_reshard $tensor, $inner_sharding), $outer_sharding),
         (Sdy_ReshardOp $tensor, $outer_sharding), [(HasOneUse:$inner_reshard)]>;
 
+// TODO(b/390759740): Add more patterns for collectives, e.g., all-gather of
+// all-slice with matching axes.
 
 def AllGatherNoopPattern : Pat<(Sdy_AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$gatheringAxes, $resultSharding),
+                               (replaceWithValue $tensor)>;
+
+def AllSliceNoopPattern : Pat<(Sdy_AllSliceOp $tensor, Sdy_EmptyAxesPerDim:$slicingAxes, $resultSharding),
                                (replaceWithValue $tensor)>;
 
 #endif  // SDY_CANONICALIZATION
