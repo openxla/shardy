@@ -62,11 +62,18 @@ bool hasOverflowAxes(const ShardingProjection& projection) {
 
 // Checks if factor sharding is compatible, that is, it satisfies:
 // 1. Factors are sharded the same way across operands and results.
+// 2. Factors that need replication are unsharded.
 //
 // Assumes factor shardings do not have overflow axes.
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
-bool hasCompatibleFactorShardings(const ShardingProjection& projection) {
+bool hasCompatibleFactorShardings(const ShardingProjection& projection,
+                                  OpShardingRuleAttr shardingRule) {
   FactorIndexToSharding factorIndexToCommonSharding;
+  // Factors that need replication should be unsharded across all operands and
+  // results in order for it to have a compatible sharding.
+  for (int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
+    factorIndexToCommonSharding[factorIndex] = FactorSharding{};
+  }
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
@@ -535,15 +542,12 @@ struct InsertExplicitReshardsPass
       // Return without inserting reshards for operations with special
       // dimensions.
       // TODO(enver): Insert explicit reshards if special dimensions are
-      // unsharded, or all speical dimensions need replication and annotated as
-      // such on the sharding rule.
-      if (isa<stablehlo::CholeskyOp, stablehlo::ReverseOp,
-              stablehlo::BitcastConvertOp, stablehlo::BroadcastInDimOp,
-              stablehlo::ConcatenateOp, stablehlo::DynamicSliceOp,
-              stablehlo::DynamicUpdateSliceOp, stablehlo::PadOp,
-              stablehlo::SliceOp, stablehlo::SortOp, stablehlo::TransposeOp,
-              stablehlo::TriangularSolveOp, stablehlo::FftOp,
-              stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
+      // unsharded.
+      // TODO(enver): Add need replication factors to fft.
+      if (isa<stablehlo::ReverseOp, stablehlo::BroadcastInDimOp,
+              stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
+              stablehlo::PadOp, stablehlo::SliceOp, stablehlo::TransposeOp,
+              stablehlo::FftOp, stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
               stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
               stablehlo::ReshapeOp, stablehlo::ConvolutionOp,
               stablehlo::CustomCallOp, stablehlo::ReduceOp,
@@ -554,7 +558,17 @@ struct InsertExplicitReshardsPass
       }
 
       // Checks if factors are sharded the same way across operands and results.
-      if (hasCompatibleFactorShardings(shardingProjection)) {
+      if (hasCompatibleFactorShardings(shardingProjection, shardingRule)) {
+        return;
+      }
+
+      // Return without inserting reshards for operations with factors that need
+      // replication.
+      // TODO(enver): Insert explicit reshards also for the case that the
+      // factors that need replication are sharded.
+      if (isa<stablehlo::CholeskyOp, stablehlo::BitcastConvertOp,
+              stablehlo::ConcatenateOp, stablehlo::SortOp,
+              stablehlo::TriangularSolveOp>(op)) {
         return;
       }
 
