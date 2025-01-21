@@ -110,11 +110,13 @@ struct TensorFactorShardings {
   // `tensorMapping`.
   //
   // Ignores sharding of any factor that needs strided view.
-  TensorShardingAttr createTensorShardingAttr(MLIRContext* ctx,
-                                              TensorMappingAttr tensorMapping,
-                                              ArrayRef<int64_t> factorSizes,
-                                              StringRef meshName,
-                                              MeshAttr mesh) const;
+  //
+  // The result tensor sharding is closed if `defaultIsClosed` is true *or* any
+  // of factors are closed.
+  TensorShardingAttr createTensorShardingAttr(
+      MLIRContext* ctx, TensorMappingAttr tensorMapping,
+      ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh,
+      bool defaultIsClosed = false) const;
 };
 
 // A struct that specifies which operands and results are updated.

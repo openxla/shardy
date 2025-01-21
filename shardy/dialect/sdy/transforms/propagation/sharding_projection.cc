@@ -131,12 +131,13 @@ int64_t addAxesToDimSharding(SmallVector<AxisRefAttr>& dimSharding,
 
 TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
     MLIRContext* ctx, TensorMappingAttr tensorMapping,
-    ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh) const {
+    ArrayRef<int64_t> factorSizes, StringRef meshName, MeshAttr mesh,
+    const bool defaultIsClosed) const {
   SmallVector<DimensionShardingAttr> newDimShardings;
   newDimShardings.reserve(tensorMapping.getRank());
 
   for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
-    bool isClosed = false;
+    bool isClosed = defaultIsClosed;
     SmallVector<AxisRefAttr> dimSharding;
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
       int64_t factorSize = factorSizes[factorIndex];

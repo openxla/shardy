@@ -142,7 +142,8 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
         projection.getOperand(operandIndex)
             .createTensorShardingAttr(
                 mesh.getContext(), shardingRule.getOperandMapping(operandIndex),
-                shardingRule.getFactorSizes(), meshName, mesh);
+                shardingRule.getFactorSizes(), meshName, mesh,
+                /*defaultIsClosed=*/true);
     auto reshardOp = rewriter.create<ReshardOp>(operand.getLoc(), operand,
                                                 newTensorSharding);
     op->setOperand(operandIndex, reshardOp);
@@ -155,7 +156,8 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
         projection.getResult(resultIndex)
             .createTensorShardingAttr(
                 mesh.getContext(), shardingRule.getResultMapping(resultIndex),
-                shardingRule.getFactorSizes(), meshName, mesh);
+                shardingRule.getFactorSizes(), meshName, mesh,
+                /*defaultIsClosed=*/true);
     auto reshardOp = rewriter.create<ReshardOp>(result.getLoc(), result,
                                                 getSharding(result));
     rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);

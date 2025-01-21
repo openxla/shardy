@@ -492,6 +492,14 @@ func.func @concatenate(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding
   return %0 : tensor<4x80x256xf32>
 }
 
+// CHECK-LABEL: func @add
+func.func @add(%arg0: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<4x32xf32>) -> tensor<4x32xf32> {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}]> : tensor<4x32xf32>
+  // CHECK-NEXT: stablehlo.add %arg0, %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x32xf32>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x32xf32>
+  return %0 : tensor<4x32xf32>
+}
+
 // CHECK-LABEL: func @dynamic_slice
 func.func @dynamic_slice(%arg0: tensor<32x4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<i32>, %arg2: tensor<i32>, %arg3: tensor<i32>) -> tensor<32x1x2xf32> {
   // CHECK-NOT: sdy.reshard
@@ -759,8 +767,8 @@ func.func @clamp_scalar_min_max(%arg0: tensor<f32>, %arg1: tensor<4x8xf32> {sdy.
 
 // CHECK-LABEL: func @select
 func.func @select(%arg0: tensor<4x8xi1>, %arg1: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x", ?}, {?}]> : tensor<4x8xi1>
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh, [{"x", ?}, {?}]> : tensor<4x8xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<4x8xi1>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: %[[SELECT:.*]] = stablehlo.select %[[RESHARD1]], %arg1, %[[RESHARD2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x8xi1>, tensor<4x8xf32>
   // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[SELECT]] <@mesh, [{}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: return %[[RESHARD3]] : tensor<4x8xf32>
@@ -770,7 +778,7 @@ func.func @select(%arg0: tensor<4x8xi1>, %arg1: tensor<4x8xf32> {sdy.sharding = 
 
 // CHECK-LABEL: func @select_scalar_pred
 func.func @select_scalar_pred(%arg0: tensor<i1>, %arg1: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg2 <@mesh, [{"x", ?}, {?}]> : tensor<4x8xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg2 <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: %[[SELECT:.*]] = stablehlo.select %arg0, %arg1, %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<i1>, tensor<4x8xf32>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[SELECT]] <@mesh, [{}, {}]> : tensor<4x8xf32>
   // CHECK-NEXT: return %[[RESHARD2]] : tensor<4x8xf32>
