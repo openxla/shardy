@@ -245,7 +245,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   if (auto tupleType = dyn_cast<TupleType>(type)) {
     if (tupleType.size() != 1) {
       return emitError("ops can only have a sharding for a tuple of size 1: ")
-          << tupleType;
+             << tupleType;
     }
     tensorType = dyn_cast<ShapedType>(tupleType.getType(0));
   }
@@ -304,7 +304,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
           return axisNameToSize[axisRef.getName()] > 1;
         })) {
       return emitError("dim ")
-          << dim << " of size 0 is sharded on an axis of size > 1";
+             << dim << " of size 0 is sharded on an axis of size > 1";
     }
     if (checkDivisibility) {
       int64_t shardedSize = dimSharding.getShardedSize(mesh);
@@ -846,7 +846,6 @@ LogicalResult verifyManualComputationValue(
       }
     }
 
-
     // 6. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     SmallVector<int64_t> newDimSizes;
@@ -919,8 +918,8 @@ LogicalResult ManualComputationOp::verify() {
   }
 
   SymbolTable symbolTable(getOperation()->getParentOfType<ModuleOp>());
-  llvm::SmallDenseSet<StringRef> manualAxesSet(
-      getManualAxes().begin(), getManualAxes().end());
+  llvm::SmallDenseSet<StringRef> manualAxesSet(getManualAxes().begin(),
+                                               getManualAxes().end());
   if (failed(verifyManualComputationValue(
           *this, getOperandTypes(), getBody().getArgumentTypes(),
           getInShardings(), symbolTable, manualAxesSet, "operand")) ||
@@ -1221,6 +1220,86 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
              << "'";
     }
     return verifyOpShardingRuleAttr(shardingRule, op);
+  }
+
+  return success();
+}
+
+// Verifies:
+// 1. Operand has a sharding.
+// 2. Result sharding is valid w.r.t the corresponding type.
+// 3. Both operand and result shardings are same:
+//    - bound to the same `MeshAttr`.
+//    - have the same DimSharding.
+//    - have the same ReplicatedAxes.
+// 5. reduction_axes are valid (see `verifyAxisRefList`).
+// 6. no axis from reduction_axes overlaps with the operand/result sharding.
+LogicalResult AllReduceOp::verify() {
+  // 1. Verify operand has a sharding.
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  if (!operandSharding) {
+    return emitOpError("reduction on operand without sharding");
+  }
+
+  // 2. Verify result sharding is valid w.r.t the corresponding type.
+  TensorShardingAttr resultSharding = getOutSharding();
+  if (failed(verifyTensorShardingAttr(resultSharding, getType(), *this,
+                                      getEmitErrorFn(*this)))) {
+    return failure();
+  }
+
+  // 3.1 Verify MeshAttr of result and operand is the same.
+  MeshAttr mesh = resultSharding.getMesh(*this);
+
+  if (MeshAttr operandMesh = operandSharding.getMesh(*this);
+      operandMesh != mesh) {
+    return emitOpError("result mesh does not match operand mesh")
+               .attachNote(getOperand().getLoc())
+           << "operand mesh: " << operandMesh;
+  }
+  // 3.1 Verify DimSharding
+  if (operandSharding.getDimShardings() != resultSharding.getDimShardings()) {
+    return emitOpError("operand and result sharding must be same");
+  }
+  // 3.2 Verify ReplicatedAxes
+  if (operandSharding.getReplicatedAxes() !=
+      resultSharding.getReplicatedAxes()) {
+    return emitOpError("operand and result replicated axes must be same");
+  }
+
+  // 5. Verify all reduction axes.
+  ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
+  {
+    SmallDenseSet<AxisRefAttr> seenAxisRefs;
+    SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
+    SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
+
+    if (failed(verifyAxisRefList(reductionAxes, axisNameToSize, seenAxisRefs,
+                                 axisNameToSubAxes, getEmitErrorFn(*this)))) {
+      return failure();
+    }
+    auto axisRefComparator = AxisRefAttr::getMeshComparator(mesh);
+    // Verify all sub-axes are valid.
+    for (auto& [axisName, subAxes] : axisNameToSubAxes) {
+      int64_t axisSize = axisNameToSize[axisName];
+      // We need to sort the sub-axes since this is assumed by `verifySubAxes`.
+      llvm::sort(subAxes, axisRefComparator);
+      if (failed(verifySubAxes(subAxes, axisName, axisSize, mesh, seenAxisRefs,
+                               getEmitErrorFn(*this)))) {
+        return failure();
+      }
+    }
+  }
+
+  // 6. Verify no axis from reduction_axes overlaps with the operand/result
+  // sharding.
+  for (AxisRefAttr reductionAxis : reductionAxes) {
+    if (operandSharding.anyOfAxisRef(
+            [&](AxisRefAttr axis) { return axis.overlaps(reductionAxis); })) {
+      return emitOpError(
+                 "reduction axis overlaps with operand/result sharding ")
+             << strippedAttrString(reductionAxis, true);
+    }
   }
 
   return success();

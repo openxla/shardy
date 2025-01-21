@@ -34,4 +34,12 @@ def AllGatherNoopPattern : Pat<(Sdy_AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$ga
 def AllSliceNoopPattern : Pat<(Sdy_AllSliceOp $tensor, Sdy_EmptyAxesPerDim:$slicingAxes, $resultSharding),
                                (replaceWithValue $tensor)>;
 
+def EmptyAxes: AttrConstraint<
+    CPred<"$_self.isa<AxisRefListAttr>() && "
+          "$_self.cast<AxisRefListAttr>().size() == 0">,
+    "is empty axes">;
+
+def AllReduceNoopPattern : Pat<(Sdy_AllReduceOp $tensor, EmptyAxes:$reductionAxes, $resultSharding),
+                               (replaceWithValue $tensor)>;
+
 #endif  // SDY_CANONICALIZATION

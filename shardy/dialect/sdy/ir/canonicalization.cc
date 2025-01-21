@@ -170,8 +170,13 @@ void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
 }
 
 void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
-                                              MLIRContext* context) {
+                                             MLIRContext* context) {
   results.add<AllSliceNoopPattern>(context);
+}
+
+void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                              MLIRContext* context) {
+  results.add<AllReduceNoopPattern>(context);
 }
 
 }  // namespace sdy

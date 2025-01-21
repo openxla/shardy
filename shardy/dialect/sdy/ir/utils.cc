@@ -288,6 +288,8 @@ TensorShardingAttr getSharding(Value value) {
           [](AllGatherOp allGatherOp) { return allGatherOp.getOutSharding(); })
       .Case<AllSliceOp>(
           [](AllSliceOp allSliceOp) { return allSliceOp.getOutSharding(); })
+      .Case<AllReduceOp>(
+          [](AllReduceOp allReduceOp) { return allReduceOp.getOutSharding(); })
       // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.
       .Case<ShardableDataFlowOpInterface>(
@@ -334,6 +336,9 @@ void setSharding(Value value, TensorShardingAttr sharding) {
       })
       .Case<AllSliceOp>([&](AllSliceOp allSliceOp) {
         allSliceOp.setOutShardingAttr(sharding);
+      })
+      .Case<AllReduceOp>([&](AllReduceOp allReduceOp) {
+        allReduceOp.setOutShardingAttr(sharding);
       })
       .Case<ShardableDataFlowOpInterface>(
           [&](ShardableDataFlowOpInterface shardableRegionOp) {

@@ -261,3 +261,55 @@ func.func @all_slice_with_incompatible_result_sharding_subaxis(%arg0 : tensor<16
   %0 = sdy.all_slice [{}, {"x":(4)2}] %arg0 out_sharding=<@mesh, [{"y"}, {"x":(1)4}]> :  tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
 }
+
+// -----
+sdy.mesh @mesh= <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @all_reduce_mismatch_output_sharding
+func.func @all_reduce_mismatch_output_sharding(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op operand and result sharding must be same}}
+  %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh, [{}, {"y"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// -----
+sdy.mesh @mesh= <["x"=2, "y"=2, "z"=2]>
+
+// CHECK-LABEL: func @all_reduce_mismatch_output_replicated_axes
+func.func @all_reduce_mismatch_output_replicated_axes(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op operand and result replicated axes must be same}}
+  %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh, [{}, {"x", "y"}], replicated={"z"}> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// -----
+sdy.mesh @mesh= <["x"=2, "y"=2, "z"=2]>
+sdy.mesh @mesh_other= <["x"=2, "y"=4]>
+
+// CHECK-LABEL: func @all_reduce_mismatch_output_mesh
+func.func @all_reduce_mismatch_output_mesh(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
+  // expected-note@above {{operand mesh: #sdy.mesh<["x"=2, "y"=2, "z"=2]>}}
+  // expected-error@+1 {{'sdy.all_reduce' op result mesh does not match operand mesh}}
+  %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh_other, [{}, {"x", "y"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// -----
+sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
+
+// CHECK-LABEL: func @all_reduce_overlapping_axis
+func.func @all_reduce_overlapping_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op reduction axis overlaps with operand/result sharding "y":(2)2}}
+  %0 = sdy.all_reduce {"y": (2)2} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// -----
+sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
+
+// CHECK-LABEL: func @all_reduce_wrong_axis
+func.func @all_reduce_wrong_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y":(4)2}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op sub-axis next pre-size 16 doesn't divide the size of the full axis 8: "y":(8)2}}
+  %0 = sdy.all_reduce {"y": (8)2} %arg0 out_sharding=<@mesh, [{"y":(4)2}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}

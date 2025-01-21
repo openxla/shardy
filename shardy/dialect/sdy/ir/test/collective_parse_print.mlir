@@ -4,6 +4,8 @@ sdy.mesh @mesh1 = <["x"=2, "y"=2]>
 sdy.mesh @mesh2 = <["x"=2, "y"=2, "z"=2]>
 sdy.mesh @mesh3 = <["x"=4, "y"=2]>
 sdy.mesh @mesh4 = <["x"=8, "y"=2, "z"=2]>
+sdy.mesh @mesh5 = <["x"=16, "y"=2]>
+sdy.mesh @mesh6 = <["x"=4, "y"=4]>
 
 // CHECK-LABEL: func @all_gather1
 func.func @all_gather1(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
@@ -115,4 +117,26 @@ func.func @all_slice_subaxis_suffix_of_subaxis(%arg0 : tensor<16x2xf32> {sdy.sha
   // CHECK-NEXT: sdy.all_slice [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{"y"}, {"z", "x":(1)4}]> : tensor<16x2xf32>
   %0 = sdy.all_slice [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{"y"}, {"z", "x":(1)4}]> : tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @all_reduce
+func.func @all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh1, [{}, {"x"}]> :  tensor<16x2xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh1, [{}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+
+// CHECK-LABEL: func @all_reduce_split_axis
+func.func @all_reduce_split_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh5, [{"y"}, {"x": (2)4}]>}) -> tensor<16x32xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"x":(1)2} %arg0 out_sharding=<@mesh5, [{"y"}, {"x":(2)4}]> :  tensor<16x32xf32>
+  %0 = sdy.all_reduce {"x": (1)2} %arg0 out_sharding=<@mesh5, [{"y"}, {"x":(2)4}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_split_axis_y
+func.func @all_reduce_split_axis_y(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh6, [{"y":(1)2}, {"x"}]>}) -> tensor<16x32xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"y":(2)2} %arg0 out_sharding=<@mesh6, [{"y":(1)2}, {"x"}]> :  tensor<16x32xf32>
+  %0 = sdy.all_reduce {"y": (2)2} %arg0 out_sharding=<@mesh6, [{"y":(1)2}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
 }

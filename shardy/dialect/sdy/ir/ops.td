@@ -526,5 +526,31 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
   let hasCanonicalizer = 1;
 }
 
+def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
+    [SameOperandsAndResultType,
+     DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+  let summary = "Reduces chunks of a tensor along `reduction_axes`";
+  let description = [{
+    Reduces chunks of a tensor along axes specified in `reduction_axes`.
+
+    **Constraints:**
+    - `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - `out_sharding` must satisfy the constraints listed in `TensorShardingAttr`.
+    - The operand must have a sharding.
+    - Both operand and result shardings should be same (mesh, dim_shardings,
+      replicated_axes).
+    - `reduction_axes` don't overlap with the operand/result dim_sharding.
+  }];
+
+  let arguments = (ins
+    AnyTensor:$tensor,
+    Sdy_AxisRefList:$reduction_axes,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+}
 
 #endif  // SDY_OPS
