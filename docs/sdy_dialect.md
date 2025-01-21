@@ -21,10 +21,11 @@ operation ::= `sdy.all_gather` $gathering_axes $tensor `out_sharding````=```$out
 
 Gathers chunks of a tensor along axes specified in `gathering_axes`.
 
-The `gathering_axes` is a list of lists of axes. Each inner list specifies
-the axes along which a separate gather should be performed. The outer list
-is over the dimensions of the tensor. It will be applied to the sharding of
-the operand (`tensor`) to obtain the sharding of the result (`out_sharding`).
+The `gathering_axes` is a list of lists of axes. The outer list is over the
+dimensions of the tensor. Each inner list specifies the axes along which a
+separate gather should be performed on the respective dimension. It will be
+applied to the sharding of the operand (`tensor`) to obtain the sharding of
+the result (`out_sharding`).
 
 Note that `out_sharding` is not used to determine the sharding of the
 result. Instead, the sharding of the result is determined by the sharding of
@@ -38,7 +39,7 @@ Example:
 ```
 
 **Constraints:**
-- Elements in `gatheringAxes` must satisfy the constraints listed in
+- Elements in `gathering_axes` must satisfy the constraints listed in
   `AxisRefListAttr`.
 - `out_sharding` must satisfy the constraints listed in
   `TensorShardingAttr`.
@@ -55,6 +56,71 @@ Interfaces: `InferTypeOpInterface`
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
 <tr><td><code>gathering_axes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | tensor of any type values
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | tensor of any type values
+
+
+### `sdy.all_slice` (sdy::AllSliceOp)
+
+_Slices chunks of a tensor along axes_
+
+
+Syntax:
+
+```
+operation ::= `sdy.all_slice` $slicing_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+```
+
+Slices chunks of a tensor along axes specified in `slicing_axes`. There is
+an algebric duality between `sdy.all_slice` and `sdy.all_gather`.
+
+The `slicing_axes` is a list of lists of axes. The outer list is over the
+dimensions of the tensor. Each inner list specifies the axes along which a
+slice should be performed on the respective dimension. It will be applied to
+the sharding of the operand (`tensor`) to obtain the sharding of the result
+(`out_sharding`).
+
+Note that `out_sharding` is not used to determine the sharding of the
+result. Instead, the sharding of the result is determined by the sharding of
+the operand and the `slicing_axes`, and `out_sharding` must match this
+inferred sharding.
+
+Example:
+```mlir
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}, {}\]>]>} : tensor<8x8xf32>
+%2 = sdy.all_slice [{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a", "b", "c"}, {}, {"d"}\]> : tensor<8x8xf32>
+```
+
+**Constraints:**
+- Elements in `slicing_axes` must satisfy the constraints listed in
+  `AxisRefListAttr`.
+- `out_sharding` must satisfy the constraints listed in
+  `TensorShardingAttr`.
+- The operand must have a sharding.
+- Both operand and result shardings should be bound to the same `MeshAttr`.
+- Applying `slicing_axes` to the operand sharding gets `out_sharding`.
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>slicing_axes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
 <tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
