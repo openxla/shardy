@@ -48,6 +48,7 @@ cc_library(
         "lift_inlined_meshes.cc",
         "manual_axes_cleanup.cc",
         "sharding_group_import.cc",
+        "translate_mesh.cc",
     ],
     hdrs = [
         "passes.h",

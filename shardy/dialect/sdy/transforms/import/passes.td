@@ -153,3 +153,22 @@ def ManualAxesCleanupPass : Pass<"sdy-manual-axes-cleanup", "ModuleOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def TranslateMeshPass : Pass<"sdy-translate-mesh", "ModuleOp"> {
+  let summary = "Replaces ";
+  let description = [{
+    1. For any in/out sharding that hasn't specified a manual axis, add that
+       manual axis to its replicated_axes. This is to ensure manual axes are
+       always fully specified.
+    2. Sorts the manual axes in mesh axis declaration order.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+
+  let options = [
+     ListOption<"axisNames", "axis-names", "std::string",
+                "Names of the new axes.">,
+     Option<"oldMeshName", "old-mesh-name", "std::string",
+           /*default=*/"",
+           "The name of the old mesh to be replaced.">
+  ];
+}
