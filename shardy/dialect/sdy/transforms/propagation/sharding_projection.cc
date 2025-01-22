@@ -258,7 +258,7 @@ void addRemainingAxes(SmallVector<AxisRefAttr>& currentAxes,
 // or this is the minor-most factor, then moving to the next factor.
 TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, TensorShardingAttr optionalSharding,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh) {
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh, const bool closedIfMissing) {
   TensorFactorShardings result;
   auto& [factorIndexToSharding, replicatedAxes] = result;
   factorIndexToSharding.reserve(factorSizes.size());
@@ -269,7 +269,8 @@ TensorFactorShardings buildTensorFactorShardings(
     ArrayRef<AxisRefAttr> axes =
         optionalSharding ? optionalSharding.getDimSharding(dim).getAxes()
                          : ArrayRef<AxisRefAttr>();
-    bool isDimClosed = optionalSharding && optionalSharding.isClosed(dim);
+    bool isDimClosed =
+        optionalSharding ? optionalSharding.isClosed(dim) : closedIfMissing;
 
     int64_t axisIndex = 0;
     std::optional<AxisRefInfo> remainingAxisInfo =
@@ -380,19 +381,22 @@ ShardingProjection::ShardingProjection(
 ShardingProjection ShardingProjection::build(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultShardings,
-    OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+    OpShardingRuleAttr shardingRule, MeshAttr mesh,
+    const bool closedIfMissing) {
   ShardingProjection projection;
 
   for (const auto& [operandSharding, operandMapping] :
        llvm::zip_equal(operandShardings, shardingRule.getOperandMappings())) {
     projection.operands.push_back(buildTensorFactorShardings(
-        operandMapping, operandSharding, shardingRule.getFactorSizes(), mesh));
+        operandMapping, operandSharding, shardingRule.getFactorSizes(), mesh,
+        closedIfMissing));
   }
 
   for (const auto& [resultSharding, resultMapping] :
        llvm::zip_equal(resultShardings, shardingRule.getResultMappings())) {
     projection.results.push_back(buildTensorFactorShardings(
-        resultMapping, resultSharding, shardingRule.getFactorSizes(), mesh));
+        resultMapping, resultSharding, shardingRule.getFactorSizes(), mesh,
+        closedIfMissing));
   }
 
   return projection;
@@ -400,9 +404,10 @@ ShardingProjection ShardingProjection::build(
 
 ShardingProjection ShardingProjection::build(Operation* op,
                                              OpShardingRuleAttr shardingRule,
-                                             MeshAttr mesh) {
+                                             MeshAttr mesh,
+                                             const bool closedIfMissing) {
   return build(getShardings(op->getOperands()), getShardings(op->getResults()),
-               shardingRule, mesh);
+               shardingRule, mesh, closedIfMissing);
 }
 
 ShardingProjection ShardingProjection::build(AxesPerFactorRef axesPerFactorRef,

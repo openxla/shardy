@@ -211,16 +211,22 @@ class ShardingProjection {
 
   // Builds a `ShardingProjection` for the given operand and result shardings,
   // w.r.t. the given `shardingRule`.
+  //
+  // An empty sharding is created for missing shardings, and it is fully open or
+  // fully closed depending on `closedIfMissing`.
   static ShardingProjection build(ArrayRef<TensorShardingAttr> operandShardings,
                                   ArrayRef<TensorShardingAttr> resultShardings,
                                   OpShardingRuleAttr shardingRule,
-                                  MeshAttr mesh);
+                                  MeshAttr mesh, bool closedIfMissing = false);
 
   // Builds a `ShardingProjection` for the operand and result shardings of the
   // given `op`, w.r.t. the given `shardingRule`.
+  //
+  // An empty sharding is created for missing shardings, and it is fully open or
+  // fully closed depending on `closedIfMissing`.
   static ShardingProjection build(Operation* op,
                                   OpShardingRuleAttr shardingRule,
-                                  MeshAttr mesh);
+                                  MeshAttr mesh, bool closedIfMissing = false);
 
   // Builds a `ShardingProjection` w.r.t. the given `shardingRule` where factor
   // shardings are the same across all operands and results, and specified by

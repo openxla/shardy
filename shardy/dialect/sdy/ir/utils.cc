@@ -304,13 +304,16 @@ TensorShardingAttr getSharding(Value value) {
       });
 }
 
-TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName) {
+TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
+                                       const bool closedIfMissing) {
   if (TensorShardingAttr sharding = getSharding(value)) {
     return sharding;
   }
-
-  return TensorShardingAttr::getFullyOpen(value.getContext(),
-                                          getTensorRank(value), meshName);
+  return closedIfMissing
+             ? TensorShardingAttr::getFullyClosed(
+                   value.getContext(), getTensorRank(value), meshName)
+             : TensorShardingAttr::getFullyOpen(value.getContext(),
+                                                getTensorRank(value), meshName);
 }
 
 void setSharding(Value value, TensorShardingAttr sharding) {

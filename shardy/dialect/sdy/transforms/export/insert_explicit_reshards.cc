@@ -156,8 +156,9 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
             .createTensorShardingAttr(
                 mesh.getContext(), shardingRule.getResultMapping(resultIndex),
                 shardingRule.getFactorSizes(), meshName, mesh);
-    auto reshardOp = rewriter.create<ReshardOp>(result.getLoc(), result,
-                                                getSharding(result));
+    auto reshardOp = rewriter.create<ReshardOp>(
+        result.getLoc(), result,
+        getOrCreateSharding(result, meshName, /*closedIfMissing=*/true));
     rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
     setSharding(result, newTensorSharding);
   }
@@ -478,6 +479,18 @@ struct InsertExplicitReshardsPass
       // TODO(enver): Check if data flow ops, data flow edge op, manual
       // computation op require extra check before creating sharding rule.
 
+      std::optional<StringRef> meshName =
+          getCommonMeshName(getShardings(op->getOperands()),
+                            getShardings(op->getResults()), symbolTable);
+      if (!meshName.has_value()) {
+        // This means none of the operands or results have a sharding attribute
+        // or the sharding attributes use different meshes. Skip if so.
+        // TODO(enver): Actually, we are moving towards supporting multiple
+        // explicit reshards so operands and results are all bound by the same
+        // mesh.
+        return;
+      }
+
       if (isa<func::ReturnOp>(op)) {
         rewriter.setInsertionPoint(op);
         for (const auto& [index, opOperand] :
@@ -485,7 +498,8 @@ struct InsertExplicitReshardsPass
           Value operand = opOperand.get();
           TensorShardingAttr funcResultSharding =
               getFuncResultSharding(funcOp, index);
-          TensorShardingAttr operandSharding = getSharding(operand);
+          TensorShardingAttr operandSharding =
+              getOrCreateSharding(operand, *meshName, /*closedIfMissing=*/true);
           if (isFullyReplicated(operandSharding) &&
               isFullyReplicated(funcResultSharding)) {
             continue;
@@ -513,24 +527,13 @@ struct InsertExplicitReshardsPass
         // since all the operations of interest got their sharding rules.
         return;
       }
-      std::optional<StringRef> meshName =
-          getCommonMeshName(getShardings(op->getOperands()),
-                            getShardings(op->getResults()), symbolTable);
-      if (!meshName.has_value()) {
-        // This means none of the operands or results have a sharding attribute
-        // or the sharding attributes use different meshes. Skip if so.
-        // TODO(enver): Actually, we are moving towards supporting multiple
-        // explicit reshards so operands and results are all bound by the same
-        // mesh.
-        return;
-      }
 
       // TODO(enver): Define get a SymbolTable at the start of the pass and use
       // that one to find meshes.
       MeshAttr mesh = getMeshAttr(op, meshName.value());
       assert(mesh && "unknown mesh");
-      ShardingProjection shardingProjection =
-          ShardingProjection::build(op, shardingRule, mesh);
+      ShardingProjection shardingProjection = ShardingProjection::build(
+          op, shardingRule, mesh, /*closedIfMissing=*/true);
 
       // Return without inserting reshards if any factor sharding has overflow
       // axes. This case is not handled yet.
