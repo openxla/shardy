@@ -170,7 +170,8 @@ void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
 }
 
 void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
-                                              MLIRContext* context) {
+                                             MLIRContext* context) {
+  results.add<AllSliceOfAllGatherPattern>(context);
   results.add<AllSliceNoopPattern>(context);
 }
 

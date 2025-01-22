@@ -34,4 +34,9 @@ def AllGatherNoopPattern : Pat<(Sdy_AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$ga
 def AllSliceNoopPattern : Pat<(Sdy_AllSliceOp $tensor, Sdy_EmptyAxesPerDim:$slicingAxes, $resultSharding),
                                (replaceWithValue $tensor)>;
 
+def AllSliceOfAllGatherPattern : Pat<
+  (Sdy_AllSliceOp (Sdy_AllGatherOp:$gatherResult $tensor, $gatheringAxes, $_), $slicingAxes, $_),
+  (replaceWithValue $tensor),
+  [(Constraint<AllMatchPred<["gatheringAxes", "slicingAxes"]>, "axes match">), (HasOneUse:$gatherResult)]>;
+
 #endif  // SDY_CANONICALIZATION
