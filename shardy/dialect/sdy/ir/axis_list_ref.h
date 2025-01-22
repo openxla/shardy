@@ -146,6 +146,9 @@ class AxisListRef {
                           /*isTailIterated=*/true, tailAxisRef);
   }
 
+  // Clears this AxisListRef.
+  void clear();
+
   friend struct AxisListRefInfo;
 
  private:
@@ -178,8 +181,6 @@ class AxisListRef {
   // `newSizeExcludingNewTail`.
   void trim(int64_t newSizeExcludingNewTail,
             std::optional<AxisRefAttr> newTailAxisRef);
-  // Clears this AxisListRef.
-  void clear();
 
   // The axes that this FactorAxesPair holds is defined by `axisRefs` and
   // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is
