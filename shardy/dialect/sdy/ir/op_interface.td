@@ -239,4 +239,37 @@ def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
   ];
 }
 
+//===----------------------------------------------------------------------===//
+// CollectiveOpInterface
+//===----------------------------------------------------------------------===//
+
+def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
+  let description = [{
+    Interface for all collective ops. Encapsulates common get/set for
+    outSharding attribute.
+  }];
+  let cppNamespace = "::mlir::sdy";
+    let methods = [
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns the output tensor sharding of the collective op.
+      }],
+      /*retType=*/"::mlir::sdy::TensorShardingAttr",
+      /*methodName=*/"getOutSharding"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Sets the output tensor sharding of the collective op.
+      }],
+      /*retType=*/"void",
+      /*methodName=*/"setOutShardingAttr",
+      /*args=*/(ins "::mlir::sdy::TensorShardingAttr":$sharding)
+    >,
+  ];
+  let verify = [{
+    // TODO(kostiantynl): b/391574176 - add a common collective op verify
+    return success();
+  }];
+}
+
 #endif  // SDY_OP_INTERFACE

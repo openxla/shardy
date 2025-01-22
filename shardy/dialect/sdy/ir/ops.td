@@ -436,8 +436,7 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
 
 
 def Sdy_AllGatherOp : Sdy_Op<"all_gather",
-    [SameOperandsAndResultType,
-     DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
   let summary = "Gathers chunks of a tensor along axes";
   let description = [{
     Gathers chunks of a tensor along axes specified in `gathering_axes`.
@@ -481,8 +480,7 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
 }
 
 def Sdy_AllSliceOp : Sdy_Op<"all_slice",
-    [SameOperandsAndResultType,
-     DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
   let summary = "Slices chunks of a tensor along axes";
   let description = [{
     Slices chunks of a tensor along axes specified in `slicing_axes`. There is
