@@ -49,7 +49,7 @@ Example:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 #### Attributes:
 
@@ -114,7 +114,7 @@ Example:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 #### Attributes:
 
