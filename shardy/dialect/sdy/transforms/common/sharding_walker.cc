@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <variant>
@@ -23,6 +24,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/IR/Visitors.h"
@@ -79,11 +81,27 @@ void processSharding(const ValueOrFuncResult& valueOrFuncResult,
 // `transformShardings` is true.
 void processShardings(
     ArrayRef<TensorShardingAttr> shardings, ValueRange values,
-    bool transformShardings, TransformShardingForTensorFn callback,
+    bool transformShardings, const SymbolTable& symbolTable,
+    TransformShardingForTensorFn callback,
     std::function<void(ArrayRef<TensorShardingAttr>)> setShardingsFn) {
   if (shardings.empty()) {
     return;
   }
+  // To handle the case where an op has a maximal sharding but returns no,
+  // values, we create a null value to pass to the callback. Note we need to
+  // keep a stack variable of the value since `values` is a ValueRange which
+  // only holds a reference.
+  // TODO(b/391545244): do something smarter than sticking a null `Value` into
+  // the callback. Not an issue now but can be in the future.
+  SmallVector<Value> emptyMaximalValue;
+  if (values.empty()) {
+    // This should be a single maximal sharding.
+    assert(shardings.size() == 1 &&
+           shardings.front().getMesh(symbolTable).isMaximal());
+    emptyMaximalValue = SmallVector<Value>(1, Value());
+    values = emptyMaximalValue;
+  }
+
   if (!transformShardings) {
     for (auto [sharding, value] : llvm::zip_equal(shardings, values)) {
       callback(sharding, value);
@@ -101,10 +119,11 @@ void processShardings(
 // Same as above but for `TensorShardingPerValueAttr`.
 void processShardings(
     TensorShardingPerValueAttr shardings, ValueRange values,
-    bool transformShardings, TransformShardingForTensorFn callback,
+    bool transformShardings, const SymbolTable& symbolTable,
+    TransformShardingForTensorFn callback,
     std::function<void(TensorShardingPerValueAttr)> setShardingsFn) {
   return processShardings(shardings.getShardings(), values, transformShardings,
-                          callback,
+                          symbolTable, callback,
                           [&](ArrayRef<TensorShardingAttr> newShardings) {
                             setShardingsFn(TensorShardingPerValueAttr::get(
                                 shardings.getContext(), newShardings));
@@ -113,6 +132,8 @@ void processShardings(
 
 void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                    ConsumeOpFn consumeOpFn, bool transformShardings) {
+  SymbolTableCollection symbolTableCollection;
+  SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(rootOp);
   rootOp->walk<WalkOrder::PreOrder>([&](Operation* op) {
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
@@ -130,14 +151,15 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
               processShardings(
                   manualComputationOp.getInShardings(),
                   manualComputationOp.getBody().getArguments(),
-                  transformShardings, callback,
+                  transformShardings, symbolTable, callback,
                   [&](TensorShardingPerValueAttr newShardings) {
                     manualComputationOp.setInShardingsAttr(newShardings);
                   });
               processShardings(
                   manualComputationOp.getOutShardings(),
                   manualComputationOp.getResults(), transformShardings,
-                  callback, [&](TensorShardingPerValueAttr newShardings) {
+                  symbolTable, callback,
+                  [&](TensorShardingPerValueAttr newShardings) {
                     manualComputationOp.setOutShardingsAttr(newShardings);
                   });
             })
@@ -146,7 +168,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
               processShardings(
                   shardableDataFlowOp.getBlockArgumentEdgeOwnerShardings(),
                   shardableDataFlowOp.getBlockArgumentEdgeOwners(),
-                  transformShardings, callback,
+                  transformShardings, symbolTable, callback,
                   [&](ArrayRef<TensorShardingAttr> newShardings) {
                     shardableDataFlowOp.setBlockArgumentEdgeOwnerShardings(
                         newShardings);
@@ -154,7 +176,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
               processShardings(
                   shardableDataFlowOp.getOpResultEdgeOwnerShardings(),
                   shardableDataFlowOp.getOpResultEdgeOwners(),
-                  transformShardings, callback,
+                  transformShardings, symbolTable, callback,
                   [&](ArrayRef<TensorShardingAttr> newShardings) {
                     shardableDataFlowOp.setOpResultEdgeOwnerShardings(
                         newShardings);
@@ -170,7 +192,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
             processSharding(result, transformShardings, callback);
           } else {
             processShardings(getShardings(op), op->getResults(),
-                             transformShardings, callback,
+                             transformShardings, symbolTable, callback,
                              [&](ArrayRef<TensorShardingAttr> newShardings) {
                                setShardings(op, newShardings);
                              });

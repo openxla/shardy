@@ -6,6 +6,9 @@ sdy.mesh @foo = <["a"=2, "b"=4]>
 // CHECK: sdy.mesh @bar = <["a"=4, "b"=2]>
 sdy.mesh @bar = <["a"=4, "b"=2]>
 
+// CHECK: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+
 // CHECK-LABEL: func @no_results
 func.func @no_results(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: return {sdy.sharding = #sdy.sharding_per_value<[]>} %arg0
@@ -153,4 +156,22 @@ func.func @single_tuple(%arg0: tensor<8x8xf32>) -> tuple<tensor<8x8xf32>> {
   // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<@foo, [{"a"}, {}]>]>
   %0 = stablehlo.custom_call @sdy_testonly(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{"a"}, {}]>]>} : (tensor<8x8xf32>) -> tuple<tensor<8x8xf32>>
   return %0 : tuple<tensor<8x8xf32>>
+}
+
+// CHECK-LABEL: func @maximal_sharding_no_results
+// CHECK-SAME:      (%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func @maximal_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
+  // CHECK-NEXT: return %arg0 : tensor<8x8xf32>
+  stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
+  return %arg0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @maximal_sharding_multiple_results
+// CHECK-SAME:      (%arg0: tensor<2xf32>) -> tensor<2xf32> {
+func.func @maximal_sharding_multiple_results(%arg0: tensor<2xf32>) -> tensor<2xf32> {
+  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<2xf32>) -> (tensor<2x0xf32>, tensor<2xf32>, tensor<3x0xi32>, tensor<4xf32>)
+  // CHECK-NEXT: return %arg0 : tensor<2xf32>
+  %0:4 = stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<2xf32>) -> (tensor<2x0xf32>, tensor<2xf32>, tensor<3x0xi32>, tensor<4xf32>)
+  return %arg0 : tensor<2xf32>
 }

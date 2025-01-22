@@ -180,7 +180,7 @@ getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp,
     // TODO(b/380881922): We should be adding the data flow edges into the map
     // to make sure the in/out shardings on ManualComputationOp are updated.
     if (auto* value = std::get_if<Value>(&valueOrFuncResult);
-        value && getDataFlowEdge(*value)) {
+        value && *value && getDataFlowEdge(*value)) {
       return sharding;
     }
     clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
