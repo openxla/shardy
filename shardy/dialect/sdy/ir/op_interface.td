@@ -23,7 +23,7 @@ include "shardy/dialect/sdy/ir/attrs.td"
 // ShardableDataFlowOpInterface
 //===----------------------------------------------------------------------===//
 
-def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
+def ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface"> {
   let description = [{
     An op interface that allows shardy to propagate shardings through data flow
     edges of ops that extend this interface.
@@ -219,7 +219,7 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
 // ShardingRuleOpInterface
 //===----------------------------------------------------------------------===//
 
-def Sdy_ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
+def ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
   let description = [{
     An op interface that allows the op to define its own sharding rule.
     A sharding rule specifies how an operation can be partitioned according to

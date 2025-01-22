@@ -124,7 +124,7 @@ def Sdy_ReturnOp : Sdy_Op<"return", [Pure, Terminator]> {
 def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
    IsolatedFromAbove, DeclareOpInterfaceMethods<
-       Sdy_ShardableDataFlowOpInterface,
+       ShardableDataFlowOpInterface,
        /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
                             "setOpResultEdgeOwnerShardings",
                             "transformTargetSharding",
@@ -386,7 +386,7 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
      RecursivelySpeculatable, IsolatedFromAbove,
      DeclareOpInterfaceMethods<InferTypeOpInterface>,
      DeclareOpInterfaceMethods<
-         Sdy_ShardableDataFlowOpInterface,
+         ShardableDataFlowOpInterface,
          /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
                               "setOpResultEdgeOwnerShardings",
                               "getBlockArgumentEdgeOwners",
