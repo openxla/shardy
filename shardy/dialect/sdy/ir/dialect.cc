@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/ir/dialect.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -325,16 +326,9 @@ AxisRefAttr::getMeshComparator(MeshAttr mesh) {
     StringRef lhsName = lhs.getName();
     StringRef rhsName = rhs.getName();
     if (lhsName == rhsName) {
-      // Both axis-refs have the same name, if one is a sub-axis and the other
-      // is the full axis, then the sub-axis comes first.
-      if (!lhs.getSubAxisInfo()) {
-        return false;
-      }
-      if (!rhs.getSubAxisInfo()) {
-        return true;
-      }
-      // Both axis-refs are sub-axes.
-      return lhs.getSubAxisInfo() < rhs.getSubAxisInfo();
+
+      // Both axis-refs have the same name, defer to AxisRefAttr::operator<
+      return lhs < rhs;
     }
 
     return mesh.getAxisNameComparator()(lhsName, rhsName);
@@ -347,13 +341,16 @@ bool AxisRefAttr::operator<(const AxisRefAttr& rhs) const {
   if (name != rhsName) {
     return name < rhsName;
   }
-  // Both axis-refs have the same name, if one is a sub-axis and the other
-  // is the full axis, then the sub-axis is smaller.
+  // Both axis-refs have the same name
   if (!getSubAxisInfo()) {
-    return false;
+    // This is the full axis, it's smaller than `rhs` iff `rhs` is a sub-axis
+    // with pre-size > 1.
+    return rhs.getSubAxisPreSize() > 1;
   }
   if (!rhs.getSubAxisInfo()) {
-    return true;
+    // This is a sub-axis and `rhs` is the full axis, this is smaller iff its
+    // pre-size is 1.
+    return getSubAxisPreSize() == 1;
   }
   // Both axis-refs are sub-axes.
   return getSubAxisInfo() < rhs.getSubAxisInfo();
@@ -372,6 +369,10 @@ int64_t AxisRefAttr::getSize(MeshAttr mesh) const {
 
 int64_t AxisRefAttr::getSubAxisPreSize() const {
   return getSubAxisInfo() ? getSubAxisInfo().getPreSize() : 1;
+}
+
+int64_t AxisRefAttr::getNextPreSizeOrFullSize(MeshAttr mesh) const {
+  return getSubAxisInfo() ? getSubAxisInfo().getNextPreSize() : getSize(mesh);
 }
 
 bool AxisRefAttr::contains(AxisRefAttr other) const {
@@ -410,15 +411,8 @@ bool AxisRefAttr::strictPrefixOf(AxisRefAttr other) const {
 }
 
 bool AxisRefAttr::suffixOf(AxisRefAttr other, MeshAttr mesh) const {
-  if (!other.contains(*this)) {
-    return false;
-  }
-  int64_t thisNextPreSize =
-      getSubAxisInfo() ? getSubAxisInfo().getNextPreSize() : getSize(mesh);
-  int64_t otherNextPreSize = other.getSubAxisInfo()
-                                 ? other.getSubAxisInfo().getNextPreSize()
-                                 : other.getSize(mesh);
-  return thisNextPreSize == otherNextPreSize;
+  return other.contains(*this) &&
+         getNextPreSizeOrFullSize(mesh) == other.getNextPreSizeOrFullSize(mesh);
 }
 
 bool AxisRefAttr::strictSuffixOf(AxisRefAttr other, MeshAttr mesh) const {
@@ -442,8 +436,59 @@ bool AxisRefAttr::overlaps(AxisRefAttr other) const {
          otherSubAxisInfo.getPreSize() < thisSubAxisInfo.getNextPreSize();
 }
 
+bool AxisRefAttr::canCoexist(AxisRefAttr other) const {
+  if (getName() != other.getName()) {
+    return true;
+  }
+  SubAxisInfoAttr thisSubAxisInfo = getSubAxisInfo();
+  SubAxisInfoAttr otherSubAxisInfo = other.getSubAxisInfo();
+
+  if (!thisSubAxisInfo || !otherSubAxisInfo) {
+    // One of the axes is full
+    return true;
+  }
+
+  int64_t thisPreSize = thisSubAxisInfo.getPreSize();
+  int64_t otherPreSize = otherSubAxisInfo.getPreSize();
+  int64_t thisNextPreSize = thisSubAxisInfo.getNextPreSize();
+  int64_t otherNextPreSize = otherSubAxisInfo.getNextPreSize();
+
+  auto [minPreSize, maxPreSize] = std::minmax(thisPreSize, otherPreSize);
+  auto [minNextPreSize, maxNextPreSize] =
+      std::minmax(thisNextPreSize, otherNextPreSize);
+
+  if (minNextPreSize > maxPreSize) {
+    // Sub-axes overlap, check if overlapping and non-overlapping parts are
+    // valid.
+    return minNextPreSize % maxPreSize == 0 && maxPreSize % minPreSize == 0 &&
+           maxNextPreSize % minNextPreSize == 0;
+  }
+  // Sub-axes don't overlap, check if the gap is valid.
+  return maxPreSize % minNextPreSize == 0;
+}
+
+std::optional<AxisRefAttr> AxisRefAttr::getPrefixWithOverlap(
+    AxisRefAttr other, MeshAttr mesh) const {
+  int64_t thisPreSize = getSubAxisPreSize();
+  if (!canCoexist(other) || !overlaps(other) ||
+      other.getSubAxisPreSize() > thisPreSize) {
+    return std::nullopt;
+  }
+  if (other.contains(*this)) {
+    return *this;
+  }
+  int64_t thisNextPreSize = getNextPreSizeOrFullSize(mesh);
+  int64_t otherNextPreSize = other.getNextPreSizeOrFullSize(mesh);
+  return AxisRefAttr::get(
+      getContext(), getName(), thisPreSize,
+      std::min(thisNextPreSize, otherNextPreSize) / thisPreSize);
+}
+
 std::optional<AxisRefAttr> AxisRefAttr::getPrefixWithoutOverlap(
     AxisRefAttr other) const {
+  if (!canCoexist(other)) {
+    return std::nullopt;
+  }
   if (!overlaps(other)) {
     return *this;
   }
@@ -454,9 +499,26 @@ std::optional<AxisRefAttr> AxisRefAttr::getPrefixWithoutOverlap(
   if (thisPreSize >= otherPreSize) {
     return std::nullopt;
   }
-  return AxisRefAttr::get(getContext(), getName(),
-                          SubAxisInfoAttr::get(getContext(), thisPreSize,
-                                               otherPreSize / thisPreSize));
+  return AxisRefAttr::get(getContext(), getName(), thisPreSize,
+                          otherPreSize / thisPreSize);
+}
+
+std::optional<AxisRefAttr> AxisRefAttr::getSuffixWithoutOverlap(
+    AxisRefAttr other, MeshAttr mesh) const {
+  if (!canCoexist(other)) {
+    return std::nullopt;
+  }
+  if (!overlaps(other)) {
+    return *this;
+  }
+
+  int64_t thisNextPreSize = getNextPreSizeOrFullSize(mesh);
+  int64_t otherNextPreSize = other.getNextPreSizeOrFullSize(mesh);
+  if (thisNextPreSize <= otherNextPreSize) {
+    return std::nullopt;
+  }
+  return AxisRefAttr::get(getContext(), getName(), otherNextPreSize,
+                          thisNextPreSize / otherNextPreSize);
 }
 
 bool AxisRefAttr::canMerge(AxisRefAttr other) const {
@@ -477,12 +539,14 @@ AxisRefAttr AxisRefAttr::merge(AxisRefAttr other, MeshAttr mesh) const {
   if (preSize == 1 && mesh.getAxisSize(getName()) == size) {
     return AxisRefAttr::get(getContext(), getName());
   }
-  return AxisRefAttr::get(getContext(), getName(),
-                          SubAxisInfoAttr::get(getContext(), preSize, size));
+  return AxisRefAttr::get(getContext(), getName(), preSize, size);
 }
 
 std::optional<AxisRefAttr> AxisRefAttr::getGreatestCommonPrefix(
     AxisRefAttr other) const {
+  if (!canCoexist(other)) {
+    return std::nullopt;
+  }
   if (prefixOf(other)) {
     return *this;
   }
@@ -490,6 +554,14 @@ std::optional<AxisRefAttr> AxisRefAttr::getGreatestCommonPrefix(
     return other;
   }
   return std::nullopt;
+}
+
+std::optional<AxisRefAttr> AxisRefAttr::removeCommonPrefix(
+    AxisRefAttr prefix, MeshAttr mesh) const {
+  if (!prefix.strictPrefixOf(*this)) {
+    return std::nullopt;
+  }
+  return getSuffixWithoutOverlap(prefix, mesh);
 }
 
 //===----------------------------------------------------------------------===//

@@ -225,7 +225,8 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
 
     // Returns a comparator that order axis names lexicographically.
     // 1. Compare the axis names lexicographically.
-    // 2. For two axes with the same name, sub-axis is smaller than the full axis.
+    // 2. For a full-axis and sub-axis with the same name "a" -
+    //    "a":(1)x < "a" < "a":(y)z, where y > 1.
     // 3. Sort two sub-axes based on comparator of SubAxisInfoAttr.
     bool operator<(const AxisRefAttr &rhs) const;
 
@@ -236,6 +237,13 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
 
     // If this is a sub-axis, returns its pre-size, otherwise returns 1.
     int64_t getSubAxisPreSize() const;
+
+    // If this is a sub-axis, returns its next pre-size (see
+    // SubAxisInfoAttr::getNextPreSize), otherwise returns its full size.
+    int64_t getNextPreSizeOrFullSize(MeshAttr) const;
+
+    // TODO(b/391138813): consider checking `canCoexist` in `contains`,
+    // `prefixOf`, and `suffixOf`, instead of in using methods.
 
     // Returns whether this axis or sub-axis contains `other`, i.e., this axis
     // or sub-axis is equal to `other` or can be split into multiple sub-axes
@@ -337,35 +345,123 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     //  "a":(1)4, "b":(2)4 -> false
     bool overlaps(AxisRefAttr other) const;
 
-    // If there is no overlap between this and other axes, return this axis.
+    // Returns whether `a` and `b` can coexist in the same mesh:
+    // * If they overlap, then both overlapping and non-overlapping parts must
+    //   be valid axes or sub-axes.
+    // * Otherwise, both axes can be used to shard the same tensor.
+    //
+    // For example:
+    //  "a", "b"           -> true
+    //  "a", "b":(2)2      -> true
+    //  "a", "a"           -> true
+    //  "a", "a":(2)2      -> true
+    //  "a":(1)2, "a":(4)2 -> true
+    //  "a":(1)4, "a":(2)4 -> true
+    //  "a":(1)2, "a":(1)3 -> false
+    //  "a":(1)2, "a":(3)2 -> false
+    //  "a":(1)3, "a":(2)3 -> false
+    bool canCoexist(AxisRefAttr other) const;
+
+    // Returns the largest prefix of this axis that overlaps with `other`, or
+    // `std::nullopt` if the prefix does not exist.
+    //
+    // If this axis and `other` can't coexist, returns `std::nullopt` (see
+    // AxisRefAttr::canCoexist).
+    //
+    // For example:
+    //  "a", "a"           -> "a"
+    //  "a":(2)2, "a"      -> "a":(2)2
+    //  "a":(2)2, "a":(2)2 -> "a":(2)2
+    //  "a":(1)4, "a":(1)2 -> "a":(1)2
+    //  "a":(2)8, "a":(1)4 -> "a":(2)2
+    //  "a", "b"           -> std::nullopt
+    //  "a":(2)2, "b"      -> std::nullopt
+    //  "a":(1)4, "a":(2)4 -> std::nullopt
+    //  "a":(1)2, "a":(1)3 -> std::nullopt
+    //  "a":(3)2, "a":(2)3 -> std::nullopt
+    std::optional<AxisRefAttr> getPrefixWithOverlap(
+        AxisRefAttr other, MeshAttr mesh) const;
+
+    // If there is no overlap between this axis and `other`, return this axis.
     // Otherwise, return the largest prefix of this axis by removing the
     // overlapping suffix with `other`. Return `std::nullopt` if the prefix does
     // not exist.
     //
+    // If this axis and `other` can't coexist, returns `std::nullopt` (see
+    // AxisRefAttr::canCoexist).
+    //
     // For example:
     //  "a", "a":(2)2      -> "a":(1)2
-    //  "a":(2)2, "a":(2)2 -> std::nullopt
     //  "a":(1)4, "a":(2)4 -> "a":(1)2
-    //  "a":(2)4, "a":(1)4 -> std::nullopt
-    //  "a":(1)4, "a":(1)2 -> std::nullopt
     //  "a":(2)8, "a":(4)2 -> "a":(2)2
     //  "a":(1)4, "a":(4)2 -> "a":(1)4
     //  "a":(1)2, "a":(4)2 -> "a":(1)2
     //  "a":(1)4, "b":(2)4 -> "a":(1)4
+    //  "a":(2)2, "a":(2)2 -> std::nullopt
+    //  "a":(2)4, "a":(1)4 -> std::nullopt
+    //  "a":(1)4, "a":(1)2 -> std::nullopt
+    //  "a":(1)2, "a":(3)2 -> std::nullopt
+    //  "a":(1)3, "a":(2)3 -> std::nullopt
     std::optional<AxisRefAttr> getPrefixWithoutOverlap(AxisRefAttr other) const;
 
-    // Returns the greatest common prefix of this and `other`. If the two
+    // If there is no overlap between this axis and `other`, return this axis.
+    // Otherwise, return the largest suffix of this axis by removing the
+    // overlapping prefix with `other`. Return `std::nullopt` if the suffix does
+    // not exist.
+    //
+    // If this axis and `other` can't coexist, returns `std::nullopt` (see
+    // AxisRefAttr::canCoexist).
+    //
+    // For example:
+    //  "a", "a":(2)2      -> "a":(4)2 (size("a") == 8)
+    //  "a":(1)4, "a":(1)2 -> "a":(2)2
+    //  "a":(2)8, "a":(4)2 -> "a":(8)2
+    //  "a":(1)4, "a":(4)2 -> "a":(1)4
+    //  "a":(1)2, "a":(4)2 -> "a":(1)2
+    //  "a":(1)4, "b":(2)4 -> "a":(1)4
+    //  "a":(2)2, "a":(2)2 -> std::nullopt
+    //  "a":(1)4, "a":(2)4 -> std::nullopt
+    //  "a":(2)2, "a":(1)4 -> std::nullopt
+    //  "a":(2)3, "a":(1)3 -> std::nullopt
+    //  "a":(3)2, "a":(1)2 -> std::nullopt
+    std::optional<AxisRefAttr> getSuffixWithoutOverlap(
+        AxisRefAttr other, MeshAttr mesh) const;
+
+    // Returns the greatest common prefix of this axis and `other`. If the two
     // axes do not have common prefix, return `std::nullopt`.
+    //
+    // If this axis and `other` can't coexist, returns `std::nullopt` (see
+    // AxisRefAttr::canCoexist).
     //
     // For example:
     //  "a", "a"           -> "a"
-    //  "a", "b"           -> std::nullopt
-    //  "a":(1)2, "a":(2)4 -> std::nullopt
     //  "a":(1)4, "a"      -> "a":(1)4
     //  "a", "a":(1)4      -> "a":(1)4
     //  "a":(1)2, "a":(1)4 -> "a":(1)2
     //  "a":(2)8, "a":(2)4 -> "a":(2)4
+    //  "a", "b"           -> std::nullopt
+    //  "a":(1)2, "a":(2)4 -> std::nullopt
     std::optional<AxisRefAttr> getGreatestCommonPrefix(AxisRefAttr other) const;
+
+    // Removes the common prefix of this axis and `other` from this axis. If the
+    // two axes do not have common prefix or `other` is greater or equal to this
+    // axis, return `std::nullopt`.
+    //
+    // If this axis and `other` can't coexist, returns `std::nullopt` (see
+    // AxisRefAttr::canCoexist).
+    //
+    // For example:
+    //  "a", "a":(1)4      -> "a":(4)2 (size("a") == 8)
+    //  "a":(1)4, "a":(1)2 -> "a":(2)2
+    //  "a":(2)8, "a":(2)4 -> "a":(8)2
+    //  "a", "b"           -> std::nullopt
+    //  "a", "a"           -> std::nullopt
+    //  "a":(1)4, "a"      -> std::nullopt
+    //  "a":(2)4, "a":(2)8 -> std::nullopt
+    //  "a":(1)2, "a":(2)4 -> std::nullopt
+    //  "a":(1)2, "a":(1)3 -> std::nullopt
+    std::optional<AxisRefAttr> removeCommonPrefix(
+        AxisRefAttr prefix, MeshAttr mesh) const;
 
     // Returns whether this axis-ref can be merged with `other`, i.e., they are
     // consecutive sub-axes of the same full axis and this sub-axis is major to

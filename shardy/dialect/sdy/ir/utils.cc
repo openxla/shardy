@@ -280,10 +280,10 @@ TensorShardingAttr getSharding(Value value) {
         return dataFlowEdgeOp.getShardingAttr();
       })
       .Case<ShardingConstraintOp>([](ShardingConstraintOp shardingConstraint) {
-        return shardingConstraint.getShardingAttr();
+        return shardingConstraint.getSharding();
       })
       .Case<ReshardOp>(
-          [](ReshardOp reshardOp) { return reshardOp.getShardingAttr(); })
+          [](ReshardOp reshardOp) { return reshardOp.getSharding(); })
       .Case<AllGatherOp>(
           [](AllGatherOp allGatherOp) { return allGatherOp.getOutSharding(); })
       .Case<AllSliceOp>(
@@ -362,8 +362,7 @@ SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
       result.push_back(firstAxisRef);
       continue;
     }
-    if (auto prefix = firstAxisRef.getGreatestCommonPrefix(secondAxisRef);
-        prefix) {
+    if (auto prefix = firstAxisRef.getGreatestCommonPrefix(secondAxisRef)) {
       result.push_back(*prefix);
     }
     break;

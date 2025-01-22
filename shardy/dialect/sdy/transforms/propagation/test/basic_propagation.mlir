@@ -426,6 +426,14 @@ func.func @single_factor_overflows(%arg0: tensor<2x4xf32> {sdy.sharding = #sdy.s
   return %0 : tensor<2x4xf32>
 }
 
+// CHECK-LABEL: func @sub_axes_cannot_coexist
+func.func @sub_axes_cannot_coexist(%arg0: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh_a_6, [{"a":(1)2}, {}]>})
+    -> (tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh_a_6, [{}, {"a":(3)2}]>}) {
+  // CHECK-NEXT: stablehlo.sine %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_6, [{?}, {"a":(3)2, ?}]>]>}
+  %0 = stablehlo.sine %arg0 : tensor<2x2xf32>
+  return %0 : tensor<2x2xf32>
+}
+
 // CHECK-LABEL: func @minor_most_factor_non_divisible
 func.func @minor_most_factor_non_divisible(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_6, [{"a"}]>}) -> tensor<2x4xf32> {
   // CHECK-NEXT: stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_6, [{"a":(1)2, ?}, {"a":(2)3, ?}]>]>}
