@@ -24,7 +24,7 @@ Sets the output tensor sharding of the collective op.
 
 NOTE: This method *must* be implemented by the user.
 
-## ShardableDataFlowOpInterface (`ShardableDataFlowOpInterface`)
+## ShardableDataFlowOpInterface (`Sdy_ShardableDataFlowOpInterface`)
 
 An op interface that allows shardy to propagate shardings through data flow
 edges of ops that extend this interface.
@@ -169,7 +169,7 @@ Gets the non-owner targets of a data flow edge given the edge `owner`.
 
 NOTE: This method *must* be implemented by the user.
 
-## ShardingRuleOpInterface (`ShardingRuleOpInterface`)
+## ShardingRuleOpInterface (`Sdy_ShardingRuleOpInterface`)
 
 An op interface that allows the op to define its own sharding rule.
 A sharding rule specifies how an operation can be partitioned according to
