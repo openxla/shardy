@@ -327,15 +327,20 @@ class FactorAxesCandidateBag {
 };
 
 FactorAxesCandidateBag findFactorAxesCandidates(
-    const ShardingProjection& projection, int64_t numFactors,
-    ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
+    const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
+    MeshAttr mesh) {
   // Find sets of candidate axes per factor.
-  SmallVector<DenseSet<AxisListRef, AxisListRefInfo>> axesSets(numFactors);
+  SmallVector<DenseSet<AxisListRef, AxisListRefInfo>> axesSets(
+      shardingRule.getNumFactors());
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(projection.getOperands(),
                                                  projection.getResults())) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
+      if (llvm::is_contained(shardingRule.getNeedReplicationFactors(),
+                             factorIndex)) {
+        continue;
+      }
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
       while (!axisRefs.empty()) {
         axesSets[factorIndex].insert(AxisListRef(axisRefs));
@@ -354,19 +359,22 @@ FactorAxesCandidateBag findFactorAxesCandidates(
            projection.getOperands(), projection.getResults()))) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      if (factorSharding.axisRefs.empty()) {
+      if (factorSharding.axisRefs.empty() ||
+          llvm::is_contained(shardingRule.getNeedReplicationFactors(),
+                             factorIndex)) {
         continue;
       }
       FactorAxesPair factorAxes(factorIndex,
                                 AxisListRef(factorSharding.axisRefs));
       updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxes,
-                                tensorSizes[tensorIndex], mesh);
+                                shardingRule.getTensorSizes()[tensorIndex],
+                                mesh);
       // Increment counts for all its strict prefixes.
       for (const AxisListRef& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
-          updateFactorAxesCandidate(factorAxesCandidatesMap,
-                                    FactorAxesPair(factorIndex, axes),
-                                    tensorSizes[tensorIndex], mesh);
+          updateFactorAxesCandidate(
+              factorAxesCandidatesMap, FactorAxesPair(factorIndex, axes),
+              shardingRule.getTensorSizes()[tensorIndex], mesh);
         }
       }
     }
@@ -386,11 +394,11 @@ FactorAxesCandidateBag findFactorAxesCandidates(
 // or with an axis that overlaps with the picked axis. Continue iterating
 // until the list is empty.
 SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
-    const ShardingProjection& projection, int64_t numFactors,
-    ArrayRef<int64_t> tensorSizes, MeshAttr mesh) {
-  SmallVector<AxisListRef> factorAxisRefs(numFactors);
+    const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
+    MeshAttr mesh) {
+  SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates =
-      findFactorAxesCandidates(projection, numFactors, tensorSizes, mesh);
+      findFactorAxesCandidates(projection, shardingRule, mesh);
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
   while (!factorAxesCandidates.empty()) {
@@ -459,11 +467,14 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
 }
 
 SmallVector<AxisListRef> findCommonAxes(const ShardingProjection& projection,
-                                        int64_t numFactors,
-                                        ArrayRef<int64_t> tensorSizes,
+                                        OpShardingRuleAttr shardingRule,
                                         MeshAttr mesh) {
-  return findCommonAxesUsingMajorityVoteHeuristic(projection, numFactors,
-                                                  tensorSizes, mesh);
+  return findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule,
+                                                  mesh);
+
+  // TODO(enver): Distribute the greatest common prefix of shardings of factors
+  // that need replication to commonly shared factors that does not need
+  // replication.
 }
 
 struct InsertExplicitReshardsPass
@@ -565,21 +576,10 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      // Return without inserting reshards for operations with factors that need
-      // replication.
-      // TODO(enver): Insert explicit reshards also for the case that the
-      // factors that need replication are sharded.
-      if (isa<stablehlo::CholeskyOp, stablehlo::BitcastConvertOp,
-              stablehlo::ConcatenateOp, stablehlo::SortOp,
-              stablehlo::TriangularSolveOp>(op)) {
-        return;
-      }
-
       UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                                   shardingRule.getNumResults());
       for (const auto& [index, axes] : llvm::enumerate(
-               findCommonAxes(shardingProjection, shardingRule.getNumFactors(),
-                              shardingRule.getTensorSizes(), mesh))) {
+               findCommonAxes(shardingProjection, shardingRule, mesh))) {
         // TODO(enver): Add unit tests to test overflow axes are cleared after
         // handling the case that some factors have overflow axes.
         updateTensorShardings |= shardingProjection.updateSharding(
