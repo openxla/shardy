@@ -403,6 +403,12 @@ LogicalResult verifyTensorShardingPerValueAttr(
     bool verifyCommonMesh = true) {
   ArrayRef<TensorShardingAttr> shardingsPerValue =
       shardingPerValueAttr.getShardings();
+  if (types.empty() && shardingsPerValue.size() == 1 &&
+      shardingsPerValue.front().getMesh(symbolTable).isMaximal()) {
+    return verifyTensorShardingAttr(
+        shardingsPerValue.front(), Type(), op, symbolTable,
+        getEmitValueInRangeErrorFn(emitError, types.size(), /*index=*/0));
+  }
   if (shardingsPerValue.size() != types.size()) {
     return emitError("shardings don't match number of values: ")
            << shardingsPerValue.size() << " shardings" << " vs " << types.size()

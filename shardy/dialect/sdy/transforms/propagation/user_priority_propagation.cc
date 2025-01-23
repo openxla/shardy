@@ -179,8 +179,10 @@ getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp,
                                    const ValueOrFuncResult& valueOrFuncResult) {
     // TODO(b/380881922): We should be adding the data flow edges into the map
     // to make sure the in/out shardings on ManualComputationOp are updated.
+    // TODO(b/391545244): remove the extra `*value` check which is only needed
+    // since we add a null `Value` during the `transformShardings` walk.
     if (auto* value = std::get_if<Value>(&valueOrFuncResult);
-        value && getDataFlowEdge(*value)) {
+        value && *value && getDataFlowEdge(*value)) {
       return sharding;
     }
     clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);

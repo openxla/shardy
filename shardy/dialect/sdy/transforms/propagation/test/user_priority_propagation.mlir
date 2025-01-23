@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -sdy-user-priority-propagate 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 // CHECK-LABEL: func @no_priorities(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
@@ -363,4 +364,15 @@ func.func @user_based_and_op_based(
   %2 = stablehlo.add %1, %1 : tensor<8x8xf32>
   %3 = stablehlo.add %2, %2 : tensor<8x8xf32>
   return %3 : tensor<8x8xf32>
+}
+
+// Nothing should be propagated, but this verifies the `transformShardings`
+// sharding walker is able to handle a maximal sharding with no returned values.
+// CHECK-LABEL: func @maximal_sharding_no_results
+// CHECK-SAME:      (%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func @maximal_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
+  // CHECK-NEXT: return %arg0 : tensor<8x8xf32>
+  stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
+  return %arg0 : tensor<8x8xf32>
 }

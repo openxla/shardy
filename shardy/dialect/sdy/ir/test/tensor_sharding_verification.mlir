@@ -504,6 +504,16 @@ func.func @maximal_sharding_with_dim_shardings(%arg0: tensor<8x8xf32>) -> tuple<
 
 // -----
 
+sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+
+func.func @maximal_sharding_no_results_with_dim_shardings(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // expected-error @+1 {{a maximal sharding must have no dimension shardings}}
+  stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, [{}]>]>} : (tensor<8x8xf32>) -> ()
+  return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["a"=2]>
 
 func.func @two_tuple(%arg0: tensor<8x8xf32>) -> tuple<tensor<8x8xf32>, tensor<8x8xf32>> {
