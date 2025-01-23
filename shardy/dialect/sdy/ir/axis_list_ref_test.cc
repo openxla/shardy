@@ -213,6 +213,20 @@ TEST_F(AxisListRefTest, LessThan_NonEmptyAgainstEmpty) {
   EXPECT_FALSE(axes < against);
 }
 
+TEST_F(AxisListRefTest, Overlaps_True) {
+  AxisListRef axes1 = createAxisListRef({createAxis("a"), createAxis("b")});
+  AxisListRef axes2 = createAxisListRef({createAxis("d")});
+  AxisListRef axes3 = createAxisListRef({createAxis("b"), createAxis("c")});
+  EXPECT_TRUE(AxisListRef::overlaps({axes1, axes2, axes3}));
+}
+
+TEST_F(AxisListRefTest, Overlaps_False) {
+  AxisListRef axes1 = createAxisListRef({createAxis("a")});
+  AxisListRef axes2 = createAxisListRef({createAxis("b"), createAxis("c")});
+  AxisListRef axes3 = createAxisListRef({createAxis("d")});
+  EXPECT_FALSE(AxisListRef::overlaps({axes1, axes2, axes3}));
+}
+
 // TODO(enver): Add unit tests for all methods.
 
 }  // namespace

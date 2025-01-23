@@ -90,6 +90,9 @@ class AxisListRefIterator {
 // is also a prefix sub-axis of an axis in the original list.
 class AxisListRef {
  public:
+  // Returns whether any two axisListRefs overlaps or not.
+  static bool overlaps(ArrayRef<AxisListRef> axisListRefs);
+
   // Assumes that input `axisRefs` is non-empty.
   AxisListRef(ArrayRef<AxisRefAttr> axisRefs)
       : axisRefs(axisRefs.drop_back()), tailAxisRef(axisRefs.back()) {}
@@ -146,6 +149,12 @@ class AxisListRef {
                           /*isTailIterated=*/true, tailAxisRef);
   }
 
+  // Clears this AxisListRef.
+  void clear();
+
+  // Checks whether `this` overlaps with `rhs`.
+  bool overlaps(const AxisListRef& rhs) const;
+
   friend struct AxisListRefInfo;
 
  private:
@@ -178,8 +187,6 @@ class AxisListRef {
   // `newSizeExcludingNewTail`.
   void trim(int64_t newSizeExcludingNewTail,
             std::optional<AxisRefAttr> newTailAxisRef);
-  // Clears this AxisListRef.
-  void clear();
 
   // The axes that this FactorAxesPair holds is defined by `axisRefs` and
   // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is

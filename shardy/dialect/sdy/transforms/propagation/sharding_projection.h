@@ -185,6 +185,11 @@ class ShardingProjection {
   const TensorFactorShardings& getResult(int64_t resultNum) const {
     return results[resultNum];
   }
+  const TensorFactorShardings& getTensor(int64_t tensorNum) const {
+    return tensorNum < getNumOperands()
+               ? getOperand(tensorNum)
+               : getResult(tensorNum - getNumOperands());
+  }
 
   bool expandOperandSharding(int64_t operandIndex, int64_t factorIndex,
                              ArrayRef<AxisRefAttr> newAxes) {
