@@ -17,14 +17,10 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
-#include "mlir/Support/LLVM.h"
-#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 
@@ -60,10 +56,10 @@ struct AddDataFlowEdgesPass
     func::FuncOp funcOp = getOperation();
     IRRewriter rewriter(funcOp);
 
-    funcOp.walk([&](Operation* op) {
+    funcOp.walk([&](ShardableDataFlowOpInterface op) {
       // Add the data flow edges for result owners and block argument owners.
-      addDataFlowEdges(getDataFlowEdgeResultOwners(op), rewriter);
-      addDataFlowEdges(getDataFlowEdgeBlockArgumentOwners(op), rewriter);
+      addDataFlowEdges(op.getBlockArgumentEdgeOwners(), rewriter);
+      addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
     });
   }
 };

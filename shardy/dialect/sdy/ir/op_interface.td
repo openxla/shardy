@@ -101,8 +101,7 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
       /*args=*/(ins),
       /*methodBody=*/"",
       /*defaultImplementation=*/[{
-        return mlir::sdy::details::getOpResultEdgeOwnerShardingsImpl(
-            this->getOperation());
+        return mlir::sdy::details::getOpResultEdgeOwnerShardingsImpl($_op);
       }]
     >,
     InterfaceMethod<
@@ -114,8 +113,7 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
       /*args=*/(ins "mlir::ArrayRef<mlir::sdy::TensorShardingAttr>":$shardings),
       /*methodBody=*/"",
       /*defaultImplementation=*/[{
-        mlir::sdy::details::setOpResultEdgeOwnerShardingsImpl(
-            this->getOperation(), shardings);
+        mlir::sdy::details::setOpResultEdgeOwnerShardingsImpl($_op, shardings);
       }]
     >,
     InterfaceMethod<
@@ -153,11 +151,11 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
     >,
     InterfaceMethod<
       /*desc=*/[{
-        Gets the data flow edge sources given a `target` value.
+        Gets the data flow edge sources given the edge `owner`.
       }],
       /*retType=*/"mlir::SmallVector<mlir::Value>",
       /*methodName=*/"getEdgeSources",
-      /*args=*/(ins "mlir::Value":$target)
+      /*args=*/(ins "mlir::Value":$owner)
     >,
     InterfaceMethod<
       /*desc=*/[{

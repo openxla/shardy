@@ -48,6 +48,7 @@ limitations under the License.
 #include "mlir/Transforms/InliningUtils.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/enums.cc.inc"
+#include "shardy/dialect/sdy/ir/extensions/stablehlo_extensions.h"
 #include "shardy/dialect/sdy/ir/parsers.h"   // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/printers.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -94,6 +95,7 @@ void SdyDialect::initialize() {
 #define GET_OP_LIST
 #include "shardy/dialect/sdy/ir/ops.cc.inc"
       >();
+  registerStablehloExtensions(getContext());
 }
 
 namespace details {
@@ -112,19 +114,19 @@ void setOpResultEdgeOwnerShardingsImpl(Operation* op,
 
 namespace {
 
-// Gets the sources given a target value.
+// Gets the sources given the edge `owner`.
 //
-// If the target is a `BlockArgument`, returns the corresponding operand.
-// If the target is an `OpResult`, returns the corresponding operand of the
+// If the owner is a `BlockArgument`, returns the corresponding operand.
+// If the owner is an `OpResult`, returns the corresponding operand of the
 // terminator.
 // Else returns an empty vector.
 template <typename RegionOpTy>
-SmallVector<Value> getEdgeSourcesFromRegionBasedOp(Value target,
+SmallVector<Value> getEdgeSourcesFromRegionBasedOp(Value owner,
                                                    RegionOpTy op) {
   static_assert(
       OpTrait::template hasSingleBlockImplicitTerminator<RegionOpTy>::value);
-  assert(getOwningOp(target) == op.getOperation());
-  return TypeSwitch<Value, SmallVector<Value>>(target)
+  assert(getOwningOp(owner) == op.getOperation());
+  return TypeSwitch<Value, SmallVector<Value>>(owner)
       .Case<BlockArgument>([op](BlockArgument blockArg) -> SmallVector<Value> {
         return {op->getOperand(blockArg.getArgNumber())};
       })
@@ -1038,7 +1040,7 @@ ResultRange ManualComputationOp::getOpResultEdgeOwners() {
   return getResults();
 }
 
-// Gets the sources given a target value.
+// Gets the sources given the edge `owner`.
 //
 // Note that the return value is a vector, for `ManualComputationOp`s there can
 // only be one value but sdy's interface expects a vector.
@@ -1050,10 +1052,10 @@ ResultRange ManualComputationOp::getOpResultEdgeOwners() {
 //   sdy.return %a
 // }
 // ```
-// If the target is a block argument (e.g., `%operand0`), return `%arg0`.
-// If the target is a result (e.g., `%r`), return `%a`.
-SmallVector<Value> ManualComputationOp::getEdgeSources(Value target) {
-  return getEdgeSourcesFromRegionBasedOp(target, *this);
+// If the owner is a block argument (e.g., `%operand0`), return `%arg0`.
+// If the owner is a result (e.g., `%r`), return `%a`.
+SmallVector<Value> ManualComputationOp::getEdgeSources(Value owner) {
+  return getEdgeSourcesFromRegionBasedOp(owner, *this);
 }
 
 // Returns the edge owner value given a `target`.
@@ -1107,10 +1109,10 @@ LogicalResult ConstantOp::inferReturnTypes(
 // DataFlowEdgeOp
 //===----------------------------------------------------------------------===//
 
-DataFlowEdgeOp DataFlowEdgeOp::getDataFlowEdgeUser(Value root) {
+DataFlowEdgeOp DataFlowEdgeOp::getDataFlowEdgeUser(Value owner) {
   // We assume the input of a DataFlowEdgeOp has exactly one user.
   return dyn_cast_or_null<DataFlowEdgeOp>(
-      root && root.hasOneUse() ? *root.user_begin() : nullptr);
+      owner && owner.hasOneUse() ? *owner.user_begin() : nullptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1151,7 +1153,7 @@ ArrayRef<BlockArgument> NamedComputationOp::getBlockArgumentEdgeOwners() {
 
 ResultRange NamedComputationOp::getOpResultEdgeOwners() { return getResults(); }
 
-// Gets the sources given a target value.
+// Gets the sources given the edge `owner`.
 //
 // Note that the return value is a vector, for `NamedComputationOp`s there can
 // only be one value but sdy's interface expects a vector.
@@ -1163,10 +1165,10 @@ ResultRange NamedComputationOp::getOpResultEdgeOwners() { return getResults(); }
 //   sdy.return %a
 // }
 // ```
-// If the target is a block argument (e.g., `%operand0`), return `%arg0`.
-// If the target is a result (e.g., `%r`), return `%a`.
-SmallVector<Value> NamedComputationOp::getEdgeSources(Value target) {
-  return getEdgeSourcesFromRegionBasedOp(target, *this);
+// If the owner is a block argument (e.g., `%operand0`), return `%arg0`.
+// If the owner is a result (e.g., `%r`), return `%a`.
+SmallVector<Value> NamedComputationOp::getEdgeSources(Value owner) {
+  return getEdgeSourcesFromRegionBasedOp(owner, *this);
 }
 
 // Returns the edge owner value given a `target`.

@@ -31,7 +31,6 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
-#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 
@@ -143,24 +142,26 @@ struct SinkDataFlowEdgesPass
         rewriter.replaceOp(dataFlowEdgeOp, dataFlowEdgeOp.getInput());
         return WalkResult::skip();
       }
-      if (!isDataFlowOp(op)) {
+      auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op);
+      if (!shardableDataFlowOp) {
         return WalkResult::advance();
       }
       ArrayRef<BlockArgument> blockArgOwners =
-          getDataFlowEdgeBlockArgumentOwners(op);
+          shardableDataFlowOp.getBlockArgumentEdgeOwners();
       if (SmallVector<TensorShardingAttr> blockArgShardings =
               getShardingsFromDataFlowEdges(blockArgOwners);
           !blockArgShardings.empty()) {
-        setBlockArgumentEdgeOwnerShardings(op, blockArgShardings);
+        shardableDataFlowOp.setBlockArgumentEdgeOwnerShardings(
+            blockArgShardings);
       }
       buildOriginShardingDictsFromDataFlowEdges(
           blockArgOwners, op, kBlockArgShardingOriginsAttr, rewriter);
 
-      ResultRange resultOwners = getDataFlowEdgeResultOwners(op);
+      ResultRange resultOwners = shardableDataFlowOp.getOpResultEdgeOwners();
       if (SmallVector<TensorShardingAttr> resultShardings =
               getShardingsFromDataFlowEdges(resultOwners);
           !resultShardings.empty()) {
-        setOpResultEdgeOwnerShardings(op, resultShardings);
+        shardableDataFlowOp.setOpResultEdgeOwnerShardings(resultShardings);
       }
       buildOriginShardingDictsFromDataFlowEdges(
           resultOwners, op, kResultShardingOriginsAttr, rewriter);

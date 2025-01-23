@@ -19,26 +19,24 @@ limitations under the License.
 //   sdy_opt <file> <llvm options>
 
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Quant/IR/Quant.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
-#include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/register.h"
 #include "shardy/dialect/sdy/transforms/passes.h"
-#include "stablehlo/dialect/StablehloOps.h"
 
 int main(int argc, char** argv) {
   mlir::registerAllPasses();
 
-  mlir::DialectRegistry dialects;
-  dialects.insert<mlir::func::FuncDialect, mlir::quant::QuantDialect,
-                  mlir::sdy::SdyDialect, mlir::stablehlo::StablehloDialect>();
-  mlir::func::registerAllExtensions(dialects);
+  mlir::DialectRegistry registry;
+  mlir::sdy::registerAllDialects(registry);
+  registry.insert<mlir::quant::QuantDialect>();
+  mlir::func::registerAllExtensions(registry);
 
   // Register all SDY passes and pipelines.
   mlir::sdy::registerAllSdyPassesAndPipelines();
 
   return mlir::asMainReturnCode(
-      mlir::MlirOptMain(argc, argv, "SDY pass driver\n", dialects));
+      mlir::MlirOptMain(argc, argv, "SDY pass driver\n", registry));
 }
