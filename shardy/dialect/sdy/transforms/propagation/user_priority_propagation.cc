@@ -37,7 +37,6 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/common/file_utils.h"
-#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
@@ -182,7 +181,7 @@ getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp,
     // TODO(b/391545244): remove the extra `*value` check which is only needed
     // since we add a null `Value` during the `transformShardings` walk.
     if (auto* value = std::get_if<Value>(&valueOrFuncResult);
-        value && *value && getDataFlowEdge(*value)) {
+        value && *value && DataFlowEdgeOp::lookup(*value)) {
       return sharding;
     }
     clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);

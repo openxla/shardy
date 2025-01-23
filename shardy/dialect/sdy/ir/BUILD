@@ -152,7 +152,6 @@ cc_library(
     name = "dialect",
     srcs = [
         "canonicalization.cc",
-        "data_flow_utils.cc",
         "dialect.cc",
         "extensions/stablehlo_extensions.cc",
         "parsers.cc",
@@ -162,7 +161,6 @@ cc_library(
     ],
     hdrs = [
         "constants.h",
-        "data_flow_utils.h",
         "dialect.h",
         "extensions/stablehlo_extensions.h",
         "parsers.h",

@@ -44,7 +44,6 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/common/file_utils.h"
-#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
@@ -88,7 +87,7 @@ void notifyUsersModified(Value value,
   for (OpOperand& use : value.getUses()) {
     Operation* user = use.getOwner();
 
-    if (DataFlowEdgeOp dataFlowEdge = getDataFlowEdge(use)) {
+    if (auto dataFlowEdge = DataFlowEdgeOp::lookup(use)) {
       notifyOpModified(dataFlowEdge);
     } else if (user->hasTrait<OpTrait::IsTerminator>()) {
       notifyOpModified(user->getParentOp());
@@ -103,7 +102,7 @@ void notifyUsersModified(Value value,
 void notifyShardingModified(Value value,
                             NotifyOpModifiedCallback notifyOpModified) {
   if (auto dataFlowEdge = value.getDefiningOp<DataFlowEdgeOp>()) {
-    for (Value nonEdgeOwnerTarget : getNonEdgeOwnerTargets(dataFlowEdge)) {
+    for (Value nonEdgeOwnerTarget : dataFlowEdge.getNonOwnerTargets()) {
       notifyUsersModified(nonEdgeOwnerTarget, notifyOpModified);
     }
   }
@@ -476,21 +475,20 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
 
   LogicalResult matchAndRewrite(DataFlowEdgeOp dataFlowEdgeOp,
                                 PatternRewriter& rewriter) const override {
-    SmallVector<Value> sources = getDataFlowSources(dataFlowEdgeOp);
+    SmallVector<Value> sources = dataFlowEdgeOp.getSources();
     // The sharding of `dataFlowEdgeOp.getResult()` is the sharding of all
     // targets.
     return propagateTensorShardings(
         sources, dataFlowEdgeOp.getResult(), getShardings(sources),
-        transformTargetSharding(
-            dataFlowEdgeOp, dataFlowEdgeOp.getShardingAttr(),
+        dataFlowEdgeOp.transformTargetSharding(
+            dataFlowEdgeOp.getShardingAttr(),
             DataFlowShardingTransformType::kBeforeEdgePropagation),
         [&](TensorShardingAttr sharding, int64_t index) {
           setSharding(sources[index], sharding);
         },
         [&](TensorShardingAttr sharding, int64_t _) {
-          dataFlowEdgeOp.setShardingAttr(transformTargetSharding(
-              dataFlowEdgeOp, sharding,
-              DataFlowShardingTransformType::kAfterEdgePropagation));
+          dataFlowEdgeOp.setShardingAttr(dataFlowEdgeOp.transformTargetSharding(
+              sharding, DataFlowShardingTransformType::kAfterEdgePropagation));
         },
         createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
                                    sources.size()),

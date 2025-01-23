@@ -57,8 +57,7 @@ SmallVector<TensorShardingAttr> getShardingsFromDataFlowEdges(
   StringRef meshName;
   for (Value edgeOwner : edgeOwners) {
     TensorShardingAttr sharding;
-    if (DataFlowEdgeOp dataFlowEdgeOp =
-            DataFlowEdgeOp::getDataFlowEdgeUser(edgeOwner)) {
+    if (auto dataFlowEdgeOp = DataFlowEdgeOp::lookup(edgeOwner)) {
       sharding = dataFlowEdgeOp.getShardingAttr();
       if (sharding && meshName.empty()) {
         meshName = sharding.getMeshName();
@@ -104,8 +103,7 @@ void buildOriginShardingDictsFromDataFlowEdges(ValueRange edgeOwners,
   bool exists = false;
   for (Value edgeOwner : edgeOwners) {
     DictionaryAttr dict;
-    if (DataFlowEdgeOp dataFlowEdgeOp =
-            DataFlowEdgeOp::getDataFlowEdgeUser(edgeOwner)) {
+    if (auto dataFlowEdgeOp = DataFlowEdgeOp::lookup(edgeOwner)) {
       dict =
           dataFlowEdgeOp->getAttrOfType<DictionaryAttr>(kShardingOriginsAttr);
     }

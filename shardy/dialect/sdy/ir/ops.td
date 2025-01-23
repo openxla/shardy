@@ -339,9 +339,26 @@ def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
   ];
 
   let extraClassDeclaration = [{
-    // If `root` has a single use which is by a `DataFlowEdgeOp`, returns that
+    // If `target` is a target of a data-flow edge, returns the corresponding
     // `DataFlowEdgeOp`, otherwise returns `nullptr`.
-    static DataFlowEdgeOp getDataFlowEdgeUser(Value owner);
+    static DataFlowEdgeOp lookup(Value target);
+
+    // If `source` is a source of a data-flow edge, returns the corresponding
+    // `DataFlowEdgeOp`, otherwise returns `nullptr`.
+    static DataFlowEdgeOp lookup(OpOperand& source);
+
+    // Transforms the `sharding` of a target depending on `transformType`.
+    //
+    // See `DataFlowShardingTransformType` for more information.
+    TensorShardingAttr transformTargetSharding(
+        TensorShardingAttr sharding,
+        DataFlowShardingTransformType transformType);
+
+    // Returns all sources of this `DataFlowEdgeOp`.
+    SmallVector<Value> getSources();
+
+    // Returns all non-edge-owner targets of this `DataFlowEdgeOp`.
+    SmallVector<Value> getNonOwnerTargets();
   }];
 }
 

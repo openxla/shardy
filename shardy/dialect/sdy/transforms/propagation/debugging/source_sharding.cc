@@ -37,7 +37,6 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
-#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
@@ -415,13 +414,13 @@ void overrideOriginsToSelf(ModuleOp moduleOp) {
         manualComputationOp->getAttrOfType<StringAttr>(kShardingOriginNameAttr);
     for (BlockArgument blockArg :
          manualComputationOp.getBody().getArguments()) {
-      setOpOriginsToSelf(getDataFlowEdge(blockArg),
+      setOpOriginsToSelf(DataFlowEdgeOp::lookup(blockArg),
                          manualComputationOriginName(
                              OriginShardingType::MC_INPUT,
                              originName.getValue(), blockArg.getArgNumber()));
     }
     for (OpResult result : manualComputationOp.getResults()) {
-      setOpOriginsToSelf(getDataFlowEdge(result),
+      setOpOriginsToSelf(DataFlowEdgeOp::lookup(result),
                          manualComputationOriginName(
                              OriginShardingType::MC_OUTPUT,
                              originName.getValue(), result.getResultNumber()));
@@ -474,8 +473,8 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
     for (auto [i, sharding] :
          llvm::enumerate(manualComputationOp.getInShardings().getShardings())) {
       // Assuming that the edges live as the only use of the block arguments.
-      DataFlowEdgeOp edge = DataFlowEdgeOp::getDataFlowEdgeUser(
-          manualComputationOp.getBody().getArgument(i));
+      auto edge =
+          DataFlowEdgeOp::lookup(manualComputationOp.getBody().getArgument(i));
       assert(edge);
       saveShardingOrigins(mappings->valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_INPUT, edge.getResult(), i,
@@ -484,8 +483,7 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
     for (auto [i, sharding] : llvm::enumerate(
              manualComputationOp.getOutShardings().getShardings())) {
       // Assuming that the edges live as the only use of the op results.
-      DataFlowEdgeOp edge =
-          DataFlowEdgeOp::getDataFlowEdgeUser(manualComputationOp.getResult(i));
+      auto edge = DataFlowEdgeOp::lookup(manualComputationOp.getResult(i));
       assert(edge);
       saveShardingOrigins(mappings->valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_OUTPUT, edge.getResult(), i,

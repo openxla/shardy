@@ -1109,10 +1109,65 @@ LogicalResult ConstantOp::inferReturnTypes(
 // DataFlowEdgeOp
 //===----------------------------------------------------------------------===//
 
-DataFlowEdgeOp DataFlowEdgeOp::getDataFlowEdgeUser(Value owner) {
+namespace {
+
+// Returns the owning op if it is a `ShardableDataFlowOpInterface`, otherwise
+// returns nullptr.
+ShardableDataFlowOpInterface dynCastOwningShardableDataFlowOp(Value value) {
+  return dyn_cast<ShardableDataFlowOpInterface>(getOwningOp(value));
+}
+
+// Returns the owning `ShardableDataFlowOpInterface` (assuming it exists).
+ShardableDataFlowOpInterface castOwningShardableDataFlowOp(Value value) {
+  ShardableDataFlowOpInterface shardableDataFlowOp =
+      dynCastOwningShardableDataFlowOp(value);
+  assert(shardableDataFlowOp);
+  return shardableDataFlowOp;
+}
+
+// If `root` has a single use which is by a `DataFlowEdgeOp`, returns that
+// `DataFlowEdgeOp`, otherwise returns `nullptr`.
+DataFlowEdgeOp getDataFlowEdgeUser(Value owner) {
   // We assume the input of a DataFlowEdgeOp has exactly one user.
   return dyn_cast_or_null<DataFlowEdgeOp>(
       owner && owner.hasOneUse() ? *owner.user_begin() : nullptr);
+}
+
+}  // namespace
+
+DataFlowEdgeOp DataFlowEdgeOp::lookup(Value target) {
+  if (ShardableDataFlowOpInterface shardableDataFlowOp =
+          dynCastOwningShardableDataFlowOp(target)) {
+    return getDataFlowEdgeUser(
+        shardableDataFlowOp.getEdgeOwnerFromTarget(target));
+  }
+  return nullptr;
+}
+
+DataFlowEdgeOp DataFlowEdgeOp::lookup(OpOperand& source) {
+  Operation* op = source.getOwner();
+  op = op->hasTrait<OpTrait::IsTerminator>() ? op->getParentOp() : op;
+  if (auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+    return getDataFlowEdgeUser(
+        shardableDataFlowOp.getEdgeOwnerFromSource(source));
+  }
+  return nullptr;
+}
+
+TensorShardingAttr DataFlowEdgeOp::transformTargetSharding(
+    TensorShardingAttr sharding,
+    DataFlowShardingTransformType transformType) {
+  return castOwningShardableDataFlowOp(getInput())
+      .transformTargetSharding(getInput(), sharding, transformType);
+}
+
+SmallVector<Value> DataFlowEdgeOp::getSources() {
+  return castOwningShardableDataFlowOp(getInput()).getEdgeSources(getInput());
+}
+
+SmallVector<Value> DataFlowEdgeOp::getNonOwnerTargets() {
+  return castOwningShardableDataFlowOp(getInput())
+      .getNonEdgeOwnerTargets(getInput());
 }
 
 //===----------------------------------------------------------------------===//

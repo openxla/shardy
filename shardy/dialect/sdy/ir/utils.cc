@@ -42,7 +42,6 @@ limitations under the License.
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
-#include "shardy/dialect/sdy/ir/data_flow_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir {
@@ -239,7 +238,7 @@ Operation* getOwningOp(Value value) {
 }
 
 Value getShardableValue(Value value) {
-  if (DataFlowEdgeOp op = getDataFlowEdge(value)) {
+  if (auto op = DataFlowEdgeOp::lookup(value)) {
     return op.getResult();
   }
 
