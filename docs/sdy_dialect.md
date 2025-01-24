@@ -210,7 +210,7 @@ This while op has n data flow edges, the i-th data flow edges is between
 sources `x_i`, `return_value_i` and targets `y_i`, `pred_arg_i`,
 `body_arg_i`.
 
-An `sdy.data_flow_edge` takes as input the root target of an edge (can be
+An `sdy.data_flow_edge` takes as input the owner of an edge (can be
 any of the targets, but preferably an op result rather than a block
 argument), which shouldn't have any other uses. This op isn't pure because
 it can take an input that originally didn't have any uses.
@@ -237,8 +237,8 @@ We don't allow the input of a `sdy.data_flow_edge` to be defined by an
 unregistered `sdy.sharding` attribute.
 
 NOTE: it's NOT the responsibility of the `sdy.data_flow_edge` to link
-between sources and targets, it's simply attached to the root target of the
-edge. The op that this edge is bound to (while in the example above) is
+between sources and targets, it's simply attached to the owner of the edge.
+The op that this edge is bound to (while in the example above) is
 responsible for providing this information.
 
 Traits: `SameOperandsAndResultType`
