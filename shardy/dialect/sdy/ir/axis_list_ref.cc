@@ -114,5 +114,28 @@ bool AxisListRef::truncateWithoutOverlap(const AxisListRef& rhs) {
   return false;
 }
 
+bool AxisListRef::overlaps(const AxisListRef& rhs) const {
+  for (AxisRefAttr axisRef : *this) {
+    for (AxisRefAttr rhsAxisRef : rhs) {
+      if (axisRef.overlaps(rhsAxisRef)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool AxisListRef::overlaps(ArrayRef<AxisListRef> axisListRefs) {
+  for (int64_t indexI = 0; indexI < axisListRefs.size(); indexI++) {
+    for (int64_t indexJ = 0; indexJ < axisListRefs.size(); indexJ++) {
+      if (indexI != indexJ &&
+          axisListRefs[indexI].overlaps(axisListRefs[indexJ])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 }  // namespace sdy
 }  // namespace mlir

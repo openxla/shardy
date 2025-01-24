@@ -16,6 +16,7 @@ limitations under the License.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 
 #include "llvm/ADT/Hashing.h"
@@ -466,9 +467,178 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
   return factorAxisRefs;
 }
 
+struct AxesCountPair {
+  ArrayRef<AxisRefAttr> axisRefs;
+  int64_t count;
+};
+
+SmallVector<int64_t> findTensorIndicesShardingIsCompatibleWithout(
+    const ShardingProjection& projection, const int64_t numFactors) {
+  using OptionalAxisRefsPerFactor = SmallVector<std::optional<AxesCountPair>>;
+  SmallVector<OptionalAxisRefsPerFactor> factorShardings(
+      numFactors, OptionalAxisRefsPerFactor(2));
+
+  // Find different shardings and their counts of factors across tensors.
+  for (const auto& [tensorIndex, tensorFactorSharding] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           projection.getOperands(), projection.getResults()))) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      bool assignedToFactorShardings = false;
+      for (int index = 0; index < 2; index++) {
+        if (!factorShardings[factorIndex][index]) {
+          factorShardings[factorIndex][index] = {
+              .axisRefs = factorSharding.axisRefs, .count = 1};
+          std::cout << "tensor: " << tensorIndex << " factor: " << factorIndex
+                    << " index: " << index
+                    << " axisRefsLength: " << factorSharding.axisRefs.size()
+                    << "\n";
+          assignedToFactorShardings = true;
+          break;
+        }
+        if (factorShardings[factorIndex][index]->axisRefs.equals(
+                factorSharding.axisRefs)) {
+          factorShardings[factorIndex][index]->count++;
+          std::cout << "tensor: " << tensorIndex << " factor: " << factorIndex
+                    << " index: " << index
+                    << " axisRefsLength: " << factorSharding.axisRefs.size()
+                    << "\n";
+          assignedToFactorShardings = true;
+          break;
+        }
+      }
+      if (!assignedToFactorShardings) {
+        // A factor has more than two different shardings across tensors. It
+        // implies there is no tensor without which the rest is compatible.
+        return {};
+      }
+    }
+  }
+
+  // At this point, each factor is sharded either the same way or sharded in
+  // exactly two different ways across tensors. Call the factors that are
+  // sharded in two different ways as incompatible and count them.
+  int incompatibleFactorCounts = 0;
+  for (int64_t factorIndex = 0; factorIndex < numFactors; factorIndex++) {
+    if (factorShardings[factorIndex][0] && factorShardings[factorIndex][1]) {
+      incompatibleFactorCounts++;
+    }
+  }
+
+  // Find the tensors that has all incompatible factors and uniquely sharded for
+  // each.
+  SmallVector<int64_t> tensorIndices;
+  for (const auto& [tensorIndex, tensorFactorSharding] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           projection.getOperands(), projection.getResults()))) {
+    int64_t factorCounts = 0;
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      // Ignore the factors that are sharded the same way across tensors.
+      if (!factorShardings[factorIndex][0] ||
+          !factorShardings[factorIndex][1]) {
+        continue;
+      }
+      bool foundFactorShardingUniqueToTensor = false;
+      for (int index = 0; index < 2; index++) {
+        if (factorShardings[factorIndex][index]->count == 1 &&
+            factorShardings[factorIndex][index]->axisRefs.equals(
+                factorSharding.axisRefs)) {
+          foundFactorShardingUniqueToTensor = true;
+          break;
+        }
+      }
+      // Tensor has an incompatible factor and there is another tensor with the
+      // same sharding. It implies there are other tensors that the factor is
+      // sharded differently. Do not add to the list of returned tensors.
+      if (!foundFactorShardingUniqueToTensor) {
+        break;
+      }
+      factorCounts++;
+    }
+    // There is no incompatible factor this tensor is missing. Otherwise, the
+    // other tensors would not be compatible on that missing factor.
+    if (factorCounts == incompatibleFactorCounts) {
+      tensorIndices.push_back(tensorIndex);
+    }
+  }
+  return tensorIndices;
+}
+
+SmallVector<AxisListRef> findCommonAxesIgnoringOneTensor(
+    const int64_t tensorIndexToIgnore, const ShardingProjection& projection,
+    const int64_t numFactors) {
+  SmallVector<AxisListRef> factorAxisRefs(numFactors);
+  for (const auto& [factorIndex, factorSharding] :
+       projection.getTensor(tensorIndexToIgnore).factorIndexToSharding) {
+    if (!factorSharding.axisRefs.empty()) {
+      factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
+    }
+  }
+  for (const auto& [tensorIndex, tensorFactorSharding] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           projection.getOperands(), projection.getResults()))) {
+    if (tensorIndex == tensorIndexToIgnore) {
+      continue;
+    }
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (factorSharding.axisRefs.empty()) {
+        factorAxisRefs[factorIndex].clear();
+        continue;
+      }
+      factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
+    }
+  }
+  return factorAxisRefs;
+}
+
+std::optional<SmallVector<AxisListRef>> findCommonAxesByReshardingOnlyOneTensor(
+    const ShardingProjection& projection, const int64_t numFactors) {
+  SmallVector<int64_t> potentialTensorIndices =
+      findTensorIndicesShardingIsCompatibleWithout(projection, numFactors);
+  if (potentialTensorIndices.size() > 2) {
+    return std::nullopt;
+  }
+
+  // A map from tensor index to the common factor axes without the tensor.
+  DenseMap<int64_t, SmallVector<AxisListRef>> factorAxisRefsPerTensor;
+  SmallVector<int64_t> tensorIndices;
+  for (const int64_t tensorIndex : potentialTensorIndices) {
+    SmallVector<AxisListRef> factorAxisRefs =
+        findCommonAxesIgnoringOneTensor(tensorIndex, projection, numFactors);
+    if (!AxisListRef::overlaps(factorAxisRefs)) {
+      factorAxisRefsPerTensor[tensorIndex] = factorAxisRefs;
+      tensorIndices.push_back(tensorIndex);
+    }
+  }
+
+  if (tensorIndices.size() == 1) {
+    return factorAxisRefsPerTensor[tensorIndices[0]];
+  }
+
+  //  TODO(enver): In case there are two such tensors, pick the better one
+  //  (according to some tie breaking criteria) and reshard only that one.
+  //  Unary operations (that does not have factors that need replication)
+  //  always have this choice, the others are always compatible because there
+  //  is only one other tensor.
+  return std::nullopt;
+}
+
 SmallVector<AxisListRef> findCommonAxes(const ShardingProjection& projection,
                                         OpShardingRuleAttr shardingRule,
                                         MeshAttr mesh) {
+  // The operations with factors that need replication are typically expensive
+  // operations, and it could be preferable not to minimize number of
+  // reshards.
+  if (shardingRule.getNeedReplicationFactors().empty()) {
+    if (auto factorAxisRefs = findCommonAxesByReshardingOnlyOneTensor(
+            projection, shardingRule.getNumFactors());
+        factorAxisRefs) {
+      return *factorAxisRefs;
+    }
+  }
+
   return findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule,
                                                   mesh);
 
