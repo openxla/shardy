@@ -337,8 +337,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
                                                  projection.getResults())) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      if (llvm::is_contained(shardingRule.getNeedReplicationFactors(),
-                             factorIndex)) {
+      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
         continue;
       }
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
@@ -360,8 +359,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
       if (factorSharding.axisRefs.empty() ||
-          llvm::is_contained(shardingRule.getNeedReplicationFactors(),
-                             factorIndex)) {
+          shardingRule.isNeedReplicationFactor(factorIndex)) {
         continue;
       }
       FactorAxesPair factorAxes(factorIndex,

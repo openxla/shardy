@@ -882,6 +882,17 @@ TensorShardingPerValueAttr TensorShardingPerValueAttr::replaceValueSharding(
 }
 
 //===----------------------------------------------------------------------===//
+// TensorMappingAttr
+//===----------------------------------------------------------------------===//
+
+bool TensorMappingAttr::containsFactor(int64_t factorIndex) const {
+  return llvm::any_of(
+      getDimMappings(), [factorIndex](DimMappingAttr dimMapping) {
+        return llvm::is_contained(dimMapping.getFactorIndices(), factorIndex);
+      });
+}
+
+//===----------------------------------------------------------------------===//
 // OpShardingRuleAttr
 //===----------------------------------------------------------------------===//
 
@@ -902,6 +913,36 @@ SmallVector<int64_t> OpShardingRuleAttr::getTensorSizes() const {
     tensorSizes.push_back(tensorSize);
   }
   return tensorSizes;
+}
+
+bool OpShardingRuleAttr::isReductionFactor(int64_t factorIndex) const {
+  return llvm::is_contained(getReductionFactors(), factorIndex);
+}
+
+bool OpShardingRuleAttr::isNeedReplicationFactor(int64_t factorIndex) const {
+  return llvm::is_contained(getNeedReplicationFactors(), factorIndex);
+}
+
+bool OpShardingRuleAttr::isFactorInAllNonScalarTensors(
+    int64_t factorIndex) const {
+  for (const TensorMappingAttr& tensorMapping :
+       llvm::concat<const TensorMappingAttr>(getOperandMappings(),
+                                             getResultMappings())) {
+    if (tensorMapping.empty()) {
+      // We do not consider scalar tensors.
+      continue;
+    }
+    if (!tensorMapping.containsFactor(factorIndex)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool OpShardingRuleAttr::isBatchingFactor(int64_t factorIndex) const {
+  return !isReductionFactor(factorIndex) &&
+         !isNeedReplicationFactor(factorIndex) &&
+         isFactorInAllNonScalarTensors(factorIndex);
 }
 
 //===----------------------------------------------------------------------===//

@@ -66,6 +66,26 @@ class DialectTest : public ::testing::Test {
                                    replicatedAxes);
   }
 
+  DimMappingAttr createDimMapping(ArrayRef<int64_t> factorIndices) {
+    return DimMappingAttr::get(&context, factorIndices);
+  }
+
+  TensorMappingAttr createTensorMapping(ArrayRef<DimMappingAttr> dimMappings) {
+    return TensorMappingAttr::get(&context, dimMappings);
+  }
+
+  OpShardingRuleAttr createOpShardingRule(
+      ArrayRef<int64_t> factorSizes,
+      ArrayRef<TensorMappingAttr> operandMappings,
+      ArrayRef<TensorMappingAttr> resultMappings,
+      ArrayRef<int64_t> reductionFactors = {},
+      ArrayRef<int64_t> needReplicationFactors = {},
+      bool isCustomRule = false) {
+    return OpShardingRuleAttr::get(&context, factorSizes, operandMappings,
+                                   resultMappings, reductionFactors,
+                                   needReplicationFactors, isCustomRule);
+  }
+
   MLIRContext context;
 };
 
@@ -597,6 +617,117 @@ TEST_F(DialectTest, DimensionShardingAttrGetShardedSize) {
   EXPECT_EQ(dimShardings[0].getShardedSize(mesh), 8);
   EXPECT_EQ(dimShardings[1].getShardedSize(mesh), 3);
 }
+
+TEST_F(DialectTest, TensorMappingAttrContainsFactor) {
+  TensorMappingAttr tensorMapping =
+      createTensorMapping({createDimMapping({0, 3}), createDimMapping({2})});
+
+  EXPECT_TRUE(tensorMapping.containsFactor(0));
+  EXPECT_TRUE(tensorMapping.containsFactor(2));
+  EXPECT_TRUE(tensorMapping.containsFactor(3));
+
+  EXPECT_FALSE(tensorMapping.containsFactor(-1));
+  EXPECT_FALSE(tensorMapping.containsFactor(1));
+  EXPECT_FALSE(tensorMapping.containsFactor(4));
+}
+
+TEST_F(DialectTest, OpShardingRuleAttrElementWiseOperation) {
+  // An element-wise operation with two operands, e.g., a + b where operand has
+  // shape 8x16x32.
+  TensorMappingAttr tensorMapping = createTensorMapping(
+      {createDimMapping({0}), createDimMapping({1}), createDimMapping({2})});
+  OpShardingRuleAttr rule = createOpShardingRule(
+      /*factorSizes=*/{8, 16, 32},
+      /*operandMappings=*/{tensorMapping, tensorMapping},
+      /*resultMappings=*/{tensorMapping});
+
+  EXPECT_EQ(rule.getNumFactors(), 3);
+  EXPECT_EQ(rule.getNumOperands(), 2);
+  EXPECT_EQ(rule.getNumResults(), 1);
+
+  auto verifyBatchingFactor = [&](int64_t factorIndex) {
+    EXPECT_FALSE(rule.isReductionFactor(factorIndex));
+    EXPECT_FALSE(rule.isNeedReplicationFactor(factorIndex));
+    EXPECT_TRUE(rule.isFactorInAllNonScalarTensors(factorIndex));
+    EXPECT_TRUE(rule.isBatchingFactor(factorIndex));
+  };
+  verifyBatchingFactor(0);
+  verifyBatchingFactor(1);
+  verifyBatchingFactor(2);
+}
+
+TEST_F(DialectTest, OpShardingRuleAttrDotGeneralOperation) {
+  // An einsum with sharding rule ([i, j, l], [i, l, k])->([i, j, k]), where l
+  // is the contracting dimension.
+  TensorMappingAttr lhs = createTensorMapping(
+      {createDimMapping({0}), createDimMapping({1}), createDimMapping({3})});
+  TensorMappingAttr rhs = createTensorMapping(
+      {createDimMapping({0}), createDimMapping({3}), createDimMapping({2})});
+  TensorMappingAttr result = createTensorMapping(
+      {createDimMapping({0}), createDimMapping({1}), createDimMapping({2})});
+  OpShardingRuleAttr rule = createOpShardingRule(
+      /*factorSizes=*/{8, 16, 32, 64}, /*operandMappings=*/{lhs, rhs},
+      /*resultMappings=*/{result}, /*reductionFactors=*/{3});
+
+  EXPECT_EQ(rule.getNumFactors(), 4);
+  EXPECT_EQ(rule.getNumOperands(), 2);
+  EXPECT_EQ(rule.getNumResults(), 1);
+
+  // Verify the first factor is a batching factor.
+  EXPECT_FALSE(rule.isReductionFactor(0));
+  EXPECT_FALSE(rule.isNeedReplicationFactor(0));
+  EXPECT_TRUE(rule.isFactorInAllNonScalarTensors(0));
+  EXPECT_TRUE(rule.isBatchingFactor(0));
+
+  auto verifyNonContractingDimension = [&](int64_t factorIndex) {
+    EXPECT_FALSE(rule.isReductionFactor(factorIndex));
+    EXPECT_FALSE(rule.isNeedReplicationFactor(factorIndex));
+    EXPECT_FALSE(rule.isFactorInAllNonScalarTensors(factorIndex));
+    EXPECT_FALSE(rule.isBatchingFactor(factorIndex));
+  };
+  verifyNonContractingDimension(1);
+  verifyNonContractingDimension(2);
+
+  // Verify the contracting dimension is a reduction factor.
+  EXPECT_TRUE(rule.isReductionFactor(3));
+  EXPECT_FALSE(rule.isNeedReplicationFactor(3));
+  EXPECT_FALSE(rule.isFactorInAllNonScalarTensors(3));
+  EXPECT_FALSE(rule.isBatchingFactor(3));
+}
+
+TEST_F(DialectTest, OpShardingRuleAttrDynamicSlice) {
+  // An dynamic_slice with sharding rule ([i, j, k], [], [], [])->([i, l, m]),
+  // {i=32, j=1, k=1, l=1, m=1}.
+  TensorMappingAttr operand = createTensorMapping(
+      {createDimMapping({0}), createDimMapping({1}), createDimMapping({2})});
+  TensorMappingAttr index = createTensorMapping({});
+  TensorMappingAttr result = createTensorMapping(
+      {createDimMapping({0}), createDimMapping({3}), createDimMapping({4})});
+  OpShardingRuleAttr rule =
+      createOpShardingRule(/*factorSizes=*/{8, 1, 1, 1, 1},
+                           /*operandMappings=*/{operand, index, index, index},
+                           /*resultMappings=*/{result});
+
+  EXPECT_EQ(rule.getNumFactors(), 5);
+  EXPECT_EQ(rule.getNumOperands(), 4);
+  EXPECT_EQ(rule.getNumResults(), 1);
+
+  // Verify the first factor is a batching factor.
+  EXPECT_FALSE(rule.isReductionFactor(0));
+  EXPECT_FALSE(rule.isNeedReplicationFactor(0));
+  EXPECT_TRUE(rule.isFactorInAllNonScalarTensors(0));
+  EXPECT_TRUE(rule.isBatchingFactor(0));
+
+  auto verifyNonBatchingFactor = [&](int64_t factorIndex) {
+    EXPECT_FALSE(rule.isReductionFactor(factorIndex));
+    EXPECT_FALSE(rule.isNeedReplicationFactor(factorIndex));
+    EXPECT_FALSE(rule.isFactorInAllNonScalarTensors(factorIndex));
+    EXPECT_FALSE(rule.isBatchingFactor(factorIndex));
+  };
+  verifyNonBatchingFactor(1);
+  verifyNonBatchingFactor(2);
+}
+
 }  // namespace
 
 }  // namespace sdy

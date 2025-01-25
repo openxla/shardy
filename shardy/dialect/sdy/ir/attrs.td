@@ -894,6 +894,10 @@ def Sdy_TensorMapping : AttrDef<Sdy_Dialect, "TensorMapping"> {
 
   let extraClassDeclaration = [{
     int64_t getRank() const { return getDimMappings().size(); }
+    bool empty() const { return getDimMappings().empty(); }
+
+    // Returns true if any of the dimension mappings contains the `factorIndex`.
+    bool containsFactor(int64_t factorIndex) const;
   }];
 }
 
@@ -1007,6 +1011,21 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     // Returns a vector of the sizes of all operand and result tensors, the
     // operands come before the results.
     SmallVector<int64_t> getTensorSizes() const;
+
+    // Returns true if the `factorIndex` is a reduction factor.
+    bool isReductionFactor(int64_t factorIndex) const;
+
+    // Returns true if the `factorIndex` is a factor requiring full replication.
+    bool isNeedReplicationFactor(int64_t factorIndex) const;
+
+    // Returns true if the `factorIndex` is a factor in all non-scalar tensors.
+    bool isFactorInAllNonScalarTensors(int64_t factorIndex) const;
+
+    // Returns true if the `factorIndex` is a batching factor, which satisfys:
+    // 1. It is not a reduction factor.
+    // 2. It is not a need replication factor.
+    // 3. It is used in all non-scalar tensors.
+    bool isBatchingFactor(int64_t factorIndex) const;
   }];
 }
 
