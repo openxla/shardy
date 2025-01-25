@@ -756,15 +756,19 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     static TensorShardingAttr getFullyClosed(
         MLIRContext* context, int64_t rank, StringRef meshName);
 
-    // Builds a fully open `TensorShardingAttr` with all dim shardings and
-    // replicated axes being marked closed and matching `sharding` in
-    // `mesh_sym_name` and rank.
+    // Builds a fully closed `TensorShardingAttr` matching `sharding` in
+    // `mesh_or_ref` and rank.
     static TensorShardingAttr getFullyClosedLike(TensorShardingAttr sharding);
 
-    // Builds a fully open `TensorShardingAttr` with all dim shardings and
-    // replicated axes being marked closed and matching `sharding` in dim
-    // sharding axes, `mesh_sym_name` and rank.
+    // Builds a `TensorShardingAttr` with all dim shardings being marked closed
+    // and matching `sharding` in dim sharding axes, `mesh_or_ref` and rank.
     static TensorShardingAttr getClosedLike(TensorShardingAttr sharding);
+
+    // Builds a `TensorShardingAttr` with a closed dim sharding for each axis
+    // list in `axesPerDim`.
+    static TensorShardingAttr getClosed(
+        MLIRContext* context, Attribute meshOrRef,
+        ArrayRef<SmallVector<AxisRefAttr>> axesPerDim);
 
     // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
     // being marked open (can be further replicated/sharded).
@@ -772,7 +776,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
         MLIRContext* context, int64_t rank, StringRef meshName);
 
     // Builds a fully open `TensorShardingAttr` matching `sharding` in
-    // `mesh_sym_name` and rank.
+    // `mesh_or_ref` and rank.
     static TensorShardingAttr getFullyOpenLike(TensorShardingAttr sharding);
 
     // Gets the local tensor type from a global RankedTensorType w.r.t. the

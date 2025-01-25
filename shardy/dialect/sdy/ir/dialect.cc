@@ -766,6 +766,12 @@ TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
   return getTensorShardingAttr(context, rank, meshName, /*isClosed=*/true);
 }
 
+TensorShardingAttr TensorShardingAttr::getFullyClosedLike(
+    TensorShardingAttr sharding) {
+  return getTensorShardingAttr(sharding.getContext(), sharding.getRank(),
+                               sharding.getMeshOrRef(), /*isClosed=*/true);
+}
+
 TensorShardingAttr TensorShardingAttr::getClosedLike(
     TensorShardingAttr sharding) {
   SmallVector<DimensionShardingAttr> closedDimShardings(sharding.getRank());
@@ -778,10 +784,17 @@ TensorShardingAttr TensorShardingAttr::getClosedLike(
                                  /*replicatedAxes=*/{});
 }
 
-TensorShardingAttr TensorShardingAttr::getFullyClosedLike(
-    TensorShardingAttr sharding) {
-  return getTensorShardingAttr(sharding.getContext(), sharding.getRank(),
-                               sharding.getMeshOrRef(), /*isClosed=*/true);
+TensorShardingAttr TensorShardingAttr::getClosed(
+    MLIRContext* context, Attribute meshOrRef,
+    ArrayRef<SmallVector<AxisRefAttr>> axesPerDim) {
+  SmallVector<DimensionShardingAttr> dimShardings;
+  dimShardings.reserve(axesPerDim.size());
+  for (ArrayRef<AxisRefAttr> axes : axesPerDim) {
+    dimShardings.push_back(
+        DimensionShardingAttr::get(context, axes, /*is_closed=*/true));
+  }
+  return TensorShardingAttr::get(context, meshOrRef, dimShardings,
+                                 /*replicatedAxes=*/{});
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
