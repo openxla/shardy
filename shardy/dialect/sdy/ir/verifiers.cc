@@ -1128,12 +1128,6 @@ LogicalResult verifyCollectiveWithAxesPerDim(
 
 }  // namespace
 
-// For each AllGatherOp, verifies:
-// 1. Operand has a sharding.
-// 2. Result sharding is valid w.r.t the corresponding type.
-// 3. Both operand and result shardings are bound to the same `MeshAttr`.
-// 4. All gathering axes are valid (see `verifyAxisRefList`).
-// 5. Applying `gathering_axes` to the operand sharding gets `out_sharding`.
 LogicalResult AllGatherOp::verify() {
   return verifyCollectiveWithAxesPerDim(
       *this, getGatheringAxes(),
@@ -1160,12 +1154,6 @@ LogicalResult AllGatherOp::verify() {
       });
 }
 
-// For each AllSliceOp, verifies:
-// 1. Operand has a sharding.
-// 2. Result sharding is valid w.r.t the corresponding type.
-// 3. Both operand and result shardings are bound to the same `MeshAttr`.
-// 4. All slicing axes are valid (see `verifyAxisRefList`).
-// 5. Applying `slicing_axes` to the operand sharding gets `out_sharding`.
 LogicalResult AllSliceOp::verify() {
   return verifyCollectiveWithAxesPerDim(
       *this, getSlicingAxes(),
@@ -1179,6 +1167,64 @@ LogicalResult AllSliceOp::verify() {
         }
         return expectedDimSharding;
       });
+}
+
+LogicalResult CollectivePermuteOp::verify() {
+  // TODO(b/391574176): CollectiveOpInterface should verify 1-3.
+
+  // 1. Verify operand has a sharding.
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  if (!operandSharding) {
+    return emitOpError("collective on operand without sharding");
+  }
+
+  // 2. Verify result sharding is valid w.r.t the corresponding type.
+  TensorShardingAttr resultSharding = getOutSharding();
+  if (failed(verifyTensorShardingAttr(resultSharding, getType(), *this,
+                                      getEmitErrorFn(*this)))) {
+    return failure();
+  }
+
+  // 3. Verify MeshAttr of result and operand is the same.
+  MeshAttr mesh = resultSharding.getMesh(*this);
+  MeshAttr operandMesh = operandSharding.getMesh(*this);
+
+  if (mesh != operandMesh) {
+    return emitOpError("result mesh does not match operand mesh")
+               .attachNote(getOperand().getLoc())
+           << "operand mesh: " << operandMesh;
+  }
+
+  // TODO(b/391574176): should also be verified by CollectiveOpInterface.
+  // Verify same rank of the result sharding and operand sharding.
+  ArrayRef<DimensionShardingAttr> resultDimShardings =
+      resultSharding.getDimShardings();
+  ArrayRef<DimensionShardingAttr> operandDimShardings =
+      operandSharding.getDimShardings();
+  if (resultDimShardings.size() != operandDimShardings.size()) {
+    return emitOpError("result sharding has rank ")
+           << resultDimShardings.size() << " but operand sharding has rank "
+           << operandDimShardings.size();
+  }
+
+  // 4. For each dimension, verify that the sharded size of input and output
+  // dimension shardings match.
+  for (auto [dim, dimShardings] : llvm::enumerate(
+           llvm::zip_equal(operandDimShardings, resultDimShardings))) {
+    auto [inDimSharding, outDimSharding] = dimShardings;
+    if (inDimSharding.getAxes() == outDimSharding.getAxes()) {
+      continue;
+    }
+    int64_t inShardedSize = inDimSharding.getShardedSize(mesh);
+    int64_t outShardedSize = outDimSharding.getShardedSize(mesh);
+    if (inShardedSize != outShardedSize) {
+      return emitOpError("sharded size of result doesn't match operand ")
+             << "on dimension " << dim << ": " << outShardedSize
+             << " != " << inShardedSize;
+    }
+  }
+
+  return success();
 }
 
 LogicalResult SdyDialect::verifyRegionArgAttribute(Operation* op,

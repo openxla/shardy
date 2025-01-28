@@ -472,7 +472,7 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     Example:
     ```mlir
     %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\]>]>} : tensor<8x8xf32>
-    %2 = sdy.all_gather [{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
+    %2 = sdy.all_gather [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
     ```
 
     **Constraints:**
@@ -517,7 +517,7 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
     Example:
     ```mlir
     %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}, {}\]>]>} : tensor<8x8xf32>
-    %2 = sdy.all_slice [{"b", "c"}, {}, {"d"}\] %1 to_sharding=<@mesh, [{"a", "b", "c"}, {}, {"d"}\]> : tensor<8x8xf32>
+    %2 = sdy.all_slice [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a", "b", "c"}, {}, {"d"}\]> : tensor<8x8xf32>
     ```
 
     **Constraints:**
@@ -539,6 +539,52 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
   let assemblyFormat = "$slicing_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
+}
+
+// TODO(b/392797233): Support using `sdy.collective_permute` to change the
+// device order between the mesh of the input and output of a reshard.
+
+def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
+    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+  let summary = "Sends a chunk of a tensor from each device to another along axes";
+  let description = [{
+    Sends a chunk of the input tensor from each device to another along the axes
+    that shard the tensor.
+
+    A collective permute can transform the input sharding such that each
+    dimension must be as sharded as it was before, i.e., it must be sharded
+    along axes whose product of sizes matches that of the axes that previously
+    sharded the tensor.
+
+    This is useful for reordering axes in a single dimension or across different
+    dimensions, and swapping sharded axes with replicated ones.
+
+    In the below example, the sharded tensor size is `tensor<1x4x2xf32>`, and
+    that is preserved by the collective permute.
+
+    Example:
+    ```mlir
+    sdy.mesh @mesh = <["a"=2, "b"=2, "c"=4, "d"=2, "e"=2, "f"=2]>
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "c"}, {"f"}, {"d", "e"}\]>]>} : tensor<8x8x8xf32>
+    %2 = sdy.collective_permute %1 out_sharding=<@mesh, [{"c":(1)2, "b", "f"}, {"a"}, {"e", "d"}\]> : tensor<8x8x8xf32>
+    ```
+
+    **Constraints:**
+    - `out_sharding` must satisfy the constraints listed in
+      `TensorShardingAttr`.
+    - The operand must have a sharding.
+    - Both operand and result shardings should be bound to the same `MeshAttr`.
+    - For each dimension, the product of sharding axis sizes in `out_sharding`
+      must match that of the corresponding operand dimension sharding.
+  }];
+
+  let arguments = (ins
+    AnyTensor:$tensor,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let hasVerifier = 1;
 }
 
 
