@@ -212,7 +212,6 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 //
 // - The tensor should have a rank.
 // - The number of dimension shardings is equal to the rank of the tensor.
-// - Dimensions of size 0 aren't sharded.
 // - Replicated axes are ordered w.r.t. `mesh` (see
 //   AxisRefAttr::getMeshComparator).
 // - All dimension shardings and the replicated axes are each a valid axis-ref
@@ -301,13 +300,6 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
       continue;
     }
 
-    if (dimSize == 0 &&
-        llvm::any_of(dimSharding.getAxes(), [&](AxisRefAttr axisRef) {
-          return axisNameToSize[axisRef.getName()] > 1;
-        })) {
-      return emitError("dim ")
-             << dim << " of size 0 is sharded on an axis of size > 1";
-    }
     if (checkDivisibility) {
       int64_t shardedSize = dimSharding.getShardedSize(mesh);
       if (dimSize % shardedSize != 0) {

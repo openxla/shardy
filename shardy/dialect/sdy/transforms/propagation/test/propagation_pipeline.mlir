@@ -57,6 +57,15 @@ func.func @sharding_constraint_replaced_with_reshard(%arg0: tensor<8x8xf32>) -> 
   return %arg0, %0 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @size_zero_dim_sharded
+// CHECK-SAME: %arg0: tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}
+// CHECK-SAME: %arg1: tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>})
+func.func @size_zero_dim_sharded(%arg0: tensor<8x0xf32>, %arg1: tensor<8x0xf32>) -> tensor<8x0xf32> {
+  // CHECK-NEXT: %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : tensor<8x0xf32>
+  return %0 : tensor<8x0xf32>
+}
+
 // -----
 
 // CHECK: sdy.mesh @mesh = <["a"=2, "b"=2]>
