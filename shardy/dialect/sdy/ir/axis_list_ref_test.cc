@@ -44,9 +44,6 @@ class AxisListRefTest : public ::testing::Test {
   }
 
   AxisListRef createAxisListRef(SmallVector<AxisRefAttr> axisRefs) {
-    if (axisRefs.empty()) {
-      return AxisListRef();
-    }
     backingData.push_back(axisRefs);
     return AxisListRef(backingData.back());
   }

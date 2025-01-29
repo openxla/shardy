@@ -90,9 +90,12 @@ class AxisListRefIterator {
 // is also a prefix sub-axis of an axis in the original list.
 class AxisListRef {
  public:
-  // Assumes that input `axisRefs` is non-empty.
-  AxisListRef(ArrayRef<AxisRefAttr> axisRefs)
-      : axisRefs(axisRefs.drop_back()), tailAxisRef(axisRefs.back()) {}
+  AxisListRef(ArrayRef<AxisRefAttr> axisRefs) {
+    if (!axisRefs.empty()) {
+      this->axisRefs = axisRefs.drop_back();
+      this->tailAxisRef = axisRefs.back();
+    }
+  }
 
   AxisListRef() = default;
 
