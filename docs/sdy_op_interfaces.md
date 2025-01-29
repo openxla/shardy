@@ -5,6 +5,12 @@
 Interface for all collective ops. Encapsulates common get/set for
 outSharding attribute.
 
+**Constraints:**
+- Operand must have a sharding.
+- `out_sharding` is valid w.r.t the corresponding type.
+- MeshAttr of result and operand is the same.
+- Same rank for the operand and result sharding.
+
 ### Methods:
 #### `getOutSharding`
 
@@ -21,6 +27,24 @@ NOTE: This method *must* be implemented by the user.
 void setOutShardingAttr(::mlir::sdy::TensorShardingAttr sharding);
 ```
 Sets the output tensor sharding of the collective op.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getTensor`
+
+```c++
+::mlir::TypedValue<::mlir::TensorType> getTensor();
+```
+Get the tensor operand of the collective op.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `getType`
+
+```c++
+::mlir::Type getType();
+```
+Get the type of the collective op result.
 
 NOTE: This method *must* be implemented by the user.
 
