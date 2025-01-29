@@ -476,12 +476,9 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     ```
 
     **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - Elements in `gathering_axes` must satisfy the constraints listed in
       `AxisRefListAttr`.
-    - `out_sharding` must satisfy the constraints listed in
-      `TensorShardingAttr`.
-    - The operand must have a sharding.
-    - Both operand and result shardings should be bound to the same `MeshAttr`.
     - Applying `gathering_axes` to the operand sharding gets `out_sharding`.
   }];
 
@@ -523,10 +520,7 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
     **Constraints:**
     - Elements in `slicing_axes` must satisfy the constraints listed in
       `AxisRefListAttr`.
-    - `out_sharding` must satisfy the constraints listed in
-      `TensorShardingAttr`.
-    - The operand must have a sharding.
-    - Both operand and result shardings should be bound to the same `MeshAttr`.
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - Applying `slicing_axes` to the operand sharding gets `out_sharding`.
   }];
 
@@ -570,11 +564,8 @@ def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
     ```
 
     **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - `axes` must satisfy the constraints listed in `AxisRefListAttr`.
-    - `out_sharding` must satisfy the constraints listed in
-      `TensorShardingAttr`.
-    - The operand must have a sharding.
-    - Both operand and result shardings should be bound to the same `MeshAttr`.
     - `src_dim` and `tgt_dim` must be valid dimensions (positive and less than
       rank of tensor), and different from each other.
     - Moving `axes` from `src_dim` to `tgt_dim` in the operand sharding gets
@@ -623,10 +614,7 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
     ```
 
     **Constraints:**
-    - `out_sharding` must satisfy the constraints listed in
-      `TensorShardingAttr`.
-    - The operand must have a sharding.
-    - Both operand and result shardings should be bound to the same `MeshAttr`.
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - For each dimension, the product of sharding axis sizes in `out_sharding`
       must match that of the corresponding operand dimension sharding.
   }];

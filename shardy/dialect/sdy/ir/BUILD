@@ -166,6 +166,7 @@ cc_library(
         "parsers.h",
         "printers.h",
         "utils.h",
+        "verifiers.h",
     ],
     deps = [
         ":attrs_inc",

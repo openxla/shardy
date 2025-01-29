@@ -18,6 +18,7 @@ limitations under the License.
 
 include "mlir/IR/OpBase.td"
 include "shardy/dialect/sdy/ir/attrs.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"
 
 //===----------------------------------------------------------------------===//
 // ShardableDataFlowOpInterface
@@ -245,9 +246,15 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
   let description = [{
     Interface for all collective ops. Encapsulates common get/set for
     outSharding attribute.
+
+    **Constraints:**
+    - Operand must have a sharding.
+    - `out_sharding` is valid w.r.t the corresponding type.
+    - MeshAttr of result and operand is the same.
+    - Same rank for the operand and result sharding.
   }];
   let cppNamespace = "::mlir::sdy";
-    let methods = [
+  let methods = [
     InterfaceMethod<
       /*desc=*/[{
         Returns the output tensor sharding of the collective op.
@@ -263,10 +270,19 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
       /*methodName=*/"setOutShardingAttr",
       /*args=*/(ins "::mlir::sdy::TensorShardingAttr":$sharding)
     >,
+    InterfaceMethod<
+      /*desc=*/[{ Get the tensor operand of the collective op. }],
+      /*retType=*/"::mlir::TypedValue<::mlir::TensorType>",
+      /*methodName=*/"getTensor"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{ Get the type of the collective op result. }],
+      /*retType=*/"::mlir::Type",
+      /*methodName=*/"getType"
+    >
   ];
   let verify = [{
-    // TODO(kostiantynl): b/391574176 - add a common collective op verify
-    return success();
+    return ::mlir::sdy::verifyCollectiveOp($_op);
   }];
 }
 

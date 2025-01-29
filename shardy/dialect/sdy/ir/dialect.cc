@@ -121,8 +121,7 @@ namespace {
 // terminator.
 // Else returns an empty vector.
 template <typename RegionOpTy>
-SmallVector<Value> getEdgeSourcesFromRegionBasedOp(Value owner,
-                                                   RegionOpTy op) {
+SmallVector<Value> getEdgeSourcesFromRegionBasedOp(Value owner, RegionOpTy op) {
   static_assert(
       OpTrait::template hasSingleBlockImplicitTerminator<RegionOpTy>::value);
   assert(getOwningOp(owner) == op.getOperation());
@@ -328,7 +327,6 @@ AxisRefAttr::getMeshComparator(MeshAttr mesh) {
     StringRef lhsName = lhs.getName();
     StringRef rhsName = rhs.getName();
     if (lhsName == rhsName) {
-
       // Both axis-refs have the same name, defer to AxisRefAttr::operator<
       return lhs < rhs;
     }
@@ -1209,8 +1207,7 @@ DataFlowEdgeOp DataFlowEdgeOp::lookup(OpOperand& source) {
 }
 
 TensorShardingAttr DataFlowEdgeOp::transformTargetSharding(
-    TensorShardingAttr sharding,
-    DataFlowShardingTransformType transformType) {
+    TensorShardingAttr sharding, DataFlowShardingTransformType transformType) {
   return castOwningShardableDataFlowOp(getInput())
       .transformTargetSharding(getInput(), sharding, transformType);
 }
