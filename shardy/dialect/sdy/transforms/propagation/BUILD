@@ -234,6 +234,7 @@ cc_test(
     srcs = ["basic_factor_propagation_test.cc"],
     deps = [
         ":basic_factor_propagation",
+        ":factor_propagation",
         ":sharding_projection",
         ":testing_utils",
         ":utils",
@@ -269,6 +270,7 @@ cc_test(
     srcs = ["aggressive_factor_propagation_test.cc"],
     deps = [
         ":aggressive_factor_propagation",
+        ":factor_propagation",
         ":sharding_projection",
         ":testing_utils",
         ":utils",

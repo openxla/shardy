@@ -273,8 +273,9 @@ LogicalResult propagateTensorShardings(
   auto updateShardings = [&]() {
     auto [updateOperand, updateResult] =
         factorPropagation.propagateFactorShardings(
-            shardingProjection, direction, shardingRule.getFactorSizes(), mesh,
-            op, conservativePropagation);
+            shardingProjection, direction,
+            /*propagateAlongFactor=*/[](int64_t) { return true; },
+            shardingRule.getFactorSizes(), mesh, op, conservativePropagation);
 
     // We need to update the tensor sharding attributes explicitly, as we
     // have been modifying our internal `shardingProjection` so far.

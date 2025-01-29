@@ -35,6 +35,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/macros.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
@@ -304,7 +305,12 @@ std::pair<SmallVector<AxisRefAttr>, bool> getCompatibleMajorAxesInternal(
 
 SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
     const ShardingProjection& projection, int64_t factorIndex,
-    PropagationDirection direction, Operation* op) const {
+    PropagationDirection direction,
+    PropagateAlongFactorPred propagateAlongFactor, Operation* op) const {
+  if (!propagateAlongFactor(factorIndex)) {
+    return {};
+  }
+
   std::optional<DirectionBasedTensorShardings> tensorShardings =
       getDirectionBasedTensorShardings(direction, op, projection.getOperands(),
                                        projection.getResults());
@@ -381,15 +387,16 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
 
 SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
     const ShardingProjection& projection, int64_t factorIndex,
-    PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
-    Operation* op, bool conservativePropagation) const {
+    PropagationDirection direction,
+    PropagateAlongFactorPred propagateAlongFactor, int64_t factorSize,
+    MeshAttr mesh, Operation* op, bool conservativePropagation) const {
   if (direction == PropagationDirection::NONE) {
     return SmallVector<AxisRefAttr>();
   }
 
   // Finds the compatible major axes ignoring conflicts.
-  SmallVector<AxisRefAttr> resultAxes =
-      getCompatibleMajorAxes(projection, factorIndex, direction, op);
+  SmallVector<AxisRefAttr> resultAxes = getCompatibleMajorAxes(
+      projection, factorIndex, direction, propagateAlongFactor, op);
 
   // Removes the major-most axis that isn't compatible w.r.t. other factors or
   // the replicated axes, and all axes that are minor to it.
@@ -406,6 +413,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
 
 UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection, PropagationDirection direction,
+    PropagateAlongFactorPred propagateAlongFactor,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
@@ -417,8 +425,8 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     // that factor for all tensors, those are the axes we will propagate to
     // tensors that aren't already sharded.
     SmallVector<AxisRefAttr> axesToPropagate = getCompatibleMajorShardingAxes(
-        projection, factorIndex, direction, factorSize, mesh, op,
-        conservativePropagation);
+        projection, factorIndex, direction, propagateAlongFactor, factorSize,
+        mesh, op, conservativePropagation);
 
     // Update all shardings along this factor if possible.
     auto [updateOperandForFactor, updateResultForFactor] =

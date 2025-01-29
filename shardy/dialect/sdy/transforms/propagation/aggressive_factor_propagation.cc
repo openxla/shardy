@@ -25,8 +25,8 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -86,6 +86,7 @@ SmallVector<TensorIndexSize> getFactorToSourceTensor(
 
 UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection, PropagationDirection direction,
+    PropagateAlongFactorPred propagateAlongFactor,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
@@ -99,8 +100,9 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   axesPerFactor.reserve(factorSizes.size());
   bool allElementsAreEmpty = true;
   for (int64_t i = 0; i < factorSizes.size(); ++i) {
-    SmallVector<AxisRefAttr>& axes = axesPerFactor.emplace_back(
-        getCompatibleMajorAxes(projection, i, direction, op));
+    SmallVector<AxisRefAttr>& axes =
+        axesPerFactor.emplace_back(getCompatibleMajorAxes(
+            projection, i, direction, propagateAlongFactor, op));
     if (!axes.empty()) {
       allElementsAreEmpty = false;
     }

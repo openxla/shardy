@@ -19,10 +19,10 @@ limitations under the License.
 #include <cstdint>
 #include <utility>
 
-#include "mlir/IR/Operation.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
@@ -42,19 +42,23 @@ class BasicFactorPropagationTest : public PropagationTestBase {
       ShardingProjection& projection, int64_t numFactors,
       PropagationDirection direction = PropagationDirection::BOTH,
       MeshAttr mesh = nullptr, bool conservativePropagation = false,
-      Operation* op = nullptr) {
+      PropagateAlongFactorPred propagateAlongFactor = [](int64_t) {
+        return true;
+      }) {
     return BasicFactorPropagation().propagateFactorShardings(
-        projection, direction, SmallVector<int64_t>(numFactors, 1), mesh, op,
+        projection, direction, propagateAlongFactor,
+        SmallVector<int64_t>(numFactors, 1), mesh, /*op=*/nullptr,
         conservativePropagation);
   }
 
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, ArrayRef<int64_t> factorSizes,
       PropagationDirection direction = PropagationDirection::BOTH,
-      MeshAttr mesh = nullptr, bool conservativePropagation = false,
-      Operation* op = nullptr) {
+      MeshAttr mesh = nullptr, bool conservativePropagation = false) {
     return BasicFactorPropagation().propagateFactorShardings(
-        projection, direction, factorSizes, mesh, op, conservativePropagation);
+        projection, direction,
+        /*propagateAlongFactor=*/[](int64_t) { return true; }, factorSizes,
+        mesh, /*op=*/nullptr, conservativePropagation);
   }
 };
 
@@ -637,6 +641,44 @@ TEST_F(BasicFactorPropagationTest,
   auto [updateOperands, updateResults] = propagateFactorShardings(
       projection, 2, PropagationDirection::BOTH, /*mesh=*/nullptr,
       /*conservativePropagation=*/true);
+  EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
+  EXPECT_EQ(projection, projectionExpected);
+}
+
+TEST_F(BasicFactorPropagationTest, PropagateAlongPartialFactors) {
+  ShardingProjection projection(
+      /*operands=*/
+      {{.factorIndexToSharding =
+            {
+                {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+                {1, {.axisRefs = {createAxis("c")}}},
+                {2, {.axisRefs = {}}},
+            }}},
+      /*results=*/
+      {{.factorIndexToSharding = {
+            {0, {.axisRefs = {}}},
+            {1, {.axisRefs = {}}},
+            {2, {.axisRefs = {createAxis("b")}}},
+        }}});
+
+  // We do not propagate along factor 1. Factor 1 is still considered as
+  // conflict when we propagate along other factors. Thus, we only propagate
+  // ["a"] along factor 0.
+  ShardingProjection projectionExpected(
+      /*operands=*/{projection.getOperand(0)},
+      /*results=*/{{.factorIndexToSharding = {
+                        {0, {.axisRefs = {createAxis("a")}}},
+                        {1, {.axisRefs = {}}},
+                        {2, {.axisRefs = {createAxis("b")}}},
+                    }}});
+
+  PropagateAlongFactorPred doNotPropagateAlongFactor1 =
+      [](int64_t factorIndex) { return factorIndex != 1; };
+
+  auto [updateOperands, updateResults] = propagateFactorShardings(
+      projection, 2, PropagationDirection::BOTH, /*mesh=*/nullptr,
+      /*conservativePropagation=*/false, doNotPropagateAlongFactor1);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
   EXPECT_EQ(projection, projectionExpected);

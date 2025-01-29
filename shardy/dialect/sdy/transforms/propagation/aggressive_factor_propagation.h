@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
@@ -77,6 +78,7 @@ class AggressiveFactorPropagation : public BasicFactorPropagation {
  public:
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, PropagationDirection direction,
+      PropagateAlongFactorPred propagateAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const override;
 };

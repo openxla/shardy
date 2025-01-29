@@ -18,9 +18,9 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 
-#include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
@@ -38,12 +38,13 @@ class AggressiveFactorPropagationTest : public PropagationTestBase {
  protected:
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, int64_t numFactors,
-      PropagationDirection direction = PropagationDirection::BOTH,
-      MeshAttr mesh = nullptr, bool conservativePropagation = false,
-      Operation* op = nullptr) {
+      PropagateAlongFactorPred propagateAlongFactor = [](int64_t) {
+        return true;
+      }) {
     return AggressiveFactorPropagation().propagateFactorShardings(
-        projection, direction, SmallVector<int64_t>(numFactors, 1), mesh, op,
-        conservativePropagation);
+        projection, /*direction=*/PropagationDirection::BOTH,
+        propagateAlongFactor, SmallVector<int64_t>(numFactors, 1),
+        /*mesh=*/nullptr, /*op=*/nullptr, /*conservativePropagation*/ false);
   }
 };
 
@@ -345,6 +346,49 @@ TEST_F(AggressiveFactorPropagationTest, NewAxesConflict) {
   EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(1, 2));
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
   EXPECT_EQ(projection, projectionExpected);
+}
+
+TEST_F(AggressiveFactorPropagationTest, PropagateAlongSpecificFactor) {
+  TensorFactorShardings factor0IsSharded = {
+      .factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}}, {1, {}}}};
+  TensorFactorShardings factor1IsSharded = {
+      .factorIndexToSharding = {{0, {}}, {1, {.axisRefs = {createAxis("a")}}}}};
+  TensorFactorShardings replicated = {
+      .factorIndexToSharding = {{0, {}}, {1, {}}}};
+
+  auto propagateAlongFactor =
+      [&](PropagateAlongFactorPred propagateAlongFactor,
+          const ShardingProjection& projectionExpected) {
+        ShardingProjection projection(
+            /*operands=*/{factor0IsSharded, factor1IsSharded},
+            /*results=*/{replicated});
+
+        auto [updateOperands, updateResults] =
+            propagateFactorShardings(projection, 2, propagateAlongFactor);
+        EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
+        EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
+        EXPECT_EQ(projection, projectionExpected);
+      };
+
+  ShardingProjection propagateAlongFactor0Expected(
+      /*operands=*/{factor0IsSharded, factor1IsSharded},
+      /*results=*/{factor0IsSharded});
+  propagateAlongFactor([](int64_t factorIndex) { return factorIndex == 0; },
+                       propagateAlongFactor0Expected);
+  propagateAlongFactor([](int64_t factorIndex) { return factorIndex != 1; },
+                       propagateAlongFactor0Expected);
+  // When we propagate along all factors, we propagate "a" to the result along
+  // factor 0.
+  propagateAlongFactor([](int64_t factorIndex) { return true; },
+                       propagateAlongFactor0Expected);
+
+  ShardingProjection propagateAlongFactor1Expected(
+      /*operands=*/{factor0IsSharded, factor1IsSharded},
+      /*results=*/{factor1IsSharded});
+  propagateAlongFactor([](int64_t factorIndex) { return factorIndex == 1; },
+                       propagateAlongFactor1Expected);
+  propagateAlongFactor([](int64_t factorIndex) { return factorIndex != 0; },
+                       propagateAlongFactor1Expected);
 }
 
 }  // namespace

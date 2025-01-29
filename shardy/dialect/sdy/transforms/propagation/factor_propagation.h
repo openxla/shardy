@@ -17,6 +17,7 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_FACTOR_PROPAGATION_H_
 
 #include <cstdint>
+#include <functional>
 
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
@@ -25,6 +26,10 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
+
+// A predicate taking a factor index and returning whether sharding axes should
+// be propagated along that factor.
+using PropagateAlongFactorPred = std::function<bool(int64_t)>;
 
 // An interface for propagating factor shardings.
 class FactorPropagation {
@@ -42,8 +47,12 @@ class FactorPropagation {
   // calculating the compatible major axes. If the projection contains a
   // sub-axis, then the axes (and any axes further sharding the factor) is
   // excluded from the result.
+  //
+  // TODO(b/392971621). Unify `PropagationDirection` and
+  // `PropagateAlongFactorPred`.
   virtual UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, PropagationDirection direction,
+      PropagateAlongFactorPred propagateAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const = 0;
 };
