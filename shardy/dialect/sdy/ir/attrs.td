@@ -1042,6 +1042,11 @@ def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
   }];
 }
 
+def Sdy_EmptyAxisList: AttrConstraint<
+    CPred<"$_self.isa<AxisRefListAttr>() && "
+          "$_self.cast<AxisRefListAttr>().empty()">,
+    "is empty axis list">;
+
 def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
                                  "list_of_axis_ref_lists", "AxisRefListAttr"> {
   let summary = "List of axis ref lists";

@@ -175,5 +175,10 @@ void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
   results.add<AllSliceNoopPattern>(context);
 }
 
+void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                             MLIRContext* context) {
+  results.add<AllToAllNoopPattern>(context);
+}
+
 }  // namespace sdy
 }  // namespace mlir
