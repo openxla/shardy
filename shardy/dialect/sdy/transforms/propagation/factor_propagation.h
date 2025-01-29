@@ -27,9 +27,10 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-// A predicate taking a factor index and returning whether sharding axes should
-// be propagated along that factor.
-using PropagateAlongFactorPred = std::function<bool(int64_t)>;
+// A predicate taking a factor index and returning the propagation direction
+// along that factor.
+using PropagationDirectionAlongFactor =
+    std::function<PropagationDirection(int64_t)>;
 
 // An interface for propagating factor shardings.
 class FactorPropagation {
@@ -38,7 +39,8 @@ class FactorPropagation {
 
   // Propagates the factor shardings in `projection`.
   //
-  // * `direction` specifies the direction of propagation.
+  // * `directionAlongFactor` is a predicate that determines in which direction
+  //   propagation should happen for a given factor.
   // * `factorSizes` is the size of each factor.
   // * `mesh` is the mesh that the factors are sharded over.
   // * `op` is the operation that the factor shardings are propagated through.
@@ -47,12 +49,9 @@ class FactorPropagation {
   // calculating the compatible major axes. If the projection contains a
   // sub-axis, then the axes (and any axes further sharding the factor) is
   // excluded from the result.
-  //
-  // TODO(b/392971621). Unify `PropagationDirection` and
-  // `PropagateAlongFactorPred`.
   virtual UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, PropagationDirection direction,
-      PropagateAlongFactorPred propagateAlongFactor,
+      ShardingProjection& projection,
+      PropagationDirectionAlongFactor directionAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const = 0;
 };

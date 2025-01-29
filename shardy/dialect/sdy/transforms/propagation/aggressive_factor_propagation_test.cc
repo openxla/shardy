@@ -34,17 +34,19 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 
+PropagationDirectionAlongFactor propagateAnything() {
+  return [](int64_t) { return PropagationDirection::BOTH; };
+}
+
 class AggressiveFactorPropagationTest : public PropagationTestBase {
  protected:
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, int64_t numFactors,
-      PropagateAlongFactorPred propagateAlongFactor = [](int64_t) {
-        return true;
-      }) {
+      PropagationDirectionAlongFactor directionAlongFactor =
+          propagateAnything()) {
     return AggressiveFactorPropagation().propagateFactorShardings(
-        projection, /*direction=*/PropagationDirection::BOTH,
-        propagateAlongFactor, SmallVector<int64_t>(numFactors, 1),
-        /*mesh=*/nullptr, /*op=*/nullptr, /*conservativePropagation*/ false);
+        projection, directionAlongFactor, SmallVector<int64_t>(numFactors, 1),
+        /*mesh=*/nullptr, /*op=*/nullptr, /*conservativePropagation=*/false);
   }
 };
 
@@ -357,7 +359,7 @@ TEST_F(AggressiveFactorPropagationTest, PropagateAlongSpecificFactor) {
       .factorIndexToSharding = {{0, {}}, {1, {}}}};
 
   auto propagateAlongFactor =
-      [&](PropagateAlongFactorPred propagateAlongFactor,
+      [&](PropagationDirectionAlongFactor propagateAlongFactor,
           const ShardingProjection& projectionExpected) {
         ShardingProjection projection(
             /*operands=*/{factor0IsSharded, factor1IsSharded},
@@ -370,25 +372,27 @@ TEST_F(AggressiveFactorPropagationTest, PropagateAlongSpecificFactor) {
         EXPECT_EQ(projection, projectionExpected);
       };
 
+  auto propagateAlongFactorOnly = [](int64_t factorIndex) {
+    return [factorIndex](int64_t i) {
+      return i == factorIndex ? PropagationDirection::BOTH
+                              : PropagationDirection::NONE;
+    };
+  };
+
   ShardingProjection propagateAlongFactor0Expected(
       /*operands=*/{factor0IsSharded, factor1IsSharded},
       /*results=*/{factor0IsSharded});
-  propagateAlongFactor([](int64_t factorIndex) { return factorIndex == 0; },
-                       propagateAlongFactor0Expected);
-  propagateAlongFactor([](int64_t factorIndex) { return factorIndex != 1; },
-                       propagateAlongFactor0Expected);
-  // When we propagate along all factors, we propagate "a" to the result along
-  // factor 0.
-  propagateAlongFactor([](int64_t factorIndex) { return true; },
-                       propagateAlongFactor0Expected);
-
   ShardingProjection propagateAlongFactor1Expected(
       /*operands=*/{factor0IsSharded, factor1IsSharded},
       /*results=*/{factor1IsSharded});
-  propagateAlongFactor([](int64_t factorIndex) { return factorIndex == 1; },
+  propagateAlongFactor(propagateAlongFactorOnly(0),
+                       propagateAlongFactor0Expected);
+  propagateAlongFactor(propagateAlongFactorOnly(1),
                        propagateAlongFactor1Expected);
-  propagateAlongFactor([](int64_t factorIndex) { return factorIndex != 0; },
-                       propagateAlongFactor1Expected);
+
+  // When we propagate along all factors, we propagate "a" to the result along
+  // factor 0.
+  propagateAlongFactor(propagateAnything(), propagateAlongFactor0Expected);
 }
 
 }  // namespace

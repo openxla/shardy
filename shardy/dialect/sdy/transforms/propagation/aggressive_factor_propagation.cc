@@ -85,24 +85,20 @@ SmallVector<TensorIndexSize> getFactorToSourceTensor(
 }  // namespace
 
 UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
-    ShardingProjection& projection, PropagationDirection direction,
-    PropagateAlongFactorPred propagateAlongFactor,
+    ShardingProjection& projection,
+    PropagationDirectionAlongFactor directionAlongFactor,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
                                projection.getNumResults());
-  if (direction == PropagationDirection::NONE) {
-    return result;
-  }
 
   // Find the compatible major axes ignoring conflicts.
   AxesPerFactor axesPerFactor;
   axesPerFactor.reserve(factorSizes.size());
   bool allElementsAreEmpty = true;
   for (int64_t i = 0; i < factorSizes.size(); ++i) {
-    SmallVector<AxisRefAttr>& axes =
-        axesPerFactor.emplace_back(getCompatibleMajorAxes(
-            projection, i, direction, propagateAlongFactor, op));
+    SmallVector<AxisRefAttr>& axes = axesPerFactor.emplace_back(
+        getCompatibleMajorAxes(projection, i, directionAlongFactor(i), op));
     if (!axes.empty()) {
       allElementsAreEmpty = false;
     }

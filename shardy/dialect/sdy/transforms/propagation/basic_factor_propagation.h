@@ -42,8 +42,8 @@ class BasicFactorPropagation : public FactorPropagation {
 
   // Propagates the factor shardings in `projection`.
   UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, PropagationDirection direction,
-      PropagateAlongFactorPred propagateAlongFactor,
+      ShardingProjection& projection,
+      PropagationDirectionAlongFactor directionAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const override;
 
@@ -87,9 +87,8 @@ class BasicFactorPropagation : public FactorPropagation {
   //     ["a":(1)2].
   SmallVector<AxisRefAttr> getCompatibleMajorShardingAxes(
       const ShardingProjection& projection, int64_t factorIndex,
-      PropagationDirection direction,
-      PropagateAlongFactorPred propagateAlongFactor, int64_t factorSize,
-      MeshAttr mesh, Operation* op, bool conservativePropagation) const;
+      PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
+      Operation* op, bool conservativePropagation) const;
 
   // Finds the longest prefix of axes that shard the given factor, such that all
   // tensors either:
@@ -100,8 +99,7 @@ class BasicFactorPropagation : public FactorPropagation {
   // This method does not resolve conflicts across factors or replicated axes.
   SmallVector<AxisRefAttr> getCompatibleMajorAxes(
       const ShardingProjection& projection, int64_t factorIndex,
-      PropagationDirection direction,
-      PropagateAlongFactorPred propagateAlongFactor, Operation* op) const;
+      PropagationDirection direction, Operation* op) const;
 
   // Returns the largest prefix of `axisRef`, which does not overlap with
   // sharding axes and overflow axes for all other factors.

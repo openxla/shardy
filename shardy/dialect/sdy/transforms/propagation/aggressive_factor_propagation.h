@@ -77,8 +77,8 @@ namespace sdy {
 class AggressiveFactorPropagation : public BasicFactorPropagation {
  public:
   UpdateTensorShardings propagateFactorShardings(
-      ShardingProjection& projection, PropagationDirection direction,
-      PropagateAlongFactorPred propagateAlongFactor,
+      ShardingProjection& projection,
+      PropagationDirectionAlongFactor directionAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const override;
 };

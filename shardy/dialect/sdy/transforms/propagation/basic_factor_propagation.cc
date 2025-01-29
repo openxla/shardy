@@ -305,9 +305,8 @@ std::pair<SmallVector<AxisRefAttr>, bool> getCompatibleMajorAxesInternal(
 
 SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
     const ShardingProjection& projection, int64_t factorIndex,
-    PropagationDirection direction,
-    PropagateAlongFactorPred propagateAlongFactor, Operation* op) const {
-  if (!propagateAlongFactor(factorIndex)) {
+    PropagationDirection direction, Operation* op) const {
+  if (direction == PropagationDirection::NONE) {
     return {};
   }
 
@@ -387,16 +386,11 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
 
 SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
     const ShardingProjection& projection, int64_t factorIndex,
-    PropagationDirection direction,
-    PropagateAlongFactorPred propagateAlongFactor, int64_t factorSize,
-    MeshAttr mesh, Operation* op, bool conservativePropagation) const {
-  if (direction == PropagationDirection::NONE) {
-    return SmallVector<AxisRefAttr>();
-  }
-
+    PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
+    Operation* op, bool conservativePropagation) const {
   // Finds the compatible major axes ignoring conflicts.
-  SmallVector<AxisRefAttr> resultAxes = getCompatibleMajorAxes(
-      projection, factorIndex, direction, propagateAlongFactor, op);
+  SmallVector<AxisRefAttr> resultAxes =
+      getCompatibleMajorAxes(projection, factorIndex, direction, op);
 
   // Removes the major-most axis that isn't compatible w.r.t. other factors or
   // the replicated axes, and all axes that are minor to it.
@@ -412,8 +406,8 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
 }
 
 UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
-    ShardingProjection& projection, PropagationDirection direction,
-    PropagateAlongFactorPred propagateAlongFactor,
+    ShardingProjection& projection,
+    PropagationDirectionAlongFactor directionAlongFactor,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
@@ -425,7 +419,7 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     // that factor for all tensors, those are the axes we will propagate to
     // tensors that aren't already sharded.
     SmallVector<AxisRefAttr> axesToPropagate = getCompatibleMajorShardingAxes(
-        projection, factorIndex, direction, propagateAlongFactor, factorSize,
+        projection, factorIndex, directionAlongFactor(factorIndex), factorSize,
         mesh, op, conservativePropagation);
 
     // Update all shardings along this factor if possible.

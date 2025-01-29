@@ -270,11 +270,16 @@ LogicalResult propagateTensorShardings(
   ShardingProjection shardingProjection = ShardingProjection::build(
       operandShardings, resultShardings, shardingRule, mesh);
   bool anyUpdated = false;
+  // TODO(zixuanjiang). We apply the same propagation direction to all factors.
+  // We may want to consider propagating along different factors with different
+  // directions in the future.
+  PropagationDirectionAlongFactor directionAlongFactor = [direction](int64_t) {
+    return direction;
+  };
   auto updateShardings = [&]() {
     auto [updateOperand, updateResult] =
         factorPropagation.propagateFactorShardings(
-            shardingProjection, direction,
-            /*propagateAlongFactor=*/[](int64_t) { return true; },
+            shardingProjection, directionAlongFactor,
             shardingRule.getFactorSizes(), mesh, op, conservativePropagation);
 
     // We need to update the tensor sharding attributes explicitly, as we

@@ -36,29 +36,30 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 
+PropagationDirectionAlongFactor propagateAnything() {
+  return [](int64_t) { return PropagationDirection::BOTH; };
+}
+
 class BasicFactorPropagationTest : public PropagationTestBase {
  protected:
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, int64_t numFactors,
-      PropagationDirection direction = PropagationDirection::BOTH,
-      MeshAttr mesh = nullptr, bool conservativePropagation = false,
-      PropagateAlongFactorPred propagateAlongFactor = [](int64_t) {
-        return true;
-      }) {
+      PropagationDirectionAlongFactor directionAlongFactor =
+          propagateAnything(),
+      MeshAttr mesh = nullptr, bool conservativePropagation = false) {
     return BasicFactorPropagation().propagateFactorShardings(
-        projection, direction, propagateAlongFactor,
-        SmallVector<int64_t>(numFactors, 1), mesh, /*op=*/nullptr,
-        conservativePropagation);
+        projection, directionAlongFactor, SmallVector<int64_t>(numFactors, 1),
+        mesh, /*op=*/nullptr, conservativePropagation);
   }
 
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, ArrayRef<int64_t> factorSizes,
-      PropagationDirection direction = PropagationDirection::BOTH,
-      MeshAttr mesh = nullptr, bool conservativePropagation = false) {
+      PropagationDirectionAlongFactor directionAlongFactor =
+          propagateAnything(),
+      MeshAttr mesh = nullptr) {
     return BasicFactorPropagation().propagateFactorShardings(
-        projection, direction,
-        /*propagateAlongFactor=*/[](int64_t) { return true; }, factorSizes,
-        mesh, /*op=*/nullptr, conservativePropagation);
+        projection, directionAlongFactor, factorSizes, mesh, /*op=*/nullptr,
+        /*conservativePropagation=*/false);
   }
 };
 
@@ -441,7 +442,7 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
     ShardingProjection projectionBefore({operand}, {resultBefore});
     ShardingProjection projectionAfter({operand}, {resultAfter});
     auto [updateOperands, updateResults] = propagateFactorShardings(
-        projectionBefore, factorSizes, PropagationDirection::BOTH, mesh);
+        projectionBefore, factorSizes, propagateAnything(), mesh);
     EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
     EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
     EXPECT_EQ(projectionBefore, projectionAfter);
@@ -484,136 +485,135 @@ TEST_F(BasicFactorPropagationTest, MinorMostFactorNotDivisible) {
   }
 }
 
-TEST_F(BasicFactorPropagationTest, UniDirectionalPropagation) {
-  TensorFactorShardings operandBefore0 = {
-      .factorIndexToSharding = {
-          {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-          {1, {.axisRefs = {createAxis("d"), createAxis("e")}}},
-      }};
-  TensorFactorShardings operandBefore1 = {
-      .factorIndexToSharding = {
-          {0, {.axisRefs = {createAxis("a")}}},
-          {1, {.axisRefs = {createAxis("d")}}},
-      }};
-  TensorFactorShardings result0 = {
-      .factorIndexToSharding = {
-          {0,
-           {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
-          {1, {.axisRefs = {createAxis("d")}}},
-      }};
+TEST_F(BasicFactorPropagationTest, DifferentDirectionsForDifferentFactors) {
+  ShardingProjection projection(
+      /*operands=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {createAxis("c")}}},
+                                  {3, {.axisRefs = {createAxis("d")}}},
+                                  {4, {.axisRefs = {}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {}}}}}},
+      /*results=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {createAxis("f")}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {createAxis("h")}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {}}}}}});
 
-  TensorFactorShardings operandAfter0 = {
-      .factorIndexToSharding = {
-          {0,
-           {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
-          {1, {.axisRefs = {createAxis("d"), createAxis("e")}}},
-      }};
-  TensorFactorShardings operandAfter1 = {
-      .factorIndexToSharding = {
-          {0,
-           {.axisRefs = {createAxis("a"), createAxis("b"), createAxis("c")}}},
-          {1, {.axisRefs = {createAxis("d")}}},
-      }};
+  PropagationDirectionAlongFactor directionAlongFactor =
+      [](int64_t factorIndex) {
+        if (factorIndex == 0 || factorIndex == 4) {
+          return PropagationDirection::BOTH;
+        }
+        if (factorIndex == 1 || factorIndex == 5) {
+          return PropagationDirection::FORWARD;
+        }
+        if (factorIndex == 2 || factorIndex == 6) {
+          return PropagationDirection::BACKWARD;
+        }
+        return PropagationDirection::NONE;
+      };
 
-  {
-    // Test that we only propagate backwards. Since we are only propagating
-    // backwards, we can expand both operands to have ["a", "b", "c"] along
-    // factor 0.
-    //
-    // Since we are only propagating backwards, we do not push "e" forwards
-    // along factor 1. We do not propagate sideways to each operand as our
-    // current behavior with BACKWARD closes all operands for factor expansion.
+  ShardingProjection projectionExpected(
+      /*operands=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {createAxis("c")}}},
+                                  {3, {.axisRefs = {createAxis("d")}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}}},
+      /*results=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {createAxis("f")}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {createAxis("h")}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}}});
 
-    ShardingProjection projection({operandBefore0, operandBefore1}, {result0});
-    ShardingProjection projectionExpected({operandAfter0, operandAfter1},
-                                          {result0});
-
-    auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 2, PropagationDirection::BACKWARD);
-    EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 1));
-    EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
-    EXPECT_EQ(projection, projectionExpected);
-  }
-
-  {
-    // Test that we only propagate forwards.
-    ShardingProjection projection({result0}, {operandBefore0, operandBefore1});
-    ShardingProjection projectionExpected({result0},
-                                          {operandAfter0, operandAfter1});
-
-    auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 2, PropagationDirection::FORWARD);
-    EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
-    EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
-    EXPECT_EQ(projection, projectionExpected);
-  }
+  auto [updateOperands, updateResults] =
+      propagateFactorShardings(projection, 8, directionAlongFactor);
+  EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 1));
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
+  EXPECT_EQ(projection, projectionExpected);
 }
 
 TEST_F(BasicFactorPropagationTest, UniDirectionalPropagationWithConflict) {
-  TensorFactorShardings operand0 = {
-      .factorIndexToSharding = {
-          {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-      }};
-  TensorFactorShardings operand1 = {.factorIndexToSharding = {
-                                        {0, {.axisRefs = {createAxis("a")}}},
-                                    }};
-  TensorFactorShardings result = {
-      .factorIndexToSharding = {
-          {0,
-           {.axisRefs = {createAxis("z"), createAxis("a"), createAxis("b")}}},
-      }};
-
-  {
-    // Even though we are propagating backwards, we still need to account for
-    // conflicts. The "z" blocks any propagation.
-    ShardingProjection projection({operand0, operand1}, {result});
-    auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 1, PropagationDirection::BACKWARD);
-    EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
-    EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
-  }
-  {
-    ShardingProjection projection({result}, {operand0, operand1});
-    auto [updateOperands, updateResults] =
-        propagateFactorShardings(projection, 1, PropagationDirection::FORWARD);
-    EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
-    EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
-  }
-}
-
-TEST_F(BasicFactorPropagationTest, NonePropagationDirection) {
   ShardingProjection projection(
       /*operands=*/
-      {
-          {.factorIndexToSharding =
-               {
-                   {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c")}}},
-               }},
-      },
-      /*results=*/{
-          {.factorIndexToSharding =
-               {
-                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-               }},
-          {.factorIndexToSharding =
-               {
-                   {0, {.axisRefs = {createAxis("a")}}},
-               }},
-          {.factorIndexToSharding =
-               {
-                   {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c")}}},
-               }},
-      });
+      {{.factorIndexToSharding =
+            {{0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+             {1, {.axisRefs = {}}},
+             {2, {.axisRefs = {createAxis("d")}}}}}},
+      /*results=*/
+      {{.factorIndexToSharding = {
+            {0, {.axisRefs = {createAxis("b")}}},
+            {1, {.axisRefs = {createAxis("c"), createAxis("d")}}},
+            {2, {.axisRefs = {}}}}}});
 
-  // Even though [a, b, c] is the most compatible, since we aren't propagating,
-  // we don't update any operands or results.
+  PropagationDirectionAlongFactor directionAlongFactor =
+      [](int64_t factorIndex) {
+        if (factorIndex == 0) {
+          return PropagationDirection::FORWARD;
+        }
+        if (factorIndex == 1) {
+          return PropagationDirection::BACKWARD;
+        }
+        return PropagationDirection::NONE;
+      };
+
+  ShardingProjection projectionExpected(
+      /*operands=*/
+      {{.factorIndexToSharding =
+            {{0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
+             {1, {.axisRefs = {createAxis("c")}}},
+             {2, {.axisRefs = {createAxis("d")}}}}}},
+      /*results=*/{projection.getResult(0)});
+
   auto [updateOperands, updateResults] =
-      propagateFactorShardings(projection, 1, PropagationDirection::NONE);
-  EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
+      propagateFactorShardings(projection, 3, directionAlongFactor);
+  EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0));
   EXPECT_THAT(toSetBitsVector(updateResults), IsEmpty());
 }
 
@@ -639,46 +639,8 @@ TEST_F(BasicFactorPropagationTest,
                         {0, {.axisRefs = {createAxis("a")}}}, {1, {}}}}});
 
   auto [updateOperands, updateResults] = propagateFactorShardings(
-      projection, 2, PropagationDirection::BOTH, /*mesh=*/nullptr,
+      projection, 2, propagateAnything(), /*mesh=*/nullptr,
       /*conservativePropagation=*/true);
-  EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
-  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
-  EXPECT_EQ(projection, projectionExpected);
-}
-
-TEST_F(BasicFactorPropagationTest, PropagateAlongPartialFactors) {
-  ShardingProjection projection(
-      /*operands=*/
-      {{.factorIndexToSharding =
-            {
-                {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
-                {1, {.axisRefs = {createAxis("c")}}},
-                {2, {.axisRefs = {}}},
-            }}},
-      /*results=*/
-      {{.factorIndexToSharding = {
-            {0, {.axisRefs = {}}},
-            {1, {.axisRefs = {}}},
-            {2, {.axisRefs = {createAxis("b")}}},
-        }}});
-
-  // We do not propagate along factor 1. Factor 1 is still considered as
-  // conflict when we propagate along other factors. Thus, we only propagate
-  // ["a"] along factor 0.
-  ShardingProjection projectionExpected(
-      /*operands=*/{projection.getOperand(0)},
-      /*results=*/{{.factorIndexToSharding = {
-                        {0, {.axisRefs = {createAxis("a")}}},
-                        {1, {.axisRefs = {}}},
-                        {2, {.axisRefs = {createAxis("b")}}},
-                    }}});
-
-  PropagateAlongFactorPred doNotPropagateAlongFactor1 =
-      [](int64_t factorIndex) { return factorIndex != 1; };
-
-  auto [updateOperands, updateResults] = propagateFactorShardings(
-      projection, 2, PropagationDirection::BOTH, /*mesh=*/nullptr,
-      /*conservativePropagation=*/false, doNotPropagateAlongFactor1);
   EXPECT_THAT(toSetBitsVector(updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
   EXPECT_EQ(projection, projectionExpected);
