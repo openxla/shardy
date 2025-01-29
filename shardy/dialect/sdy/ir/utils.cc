@@ -331,7 +331,7 @@ void setSharding(Value value, TensorShardingAttr sharding) {
       .Case<ReshardOp>(
           [&](ReshardOp reshardOp) { reshardOp.setShardingAttr(sharding); })
       .Case<CollectiveOpInterface>([&](CollectiveOpInterface collectiveOp) {
-        return collectiveOp.setOutShardingAttr(sharding);
+        collectiveOp.setOutShardingAttr(sharding);
       })
       .Case<ShardableDataFlowOpInterface>(
           [&](ShardableDataFlowOpInterface shardableRegionOp) {

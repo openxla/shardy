@@ -37,6 +37,8 @@ def AllSliceNoopPattern : Pat<(Sdy_AllSliceOp $tensor, Sdy_EmptyAxesPerDim:$slic
 def AllToAllNoopPattern : Pat<(Sdy_AllToAllOp $tensor, $srcDim, $tgtDim, Sdy_EmptyAxisList:$axes, $outSharding),
                                (replaceWithValue $tensor)>;
 
+def AllReduceNoopPattern : Pat<(Sdy_AllReduceOp $tensor, Sdy_EmptyAxisList:$reductionAxes, $resultSharding),
+                               (replaceWithValue $tensor)>;
 
 def AllSliceOfAllGatherPattern : Pat<
   (Sdy_AllSliceOp (Sdy_AllGatherOp $tensor, $gatheringAxes, $_), $slicingAxes, $_),

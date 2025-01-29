@@ -1358,5 +1358,38 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
   return success();
 }
 
+LogicalResult AllReduceOp::verify() {
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  TensorShardingAttr resultSharding = getOutSharding();
+  MeshAttr mesh = resultSharding.getMesh(*this);
+  if (!operandSharding.areDimAxesEqual(resultSharding)) {
+    return emitOpError("operand and result sharding have different axes");
+  }
+
+  // 1. Verify all reduction axes are valid.
+  SmallDenseSet<AxisRefAttr> seenAxisRefs;
+  SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
+  ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
+  SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
+  if (auto res = verifyAxisRefList(reductionAxes, axisNameToSize, seenAxisRefs,
+                                   axisNameToSubAxes, getEmitErrorFn(*this));
+      failed(res)) {
+    return res;
+  }
+
+  // 2. Verify no axis from reduction_axes overlap with the operand sharding
+  // axes.
+  for (AxisRefAttr reductionAxisRef : reductionAxes) {
+    if (operandSharding.anyOfAxisRef([reductionAxisRef](AxisRefAttr axisRef) {
+          return axisRef.overlaps(reductionAxisRef);
+        })) {
+      return emitOpError("reduction axis overlaps with operand sharding: ")
+             << reductionAxisRef.toString();
+    }
+  }
+
+  return success();
+}
+
 }  // namespace sdy
 }  // namespace mlir

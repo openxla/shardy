@@ -793,6 +793,18 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // `localTensorType` will be a multiple of the global tensor type returned.
     RankedTensorType getGlobalTensorType(RankedTensorType localTensorType,
                                          MeshAttr mesh) const;
+
+    // Returns true if axes of all dimensions are the same.
+    bool areDimAxesEqual(TensorShardingAttr otherSharding) const {
+      auto left = getDimShardings();
+      auto right = otherSharding.getDimShardings();
+      return left.size() == right.size() &&
+             llvm::all_of(llvm::zip_equal(left, right),
+                          [](auto&& pair) {
+                            return std::get<0>(pair).getAxes() ==
+                                   std::get<1>(pair).getAxes();
+                          });
+    }
     }];
 }
 
@@ -1045,7 +1057,7 @@ def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
 def Sdy_EmptyAxisList: AttrConstraint<
     CPred<"$_self.isa<AxisRefListAttr>() && "
           "$_self.cast<AxisRefListAttr>().empty()">,
-    "is empty axis list">;
+    "axis list is empty">;
 
 def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
                                  "list_of_axis_ref_lists", "AxisRefListAttr"> {

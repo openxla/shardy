@@ -175,6 +175,11 @@ void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
   results.add<AllSliceNoopPattern>(context);
 }
 
+void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
+                                              MLIRContext* context) {
+  results.add<AllReduceNoopPattern>(context);
+}
+
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
   results.add<AllToAllNoopPattern>(context);

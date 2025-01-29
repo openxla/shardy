@@ -628,5 +628,29 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
   let hasVerifier = 1;
 }
 
+def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
+    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+  let summary = "Perform an all-reduce comunication along axes";
+  let description = [{
+    Reduces chunks of a tensor along axes specified in `reduction_axes`.
+    The order of `reduction_axes` is not important for the result, but can
+    affect the order of the corresponding replica groups.
+
+    **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+    - `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`;
+    - `reduction_axes` must not overlap with the operand sharding axes;
+  }];
+
+  let arguments = (ins
+    AnyTensor:$tensor,
+    Sdy_AxisRefList:$reduction_axes,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+}
 
 #endif  // SDY_OPS

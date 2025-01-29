@@ -5,6 +5,8 @@ sdy.mesh @mesh2 = <["x"=2, "y"=2, "z"=2]>
 sdy.mesh @mesh3 = <["x"=4, "y"=2]>
 sdy.mesh @mesh4 = <["x"=8, "y"=2, "z"=2]>
 sdy.mesh @mesh5 = <["x"=2, "y"=2, "z"=4, "w"=4]>
+sdy.mesh @mesh6 = <["x"=4, "y"=4]>
+sdy.mesh @mesh7 = <["x"=16, "y"=2]>
 
 // CHECK-LABEL: func @all_gather1
 func.func @all_gather1(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
@@ -207,4 +209,41 @@ func.func @collective_permute_replace_sub_axes_multiple_dims(%arg0 : tensor<16x8
   // CHECK-NEXT: sdy.collective_permute %arg0 out_sharding=<@mesh5, [{"z":(1)2, "x", "y"}, {"z":(2)2, "w":(1)2}]>
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh5, [{"z":(1)2, "x", "y"}, {"z":(2)2, "w":(1)2}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce
+func.func @all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh1, [{}, {"x"}]> :  tensor<16x2xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh1, [{}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+sdy.mesh @mesh_xyzw = <["x"=2, "y"=2, "z"=2, "w"=2]>
+
+// CHECK-LABEL: func @all_reduce_many_axes
+func.func @all_reduce_many_axes(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh_xyzw, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"z", "w"} %arg0 out_sharding=<@mesh_xyzw, [{"y"}, {"x"}]> :  tensor<16x2xf32>
+  %0 = sdy.all_reduce {"z", "w"} %arg0 out_sharding=<@mesh_xyzw, [{"y"}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_split_axis
+func.func @all_reduce_split_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh7, [{"y"}, {"x": (2)4}]>}) -> tensor<16x32xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"x":(1)2} %arg0 out_sharding=<@mesh7, [{"y"}, {"x":(2)4}]> :  tensor<16x32xf32>
+  %0 = sdy.all_reduce {"x":(1)2} %arg0 out_sharding=<@mesh7, [{"y"}, {"x":(2)4}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_split_axis_y
+func.func @all_reduce_split_axis_y(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh6, [{"y":(1)2}, {"x"}]>}) -> tensor<16x32xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"y":(2)2} %arg0 out_sharding=<@mesh6, [{"y":(1)2}, {"x"}]> :  tensor<16x32xf32>
+  %0 = sdy.all_reduce {"y":(2)2} %arg0 out_sharding=<@mesh6, [{"y":(1)2}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_output_is_explicitely_replicated
+func.func @all_reduce_output_is_explicitely_replicated(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: sdy.all_reduce {} %arg0 out_sharding=<@mesh2, [{}, {"x", "y"}], replicated={"z"}> :  tensor<16x2xf32>
+  %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh2, [{}, {"x", "y"}], replicated={"z"}> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
 }
