@@ -10,7 +10,7 @@ representation and additional API components to attach shardings to tensors.
 
 ### `sdy.all_gather` (sdy::AllGatherOp)
 
-_Gathers chunks of a tensor along axes_
+_Performs an all-gather communication along axes_
 
 
 Syntax:
@@ -34,8 +34,8 @@ inferred sharding.
 
 Example:
 ```mlir
-%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\]>]>} : tensor<8x8xf32>
-%2 = sdy.all_gather [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8xf32>
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\]>]>} : tensor<8x8x8xf32>
+%2 = sdy.all_gather [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\]> : tensor<8x8x8xf32>
 ```
 
 **Constraints:**
@@ -74,7 +74,7 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 ### `sdy.all_slice` (sdy::AllSliceOp)
 
-_Slices chunks of a tensor along axes_
+_Performs a dynamic-slice operation along axes_
 
 
 Syntax:
@@ -99,8 +99,8 @@ inferred sharding.
 
 Example:
 ```mlir
-%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}, {}\]>]>} : tensor<8x8xf32>
-%2 = sdy.all_slice [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a", "b", "c"}, {}, {"d"}\]> : tensor<8x8xf32>
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}, {}\]>]>} : tensor<8x8x8xf32>
+%2 = sdy.all_slice [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a", "b", "c"}, {}, {"d"}\]> : tensor<8x8x8xf32>
 ```
 
 **Constraints:**
@@ -137,9 +137,81 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 | `result` | tensor of any type values
 
 
+### `sdy.all_to_all` (sdy::AllToAllOp)
+
+_Performs an all-to-all communication along axes_
+
+
+Syntax:
+
+```
+operation ::= `sdy.all_to_all` $axes $src_dim `` `->` `` $tgt_dim $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+```
+
+Slices chunks of a tensor along dimension `tgt_dim` and axes specified in
+`axes`, scatteres those chunks along the axes, and concatenates them along
+dimension `src_dim`.
+
+This operation is essentially a combination of an all-gather along `src_dim`
+and `axes`, followed by an all-slice along `tgt_dim` and `axes`, i.e., a
+suffix of the axes sharding dimension `src_dim` on the input tensor is
+appended to the axes sharding dimension `tgt_dim` on the output tensor.
+
+The all-to-all will be applied to the sharding of the operand (`tensor`) to
+obtain the sharding of the result (`out_sharding`).
+
+Note that `out_sharding` is not used to determine the sharding of the
+result. Instead, the sharding of the result is determined by the sharding of
+the operand, `src_dim`, `tgt_dim`, and `axes`, and `out_sharding` must match
+this inferred sharding.
+
+Example:
+```mlir
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}\]>]>} : tensor<8x8xf32>
+%2 = sdy.all_to_all {"b", "c"} 0->1 %1 out_sharding=<@mesh, [{"a"}, {"b", "c"}\]> : tensor<8x8xf32>
+```
+
+**Constraints:**
+- `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+- `out_sharding` must satisfy the constraints listed in
+  `TensorShardingAttr`.
+- The operand must have a sharding.
+- Both operand and result shardings should be bound to the same `MeshAttr`.
+- `src_dim` and `tgt_dim` must be valid dimensions (positive and less than
+  rank of tensor), and different from each other.
+- Moving `axes` from `src_dim` to `tgt_dim` in the operand sharding gets
+  `out_sharding`.
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>src_dim</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>tgt_dim</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>axes</code></td><td>::mlir::sdy::AxisRefListAttr</td><td>List of axis refs</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | tensor of any type values
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | tensor of any type values
+
+
 ### `sdy.collective_permute` (sdy::CollectivePermuteOp)
 
-_Sends a chunk of a tensor from each device to another along axes_
+_Performs a collective-permute communication to replace axes_
 
 
 Syntax:
@@ -148,8 +220,8 @@ Syntax:
 operation ::= `sdy.collective_permute` $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
 ```
 
-Sends a chunk of the input tensor from each device to another along the axes
-that shard the tensor.
+Sends a chunk of the input tensor from each device to another to
+reorder/replace the axes that shard the tensor.
 
 A collective permute can transform the input sharding such that each
 dimension must be as sharded as it was before, i.e., it must be sharded
