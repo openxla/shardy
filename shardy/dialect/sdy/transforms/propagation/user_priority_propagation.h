@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_priority_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
@@ -45,7 +46,7 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
 // Runs the user-priority propagation algorithm (see
 // `UserPriorityPropagationPass`).
 std::unique_ptr<Pass> createUserPriorityPropagationPass(
-    const PropagationOptions& optios);
+    const PropagationOptions& options);
 
 }  // namespace sdy
 }  // namespace mlir

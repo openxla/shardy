@@ -32,9 +32,10 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "shardy/dialect/sdy/transforms/propagation/aggressive_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
-#include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {

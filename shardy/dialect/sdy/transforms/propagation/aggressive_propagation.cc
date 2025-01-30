@@ -27,6 +27,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
@@ -43,15 +44,10 @@ struct AggressivePropagationPass
     : public impl::AggressivePropagationPassBase<AggressivePropagationPass> {
   using AggressivePropagationPassBase::AggressivePropagationPassBase;
 
-  explicit AggressivePropagationPass(
-      // NOLINTBEGIN(clang-diagnostic-shadow-field)
-      bool keepShardingRules, StringRef dumpDirectory,
-      bool conservativePropagation, PropagationStrategy propagationStrategy) {
-    // NOLINTEND(clang-diagnostic-shadow-field)
-    this->keepShardingRules = keepShardingRules;
-    this->dumpDirectory = dumpDirectory.str();
-    this->conservativePropagation = conservativePropagation;
-    this->propagationStrategy = propagationStrategy;
+  explicit AggressivePropagationPass(const PropagationOptions& options,
+                                     PropagationStrategy strategy) {
+    setPropagationOptions(options);
+    propagationStrategy = strategy;
   }
 };
 
@@ -89,11 +85,8 @@ LogicalResult AggressivePropagationPassImpl::propagate(
 }
 
 std::unique_ptr<Pass> createAggressivePropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory,
-    bool conservativePropagation, PropagationStrategy propagationStrategy) {
-  return std::make_unique<AggressivePropagationPass>(
-      keepShardingRules, dumpDirectory, conservativePropagation,
-      propagationStrategy);
+    const PropagationOptions& options, PropagationStrategy strategy) {
+  return std::make_unique<AggressivePropagationPass>(options, strategy);
 }
 
 }  // namespace sdy

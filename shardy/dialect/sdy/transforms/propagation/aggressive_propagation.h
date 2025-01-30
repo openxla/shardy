@@ -26,6 +26,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/transforms/propagation/aggressive_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
@@ -89,11 +90,9 @@ class AggressivePropagationPassImpl : public BasicPropagationPassImpl {
   AggressiveFactorPropagation aggressiveFactorPropagation;
 };
 
-// Runs op based sharding propagation (see `AggressivePropagationPass`).
 std::unique_ptr<Pass> createAggressivePropagationPass(
-    bool keepShardingRules, StringRef dumpDirectory = "",
-    bool conservativePropagation = false,
-    PropagationStrategy propagationStrategy = PropagationStrategy::Aggressive);
+    const PropagationOptions& options,
+    PropagationStrategy strategy = PropagationStrategy::Aggressive);
 
 }  // namespace sdy
 }  // namespace mlir
