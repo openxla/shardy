@@ -1029,6 +1029,10 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     // 2. It is not a need replication factor.
     // 3. It is used in all non-scalar tensors.
     bool isBatchingFactor(int64_t factorIndex) const;
+
+    // Returns a vector of tensor indices that are non-scalar, of all operand
+    // and result tensors, the operands come before the results.
+    SmallVector<int64_t> getNonScalarTensorIndices() const;
   }];
 }
 

@@ -127,6 +127,7 @@ cc_library(
     hdrs = ["sharding_projection.h"],
     deps = [
         ":utils",
+        "//shardy/dialect/sdy/ir:axis_list_ref",
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",

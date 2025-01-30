@@ -105,6 +105,8 @@ class AxisListRef {
     // sufficient to check if `tailAxisRef` empty.
     return !tailAxisRef;
   }
+  // Clears this AxisListRef.
+  void clear();
 
   int64_t size() const { return empty() ? 0 : axisRefs.size() + 1; }
 
@@ -181,8 +183,6 @@ class AxisListRef {
   // `newSizeExcludingNewTail`.
   void trim(int64_t newSizeExcludingNewTail,
             std::optional<AxisRefAttr> newTailAxisRef);
-  // Clears this AxisListRef.
-  void clear();
 
   // The axes that this FactorAxesPair holds is defined by `axisRefs` and
   // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is

@@ -464,9 +464,68 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
   return factorAxisRefs;
 }
 
+int64_t findTensorIndexToPreferOnUnaryOperation(
+    const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
+    MeshAttr mesh) {
+  // Find common axes on the larger tensor, hence reshard the smaller tensor.
+  SmallVector<int64_t> tensorIndices = shardingRule.getNonScalarTensorIndices();
+  const int64_t lhs = tensorIndices[0];
+  const int64_t rhs = tensorIndices[1];
+
+  SmallVector<int64_t> tensorSizes = shardingRule.getTensorSizes();
+  if (tensorSizes[lhs] != tensorSizes[rhs]) {
+    return tensorSizes[lhs] < tensorSizes[rhs] ? rhs : lhs;
+  }
+
+  // Find common axes on the tensor that is more sharded, hence perform the
+  // operation on smaller tensor per device.
+  return projection.getTensor(lhs).getShardingSize(mesh) <
+                 projection.getTensor(rhs).getShardingSize(mesh)
+             ? rhs
+             : lhs;
+}
+
+// Assumes that tensors do not have factors that need replication.
+SmallVector<AxisListRef> findCommonAxesOnUnaryOperation(
+    const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
+    MeshAttr mesh) {
+  int64_t tensorIndexToPrefer =
+      findTensorIndexToPreferOnUnaryOperation(projection, shardingRule, mesh);
+
+  // Set factor shardings to make sure factors that do not appear in the
+  // preferred tensor are sharded on the other tensor.
+  SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
+  // TODO(enver): Add and use forEachFactorSharding helper method.
+  for (const auto& [tensorIndex, tensorFactorSharding] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           projection.getOperands(), projection.getResults()))) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (!factorSharding.axisRefs.empty()) {
+        // TODO(enver): Drop the need for explicit AxisListRef casting.
+        factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
+      }
+    }
+  }
+
+  // Override with the factor shardings on the preferred tensor.
+  for (const auto& [factorIndex, factorSharding] :
+       projection.getTensor(tensorIndexToPrefer).factorIndexToSharding) {
+    factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
+  }
+  return factorAxisRefs;
+}
+
 SmallVector<AxisListRef> findCommonAxes(const ShardingProjection& projection,
                                         OpShardingRuleAttr shardingRule,
                                         MeshAttr mesh) {
+  // Handle the special case of unary operations without factors that need
+  // replication. Reshard only one of the tensors.
+  if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
+      shardingRule.getNeedReplicationFactors().empty()) {
+    return findCommonAxesOnUnaryOperation(projection, shardingRule, mesh);
+  }
+
   return findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule,
                                                   mesh);
 
@@ -556,16 +615,14 @@ struct InsertExplicitReshardsPass
       // TODO(enver): Insert explicit reshards if special dimensions are
       // unsharded.
       // TODO(enver): Add need replication factors to fft.
-      if (isa<stablehlo::ReverseOp, stablehlo::BroadcastInDimOp,
-              stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
-              stablehlo::PadOp, stablehlo::SliceOp, stablehlo::TransposeOp,
-              stablehlo::FftOp, stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
-              stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
-              stablehlo::ReshapeOp, stablehlo::ConvolutionOp,
-              stablehlo::CustomCallOp, stablehlo::ReduceOp,
-              stablehlo::AllReduceOp, stablehlo::AllGatherOp,
-              stablehlo::AllToAllOp, stablehlo::CollectivePermuteOp,
-              stablehlo::ClampOp>(op)) {
+      if (isa<stablehlo::ReverseOp, stablehlo::DynamicSliceOp,
+              stablehlo::DynamicUpdateSliceOp, stablehlo::PadOp,
+              stablehlo::SliceOp, stablehlo::FftOp, stablehlo::ReduceWindowOp,
+              stablehlo::ScatterOp, stablehlo::SelectAndScatterOp,
+              stablehlo::GatherOp, stablehlo::ConvolutionOp,
+              stablehlo::CustomCallOp, stablehlo::AllReduceOp,
+              stablehlo::AllGatherOp, stablehlo::AllToAllOp,
+              stablehlo::CollectivePermuteOp>(op)) {
         return;
       }
 

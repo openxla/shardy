@@ -104,6 +104,17 @@ bool TensorFactorShardings::updateShardingAxes(
   return true;
 }
 
+int64_t TensorFactorShardings::getShardingSize(MeshAttr mesh) const {
+  int64_t shardingSize = 1;
+  for (const auto& [_, factorSharding] : factorIndexToSharding) {
+    for (AxisRefAttr axis : llvm::concat<const AxisRefAttr>(
+             factorSharding.axisRefs, factorSharding.overflowAxes)) {
+      shardingSize *= axis.getSize(mesh);
+    }
+  }
+  return shardingSize;
+}
+
 namespace {
 
 // Adds all axes in `axes` to `dimSharding`.

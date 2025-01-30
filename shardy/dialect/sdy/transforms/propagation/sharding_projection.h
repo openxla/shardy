@@ -115,6 +115,9 @@ struct TensorFactorShardings {
                                               ArrayRef<int64_t> factorSizes,
                                               StringRef meshName,
                                               MeshAttr mesh) const;
+
+  // Returns the total sharding size of the tensor across all its factors.
+  int64_t getShardingSize(MeshAttr mesh) const;
 };
 
 // A struct that specifies which operands and results are updated.
@@ -184,6 +187,13 @@ class ShardingProjection {
   }
   const TensorFactorShardings& getResult(int64_t resultNum) const {
     return results[resultNum];
+  }
+  // TODO(enver): Move expandTensorSharding from propagation code to sharding
+  // projection and employ `getTensor`.
+  const TensorFactorShardings& getTensor(int64_t tensorNum) const {
+    return tensorNum < getNumOperands()
+               ? getOperand(tensorNum)
+               : getResult(tensorNum - getNumOperands());
   }
 
   bool expandOperandSharding(int64_t operandIndex, int64_t factorIndex,

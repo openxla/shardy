@@ -953,6 +953,19 @@ bool OpShardingRuleAttr::isBatchingFactor(int64_t factorIndex) const {
          isFactorInAllNonScalarTensors(factorIndex);
 }
 
+SmallVector<int64_t> OpShardingRuleAttr::getNonScalarTensorIndices() const {
+  SmallVector<int64_t> nonScalarTensorIndices;
+
+  for (auto [tensorIndex, tensorMapping] :
+       llvm::enumerate(llvm::concat<const TensorMappingAttr>(
+           getOperandMappings(), getResultMappings()))) {
+    if (!tensorMapping.empty()) {
+      nonScalarTensorIndices.push_back(tensorIndex);
+    }
+  }
+  return nonScalarTensorIndices;
+}
+
 //===----------------------------------------------------------------------===//
 // ManualComputationOp
 //===----------------------------------------------------------------------===//
