@@ -794,17 +794,8 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     RankedTensorType getGlobalTensorType(RankedTensorType localTensorType,
                                          MeshAttr mesh) const;
 
-    // Returns true if axes of all dimensions are the same.
-    bool areDimAxesEqual(TensorShardingAttr otherSharding) const {
-      ArrayRef<DimensionShardingAttr> left = getDimShardings();
-      ArrayRef<DimensionShardingAttr> right = otherSharding.getDimShardings();
-      return left.size() == right.size() &&
-             llvm::all_of(llvm::zip_equal(left, right),
-                          [](auto&& pair) {
-                            return std::get<0>(pair).getAxes() ==
-                                   std::get<1>(pair).getAxes();
-                          });
-    }
+    // Returns true if all dimensions are sharded in the same way.
+    bool areDimAxesEqual(TensorShardingAttr otherSharding) const;
     }];
 }
 
