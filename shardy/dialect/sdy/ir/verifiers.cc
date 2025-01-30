@@ -1375,8 +1375,9 @@ LogicalResult AllReduceOp::verify() {
     if (operandSharding.anyOfAxisRef([reductionAxisRef](AxisRefAttr axisRef) {
           return axisRef.overlaps(reductionAxisRef);
         })) {
-      return emitOpError("reduction axis overlaps with operand sharding: ")
-             << reductionAxisRef.toString();
+      return emitOpError("reduction axis ")
+             << reductionAxisRef.toString()
+             << " overlaps with operand sharding";
     }
   }
 

@@ -796,8 +796,8 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
 
     // Returns true if axes of all dimensions are the same.
     bool areDimAxesEqual(TensorShardingAttr otherSharding) const {
-      auto left = getDimShardings();
-      auto right = otherSharding.getDimShardings();
+      ArrayRef<DimensionShardingAttr> left = getDimShardings();
+      ArrayRef<DimensionShardingAttr> right = otherSharding.getDimShardings();
       return left.size() == right.size() &&
              llvm::all_of(llvm::zip_equal(left, right),
                           [](auto&& pair) {

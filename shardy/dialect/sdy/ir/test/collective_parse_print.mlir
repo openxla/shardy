@@ -227,8 +227,8 @@ func.func @all_reduce_many_axes(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.shar
   return %0 : tensor<16x2xf32>
 }
 
-// CHECK-LABEL: func @all_reduce_split_axis
-func.func @all_reduce_split_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh7, [{"y"}, {"x": (2)4}]>}) -> tensor<16x32xf32> {
+// CHECK-LABEL: func @all_reduce_sub_axis
+func.func @all_reduce_sub_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh7, [{"y"}, {"x": (2)4}]>}) -> tensor<16x32xf32> {
   // CHECK-NEXT: sdy.all_reduce {"x":(1)2} %arg0 out_sharding=<@mesh7, [{"y"}, {"x":(2)4}]> :  tensor<16x32xf32>
   %0 = sdy.all_reduce {"x":(1)2} %arg0 out_sharding=<@mesh7, [{"y"}, {"x":(2)4}]> :  tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
@@ -241,8 +241,8 @@ func.func @all_reduce_split_axis_y(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.
   return %0 : tensor<16x32xf32>
 }
 
-// CHECK-LABEL: func @all_reduce_output_is_explicitely_replicated
-func.func @all_reduce_output_is_explicitely_replicated(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
+// CHECK-LABEL: func @all_reduce_output_is_explicitly_replicated
+func.func @all_reduce_output_is_explicitly_replicated(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
   // CHECK-NEXT: sdy.all_reduce {} %arg0 out_sharding=<@mesh2, [{}, {"x", "y"}], replicated={"z"}> :  tensor<16x2xf32>
   %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh2, [{}, {"x", "y"}], replicated={"z"}> :  tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
