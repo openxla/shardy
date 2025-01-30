@@ -21,6 +21,8 @@ include "mlir/IR/PatternBase.td"
 
 def HasOneUse: Constraint<CPred<"$_self.hasOneUse()">, "has one use">;
 
+def TensorShardingDimAxesEqual : Constraint<CPred<"getSharding($0).areDimAxesEqual($1)">, "sharding axes match">;
+
 def ReshardOfReshardPattern :
     Pat<(Sdy_ReshardOp (Sdy_ReshardOp:$inner_reshard $tensor, $inner_sharding), $outer_sharding),
         (Sdy_ReshardOp $tensor, $outer_sharding), [(HasOneUse:$inner_reshard)]>;
@@ -39,6 +41,11 @@ def AllToAllNoopPattern : Pat<(Sdy_AllToAllOp $tensor, $srcDim, $tgtDim, Sdy_Emp
 
 def AllReduceNoopPattern : Pat<(Sdy_AllReduceOp $tensor, Sdy_EmptyAxisList:$reductionAxes, $resultSharding),
                                (replaceWithValue $tensor)>;
+
+def CollectivePermuteNoopPattern : Pat<
+  (Sdy_CollectivePermuteOp $tensor, $out_sharding),
+  (replaceWithValue $tensor),
+  [(TensorShardingDimAxesEqual $tensor, $out_sharding)]>;
 
 def AllSliceOfAllGatherPattern : Pat<
   (Sdy_AllSliceOp (Sdy_AllGatherOp $tensor, $gatheringAxes, $_), $slicingAxes, $_),

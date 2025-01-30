@@ -30,6 +30,20 @@ func.func @null_all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<
   return %0 : tensor<16x2xf32>
 }
 
+// CHECK-LABEL: func @null_collective_permute
+func.func @null_collective_permute(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: return %arg0 : tensor<16x2xf32>
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @null_collective_permute_with_diff_open_closed
+func.func @null_collective_permute_with_diff_open_closed(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y", ?}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: return %arg0 : tensor<16x2xf32>
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
 // CHECK-LABEL: func @all_slice_of_all_gather
 func.func @all_slice_of_all_gather(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
   // TODO(kostiantynl): orphaned all_gather should be removed.

@@ -626,6 +626,7 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
   let results = (outs AnyTensor:$result);
   let assemblyFormat = "$tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasVerifier = 1;
+  let hasCanonicalizer = 1;
 }
 
 def Sdy_AllReduceOp: Sdy_Op<"all_reduce",

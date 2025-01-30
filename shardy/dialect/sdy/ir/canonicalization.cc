@@ -185,5 +185,10 @@ void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
   results.add<AllToAllNoopPattern>(context);
 }
 
+void CollectivePermuteOp::getCanonicalizationPatterns(
+    RewritePatternSet& results, MLIRContext* context) {
+  results.add<CollectivePermuteNoopPattern>(context);
+}
+
 }  // namespace sdy
 }  // namespace mlir
