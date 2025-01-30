@@ -69,6 +69,51 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 | `result` | tensor of any type values
 
 
+### `sdy.all_reduce` (sdy::AllReduceOp)
+
+_Perform an all-reduce comunication along axes_
+
+
+Syntax:
+
+```
+operation ::= `sdy.all_reduce` $reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+```
+
+Reduces chunks of a tensor along axes specified in `reduction_axes`.
+The order of `reduction_axes` is not important for the result, but can
+affect the order of the corresponding replica groups.
+
+**Constraints:**
+- Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+- `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`;
+- `reduction_axes` must not overlap with the operand sharding axes;
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>reduction_axes</code></td><td>::mlir::sdy::AxisRefListAttr</td><td>List of axis refs</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | tensor of any type values
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | tensor of any type values
+
+
 ### `sdy.all_slice` (sdy::AllSliceOp)
 
 _Performs a dynamic-slice operation along axes_
