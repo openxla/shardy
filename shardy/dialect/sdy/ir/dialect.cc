@@ -966,6 +966,18 @@ SmallVector<int64_t> OpShardingRuleAttr::getNonScalarTensorIndices() const {
   return nonScalarTensorIndices;
 }
 
+// TODO(enver): Consider returning a BitVector for batching factors.
+SmallVector<int64_t> OpShardingRuleAttr::getBatchingFactors() const {
+  SmallVector<int64_t> factorIndices;
+  factorIndices.reserve(getNumFactors());
+  for (int64_t index = 0; index < getNumFactors(); index++) {
+    if (isBatchingFactor(index)) {
+      factorIndices.push_back(index);
+    }
+  }
+  return factorIndices;
+}
+
 //===----------------------------------------------------------------------===//
 // ManualComputationOp
 //===----------------------------------------------------------------------===//

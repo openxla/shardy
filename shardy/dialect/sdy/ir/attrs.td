@@ -1024,7 +1024,7 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     // Returns true if the `factorIndex` is a factor in all non-scalar tensors.
     bool isFactorInAllNonScalarTensors(int64_t factorIndex) const;
 
-    // Returns true if the `factorIndex` is a batching factor, which satisfys:
+    // Returns true if the `factorIndex` is a batching factor, which satisfies:
     // 1. It is not a reduction factor.
     // 2. It is not a need replication factor.
     // 3. It is used in all non-scalar tensors.
@@ -1033,6 +1033,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     // Returns a vector of tensor indices that are non-scalar, of all operand
     // and result tensors, the operands come before the results.
     SmallVector<int64_t> getNonScalarTensorIndices() const;
+
+    // Returns a vector of batching factor indices.
+    SmallVector<int64_t> getBatchingFactors() const;
   }];
 }
 
