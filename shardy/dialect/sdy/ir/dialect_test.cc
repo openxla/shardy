@@ -252,57 +252,47 @@ TEST_F(DialectTest, AxisRefAttrCompare) {
   compare(createSubAxis("x", 1, 4), createSubAxis("x", 2, 2));
 }
 
-TEST_F(DialectTest, AxisRefAttrGetPrefixWithOverlap) {
-  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 16),
-                                       MeshAxisAttr::get(&context, "y", 4)});
-  auto samePrefix = [&](AxisRefAttr a, AxisRefAttr b) {
-    AxisRefAttr smaller = std::min(a, b);
-    EXPECT_EQ(a.getPrefixWithOverlap(b, mesh), smaller);
-    EXPECT_EQ(b.getPrefixWithOverlap(a, mesh), smaller);
+TEST_F(DialectTest, AxisRefAttrGetOverlap) {
+  auto contained = [](AxisRefAttr small, AxisRefAttr large) {
+    EXPECT_TRUE(large.contains(small));
+    EXPECT_EQ(large.getOverlap(small), small);
+    EXPECT_EQ(small.getOverlap(large), small);
   };
-  samePrefix(createAxis("x"), createAxis("x"));
-  samePrefix(createSubAxis("x", 2, 2), createSubAxis("x", 2, 2));
-  samePrefix(createSubAxis("x", 1, 4), createSubAxis("x", 1, 2));
+  contained(createAxis("x"), createAxis("x"));
+  contained(createSubAxis("x", 1, 4), createAxis("x"));
+  contained(createSubAxis("x", 4, 8), createAxis("x"));
+  contained(createSubAxis("x", 2, 2), createSubAxis("x", 2, 2));
+  contained(createSubAxis("x", 1, 2), createSubAxis("x", 1, 4));
+  contained(createSubAxis("x", 2, 2), createSubAxis("x", 1, 4));
+  contained(createSubAxis("x", 2, 2), createSubAxis("x", 1, 8));
 
-  // "x":(2)4 and "x"
-  EXPECT_EQ(
-      createSubAxis("x", 2, 4).getPrefixWithOverlap(createAxis("x"), mesh),
-      createSubAxis("x", 2, 4));
-  EXPECT_EQ(
-      createAxis("x").getPrefixWithOverlap(createSubAxis("x", 2, 4), mesh),
-      std::nullopt);
+  auto overlaps = [](AxisRefAttr a, AxisRefAttr b, AxisRefAttr expected) {
+    EXPECT_EQ(a.getOverlap(b), expected);
+    EXPECT_EQ(b.getOverlap(a), expected);
+  };
+  overlaps(createSubAxis("x", 1, 4), createSubAxis("x", 2, 4),
+           createSubAxis("x", 2, 2));
+  overlaps(createSubAxis("x", 4, 4), createSubAxis("x", 2, 4),
+           createSubAxis("x", 4, 2));
 
-  // "x":(2)4 and "x":(1)4
-  EXPECT_EQ(createSubAxis("x", 2, 4).getPrefixWithOverlap(
-                createSubAxis("x", 1, 4), mesh),
-            createSubAxis("x", 2, 2));
-  EXPECT_EQ(createSubAxis("x", 1, 4).getPrefixWithOverlap(
-                createSubAxis("x", 2, 4), mesh),
-            std::nullopt);
-
-  // "x"(4)2 and "x":(2)8
-  EXPECT_EQ(createSubAxis("x", 4, 2).getPrefixWithOverlap(
-                createSubAxis("x", 2, 8), mesh),
-            createSubAxis("x", 4, 2));
-  EXPECT_EQ(createSubAxis("x", 2, 8).getPrefixWithOverlap(
-                createSubAxis("x", 4, 2), mesh),
-            std::nullopt);
-
-  auto checkNoOverlap = [&](AxisRefAttr a, AxisRefAttr b) {
-    EXPECT_EQ(a.getPrefixWithOverlap(b, mesh), std::nullopt);
-    EXPECT_EQ(b.getPrefixWithOverlap(a, mesh), std::nullopt);
+  auto checkNoOverlap = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_FALSE(a.overlaps(b));
+    EXPECT_EQ(a.getOverlap(b), std::nullopt);
+    EXPECT_EQ(b.getOverlap(a), std::nullopt);
   };
   checkNoOverlap(createAxis("x"), createAxis("y"));
   checkNoOverlap(createAxis("x"), createSubAxis("y", 1, 2));
   checkNoOverlap(createSubAxis("x", 1, 4), createSubAxis("x", 4, 2));
   checkNoOverlap(createSubAxis("x", 1, 2), createSubAxis("x", 4, 2));
 
-  auto checkCannotCoexist = [&](AxisRefAttr a, AxisRefAttr b) {
-    EXPECT_EQ(a.getPrefixWithOverlap(b, mesh), std::nullopt);
-    EXPECT_EQ(b.getPrefixWithOverlap(a, mesh), std::nullopt);
+  auto checkCannotCoexist = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_FALSE(a.canCoexist(b));
+    EXPECT_EQ(a.getOverlap(b), std::nullopt);
+    EXPECT_EQ(b.getOverlap(a), std::nullopt);
   };
-  checkCannotCoexist(createSubAxis("x", 1, 2), createSubAxis("x", 1, 3));
-  checkCannotCoexist(createSubAxis("x", 3, 2), createSubAxis("x", 2, 3));
+  checkCannotCoexist(createSubAxis("x", 1, 2), createSubAxis("x", 3, 2));
+  checkCannotCoexist(createSubAxis("x", 1, 3), createSubAxis("x", 2, 3));
+  checkCannotCoexist(createSubAxis("x", 2, 3), createSubAxis("x", 3, 2));
 }
 
 // The test cases are the same as DialectTest.AxisRefAttrOverlaps.
@@ -451,36 +441,6 @@ TEST_F(DialectTest, AxisRefAttrGetGreatestCommonPrefix) {
   prefix(createSubAxis("x", 1, 4), createAxis("x"));
   prefix(createSubAxis("x", 1, 2), createSubAxis("x", 1, 4));
   prefix(createSubAxis("x", 2, 4), createSubAxis("x", 2, 8));
-}
-
-TEST_F(DialectTest, AxisRefAttrRemoveCommonPrefix) {
-  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 16),
-                                       MeshAxisAttr::get(&context, "y", 4)});
-  auto isNotPrefix = [&](AxisRefAttr a, AxisRefAttr b) {
-    EXPECT_EQ(a.removeCommonPrefix(b, mesh), std::nullopt);
-    EXPECT_EQ(b.removeCommonPrefix(a, mesh), std::nullopt);
-  };
-  isNotPrefix(createAxis("x"), createAxis("y"));
-  isNotPrefix(createSubAxis("x", 1, 2), createSubAxis("y", 1, 2));
-  isNotPrefix(createSubAxis("x", 1, 2), createSubAxis("x", 2, 4));
-  isNotPrefix(createSubAxis("x", 1, 2), createSubAxis("x", 1, 3));
-
-  auto equals = [&](AxisRefAttr a) {
-    EXPECT_EQ(a.removeCommonPrefix(a, mesh), std::nullopt);
-  };
-  equals(createAxis("x"));
-  equals(createSubAxis("x", 2, 4));
-
-  auto prefix = [&](AxisRefAttr small, AxisRefAttr large,
-                    AxisRefAttr expected) {
-    EXPECT_EQ(large.removeCommonPrefix(small, mesh), expected);
-    EXPECT_EQ(small.removeCommonPrefix(large, mesh), std::nullopt);
-  };
-  prefix(createSubAxis("x", 1, 4), createAxis("x"), createSubAxis("x", 4, 4));
-  prefix(createSubAxis("x", 1, 2), createSubAxis("x", 1, 4),
-         createSubAxis("x", 2, 2));
-  prefix(createSubAxis("x", 2, 4), createSubAxis("x", 2, 8),
-         createSubAxis("x", 8, 2));
 }
 
 TEST_F(DialectTest, TensorShardingAttrCanShardOrReplicate) {
