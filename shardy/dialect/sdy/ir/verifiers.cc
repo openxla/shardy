@@ -1197,7 +1197,8 @@ LogicalResult AllToAllOp::verify() {
     auto [operandDimSharding, resultDimSharding] = dimShardings;
     LogicalResult logicalResult = success();
     auto verifyDimSharding =
-        [&, this](ArrayRef<AxisRefAttr> expectedDimSharding) -> LogicalResult {
+        [this, dim = dim, resultDimSharding = resultDimSharding](
+            ArrayRef<AxisRefAttr> expectedDimSharding) -> LogicalResult {
       if (expectedDimSharding != resultDimSharding.getAxes()) {
         return emitOpError("result sharding doesn't match expected sharding ")
                << strippedAttrsString(ArrayRef(expectedDimSharding),
