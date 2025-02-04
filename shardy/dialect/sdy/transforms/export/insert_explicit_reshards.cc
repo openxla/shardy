@@ -626,13 +626,18 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      if (isa<func::ReturnOp>(op)) {
+      if (isa<func::ReturnOp, stablehlo::ReturnOp, sdy::ReturnOp>(op)) {
         rewriter.setInsertionPoint(op);
         for (const auto& [index, opOperand] :
              llvm::enumerate(op->getOpOperands())) {
           Value operand = opOperand.get();
           TensorShardingAttr funcResultSharding =
-              getFuncResultSharding(funcOp, index);
+              isa<func::ReturnOp>(op)
+                  ? getFuncResultSharding(funcOp, index)
+                  : getSharding(
+                        dyn_cast<mlir::sdy::ShardableDataFlowOpInterface>(
+                            operand.getParentBlock()->getParentOp())
+                            .getOpResultEdgeOwners()[index]);
           TensorShardingAttr operandSharding =
               getOrCreateSharding(operand, *meshName, /*closedIfMissing=*/true);
           if (isFullyReplicated(operandSharding) &&
