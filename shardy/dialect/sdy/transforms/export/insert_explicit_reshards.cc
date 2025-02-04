@@ -626,13 +626,18 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      if (isa<func::ReturnOp>(op)) {
+      if (isa<func::ReturnOp, sdy::ReturnOp, stablehlo::ReturnOp>(op)) {
         rewriter.setInsertionPoint(op);
         for (const auto& [index, opOperand] :
              llvm::enumerate(op->getOpOperands())) {
           Value operand = opOperand.get();
           TensorShardingAttr funcResultSharding =
-              getFuncResultSharding(funcOp, index);
+              isa<func::ReturnOp>(op)
+                  ? getFuncResultSharding(funcOp, index)
+                  : getSharding(
+                        dyn_cast<mlir::sdy::ShardableDataFlowOpInterface>(
+                            operand.getParentBlock()->getParentOp())
+                            .getOpResultEdgeOwners()[index]);
           TensorShardingAttr operandSharding =
               getOrCreateSharding(operand, *meshName, /*closedIfMissing=*/true);
           if (isFullyReplicated(operandSharding) &&
@@ -646,6 +651,36 @@ struct InsertExplicitReshardsPass
                 operand.getLoc(), operand,
                 funcResultSharding
                     ? funcResultSharding
+                    : TensorShardingAttr::getFullyClosedLike(operandSharding));
+            opOperand.set(reshardOp);
+          }
+        }
+        return;
+      }
+
+      if (isa<mlir::sdy::ShardableDataFlowOpInterface>(op)) {
+        rewriter.setInsertionPoint(op);
+        for (const auto& [index, opOperand] :
+             llvm::enumerate(op->getOpOperands())) {
+          Value operand = op->getOperand(index);
+          TensorShardingAttr operandSharding =
+              getOrCreateSharding(operand, *meshName, /*closedIfMissing=*/true);
+          auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op);
+          Value target = shardableDataFlowOp.getEdgeOwnerFromSource(opOperand);
+          if (!target) {
+            continue;
+          }
+          TensorShardingAttr blockArgumentSharding =
+              shardableDataFlowOp.getEdgeOwnerSharding(target);
+          if (isFullyReplicated(operandSharding) &&
+              isFullyReplicated(blockArgumentSharding)) {
+            continue;
+          }
+          if (blockArgumentSharding != operandSharding) {
+            auto reshardOp = rewriter.create<ReshardOp>(
+                operand.getLoc(), operand,
+                blockArgumentSharding
+                    ? blockArgumentSharding
                     : TensorShardingAttr::getFullyClosedLike(operandSharding));
             opOperand.set(reshardOp);
           }

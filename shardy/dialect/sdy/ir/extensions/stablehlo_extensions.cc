@@ -97,7 +97,7 @@ struct CaseShardableDataFlowOpInterface
   }
 
   Value getEdgeOwnerFromSource(Operation *op, OpOperand &source) const {
-    return op->getResult(source.getOperandNumber());
+    return nullptr;
   }
 };
 

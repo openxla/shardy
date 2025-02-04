@@ -1183,7 +1183,7 @@ Value ManualComputationOp::getEdgeOwnerFromTarget(Value target) {
 // result. Otherwise it should be an operand of the `ManualComputationOp`,
 // return the `BlockArgument` with the same index.
 Value ManualComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
-  return sdy::getEdgeOwnerFromSource(source, *this);
+  return getBlockArgumentEdgeOwners()[source.getOperandNumber()];
 }
 
 //===----------------------------------------------------------------------===//
@@ -1350,7 +1350,7 @@ Value NamedComputationOp::getEdgeOwnerFromTarget(Value target) {
 // result. Otherwise it should be an operand of the `NamedComputationOp`, return
 // the `BlockArgument` with the same index.
 Value NamedComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
-  return sdy::getEdgeOwnerFromSource(source, *this);
+  return getBlockArgumentEdgeOwners()[source.getOperandNumber()];
 }
 
 LogicalResult NamedComputationOp::inferReturnTypes(
