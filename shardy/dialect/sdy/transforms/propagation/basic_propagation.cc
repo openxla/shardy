@@ -420,13 +420,13 @@ class PropagateRegisteredOp : public RewritePattern {
   explicit PropagateRegisteredOp(
       MLIRContext* context, const SymbolTable& symbolTable,
       GetDirectionToPropagateFn getDirectionToPropagate,
-      bool conservativePropagation, const FactorPropagation& factorPropagation,
+      const FactorPropagation& factorPropagation, bool conservativePropagation,
       const ShardingGroupMap& shardingGroupMap)
       : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context),
         symbolTable(symbolTable),
         getDirectionToPropagate(getDirectionToPropagate),
-        conservativePropagation(conservativePropagation),
         factorPropagation(factorPropagation),
+        conservativePropagation(conservativePropagation),
         shardingGroupMap(shardingGroupMap) {}
 
   LogicalResult matchAndRewrite(Operation* op,
@@ -451,8 +451,8 @@ class PropagateRegisteredOp : public RewritePattern {
  private:
   const SymbolTable& symbolTable;
   GetDirectionToPropagateFn getDirectionToPropagate;
-  bool conservativePropagation;
   const FactorPropagation& factorPropagation;
+  bool conservativePropagation;
   const ShardingGroupMap& shardingGroupMap;
 };
 
@@ -462,27 +462,21 @@ class PropagateRegisteredOp : public RewritePattern {
 // The `sdy.data_flow_edge` holds the updateable sharding of all targets.
 class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
  public:
-  explicit PropagateDataFlowEdgeOp(MLIRContext* context,
-                                   const SymbolTable& symbolTable,
-                                   const FactorPropagation& factorPropagation,
-                                   const ShardingGroupMap& shardingGroupMap)
+  explicit PropagateDataFlowEdgeOp(
+      MLIRContext* context, const SymbolTable& symbolTable,
+      GetDirectionToPropagateFn getDirectionToPropagate,
+      const FactorPropagation& factorPropagation,
+      const ShardingGroupMap& shardingGroupMap)
       : OpRewritePattern<DataFlowEdgeOp>(context),
         symbolTable(symbolTable),
+        getDirectionToPropagate(getDirectionToPropagate),
         factorPropagation(factorPropagation),
         shardingGroupMap(shardingGroupMap) {}
 
   LogicalResult matchAndRewrite(DataFlowEdgeOp dataFlowEdgeOp,
                                 PatternRewriter& rewriter) const override {
     SmallVector<Value> sources = dataFlowEdgeOp.getSources();
-    // The sharding of `dataFlowEdgeOp.getResult()` is the sharding of all
-    // targets.
-
     SmallVector<TensorShardingAttr> operandShardingRef = getShardings(sources);
-    TensorShardingAttr resultsShardingRef =
-        dataFlowEdgeOp.transformTargetSharding(
-            dataFlowEdgeOp.getShardingAttr(),
-            DataFlowShardingTransformType::kBeforeEdgePropagation);
-
     PropagationTensorParams operandsParams = PropagationTensorParams(
         /*tensors=*/sources,
         /*shardings=*/operandShardingRef,
@@ -490,20 +484,24 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
         [&sources](TensorShardingAttr sharding, int64_t index) {
           setSharding(sources[index], sharding);
         });
+
     Value result = dataFlowEdgeOp.getResult();
+    // The sharding of `result` is the sharding of all targets.
+    TensorShardingAttr resultsShardingRef =
+        dataFlowEdgeOp.transformTargetSharding(
+            dataFlowEdgeOp.getShardingAttr(),
+            DataFlowShardingTransformType::kBeforeEdgePropagation);
     PropagationTensorParams resultsParams = PropagationTensorParams(
         /*tensors=*/result,
         /*shardings=*/resultsShardingRef,
         /*setShardingCallback=*/
-        [&dataFlowEdgeOp](TensorShardingAttr sharding, int64_t _) {
+        [&dataFlowEdgeOp](TensorShardingAttr sharding, int64_t) {
           dataFlowEdgeOp.setShardingAttr(dataFlowEdgeOp.transformTargetSharding(
               sharding, DataFlowShardingTransformType::kAfterEdgePropagation));
         });
 
-    // TODO(b/394390827). We may pass getDirectionToPropagate so we can decide
-    // to change the priority of data flow ops.
-    PropagationDirectionAlongFactor directionAlongFactor =
-        std::bind(propagateAny, dataFlowEdgeOp, std::placeholders::_1);
+    PropagationDirectionAlongFactor directionAlongFactor = std::bind(
+        getDirectionToPropagate, dataFlowEdgeOp, std::placeholders::_1);
     return propagateTensorShardings(
         operandsParams, resultsParams,
         createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
@@ -515,6 +513,7 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
 
  private:
   const SymbolTable& symbolTable;
+  GetDirectionToPropagateFn getDirectionToPropagate;
   const FactorPropagation& factorPropagation;
   const ShardingGroupMap& shardingGroupMap;
 };
@@ -605,14 +604,16 @@ LogicalResult BasicPropagationPassImpl::propagate(
   }
   MLIRContext* context = moduleOp.getContext();
   RewritePatternSet patterns(context);
-  patterns.add<PropagateDataFlowEdgeOp, PropagatePropagationBarrier>(
+  patterns.add<PropagatePropagationBarrier>(
       context, symbolTable, factorPropagation, shardingGroupMap);
+  patterns.add<PropagateDataFlowEdgeOp>(context, symbolTable,
+                                        getDirectionToPropagate,
+                                        factorPropagation, shardingGroupMap);
   patterns.add<PropagateRegisteredOp>(
-      context, symbolTable, getDirectionToPropagate, conservativePropagation,
-      factorPropagation, shardingGroupMap);
-  // Note that we only need a single iteration (and another to confirm
-  // convergence), since we make sure ops whose sharding changes are
-  // added back to the worklist.
+      context, symbolTable, getDirectionToPropagate, factorPropagation,
+      conservativePropagation, shardingGroupMap);
+  // We only need a single iteration (and another to confirm convergence), since
+  // we make sure ops whose sharding changes are added back to the worklist.
   GreedyRewriteConfig config;
   config.useTopDownTraversal = true;
   config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;

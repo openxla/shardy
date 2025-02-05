@@ -52,7 +52,7 @@ using GetDirectionToPropagateFnPtr = PropagationDirection (*)(Operation*,
 
 PropagationDirection isPassThrough(Operation* op, int64_t) {
   if (isElementwise(op) ||
-      isa<stablehlo::ReshapeOp, stablehlo::TransposeOp>(op)) {
+      isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
     return PropagationDirection::BOTH;
   }
   if (isa<stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp>(op)) {
