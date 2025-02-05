@@ -780,8 +780,7 @@ ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
 // For each set of op values (operands/results) and corresponding sharding for
 // each value, verifies:
 // 1. the sharding list itself wrt the mesh and `globalTypes`,
-// 2. the in/out shardings are valid w.r.t the corresponding global
-//    type,
+// 2. the in/out shardings are valid w.r.t the corresponding global type,
 // 3. the number of global and local tensor inputs/outputs of the op region
 //    match,
 // 4. the manual axes come before any free axes in each dim sharding,
@@ -816,7 +815,7 @@ LogicalResult verifyManualComputationValue(
     return failure();
   }
 
-  // 4. Verify the number of global and local tensor inputs/outputs of the op
+  // 3. Verify the number of global and local tensor inputs/outputs of the op
   //    region match.
   if (globalTypes.size() != localTypes.size()) {
     return op->emitOpError("number of op ")
@@ -830,7 +829,7 @@ LogicalResult verifyManualComputationValue(
            globalTypes, localTypes, shardingPerValueAttr.getShardings()))) {
     auto [globalType, localType, sharding] = valueEntry;
 
-    // 5. Verify the manual axes come before any free axes in each dim sharding.
+    // 4. Verify the manual axes come before any free axes in each dim sharding.
     for (auto [dim, dimSharding] :
          llvm::enumerate(sharding.getDimShardings())) {
       ArrayRef<AxisRefAttr> axes = dimSharding.getAxes();
@@ -846,7 +845,7 @@ LogicalResult verifyManualComputationValue(
       }
     }
 
-    // 6. Verify the global shape and local shapes of the op regions
+    // 5. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     SmallVector<int64_t> newDimSizes;
     auto globalRankedType = mlir::cast<RankedTensorType>(globalType);
@@ -873,7 +872,7 @@ LogicalResult verifyManualComputationValue(
              << ", actual local shape " << localRankedType;
     }
 
-    // 7. No manual axes are split.
+    // 6. No manual axes are split.
     if (sharding.anyOfAxisRef([&](AxisRefAttr axis) {
           return axis.getSubAxisInfo() &&
                  manualAxesSet.contains(axis.getName());
