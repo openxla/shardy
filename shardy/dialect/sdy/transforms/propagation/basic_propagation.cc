@@ -245,7 +245,8 @@ void updateTensorShardings(const PropagationTensorParams& operandsParams,
 LogicalResult propagateTensorShardings(
     const PropagationTensorParams& operandsParams,
     const PropagationTensorParams& resultsParams,
-    OpShardingRuleAttr shardingRule, PropagationDirection direction,
+    OpShardingRuleAttr shardingRule,
+    PropagationDirectionAlongFactor directionAlongFactor,
     const FactorPropagation& factorPropagation, bool conservativePropagation,
     Operation* op, const SymbolTable& symbolTable, PatternRewriter* rewriter,
     ShardingGroupMap shardingGroupMap) {
@@ -280,11 +281,6 @@ LogicalResult propagateTensorShardings(
   ShardingProjection shardingProjection = ShardingProjection::build(
       operandsParams.shardings, resultsParams.shardings, shardingRule, mesh);
   bool anyUpdated = false;
-
-  PropagationDirectionAlongFactor directionAlongFactor = [direction](int64_t) {
-    return direction;
-  };
-
   auto updateShardings = [&]() {
     auto [updateOperand, updateResult] =
         factorPropagation.propagateFactorShardings(
@@ -318,29 +314,14 @@ LogicalResult propagateTensorShardings(
   return success(anyUpdated);
 }
 
-// Same as the overload above, except there is a single operand and result.
-LogicalResult propagateTensorShardings(
-    const PropagationTensorParams& operandsParams,
-    const PropagationTensorParams& resultsParams,
-    OpShardingRuleAttr shardingRule, Operation* op,
-    const SymbolTable& symbolTable, PatternRewriter* rewriter,
-    const FactorPropagation& factorPropagation,
-    const ShardingGroupMap& shardingGroupMap,
-    PropagationDirection direction = PropagationDirection::BOTH,
-    bool conservativePropagation = false) {
-  return propagateTensorShardings(
-      operandsParams, resultsParams, shardingRule, direction, factorPropagation,
-      conservativePropagation, op, symbolTable, rewriter, shardingGroupMap);
-}
-
 // Same as the overload above, except the operand and result shardings are
 // extracted using `getSharding` and set using `setSharding`.
 LogicalResult propagateTensorShardings(
     ValueRange operands, ValueRange results, OpShardingRuleAttr shardingRule,
     Operation* op, const SymbolTable& symbolTable, PatternRewriter& rewriter,
+    PropagationDirectionAlongFactor directionAlongFactor,
     const FactorPropagation& factorPropagation,
     const ShardingGroupMap& shardingGroupMap,
-    PropagationDirection direction = PropagationDirection::BOTH,
     bool conservativePropagation = false) {
   SmallVector<TensorShardingAttr> operandsShardings = getShardings(operands);
   SmallVector<TensorShardingAttr> resultsShardings = getShardings(results);
@@ -357,9 +338,10 @@ LogicalResult propagateTensorShardings(
         setSharding(results[index], sharding);
       });
 
-  return propagateTensorShardings(
-      operandsParams, resultsParams, shardingRule, direction, factorPropagation,
-      conservativePropagation, op, symbolTable, &rewriter, shardingGroupMap);
+  return propagateTensorShardings(operandsParams, resultsParams, shardingRule,
+                                  directionAlongFactor, factorPropagation,
+                                  conservativePropagation, op, symbolTable,
+                                  &rewriter, shardingGroupMap);
 }
 
 // Propagates the shardings between the operands of the `funcOp`'s terminator
@@ -406,10 +388,12 @@ LogicalResult propagateFuncResults(FuncOp funcOp,
     (void)propagateTensorShardings(
         operandsParams, resultsParams,
         // Treat the sharding data flow b/w the `funcOp` terminator and func
-        // result attrs as an identity op. Create an equivalent sharding
-        // rule.
-        createIdentityShardingRule(tensorType), funcOp, symbolTable,
-        /*rewriter=*/nullptr, factorPropagation, shardingGroupMap);
+        // result attrs as an identity op. Create an equivalent sharding rule.
+        createIdentityShardingRule(tensorType),
+        std::bind(propagateAny, funcOp, std::placeholders::_1),
+        factorPropagation,
+        /*conservativePropagation=*/false, funcOp, symbolTable,
+        /*rewriter=*/nullptr, shardingGroupMap);
   }
   return success();
 }
@@ -455,19 +439,13 @@ class PropagateRegisteredOp : public RewritePattern {
         diag << "op doesn't have a registered sharding rule";
       });
     }
-    PropagationDirection direction = getDirectionToPropagate(op);
-    if (direction == PropagationDirection::NONE) {
-      // No need to continue to propagate if the direction is `NONE`, as
-      // neither operands nor results can be updated.
-      return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
-        diag << "propagation direction on op is NONE";
-      });
-    }
 
+    PropagationDirectionAlongFactor directionAlongFactor =
+        std::bind(getDirectionToPropagate, op, std::placeholders::_1);
     return propagateTensorShardings(op->getOperands(), op->getResults(),
                                     shardingRule, op, symbolTable, rewriter,
-                                    factorPropagation, shardingGroupMap,
-                                    direction, conservativePropagation);
+                                    directionAlongFactor, factorPropagation,
+                                    shardingGroupMap, conservativePropagation);
   }
 
  private:
@@ -522,14 +500,19 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
               sharding, DataFlowShardingTransformType::kAfterEdgePropagation));
         });
 
+    // TODO(b/394390827). We may pass getDirectionToPropagate so we can decide
+    // to change the priority of data flow ops.
+    PropagationDirectionAlongFactor directionAlongFactor =
+        std::bind(propagateAny, dataFlowEdgeOp, std::placeholders::_1);
     return propagateTensorShardings(
         operandsParams, resultsParams,
         createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
                                    sources.size()),
-        PropagationDirection::BOTH, factorPropagation,
+        directionAlongFactor, factorPropagation,
         /*conservativePropagation=*/false, dataFlowEdgeOp, symbolTable,
         &rewriter, shardingGroupMap);
   }
+
  private:
   const SymbolTable& symbolTable;
   const FactorPropagation& factorPropagation;
@@ -556,8 +539,9 @@ class PropagatePropagationBarrier
         propagationBarrierOp.getInput(), propagationBarrierOp.getResult(),
         createIdentityShardingRule(
             cast<RankedTensorType>(propagationBarrierOp.getType())),
-        propagationBarrierOp, symbolTable, rewriter, factorPropagation,
-        shardingGroupMap, propagationBarrierOp.getAllowedDirection());
+        propagationBarrierOp, symbolTable, rewriter,
+        [&](int64_t) { return propagationBarrierOp.getAllowedDirection(); },
+        factorPropagation, shardingGroupMap);
   }
 
  private:
@@ -604,7 +588,7 @@ bool allValidShapes(ModuleOp moduleOp) {
 
 }  // namespace
 
-PropagationDirection propagateAny(Operation*) {
+PropagationDirection propagateAny(Operation*, int64_t) {
   return PropagationDirection::BOTH;
 }
 

@@ -17,6 +17,8 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_BASIC_PROPAGATION_H_
 
 #include <stdbool.h>
+
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -29,21 +31,22 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
+#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {
 namespace sdy {
 
 // A function that determines in which direction propagation should happen for a
-// given op.
+// given op and factor index.
 using GetDirectionToPropagateFn =
-    std::function<PropagationDirection(Operation*)>;
+    std::function<PropagationDirection(Operation* op, int64_t factorIndex)>;
 
-// A function that returns `PropagationDirection::BOTH` for all operations.
-PropagationDirection propagateAny(Operation* op);
+// A function that returns `PropagationDirection::BOTH` for all operations and
+// factor indices.
+PropagationDirection propagateAny(Operation* op, int64_t factorIndex);
 
 // The implementation class for the basic propagation pass.
 //

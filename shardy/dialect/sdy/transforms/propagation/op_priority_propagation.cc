@@ -46,34 +46,11 @@ namespace sdy {
 namespace {
 
 // A function that determines in which direction propagation should happen for a
-// given op.
-using GetDirectionToPropagateFnPtr = PropagationDirection (*)(Operation*);
+// given op and factor index.
+using GetDirectionToPropagateFnPtr = PropagationDirection (*)(Operation*,
+                                                              int64_t);
 
-template <typename... OpTs>
-PropagationDirection isaBoth(Operation* op) {
-  return isa<OpTs...>(op) ? PropagationDirection::BOTH
-                          : PropagationDirection::NONE;
-}
-
-template <typename... OpTs>
-PropagationDirection isNotABoth(Operation* op) {
-  return !isa<OpTs...>(op) ? PropagationDirection::BOTH
-                           : PropagationDirection::NONE;
-}
-
-template <typename... OpTs>
-PropagationDirection isaForward(Operation* op) {
-  return isa<OpTs...>(op) ? PropagationDirection::FORWARD
-                          : PropagationDirection::NONE;
-}
-
-template <typename... OpTs>
-PropagationDirection isaBackward(Operation* op) {
-  return isa<OpTs...>(op) ? PropagationDirection::BACKWARD
-                          : PropagationDirection::NONE;
-}
-
-PropagationDirection isPassThrough(Operation* op) {
+PropagationDirection isPassThrough(Operation* op, int64_t) {
   if (isElementwise(op) ||
       isa<stablehlo::ReshapeOp, stablehlo::TransposeOp>(op)) {
     return PropagationDirection::BOTH;
@@ -93,18 +70,19 @@ constexpr std::array<GetDirectionToPropagateFnPtr, 2> opPropagationSchedule = {
 // a caller. It will return the intersection of the passed in
 // `getDirectionToPropagate` and the op based direction.
 GetDirectionToPropagateFn getOpBasedDirectionToPropagate(
-    int64_t currentOpPriority,
+    int64_t currentPriority,
     GetDirectionToPropagateFn getDirectionToPropagate) {
-  return [currentOpPriority, getDirectionToPropagate](Operation* op) {
+  return [currentPriority, getDirectionToPropagate](Operation* op,
+                                                    int64_t factorIndex) {
     PropagationDirection opBasedDirection = std::accumulate(
         opPropagationSchedule.begin(),
-        opPropagationSchedule.begin() + currentOpPriority + 1,
+        opPropagationSchedule.begin() + currentPriority + 1,
         PropagationDirection::NONE,
         [&](PropagationDirection acc, GetDirectionToPropagateFnPtr dirFn) {
-          return unionOfPropagationDirections(acc, dirFn(op));
+          return unionOfPropagationDirections(acc, dirFn(op, factorIndex));
         });
-    return intersectionOfPropagationDirections(opBasedDirection,
-                                               getDirectionToPropagate(op));
+    return intersectionOfPropagationDirections(
+        opBasedDirection, getDirectionToPropagate(op, factorIndex));
   };
 }
 
@@ -129,13 +107,13 @@ LogicalResult OpPriorityPropagationPassImpl::propagate(
     return AggressivePropagationPassImpl::propagate(
         moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate);
   }
-  // Reset currentOpPriority to 0. Before running the pass. This same instance
+  // Reset currentPriority to 0. Before running the pass. This same instance
   // could have been run earlier already (e.g. with a different user priority).
-  for (int64_t currentOpPriority = 0;
-       currentOpPriority < opPropagationSchedule.size(); currentOpPriority++) {
+  for (int64_t currentPriority = 0;
+       currentPriority < opPropagationSchedule.size(); currentPriority++) {
     if (AggressivePropagationPassImpl::propagate(
             moduleOp, symbolTable, shardingGroupMap,
-            getOpBasedDirectionToPropagate(currentOpPriority,
+            getOpBasedDirectionToPropagate(currentPriority,
                                            getDirectionToPropagate))
             .failed()) {
       return failure();
