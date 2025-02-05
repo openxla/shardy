@@ -105,6 +105,12 @@ _Sinks all `DataFlowEdgeOp` into their input._
 
 Moves the sharding of each `DataFlowEdgeOp` to its input (the root target of
 the edge), and replaces the op with its input.
+
+#### Options
+```
+-sink-debug-sharding-origins          : Whether to sink the debug sharding origins info. See `debug-sharding-origins` option in propagation for more info.
+-sink-debug-propagation-edge-sharding : Whether to sink the debug propagation edge sharding info. See `debug-propagation-edge-sharding` option in propagation for more info.
+```
 ### `-sdy-update-non-divisible-input-output-shardings`
 
 _Makes FuncOp inputs/outputs evenly sharded, removing any need for padding due to non-divisible shardings._
