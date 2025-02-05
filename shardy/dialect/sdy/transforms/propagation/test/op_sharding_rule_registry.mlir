@@ -494,10 +494,10 @@ func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x
 }
 
 // CHECK-LABEL: func @slice
-func.func @slice(%arg0: tensor<32x4x8xf32>) -> tensor<32x1x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=32, j=4, k=8}>
-  %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:8:2] : (tensor<32x4x8xf32>) -> tensor<32x1x2xf32>
-  return %0 : tensor<32x1x2xf32>
+func.func @slice(%arg0: tensor<32x4x8x1xf32>) -> tensor<32x1x2x1xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, j, k])->([i, m, j, k]) {i=32, j=8, k=1, l=1, m=1}>
+  %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:8:2, 0:1] : (tensor<32x4x8x1xf32>) -> tensor<32x1x2x1xf32>
+  return %0 : tensor<32x1x2x1xf32>
 }
 
 // Sort is currently treated as a pointwise op, and we add a factor for the sort
