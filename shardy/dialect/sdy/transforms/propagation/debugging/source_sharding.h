@@ -20,9 +20,12 @@ limitations under the License.
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Action.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Unit.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -53,24 +56,39 @@ struct OriginSharding {
 };
 
 // Specifies whether a sharding came from an operand or a result.
-enum EdgeSourceType { OPERAND, RESULT };
+enum EdgeNodeType { OPERAND, RESULT };
 
 // The operand/result a sharding came from through an `Operation` to modify the
 // sharding of some `Value` in the `Operation`.
-struct EdgeSource {
-  EdgeSourceType type;
+struct EdgeNode {
+  EdgeNodeType type;
   int64_t index;
 };
 
-using AxisToEdgeSourceMap = llvm::DenseMap<AxisRefAttr, EdgeSource>;
+// The source and target of a source sharding edge.
+struct PropagationEdge {
+  EdgeNode source;
+  EdgeNode target;
+  int64_t propagationStep;
+};
+
+// Types used for `debugPropagationEdgeSharding`.
+using AxisToEdgeMap = llvm::DenseMap<AxisRefAttr, PropagationEdge>;
+using AxisToEdgesMap =
+    llvm::DenseMap<AxisRefAttr, SmallVector<PropagationEdge>>;
+using OperationToEdgesMap = llvm::DenseMap<Operation*, AxisToEdgesMap>;
+// Mapping from `FuncOp` to the edges for each result.
+using FuncResultToEdgesMap =
+    llvm::DenseMap<func::FuncOp, SmallVector<AxisToEdgesMap>>;
+
+// Types used for `debugShardingOrigins`.
 using AxisToOriginShardingMap = llvm::DenseMap<AxisRefAttr, OriginSharding>;
-using ValueToEdgeSourceMap = llvm::DenseMap<Value, AxisToEdgeSourceMap>;
 using ValueToOriginShardingMap = llvm::DenseMap<Value, AxisToOriginShardingMap>;
 
 // The mappings used for debugging sharding origins and edge sources.
 struct ShardingDebugMappings {
   ShardingDebugMappings(bool debugShardingOrigins,
-                        bool debugEdgeSourceSharding);
+                        bool debugPropagationEdgeSharding);
 
   // We do not allow copying of the mappings, as we don't want the mappings
   // to be copied over to the new instance. There should only ever be one
@@ -78,8 +96,13 @@ struct ShardingDebugMappings {
   ShardingDebugMappings(const ShardingDebugMappings&) = delete;
   ShardingDebugMappings& operator=(const ShardingDebugMappings&) = delete;
 
-  bool debugShardingOrigins, debugEdgeSourceSharding;
-  ValueToEdgeSourceMap valueToEdgeSourceMap;
+  bool debugShardingOrigins, debugPropagationEdgeSharding;
+  OperationToEdgesMap operationToEdgesMap;
+  // NOTE: we need a separate map for `FuncOp` results as propagation is run
+  // per terminator operand/result pair, so we need to figure out which index
+  // the `FuncOp` result is. So this saves the edges for each `FuncOp` result
+  // separately.
+  FuncResultToEdgesMap funcResultToEdgesMap;
   ValueToOriginShardingMap valueToOriginShardingMap;
 };
 
@@ -91,17 +114,20 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
  public:
   using Base = tracing::ActionImpl<SourceShardingAction>;
 
-  SourceShardingAction(ArrayRef<IRUnit> irUnits, ValueRange operands,
-                       ValueRange results, MeshAttr mesh,
+  SourceShardingAction(ArrayRef<IRUnit> irUnits, Operation* op,
+                       ValueRange operands, ValueRange results, MeshAttr mesh,
                        OpShardingRuleAttr shardingRule,
-                       const ShardingProjection& shardingProjection)
+                       const ShardingProjection& shardingProjection,
+                       const bool& anyUpdated)
       : Base(irUnits),
+        op(op),
         operands(operands),
         results(results),
         mesh(mesh),
         shardingRule(shardingRule),
         oldShardingProjection(shardingProjection),
-        newShardingProjection(shardingProjection) {}
+        newShardingProjection(shardingProjection),
+        anyUpdated(anyUpdated) {}
 
   static constexpr StringLiteral tag = "SourceShardingAction";
   static constexpr StringLiteral desc =
@@ -109,6 +135,7 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
       "a user defined sharding either on `FuncOp` inputs/outputs, an "
       "`sdy.sharding_constraint`, or `sdy.ManualComputationOp` input/output.";
 
+  Operation* op;
   ValueRange operands, results;
   MeshAttr mesh;
   OpShardingRuleAttr shardingRule;
@@ -117,12 +144,14 @@ class SourceShardingAction : public tracing::ActionImpl<SourceShardingAction> {
   // new sharding projections differ.
   const ShardingProjection oldShardingProjection;
   const ShardingProjection& newShardingProjection;
+  // Whether any of the operands/results were updated.
+  const bool& anyUpdated;
 };
 
 // Handles `SourceShardingAction`s, figuring out what operand/result shardings
 // have been propagated through due to new axes. Saves what was the source of
 // the axis to appear on the sharding of a given `Value` to
-// `valueToEdgeSourceMap` and `valueToOriginShardingMap`.
+// `operationToEdgesMap`/`funcResultToEdgesMap` and `valueToOriginShardingMap`.
 struct SourceShardingHandler {
   SourceShardingHandler(ShardingDebugMappings* mappings);
 
@@ -140,7 +169,26 @@ struct SourceShardingHandler {
 
  private:
   ShardingDebugMappings* mappings;
+  int64_t propagationStep = 0;
 };
+
+// Saves an array of all the origin sharding and propagation edge dictionaries
+// for the given `edgeOwners` on `op`. If non exist, nothing is saved.
+//
+// Saving the info depends on if the corresponding `sinkDebugShardingOrigins`
+// and `sinkDebugPropagationEdgeSharding` are true.
+//
+// For debugging the origin shardings and propagation edges, we want to preserve
+// the debugging dictionaries from the `DataFlowEdgeOp`s on the owning op so
+// that they are preserved after the propagation pipeline.
+//
+// See the `debug-sharding-origins` and `debug-edge-source-sharding` config on
+// propagation for more details.
+void saveDebugInfoDictsFromDataFlowEdges(ValueRange edgeOwners, Operation* op,
+                                         bool sinkDebugShardingOrigins,
+                                         bool sinkDebugPropagationEdgeSharding,
+                                         EdgeNodeType edgeNodeType,
+                                         IRRewriter& rewriter);
 
 }  // namespace sdy
 }  // namespace mlir

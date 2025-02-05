@@ -35,15 +35,29 @@ inline constexpr StringRef kShardingRuleAttr = "sdy.sharding_rule";
 // caused a value to be sharded a certain way.
 inline constexpr StringRef kShardingOriginsAttr = "sdy.sharding_origins";
 
+// Attribute name for saving which operand/result sharding of an op caused its
+// value to be sharded a certain way.
+inline constexpr StringRef kPropagationEdgesAttr = "sdy.propagation_edges";
+
 // Attribute name like `kShardingOriginsAttr` but for
 // `ShardableDataFlowOpInterface` op block arguments.
 inline constexpr StringRef kBlockArgShardingOriginsAttr =
     "sdy.block_arg_sharding_origins";
 
+// Attribute name like `kPropagationEdgesAttr` but for
+// `ShardableDataFlowOpInterface` op block arguments.
+inline constexpr StringRef kBlockArgPropagationEdgesAttr =
+    "sdy.block_arg_propagation_edges";
+
 // Attribute name like `kShardingOriginsAttr` but for
 // `ShardableDataFlowOpInterface` op results.
 inline constexpr StringRef kResultShardingOriginsAttr =
     "sdy.result_sharding_origins";
+
+// Attribute name like `kPropagationEdgesAttr` but for
+// `ShardableDataFlowOpInterface` op results.
+inline constexpr StringRef kResultPropagationEdgesAttr =
+    "sdy.result_propagation_edges";
 
 // Attribute name for the unique name of a sharding origin. Is either an
 // `sdy.sharding_constraint`, or `sdy.ManualComputationOp` input/output.

@@ -126,12 +126,12 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
           "before propagation."),
       llvm::cl::init(false)};
 
-  Option<bool> debugEdgeSourceSharding{
-      *this, "debug-edge-source-sharding",
+  Option<bool> debugPropagationEdgeSharding{
+      *this, "debug-propagation-edge-sharding",
       llvm::cl::desc(
-          "whether to save information about the edge source of a sharding "
-          "on the MLIR module. These are from which operand/result a sharding "
-          "was propagated."),
+          "whether to save information about the SSA value edges of how a "
+          "sharding on the MLIR module propagated around. These are from which "
+          "operand/result a sharding was propagated to a given op."),
       llvm::cl::init(false)};
 
  private:

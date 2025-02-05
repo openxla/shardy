@@ -22,6 +22,7 @@ limitations under the License.
 #include <optional>
 #include <string>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -34,7 +35,9 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -47,8 +50,8 @@ namespace sdy {
 namespace {
 
 // The map from factor to edge source for operands and results.
-struct FactorsToEdgeSourceMap {
-  llvm::SmallVector<AxisToEdgeSourceMap> operands, results;
+struct FactorsToEdgeMap {
+  llvm::SmallVector<AxisToEdgeMap> operands, results;
 };
 
 // Finds what operand/result the new sharding axes came from for a given
@@ -73,123 +76,120 @@ std::optional<int64_t> findNewAxisRefMatch(
 //
 // This only saves any newly introduced factor shardings, not any pre-existing
 // ones. So if no operand/result sharding changes, the map will be empty.
-FactorsToEdgeSourceMap createSourceMap(
+FactorsToEdgeMap createSourceMap(
     const ShardingProjection& oldShardingProjection,
     const ShardingProjection& newShardingProjection,
-    OpShardingRuleAttr shardingRule, MeshAttr mesh) {
-  FactorsToEdgeSourceMap axisToEdgeSourceMap{
-      llvm::SmallVector<AxisToEdgeSourceMap>(
-          oldShardingProjection.getNumOperands(), AxisToEdgeSourceMap()),
-      llvm::SmallVector<AxisToEdgeSourceMap>(
-          oldShardingProjection.getNumResults(), AxisToEdgeSourceMap())};
+    OpShardingRuleAttr shardingRule, MeshAttr mesh,
+    const int64_t propagationStep) {
+  FactorsToEdgeMap axisToEdgeMap{
+      llvm::SmallVector<AxisToEdgeMap>(oldShardingProjection.getNumOperands(),
+                                       AxisToEdgeMap()),
+      llvm::SmallVector<AxisToEdgeMap>(oldShardingProjection.getNumResults(),
+                                       AxisToEdgeMap())};
 
   // Saves the `axisRefs` to the specified `valueSourceMap` of
-  // `axisToEdgeSourceMap`.
-  auto saveEdgeSources = [&](ArrayRef<AxisRefAttr> newAxisRefs,
-                             ArrayRef<AxisRefAttr> oldAxisRefs,
-                             EdgeSourceType type, int64_t sourceIndex,
-                             AxisToEdgeSourceMap& valueSourceMap) {
+  // `axisToEdgeMap`.
+  auto saveEdges = [&](ArrayRef<AxisRefAttr> newAxisRefs,
+                       ArrayRef<AxisRefAttr> oldAxisRefs, EdgeNode source,
+                       EdgeNode target, AxisToEdgeMap& valueSourceMap) {
     // To avoid iterating over all the new axes, only compare the very last old
     // axis (since there could have been a sub-axis update) and then the
     // trailing new axes.
     int64_t oldAxisIndex = oldAxisRefs.size() - 1;
     if (!oldAxisRefs.empty() &&
         oldAxisRefs[oldAxisIndex] != newAxisRefs[oldAxisIndex]) {
-      valueSourceMap.try_emplace(newAxisRefs[oldAxisIndex],
-                                 EdgeSource{type, sourceIndex});
+      valueSourceMap.try_emplace(
+          newAxisRefs[oldAxisIndex],
+          PropagationEdge{source, target, propagationStep});
     }
     for (AxisRefAttr axisRef : newAxisRefs.drop_front(oldAxisRefs.size())) {
-      valueSourceMap.try_emplace(axisRef, EdgeSource{type, sourceIndex});
+      valueSourceMap.try_emplace(
+          axisRef, PropagationEdge{source, target, propagationStep});
     }
   };
 
   MLIRContext* context = mesh.getContext();
   ArrayRef<int64_t> factorSizes = shardingRule.getFactorSizes();
-  auto visitValue =
-      [&](const TensorFactorShardings& oldValue,
-          const TensorFactorShardings& newValue, int64_t valueIndex,
-          TensorMappingAttr tensorMapping,
-          llvm::SmallVector<AxisToEdgeSourceMap>& valueSourceMap) {
-        DenseSet<AxisRefAttr> oldAxes;
-        for (const auto& [_, oldFactorSharding] :
-             oldValue.factorIndexToSharding) {
-          oldAxes.insert(oldFactorSharding.axisRefs.begin(),
-                         oldFactorSharding.axisRefs.end());
-        }
-        for (const auto& [factorIndex, oldFactorSharding] :
-             oldValue.factorIndexToSharding) {
-          const FactorSharding& newFactorSharding =
-              newValue.factorIndexToSharding.at(factorIndex);
-          if (oldFactorSharding.axisRefs == newFactorSharding.axisRefs) {
-            continue;
-          }
-          SmallVector<AxisRefAttr> newlyIntroducedAxes;
-          // If multiple sub axes can be merged due to a dimension sharding
-          // having multiple factors, each sharded on a sub axis, make sure we
-          // only save the merged one. This can happen during an
-          // `(A, B) -> (AB,)` reshape.
-          TensorShardingAttr tensorSharding = newValue.createTensorShardingAttr(
-              context, tensorMapping, factorSizes, "", mesh);
-          for (DimensionShardingAttr dimSharding :
-               tensorSharding.getDimShardings()) {
-            llvm::copy_if(
-                dimSharding.getAxes(), std::back_inserter(newlyIntroducedAxes),
-                [&](const AxisRefAttr& axisRef) {
-                  // Don't add any axes that were already in the
-                  // old sharding. We just want new axes.
-                  if (oldAxes.contains(axisRef)) {
-                    return false;
-                  }
-                  // We need to avoid any axes that already existed
-                  // in the old sharding, but aren't in the new
-                  // projection as the conflicted. E.g. for a
-                  // contracting dim matmul, if both the LHS/RHS are
-                  // sharded on the same axis on their respective
-                  // non-contracting dims, the dimension sharding
-                  // will contain the conflicting axes, but the
-                  // factor sharding will not. And we don't want this
-                  // axis as it isn't a newly introduced axis.
-                  for (AxisRefAttr newAxisRef : newFactorSharding.axisRefs) {
-                    if (newAxisRef.prefixOf(axisRef)) {
-                      return true;
-                    }
-                  }
-                  return false;
-                });
-          }
-          // This factor sharding has changed, let's find who changed it.
-          if (std::optional<int64_t> operandSource =
-                  findNewAxisRefMatch(newFactorSharding.axisRefs, factorIndex,
-                                      oldShardingProjection.getOperands())) {
-            saveEdgeSources(newlyIntroducedAxes, oldFactorSharding.axisRefs,
-                            EdgeSourceType::OPERAND, *operandSource,
-                            valueSourceMap[valueIndex]);
-          } else if (std::optional<int64_t> resultSource = findNewAxisRefMatch(
-                         newFactorSharding.axisRefs, factorIndex,
-                         oldShardingProjection.getResults())) {
-            saveEdgeSources(newlyIntroducedAxes, oldFactorSharding.axisRefs,
-                            EdgeSourceType::RESULT, *resultSource,
-                            valueSourceMap[valueIndex]);
-          }
-        }
-      };
+  auto visitValue = [&](const TensorFactorShardings& oldValue,
+                        const TensorFactorShardings& newValue,
+                        EdgeNodeType valueType, int64_t valueIndex,
+                        TensorMappingAttr tensorMapping,
+                        llvm::SmallVector<AxisToEdgeMap>& valueSourceMap) {
+    DenseSet<AxisRefAttr> oldAxes;
+    for (const auto& [_, oldFactorSharding] : oldValue.factorIndexToSharding) {
+      oldAxes.insert(oldFactorSharding.axisRefs.begin(),
+                     oldFactorSharding.axisRefs.end());
+    }
+    for (const auto& [oldFactorSharding, newFactorSharding] : llvm::zip_equal(
+             oldValue.factorIndexToSharding, newValue.factorIndexToSharding)) {
+      if (oldFactorSharding.second.axisRefs ==
+          newFactorSharding.second.axisRefs) {
+        continue;
+      }
+      SmallVector<AxisRefAttr> newlyIntroducedAxes;
+      // If multiple sub axes can be merged due to a dimension sharding having
+      // multiple factors, each sharded on a sub axis, make sure we only save
+      // the merged one. This can happen during an `(A, B) -> (AB,)` reshape.
+      TensorShardingAttr tensorSharding = newValue.createTensorShardingAttr(
+          context, tensorMapping, factorSizes, "", mesh);
+      for (DimensionShardingAttr dimSharding :
+           tensorSharding.getDimShardings()) {
+        llvm::copy_if(
+            dimSharding.getAxes(), std::back_inserter(newlyIntroducedAxes),
+            [&](const AxisRefAttr& axisRef) {
+              // Don't add any axes that were already in the
+              // old sharding. We just want new axes.
+              if (oldAxes.contains(axisRef)) {
+                return false;
+              }
+              // We need to avoid any axes that already existed in the old
+              // sharding, but aren't in the new projection as the conflicted.
+              // E.g. for a contracting dim matmul, if both the LHS/RHS are
+              // sharded on the same axis on their respective non-contracting
+              // dims, the dimension sharding will contain the conflicting axes,
+              // but the factor sharding will not. And we don't want this axis
+              // as it isn't a newly introduced axis.
+              for (AxisRefAttr newAxisRef : newFactorSharding.second.axisRefs) {
+                if (newAxisRef.prefixOf(axisRef)) {
+                  return true;
+                }
+              }
+              return false;
+            });
+      }
+      // This factor sharding has changed, let's find who changed it.
+      if (std::optional<int64_t> operandSource = findNewAxisRefMatch(
+              newFactorSharding.second.axisRefs, oldFactorSharding.first,
+              oldShardingProjection.getOperands())) {
+        saveEdges(newlyIntroducedAxes, oldFactorSharding.second.axisRefs,
+                  EdgeNode{EdgeNodeType::OPERAND, *operandSource},
+                  EdgeNode{valueType, valueIndex}, valueSourceMap[valueIndex]);
+      } else if (std::optional<int64_t> resultSource = findNewAxisRefMatch(
+                     newFactorSharding.second.axisRefs, oldFactorSharding.first,
+                     oldShardingProjection.getResults())) {
+        saveEdges(newlyIntroducedAxes, oldFactorSharding.second.axisRefs,
+                  EdgeNode{EdgeNodeType::RESULT, *resultSource},
+                  EdgeNode{valueType, valueIndex}, valueSourceMap[valueIndex]);
+      }
+    }
+  };
 
   for (auto [i, packedOperands] :
        llvm::enumerate(llvm::zip_equal(oldShardingProjection.getOperands(),
                                        newShardingProjection.getOperands()))) {
     auto [oldOperand, newOperand] = packedOperands;
-    visitValue(oldOperand, newOperand, i, shardingRule.getOperandMapping(i),
-               axisToEdgeSourceMap.operands);
+    visitValue(oldOperand, newOperand, EdgeNodeType::OPERAND, i,
+               shardingRule.getOperandMapping(i), axisToEdgeMap.operands);
   }
   for (auto [i, packedResults] :
        llvm::enumerate(llvm::zip_equal(oldShardingProjection.getResults(),
                                        newShardingProjection.getResults()))) {
     auto [oldResult, newResult] = packedResults;
-    visitValue(oldResult, newResult, i, shardingRule.getResultMapping(i),
-               axisToEdgeSourceMap.results);
+    visitValue(oldResult, newResult, EdgeNodeType::RESULT, i,
+               shardingRule.getResultMapping(i), axisToEdgeMap.results);
   }
 
-  return axisToEdgeSourceMap;
+  return axisToEdgeMap;
 }
 
 std::string manualComputationOriginName(OriginShardingType type, StringRef name,
@@ -243,6 +243,12 @@ StringAttr shardingOriginToString(OriginSharding source, MLIRContext* context) {
                          llvm::formatv("{0}: {1}", typeString, source.index));
 }
 
+// Avoid printing the string with escaping quotes, aka "\22".
+void eraseDoubleQuotesInAxisRefString(std::string& axisRefString) {
+  axisRefString.erase(remove(axisRefString.begin(), axisRefString.end(), '"'),
+                      axisRefString.end());
+}
+
 // Create a list of entries from the `axisToOriginSharding` map to save as a
 // `DictionaryAttr`.
 SmallVector<NamedAttribute> createOriginShardingEntries(
@@ -251,9 +257,7 @@ SmallVector<NamedAttribute> createOriginShardingEntries(
   entries.reserve(axisToOriginSharding.size());
   for (const auto& [axisRef, shardingOrigin] : axisToOriginSharding) {
     std::string axisRefString = axisRef.toString();
-    // Avoid printing the string with escaping quotes, aka "\22".
-    axisRefString.erase(remove(axisRefString.begin(), axisRefString.end(), '"'),
-                        axisRefString.end());
+    eraseDoubleQuotesInAxisRefString(axisRefString);
     entries.emplace_back(
         NamedAttribute(StringAttr::get(context, axisRefString),
                        shardingOriginToString(shardingOrigin, context)));
@@ -273,33 +277,40 @@ SmallVector<Attribute> getOriginShardingDicts(Operation* op, Builder& builder) {
   return SmallVector<Attribute>(resultDicts.getValue());
 }
 
-// Saves the originating sharding debug information on the `moduleOp`.
-void saveShardingOriginsOnModule(ModuleOp moduleOp,
-                                 ShardingDebugMappings* mappings) {
-  MLIRContext* context = moduleOp.getContext();
+// Gets the `OpOperand` of the `value` in the `funcOp` terminator if the Value
+// is used in the terminator. Else returns `nullptr`.
+OpOperand* getTerminatorOperand(Value value, func::FuncOp funcOp) {
+  ArrayRef<OpOperand> terminatorOperands =
+      getBodyTerminator(funcOp)->getOpOperands();
+  if (auto it = llvm::find_if(value.getUses(),
+                              [&](const OpOperand& use) {
+                                return llvm::is_contained(terminatorOperands,
+                                                          use);
+                              });
+      it != value.getUses().end()) {
+    return it.getOperand();
+  }
+  return nullptr;
+}
+
+// Saves the originating sharding debug information on each `Value` in
+// `valueToOriginShardingMap`.
+void saveShardingOriginsOnModule(
+    MLIRContext* context,
+    const ValueToOriginShardingMap& valueToOriginShardingMap) {
   Builder builder(context);
-  for (auto [value, axisToOriginSharding] :
-       mappings->valueToOriginShardingMap) {
+  for (auto& [value, axisToOriginSharding] : valueToOriginShardingMap) {
     Operation* owningOp = getOwningOp(value);
 
     func::FuncOp funcOp = getEnclosingOfType<func::FuncOp>(owningOp);
 
     // TODO(bartchr): Swap the map to store `ValueOrFuncResult` to avoid having
     // to do this terminator finding logic just to set the func result attr.
-    OpOperand* terminatorOperand = nullptr;
-    ArrayRef<OpOperand> terminatorOperands =
-        getBodyTerminator(funcOp)->getOpOperands();
-    if (auto it = llvm::find_if(value.getUses(),
-                                [&](const OpOperand& use) {
-                                  return llvm::is_contained(terminatorOperands,
-                                                            use);
-                                });
-        it != value.getUses().end()) {
-      terminatorOperand = it.getOperand();
-    }
+    OpOperand* terminatorOperand = getTerminatorOperand(value, funcOp);
 
     SmallVector<NamedAttribute> entries =
         createOriginShardingEntries(axisToOriginSharding, context);
+
     if (terminatorOperand) {
       int64_t operandNumber = terminatorOperand->getOperandNumber();
       funcOp.setResultAttr(operandNumber, kShardingOriginsAttr,
@@ -325,6 +336,131 @@ void saveShardingOriginsOnModule(ModuleOp moduleOp,
           op->setAttr(kShardingOriginsAttr,
                       builder.getArrayAttr(newResultDicts));
         });
+  }
+}
+
+// Converts the `node` to a `NamedAttribute`.
+StringAttr edgeNodeToString(EdgeNode node, Builder& builder) {
+  std::string typeString;
+  switch (node.type) {
+    case EdgeNodeType::OPERAND: {
+      typeString = "operand";
+      break;
+    }
+    case EdgeNodeType::RESULT: {
+      typeString = "result";
+      break;
+    }
+  }
+  return builder.getStringAttr(
+      llvm::formatv("{0}: {1}", typeString, node.index));
+}
+
+// In the case where we have a Value used multiple times as an operand, we
+// should only add the edge once. For example:
+// ```mlir
+// %0 = stablehlo.add %arg0, %arg0 <[<@mesh, [{"a", ?}]>]> : tensor<8xf32>
+// return %0 : tensor<8xf32>
+// ```
+// The sharding projection said that both operand 0 and 1 are updated. However,
+// they are the same value, so we only need to add the edge once. This is only
+// the case for the target of the edge, because if the source appears multiple
+// times, then it's because it effects multiple other operands/results in the
+// op.
+bool insertSeenValue(Operation* op, const PropagationEdge& edge,
+                     llvm::SmallDenseSet<Value>& seenValues) {
+  EdgeNode target = edge.target;
+  switch (target.type) {
+    case EdgeNodeType::OPERAND: {
+      if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
+        return seenValues.insert(
+            getBodyTerminator(funcOp)->getOperand(target.index)).second;
+      }
+      return seenValues.insert(op->getOperand(target.index)).second;
+    }
+    case EdgeNodeType::RESULT: {
+      return true;
+    }
+  }
+}
+
+// Create a list of entries from the `axisToEdge` map to save as a
+// `DictionaryAttr`.
+DictionaryAttr createEdgeEntries(Operation* op,
+                                 const AxisToEdgesMap& axisToEdges,
+                                 MLIRContext* context) {
+  Builder builder(context);
+  SmallVector<NamedAttribute> entries;
+  for (const auto& [axisRef, edges] : axisToEdges) {
+    std::string axisRefString = axisRef.toString();
+    eraseDoubleQuotesInAxisRefString(axisRefString);
+    SmallVector<Attribute> axisEntries;
+    llvm::SmallDenseSet<Value> seenTargetValues;
+    for (const PropagationEdge& edge : edges) {
+      assert(edge.source.type == EdgeNodeType::OPERAND ||
+             edge.source.type == EdgeNodeType::RESULT);
+      if (!insertSeenValue(op, edge, seenTargetValues)) {
+        continue;
+      }
+      StringAttr sourceEntry = edgeNodeToString(edge.source, builder);
+      StringAttr targetEntry = edgeNodeToString(edge.target, builder);
+      DictionaryAttr edgeEntry = builder.getDictionaryAttr({
+          builder.getNamedAttr("source", sourceEntry),
+          builder.getNamedAttr("target", targetEntry),
+          builder.getNamedAttr("propagation_step",
+                               builder.getI64IntegerAttr(edge.propagationStep)),
+      });
+      axisEntries.push_back(edgeEntry);
+    }
+    entries.emplace_back(builder.getStringAttr(axisRefString),
+                         builder.getArrayAttr(axisEntries));
+  }
+  return builder.getDictionaryAttr(entries);
+}
+
+// Saves the originating sharding debug information on each `op` in
+// `mappings->operationToEdgesMap`.
+//
+// This works by having each `Operation*` save a source/target edge, which is
+// always composed of at least one operand. This is because results
+// can be used several times, but an operand only ever has one defining op. So
+// these edges always look "backwards" - never forwards towards a use of a
+// result.
+//
+// As such, the `FuncOp` args don't contain edge source information: only the
+// ops that use them.
+void saveEdgesOnModule(MLIRContext* context,
+                       const OperationToEdgesMap& operationToEdgesMap) {
+  Builder builder(context);
+  for (auto [op, axisToEdges] : operationToEdgesMap) {
+    if (isa<func::FuncOp>(op)) {
+      continue;
+    }
+    op->setAttr(kPropagationEdgesAttr,
+                createEdgeEntries(op, axisToEdges, context));
+  }
+}
+
+// Saves the edge source sharding debug information on the result attrs of
+// `funcOp`.
+//
+// Since only the uses of a sharding save the edge, for `FuncOp` results which
+// have been updated, we save the edges in each result's `resultAttr`. If the
+// function has multiple results, then each `edge_source` on the func result
+// attributes will have index 0. This is because of how propagation works with
+// running propagation on each returned result. Having them have the right index
+// would make sense if the `sdy.edge_sources` were saved as a top level
+// attribute on the func, but since one is saved per result, then an index of 0
+// makes most sense.
+void saveEdgesOnFuncResults(func::FuncOp funcOp,
+                            const FuncResultToEdgesMap& funcResultToEdgesMap) {
+  for (auto [funcOp, resultToEdgesMap] : funcResultToEdgesMap) {
+    for (auto [resultIndex, axisToEdgesMap] :
+         llvm::enumerate(resultToEdgesMap)) {
+      funcOp.setResultAttr(
+          resultIndex, kPropagationEdgesAttr,
+          createEdgeEntries(funcOp, axisToEdgesMap, funcOp->getContext()));
+    }
   }
 }
 
@@ -428,13 +564,14 @@ void overrideOriginsToSelf(ModuleOp moduleOp) {
   });
 }
 
-// Sets up the `handler` with the initial sharding origin information on
-// the `moduleOp`.
-// The `SourceShardingHandler` will keep `valueToEdgeSourceMap` and
-// `valueToOriginShardingMap` up to date with the source sharding information
-// on the module during the propagation rewrite patterns.
-void prepareShardingOriginsHandler(ModuleOp moduleOp,
-                                   ShardingDebugMappings* mappings) {
+// Sets up `valueToOriginShardingMap` with the initial sharding origin
+// information on the `moduleOp`.
+//
+// The `SourceShardingHandler` will keep `valueToOriginShardingMap` up to date
+// with the origin sharding information on the module during the propagation
+// rewrite patterns.
+void prepareShardingOriginsHandler(
+    ModuleOp moduleOp, ValueToOriginShardingMap& valueToOriginShardingMap) {
   MLIRContext* context = moduleOp.getContext();
   // Build the initial sharding origin map.
   // NOTE(bartchr): This assumes that we do not propagate across different
@@ -442,22 +579,21 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
   // this if we do propagate across `FuncOp`s.
   moduleOp.walk([&](func::FuncOp funcOp) {
     for (BlockArgument arg : funcOp.getArguments()) {
-      saveShardingOrigins(mappings->valueToOriginShardingMap, getSharding(arg),
+      saveShardingOrigins(valueToOriginShardingMap, getSharding(arg),
                           OriginShardingType::INPUT, arg, arg.getArgNumber());
     }
     for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
       int64_t valueIndex = returnOperand.getOperandNumber();
-      saveShardingOrigins(mappings->valueToOriginShardingMap,
-                          getFuncResultSharding(funcOp, valueIndex),
-                          OriginShardingType::OUTPUT, returnOperand.get(),
-                          valueIndex);
+      saveShardingOrigins(
+          valueToOriginShardingMap, getFuncResultSharding(funcOp, valueIndex),
+          OriginShardingType::OUTPUT, returnOperand.get(), valueIndex);
     }
   });
   // NOTE: all `ManualComputationOp`s and `ShardingConstraintOp`s will have a
   // unique source name, no matter if they aren't in the same `FuncOp`.
   int64_t sourceId = 0;
   moduleOp.walk([&](ShardingConstraintOp shardingConstraintOp) {
-    saveShardingOrigins(mappings->valueToOriginShardingMap,
+    saveShardingOrigins(valueToOriginShardingMap,
                         shardingConstraintOp.getSharding(),
                         OriginShardingType::CONSTRAINT,
                         shardingConstraintOp.getResult(), 0, sourceId);
@@ -476,7 +612,7 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
       auto edge =
           DataFlowEdgeOp::lookup(manualComputationOp.getBody().getArgument(i));
       assert(edge);
-      saveShardingOrigins(mappings->valueToOriginShardingMap, sharding,
+      saveShardingOrigins(valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_INPUT, edge.getResult(), i,
                           sourceId);
     }
@@ -485,7 +621,7 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
       // Assuming that the edges live as the only use of the op results.
       auto edge = DataFlowEdgeOp::lookup(manualComputationOp.getResult(i));
       assert(edge);
-      saveShardingOrigins(mappings->valueToOriginShardingMap, sharding,
+      saveShardingOrigins(valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_OUTPUT, edge.getResult(), i,
                           sourceId);
     }
@@ -496,12 +632,26 @@ void prepareShardingOriginsHandler(ModuleOp moduleOp,
   });
 }
 
+// Sets up `funcResultToEdgesMap` for saving the edge source information
+// on the `moduleOp`.
+//
+// The `SourceShardingHandler` will keep `funcResultToEdgesMap` up to date
+// with the source sharding information on the module during the propagation
+// rewrite patterns.
+void prepareFuncResultToEdgesHandler(
+    ModuleOp moduleOp, FuncResultToEdgesMap& funcResultToEdgesMap) {
+  moduleOp.walk([&](func::FuncOp funcOp) {
+    funcResultToEdgesMap[funcOp] =
+        SmallVector<AxisToEdgesMap>(funcOp.getNumResults());
+  });
+}
+
 OriginSharding lookUpValueOriginSharding(
     Value value, AxisRefAttr axisRef,
     const ValueToOriginShardingMap& valueToOriginShardingMap) {
   // NOTE: need to call `getShardableValue` in case the operand/result is
   // part of a `ShardableDataFlowOpInterface` and the `Value` the sharding
-  // lives on is a `DataFlowEdgeOp` instead of the `edgeSource` itself.
+  // lives on is a `DataFlowEdgeOp` instead of the `edge` itself.
   const AxisToOriginShardingMap& axisToOriginSharding =
       valueToOriginShardingMap.at(getShardableValue(value));
   if (auto it = axisToOriginSharding.find(axisRef);
@@ -524,9 +674,9 @@ OriginSharding lookUpValueOriginSharding(
 }  // namespace
 
 ShardingDebugMappings::ShardingDebugMappings(bool debugShardingOrigins,
-                                             bool debugEdgeSourceSharding)
+                                             bool debugPropagationEdgeSharding)
     : debugShardingOrigins(debugShardingOrigins),
-      debugEdgeSourceSharding(debugEdgeSourceSharding) {}
+      debugPropagationEdgeSharding(debugPropagationEdgeSharding) {}
 
 SourceShardingHandler::SourceShardingHandler(ShardingDebugMappings* mappings)
     : mappings(mappings) {}
@@ -541,68 +691,148 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
   }
 
   auto sourceShardingAction = cast<SourceShardingAction>(action);
-  FactorsToEdgeSourceMap factorsToEdgeSources = createSourceMap(
-      sourceShardingAction.oldShardingProjection,
-      sourceShardingAction.newShardingProjection,
-      sourceShardingAction.shardingRule, sourceShardingAction.mesh);
+  if (!sourceShardingAction.anyUpdated) {
+    return;
+  }
+  FactorsToEdgeMap factorsToEdges =
+      createSourceMap(sourceShardingAction.oldShardingProjection,
+                      sourceShardingAction.newShardingProjection,
+                      sourceShardingAction.shardingRule,
+                      sourceShardingAction.mesh, propagationStep);
+  propagationStep++;
   // If the new and old shardings are different, something was propagated to it.
   // Find and save it.
-  auto lookUpOriginSharding = [&](EdgeSource edgeSource,
+  auto lookUpOriginSharding = [&](EdgeNode edgeNode,
                                   AxisRefAttr axisRef) -> OriginSharding {
-    switch (edgeSource.type) {
+    switch (edgeNode.type) {
       case OPERAND:
         return lookUpValueOriginSharding(
-            sourceShardingAction.operands[edgeSource.index], axisRef,
+            sourceShardingAction.operands[edgeNode.index], axisRef,
             mappings->valueToOriginShardingMap);
       case RESULT:
         return lookUpValueOriginSharding(
-            sourceShardingAction.results[edgeSource.index], axisRef,
+            sourceShardingAction.results[edgeNode.index], axisRef,
             mappings->valueToOriginShardingMap);
     }
-    llvm_unreachable("unknown EdgeSource");
+    llvm_unreachable("unknown EdgeNode");
   };
 
-  auto updateMappings = [&](ShardingDebugMappings* mappings,
-                            AxisToEdgeSourceMap axisToEdgeSource, Value value) {
-    for (auto [axisRef, edgeSource] : axisToEdgeSource) {
-      if (mappings->debugEdgeSourceSharding) {
-        mappings->valueToEdgeSourceMap[value].try_emplace(axisRef, edgeSource);
-      }
-      if (mappings->debugShardingOrigins) {
-        mappings->valueToOriginShardingMap[value].try_emplace(
-            axisRef, lookUpOriginSharding(edgeSource, axisRef));
+  auto updateMappings = [&](int64_t i, AxisRefAttr axisRef,
+                            PropagationEdge edge, Value value) {
+    if (mappings->debugPropagationEdgeSharding) {
+      if (auto funcOp = dyn_cast<func::FuncOp>(sourceShardingAction.op)) {
+        mappings->funcResultToEdgesMap[funcOp][i][axisRef].push_back(edge);
+      } else {
+        mappings->operationToEdgesMap[sourceShardingAction.op][axisRef]
+            .push_back(edge);
       }
     }
+    if (mappings->debugShardingOrigins) {
+      mappings->valueToOriginShardingMap[value].try_emplace(
+          axisRef, lookUpOriginSharding(edge.source, axisRef));
+    }
   };
-  for (auto [operand, axisToEdgeSource] : llvm::zip_equal(
-           sourceShardingAction.operands, factorsToEdgeSources.operands)) {
-    updateMappings(mappings, axisToEdgeSource, operand);
+
+  for (auto [i, operand] : llvm::enumerate(sourceShardingAction.operands)) {
+    for (auto [axisRef, edge] : factorsToEdges.operands[i]) {
+      updateMappings(i, axisRef, edge, operand);
+    }
   }
-  for (auto [result, axisToEdgeSource] : llvm::zip_equal(
-           sourceShardingAction.results, factorsToEdgeSources.results)) {
-    updateMappings(mappings, axisToEdgeSource, result);
+
+  for (auto [i, result] : llvm::enumerate(sourceShardingAction.results)) {
+    for (auto [axisRef, edge] : factorsToEdges.results[i]) {
+      updateMappings(i, axisRef, edge, result);
+    }
   }
 }
 
 void SourceShardingHandler::prepareHandler(ModuleOp moduleOp) {
   if (mappings->debugShardingOrigins) {
-    prepareShardingOriginsHandler(moduleOp, mappings);
+    prepareShardingOriginsHandler(moduleOp, mappings->valueToOriginShardingMap);
   }
-  if (mappings->debugEdgeSourceSharding) {
-    llvm_unreachable("edge sharding not implemented yet");
+  if (mappings->debugPropagationEdgeSharding) {
+    prepareFuncResultToEdgesHandler(moduleOp, mappings->funcResultToEdgesMap);
   }
-  if (mappings->debugShardingOrigins || mappings->debugEdgeSourceSharding) {
+  if (mappings->debugShardingOrigins ||
+      mappings->debugPropagationEdgeSharding) {
     moduleOp->getContext()->registerActionHandler(*this);
   }
 }
 
 void SourceShardingHandler::saveOnModule(ModuleOp moduleOp) {
+  MLIRContext* context = moduleOp.getContext();
   if (mappings->debugShardingOrigins) {
-    saveShardingOriginsOnModule(moduleOp, mappings);
+    saveShardingOriginsOnModule(context, mappings->valueToOriginShardingMap);
     overrideOriginsToSelf(moduleOp);
   }
-  if (mappings->debugEdgeSourceSharding) {
-    llvm_unreachable("edge sharding not implemented yet");
+  if (mappings->debugPropagationEdgeSharding) {
+    saveEdgesOnModule(context, mappings->operationToEdgesMap);
+    moduleOp.walk([&](func::FuncOp funcOp) {
+      saveEdgesOnFuncResults(funcOp, mappings->funcResultToEdgesMap);
+    });
+  }
+}
+
+namespace {
+
+// Looks for the debug info dictionary on the `dataFlowEdgeOp` called
+// `debugAttrName` and pushes it back to the `debugInfoDict`. If the dictionary
+// doesn't exist, pushes an empty dictionary.
+void pushBackToDebugInfoDict(DataFlowEdgeOp dataFlowEdgeOp,
+                             StringRef debugAttrName,
+                             SmallVector<Attribute>& debugInfoDict,
+                             IRRewriter& rewriter) {
+  assert(dataFlowEdgeOp);
+  if (auto edgeDebugInfo =
+          dataFlowEdgeOp->getAttrOfType<DictionaryAttr>(debugAttrName)) {
+    debugInfoDict.push_back(edgeDebugInfo);
+  } else {
+    debugInfoDict.push_back(rewriter.getDictionaryAttr({}));
+  }
+}
+
+}  // namespace
+
+void saveDebugInfoDictsFromDataFlowEdges(ValueRange edgeOwners, Operation* op,
+                                         bool sinkDebugShardingOrigins,
+                                         bool sinkDebugPropagationEdgeSharding,
+                                         EdgeNodeType edgeNodeType,
+                                         IRRewriter& rewriter) {
+  if (!sinkDebugShardingOrigins && !sinkDebugPropagationEdgeSharding) {
+    return;
+  }
+  SmallVector<Attribute> originShardingDicts;
+  if (sinkDebugShardingOrigins) {
+    originShardingDicts.reserve(edgeOwners.size());
+  }
+  SmallVector<Attribute> propagationEdgeDicts;
+  if (sinkDebugPropagationEdgeSharding) {
+    propagationEdgeDicts.reserve(edgeOwners.size());
+  }
+  for (Value edgeOwner : edgeOwners) {
+    if (auto dataFlowEdgeOp = DataFlowEdgeOp::lookup(edgeOwner)) {
+      if (sinkDebugShardingOrigins) {
+        pushBackToDebugInfoDict(dataFlowEdgeOp, kShardingOriginsAttr,
+                                originShardingDicts, rewriter);
+      }
+      if (sinkDebugPropagationEdgeSharding) {
+        pushBackToDebugInfoDict(dataFlowEdgeOp, kPropagationEdgesAttr,
+                                propagationEdgeDicts, rewriter);
+      }
+    }
+  }
+
+  if (sinkDebugShardingOrigins) {
+    op->setAttr(edgeNodeType == EdgeNodeType::OPERAND
+                    ? kBlockArgShardingOriginsAttr
+                    : kResultShardingOriginsAttr,
+                rewriter.getArrayAttr(originShardingDicts));
+  }
+  if (sinkDebugPropagationEdgeSharding) {
+    op->setAttr(edgeNodeType == EdgeNodeType::OPERAND
+                    ? kBlockArgPropagationEdgesAttr
+                    : kResultPropagationEdgesAttr,
+                rewriter.getArrayAttr(propagationEdgeDicts));
   }
 }
 

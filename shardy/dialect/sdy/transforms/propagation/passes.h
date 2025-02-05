@@ -46,7 +46,7 @@ struct PropagationOptions {
   // Whether to save debug information about the sharding origins on the module.
   bool debugShardingOrigins = false;
   // Whether to save debug information about the edge shardings on the module.
-  bool debugEdgeSourceSharding = false;
+  bool debugPropagationEdgeSharding = false;
   // Whether to avoid converting `sdy::ShardingConstraintOp` to
   // `sdy::ReshardOp`.
   bool skipConvertToReshard = false;

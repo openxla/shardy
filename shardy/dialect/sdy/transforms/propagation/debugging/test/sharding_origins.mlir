@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-aggressive-propagate="debug-sharding-origins=true" -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-aggressive-propagate=debug-sharding-origins=true -sdy-sink-data-flow-edges="sink-debug-sharding-origins=true" 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 

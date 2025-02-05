@@ -28,6 +28,19 @@ def SinkDataFlowEdgesPass : Pass<"sdy-sink-data-flow-edges", "func::FuncOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
   //TODO(tomnatan): consider moving the sharding to all targets that can have a sharding attached.
+
+  let options = [
+    Option<"sinkDebugShardingOrigins", "sink-debug-sharding-origins", "bool",
+           /*default=*/"false",
+           "Whether to sink the debug sharding origins info. See "
+           "`debug-sharding-origins` option in propagation for more info.">,
+    Option<"sinkDebugPropagationEdgeSharding",
+           "sink-debug-propagation-edge-sharding", "bool",
+           /*default=*/"false",
+           "Whether to sink the debug propagation edge sharding info. See "
+           "`debug-propagation-edge-sharding` option in propagation for more "
+           "info.">
+  ];
 }
 
 def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-input-output-shardings", "func::FuncOp"> {
