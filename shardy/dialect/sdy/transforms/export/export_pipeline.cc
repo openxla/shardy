@@ -25,6 +25,7 @@ namespace sdy {
 
 void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
                        bool skipConvertToReshard) {
+  pm.addPass(createCloseShardingsPass());
   pm.addPass(createRemoveShardingGroupsPass());
   if (!skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
