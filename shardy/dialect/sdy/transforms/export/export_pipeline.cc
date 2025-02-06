@@ -24,7 +24,8 @@ namespace mlir {
 namespace sdy {
 
 void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
-                       bool skipConvertToReshard) {
+                       bool skipConvertToReshard,
+                       bool enableInsertExplicitCollectives) {
   pm.addPass(createRemoveShardingGroupsPass());
   if (!skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
@@ -34,6 +35,15 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
       createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
                                                "sdy_module_after_sdy_export"));
+  if (enableInsertExplicitCollectives) {
+    pm.addNestedPass<func::FuncOp>(createCloseShardingsPass());
+    pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
+    pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        dumpDirectory, "sdy_module_after_reshard_to_collectives"));
+  }
 }
 
 void registerExportPipeline() {

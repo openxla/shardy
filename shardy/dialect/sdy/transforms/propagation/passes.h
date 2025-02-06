@@ -52,6 +52,8 @@ struct PropagationOptions {
   bool skipConvertToReshard = false;
   // Whether to skip inlining in the module.
   bool skipInline = false;
+  // Whether to enable inserting explicit collectives.
+  bool enableInsertExplicitCollectives = false;
 };
 
 // Adds the SDY propagation pass, preceded by a sequence of import passes needed

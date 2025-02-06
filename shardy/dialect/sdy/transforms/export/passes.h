@@ -38,7 +38,8 @@ namespace sdy {
 // Adds a sequence of export passes needed as a post-processing step for SDY
 // propagation.
 void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
-                       bool skipConvertToReshard = false);
+                       bool skipConvertToReshard = false,
+                       bool enableInsertExplicitCollectives = false);
 
 // Register the sdy-export-pipeline.
 void registerExportPipeline();

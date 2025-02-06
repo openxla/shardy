@@ -29,7 +29,8 @@ void addPropagationPipeline(OpPassManager& pm,
                             const PropagationOptions& options) {
   addImportPipeline(pm, options.dumpDirectory, options.skipInline);
   pm.addPass(createUserPriorityPropagationPass(options));
-  addExportPipeline(pm, options.dumpDirectory, options.skipConvertToReshard);
+  addExportPipeline(pm, options.dumpDirectory, options.skipConvertToReshard,
+                    options.enableInsertExplicitCollectives);
 }
 
 void registerPropagationPipeline() {
