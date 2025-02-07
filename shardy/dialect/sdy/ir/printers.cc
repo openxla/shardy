@@ -74,8 +74,6 @@ void printFactorSizes(AsmPrinter& printer, ArrayRef<int64_t> factorSizes) {
   printer << "}";
 }
 
-namespace {
-
 void printFactorsWithType(AsmPrinter& printer, ArrayRef<int64_t> factors,
                           StringRef type) {
   if (factors.empty()) {
@@ -86,19 +84,6 @@ void printFactorsWithType(AsmPrinter& printer, ArrayRef<int64_t> factors,
     printer << factorSymbolString(factor);
   });
   printer << "}";
-}
-
-}  // namespace
-
-void printReductionFactors(AsmPrinter& printer,
-                           ArrayRef<int64_t> reductionFactors) {
-  return printFactorsWithType(printer, reductionFactors, "reduction");
-}
-
-void printNeedReplicationFactors(AsmPrinter& printer,
-                                 ArrayRef<int64_t> needReplicationFactors) {
-  return printFactorsWithType(printer, needReplicationFactors,
-                              "need_replication");
 }
 
 void printIsCustomRule(AsmPrinter& printer, bool isCustomRule) {

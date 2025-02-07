@@ -50,6 +50,10 @@ enum class FactorType {
   // If we have sharding along a dimension that needs replication, the
   // partitioner will make this dimension replicated.
   kNeedReplication,
+
+  // If we have sharding along a dimension that needs permutation, the
+  // partitioner will add collective-permute operations.
+  kPermutation,
 };
 
 // The factor mappings that compose a dimension of a tensor.
@@ -139,8 +143,8 @@ class OpShardingRuleBuilder {
   SmallVector<TensorMapping> operandMappings;
   SmallVector<TensorMapping> resultMappings;
 
-  SmallVector<int64_t> reductionFactors;
-  SmallVector<int64_t> needReplicationFactors;
+  SmallVector<int64_t> reductionFactors, needReplicationFactors,
+      permutationFactors;
 };
 
 // Creates an identity mapping for an op with `numOperands` operands and

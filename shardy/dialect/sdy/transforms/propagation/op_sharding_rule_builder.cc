@@ -117,7 +117,7 @@ OpShardingRuleAttr OpShardingRuleBuilder::build() {
 
   auto result = OpShardingRuleAttr::get(
       context, factorSizes, operandMappingAttrs, resultMappingAttrs,
-      reductionFactors, needReplicationFactors);
+      reductionFactors, needReplicationFactors, permutationFactors);
 
   // Erase all added factors, to return the builder to its original state before
   // calling this method.
@@ -152,6 +152,9 @@ void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
       return;
     case FactorType::kNeedReplication:
       needReplicationFactors.push_back(factorIndex);
+      return;
+    case FactorType::kPermutation:
+      permutationFactors.push_back(factorIndex);
       return;
     case FactorType::kDefault:
       return;

@@ -38,15 +38,10 @@ void printMeshOrRef(AsmPrinter& printer, Attribute meshOrRef);
 // printed as `{i=6, j=2, k=4}`.
 void printFactorSizes(AsmPrinter& printer, ArrayRef<int64_t> factorSizes);
 
-// Prints the reduction factors of an OpShardingRule. Given a vector [0, 2], we
-// print `reduction={i, k}`.
-void printReductionFactors(AsmPrinter& printer,
-                           ArrayRef<int64_t> reductionFactors);
-
-// Prints the factors needing replication of an OpShardingRule. Given a vector
-// [0, 2], we print `need_replication={i, k}`.
-void printNeedReplicationFactors(AsmPrinter& printer,
-                                 ArrayRef<int64_t> needReplicationFactors);
+// Prints the `factors` of `type` in an OpShardingRule. Given a vector [0, 2],
+// we print `type={i, k}`.
+void printFactorsWithType(AsmPrinter& printer, ArrayRef<int64_t> factors,
+                          StringRef type);
 
 void printIsCustomRule(AsmPrinter& printer, bool isCustomRule);
 

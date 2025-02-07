@@ -916,6 +916,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     such as the contracting dimensions in a dot operation.
     `need_replication_factors` contains the indices of factors requiring full
     replication, such as the sorted dimension in a sort operation.
+    `permutation_factors` contains the indices of factors requiring
+    collective-permute if they are sharded, such as the padding dimensions in a
+    pad operation.
 
     `is_custom_rule` describes whether this is a rule defined by a user for a
     `stablehlo.custom_call` op. The partitioner doesn't know how to partition
@@ -930,7 +933,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       operands/results).
     - Rank of each `TensorMappingAttr` matches the rank of the corresponding
       tensor type.
-    - For each group of factors (`reduction_factors`, `need_replication_factors`):
+    - For each group of factors (`reduction_factors`,
+      `need_replication_factors`, `permutation_factors`):
       * Elements must be in range [0, `$factor_sizes`].
       * No duplicate factor indices within each group and across groups.
   }];
@@ -946,6 +950,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
           "factors requiring reduction">:$reduction_factors,
       OptionalArrayRefParameter<"int64_t",
           "factors requiring full replication">:$need_replication_factors,
+      OptionalArrayRefParameter<"int64_t",
+          "factors corresponding to multiple sizes">:$permutation_factors,
       DefaultValuedParameter<"bool", "false",
           "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
   );
@@ -956,8 +962,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     `` `->` ``
     `(`$result_mappings`)` ``
     custom<FactorSizes>($factor_sizes) ``
-    custom<ReductionFactors>($reduction_factors) ``
-    custom<NeedReplicationFactors>($need_replication_factors) ``
+    custom<FactorsWithType>($reduction_factors, "\"reduction\"") ``
+    custom<FactorsWithType>($need_replication_factors, "\"need_replication\"") ``
+    custom<FactorsWithType>($permutation_factors, "\"permutation\"") ``
     custom<IsCustomRule>($is_custom_rule)
     `>`
   }];
@@ -967,10 +974,11 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
                      "ArrayRef<TensorMappingAttr>":$operand_mappings,
                      "ArrayRef<TensorMappingAttr>":$result_mappings,
                      "ArrayRef<int64_t>":$reduction_factors,
-                     "ArrayRef<int64_t>":$need_replication_factors), [{
+                     "ArrayRef<int64_t>":$need_replication_factors,
+                     "ArrayRef<int64_t>":$permutation_factors), [{
       return $_get($_ctxt, factor_sizes, operand_mappings, result_mappings,
                    reduction_factors, need_replication_factors,
-                   /*is_custom_rule=*/false);
+                   permutation_factors, /*is_custom_rule=*/false);
     }]>
   ];
 
@@ -1001,13 +1009,17 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     // Returns true if the `factorIndex` is a factor requiring full replication.
     bool isNeedReplicationFactor(int64_t factorIndex) const;
 
+    // Returns true if the `factorIndex` is a permutation factor.
+    bool isPermutationFactor(int64_t factorIndex) const;
+
     // Returns true if the `factorIndex` is a factor in all non-scalar tensors.
     bool isFactorInAllNonScalarTensors(int64_t factorIndex) const;
 
     // Returns true if the `factorIndex` is a batching factor, which satisfies:
     // 1. It is not a reduction factor.
     // 2. It is not a need replication factor.
-    // 3. It is used in all non-scalar tensors.
+    // 3. It is not a permutation factor.
+    // 4. It is used in all non-scalar tensors.
     bool isBatchingFactor(int64_t factorIndex) const;
 
     // Returns a vector of tensor indices that are non-scalar, of all operand

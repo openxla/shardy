@@ -954,6 +954,10 @@ bool OpShardingRuleAttr::isNeedReplicationFactor(int64_t factorIndex) const {
   return llvm::is_contained(getNeedReplicationFactors(), factorIndex);
 }
 
+bool OpShardingRuleAttr::isPermutationFactor(int64_t factorIndex) const {
+  return llvm::is_contained(getPermutationFactors(), factorIndex);
+}
+
 bool OpShardingRuleAttr::isFactorInAllNonScalarTensors(
     int64_t factorIndex) const {
   for (const TensorMappingAttr& tensorMapping :
@@ -970,9 +974,11 @@ bool OpShardingRuleAttr::isFactorInAllNonScalarTensors(
   return true;
 }
 
+// TODO(b/394881597). Adding a method to return the factor type given the index.
 bool OpShardingRuleAttr::isBatchingFactor(int64_t factorIndex) const {
   return !isReductionFactor(factorIndex) &&
          !isNeedReplicationFactor(factorIndex) &&
+         !isPermutationFactor(factorIndex) &&
          isFactorInAllNonScalarTensors(factorIndex);
 }
 

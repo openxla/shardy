@@ -38,15 +38,10 @@ ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef);
 ParseResult parseFactorSizes(AsmParser& parser,
                              SmallVector<int64_t>& factorSizes);
 
-// Parses the reduction factors of an OpShardingRule. We expect to parse
-// `reduction={i, k}` into a vector [0, 2].
-ParseResult parseReductionFactors(AsmParser& parser,
-                                  SmallVector<int64_t>& reductionFactors);
-
-// Parses the factors needing replication of an OpShardingRule. We expect to
-// parse `need_replication={i, k}` into a vector [0, 2].
-ParseResult parseNeedReplicationFactors(
-    AsmParser& parser, SmallVector<int64_t>& needReplicationFactors);
+// Parses a list of `factors` of `type` in an OpShardingRule. We expect to parse
+// `type={i, k}` into a vector [0, 2].
+ParseResult parseFactorsWithType(AsmParser& parser,
+                                 SmallVector<int64_t>& factors, StringRef type);
 
 ParseResult parseIsCustomRule(AsmParser& parser, bool& isCustomRule);
 
