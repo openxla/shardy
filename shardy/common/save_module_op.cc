@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/common/save_module_op.h"
 
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/ADT/SmallString.h"
@@ -39,6 +40,13 @@ void saveModuleOp(ModuleOp moduleOp, StringRef dumpDirectory,
   filePath.append(".mlir");
 
   std::error_code errorCode;
+  if (!llvm::sys::fs::exists(dumpDirectory)) {
+    errorCode = llvm::sys::fs::create_directories(dumpDirectory);
+    if (errorCode) {
+      fileSavingError(filePath.str(), errorCode.message());
+      return;
+    }
+  }
   llvm::raw_fd_ostream fileStream(filePath, errorCode);
   if (errorCode) {
     fileSavingError(filePath.str(), errorCode.message());
