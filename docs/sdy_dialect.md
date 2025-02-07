@@ -1022,6 +1022,7 @@ Syntax:
   ::llvm::ArrayRef<TensorMappingAttr>,   # result_mappings
   ::llvm::ArrayRef<int64_t>,   # reduction_factors
   ::llvm::ArrayRef<int64_t>,   # need_replication_factors
+  ::llvm::ArrayRef<int64_t>,   # permutation_factors
   bool   # is_custom_rule
 >
 ```
@@ -1054,6 +1055,9 @@ one dimensions that correspond across operands and results.
 such as the contracting dimensions in a dot operation.
 `need_replication_factors` contains the indices of factors requiring full
 replication, such as the sorted dimension in a sort operation.
+`permutation_factors` contains the indices of factors requiring
+collective-permute if they are sharded, such as the padding dimensions in a
+pad operation.
 
 `is_custom_rule` describes whether this is a rule defined by a user for a
 `stablehlo.custom_call` op. The partitioner doesn't know how to partition
@@ -1068,7 +1072,8 @@ for `stablehlo.custom_call` ops.
   operands/results).
 - Rank of each `TensorMappingAttr` matches the rank of the corresponding
   tensor type.
-- For each group of factors (`reduction_factors`, `need_replication_factors`):
+- For each group of factors (`reduction_factors`,
+  `need_replication_factors`, `permutation_factors`):
   * Elements must be in range [0, `$factor_sizes`].
   * No duplicate factor indices within each group and across groups.
 
@@ -1081,6 +1086,7 @@ for `stablehlo.custom_call` ops.
 | result_mappings | `::llvm::ArrayRef<TensorMappingAttr>` | result mappings |
 | reduction_factors | `::llvm::ArrayRef<int64_t>` | factors requiring reduction |
 | need_replication_factors | `::llvm::ArrayRef<int64_t>` | factors requiring full replication |
+| permutation_factors | `::llvm::ArrayRef<int64_t>` | factors corresponding to multiple sizes |
 | is_custom_rule | `bool` | whether the rule is for a stablehlo.custom_call |
 
 ### SubAxisInfoAttr
