@@ -36,7 +36,7 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
   pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
                                                "sdy_module_after_sdy_export"));
   if (enableInsertExplicitCollectives) {
-    pm.addNestedPass<func::FuncOp>(createCloseShardingsPass());
+    pm.addPass(createCloseShardingsPass());
     pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
