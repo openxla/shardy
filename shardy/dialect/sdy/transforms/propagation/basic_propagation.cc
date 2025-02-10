@@ -614,11 +614,7 @@ LogicalResult BasicPropagationPassImpl::propagate(
       conservativePropagation, shardingGroupMap);
   // We only need a single iteration (and another to confirm convergence), since
   // we make sure ops whose sharding changes are added back to the worklist.
-  GreedyRewriteConfig config;
-  config.useTopDownTraversal = true;
-  config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;
-  config.fold = false;
-  config.cseConstants = false;
+  GreedyRewriteConfig config{.useTopDownTraversal = true};
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
     // We should always converge in 2 iterations, if we don't, something is
     // wrong.
@@ -628,8 +624,8 @@ LogicalResult BasicPropagationPassImpl::propagate(
     return failure();
   }
 
-  // Pushes any shardings from the values returned in the terminator of the body
-  // of `funcOp` to the corresponding `funcOp` result type attrs.
+  // Pushes any shardings from tha values returned in the terminator of the body
+  // of `funcOp` to the coresponding `funcOp` result type attrs.
   if (failed(propagateFuncResults(moduleOp, symbolTable, factorPropagation,
                                   shardingGroupMap))) {
     return failure();

@@ -304,7 +304,7 @@ void saveShardingOriginsOnModule(
 
     func::FuncOp funcOp = getEnclosingOfType<func::FuncOp>(owningOp);
 
-    // TODO(bartchr): Swap the map to store `ValueOrFuncResult` to avoid having
+    // TODO(bartchr): Swop the map to sture `ValueOrFuncResult` to avoid having
     // to do this terminator finding logic just to set the func result attr.
     OpOperand* terminatorOperand = getTerminatorOperand(value, funcOp);
 
@@ -317,10 +317,12 @@ void saveShardingOriginsOnModule(
                            builder.getDictionaryAttr(entries));
     }
     TypeSwitch<Operation*, void>(owningOp)
-        .Case<func::FuncOp>([&, value = value](func::FuncOp funcOp) {
-          funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
-                            kShardingOriginsAttr,
-                            builder.getDictionaryAttr(entries));
+        .Case<func::FuncOp>([&](func::FuncOp funcOp) {
+          if (value) {
+            funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
+                              kShardingOriginsAttr,
+                              builder.getDictionaryAttr(entries));
+          }
         })
         .Case<ShardingConstraintOp, DataFlowEdgeOp>([&](Operation* op) {
           op->setAttr(kShardingOriginsAttr, builder.getDictionaryAttr(entries));
