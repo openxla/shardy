@@ -38,13 +38,13 @@ struct WhileShardableDataFlowOpInterface
     return op->getResults();
   }
 
-  SmallVector<Value> getEdgeSources(Operation *op, Value owner) const {
+  SmallVector<OpOperand *> getEdgeSources(Operation *op, Value owner) const {
     auto whileOp = cast<stablehlo::WhileOp>(op);
     auto opResult = dyn_cast<OpResult>(owner);
     assert(opResult && opResult.getOwner() == op);
     unsigned int resNum = opResult.getResultNumber();
-    return {whileOp->getOperand(resNum),
-            getBodyTerminatorOperands(whileOp)[resNum]};
+    return {&whileOp->getOpOperand(resNum),
+            &getBodyTerminatorOpOperands(whileOp)[resNum]};
   }
 
   Value getEdgeOwnerFromTarget(Operation *op, Value target) const {
@@ -77,14 +77,14 @@ struct CaseShardableDataFlowOpInterface
     return op->getResults();
   }
 
-  SmallVector<Value> getEdgeSources(Operation *op, Value owner) const {
+  SmallVector<OpOperand *> getEdgeSources(Operation *op, Value owner) const {
     auto caseOp = cast<stablehlo::CaseOp>(op);
     auto opResult = dyn_cast<OpResult>(owner);
     assert(opResult && opResult.getOwner() == op);
-    SmallVector<Value> sources;
+    SmallVector<OpOperand *> sources;
     sources.reserve(caseOp.getBranches().size());
     for (Region &branch : caseOp.getBranches()) {
-      sources.push_back(branch.front().getTerminator()->getOperand(
+      sources.push_back(&branch.front().getTerminator()->getOpOperand(
           opResult.getResultNumber()));
     }
     return sources;
@@ -109,10 +109,10 @@ struct OptBarrierShardableDataFlowOpInterface
     return op->getResults();
   }
 
-  SmallVector<Value> getEdgeSources(Operation *op, Value owner) const {
+  SmallVector<OpOperand *> getEdgeSources(Operation *op, Value owner) const {
     auto opResult = dyn_cast<OpResult>(owner);
     assert(opResult && opResult.getOwner() == op);
-    return {op->getOperand(opResult.getResultNumber())};
+    return {&op->getOpOperand(opResult.getResultNumber())};
   }
 
   Value getEdgeOwnerFromTarget(Operation *op, Value target) const {

@@ -154,7 +154,7 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
       /*desc=*/[{
         Gets the data flow edge sources given the edge `owner`.
       }],
-      /*retType=*/"mlir::SmallVector<mlir::Value>",
+      /*retType=*/"mlir::SmallVector<mlir::OpOperand*>",
       /*methodName=*/"getEdgeSources",
       /*args=*/(ins "mlir::Value":$owner)
     >,

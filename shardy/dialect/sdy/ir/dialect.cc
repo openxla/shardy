@@ -121,18 +121,22 @@ namespace {
 // terminator.
 // Else returns an empty vector.
 template <typename RegionOpTy>
-SmallVector<Value> getEdgeSourcesFromRegionBasedOp(Value owner, RegionOpTy op) {
+SmallVector<OpOperand*> getEdgeSourcesFromRegionBasedOp(Value owner,
+                                                        RegionOpTy op) {
   static_assert(
       OpTrait::template hasSingleBlockImplicitTerminator<RegionOpTy>::value);
   assert(getOwningOp(owner) == op.getOperation());
-  return TypeSwitch<Value, SmallVector<Value>>(owner)
-      .Case<BlockArgument>([op](BlockArgument blockArg) -> SmallVector<Value> {
-        return {op->getOperand(blockArg.getArgNumber())};
-      })
-      .template Case<OpResult>([op](OpResult opResult) -> SmallVector<Value> {
-        return {getBodyTerminatorOperand(op, opResult.getResultNumber())};
-      })
-      .Default([](Value _) -> SmallVector<Value> { return {}; });
+  return TypeSwitch<Value, SmallVector<OpOperand*>>(owner)
+      .Case<BlockArgument>(
+          [op](BlockArgument blockArg) -> SmallVector<OpOperand*> {
+            return {&op->getOpOperand(blockArg.getArgNumber())};
+          })
+      .template Case<OpResult>(
+          [op](OpResult opResult) -> SmallVector<OpOperand*> {
+            return {
+                &getBodyTerminatorOpOperands(op)[opResult.getResultNumber()]};
+          })
+      .Default([](Value _) -> SmallVector<OpOperand*> { return {}; });
 }
 
 // Returns the edge owner given a `source`.
@@ -1170,7 +1174,7 @@ ResultRange ManualComputationOp::getOpResultEdgeOwners() {
 // ```
 // If the owner is a block argument (e.g., `%operand0`), return `%arg0`.
 // If the owner is a result (e.g., `%r`), return `%a`.
-SmallVector<Value> ManualComputationOp::getEdgeSources(Value owner) {
+SmallVector<OpOperand*> ManualComputationOp::getEdgeSources(Value owner) {
   return getEdgeSourcesFromRegionBasedOp(owner, *this);
 }
 
@@ -1277,7 +1281,12 @@ TensorShardingAttr DataFlowEdgeOp::transformTargetSharding(
 }
 
 SmallVector<Value> DataFlowEdgeOp::getSources() {
-  return castOwningShardableDataFlowOp(getInput()).getEdgeSources(getInput());
+  SmallVector<Value> sources;
+  for (OpOperand* opOperand :
+       castOwningShardableDataFlowOp(getInput()).getEdgeSources(getInput())) {
+    sources.push_back(opOperand->get());
+  }
+  return sources;
 }
 
 SmallVector<Value> DataFlowEdgeOp::getNonOwnerTargets() {
@@ -1337,7 +1346,7 @@ ResultRange NamedComputationOp::getOpResultEdgeOwners() { return getResults(); }
 // ```
 // If the owner is a block argument (e.g., `%operand0`), return `%arg0`.
 // If the owner is a result (e.g., `%r`), return `%a`.
-SmallVector<Value> NamedComputationOp::getEdgeSources(Value owner) {
+SmallVector<OpOperand*> NamedComputationOp::getEdgeSources(Value owner) {
   return getEdgeSourcesFromRegionBasedOp(owner, *this);
 }
 

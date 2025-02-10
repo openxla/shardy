@@ -601,6 +601,14 @@ AxesPerFactor findCommonAxes(const ShardingProjection& projection,
   return factorCommonAxes;
 }
 
+bool shouldReshard(TensorShardingAttr sourceSharding,
+                   TensorShardingAttr targetSharding) {
+  if (isFullyReplicated(sourceSharding) && isFullyReplicated(targetSharding)) {
+    return false;
+  }
+  return sourceSharding != targetSharding;
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -635,11 +643,7 @@ struct InsertExplicitReshardsPass
               getFuncResultSharding(funcOp, index);
           TensorShardingAttr operandSharding =
               getOrCreateSharding(operand, *meshName, /*closedIfMissing=*/true);
-          if (isFullyReplicated(operandSharding) &&
-              isFullyReplicated(funcResultSharding)) {
-            continue;
-          }
-          if (funcResultSharding != operandSharding) {
+          if (shouldReshard(operandSharding, funcResultSharding)) {
             // TODO(enver): Close all shardings and drop replicated axes before
             // this pass on the export pipeline.
             auto reshardOp = rewriter.create<ReshardOp>(
@@ -648,6 +652,34 @@ struct InsertExplicitReshardsPass
                     ? funcResultSharding
                     : TensorShardingAttr::getFullyClosedLike(operandSharding));
             opOperand.set(reshardOp);
+          }
+        }
+        return;
+      }
+
+      // TODO(enver): Prefer resharding the owner when multiple sources are
+      // sharded in the same way.
+      if (auto shardableDataFlowOp =
+              dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        for (Value owner : llvm::concat<Value>(
+                 shardableDataFlowOp.getOpResultEdgeOwners(),
+                 shardableDataFlowOp.getBlockArgumentEdgeOwners())) {
+          TensorShardingAttr ownerSharding =
+              shardableDataFlowOp.getEdgeOwnerSharding(owner);
+          for (OpOperand* sourceOpOperand :
+               shardableDataFlowOp.getEdgeSources(owner)) {
+            Value source = sourceOpOperand->get();
+            TensorShardingAttr sourceSharding = getOrCreateSharding(
+                source, *meshName, /*closedIfMissing=*/true);
+            if (shouldReshard(sourceSharding, ownerSharding)) {
+              rewriter.setInsertionPointAfterValue(source);
+              auto reshardOp = rewriter.create<ReshardOp>(
+                  source.getLoc(), source,
+                  ownerSharding
+                      ? ownerSharding
+                      : TensorShardingAttr::getFullyClosedLike(sourceSharding));
+              sourceOpOperand->set(reshardOp);
+            }
           }
         }
         return;
