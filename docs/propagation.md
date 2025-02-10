@@ -102,7 +102,7 @@ factor. However, it is not enough for reshapes.
 The following reshape merges two dimensions into one:
 
 ```mlir
-%out = mhlo.reshape(%in) : (tensor<2x4x32xf32>) -> tensor<8x32xf32>
+%out = stablehlo.reshape(%in) : (tensor<2x4x32xf32>) -> tensor<8x32xf32>
 ```
 
 Here, both dimensions 0 and 1 of the input correspond to dimension 0 of the
@@ -122,7 +122,7 @@ need a single dimension to reference multiple factors:
 The same can be done if the reshape were to split a dimension:
 
 ```mlir
-%out = mhlo.reshape(%in) : (tensor<8x32xf32>) -> tensor<2x4x32xf32>
+%out = stablehlo.reshape(%in) : (tensor<8x32xf32>) -> tensor<2x4x32xf32>
 ```
 
 Here,
@@ -138,7 +138,7 @@ These factors can also work with cases where there is no full dimension that
 corresponds to one of the factors:
 
 ```mlir
-%out = mhlo.reshape(%in) : (tensor<8x4xf32>) -> tensor<2x16xf32>
+%out = stablehlo.reshape(%in) : (tensor<8x4xf32>) -> tensor<2x16xf32>
 // ((ij), k) -> (i,(jk)) : i=2, j=4, k=4
 ```
 
