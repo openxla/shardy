@@ -159,7 +159,7 @@ NOTE: This method *must* be implemented by the user.
 #### `getEdgeSources`
 
 ```c++
-mlir::SmallVector<mlir::Value> getEdgeSources(mlir::Value owner);
+mlir::SmallVector<mlir::OpOperand*> getEdgeSources(mlir::Value owner);
 ```
 Gets the data flow edge sources given the edge `owner`.
 
