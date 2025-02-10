@@ -122,8 +122,8 @@ FactorsToEdgeMap createSourceMap(
     }
     for (const auto& [oldFactorSharding, newFactorSharding] : llvm::zip_equal(
              oldValue.factorIndexToSharding, newValue.factorIndexToSharding)) {
-      if (oldFactorSharding.second.axisRefs ==
-          newFactorSharding.second.axisRefs) {
+      const auto& newAxisRefs = newFactorSharding.second.axisRefs;
+      if (newAxisRefs == oldFactorSharding.second.axisRefs) {
         continue;
       }
       SmallVector<AxisRefAttr> newlyIntroducedAxes;
@@ -149,7 +149,7 @@ FactorsToEdgeMap createSourceMap(
               // dims, the dimension sharding will contain the conflicting axes,
               // but the factor sharding will not. And we don't want this axis
               // as it isn't a newly introduced axis.
-              for (AxisRefAttr newAxisRef : newFactorSharding.second.axisRefs) {
+              for (AxisRefAttr newAxisRef : newAxisRefs) {
                 if (newAxisRef.prefixOf(axisRef)) {
                   return true;
                 }
@@ -158,15 +158,15 @@ FactorsToEdgeMap createSourceMap(
             });
       }
       // This factor sharding has changed, let's find who changed it.
-      if (std::optional<int64_t> operandSource = findNewAxisRefMatch(
-              newFactorSharding.second.axisRefs, oldFactorSharding.first,
-              oldShardingProjection.getOperands())) {
+      if (std::optional<int64_t> operandSource =
+              findNewAxisRefMatch(newAxisRefs, oldFactorSharding.first,
+                                  oldShardingProjection.getOperands())) {
         saveEdges(newlyIntroducedAxes, oldFactorSharding.second.axisRefs,
                   EdgeNode{EdgeNodeType::OPERAND, *operandSource},
                   EdgeNode{valueType, valueIndex}, valueSourceMap[valueIndex]);
-      } else if (std::optional<int64_t> resultSource = findNewAxisRefMatch(
-                     newFactorSharding.second.axisRefs, oldFactorSharding.first,
-                     oldShardingProjection.getResults())) {
+      } else if (std::optional<int64_t> resultSource =
+                     findNewAxisRefMatch(newAxisRefs, oldFactorSharding.first,
+                                         oldShardingProjection.getResults())) {
         saveEdges(newlyIntroducedAxes, oldFactorSharding.second.axisRefs,
                   EdgeNode{EdgeNodeType::RESULT, *resultSource},
                   EdgeNode{valueType, valueIndex}, valueSourceMap[valueIndex]);
