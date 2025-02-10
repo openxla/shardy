@@ -421,3 +421,23 @@ func.func @sub_axes_merge_after_propagation_step(
   %0 = stablehlo.add %arg0, %arg0 : tensor<16xf32>
   return %0 : tensor<16xf32>
 }
+
+// CHECK-LABEL: already_split_sub_axis_result_reshape
+// CHECK-SAME:    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c", ?}]>,
+// CHECK-SAME:                           sdy.sharding_origins = {a = "self", c = "self"}}
+// CHECK-SAME:  ) -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c":(1)2, ?}, {"c":(2)4, ?}]>,
+// CHECK-SAME:                         sdy.sharding_origins = {a = "input: 0",
+// CHECK-SAME:                                                 "c:(1)2" = "input: 0",
+// CHECK-SAME:                                                 "c:(2)2" = "self",
+// CHECK-SAME:                                                 "c:(2)4" = "input: 0"}})
+func.func @already_split_sub_axis_result_reshape(
+  %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c", ?}]>})
+  -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"c":(2)2, ?}]>}) {
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %arg0 {
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "c":(1)2, ?}, {"c":(2)4, ?}]>]>,
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "input: 0", "c:(1)2" = "input: 0",
+  // CHECK-SAME:                            "c:(2)2" = "output: 0", "c:(2)4" = "input: 0"}]
+  // CHECK-SAME: } : (tensor<16xf32>) -> tensor<4x4xf32>
+  %0 = stablehlo.reshape %arg0 : (tensor<16xf32>) -> tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}
