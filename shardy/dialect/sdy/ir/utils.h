@@ -90,6 +90,20 @@ int64_t getTensorRank(Value value);
 // Returns true if the value is a tensor with rank 0.
 int64_t isScalar(Value value);
 
+// Looks up the mesh symbol with the given `meshName` in `symbolTable`, and
+// returns it if it exists in the table, or nullptr otherwise.
+MeshOp getMeshOp(const SymbolTable& symbolTable, StringRef meshName);
+
+// Looks up the mesh symbol with the given `meshSymName` in the symbol table of
+// the enclosing module of `op`, and returns it if it exists in the table, or
+// nullptr otherwise.
+MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName);
+
+// Looks up the mesh symbol with the given `meshName` in the symbol table of
+// the enclosing module of `op`, and returns it if it exists in the table, or
+// nullptr otherwise.
+MeshOp getMeshOp(Operation* op, StringRef meshName);
+
 // If `meshOrRef` is a `MeshAttr`, returns it, otherwise, looks up the
 // referenced mesh symbol in `symbolTable`, and returns its `MeshAttr`
 // if it exists in the table, or nullptr otherwise.
