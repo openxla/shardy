@@ -9,7 +9,7 @@ func.func @concat(%arg0: tensor<4x3x256xf32>, %arg1: tensor<4x5x256xf32>) -> ten
 
 // CHECK-LABEL: func @conv
 func.func @conv(%arg0 : tensor<2x224x224x192xf32>, %arg1 : tensor<3x3x192x64xf32>) -> tensor<2x112x112x64xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, m, j], [n, o, j, k])->([i, p, q, k]) {i=2, j=192, k=64, l=1, m=1, n=1, o=1, p=1, q=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, l, m, j], [n, o, j, k])->([i, p, q, k]) {i=2, j=192, k=64, l=1, m=1, n=1, o=1, p=1, q=1} reduction={j}>
   %0 = stablehlo.convolution(%arg0, %arg1)
     dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
     window = {stride = [2, 2], pad = [[0, 1], [0, 1]]} {

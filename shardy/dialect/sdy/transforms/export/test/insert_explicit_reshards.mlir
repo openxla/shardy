@@ -696,13 +696,14 @@ func.func @concatenate(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding
   return %0 : tensor<4x80x256xf32>
 }
 
-// CHECK-LABEL: func @concatenate_replicated_dim_is_sharded
-func.func @concatenate_replicated_dim_is_sharded(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}, %arg1: tensor<4x48x256xf32>) -> tensor<4x80x256xf32> {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}, {}]> : tensor<4x32x256xf32>
-  // CHECK: %[[RESHARD2:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}, {}]> : tensor<4x48x256xf32>
-  // CHECK: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD1]], %[[RESHARD2]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
-  // CHECK: %[[RESHARD3:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {}, {}]> : tensor<4x80x256xf32>
-  // CHECK: return %[[RESHARD3]] : tensor<4x80x256xf32>
+// TODO(b/396121070): In this case we would probably want to replicate the
+// concat dimension.
+// CHECK-LABEL: func @concatenate_concat_dim_is_sharded
+func.func @concatenate_concat_dim_is_sharded(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}, %arg1: tensor<4x48x256xf32>) -> tensor<4x80x256xf32> {
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {"y"}, {}]> : tensor<4x48x256xf32>
+  // CHECK: %[[CONCATENATE:.*]] = stablehlo.concatenate %arg0, %[[RESHARD1]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  // CHECK: %[[RESHARD2:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {}, {}]> : tensor<4x80x256xf32>
+  // CHECK: return %[[RESHARD2]] : tensor<4x80x256xf32>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
   return %0 : tensor<4x80x256xf32>
 }

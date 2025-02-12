@@ -121,17 +121,23 @@ class OpShardingRuleBuilder {
         return FactorType::kDefault;
       });
 
-  // Adds a pointwise factor for the matching dimensions and calls
-  // `onMismatchFn` for the mismatching ones. A dimension is matching if (1)
-  // the dimension size in `inShape` and `outShape` is the same, OR (2)
-  // `alwaysAddFactor` is true.
+  // Adds a pointwise factor for each dimension whose size in `inShape` and
+  // `outShape` is the same, and calls `onMismatchFn` on the rest.
   //
   // If `inShape` and `outShape` are empty, this method does nothing.
   OpShardingRuleBuilder& addPointwiseIfDimSizesMatch(
       ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
-      bool alwaysAddFactor = false,
       std::function<void(int64_t dim, OpShardingRuleBuilder& builder)>
           onMismatchFn = [](int64_t dim, OpShardingRuleBuilder& builder) {});
+
+  // Adds a pointwise factor for all dimensions of all operands/results that
+  // have rank at least 1. The factor type is determined by `predFactorType`.
+  //
+  // Each dimension whose size in `inShape` and `outShape` is different, gets a
+  // `mismatchFactorType` factor type.
+  OpShardingRuleBuilder& addPointwiseWithDiffTypeForMismatch(
+      ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
+      FactorType mismatchFactorType);
 
  private:
   void updateFactorType(FactorType factorType, int64_t factorIndex);
