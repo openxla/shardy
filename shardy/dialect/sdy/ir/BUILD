@@ -162,6 +162,7 @@ cc_library(
     hdrs = [
         "constants.h",
         "dialect.h",
+        "enums.h",
         "extensions/stablehlo_extensions.h",
         "parsers.h",
         "printers.h",

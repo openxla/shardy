@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 
 namespace mlir {
 namespace sdy {
@@ -156,7 +157,7 @@ void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
     case FactorType::kPermutation:
       permutationFactors.push_back(factorIndex);
       return;
-    case FactorType::kDefault:
+    case FactorType::kPassThrough:
       return;
   }
   llvm_unreachable("unknown FactorType");
@@ -233,9 +234,9 @@ OpShardingRuleBuilder::addPointwiseWithDiffTypeForMismatch(
   for (auto [dim, dimSizes] :
        llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
     auto [inDimSize, outDimSize] = dimSizes;
-    addFactor(
-        dim, inDimSize,
-        inDimSize == outDimSize ? FactorType::kDefault : mismatchFactorType);
+    addFactor(dim, inDimSize,
+              inDimSize == outDimSize ? FactorType::kPassThrough
+                                      : mismatchFactorType);
   }
   return *this;
 }

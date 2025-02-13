@@ -912,13 +912,17 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     this is mainly for completeness as many ops such as pointwise ops have size
     one dimensions that correspond across operands and results.
 
-    `reduction_factors` contains the indices of factors requiring reduction,
-    such as the contracting dimensions in a dot operation.
-    `need_replication_factors` contains the indices of factors requiring full
-    replication, such as the sorted dimension in a sort operation.
-    `permutation_factors` contains the indices of factors requiring
-    collective-permute if they are sharded, such as the padding dimensions in a
-    pad operation.
+    **Factor types:**
+    - `reduction_factors` contains the indices of factors requiring reduction,
+      such as the contracting dimensions in a dot operation.
+    - `need_replication_factors` contains the indices of factors requiring full
+      replication, such as the sorted dimension in a sort operation.
+    - `permutation_factors` contains the indices of factors requiring
+      collective-permute if they are sharded, such as the padding dimensions in
+      a pad operation.
+    - All other factors are considered as pass-through factors, i.e., factors
+      that don't require any communication if sharded in the same way across all
+      tensors that are mapped to them.
 
     `is_custom_rule` describes whether this is a rule defined by a user for a
     `stablehlo.custom_call` op. The partitioner doesn't know how to partition
@@ -1003,6 +1007,12 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     // operands come before the results.
     SmallVector<int64_t> getTensorSizes() const;
 
+    // Returns the type of the given `factorIndex`.
+    FactorType getFactorType(int64_t factorIndex) const;
+
+    // Returns true if the `factorIndex` is a pass-through factor.
+    bool isPassThroughFactor(int64_t factorIndex) const;
+
     // Returns true if the `factorIndex` is a reduction factor.
     bool isReductionFactor(int64_t factorIndex) const;
 
@@ -1016,10 +1026,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     bool isFactorInAllNonScalarTensors(int64_t factorIndex) const;
 
     // Returns true if the `factorIndex` is a batching factor, which satisfies:
-    // 1. It is not a reduction factor.
-    // 2. It is not a need replication factor.
-    // 3. It is not a permutation factor.
-    // 4. It is used in all non-scalar tensors.
+    // 1. It is a pass-through factor.
+    // 2. It is used in all non-scalar tensors.
     bool isBatchingFactor(int64_t factorIndex) const;
 
     // Returns a vector of tensor indices that are non-scalar, of all operand

@@ -49,6 +49,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/enums.cc.inc"
 #include "shardy/dialect/sdy/ir/extensions/stablehlo_extensions.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/parsers.h"   // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/printers.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -950,6 +951,23 @@ SmallVector<int64_t> OpShardingRuleAttr::getTensorSizes() const {
   return tensorSizes;
 }
 
+FactorType OpShardingRuleAttr::getFactorType(int64_t factorIndex) const {
+  if (isReductionFactor(factorIndex)) {
+    return FactorType::kReduction;
+  }
+  if (isNeedReplicationFactor(factorIndex)) {
+    return FactorType::kNeedReplication;
+  }
+  if (isPermutationFactor(factorIndex)) {
+    return FactorType::kPermutation;
+  }
+  return FactorType::kPassThrough;
+}
+
+bool OpShardingRuleAttr::isPassThroughFactor(int64_t factorIndex) const {
+  return getFactorType(factorIndex) == FactorType::kPassThrough;
+}
+
 bool OpShardingRuleAttr::isReductionFactor(int64_t factorIndex) const {
   return llvm::is_contained(getReductionFactors(), factorIndex);
 }
@@ -978,11 +996,8 @@ bool OpShardingRuleAttr::isFactorInAllNonScalarTensors(
   return true;
 }
 
-// TODO(b/394881597). Adding a method to return the factor type given the index.
 bool OpShardingRuleAttr::isBatchingFactor(int64_t factorIndex) const {
-  return !isReductionFactor(factorIndex) &&
-         !isNeedReplicationFactor(factorIndex) &&
-         !isPermutationFactor(factorIndex) &&
+  return isPassThroughFactor(factorIndex) &&
          isFactorInAllNonScalarTensors(factorIndex);
 }
 

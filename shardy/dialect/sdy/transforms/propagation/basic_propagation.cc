@@ -45,6 +45,7 @@ limitations under the License.
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"

@@ -40,6 +40,7 @@ limitations under the License.
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/verifiers.h"
 
 // IWYU pragma: end_keep
@@ -56,20 +57,9 @@ limitations under the License.
 
 // Below are methods that are the bodies of ODS-generated op-interface classes
 // which cannot be inlined due to cyclic dependencies on helper functions.
+
 namespace mlir {
 namespace sdy {
-
-// Specifies whether the dataflow edge owner sharding is being transformed
-// before or after edge propagation.
-enum class DataFlowShardingTransformType {
-  // Before edge propagation is when the value of the shardings are inspected
-  // for propagation.
-  kBeforeEdgePropagation,
-  // After edge propagation is when the shardings are set back on the data flow
-  // edge owner.
-  kAfterEdgePropagation
-};
-
 namespace details {
 
 // Default implementation of the `getOpResultEdgeOwnerShardings` method of

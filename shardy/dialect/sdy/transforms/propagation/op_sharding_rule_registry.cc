@@ -37,6 +37,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -262,7 +263,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         // dimensions are decomposition dimensions, which need replication.
         int64_t numBatchDims = shape.size() - 2;
         std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
-          return dim < numBatchDims ? FactorType::kDefault
+          return dim < numBatchDims ? FactorType::kPassThrough
                                     : FactorType::kNeedReplication;
         };
         return OpShardingRuleBuilder(cholesky)
@@ -292,7 +293,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                   // Concat dimension needs permutation.
                   return dim == concat.getDimension()
                              ? FactorType::kPermutation
-                             : FactorType::kDefault;
+                             : FactorType::kPassThrough;
                 };
             return OpShardingRuleBuilder(concat)
                 .addPointwiseIf(getTensorShape(concat.getResult()), pred,
@@ -884,7 +885,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                   /*resultDims=*/SmallVector<int64_t>(numInputs, inputDim),
                   factorSize,
                   needReduction ? FactorType::kReduction
-                                : FactorType::kDefault);
+                                : FactorType::kPassThrough);
             });
         return builder.build();
       })
@@ -958,7 +959,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         };
         std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
           return dim == sort.getDimension() ? FactorType::kNeedReplication
-                                            : FactorType::kDefault;
+                                            : FactorType::kPassThrough;
         };
         return OpShardingRuleBuilder(sort)
             .addPointwiseIf(shape, pred, getFactorType)
