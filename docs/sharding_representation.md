@@ -47,7 +47,7 @@ We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
     that are not used to shard a dimension are implicitly replicated, but the
     sharding can specify axes that are explicitly replicated and therefore
     cannot be used to shard a dimension later on.
-*   [**Axis splitting and sub-axes**](#axis_splitting_and_sub-axes) - a (full)
+*   [**Axis splitting and sub-axes**](#axis-splitting-and-sub-axes) - a (full)
     mesh axis can be split into multiple sub-axes that can be individually used
     to shard a dimension or be explicitly replicated.
 *   [**Multiple logical meshes**](#multiple-logical-meshes) - different
@@ -68,7 +68,7 @@ We expand the basic structure and each key component in this section.
 ### Basic structure
 
 The dimension shardings tell us for each dimension of the tensor, along which
-axes (or [sub-axes](#axis_splitting_and_sub-axes)) it is sharded from major to
+axes (or [sub-axes](#axis-splitting-and-sub-axes)) it is sharded from major to
 minor. All other axes that don't shard a dimension are implicitly replicated (or
 [explicitly replicated](#explicitly-replicated-axes)).
 
