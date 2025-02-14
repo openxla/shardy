@@ -685,11 +685,9 @@ func.func @reshape_split_dim_with_intermediate_one(%arg0: tensor<32xf32>) -> ten
   return %0 : tensor<8x1x4xf32>
 }
 
-// Reverse is currently treated as a pointwise op, and we add a factor for the
-// reverse dimensions as well, but this decision could change in the future.
 // CHECK-LABEL: func @reverse
 func.func @reverse(%arg0: tensor<4x32x8x2xf32>) -> tensor<4x32x8x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, j, k, l]) {i=4, j=32, k=8, l=2}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, j, k, l]) {i=4, j=32, k=8, l=2} permutation={j, l}>
   %0 = stablehlo.reverse %arg0, dims = [1, 3] : tensor<4x32x8x2xf32>
   return %0 : tensor<4x32x8x2xf32>
 }

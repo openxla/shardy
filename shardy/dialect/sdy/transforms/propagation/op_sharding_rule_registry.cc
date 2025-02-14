@@ -185,16 +185,6 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           stablehlo::TanhOp, stablehlo::XorOp>([](Operation* pointwiseOp) {
         return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
       })
-      // The following case is for ops that are only pointwise for the sake of
-      // propagation, but would require communication for the result to be
-      // sharded like the operand along a specific dimensions. For example, if
-      // the operand of an `stablehlo::ReverseOp` is sharded along the reverse
-      // dimension, we would want to propagate that sharding to the
-      // corresponding dimension of the result, even though that would require
-      // communication as all elements are needed for sorting.
-      .Case<stablehlo::ReverseOp>([](Operation* pointwiseOp) {
-        return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
-      })
       //===----------------------------------------------------------------===//
       // NOTE: Please keep the order of cases alphabetical.
       //===----------------------------------------------------------------===//
@@ -850,6 +840,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         }
 
         return builder.build();
+      })
+      .Case<stablehlo::ReverseOp>([](stablehlo::ReverseOp reverse) {
+        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
+          return llvm::is_contained(reverse.getDimensions(), dim)
+                     ? FactorType::kPermutation
+                     : FactorType::kPassThrough;
+        };
+        return OpShardingRuleBuilder(reverse)
+            .addPointwise(getTensorShape(reverse.getResult()), getFactorType)
+            .build();
       })
       .Case<stablehlo::ScatterOp>([](stablehlo::ScatterOp scatter) {
         OpShardingRuleBuilder builder(scatter);
