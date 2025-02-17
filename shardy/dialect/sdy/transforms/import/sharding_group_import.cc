@@ -17,10 +17,12 @@ limitations under the License.
 #include <memory>  // IWYU pragma: keep
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/EquivalenceClasses.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
@@ -134,6 +136,7 @@ GroupIdToShardingGroups unifyShardingGroups(
 LogicalResult validateCompatibilityAndApplyInitialShardingConstraints(
     ModuleOp module, GroupIdToShardingGroups& groupIdToShardingGroups) {
   SmallDenseMap<int64_t, TensorShardingAttr> groupIdToSharding;
+  SmallDenseMap<int64_t, SmallVector<Value>> groupIdToConstrainedValues;
   // Tensors can have initial shardings defined in several ways (e.g., sharding
   // constraints, function arguments, manual computations). These initial
   // shardings only conflict with Sharding Groups if their value belongs to a
@@ -146,21 +149,34 @@ LogicalResult validateCompatibilityAndApplyInitialShardingConstraints(
       if (!sharding) {
         continue;
       }
+      // TODO(b/397213178): Possibly make this an error once we find the
+      // underlying issue in the model.
+      groupIdToConstrainedValues[groupId].push_back(shardingGroupOp.getInput());
       auto [it, inserted] = groupIdToSharding.try_emplace(groupId, sharding);
       if (!inserted && it->second != sharding) {
-        shardingGroupOp.emitError(
+        shardingGroupOp.emitWarning(
             "Inconsistent shardings prior to propagation for ShardingGroupOps "
             "with canonicalized groupId: ")
-            << groupId;
-        return failure();
+            << groupId << " due to the operand " << shardingGroupOp.getInput()
+            << ". Inserting an open sharding constraint to all constrained "
+            << " values";
+        // NOTE: Arbitrarily use the mesh name of `sharding`. If the one already
+        // in `groupIdToConstrainedValues` is different, then once we support
+        // propagating through different meshes, this won't be an issue. Think
+        // it's fine to not error since this is a really rare case.
+        StringRef meshName = sharding.getMeshName();
+        IRRewriter rewriter(shardingGroupOp);
+        for (Value value : groupIdToConstrainedValues.at(groupId)) {
+          rewriter.setInsertionPointAfterValue(value);
+          auto openShardingConstraint = rewriter.create<ShardingConstraintOp>(
+              value.getLoc(), value,
+              TensorShardingAttr::getFullyOpen(
+                  value.getContext(),
+                  cast<ShapedType>(value.getType()).getRank(), meshName));
+          rewriter.replaceAllUsesExcept(value, openShardingConstraint,
+                                        openShardingConstraint);
+        }
       }
-    }
-  }
-
-  // Apply initial shardings to all values in the group.
-  for (auto& [groupId, sharding] : groupIdToSharding) {
-    for (ShardingGroupOp shardingGroupOp : groupIdToShardingGroups[groupId]) {
-      setSharding(shardingGroupOp.getInput(), sharding);
     }
   }
 
