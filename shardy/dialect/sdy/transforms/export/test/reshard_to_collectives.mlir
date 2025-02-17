@@ -101,6 +101,26 @@ func.func @two_all_to_alls_tgt_dim_not_empty(%arg0 : tensor<16x8x8xf32> {sdy.sha
   return %0 : tensor<16x8x8xf32>
 }
 
+// CHECK-LABEL: func @two_all_to_alls_same_tgt_dim_reverse_order
+func.func @two_all_to_alls_same_tgt_dim_reverse_order(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"y"}, {"x"}, {}]>}) -> tensor<16x8x8xf32> {
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all {"x"} 1->2 %arg0 out_sharding=<@mesh3d, [{"y"}, {}, {"x"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all {"y"} 0->2 %[[ALL_TO_ALL_0]] out_sharding=<@mesh3d, [{}, {}, {"x", "y"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{}, {}, {"x", "y"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// CHECK-LABEL: func @two_all_to_alls_same_tgt_dim_non_contiguous
+func.func @two_all_to_alls_same_tgt_dim_non_contiguous(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"y"}, {"x", "z"}, {}]>}) -> tensor<16x8x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{"x"}, {"y", "z"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all {"x"} 0->2 %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{}, {"y", "z"}, {"x"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all {"y", "z"} 1->2 %[[ALL_TO_ALL_0]] out_sharding=<@mesh3d, [{}, {}, {"x", "y", "z"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{}, {}, {"x", "y", "z"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+
 // CHECK-LABEL: func @slice_then_all_to_alls
 func.func @slice_then_all_to_alls(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d_4x2x4, [{}, {"y", "z"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}, {}] %arg0 out_sharding=<@mesh3d_4x2x4, [{"x"}, {"y", "z"}, {}]>
@@ -258,6 +278,15 @@ func.func @slice_and_swap_axes_between_dims(%arg0 : tensor<16x8xf32> {sdy.shardi
   // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]]
   %0 = sdy.reshard %arg0 <@mesh3d, [{"x", "y"}, {"z"}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @swap_axes_between_dims_then_all_to_all
+func.func @swap_axes_between_dims_then_all_to_all(%arg0 : tensor<8x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"x"}, {"y"}, {}]>}) -> tensor<8x8x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d, [{"y"}, {"x"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"y"} 0->2 %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d, [{}, {"x"}, {"y"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  %0 = sdy.reshard %arg0 <@mesh2d, [{}, {"x"}, {"y"}]> : tensor<8x8x8xf32>
+  return %0 : tensor<8x8x8xf32>
 }
 
 // CHECK-LABEL: func @slice_sub_axes_then_swap_between_dims

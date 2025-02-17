@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <functional>
@@ -370,7 +371,14 @@ class CollectiveInserter {
     tryCollectivePermute();
 
     // 3. Try to insert all-to-alls, that preserves the size of the tensor.
-    tryAllToAlls();
+    //
+    // We first try to insert all-to-alls that move axes to the right position
+    // at the target dimension, to make sure multiple all-to-alls from different
+    // source dimensions to the same target dimension are inserted in the right
+    // order (to avoid the need for a collective permute), then we lift that
+    // constraint.
+    tryAllToAlls(/*allowOutOfOrderTarget=*/false);
+    tryAllToAlls(/*allowOutOfOrderTarget=*/true);
 
     // 4. Try to insert an all-gather, that increases the size of the tensor.
     tryAllGather();
@@ -665,14 +673,15 @@ class CollectiveInserter {
   //    the current sharding). This means we can replace B with A.
   //
   // 3. `inAxesPerDim[d1] = [..., A, ..., B, C, ...]` such that A and C are
-  //    in `outAxesPerDim[d2]` but B isn't (d1 != d2), This means we can reorder
+  //    in `outAxesPerDim[d2]` (d1 != d2) but B isn't, This means we can reorder
   //    `inAxesPerDim[d1]` such that A and C are contiguous and in the desired
   //    order in `outAxesPerDim[d2]`.
   //
-  // 4. `inAxesPerDim[d1] = [..., A, B, ...]` and
-  //    `outAxesPerDim[d2] = [..., B, ..., A, ...]` (d1 != d2). This means we
-  //    can reorder `inAxesPerDim[d1]` such that A and B are in the desired
-  //    order in `outAxesPerDim[d2]`.
+  // 4. `inAxesPerDim[d1] = [..., A, B, ...]` such that A and B are in
+  //    `outAxesPerDim[d2]` (d1 != d2) but in different order or discontiguous.
+  //    This means we can replace A and B in `inAxesPerDim[d1]` with axes C and
+  //    D respectively such that `outAxesPerDim[d2] = [..., C, D, ...]` (note
+  //    that both C and D can be either A, B, or a different axis).
   //
   // 5. `inAxesPerDim[d1] = [..., A, B, ...]` such that `outAxesPerDim[d]` is
   //    empty, A is in `outAxesPerDim[d2]` (d2 != d1) but B isn't in
@@ -703,7 +712,7 @@ class CollectiveInserter {
           curOutDim = outAxisEntryIt->second.dim;
           int64_t curOutIndex = outAxisEntryIt->second.index;
           if (seenDims.test(*curOutDim) &&
-              (lastOutDim != curOutDim || curOutIndex < lastOutIndex)) {
+              (lastOutDim != curOutDim || curOutIndex != lastOutIndex + 1)) {
             // Discontiguous destination dim or axes out of order at destination
             // dim (condition #3 & #4).
             return true;
@@ -877,8 +886,9 @@ class CollectiveInserter {
   // returns the axes and target dimension of this all-to-all.
   //
   // The suffix of axes in `inAxesPerDim[srcDim]`, such that all axes within the
-  // suffix are mapped to the same dimension in `outAxisToDimAndIndex`, are
-  // all-to-all-ed with the mapped dimension as the target (tgtDim).
+  // suffix are mapped to the same dimension in `outAxisToDimAndIndex`
+  // (`allToAllAxes`), are all-to-all-ed with the mapped dimension as the target
+  // (`tgtDim`).
   //
   // The internal state is updated as follows for `allToAllAxes` and `tgtDim`:
   //
@@ -888,6 +898,10 @@ class CollectiveInserter {
   //   `currentAxesPerDim[tgtDim]`.
   // - The common prefix between `inAxesPerDim[tgtDim]` and
   //   `outAxesPerDim[tgtDim]` is removed from both.
+  //
+  // If `allowOutOfOrderTarget` is false, we enforce an addition constraint -
+  // we only all-to-all if the axes are moved to the target dimension at the
+  // right place, i.e., `allToAllAxes` is a prefix of `outAxesPerDim[tgtDim]`.
   //
   // Note that this brings us closer to being done, i.e., having both
   // `inAxesPerDim` and `outAxesPerDim` empty, because we move axes from
@@ -899,9 +913,9 @@ class CollectiveInserter {
   //   will allow us to perform a collective permute on them to get them to the
   //   right place.
   //
-  // For example:
+  // Example 1:
   //
-  // Input: `srcDim = 1`
+  // Input: `srcDim = 1`, `allowOutOfOrderTarget = true`
   //
   // Initial state:
   // - `inAxesPerDim = [["w"], ["x", "y", "z"], []]`,
@@ -917,47 +931,70 @@ class CollectiveInserter {
   // - `inAxesPerDim = [["w", "x"], [], []]`
   // - `outAxesPerDim = [["x"], [], []]`
   // - `currentAxesPerDim = [["w", "x"], [], ["y", "z"]]`
-  std::optional<AllToAllInfo> getAllToAllInfo(int64_t srcDim) {
+  //
+  // Example 2:
+  //
+  // Input: `srcDim = 0`, `allowOutOfOrderTarget = false`
+  //
+  // Initial state:
+  // - `inAxesPerDim = [["y"], ["x"], []]`,
+  // - `outAxesPerDim = [[], [], ["x", "y"]]`
+  // - `currentAxesPerDim = [["y"], ["x"], []]`
+  //
+  // Returns `std::nullopt`, because "y" won't be moved from source dimension
+  // (dim 0) to the right position in the target dimension (dim 2).
+  //
+  // Another call with `srcDim = 0` would return `{axes = ["x"], tgtDim = 2}`,
+  // then a call with `srcDim = 1` would return `{axes = ["y"], tgtDim = 2}`,
+  // since both axes are moved to the right position.
+  std::optional<AllToAllInfo> getAllToAllInfo(int64_t srcDim,
+                                              bool allowOutOfOrderTarget) {
     AxisList& srcInAxes = inAxesPerDim[srcDim];
 
     auto axisRevIt = srcInAxes.rbegin();
     int64_t numAxes = 0;
-    std::optional<int64_t> optTgtDim;
+    std::optional<int64_t> tgtDim;
     for (; axisRevIt != srcInAxes.rend(); ++axisRevIt) {
       auto outAxisEntryIt = outAxisToDimAndIndex.find(*axisRevIt);
       if (outAxisEntryIt == outAxisToDimAndIndex.end()) {
         break;
       }
       int64_t outAxisDim = outAxisEntryIt->second.dim;
-      if (outAxisDim == srcDim || (optTgtDim && outAxisDim != *optTgtDim)) {
+      if (outAxisDim == srcDim || (tgtDim && outAxisDim != *tgtDim)) {
         break;
       }
-      optTgtDim = outAxisDim;
+      tgtDim = outAxisDim;
       ++numAxes;
     }
 
-    if (!optTgtDim) {
+    if (!tgtDim) {
       // Can't do an all-to-all from `srcDim` to any dimension.
       return std::nullopt;
     }
 
     auto startInAxisIt = axisRevIt.base();
 
-    AllToAllInfo result(*optTgtDim);
-    auto& [allToAllAxes, tgtDim] = result;
-    allToAllAxes.reserve(numAxes);
+    AxisList& tgtOutAxes = outAxesPerDim[*tgtDim];
+    if (!allowOutOfOrderTarget &&
+        !std::equal(startInAxisIt, srcInAxes.end(), tgtOutAxes.begin())) {
+      // We don't all-to-all if axes aren't moved to the target dimension at the
+      // right position.
+      return std::nullopt;
+    }
+
+    AllToAllInfo result(*tgtDim);
+    result.axes.reserve(numAxes);
 
     SmallVector<AxisRefAttr>& srcCurrentAxes = currentAxesPerDim[srcDim];
-    SmallVector<AxisRefAttr>& tgtCurrentAxes = currentAxesPerDim[tgtDim];
+    SmallVector<AxisRefAttr>& tgtCurrentAxes = currentAxesPerDim[*tgtDim];
 
     popBackFromCurrentAxes(srcCurrentAxes, srcInAxes, startInAxisIt);
 
-    AxisList& tgtInAxes = inAxesPerDim[tgtDim];
-    AxisList& tgtOutAxes = outAxesPerDim[tgtDim];
+    AxisList& tgtInAxes = inAxesPerDim[*tgtDim];
     auto srcInAxisIt = startInAxisIt;
     while (srcInAxisIt != srcInAxes.end()) {
       AxisRefAttr axis = *srcInAxisIt;
-      addAxisOrMerge(allToAllAxes, axis, mesh);
+      addAxisOrMerge(result.axes, axis, mesh);
       addAxisOrMerge(tgtCurrentAxes, axis, mesh);
       srcInAxisIt = srcInAxes.erase(srcInAxisIt);
       inAxisSet.erase(axis);
@@ -973,9 +1010,12 @@ class CollectiveInserter {
   }
 
   // Tries to insert a sequence of `sdy.all_to_all`s.
-  void tryAllToAlls() {
+  //
+  // If `allowOutOfOrderTarget` is false, we only all-to-all if the axes are
+  // moved to the target dimension at the right position.
+  void tryAllToAlls(bool allowOutOfOrderTarget) {
     for (int64_t srcDim = 0; srcDim < getRank(); ++srcDim) {
-      while (auto info = getAllToAllInfo(srcDim)) {
+      while (auto info = getAllToAllInfo(srcDim, allowOutOfOrderTarget)) {
         result = rewriter.create<AllToAllOp>(loc, result, srcDim, info->tgtDim,
                                              info->axes, getCurrentSharding());
       }
