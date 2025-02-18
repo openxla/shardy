@@ -130,3 +130,17 @@ func.func @manual_computation(%arg0: tensor<32x32xf32> {sdy.sharding = #sdy.shar
   %4 = sdy.data_flow_edge %0 sharding=<@mesh, [{"a", ?}, {?}]> : tensor<32x32xf32>
   func.return %4: tensor<32x32xf32>
 }
+
+// CHECK-LABEL: func @pass_through_factor_higher_priority_than_reduction_factor(
+// CHECK-SAME:      %arg0: tensor<32x1024xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:      %arg1: tensor<1024x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
+// CHECK-SAME:      -> (tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
+func.func @pass_through_factor_higher_priority_than_reduction_factor(
+  %arg0: tensor<32x1024xf32>,
+  %arg1: tensor<1024x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}
+) -> (tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %arg1, precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : (tensor<32x1024xf32>, tensor<1024x16xf32>) -> tensor<32x16xf32>
+  // CHECK-NEXT: return %[[DOT]] : tensor<32x16xf32>
+  %0 = stablehlo.dot %arg0, %arg1, precision = [DEFAULT, DEFAULT] : (tensor<32x1024xf32>, tensor<1024x16xf32>) -> tensor<32x16xf32>
+  return %0 : tensor<32x16xf32>
+}

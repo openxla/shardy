@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "shardy/dialect/sdy/transforms/propagation/aggressive_propagation.h"
@@ -61,8 +62,20 @@ PropagationDirection isPassThrough(Operation* op, int64_t) {
   return PropagationDirection::NONE;
 }
 
-constexpr std::array<GetDirectionToPropagateFnPtr, 2> opPropagationSchedule = {
-    isPassThrough, propagateAny};
+// NOTE: if the `op` has no sharding rule, then we will assume it uses an
+// identity sharding rule. For example, `DataFlowEdgeOp`.
+PropagationDirection onlyPassThroughFactors(Operation* op,
+                                            int64_t factorIndex) {
+  if (auto shardingRule =
+          op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr);
+      shardingRule && !shardingRule.isPassThroughFactor(factorIndex)) {
+    return PropagationDirection::NONE;
+  }
+  return PropagationDirection::BOTH;
+}
+
+constexpr std::array<GetDirectionToPropagateFnPtr, 3> opPropagationSchedule = {
+    isPassThrough, onlyPassThroughFactors, propagateAny};
 
 // Returns the direction in which the given operation should be propagated.
 //
