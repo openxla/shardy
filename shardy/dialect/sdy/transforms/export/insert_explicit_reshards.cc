@@ -486,7 +486,7 @@ int64_t findTensorIndexToPreferOnUnaryOperation(
 }
 
 // Assumes that tensors do not have factors that need replication.
-AxesPerFactor findCommonAxesOnUnaryOperation(
+SmallVector<AxisListRef> findCommonAxesOnUnaryOperation(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
     MeshAttr mesh) {
   int64_t tensorIndexToPrefer =
@@ -494,7 +494,7 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
 
   // Set factor shardings to make sure factors that do not appear in the
   // preferred tensor are sharded on the other tensor.
-  AxesPerFactor factorAxisRefs(shardingRule.getNumFactors());
+  SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   // TODO(enver): Add and use forEachFactorSharding helper method.
   for (const auto& [tensorIndex, tensorFactorSharding] :
        llvm::enumerate(llvm::concat<const TensorFactorShardings>(
@@ -503,7 +503,7 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
          tensorFactorSharding.factorIndexToSharding) {
       if (!factorSharding.axisRefs.empty()) {
         // TODO(enver): Drop the need for explicit AxisListRef casting.
-        factorAxisRefs[factorIndex] = factorSharding.axisRefs;
+        factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
       }
     }
   }
@@ -511,7 +511,7 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
   // Override with the factor shardings on the preferred tensor.
   for (const auto& [factorIndex, factorSharding] :
        projection.getTensor(tensorIndexToPrefer).factorIndexToSharding) {
-    factorAxisRefs[factorIndex] = factorSharding.axisRefs;
+    factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
   }
   return factorAxisRefs;
 }
@@ -563,8 +563,9 @@ void distributeAxisRefsToBatchingFactors(
   }
 }
 
-AxesPerFactor findCommonAxes(const ShardingProjection& projection,
-                             OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+SmallVector<AxisListRef> findCommonAxesBeforeHandlingReplicatedFactors(
+    const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
+    MeshAttr mesh) {
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
@@ -572,8 +573,18 @@ AxesPerFactor findCommonAxes(const ShardingProjection& projection,
     return findCommonAxesOnUnaryOperation(projection, shardingRule, mesh);
   }
 
-  SmallVector<AxisListRef> factorAxisRefs =
-      findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule, mesh);
+  return findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule,
+                                                  mesh);
+}
+
+AxesPerFactor findCommonAxes(const ShardingProjection& projection,
+                             OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+  SmallVector<AxisListRef> factorAxisRefs;
+  if (factorAxisRefs = findCommonAxesBeforeHandlingReplicatedFactors(
+          projection, shardingRule, mesh);
+      factorAxisRefs.empty()) {
+    return {};
+  }
 
   const int64_t numFactors = shardingRule.getNumFactors();
   AxesPerFactor factorCommonAxes(numFactors);
