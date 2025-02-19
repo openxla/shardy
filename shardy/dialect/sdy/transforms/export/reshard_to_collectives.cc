@@ -504,6 +504,137 @@ class CollectiveInserter {
     alignSubAxesByDecomposition(outAxesPerDim, splitAddedAxes, mesh);
   }
 
+  // For an future all-to-all from source dimension `d1` to target dimension
+  // `d2`, Holds the range of out axes in that dimension to slice at `d1`.
+  struct AxesToSliceForAllToAll {
+    AxisList::iterator outAxisBeginIt;
+    AxisList::iterator outAxisEndIt;
+  };
+
+  // Return axes to slice at a given source dimension `srcDim` to perform an
+  // all-to-all to a target dimension (`tgtDim`) with additional axes, if
+  // certain conditions are met that indicate that a redundant
+  // collective-permute can be avoided by slicing at `srcDim` rather than
+  // `tgtDim`.
+  //
+  // All the following must hold:
+  //
+  // - `inAxesPerDim[srcDim]` isn't empty, otherwise an all-to-all isn't needed
+  //   from that dimension.
+  //
+  // - `outAxesPerDim[srcDim]` is empty, otherwise it means the source dimension
+  //   has misplaced axes that a collective-permute can replace.
+  //
+  // - `inAxesPerDim[tgtDim]` is empty, otherwise it means the target dimension
+  //   has misplaced axes that a collective-permute can replace.
+  //
+  // - The first axis in `outAxesPerDim[tgtDim]` beyond
+  //   `inAxesPerDim[srcDim].back()` isn't present in `inAxisSet` (i.e.,
+  //   available to slice), otherwise there is no axis to slice at `srcDim`.
+  //
+  // - A suffix of `inAxesPerDim[srcDim]` is contained within
+  //   `outAxesPerDim[tgtDim]` (in the same order) and other axes in
+  //   `inAxesPerDim[srcDim]` don't appear in `outAxesPerDim[tgtDim]`, otherwise
+  //   a collective-permute will be needed to reorder or replace axes.
+  //
+  // - `srcDim` can't accommodate all available axes in `outAxesPerDim[tgtDim]`
+  //   beyond `inAxesPerDim[srcDim].back()`, i.e., slicing those axes at
+  //   `srcDim` would require padding as the dimension size isn't divisible by
+  //   the product of axis sizes (including `inAxesPerDim[srcDim]`).
+  //
+  // In which case, returns a range containing all axes in
+  // `outAxesPerDim[tgtDim]` that are available to slice beyond
+  // `inAxesPerDim[srcDim].back()`
+  //
+  // In addition, divides the capacity of `tgtDim` by the product of axis sizes
+  // in `srcDim` that will be moved to `tgtDim` after slicing along the
+  // returned axes, as we are effectively "borrowing" the capacity for `srcDim`.
+  //
+  // For example:
+  //
+  // Input: `srcDim = 1`
+  //
+  // Initial state:
+  // - `mesh = {"x": 2, "y": 2, "z": 2, "w": 2}`
+  // - `getTensorShape(result)` = [4, 8, 32]
+  // - `inAxesPerDim = [["w"], ["x"], []]`
+  // - `outAxesPerDim = [[], [], ["x", "y", "z", "w"]]`
+  // - `capacityPerDim = [1, 1, 16]`
+  //
+  // Returns: `["y", "z"]` and updates `capacityPerDim = [1, 1, 2]`
+  std::optional<AxesToSliceForAllToAll> getAxesToSliceForAllToAll(
+      int64_t srcDim) {
+    AxisList& srcInAxes = inAxesPerDim[srcDim];
+    if (srcInAxes.empty() || !outAxesPerDim[srcDim].empty()) {
+      // No axes at source dimension to move, or source dimension has other axes
+      // in output sharding.
+      return std::nullopt;
+    }
+    auto outAxisEntryIt = outAxisToDimAndIndex.find(srcInAxes.back());
+    if (outAxisEntryIt == outAxisToDimAndIndex.end()) {
+      // First in axis at source isn't present in `outAxesPerDim`.
+      return std::nullopt;
+    }
+
+    int64_t tgtDim = outAxisEntryIt->second.dim;
+    if (!inAxesPerDim[tgtDim].empty()) {
+      // The target dimension is currently sharded on a misplaced axis.
+      return std::nullopt;
+    }
+
+    AxisList& tgtOutAxes = outAxesPerDim[tgtDim];
+    // Find the first out axis beyond `srcInAxes.back()`.
+    auto startOutAxisIt = ++llvm::find(tgtOutAxes, srcInAxes.back());
+    if (startOutAxisIt == tgtOutAxes.end() ||
+        inAxisSet.contains(*startOutAxisIt)) {
+      // `tgtOutAxes` doesn't have any axes beyond `srcInAxes.back()` or the
+      // first of those axes isn't available to slice.
+      return std::nullopt;
+    }
+
+    // Advance `inAxisRevIt` beyond the suffix of `srcInAxes` that is contained
+    // in `tgtOutAxes`.
+    auto inAxisRevIt = srcInAxes.rbegin();
+    auto outAxisRevIt = std::make_reverse_iterator(startOutAxisIt);
+    int64_t allToAllSize = 1;
+    while (inAxisRevIt != srcInAxes.rend() &&
+           outAxisRevIt != tgtOutAxes.rend() && *inAxisRevIt == *outAxisRevIt) {
+      allToAllSize *= inAxisRevIt->getSize(mesh);
+      ++inAxisRevIt;
+      ++outAxisRevIt;
+    }
+
+    int64_t srcPrefixSize = 1;
+    for (; inAxisRevIt != srcInAxes.rend(); ++inAxisRevIt) {
+      if (outAxisEntryIt = outAxisToDimAndIndex.find(*inAxisRevIt);
+          outAxisEntryIt != outAxisToDimAndIndex.end() &&
+          outAxisEntryIt->second.dim == tgtDim) {
+        // There is an out of order axis in `srcInAxes` that appears in
+        // `tgtOutAxes`.
+        return std::nullopt;
+      }
+      srcPrefixSize *= inAxisRevIt->getSize(mesh);
+    }
+
+    auto curOutAxisIt = startOutAxisIt;
+    while (curOutAxisIt != tgtOutAxes.end() &&
+           !inAxisSet.contains(*curOutAxisIt)) {
+      // Current out axis is available to slice.
+      allToAllSize *= (curOutAxisIt++)->getSize(mesh);
+    }
+
+    if (getTensorShape(result)[srcDim] % (srcPrefixSize * allToAllSize) != 0) {
+      // `srcDim` can't accommodate all output axes within range
+      // [startOutAxisIt, curOutAxisIt).
+      return std::nullopt;
+    }
+
+    // Divide the capacity of `tgtDim` by the new sharded size of `srcDim`.
+    capacityPerDim[tgtDim] /= allToAllSize;
+
+    return AxesToSliceForAllToAll{startOutAxisIt, curOutAxisIt};
+  }
+
   // If an all-slice can be performed, returns the axes to slice for each
   // dimension, otherwise returns std::nullopt.
   //
@@ -515,19 +646,26 @@ class CollectiveInserter {
   //
   // Constraint: we can only slice dimension d along axes whose product of
   // sizes doesn't exceed the capacity for that dimension, otherwise we will
-  // incur a redundant all-to-all.
+  // incur a redundant all-to-all. Under certain conditions (see
+  // `getAxesToSliceForAllToAll`), we would use the capacity in one dimension to
+  // slice in another dimension.
   //
   // Let `capacityPerDim[d]` be the capacity for dimension d. We update this
   // value as we pick slicing axes, i.e., if we slice dimension d along an axis
   // of size n, we divide `capacityPerDim[d]` by n.
   //
-  // We pick the slicing axes across all dimensions in two stages:
+  // We pick the slicing axes across all dimensions in three stages:
   //
-  // 1. For each dimension d, each axis A in `outAxesPerDim[d]` that isn't
+  // 1. For each dimension `d1`, if certain conditions are met for another
+  //    dimension `d2`, slice axes from `outAxesPerDim[d2]` at dimension `d1`,
+  //    for a future all-to-all from `d1` to `d2` (see
+  //   `getAxesToSliceForAllToAll`).
+  //
+  // 2. For each dimension `d`, each axis A in `outAxesPerDim[d]` that isn't
   //    present in `inAxisSet` (i.e., available to slice) is sliced on dimension
   //    d as long as `capacityPerDim[d] > 1`.
   //
-  // 2. Then, we iterate over all remaining axes in `outAxesPerDim` that aren't
+  // 3. Then, we iterate over all remaining axes in `outAxesPerDim` that aren't
   //    present in `inAxisSet` (i.e., available to slice), and slice each on the
   //    first dimension d such that `capacityPerDim[d] > 1`.
   //
@@ -577,21 +715,59 @@ class CollectiveInserter {
   // - `inAxesPerDim = [["y"], ["z"], []]`
   // - `outAxesPerDim = [["x"], [], []]`
   // - `currentAxesPerDim = [["y"], ["z"], ["w"]]`
+  //
+  // Example 3 (`getAxesToSliceForAllToAll`):
+  //
+  // Initial state:
+  // - `mesh = {"x": 2, "y": 2, "z": 2, "w": 2}`
+  // - `getTensorShape(result)` = [4, 8, 32]
+  // - `inAxesPerDim = [["w"], ["x"], []]`
+  // - `outAxesPerDim = [[], [], ["x", "y", "z", "w"]]`
+  // - `capacityPerDim = [1, 1, 16]`
+  //
+  // Returns: `[[], ["y", "z"], []]`, and updates:
+  // - `inAxesPerDim = [["w"], ["x", "y" "z"], []]`
+  // - `outAxesPerDim = [[], [], ["x", "y", "z", "w"]]`
+  // - `currentAxesPerDim = [["w"], ["x", "y", "z"], []]`
   std::optional<AxesPerDim> getSlicingAxesPerDim() {
     AxesPerDim slicingAxesPerDim(currentAxesPerDim.size());
-    AxisList availableOutAxes;
-
-    // 1. Slice axes in the dimension they appear in `outAxesPerDim`, i.e. the
-    // desired dimension, as long as the per-dim capacity allows.
     bool hasSlicingAxes = false;
-    for (auto [inAxes, outAxes, currentAxes, slicingAxes, dimCapacity] :
-         llvm::zip_equal(inAxesPerDim, outAxesPerDim, currentAxesPerDim,
-                         slicingAxesPerDim, capacityPerDim)) {
+
+    // Initialize capacity per dimension.
+    for (auto [inAxes, outAxes, dimCapacity] :
+         llvm::zip_equal(inAxesPerDim, outAxesPerDim, capacityPerDim)) {
       int64_t inShardedSize = getShardedSize(inAxes, mesh);
       int64_t outShardedSize = getShardedSize(outAxes, mesh);
       dimCapacity = outShardedSize % inShardedSize == 0
                         ? outShardedSize / inShardedSize
                         : 1;
+    }
+
+    // 1. For a future all-to-all from a source dimension `d1` to a target
+    // dimension `d2`, slice axes from `outAxesPerDim[d2]` at the source
+    // dimension `d1`.
+    for (int64_t srcDim = 0; srcDim < getRank(); ++srcDim) {
+      std::optional<AxesToSliceForAllToAll> axesToSlice =
+          getAxesToSliceForAllToAll(srcDim);
+      if (!axesToSlice) {
+        continue;
+      }
+      hasSlicingAxes = true;
+      std::for_each(axesToSlice->outAxisBeginIt, axesToSlice->outAxisEndIt,
+                    [&](AxisRefAttr outAxis) {
+                      inAxesPerDim[srcDim].push_back(outAxis);
+                      inAxisSet.insert(outAxis);
+                      addAxisOrMerge(slicingAxesPerDim[srcDim], outAxis, mesh);
+                      addAxisOrMerge(currentAxesPerDim[srcDim], outAxis, mesh);
+                    });
+    }
+
+    // 2. Slice axes in the dimension they appear in `outAxesPerDim`, i.e. the
+    // desired dimension, as long as the per-dim capacity allows.
+    AxisList availableOutAxes;
+    for (auto [inAxes, outAxes, currentAxes, slicingAxes, dimCapacity] :
+         llvm::zip_equal(inAxesPerDim, outAxesPerDim, currentAxesPerDim,
+                         slicingAxesPerDim, capacityPerDim)) {
       auto outIt = outAxes.begin();
       while (outIt != outAxes.end()) {
         AxisRefAttr outAxis = *outIt;
@@ -632,7 +808,7 @@ class CollectiveInserter {
       }
     }
 
-    // 2. Slice axes in the first dimension that has enough capacity.
+    // 3. Slice axes in the first dimension that has enough capacity.
     distributeInAxesWithinCapacity(
         availableOutAxes, /*addToFront=*/false,
         /*consumeAxisToAdd=*/[&](AxisRefAttr axisToAdd, int64_t dim) {
@@ -661,7 +837,7 @@ class CollectiveInserter {
 
   // We should insert a collective permute if one of the following holds:
   //
-  // 1. Both `inAxesPerDim[d]` and `outAxesPerDim[d]` aren;t empty for a certain
+  // 1. Both `inAxesPerDim[d]` and `outAxesPerDim[d]` aren't empty for a certain
   //    dimension d. This means we can replace a prefix of `inAxesPerDim[d]`
   //    with a prefix of `outAxesPerDim[d]`, such that the prefixes sharded size
   //    is the minimum of the two sharded sizes. The in and out prefixes might
