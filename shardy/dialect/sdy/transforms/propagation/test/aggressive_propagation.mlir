@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -sdy-aggressive-propagate="propagation-strategy=aggressive" -verify-diagnostics 2>&1 | FileCheck %s
 
 sdy.mesh @empty_mesh = <[]>
+sdy.mesh @mesh_a_4 = <["a"=4]>
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 sdy.mesh @mesh_a_2_b_2_c_2_d_2 = <["a"=2, "b"=2, "c"=2, "d"=2]>
@@ -149,4 +150,83 @@ func.func @multiple_conflicts_across_factors(
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2_d_2, [{"d"}, {?}, {?}]>]>} :
     (tensor<2x8x4xf32>, tensor<2x4x16xf32>) -> tensor<2x8x16xf32>
   return %0 : tensor<2x8x16xf32>
+}
+
+
+// CHECK-LABEL: func @avoid_sideways_propagation_if_result_is_closed_empty(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+// CHECK-SAME:  -> tensor<8xf32>
+func.func @avoid_sideways_propagation_if_result_is_closed_empty(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+    -> tensor<8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @allow_sideways_propagation_if_result_is_open_empty(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b", ?}]>})
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b", ?}]>})
+func.func @allow_sideways_propagation_if_result_is_open_empty(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+    -> tensor<8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", "b", ?}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{?}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @avoid_sideways_propagation_if_result_is_closed_sub_axis(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>},
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a":(1)2, ?}]>})
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a":(1)2, ?}]>})
+func.func @avoid_sideways_propagation_if_result_is_closed_sub_axis(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{?}]>})
+    -> tensor<8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{"a":(1)2}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{"a":(1)2}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @allow_partial_sideways_propagation_if_conflicting_with_result(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
+func.func @allow_partial_sideways_propagation_if_conflicting_with_result(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+    -> tensor<8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @allow_sideways_propagation_if_result_fully_matches(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b", ?}]>})
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b", ?}]>})
+func.func @allow_sideways_propagation_if_result_fully_matches(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+    -> tensor<8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", "b"}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", "b"}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @allow_sideways_propagation_if_no_conflicting_with_one_of_multiple_results(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
+// CHECK-SAME:   -> (tensor<8xf32>, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
+func.func @allow_sideways_propagation_if_no_conflicting_with_one_of_multiple_results(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+    -> (tensor<8xf32>, tensor<8xf32>) {
+  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>, <@mesh_a_2_b_2, [{"a", ?}]>]>
+  %0:2 = stablehlo.custom_call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>, <@mesh_a_2_b_2, [{?}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i], [i])->([i], [i]) {i=8}, custom>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
 }

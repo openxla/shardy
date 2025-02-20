@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
@@ -82,7 +83,64 @@ SmallVector<TensorIndexSize> getFactorToSourceTensor(
   return factorToSourceTensor;
 }
 
+// Returns if `factorSharding` has a factor at `factorIndex` which is the
+// strict prefix of `shardingAxes`.
+bool isStrictPrefixOfFactorSharding(
+    const TensorFactorShardings& factorSharding, int64_t factorIndex,
+    ArrayRef<AxisRefAttr> shardingAxes) {
+  if (auto it = factorSharding.factorIndexToSharding.find(factorIndex);
+      it != factorSharding.factorIndexToSharding.end()) {
+    return isAxisListPrefixOf(it->getSecond().axisRefs, shardingAxes) ==
+        PrefixStatus::STRICT_PREFIX;
+  }
+  return false;
+}
+
 }  // namespace
+
+SmallVector<AxisRefAttr>
+AggressiveFactorPropagation::getPropagatedFactorSharding(
+    int64_t factorIndex, const TensorFactorShardings& tensorFactorShardings,
+    const FactorIndexToSharding& factorIndexToSharding,
+    AxesPerFactorRef axesPerFactor, MeshAttr mesh, bool conservativePropagation,
+    ArrayRef<int64_t> factorSizes) const {
+  auto factorShardingIt = factorIndexToSharding.find(factorIndex);
+  if (factorShardingIt == factorIndexToSharding.end()) {
+    return {};
+  }
+  const FactorSharding& factorSharding = factorShardingIt->second;
+  SmallVector<AxisRefAttr> newAxes = axesPerFactor[factorIndex];
+
+  // Resolve conflicts within a factor.
+  truncateAxesByRemovingConflicts(
+      newAxes,
+      [&, factorIndex = factorIndex,
+       &tensorFactorShardings = tensorFactorShardings](
+          AxisRefAttr axisRef, int64_t prevShardedSize) {
+        return compatiblePrefixNoConflictsWithinFactor(
+            axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
+            prevShardedSize, factorSizes[factorIndex], mesh);
+      },
+      mesh, conservativePropagation);
+  if (!isStrictPrefix(factorSharding.axisRefs, newAxes)) {
+    return {};
+  }
+
+  // Resolve conflicts (overlapping sharding axes) between factors.
+  //
+  // Note that we pass `factorIndexToSharding`, which might have been
+  // updated for a previous factor (previous iteration), thus we are
+  // checking for conflicts w.r.t. the updated state of this tensor.
+  truncateAxesByRemovingConflicts(
+      newAxes,
+      [&, factorIndex = factorIndex](AxisRefAttr axisRef, int64_t) {
+        return compatiblePrefixNoConflictsAcrossFactors(
+            axisRef, factorIndexToSharding, factorIndex);
+      },
+      mesh, conservativePropagation);
+
+  return newAxes;
+}
 
 UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection,
@@ -124,12 +182,8 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
                                  factorToSourceTensor[j].index, j);
   });
 
-  // The propagation on each tensor is independent. This strategy can propagate
-  // different shardings to different tensors along the same factor. Examples
-  // are provided in the docstring of this class.
   for (const auto& [tensorIndex, tensorFactorShardings] :
-       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
-           projection.getOperands(), projection.getResults()))) {
+       llvm::enumerate(projection.getResults())) {
     const FactorIndexToSharding& factorIndexToSharding =
         tensorFactorShardings.factorIndexToSharding;
 
@@ -137,52 +191,63 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     // following the order of preference in  `sortedFactorIndices`.
     bool tensorUpdated = false;
     for (int64_t factorIndex : sortedFactorIndices) {
-      auto factorShardingIt = factorIndexToSharding.find(factorIndex);
-      if (factorShardingIt == factorIndexToSharding.end()) {
+      SmallVector<AxisRefAttr> newAxes = getPropagatedFactorSharding(
+          factorIndex, tensorFactorShardings, factorIndexToSharding,
+          axesPerFactor, mesh, conservativePropagation, factorSizes);
+      if (newAxes.empty()) {
         continue;
       }
-      const FactorSharding& factorSharding = factorShardingIt->second;
-      SmallVector<AxisRefAttr> newAxes = axesPerFactor[factorIndex];
+      tensorUpdated |= expandTensorSharding(
+          projection, tensorIndex + projection.getNumOperands(), factorIndex,
+          newAxes);
+    }
+    result.updateResults[tensorIndex] = tensorUpdated;
+  }
 
-      // Resolve conflicts within a factor.
-      truncateAxesByRemovingConflicts(
-          newAxes,
-          [&, factorIndex = factorIndex,
-           &tensorFactorShardings = tensorFactorShardings](
-              AxisRefAttr axisRef, int64_t prevShardedSize) {
-            return compatiblePrefixNoConflictsWithinFactor(
-                axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
-                prevShardedSize, factorSizes[factorIndex], mesh);
-          },
-          mesh, conservativePropagation);
-      if (!isStrictPrefix(factorSharding.axisRefs, newAxes)) {
+  for (const auto& [tensorIndex, tensorFactorShardings] :
+       llvm::enumerate(projection.getOperands())) {
+    const FactorIndexToSharding& factorIndexToSharding =
+        tensorFactorShardings.factorIndexToSharding;
+
+    // Propagate the axes got in Step 1, resolving conflicts between factors by
+    // following the order of preference in  `sortedFactorIndices`.
+    bool tensorUpdated = false;
+    for (int64_t factorIndex : sortedFactorIndices) {
+      SmallVector<AxisRefAttr> newAxes = getPropagatedFactorSharding(
+          factorIndex, tensorFactorShardings, factorIndexToSharding,
+          axesPerFactor, mesh, conservativePropagation, factorSizes);
+      if (newAxes.empty()) {
         continue;
       }
 
-      // Resolve conflicts (overlapping sharding axes) between factors.
+      // Only propagate sideways through operands the factors that are also
+      // used in at least one result We want to avoid the following situation
+      // which can happen when a `sharding_constraint` is added onto the operand
+      // during Shardy import:
+      // ```
+      // %arg0: [{"a", ?}]
+      // %arg1: [{?}]
+      // %0 = add %arg0, %arg1 : [{}]
+      // ```
+      // We don't want to do an all-gather on both %arg0 and %arg1 due to "a"
+      // propagating sideways. Instead with the code below, since "a" can't
+      // propagate to `%0`, we will only do an all-gather on %arg0.
       //
-      // Note that we pass `factorIndexToSharding`, which might have been
-      // updated for a previous factor (previous iteration), thus we are
-      // checking for conflicts w.r.t. the updated state of this tensor.
-      truncateAxesByRemovingConflicts(
-          newAxes,
-          [&, factorIndex = factorIndex](AxisRefAttr axisRef, int64_t) {
-            return compatiblePrefixNoConflictsAcrossFactors(
-                axisRef, factorIndexToSharding, factorIndex);
-          },
-          mesh, conservativePropagation);
+      // TODO(b/396642774): Long term we should undo this and allow sideways
+      // propagation, but have our explicit reshard pass make sure the result is
+      // all-gathered instead of both operands.
+      if (op && isElementwise(op)) {
+        for (const TensorFactorShardings& result : projection.getResults()) {
+          if (isStrictPrefixOfFactorSharding(result, factorIndex, newAxes)) {
+            newAxes = result.factorIndexToSharding.at(factorIndex).axisRefs;
+          }
+        }
+      }
       tensorUpdated |=
           expandTensorSharding(projection, tensorIndex, factorIndex, newAxes);
     }
-
-    if (tensorIndex < projection.getNumOperands()) {
-      result.updateOperands[tensorIndex] = tensorUpdated;
-    } else {
-      result.updateResults[tensorIndex - projection.getNumOperands()] =
-          tensorUpdated;
-    }
+    result.updateOperands[tensorIndex] = tensorUpdated;
   }
-
   return result;
 }
 

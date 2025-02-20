@@ -81,6 +81,15 @@ class AggressiveFactorPropagation : public BasicFactorPropagation {
       PropagationDirectionAlongFactor directionAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
       bool conservativePropagation) const override;
+
+ private:
+  // Returns the axes to propagate to an individual factor in the given
+  // `tensorFactorShardings` of a tensor.
+  SmallVector<AxisRefAttr> getPropagatedFactorSharding(
+      int64_t factorIndex, const TensorFactorShardings& tensorFactorShardings,
+      const FactorIndexToSharding& factorIndexToSharding,
+      AxesPerFactorRef axesPerFactor, MeshAttr mesh,
+      bool conservativePropagation, ArrayRef<int64_t> factorSizes) const;
 };
 
 }  // namespace sdy

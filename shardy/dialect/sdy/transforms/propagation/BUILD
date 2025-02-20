@@ -260,6 +260,7 @@ cc_library(
         ":utils",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:macros",
+        "//shardy/dialect/sdy/transforms/common:op_properties",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
