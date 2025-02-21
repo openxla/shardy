@@ -128,6 +128,20 @@ int64_t isScalar(Value value) {
   return false;
 }
 
+MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName) {
+  return SymbolTable::lookupNearestSymbolFrom<sdy::MeshOp>(
+      op, meshSymName);
+}
+
+MeshOp getMeshOp(Operation* op, StringRef meshName) {
+  return getMeshOp(op, SymbolRefAttr::get(op->getContext(), meshName));
+}
+
+MeshOp getMeshOp(const SymbolTable& symbolTable, StringRef meshName) {
+  return symbolTable.lookup<MeshOp>(meshName);
+}
+
+
 MeshAttr getMeshOrLookup(const SymbolTable& symbolTable, Attribute meshOrRef) {
   if (auto mesh = dyn_cast<MeshAttr>(meshOrRef)) {
     return mesh;
@@ -143,7 +157,7 @@ MeshAttr getMeshOrLookup(Operation* op, Attribute meshOrRef) {
 }
 
 MeshAttr getMeshAttr(const SymbolTable& symbolTable, StringRef meshName) {
-  if (auto meshOp = symbolTable.lookup<MeshOp>(meshName)) {
+  if (MeshOp meshOp = getMeshOp(symbolTable, meshName)) {
     return meshOp.getMesh();
   }
 
@@ -160,8 +174,7 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName) {
 }
 
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
-  if (auto meshOp =
-          SymbolTable::lookupNearestSymbolFrom<MeshOp>(op, meshSymName)) {
+  if (MeshOp meshOp = getMeshOp(op, meshSymName)) {
     return meshOp.getMesh();
   }
 
