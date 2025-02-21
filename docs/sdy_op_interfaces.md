@@ -10,7 +10,8 @@ outSharding attribute.
 **Constraints:**
 - Operand must have a sharding.
 - `out_sharding` is valid w.r.t the corresponding type.
-- MeshAttr of result and operand is the same.
+- Operand and result sharding must have the same mesh if
+  `allowDifferentMeshes()` returns false.
 - Same rank for the operand and result sharding.
 
 ### Methods:
@@ -52,6 +53,17 @@ NOTE: This method *must* be implemented by the user.
 ```
 
 Get the type of the collective op result.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `allowDifferentMeshes`
+
+```c++
+bool allowDifferentMeshes();
+```
+
+Indicated whether the collective op allows the input and output sharding
+to have different meshes.
 
 NOTE: This method *must* be implemented by the user.
 
