@@ -589,7 +589,9 @@ def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
 // device order between the mesh of the input and output of a reshard.
 
 def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
-    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
+         /*methodOverrides=*/["allowDifferentMeshes"]>]> {
   let summary = "Performs a collective-permute communication to replace axes";
   let description = [{
     Sends a chunk of the input tensor from each device to another to
@@ -615,6 +617,8 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
 
     **Constraints:**
     - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+    - If input and output sharding have different meshes, then those meshes must
+      have exactly the same axes and different order of device ids.
     - For each dimension, the product of sharding axis sizes in `out_sharding`
       must match that of the corresponding operand dimension sharding.
   }];

@@ -1240,6 +1240,20 @@ LogicalResult CollectivePermuteOp::verify() {
   TensorShardingAttr operandSharding = getSharding(getOperand());
   TensorShardingAttr resultSharding = getOutSharding();
   MeshAttr mesh = resultSharding.getMesh(*this);
+  MeshAttr operandMesh = operandSharding.getMesh(*this);
+  if (mesh.getAxes() != operandMesh.getAxes()) {
+    return emitOpError("result mesh has different axes than operand mesh")
+               .attachNote(getTensor().getLoc())
+           << "operand mesh: " << operandMesh;
+  }
+  if (operandSharding.getMeshOrRef() != resultSharding.getMeshOrRef() &&
+      mesh.getDeviceIds() == operandMesh.getDeviceIds()) {
+    return emitOpError(
+               "result mesh name is different but same device ids as operand")
+               .attachNote(getTensor().getLoc())
+           << "operand mesh: " << operandMesh;
+  }
+
   ArrayRef<DimensionShardingAttr> resultDimShardings =
       resultSharding.getDimShardings();
   ArrayRef<DimensionShardingAttr> operandDimShardings =
@@ -1286,13 +1300,14 @@ LogicalResult verifyCollectiveOp(Operation* rawOp) {
   }
 
   // 3. Verify MeshAttr of result and operand is the same.
-  MeshAttr mesh = resultSharding.getMesh(collectiveOp);
-  MeshAttr operandMesh = operandSharding.getMesh(collectiveOp);
-
-  if (mesh != operandMesh) {
-    return collectiveOp.emitOpError("result mesh does not match operand mesh")
-               .attachNote(collectiveOp.getTensor().getLoc())
-           << "operand mesh: " << operandMesh;
+  if (!collectiveOp.allowDifferentMeshes()) {
+    MeshAttr mesh = resultSharding.getMesh(collectiveOp);
+    MeshAttr operandMesh = operandSharding.getMesh(collectiveOp);
+    if (mesh != operandMesh) {
+      return collectiveOp.emitOpError("result mesh does not match operand mesh")
+                 .attachNote(collectiveOp.getTensor().getLoc())
+             << "operand mesh: " << operandMesh;
+    }
   }
 
   // 4. Verify same rank of the result sharding and operand sharding.

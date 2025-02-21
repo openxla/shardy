@@ -5,6 +5,8 @@ sdy.mesh @mesh2d = <["x"=2, "y"=2]>
 sdy.mesh @mesh2d_4x2 = <["x"=4, "y"=2]>
 sdy.mesh @mesh2d_2x8 = <["x"=2, "y"=8]>
 sdy.mesh @mesh2d_2x3 = <["x"=2, "y"=3]>
+sdy.mesh @mesh2d_non_iota = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
+sdy.mesh @mesh2d_non_iota_2 = <["x"=2, "y"=2], device_ids=[3, 1, 2, 0]>
 sdy.mesh @mesh3d = <["x"=2, "y"=2, "z"=2]>
 sdy.mesh @mesh3d_4x2x4 = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh4d = <["x"=2, "y"=2, "z"=2, "w"=2]>
@@ -592,6 +594,62 @@ func.func @replace_sub_axes_3(%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.shard
   // CHECK-NEXT: return %[[ALL_GATHER]]
   %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w"}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reorder_device_ids
+func.func @reorder_device_ids(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d_non_iota, [{"x"}, {"y"}]>
+  // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{"x"}, {"y"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reorder_axes_and_device_ids
+func.func @reorder_axes_and_device_ids(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"x", "y"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d_non_iota, [{"y", "x"}, {}]>
+  // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{"y", "x"}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reorder_device_ids_then_all_gather
+func.func @reorder_device_ids_then_all_gather(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d_non_iota, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"y"}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_non_iota, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{"x"}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @slice_then_reorder_axes_and_device_ids
+func.func @slice_then_reorder_axes_and_device_ids(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %arg0 out_sharding=<@mesh2d, [{"x", "y"}, {}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_non_iota, [{"y", "x"}, {}]>
+  // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{"y", "x"}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @slice_then_reorder_device_ids_then_all_to_all
+func.func @slice_then_reorder_device_ids_then_all_to_all(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d_non_iota, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %arg0 out_sharding=<@mesh2d_non_iota, [{"x", "y"}, {}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_non_iota_2, [{"x", "y"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"x", "y"} 0->1 %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_non_iota_2, [{}, {"x", "y"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota_2, [{}, {"x", "y"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// This test also verifies that axes aren't reordered when it's not necessary,
+// even when device ids are reordered.
+// CHECK-LABEL: func @reorder_device_ids_then_two_all_to_alls
+func.func @reorder_device_ids_then_two_all_to_alls(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{}, {"y", "x"}, {}]>}) -> tensor<16x8x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d_non_iota, [{}, {"y", "x"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all {"x"} 1->0 %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_non_iota, [{"x"}, {"y"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all {"y"} 1->2 %[[ALL_TO_ALL_0]] out_sharding=<@mesh2d_non_iota, [{"x"}, {}, {"y"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{"x"}, {}, {"y"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
 }
 
 // TODO(b/391138813): Add proper support for axes that can't co-exist

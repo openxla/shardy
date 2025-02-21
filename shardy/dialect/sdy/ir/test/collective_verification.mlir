@@ -396,23 +396,35 @@ func.func @all_to_all_incompatible_result_sharding_non_moved_dim(%arg0 : tensor<
 
 // -----
 
-sdy.mesh @mesh1 = <["x"=2, "y"=2]>
-sdy.mesh @mesh2 = <["a"=2, "b"=2]>
-
-// expected-note @+1 {{operand mesh: #sdy.mesh<["a"=2, "b"=2]>}}
-func.func @collective_permute_with_incompatible_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"a"}, {"b"}]>}) -> tensor<16x8xf32> {
-  // expected-error @+1 {{result mesh does not match operand mesh}}
-  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh1, [{"x"}, {"y"}]> :  tensor<16x8xf32>
-  return %0 : tensor<16x8xf32>
-}
-
-// -----
-
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @collective_permute_invalid_out_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "x"}}
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{"y", "x"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh1 = <["x"=2, "y"=4]>
+sdy.mesh @mesh2 = <["x"=4, "y"=2]>
+
+// expected-note @+1 {{operand mesh: #sdy.mesh<["x"=4, "y"=2]>}}
+func.func @collective_permute_with_incompatible_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result mesh has different axes than operand mesh}}
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh1, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh1 = <["x"=2, "y"=4]>
+sdy.mesh @mesh2 = <["x"=2, "y"=4]>
+
+// expected-note @+1 {{operand mesh: #sdy.mesh<["x"=2, "y"=4]>}}
+func.func @collective_permute_with_different_but_identical_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result mesh name is different but same device ids as operand}}
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh2, [{"x"}, {"y"}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 

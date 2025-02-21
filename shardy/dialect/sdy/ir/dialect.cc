@@ -1393,6 +1393,14 @@ LogicalResult NamedComputationOp::inferReturnTypes(
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// CollectivePermuteOp
+//===----------------------------------------------------------------------===//
+
+bool CollectivePermuteOp::allowDifferentMeshes() { return true; }
+
+Type CollectivePermuteOp::getType() { return getResult().getType(); }
+
 }  // namespace sdy
 }  // namespace mlir
 

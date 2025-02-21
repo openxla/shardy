@@ -250,7 +250,8 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
     **Constraints:**
     - Operand must have a sharding.
     - `out_sharding` is valid w.r.t the corresponding type.
-    - MeshAttr of result and operand is the same.
+    - Operand and result sharding must have the same mesh if
+      `allowDifferentMeshes()` returns false.
     - Same rank for the operand and result sharding.
   }];
   let cppNamespace = "::mlir::sdy";
@@ -279,6 +280,17 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
       /*desc=*/[{ Get the type of the collective op result. }],
       /*retType=*/"::mlir::Type",
       /*methodName=*/"getType"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Indicated whether the collective op allows the input and output sharding
+        to have different meshes.
+      }],
+      /*retType=*/"bool",
+      /*methodName=*/"allowDifferentMeshes",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/"return false;"
     >
   ];
   let verify = [{

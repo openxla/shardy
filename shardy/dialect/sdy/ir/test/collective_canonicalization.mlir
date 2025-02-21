@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -canonicalize | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
+sdy.mesh @mesh_non_iota = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
 
 // CHECK-LABEL: func @null_all_gather
 func.func @null_all_gather(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
@@ -34,6 +35,14 @@ func.func @null_all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<
 func.func @null_collective_permute(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
   // CHECK-NEXT: return %arg0 : tensor<16x2xf32>
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @collective_permute_reorder_device_ids
+func.func @collective_permute_reorder_device_ids(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh_non_iota, [{"y"}, {"x"}]>
+  // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]]
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_non_iota, [{"y"}, {"x"}]> :  tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
 }
 

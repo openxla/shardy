@@ -24,11 +24,14 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
+#include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
@@ -322,14 +325,14 @@ struct AllToAllInfo {
 class CollectiveInserter {
  public:
   CollectiveInserter(TensorShardingAttr inSharding,
-                     TensorShardingAttr outSharding, MeshAttr mesh,
-                     Value result, ConversionPatternRewriter& rewriter,
-                     Location loc)
+                     TensorShardingAttr outSharding, Value result,
+                     ConversionPatternRewriter& rewriter, Operation* op)
       : rewriter(rewriter),
-        loc(loc),
-        mesh(mesh),
-        meshOrRef(inSharding.getMeshOrRef()),
+        loc(op->getLoc()),
         result(result),
+        mesh(inSharding.getMesh(op)),
+        curMeshName(inSharding.getMeshSymName()),
+        outMeshName(outSharding.getMeshSymName()),
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
         currentAxesPerDim(getAxesPerDim<SmallVector<AxisRefAttr>>(inSharding)),
@@ -390,9 +393,11 @@ class CollectiveInserter {
 
  private:
   // Returns true if the input sharding has been transformed into the output
-  // sharding, i.e., both `inAxesPerDim` and `outAxesPerDim` are empty.
+  // sharding, i.e., both `inAxesPerDim` and `outAxesPerDim` are empty and
+  // `curMeshName == outMeshName`.
   bool isDone() const {
-    return llvm::all_of(inAxesPerDim, std::mem_fn(&AxisList::empty)) &&
+    return curMeshName == outMeshName &&
+           llvm::all_of(inAxesPerDim, std::mem_fn(&AxisList::empty)) &&
            llvm::all_of(outAxesPerDim, std::mem_fn(&AxisList::empty));
   }
 
@@ -401,7 +406,7 @@ class CollectiveInserter {
   int64_t getRank() const { return inAxesPerDim.size(); }
 
   TensorShardingAttr getCurrentSharding() const {
-    return TensorShardingAttr::getClosed(getContext(), meshOrRef,
+    return TensorShardingAttr::getClosed(getContext(), curMeshName,
                                          currentAxesPerDim);
   }
 
@@ -1045,10 +1050,21 @@ class CollectiveInserter {
     // the actual creation of the collective permute, since the latter isn't
     // guaranteed to maintain the order of axes in case a collective permute is
     // actually redundant.
-    if (!shouldCollectivePermute()) {
+    if (shouldCollectivePermute()) {
+      performCollectivePermute();
+    } else if (curMeshName == outMeshName) {
       return;
     }
-    performCollectivePermute();
+    // If `curMeshName != outMeshName`, it means the output sharding has a mesh
+    // with a different order of device ids than that of the input sharding,
+    // which requires a collective permute. If `shouldCollectivePermute()` is
+    // false, we want to insert a collective permute to reorder the device ids
+    // without changing the sharding axes.
+    curMeshName = outMeshName;
+
+    // TODO(b/392797233): if the order of device ids changes, but the input or
+    // output sharding is fully replicated, we can skip the collective permute.
+
     result =
         rewriter.create<CollectivePermuteOp>(loc, result, getCurrentSharding());
   }
@@ -1200,9 +1216,9 @@ class CollectiveInserter {
 
   ConversionPatternRewriter& rewriter;
   Location loc;
-  MeshAttr mesh;
-  Attribute meshOrRef;
   Value result;
+  MeshAttr mesh;
+  FlatSymbolRefAttr curMeshName, outMeshName;
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;
   AxesPerDim currentAxesPerDim;
   SmallVector<int64_t> capacityPerDim;
@@ -1222,19 +1238,31 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
     TensorShardingAttr inSharding = getSharding(adaptor.getInput());
     TensorShardingAttr outSharding = adaptor.getSharding();
     // Here it's safe to assume that shardings' meshes have a name.
-    if (inSharding.getRank() != outSharding.getRank() ||
-        inSharding.getMeshName() != outSharding.getMeshName()) {
+    if (inSharding.getRank() != outSharding.getRank()) {
       return rewriter.notifyMatchFailure(
           op, [](Diagnostic& diag) { diag << "Incompatible shardings"; });
+    }
+    MeshAttr inMesh = inSharding.getMesh(op);
+    if (inSharding.getMeshName() != outSharding.getMeshName()) {
+       MeshAttr outMesh = outSharding.getMesh(op);
+       if (outMesh.getAxes() != inMesh.getAxes() ||
+           inMesh.getDeviceIds() == outMesh.getDeviceIds() ||
+           (inSharding.isFullyReplicated() &&
+            outSharding.isFullyReplicated())) {
+         // We currently only support a reshard between different meshes if
+         // they have the same axes and different device ids, and at least one
+         // of the sharding isn't fully replicated.
+         return rewriter.notifyMatchFailure(
+             op, [](Diagnostic& diag) { diag << "Incompatible meshes"; });
+       }
     }
 
     // TODO(tomnatan): we should verify that the operand of ReshardOp has a
     // sharding.
     // TODO(tomnatan): use a SymbolTable.
 
-    CollectiveInserter collectiveInserter(
-        inSharding, outSharding, inSharding.getMesh(op), adaptor.getInput(),
-        rewriter, op.getLoc());
+    CollectiveInserter collectiveInserter(inSharding, outSharding,
+                                          adaptor.getInput(), rewriter, op);
     rewriter.replaceOp(op, collectiveInserter.insert());
 
     return success();
