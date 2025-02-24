@@ -139,8 +139,20 @@ func.func @pass_through_factor_higher_priority_than_reduction_factor(
   %arg0: tensor<32x1024xf32>,
   %arg1: tensor<1024x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}
 ) -> (tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
-  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %arg1, precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : (tensor<32x1024xf32>, tensor<1024x16xf32>) -> tensor<32x16xf32>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %arg1, precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
   // CHECK-NEXT: return %[[DOT]] : tensor<32x16xf32>
   %0 = stablehlo.dot %arg0, %arg1, precision = [DEFAULT, DEFAULT] : (tensor<32x1024xf32>, tensor<1024x16xf32>) -> tensor<32x16xf32>
   return %0 : tensor<32x16xf32>
+}
+
+// CHECK-LABEL: func @broadcast_forward_higher_priority_than_backwards
+func.func @broadcast_forward_higher_priority_than_backwards(
+  %arg0: tensor<32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}
+) -> (tensor<32x16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}, {}]>}) {
+  // CHECK-NEXT: %[[BROADCAST_1:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  // CHECK-NEXT: %[[BROADCAST_2:.*]] = stablehlo.broadcast_in_dim %[[BROADCAST_1]], dims = [0, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}, {?}]>]>}
+  // CHECK-NEXT: return %[[BROADCAST_2]]
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<32xf32>) -> tensor<32x16xf32>
+  %1 = stablehlo.broadcast_in_dim %0, dims = [0, 1] : (tensor<32x16xf32>) -> tensor<32x16x8xf32>
+  return %1 : tensor<32x16x8xf32>
 }

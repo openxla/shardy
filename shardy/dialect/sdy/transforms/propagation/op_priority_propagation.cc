@@ -51,7 +51,7 @@ namespace {
 using GetDirectionToPropagateFnPtr = PropagationDirection (*)(Operation*,
                                                               int64_t);
 
-PropagationDirection isPassThrough(Operation* op, int64_t) {
+PropagationDirection isPassThroughOp(Operation* op, int64_t) {
   if (isElementwise(op) ||
       isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
     return PropagationDirection::BOTH;
@@ -64,18 +64,21 @@ PropagationDirection isPassThrough(Operation* op, int64_t) {
 
 // NOTE: if the `op` has no sharding rule, then we will assume it uses an
 // identity sharding rule. For example, `DataFlowEdgeOp`.
-PropagationDirection onlyPassThroughFactors(Operation* op,
-                                            int64_t factorIndex) {
+PropagationDirection onlyPassThroughFactorsBroadcastBackward(
+    Operation* op, int64_t factorIndex) {
   if (auto shardingRule =
           op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr);
       shardingRule && !shardingRule.isPassThroughFactor(factorIndex)) {
     return PropagationDirection::NONE;
   }
+  if (isa<stablehlo::BroadcastInDimOp>(op)) {
+    return PropagationDirection::BACKWARD;
+  }
   return PropagationDirection::BOTH;
 }
 
 constexpr std::array<GetDirectionToPropagateFnPtr, 3> opPropagationSchedule = {
-    isPassThrough, onlyPassThroughFactors, propagateAny};
+    isPassThroughOp, onlyPassThroughFactorsBroadcastBackward, propagateAny};
 
 // Returns the direction in which the given operation should be propagated.
 //
