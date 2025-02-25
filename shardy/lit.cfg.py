@@ -36,6 +36,7 @@ config.environment['FILECHECK_OPTS'] = '-enable-var-scope'
 tools = [
     'FileCheck',
     'sdy_opt',
+    'sdy_translate',
 ]
 tool_dirs = [
     config.llvm_tools_dir,
