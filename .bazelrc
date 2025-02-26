@@ -1,3 +1,6 @@
+# Use the "local" spawn strategy to improve build performance
+build --spawn_strategy=local
+
 # Flag to enable remote config
 common --experimental_repo_remote_exec
 
