@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 
@@ -35,7 +36,8 @@ ShardingGroupMap::ShardingGroupMap(ModuleOp moduleOp) {
     // After canonicalization all group ids will take distinct values in the
     // range 0,1,...,N. Because of this we can directly index these group ids
     // into the shardingGroupToValues vector (resizing when necessary).
-    shardingGroupToValues.resize(op.getGroupId() + 1);
+    shardingGroupToValues.resize(
+        std::max(op.getGroupId() + 1, shardingGroupToValues.size()));
     // Each value can only map to one sharding group id after
     // canonicalization.
     auto [it, inserted] =
