@@ -87,3 +87,25 @@ func.func @inlined_mesh(
     (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   return %1 : tensor<8x16xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: add_extra_sharding_constraint_for_incompatible_sharding_shardings(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}
+// CHECK-SAME:  ) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
+func.func @add_extra_sharding_constraint_for_incompatible_sharding_shardings(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"b", ?}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.reshard %[[WSC_0]] <@mesh, [{"a", ?}, {"b", ?}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {"b", ?}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC_3:.*]] = sdy.reshard %[[WSC_2]] <@mesh, [{"a", ?}, {"b", ?}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC_1]], %[[WSC_3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{}, {"b", ?}]> : tensor<8x8xf32>
+  sdy.sharding_group %0 group_id=1183 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {?}]> : tensor<8x8xf32>
+  sdy.sharding_group %1 group_id=1183 : tensor<8x8xf32>
+  %2 = stablehlo.add %0, %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : tensor<8x8xf32>
+  func.return %2: tensor<8x8xf32>
+}

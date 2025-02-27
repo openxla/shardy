@@ -219,7 +219,6 @@ def Sdy_ShardingGroupOp : Sdy_Op<"sharding_group",
   let results = (outs);
 
   let assemblyFormat = "$input `group_id````=```$group_id attr-dict `:` type($input)";
-  let hasCanonicalizer = 1;
 }
 
 def Sdy_ConstantOp : Sdy_Op<"constant",

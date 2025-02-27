@@ -63,10 +63,6 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
-  pm.addPass(createCanonicalizerPass(
-      getCanonicalizerConfig(/*enableRegionSimplification=*/false),
-      /*disabledPatterns=*/{},
-      /*enabledPatterns=*/{"DedupShardingGroupPattern"}));
   pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
                                                "sdy_module_after_sdy_import"));
 }
