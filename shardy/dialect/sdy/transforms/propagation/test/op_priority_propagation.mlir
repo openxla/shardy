@@ -35,6 +35,45 @@ func.func @element_wise_over_dot_general_flipped_op_order(%arg0: tensor<8x8xf32>
   return %2 : tensor<8x8xf32>
 }
 
+// If we propagated forward through element-wise ops with multiple uses in the
+// first iteration, the sharding on dim 0 would have been propagated to the two
+// add ops.
+// CHECK-LABEL: func @defer_forward_propagation_for_multi_use_ops
+func.func @defer_forward_propagation_for_multi_use_ops(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>}) {
+  // CHECK-NEXT: %[[SINE:.*]] = stablehlo.sine %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>}
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[SINE]], %[[SINE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[SINE]], %[[SINE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  // CHECK-NEXT: %[[MUL:.*]] = stablehlo.multiply %[[ADD_1]], %[[ADD_2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  // CHECK-NEXT: return %[[MUL]]
+  %1 = stablehlo.sine %arg0 : tensor<8x8xf32>
+  %2 = stablehlo.add %1, %1 : tensor<8x8xf32>
+  %3 = stablehlo.add %1, %1 : tensor<8x8xf32>
+  // Need the additinal op since it will get the result sharding regardless of
+  // op priority propagation.
+  %4 = stablehlo.multiply %2, %3 : tensor<8x8xf32>
+  return %4 : tensor<8x8xf32>
+}
+
+// If we propagated backwards through element-wise ops with a multi-use operand
+// in the first iteration, the sharding on dim 1 would have been propagated to
+// %arg0.
+// CHECK-LABEL: func @defer_backwards_propagation_for_op_with_multi_use_operand
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
+func.func @defer_backwards_propagation_for_op_with_multi_use_operand(%arg0: tensor<8x8xf32>)
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>},
+        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>}
+  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  // CHECK-NEXT: %[[SINE:.*]] = stablehlo.sine %[[ADD_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>}
+  // CHECK-NEXT: return %[[ADD_2]], %[[SINE]]
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %2 = stablehlo.sine %0 : tensor<8x8xf32>
+  return %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
 // Verify that the element-wise ops are sharded on dim 1 due to the
 // `sharding_constraint`. Without `sharding_constraint` haveing the
 // `Elementwise` trait, then the element-wise ops would be sharded on dim 0
