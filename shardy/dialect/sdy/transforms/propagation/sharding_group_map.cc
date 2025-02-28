@@ -37,7 +37,8 @@ ShardingGroupMap::ShardingGroupMap(ModuleOp moduleOp) {
     // range 0,1,...,N. Because of this we can directly index these group ids
     // into the shardingGroupToValues vector (resizing when necessary).
     shardingGroupToValues.resize(
-        std::max(op.getGroupId() + 1, shardingGroupToValues.size()));
+        std::max(op.getGroupId() + 1,
+                 static_cast<uint64_t>(shardingGroupToValues.size())));
     // Each value can only map to one sharding group id after
     // canonicalization.
     auto [it, inserted] =
