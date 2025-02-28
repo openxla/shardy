@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "shardy/dialect/sdy/ir/register.h"
 #include "shardy/dialect/sdy/transforms/passes.h"
+#include "shardy/round_trip_import/pipelines.h"
 
 int main(int argc, char** argv) {
   mlir::registerAllPasses();
@@ -36,6 +37,9 @@ int main(int argc, char** argv) {
 
   // Register all SDY passes and pipelines.
   mlir::sdy::registerAllSdyPassesAndPipelines();
+
+  // Register all SDY round-trip-import passes and the pipeline.
+  mlir::sdy::registerAllSdyRoundTripImportPassesAndPipeline();
 
   return mlir::asMainReturnCode(
       mlir::MlirOptMain(argc, argv, "SDY pass driver\n", registry));
