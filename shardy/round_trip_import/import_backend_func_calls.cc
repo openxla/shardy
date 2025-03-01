@@ -56,41 +56,41 @@ class BackendFuncCallPattern : public OpConversionPattern<CallOp> {
                                   const SymbolTable& symbolTable)
       : OpConversionPattern<CallOp>(context), symbolTable(symbolTable) {}
 
-  mlir::LogicalResult matchAndRewrite(
+  LogicalResult matchAndRewrite(
       CallOp callOp, OpAdaptor adaptor,
-      mlir::ConversionPatternRewriter& rewriter) const override {
+      ConversionPatternRewriter& rewriter) const override {
     if (!hasFrontendAttr(callOp, kXlaBackendConfigAttr)) {
-      return mlir::failure();
+      return failure();
     }
 
     FuncOp func = symbolTable.lookup<FuncOp>(adaptor.getCallee());
     assert(func &&
            ("Failed to lookup function: " + std::string(adaptor.getCallee()))
                .c_str());
-    mlir::SmallVector<mlir::NamedAttribute> namedCompAttrs;
+    SmallVector<NamedAttribute> namedCompAttrs;
     llvm::copy_if(callOp->getDiscardableAttrs(),
                   std::back_inserter(namedCompAttrs),
-                  [](const mlir::NamedAttribute& attr) {
+                  [](const NamedAttribute& attr) {
                     return attr.getName() != kShardingAttr;
                   });
 
     auto namedCompOp = rewriter.replaceOpWithNewOp<NamedComputationOp>(
         callOp, callOp->getResultTypes(), adaptor.getCallee(),
         adaptor.getOperands(), /*inShardings=*/nullptr,
-        /*outShardings=*/mlir::sdy::getShardingPerValue(callOp));
+        /*outShardings=*/getShardingPerValue(callOp));
     namedCompOp->setAttrs(namedCompAttrs);
     if (func.getBody().empty()) {
-      return rewriter.notifyMatchFailure(callOp, [](mlir::Diagnostic& diag) {
+      return rewriter.notifyMatchFailure(callOp, [](Diagnostic& diag) {
         diag << "Tried to use an already inlined FuncOp. Expected each CallOp "
                 "with backend_config to have a unique FuncOp.";
       });
     }
 
-    mlir::sdy::inlineRegionAndConvertTerminatorOp<mlir::sdy::ReturnOp>(
+    inlineRegionAndConvertTerminatorOp<ReturnOp>(
         func.getBody(), namedCompOp.getRegion(), rewriter);
     rewriter.eraseOp(func);
 
-    return mlir::success();
+    return success();
   }
 
  private:
@@ -99,8 +99,7 @@ class BackendFuncCallPattern : public OpConversionPattern<CallOp> {
 
 // Converts a `CallOp` with `backend_config` into a `NamedComputationOp`.
 class ImportBackendFuncCallsPass
-    : public mlir::PassWrapper<ImportBackendFuncCallsPass,
-                               mlir::OperationPass<mlir::ModuleOp>> {
+    : public PassWrapper<ImportBackendFuncCallsPass, OperationPass<ModuleOp>> {
  public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ImportBackendFuncCallsPass)
 
@@ -108,9 +107,9 @@ class ImportBackendFuncCallsPass
     // NOTE: Assume that there is a unique callee for each caller. So no need to
     // do a walk and copy the callees if there are multiple callers for the
     // callee.
-    mlir::MLIRContext& context = getContext();
-    mlir::ConversionTarget target(context);
-    target.addLegalOp<NamedComputationOp, mlir::sdy::ReturnOp>();
+    MLIRContext& context = getContext();
+    ConversionTarget target(context);
+    target.addLegalOp<NamedComputationOp, ReturnOp>();
     SymbolTable symbolTable(getOperation());
     target.addDynamicallyLegalOp<CallOp>([&](CallOp op) {
       // In case the assumption that each host-callback caller has a unique
@@ -118,10 +117,10 @@ class ImportBackendFuncCallsPass
       // verification, make sure that the callee is a function that exists.
       return !hasFrontendAttr(op, kXlaBackendConfigAttr);
     });
-    mlir::RewritePatternSet patterns(&context);
+    RewritePatternSet patterns(&context);
     patterns.add<BackendFuncCallPattern>(&context, symbolTable);
-    if (mlir::failed(mlir::applyPartialConversion(getOperation(), target,
-                                                  std::move(patterns)))) {
+    if (failed(applyPartialConversion(getOperation(), target,
+                                      std::move(patterns)))) {
       signalPassFailure();
     }
   }
@@ -139,12 +138,12 @@ class ImportBackendFuncCallsPass
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> createImportBackendFuncCallsPass() {
+std::unique_ptr<Pass> createImportBackendFuncCallsPass() {
   return std::make_unique<ImportBackendFuncCallsPass>();
 }
 
 void registerImportBackendFuncCallsPass() {
-  mlir::registerPass(createImportBackendFuncCallsPass);
+  registerPass(createImportBackendFuncCallsPass);
 }
 
 }  // namespace sdy

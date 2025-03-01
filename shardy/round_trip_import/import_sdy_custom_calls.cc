@@ -47,28 +47,28 @@ namespace {
 using ::mlir::stablehlo::CustomCallOp;
 using ::mlir::stablehlo::CustomCallOpAdaptor;
 
-mlir::LogicalResult rewriteShardingCustomCall(
-    CustomCallOp op, CustomCallOpAdaptor adaptor,
-    mlir::ConversionPatternRewriter& rewriter) {
+LogicalResult rewriteShardingCustomCall(CustomCallOp op,
+                                        CustomCallOpAdaptor adaptor,
+                                        ConversionPatternRewriter& rewriter) {
   if (op->getNumResults() != 1) {
     op.emitError() << "expected CustomCallOp with exactly one result";
-    return mlir::failure();
+    return failure();
   }
-  TensorShardingAttr sharding = mlir::sdy::getSharding(op->getResult(0));
+  TensorShardingAttr sharding = getSharding(op->getResult(0));
   if (!sharding) {
     op.emitError() << "expected CustomCallOp with a sharding attribute";
-    return mlir::failure();
+    return failure();
   }
 
   rewriter.replaceOpWithNewOp<ShardingConstraintOp>(
       op, adaptor.getInputs().front(), sharding);
 
-  return mlir::success();
+  return success();
 }
 
-mlir::LogicalResult rewriteShardingGroupCustomCall(
+LogicalResult rewriteShardingGroupCustomCall(
     CustomCallOp op, CustomCallOpAdaptor adaptor,
-    mlir::ConversionPatternRewriter& rewriter) {
+    ConversionPatternRewriter& rewriter) {
   assert(op.getNumOperands() == 1);
   assert(op.getNumResults() <= 1);
   std::optional<IntegerAttr> shardingGroupId =
@@ -84,15 +84,15 @@ mlir::LogicalResult rewriteShardingGroupCustomCall(
   rewriter.replaceOpWithNewOp<ShardingGroupOp>(op, adaptor.getInputs().front(),
                                                shardingGroupId->getInt());
 
-  return mlir::success();
+  return success();
 }
 
-class SdyCustomCallPattern : public mlir::OpConversionPattern<CustomCallOp> {
+class SdyCustomCallPattern : public OpConversionPattern<CustomCallOp> {
   using OpConversionPattern::OpConversionPattern;
 
-  mlir::LogicalResult matchAndRewrite(
+  LogicalResult matchAndRewrite(
       CustomCallOp op, OpAdaptor adaptor,
-      mlir::ConversionPatternRewriter& rewriter) const override {
+      ConversionPatternRewriter& rewriter) const override {
     if (op.getCallTargetName() == kShardingCustomCallTargetName) {
       return rewriteShardingCustomCall(op, adaptor, rewriter);
     }
@@ -110,23 +110,22 @@ class SdyCustomCallPattern : public mlir::OpConversionPattern<CustomCallOp> {
 // * xla.sdy.Sharding -> ShardingConstraintOp
 // * xla.sdy.ShardingGroup -> ShardingGroupOp
 class ImportSdyCustomCallsPass
-    : public mlir::PassWrapper<ImportSdyCustomCallsPass,
-                               mlir::OperationPass<mlir::ModuleOp>> {
+    : public PassWrapper<ImportSdyCustomCallsPass, OperationPass<ModuleOp>> {
  public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ImportSdyCustomCallsPass)
 
   void runOnOperation() final {
-    mlir::MLIRContext& context = getContext();
-    mlir::ConversionTarget target(context);
-    target.addLegalDialect<mlir::sdy::SdyDialect>();
+    MLIRContext& context = getContext();
+    ConversionTarget target(context);
+    target.addLegalDialect<SdyDialect>();
     target.addDynamicallyLegalOp<CustomCallOp>([](CustomCallOp op) {
       return op.getCallTargetName() != kShardingCustomCallTargetName &&
              op.getCallTargetName() != kShardingGroupCustomCallTargetName;
     });
-    mlir::RewritePatternSet patterns(&context);
+    RewritePatternSet patterns(&context);
     patterns.add<SdyCustomCallPattern>(&context);
-    if (mlir::failed(mlir::applyPartialConversion(getOperation(), target,
-                                                  std::move(patterns)))) {
+    if (failed(applyPartialConversion(getOperation(), target,
+                                      std::move(patterns)))) {
       signalPassFailure();
     }
   }
@@ -144,12 +143,12 @@ class ImportSdyCustomCallsPass
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> createImportSdyCustomCallsPass() {
+std::unique_ptr<Pass> createImportSdyCustomCallsPass() {
   return std::make_unique<ImportSdyCustomCallsPass>();
 }
 
 void registerImportSdyCustomCallsPass() {
-  mlir::registerPass(createImportSdyCustomCallsPass);
+  registerPass(createImportSdyCustomCallsPass);
 }
 
 }  // namespace sdy

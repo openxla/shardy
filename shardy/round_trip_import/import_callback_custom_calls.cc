@@ -36,8 +36,8 @@ namespace {
 using ::mlir::stablehlo::CustomCallOp;
 
 class SdyRoundTripImportCallbackCustomCallsPass
-    : public mlir::PassWrapper<SdyRoundTripImportCallbackCustomCallsPass,
-                               mlir::OperationPass<ModuleOp>> {
+    : public PassWrapper<SdyRoundTripImportCallbackCustomCallsPass,
+                         OperationPass<ModuleOp>> {
  public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
       SdyRoundTripImportCallbackCustomCallsPass)
@@ -47,7 +47,7 @@ class SdyRoundTripImportCallbackCustomCallsPass
       if (op->getNumResults() != 0 || !isPythonCallbackCustomCall(op)) {
         return;
       }
-      mlir::IRRewriter rewriter(op);
+      IRRewriter rewriter(op);
       // Shardy needs at least one op result to have a sharding annotation.
       // Since the callback has no results, and we need to say the callbacks
       // have a maximal sharding, we add a dummy result and set the result
@@ -69,19 +69,19 @@ class SdyRoundTripImportCallbackCustomCallsPass
            "compatible with SDY";
   }
 
-  void getDependentDialects(mlir::DialectRegistry& registry) const final {
-    registry.insert<mlir::stablehlo::StablehloDialect>();
+  void getDependentDialects(DialectRegistry& registry) const final {
+    registry.insert<stablehlo::StablehloDialect>();
   }
 };
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> createSdyRoundTripImportCallbackCustomCallsPass() {
+std::unique_ptr<Pass> createSdyRoundTripImportCallbackCustomCallsPass() {
   return std::make_unique<SdyRoundTripImportCallbackCustomCallsPass>();
 }
 
 void registerSdyRoundTripImportCallbackCustomCallsPass() {
-  mlir::registerPass(createSdyRoundTripImportCallbackCustomCallsPass);
+  registerPass(createSdyRoundTripImportCallbackCustomCallsPass);
 }
 
 }  // namespace sdy

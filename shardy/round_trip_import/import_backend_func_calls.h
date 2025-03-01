@@ -30,7 +30,7 @@ namespace sdy {
 // functions that require the callee to be propagated through.
 //
 // NOTE: it assumes that there is a unique callee for each caller.
-std::unique_ptr<mlir::Pass> createImportBackendFuncCallsPass();
+std::unique_ptr<Pass> createImportBackendFuncCallsPass();
 
 // Register the xla-sdy-import-backend-func-calls pass.
 void registerImportBackendFuncCallsPass();

@@ -30,7 +30,7 @@ namespace sdy {
 // callback custom calls are not guaranteed to return a value.
 // To allow the custom calls to have a maximal sharding, we change the return
 // type to return a dummy value.
-std::unique_ptr<mlir::Pass> createSdyRoundTripImportCallbackCustomCallsPass();
+std::unique_ptr<Pass> createSdyRoundTripImportCallbackCustomCallsPass();
 
 // Registers the xla-sdy-round-trip-import-callback-custom-calls pass.
 void registerSdyRoundTripImportCallbackCustomCallsPass();

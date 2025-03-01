@@ -29,7 +29,7 @@ namespace sdy {
 // - Converts sharding rules from `kShardingRuleRoundTripAttr` to
 //   `kShardingRuleAttr`
 // - Converts meshes from `kMeshesRoundTripAttr` to sdy.mesh symbols
-std::unique_ptr<mlir::Pass> createSdyRoundTripImportShardyAttrsPass();
+std::unique_ptr<Pass> createSdyRoundTripImportShardyAttrsPass();
 
 // Registers the xla-sdy-round-trip-import-shardy-attrs pass.
 void registerSdyRoundTripImportShardyAttrsPass();

@@ -27,7 +27,7 @@ namespace sdy {
 // `@xla.sdy.manual_computation_body` with in/out shardings and manual
 // axes as frontend attrs, wrapped with a pair of `CustomCallOp`s that change
 // the shape of the arguments/results, to a `ManualComputationOp`.
-std::unique_ptr<mlir::Pass> createSdyRoundTripShardMapImportPass();
+std::unique_ptr<Pass> createSdyRoundTripShardMapImportPass();
 
 // Registers the xla-sdy-round-trip-shard-map-import pass.
 void registerSdyRoundTripShardMapImportPass();

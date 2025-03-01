@@ -36,39 +36,36 @@ namespace sdy {
 
 // Gets the "frontend_attributes" `DictionaryAttr` from `op`. If it doesn't
 // exist, return nullptr.
-mlir::DictionaryAttr getFrontendAttrs(mlir::Operation* op);
+DictionaryAttr getFrontendAttrs(Operation* op);
 
 // Gets the `frontend_attributes` `DictionaryAttr` from `funcOp`'s arg at
 // `index`. If it doesn't exist, return nullptr.
-mlir::DictionaryAttr getFuncArgFrontendAttrs(mlir::func::FuncOp funcOp,
-                                             unsigned int index);
+DictionaryAttr getFuncArgFrontendAttrs(func::FuncOp funcOp, unsigned int index);
 
 // Remove `attributeName` from the frontend attributes of `op`.
-void removeFrontendAttribute(mlir::Operation* op,
-                             mlir::StringRef attributeName);
+void removeFrontendAttribute(Operation* op, StringRef attributeName);
 
 // Remove `attributeName` from the argument at `argNum`'s frontend attributes
 // of `funcOp`.
-void removeFrontendAttribute(mlir::func::FuncOp funcOp,
-                             mlir::StringRef attributeName, int64_t argNum);
+void removeFrontendAttribute(func::FuncOp funcOp, StringRef attributeName,
+                             int64_t argNum);
 
 // Checks if "frontend_attributes" `DictionaryAttr` from `op` contains `key`.
-bool hasFrontendAttr(mlir::Operation* op, mlir::StringRef key);
+bool hasFrontendAttr(Operation* op, StringRef key);
 
 // Checks if `dictAttr` exists and contains `key`.
-bool hasKey(mlir::DictionaryAttr dictAttr, mlir::StringRef key);
+bool hasKey(DictionaryAttr dictAttr, StringRef key);
 
 std::string cunescape(llvm::StringRef escapedValue);
 
 // Parses `attrName` from `dictAttr` to an attribute of type `AttrTy`.
 template <typename AttrTy>
-AttrTy parseStringAttr(mlir::DictionaryAttr dictAttr,
-                       llvm::StringRef attrName) {
-  if (mlir::Attribute stringAttr = dictAttr.get(attrName)) {
+AttrTy parseStringAttr(DictionaryAttr dictAttr, llvm::StringRef attrName) {
+  if (Attribute stringAttr = dictAttr.get(attrName)) {
     std::string unescapedValue =
-        cunescape(mlir::cast<mlir::StringAttr>(stringAttr).getValue());
-    return mlir::cast<AttrTy>(
-        mlir::parseAttribute(unescapedValue, stringAttr.getContext()));
+        cunescape(cast<StringAttr>(stringAttr).getValue());
+    return cast<AttrTy>(
+        parseAttribute(unescapedValue, stringAttr.getContext()));
   }
   return nullptr;
 }
@@ -77,9 +74,8 @@ AttrTy parseStringAttr(mlir::DictionaryAttr dictAttr,
 // and parses it to an attribute of type `AttrTy`. If it doesn't exist, then
 // returns std::nullopt.
 template <typename AttrTy>
-std::optional<AttrTy> tryGetFrontendAttr(mlir::Operation* op,
-                                         mlir::StringRef attrName) {
-  mlir::DictionaryAttr dictAttr = getFrontendAttrs(op);
+std::optional<AttrTy> tryGetFrontendAttr(Operation* op, StringRef attrName) {
+  DictionaryAttr dictAttr = getFrontendAttrs(op);
   if (hasKey(dictAttr, attrName)) {
     return parseStringAttr<AttrTy>(dictAttr, attrName);
   }
@@ -88,12 +84,11 @@ std::optional<AttrTy> tryGetFrontendAttr(mlir::Operation* op,
 
 // Builds a new `stablehlo.custom_call` with the same operands and attributes
 // as `op` but with new `resultTypes`.
-mlir::stablehlo::CustomCallOp cloneCustomCallWithNewResultTypes(
-    mlir::stablehlo::CustomCallOp op, mlir::TypeRange resultTypes,
-    mlir::IRRewriter& rewriter);
+stablehlo::CustomCallOp cloneCustomCallWithNewResultTypes(
+    stablehlo::CustomCallOp op, TypeRange resultTypes, IRRewriter& rewriter);
 
 // Whether `op` is a Python callback custom call.
-bool isPythonCallbackCustomCall(mlir::stablehlo::CustomCallOp op);
+bool isPythonCallbackCustomCall(stablehlo::CustomCallOp op);
 
 }  // namespace sdy
 }  // namespace mlir

@@ -106,30 +106,30 @@ void removeFrontendAttribute(FuncOp funcOp, StringRef attributeName,
       [&]() { funcOp.removeArgAttr(argNum, kFrontendAttributesAttr); });
 }
 
-bool hasFrontendAttr(mlir::Operation* op, mlir::StringRef key) {
+bool hasFrontendAttr(Operation* op, StringRef key) {
   return hasKey(getFrontendAttrs(op), key);
 }
 
-bool hasKey(mlir::DictionaryAttr dictAttr, mlir::StringRef key) {
+bool hasKey(DictionaryAttr dictAttr, StringRef key) {
   return dictAttr && dictAttr.contains(key);
 }
 
 CustomCallOp cloneCustomCallWithNewResultTypes(CustomCallOp op,
-                                               mlir::TypeRange resultTypes,
-                                               mlir::IRRewriter& rewriter) {
+                                               TypeRange resultTypes,
+                                               IRRewriter& rewriter) {
   auto customCallOp = rewriter.create<CustomCallOp>(
       op.getLoc(), resultTypes, op.getOperands(), op.getCallTargetNameAttr(),
       op.getHasSideEffectAttr(), op.getBackendConfigAttr(),
       op.getApiVersionAttr(), op.getCalledComputations(),
       op.getOperandLayoutsAttr(), op.getResultLayoutsAttr(),
       op.getOutputOperandAliases());
-  customCallOp->setDiscardableAttrs(mlir::DictionaryAttr::get(
+  customCallOp->setDiscardableAttrs(DictionaryAttr::get(
       op->getContext(), llvm::to_vector(op->getDiscardableAttrs())));
   return customCallOp;
 };
 
-bool isPythonCallbackCustomCall(mlir::stablehlo::CustomCallOp op) {
-  mlir::StringRef targetName = op.getCallTargetName();
+bool isPythonCallbackCustomCall(stablehlo::CustomCallOp op) {
+  StringRef targetName = op.getCallTargetName();
   return targetName == kPythonCpuCallbackCustomCallTargetName ||
          targetName == kPythonGpuCallbackCustomCallTargetName ||
          targetName == kFFIPythonCpuCallbackCustomCallTargetName ||

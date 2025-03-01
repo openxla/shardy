@@ -92,7 +92,7 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
     }
     // `SendOp` and `RecvOp` can have a sharding when doing TPU callbacks
     // through JAX.
-    if (mlir::isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
+    if (isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
       op->setAttr(kShardingAttr, parseStringAttr<TensorShardingPerValueAttr>(
                                      dictAttr, kShardingRoundTripAttr));
     }
@@ -102,7 +102,7 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
     // which may mean the shapes are wrong when the new instruction is a reshape
     // for example. This does mean we can't fully round-trip b/w HLO and MLIR
     // after SDY propagation.
-    if (auto customCallOp = mlir::dyn_cast<stablehlo::CustomCallOp>(op)) {
+    if (auto customCallOp = dyn_cast<stablehlo::CustomCallOp>(op)) {
       StringRef targetName = customCallOp.getCallTargetName();
       if (targetName == kFuncResultShardingTargetName) {
         // This is a temporary CustomCallOp that holds the sharding from a
@@ -110,13 +110,13 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
         // func result and delete the CustomCallOp.
         auto shardingPerValueAttr = parseStringAttr<TensorShardingPerValueAttr>(
             dictAttr, kShardingRoundTripAttr);
-        for (mlir::OpOperand& use :
+        for (OpOperand& use :
              llvm::make_early_inc_range(customCallOp->getUses())) {
           // We currently ignore users that are not the func return op.
           // This might happen due to inlined func ops that originally had
           // result shardings.
           // TODO(b/370984308): explore if we need to support this properly.
-          if (mlir::isa<mlir::func::ReturnOp>(use.getOwner())) {
+          if (isa<func::ReturnOp>(use.getOwner())) {
             funcOp.setResultAttr(use.getOperandNumber(), kShardingAttr,
                                  shardingPerValueAttr.getSharding(0));
             use.set(customCallOp.getOperand(0));
@@ -144,8 +144,8 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
 }
 
 class SdyRoundTripImportShardyAttrsPass
-    : public mlir::PassWrapper<SdyRoundTripImportShardyAttrsPass,
-                               mlir::OperationPass<ModuleOp>> {
+    : public PassWrapper<SdyRoundTripImportShardyAttrsPass,
+                         OperationPass<ModuleOp>> {
  public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
       SdyRoundTripImportShardyAttrsPass)
@@ -159,18 +159,18 @@ class SdyRoundTripImportShardyAttrsPass
     // the original Shardy model.
     std::optional<DictionaryAttr> meshesAttr =
         tryGetFrontendAttr<DictionaryAttr>(moduleOp, kMeshesRoundTripAttr);
-    mlir::ArrayRef<NamedAttribute> sdyMeshes =
-        meshesAttr.has_value() ? meshesAttr.value().getValue()
-                               : mlir::ArrayRef<NamedAttribute>();
+    ArrayRef<NamedAttribute> sdyMeshes = meshesAttr.has_value()
+                                             ? meshesAttr.value().getValue()
+                                             : ArrayRef<NamedAttribute>();
 
     IRRewriter rewriter(moduleOp);
     // Insert the meshes before any functions.
     rewriter.setInsertionPointToStart(moduleOp.getBody());
     SymbolTable symbolTable(moduleOp);
     for (NamedAttribute mesh : sdyMeshes) {
-      auto meshAttr = mlir::cast<MeshAttr>(mesh.getValue());
-      symbolTable.insert(rewriter.create<mlir::sdy::MeshOp>(
-          moduleOp.getLoc(), mesh.getName(), meshAttr));
+      auto meshAttr = cast<MeshAttr>(mesh.getValue());
+      symbolTable.insert(
+          rewriter.create<MeshOp>(moduleOp.getLoc(), mesh.getName(), meshAttr));
     }
     removeFrontendAttribute(moduleOp, kMeshesRoundTripAttr);
 
@@ -188,19 +188,19 @@ class SdyRoundTripImportShardyAttrsPass
            "attributes to SDY meshes, shardings and sharding rules.";
   }
 
-  void getDependentDialects(mlir::DialectRegistry& registry) const final {
-    registry.insert<mlir::sdy::SdyDialect>();
+  void getDependentDialects(DialectRegistry& registry) const final {
+    registry.insert<SdyDialect>();
   }
 };
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> createSdyRoundTripImportShardyAttrsPass() {
+std::unique_ptr<Pass> createSdyRoundTripImportShardyAttrsPass() {
   return std::make_unique<SdyRoundTripImportShardyAttrsPass>();
 }
 
 void registerSdyRoundTripImportShardyAttrsPass() {
-  mlir::registerPass(createSdyRoundTripImportShardyAttrsPass);
+  registerPass(createSdyRoundTripImportShardyAttrsPass);
 }
 
 }  // namespace sdy

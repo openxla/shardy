@@ -26,7 +26,7 @@ namespace sdy {
 // Creates a pass that imports sdy tagged `CustomCall` ops. Namely it converts
 // * xla.sdy.Sharding -> ShardingConstraintOp
 // * xla.sdy.ShardingGroup -> ShardingGroupOp
-std::unique_ptr<mlir::Pass> createImportSdyCustomCallsPass();
+std::unique_ptr<Pass> createImportSdyCustomCallsPass();
 
 // Register the xla-sdy-import-sdy-custom-calls pass.
 void registerImportSdyCustomCallsPass();
