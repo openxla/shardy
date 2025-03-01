@@ -274,6 +274,11 @@ TensorFactorShardings buildTensorFactorShardings(
   auto& [factorIndexToSharding, replicatedAxes] = result;
   factorIndexToSharding.reserve(factorSizes.size());
 
+  if (optionalSharding) {
+    assert(optionalSharding.getRank() == tensorMapping.getRank() &&
+           "mismatched rank between optionalSharding and tensorMapping");
+  }
+
   // 1. Populate factor shardings
   for (const auto [dim, dimMapping] :
        llvm::enumerate(tensorMapping.getDimMappings())) {

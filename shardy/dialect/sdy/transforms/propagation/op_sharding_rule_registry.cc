@@ -1029,10 +1029,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case<ModuleOp, func::FuncOp, ConstantOp, DataFlowEdgeOp,
             ManualComputationOp, MeshOp, PropagationBarrierOp,
             ShardableDataFlowOpInterface, ShardingGroupOp, ReshardOp,
-            stablehlo::CaseOp, stablehlo::ConstantOp, stablehlo::CreateTokenOp,
-            stablehlo::GetTupleElementOp, stablehlo::IotaOp,
-            stablehlo::OutfeedOp, stablehlo::OptimizationBarrierOp,
-            stablehlo::PartitionIdOp, stablehlo::RngBitGeneratorOp,
+            stablehlo::AfterAllOp, stablehlo::CaseOp, stablehlo::ConstantOp,
+            stablehlo::CreateTokenOp, stablehlo::GetTupleElementOp,
+            stablehlo::InfeedOp, stablehlo::IotaOp, stablehlo::OutfeedOp,
+            stablehlo::OptimizationBarrierOp, stablehlo::PartitionIdOp,
+            stablehlo::RecvOp, stablehlo::RngBitGeneratorOp, stablehlo::SendOp,
             stablehlo::WhileOp>([](Operation*) { return OpShardingRuleAttr(); })
       .Case<ShardingRuleOpInterface>(
           [](ShardingRuleOpInterface shardingRuleOp) {

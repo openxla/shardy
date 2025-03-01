@@ -265,6 +265,17 @@ LogicalResult propagateTensorShardings(
   }
   MeshAttr mesh = getMeshAttr(op, meshName.value());
   assert(mesh && "unknown mesh");
+  if (mesh.isMaximal()) {
+    // Maximal meshes and shardings are usually a placeholder for special
+    // operations, such as send and recv. We do not propagate maximal shardings
+    // to their operands or users.
+    if (rewriter) {
+      return rewriter->notifyMatchFailure(op, [](Diagnostic& diag) {
+        diag << "Shardy does not propagate maximal shardings.";
+      });
+    }
+    return failure();
+  }
 
   std::optional<NotifyOpModifiedCallback> notifyOpModified = std::nullopt;
   if (rewriter) {
