@@ -335,7 +335,6 @@ func.func @reshape_merge_dim_major_factor_fully_sharded(
 func.func @reshape_merge_dim_major_factor_partially_sharded(
     %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}) -> tensor<16xf32> {
   // CHECK-NEXT: stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}]>]>}
-  // expected-warning@+1 {{can't propagate sharding as strided view is needed}}
   %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
   return %0 : tensor<16xf32>
 }

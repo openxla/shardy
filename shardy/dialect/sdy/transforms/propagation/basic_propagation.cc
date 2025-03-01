@@ -169,10 +169,6 @@ bool updateTensorSharding(Value modifiedValue,
   if ((!oldTensorSharding && newSharding.emptyAxes()) ||
       newSharding == oldTensorSharding) {
     // This means no update can be done to the sharding.
-    // TODO(tomnatan): find a way to warn about this silently.
-    static llvm::once_flag flag;
-    emitOpWarningOnce(flag, getOwningOp(modifiedValue),
-                      "can't propagate sharding as strided view is needed");
     return false;
   }
 
@@ -358,10 +354,9 @@ LogicalResult propagateTensorShardings(
 
 // Propagates the shardings between the operands of the `funcOp`'s terminator
 // and the `funcOp`'s result type attrs.
-LogicalResult propagateFuncResults(FuncOp funcOp,
-                                   const SymbolTable& symbolTable,
-                                   const FactorPropagation& factorPropagation,
-                                   const ShardingGroupMap& shardingGroupMap) {
+void propagateFuncResults(FuncOp funcOp, const SymbolTable& symbolTable,
+                          const FactorPropagation& factorPropagation,
+                          const ShardingGroupMap& shardingGroupMap) {
   for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
     Value returnValue = returnOperand.get();
     auto tensorType = dynCastStaticShapedType(returnValue.getType());
@@ -407,22 +402,17 @@ LogicalResult propagateFuncResults(FuncOp funcOp,
         /*conservativePropagation=*/false, funcOp, symbolTable,
         /*rewriter=*/nullptr, shardingGroupMap);
   }
-  return success();
 }
 
 // Overload of `propagateFuncResults` to propagate operand/result shardings of
 // every `FuncOp` in `moduleOp`.
-LogicalResult propagateFuncResults(ModuleOp moduleOp,
-                                   const SymbolTable& symbolTable,
-                                   const FactorPropagation& factorPropagation,
-                                   const ShardingGroupMap& shardingGroupMap) {
+void propagateFuncResults(ModuleOp moduleOp, const SymbolTable& symbolTable,
+                          const FactorPropagation& factorPropagation,
+                          const ShardingGroupMap& shardingGroupMap) {
   for (auto funcOp : moduleOp.getOps<FuncOp>()) {
-    if (failed(propagateFuncResults(funcOp, symbolTable, factorPropagation,
-                                    shardingGroupMap))) {
-      return failure();
-    }
+    propagateFuncResults(funcOp, symbolTable, factorPropagation,
+                         shardingGroupMap);
   }
-  return success();
 }
 
 // Propagates the sharding of an operation (between operands and results) that
@@ -610,10 +600,8 @@ LogicalResult BasicPropagationPassImpl::propagate(
     GetDirectionToPropagateFn getDirectionToPropagate) {
   // Pushes any shardings that exist on the `funcOp` result type attrs to the
   // corresponding values returned in the terminator of the body of `funcOp`.
-  if (failed(propagateFuncResults(moduleOp, symbolTable, factorPropagation,
-                                  shardingGroupMap))) {
-    return failure();
-  }
+  propagateFuncResults(moduleOp, symbolTable, factorPropagation,
+                       shardingGroupMap);
   MLIRContext* context = moduleOp.getContext();
   RewritePatternSet patterns(context);
   patterns.add<PropagatePropagationBarrier>(
@@ -626,26 +614,30 @@ LogicalResult BasicPropagationPassImpl::propagate(
       conservativePropagation, shardingGroupMap);
   // We only need a single iteration (and another to confirm convergence), since
   // we make sure ops whose sharding changes are added back to the worklist.
+  // Only issue a warning if failed to converge in debug builds, otherwise we
+  // set the max iterations to 1, to avoid the redundant iteration to check
+  // convergence.
   GreedyRewriteConfig config;
   config.useTopDownTraversal = true;
   config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;
+  config.maxIterations = 1;
+#ifndef NDEBUG
+  config.maxIterations = 2;
+#endif
   config.fold = false;
   config.cseConstants = false;
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
-    // We should always converge in 2 iterations, if we don't, something is
-    // wrong.
-    moduleOp->emitError("Failed to converge after ")
-        << config.maxIterations
-        << " iterations. please contact the Shardy team.";
-    return failure();
+  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns), config)) &&
+      config.maxIterations > 1) {
+    // We should always converge in 2 iterations, otherwise something is wrong.
+    emitWarning(moduleOp->getLoc(), "Failed to converge after ")
+        << config.maxIterations << " iterations, this shouldn't happen. "
+        << "please contact the Shardy team.";
   }
 
   // Pushes any shardings from the values returned in the terminator of the body
   // of `funcOp` to the corresponding `funcOp` result type attrs.
-  if (failed(propagateFuncResults(moduleOp, symbolTable, factorPropagation,
-                                  shardingGroupMap))) {
-    return failure();
-  }
+  propagateFuncResults(moduleOp, symbolTable, factorPropagation,
+                       shardingGroupMap);
   return success();
 }
 
