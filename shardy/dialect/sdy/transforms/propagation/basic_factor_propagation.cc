@@ -176,31 +176,14 @@ using DirectionBasedTensorShardings =
 // The same holds for backwards propagation, except we allow expansion based
 // on the result factor shardings but not the operands.
 std::optional<DirectionBasedTensorShardings> getDirectionBasedTensorShardings(
-    PropagationDirection direction, Operation* op,
-    ArrayRef<TensorFactorShardings> operands,
+    PropagationDirection direction, ArrayRef<TensorFactorShardings> operands,
     ArrayRef<TensorFactorShardings> results) {
-  static const char* errMsg =
-      "since Shardy is propagating {0} for this op, Shardy may not "
-      "fully propagate to each of the multiple {1}s; {0} "
-      "propagation was designed with single {1} ops in mind. Let the "
-      "Shardy team know the operation that you'd like to be fully "
-      "supported.";
-  static llvm::once_flag flag;
   switch (direction) {
     case PropagationDirection::BOTH:
-      return std::make_pair(operands, results);
     case PropagationDirection::FORWARD: {
-      if (op && results.size() > 1) {
-        emitOpWarningOnce(flag, op,
-                          llvm::formatv(errMsg, "forward", "result").str());
-      }
       return std::make_pair(operands, results);
     }
     case PropagationDirection::BACKWARD: {
-      if (op && operands.size() > 1) {
-        emitOpWarningOnce(flag, op,
-                          llvm::formatv(errMsg, "backward", "operand").str());
-      }
       return std::make_pair(results, operands);
     }
     case PropagationDirection::NONE:
@@ -311,7 +294,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
   }
 
   std::optional<DirectionBasedTensorShardings> tensorShardings =
-      getDirectionBasedTensorShardings(direction, op, projection.getOperands(),
+      getDirectionBasedTensorShardings(direction, projection.getOperands(),
                                        projection.getResults());
   assert(tensorShardings.has_value());
 

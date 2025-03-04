@@ -21,15 +21,18 @@ limitations under the License.
 #include <memory>
 #include <numeric>
 
+#include "llvm/ADT/STLExtras.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "shardy/dialect/sdy/transforms/propagation/aggressive_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
@@ -51,15 +54,53 @@ namespace {
 using GetDirectionToPropagateFnPtr = PropagationDirection (*)(Operation*,
                                                               int64_t);
 
-PropagationDirection isPassThroughOp(Operation* op, int64_t) {
-  if (isElementwise(op) ||
-      isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
+// Returns the direction to propagate based on whether any of the op's operands
+// has multiple uses.
+//
+// The rational is that if any of the operands has multiple uses:
+// - We don't want to propagate forward, to avoid introducing a conflict for
+//   each use of the operand.
+// - We don't want to propagate backwards, since there could be a conflict with
+//   another use of the operand.
+//
+// If `allowMultiUse` is true, returns `BOTH` regardless of the number of uses.
+PropagationDirection getDirectionBasedOnUses(Operation* op,
+                                             bool allowMultiUse) {
+  if (allowMultiUse) {
     return PropagationDirection::BOTH;
   }
+
+  bool anyOperandMultipleUses =
+      llvm::any_of(op->getOperands(), [&](Value operand) {
+        // We can ignore scalar operands, since they can't be sharded.
+        return !operand.hasOneUse() && !isScalar(operand);
+      });
+  return anyOperandMultipleUses ? PropagationDirection::NONE
+                                : PropagationDirection::BOTH;
+}
+
+PropagationDirection isPassThroughOp(Operation* op, int64_t factorIndex,
+                                     bool allowMultiUse) {
+  if (isElementwise(op) ||
+      isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
+    return getDirectionBasedOnUses(op, allowMultiUse);
+  }
   if (isa<stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp>(op)) {
-    return PropagationDirection::FORWARD;
+    return intersectionOfPropagationDirections(
+        getDirectionBasedOnUses(op, allowMultiUse),
+        PropagationDirection::FORWARD);
   }
   return PropagationDirection::NONE;
+}
+
+PropagationDirection isPassThroughOpSingleUse(Operation* op,
+                                              int64_t factorIndex) {
+  return isPassThroughOp(op, factorIndex, /*allowMultiUse=*/false);
+}
+
+PropagationDirection isPassThroughOpMultiUse(Operation* op,
+                                             int64_t factorIndex) {
+  return isPassThroughOp(op, factorIndex, /*allowMultiUse=*/true);
 }
 
 // NOTE: if the `op` has no sharding rule, then we will assume it uses an
@@ -77,8 +118,9 @@ PropagationDirection onlyPassThroughFactorsBroadcastBackward(
   return PropagationDirection::BOTH;
 }
 
-constexpr std::array<GetDirectionToPropagateFnPtr, 3> opPropagationSchedule = {
-    isPassThroughOp, onlyPassThroughFactorsBroadcastBackward, propagateAny};
+constexpr std::array<GetDirectionToPropagateFnPtr, 4> opPropagationSchedule = {
+    isPassThroughOpSingleUse, isPassThroughOpMultiUse,
+    onlyPassThroughFactorsBroadcastBackward, propagateAny};
 
 // Returns the direction in which the given operation should be propagated.
 //
