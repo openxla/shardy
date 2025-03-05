@@ -14,10 +14,12 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
+#include <functional>
 #include <memory>  // IWYU pragma: keep
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
@@ -62,11 +64,21 @@ bool isUsedByOtherShardingConstraint(
       });
 }
 
-// Returns true if `input` should have its sharding set to `sharding` of the
-// sharding constraint `op`.
-bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
-  if (getSharding(input) || input.getDefiningOp<DataFlowEdgeOp>()) {
-    // `input` already has a sharding or is produced by a `DataFlowEdgeOp`.
+void moveAfterValue(Operation* op, Value value) {
+  if (Operation* defOp = value.getDefiningOp()) {
+    op->moveAfter(defOp);
+  } else {
+    // Move to front of block.
+    Block* block = cast<BlockArgument>(value).getOwner();
+    op->moveBefore(block, block->begin());
+  }
+}
+
+// Returns true if `input` should have its sharding set to `sharding` of a
+// sharding constraint.
+bool shouldApply(Value input, TensorShardingAttr sharding) {
+  if (getSharding(input)) {
+    // `input` already has a sharding.
     return false;
   }
 
@@ -82,6 +94,28 @@ bool shouldApply(Value input, TensorShardingAttr sharding, Operation* op) {
   // Return true if `input` has no other uses of type `ShardingConstraintOp` or
   // `ManualComputationOp` with a different sharding.
   return !isUsedByConstraintWithDifferentSharding(input, sharding);
+}
+
+// Applies the `sharding` of a sharding constraint to `input` if `shouldApply`
+// returns true.
+//
+// If `input` is produced by a `DataFlowEdgeOp`, then instead of setting the
+// ops's sharding to `sharding`, we replace all uses of `input` with the
+// `ShardingConstraintOp` returned by `getConstraintAfterValue`. This is to
+// avoid restricting the sharding of all targets of the edge and to match GSPMD.
+void applyConstraint(
+    Value input, TensorShardingAttr sharding,
+    std::function<ShardingConstraintOp()> getConstraintAfterValue) {
+  if (!shouldApply(input, sharding)) {
+    return;
+  }
+
+  if (input.getDefiningOp<DataFlowEdgeOp>()) {
+    ShardingConstraintOp shardingConstraintOp = getConstraintAfterValue();
+    input.replaceAllUsesExcept(shardingConstraintOp, shardingConstraintOp);
+  } else {
+    setSharding(input, sharding);
+  }
 }
 
 // If `curShardingConstraintOp` is the last `ShardingConstraintOp` in a chain
@@ -129,16 +163,19 @@ struct ApplyShardingConstraintsPass
   using ApplyShardingConstraintsPassBase::ApplyShardingConstraintsPassBase;
 
   void runOnOperation() final {
-    getOperation().walk([](Operation* op) {
+    OpBuilder builder(&getContext());
+    getOperation().walk([&](Operation* op) {
       TypeSwitch<Operation*>(op)
           .Case<ShardingConstraintOp>(
               [](ShardingConstraintOp shardingConstraintOp) {
                 Value input = shardingConstraintOp.getInput();
                 TensorShardingAttr sharding =
                     shardingConstraintOp.getSharding();
-                if (shouldApply(input, sharding, shardingConstraintOp)) {
-                  setSharding(input, sharding);
-                }
+                applyConstraint(input, sharding,
+                                /*getConstraintAfterValue=*/[&]() {
+                                  moveAfterValue(shardingConstraintOp, input);
+                                  return shardingConstraintOp;
+                                });
 
                 // If `shardingConstraintOp` is the last op in a chain of at
                 // least two sharding constraints, and the input of the chain
@@ -163,13 +200,20 @@ struct ApplyShardingConstraintsPass
                 }
               })
           .Case<ManualComputationOp>(
-              [](ManualComputationOp manualComputationOp) {
+              [&](ManualComputationOp manualComputationOp) {
                 for (auto [operand, sharding] : llvm::zip_equal(
                          manualComputationOp.getOperands(),
                          manualComputationOp.getInShardings().getShardings())) {
-                  if (shouldApply(operand, sharding, manualComputationOp)) {
-                    setSharding(operand, sharding);
-                  }
+                  applyConstraint(
+                      operand, sharding,
+                      /*getConstraintAfterValue=*/
+                      [&, operand = operand, sharding = sharding]() {
+                        // We can't move the `ManualComputationOp`, so we create
+                        // a new `ShardingConstraintOp` after the operand.
+                        builder.setInsertionPointAfterValue(operand);
+                        return builder.create<ShardingConstraintOp>(
+                            manualComputationOp.getLoc(), operand, sharding);
+                      });
                 }
               });
     });

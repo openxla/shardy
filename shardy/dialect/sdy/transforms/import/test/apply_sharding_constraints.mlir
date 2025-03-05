@@ -18,16 +18,6 @@ func.func @input_has_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   return %1 : tensor<8x8xf32>
 }
 
-// CHECK-LABEL: func @input_produced_by_data_flow_edge
-func.func @input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // CHECK-NEXT: sdy.data_flow_edge %arg0 : tensor<8x8xf32>
-  // CHECK-NOT: sdy.sharding
-  // CHECK-NEXT: sdy.sharding_constraint
-  %0 = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
-  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
-  return %1 : tensor<8x8xf32>
-}
-
 // CHECK-LABEL: func @open_sharding_constraint
 func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add %arg0, %arg0
@@ -52,6 +42,34 @@ func.func @no_other_sharding_constraint_users(%arg0: tensor<8x8xf32>)
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
   %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
   %2 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @input_produced_by_data_flow_edge
+func.func @input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
+    -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE:.*]] = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[SHARDING_CONSTRAINT:.*]] = sdy.sharding_constraint %[[DATA_FLOW_EDGE]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]]
+  // CHECK-NEXT: return %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]], %[[ADD]]
+  %0 = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %2 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @input_produced_by_data_flow_edge_constraint_after_other_user
+func.func @input_produced_by_data_flow_edge_constraint_after_other_user(%arg0: tensor<8x8xf32>)
+    -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE:.*]] = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[SHARDING_CONSTRAINT:.*]] = sdy.sharding_constraint %[[DATA_FLOW_EDGE]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]]
+  // CHECK-NEXT: return %[[SHARDING_CONSTRAINT]], %[[ADD]], %[[SHARDING_CONSTRAINT]]
+  %0 = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
 
@@ -156,6 +174,24 @@ func.func @manual_computation(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) ->
     sdy.return %3 : tensor<2x8xf32>
   } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   func.return %0, %2: tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @manual_computation_operand_produced_by_data_flow_edge
+func.func @manual_computation_operand_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
+    -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE:.*]] = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[SHARDING_CONSTRAINT:.*]] = sdy.sharding_constraint %[[DATA_FLOW_EDGE]] <@mesh, [{"b", "a"}, {}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]]
+  // CHECK-NEXT: %[[MANUAL_COMP:.*]] = sdy.manual_computation(%[[SHARDING_CONSTRAINT]])
+  // CHECK:      return %[[SHARDING_CONSTRAINT]], %[[ADD]], %[[MANUAL_COMP]]
+  %0 = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  %2 = sdy.manual_computation(%0) in_shardings=[<@mesh, [{"b", "a"}, {}]>] out_shardings=[<@mesh, [{"a", "b"}, {}]>]
+      manual_axes={"a", "b"} (%arg2: tensor<2x8xf32>) {
+    sdy.return %arg2 : tensor<2x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
 
 // CHECK-LABEL: func @chain_of_two_sharding_constraints

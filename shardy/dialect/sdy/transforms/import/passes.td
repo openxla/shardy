@@ -53,14 +53,17 @@ def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "func:
     all of the following:
 
     * The input doesn't have an existing sharding.
-    * The input isn't produced by a `DataFlowEdgeOp`, which holds the sharding
-      of all targets of the edge.
     * The sharding of the `ShardingConstraintOp` is fully closed.
     * The input doesn't have any other users of type `ShardingConstraintOp` or
       `ManualComputationOp` with a different sharding.
 
     These conditions indicate that the `ShardingConstraintOp` dictates the
     sharding of its input.
+
+    If the input is produced by a `DataFlowEdgeOp`, then instead of setting the
+    op's sharding, we replace all uses of `input` with the
+    `ShardingConstraintOp`, to avoid restricting the sharding of all targets of
+    the edge.
 
     Note that the sharding of a `ShardingConstraintOp` will propagate to its
     input or users during propagation regardless of this pass, but since the
