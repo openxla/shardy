@@ -186,11 +186,11 @@ TensorShardingAttr ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(
 }
 
 TensorShardingAttr ShardableDataFlowOpInterface::getEdgeOwnerSharding(
-    Value value) {
-  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    Value owner) {
+  if (auto blockArg = dyn_cast<BlockArgument>(owner)) {
     return getBlockArgumentEdgeOwnerSharding(blockArg.getArgNumber());
   }
-  return getOpResultEdgeOwnerSharding(cast<OpResult>(value).getResultNumber());
+  return getOpResultEdgeOwnerSharding(cast<OpResult>(owner).getResultNumber());
 }
 
 void ShardableDataFlowOpInterface::setBlockArgumentEdgeOwnerSharding(
@@ -226,11 +226,11 @@ void ShardableDataFlowOpInterface::setOpResultEdgeOwnerSharding(
 }
 
 void ShardableDataFlowOpInterface::setEdgeOwnerSharding(
-    Value value, TensorShardingAttr sharding) {
-  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    Value owner, TensorShardingAttr sharding) {
+  if (auto blockArg = dyn_cast<BlockArgument>(owner)) {
     setBlockArgumentEdgeOwnerSharding(blockArg.getArgNumber(), sharding);
   } else {
-    setOpResultEdgeOwnerSharding(cast<OpResult>(value).getResultNumber(),
+    setOpResultEdgeOwnerSharding(cast<OpResult>(owner).getResultNumber(),
                                  sharding);
   }
 }

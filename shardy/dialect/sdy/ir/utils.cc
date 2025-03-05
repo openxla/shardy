@@ -259,11 +259,12 @@ Value getShardableValue(Value value) {
     return value;
   }
 
-  auto arg = cast<BlockArgument>(value);
-
-  return TypeSwitch<Operation*, Value>(arg.getOwner()->getParentOp())
-      .Case<FuncOp, ShardableDataFlowOpInterface>(
-          [&](Operation*) { return value; })
+  return TypeSwitch<Operation*, Value>(getOwningOp(value))
+      .Case<FuncOp>([&](FuncOp) { return value; })
+      .Case<ShardableDataFlowOpInterface>(
+          [&](ShardableDataFlowOpInterface shardableRegionOp) {
+            return shardableRegionOp.getEdgeOwnerFromTarget(value);
+          })
       .Default([&](Operation* op) {
         // We only fail if the value isn't scalar. Scalar block arguments, such
         // as the arguments of a reduction function, don't have a shardable
