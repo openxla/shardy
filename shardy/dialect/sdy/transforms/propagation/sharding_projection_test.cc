@@ -768,7 +768,8 @@ TEST_F(ShardingProjectionExpandShardingTest, DotGeneralSimple) {
   // - The result is mapped to factor 0. The old sharding axes ["a", "b":(1)2]
   //   are smaller than the new one, so the sharding axes are updated.
   UpdateTensorShardings ifUpdated = projection.expandSharding(
-      /*factorIndex=*/0, {createAxis("a"), createAxis("b")});
+      /*factorIndex=*/0, {createAxis("a"), createAxis("b")},
+      PropagationDirection::BOTH);
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), ElementsAre(0));
 
@@ -778,13 +779,15 @@ TEST_F(ShardingProjectionExpandShardingTest, DotGeneralSimple) {
   // - The result is mapped to factor 1. The existing axes ["d", "f"] is larger
   //   than the new one, so it will be skipped.
   ifUpdated = projection.expandSharding(
-      /*factorIndex=*/1, {createAxis("d"), createSubAxis("f", 1, 2)});
+      /*factorIndex=*/1, {createAxis("d"), createSubAxis("f", 1, 2)},
+      PropagationDirection::BOTH);
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), ElementsAre(1));
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), IsEmpty());
 
   // We set the sharding of factor 2 (contracting dim) to [] (an empty vector of
   // axes). Skip all the tensors.
-  ifUpdated = projection.expandSharding(/*factorIndex=*/2, {});
+  ifUpdated = projection.expandSharding(/*factorIndex=*/2, {},
+                                        PropagationDirection::BOTH);
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
   EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), IsEmpty());
 
@@ -816,6 +819,77 @@ TEST_F(ShardingProjectionExpandShardingTest, DotGeneralSimple) {
                   FactorShardingIs(
                       /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
                       ElementsAre(AxisRefIs("d"), AxisRefIs("f")))));
+}
+
+TEST_F(ShardingProjectionExpandShardingTest, DifferentPropagationDirections) {
+  const std::string program = R"mlir(
+    sdy.mesh @mesh = <["a"=4, "b"=4, "c"=4]>
+
+    func.func @main(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>)
+        -> (tensor<16x32xf32>, tensor<16x32xf32>) {
+      %0:2 = stablehlo.custom_call @foo(%arg0, %arg1)
+        {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j], [i, j]) {i=16, j=32}, custom>}
+        : (tensor<16x32xf32>, tensor<16x32xf32>) -> (tensor<16x32xf32>, tensor<16x32xf32>)
+      return %0#0, %0#1 : tensor<16x32xf32>, tensor<16x32xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+  ShardingProjection projection =
+      getShardingProjection<stablehlo::CustomCallOp>(module.get());
+
+  UpdateTensorShardings ifUpdated = projection.expandSharding(
+      /*factorIndex=*/0, {createAxis("c")},
+      PropagationDirection::NONE);
+  EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
+  EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), IsEmpty());
+
+  ifUpdated = projection.expandSharding(
+      /*factorIndex=*/0, {createAxis("a")},
+      PropagationDirection::FORWARD);
+  EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), IsEmpty());
+  EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), ElementsAre(0, 1));
+
+  ifUpdated = projection.expandSharding(
+      /*factorIndex=*/1, {createAxis("b")},
+      PropagationDirection::BACKWARD);
+  EXPECT_THAT(toSetBitsVector(ifUpdated.updateOperands), ElementsAre(0, 1));
+  EXPECT_THAT(toSetBitsVector(ifUpdated.updateResults), IsEmpty());
+
+  // Check the new factorIndexToSharding. `expandSharding` should not modify
+  // other members (isClosed, isMinorMost, overflowAxes).
+  EXPECT_THAT(projection.getOperand(0).factorIndexToSharding,
+              UnorderedElementsAre(
+                  FactorShardingIs(
+                      /*index*/ 0, /*isClosed*/ false, /*isMinorMost*/ true,
+                      IsEmpty()),
+                  FactorShardingIs(
+                      /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
+                      ElementsAre(AxisRefIs("b")))));
+  EXPECT_THAT(projection.getOperand(1).factorIndexToSharding,
+              UnorderedElementsAre(
+                  FactorShardingIs(
+                      /*index*/ 0, /*isClosed*/ false, /*isMinorMost*/ true,
+                      IsEmpty()),
+                  FactorShardingIs(
+                      /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
+                      ElementsAre(AxisRefIs("b")))));
+  EXPECT_THAT(projection.getResult(0).factorIndexToSharding,
+              UnorderedElementsAre(
+                  FactorShardingIs(
+                      /*index*/ 0, /*isClosed*/ false, /*isMinorMost*/ true,
+                      ElementsAre(AxisRefIs("a"))),
+                  FactorShardingIs(
+                      /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
+                      IsEmpty())));
+  EXPECT_THAT(projection.getResult(1).factorIndexToSharding,
+              UnorderedElementsAre(
+                  FactorShardingIs(
+                      /*index*/ 0, /*isClosed*/ false, /*isMinorMost*/ true,
+                      ElementsAre(AxisRefIs("a"))),
+                  FactorShardingIs(
+                      /*index*/ 1, /*isClosed*/ false, /*isMinorMost*/ true,
+                      IsEmpty())));
 }
 
 //===----------------------------------------------------------------------===//

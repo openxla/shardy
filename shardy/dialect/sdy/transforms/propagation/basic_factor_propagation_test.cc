@@ -513,7 +513,7 @@ TEST_F(BasicFactorPropagationTest, DifferentDirectionsForDifferentFactors) {
                                   {3, {.axisRefs = {}}},
                                   {4, {.axisRefs = {createAxis("e")}}},
                                   {5, {.axisRefs = {createAxis("f")}}},
-                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {6, {.axisRefs = {}}},
                                   {7, {.axisRefs = {createAxis("h")}}}}},
        {.factorIndexToSharding = {{0, {.axisRefs = {}}},
                                   {1, {.axisRefs = {}}},
@@ -521,7 +521,7 @@ TEST_F(BasicFactorPropagationTest, DifferentDirectionsForDifferentFactors) {
                                   {3, {.axisRefs = {}}},
                                   {4, {.axisRefs = {}}},
                                   {5, {.axisRefs = {}}},
-                                  {6, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
                                   {7, {.axisRefs = {}}}}}});
 
   PropagationDirectionAlongFactor directionAlongFactor =
@@ -549,7 +549,7 @@ TEST_F(BasicFactorPropagationTest, DifferentDirectionsForDifferentFactors) {
                                   {6, {.axisRefs = {createAxis("g")}}},
                                   {7, {.axisRefs = {}}}}},
        {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
-                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {1, {.axisRefs = {}}},
                                   {2, {.axisRefs = {}}},
                                   {3, {.axisRefs = {}}},
                                   {4, {.axisRefs = {createAxis("e")}}},
@@ -563,7 +563,7 @@ TEST_F(BasicFactorPropagationTest, DifferentDirectionsForDifferentFactors) {
                                   {3, {.axisRefs = {}}},
                                   {4, {.axisRefs = {createAxis("e")}}},
                                   {5, {.axisRefs = {createAxis("f")}}},
-                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {6, {.axisRefs = {}}},
                                   {7, {.axisRefs = {createAxis("h")}}}}},
        {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
                                   {1, {.axisRefs = {createAxis("b")}}},

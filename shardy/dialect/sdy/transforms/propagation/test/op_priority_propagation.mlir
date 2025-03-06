@@ -113,6 +113,21 @@ func.func @defer_backwards_propagation_dynamic_slice(
   return %1, %2 : tensor<8x2xf32>, tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @defer_sideways_propagation_dynamic_update_slice(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+// CHECK-SAME:      %arg1: tensor<8x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}
+func.func @defer_sideways_propagation_dynamic_update_slice(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+    %arg1: tensor<8x2xf32>, %arg2: tensor<i32>, %arg3: tensor<i32>)
+    -> (tensor<8x8xf32>, tensor<8x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>}) {
+  // CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>}
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  // CHECK-NEXT: return %[[DUS]], %[[ADD]]
+  %1 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 : (tensor<8x8xf32>, tensor<8x2xf32>, tensor<i32>, tensor<i32>) -> tensor<8x8xf32>
+  %2 = stablehlo.add %arg1, %arg1 : tensor<8x2xf32>
+  return %1, %2 : tensor<8x8xf32>, tensor<8x2xf32>
+}
+
 // Verify that the element-wise ops are sharded on dim 1 due to the
 // `sharding_constraint`. Without `sharding_constraint` haveing the
 // `Elementwise` trait, then the element-wise ops would be sharded on dim 0
