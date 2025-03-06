@@ -222,6 +222,20 @@ func.func @chain_of_three_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tenso
   return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @input_of_sharding_constraint_chain_head_has_sharding
+func.func @input_of_sharding_constraint_chain_head_has_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD_0]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[ADD_0]], %[[ADD_0]]
+  // CHECK-NEXT: return %[[WSC_1]], %[[ADD_1]]
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  %3 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
 // CHECK-LABEL: func @chain_on_block_arg_after_other_user
 func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>

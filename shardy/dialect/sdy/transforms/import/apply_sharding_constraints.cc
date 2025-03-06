@@ -54,14 +54,12 @@ bool isUsedByConstraintWithDifferentSharding(Value input,
 }
 
 // Returns true if `input` is used by any `ShardingConstraintOp` or
-// `ManualComputationOp`, that isn't `optionalShardingConstraint` if provided.
-bool isUsedByOtherShardingConstraint(
-    Value input, Operation* optionalShardingConstraint = nullptr) {
-  return llvm::any_of(
-      input.getUsers(), [optionalShardingConstraint](Operation* user) {
-        return user != optionalShardingConstraint &&
-               isa<ShardingConstraintOp, ManualComputationOp>(user);
-      });
+// `ManualComputationOp`, that isn't `excluded` if provided.
+bool isUsedByShardingConstraint(Value input, Operation* excluded = nullptr) {
+  return llvm::any_of(input.getUsers(), [excluded](Operation* user) {
+    return user != excluded &&
+           isa<ShardingConstraintOp, ManualComputationOp>(user);
+  });
 }
 
 void moveAfterValue(Operation* op, Value value) {
@@ -118,15 +116,15 @@ void applyConstraint(
   }
 }
 
-// If `curShardingConstraintOp` is the last `ShardingConstraintOp` in a chain
-// of `ShardingConstraintOp`s that holds the following constraints:
+// Given the head of a `ShardingConstraintOp` chain, returns the tail of the
+// chain if all conditions are true. Otherwise, returns nullptr.
 //
-// 1. `curShardingConstraintOp` isn't used by any `ShardingConstraintOp` or
-//    `ManualComputationOp` (otherwise it's not the last in the chain).
-// 2. None of the other ops in the chain have more than one use.
-//
-// returns the first ShardingConstraintOp in that chain. Otherwise, returns
-// nullptr.
+// 1. The `head` should be the first one in the chain.
+// 2. The input of the `head` cannot have a sharding.
+// 3. The input of the `head` isn't used by any other `ShardingConstraintOp` or
+//    `ManualComputationOp`.
+// 4. Other than `tail`, none of the ops in the chain have more than one use.
+// 5. The length of the chain is at least 2.
 //
 // For example:
 //
@@ -135,26 +133,47 @@ void applyConstraint(
 //   z = sdy.sharding_constraint(y)
 //   w = sdy.sharding_constraint(z)
 //   ```
-// Such that `w` isn't used by any other `ShardingConstraintOp` or
-// `ManualComputationOp`, and `y` & `z` have a single use, in which case this
-// method returns `y`.
-ShardingConstraintOp getFirstShardingConstraintInChain(
-    ShardingConstraintOp curShardingConstraintOp) {
-  if (isUsedByOtherShardingConstraint(curShardingConstraintOp)) {
+// `y` is the head of the chain, and `w` is the tail. Taking `y` as the input,
+// we return `w` if the following conditions are true.
+// 1. `y` and `z` does not have any other uses.
+// 2. `x` does not have a sharding.
+// 3. `x` isn't used by any other `ShardingConstraintOp` or
+//    `ManualComputationOp`.
+//
+// TODO(b/377454801): reconsider this logic.
+ShardingConstraintOp getTailOfShardingConstraintChain(
+    ShardingConstraintOp head) {
+  if (head.getInput().getDefiningOp<ShardingConstraintOp>()) {
+    // `head` is not the first one in the chain.
     return nullptr;
   }
 
-  ShardingConstraintOp prevShardingConstraintOp = curShardingConstraintOp;
-  while ((curShardingConstraintOp =
-              curShardingConstraintOp.getInput()
-                  .getDefiningOp<ShardingConstraintOp>())) {
-    if (!curShardingConstraintOp->hasOneUse()) {
-      return nullptr;
-    }
-    prevShardingConstraintOp = curShardingConstraintOp;
+  if (getSharding(head.getInput())) {
+    // The input of the `head` already has a sharding.
+    return nullptr;
   }
 
-  return prevShardingConstraintOp;
+  if (isUsedByShardingConstraint(head.getInput(), /*excluded=*/head)) {
+    return nullptr;
+  }
+
+  ShardingConstraintOp tail = head;
+  while (tail->hasOneUse() && isa<ShardingConstraintOp>(*tail->user_begin())) {
+    tail = cast<ShardingConstraintOp>(*tail->user_begin());
+  }
+
+  if (tail == head) {
+    // The chain is of length 1.
+    return nullptr;
+  }
+
+  if (isUsedByShardingConstraint(tail)) {
+    // `tail` is not the last one in the chain. We achieve this since `tail` has
+    // multiple uses.
+    return nullptr;
+  }
+
+  return tail;
 }
 
 struct ApplyShardingConstraintsPass
@@ -168,6 +187,22 @@ struct ApplyShardingConstraintsPass
       TypeSwitch<Operation*>(op)
           .Case<ShardingConstraintOp>(
               [](ShardingConstraintOp shardingConstraintOp) {
+                // If `getTailOfShardingConstraintChain` returns a non-null
+                // value, we replace all uses of `head`s input that are defined
+                // after `tail` (and in the same block) with `tail`.
+                //
+                // Refer to `getTailOfShardingConstraintChain` for more details.
+                ShardingConstraintOp head = shardingConstraintOp;
+                if (ShardingConstraintOp tail =
+                        getTailOfShardingConstraintChain(head)) {
+                  head.getInput().replaceUsesWithIf(
+                      tail.getResult(), [&](OpOperand& use) {
+                        return use.getOwner() != head &&
+                               tail->getBlock() == use.getOwner()->getBlock() &&
+                               tail->isBeforeInBlock(use.getOwner());
+                      });
+                }
+
                 Value input = shardingConstraintOp.getInput();
                 TensorShardingAttr sharding =
                     shardingConstraintOp.getSharding();
@@ -176,28 +211,6 @@ struct ApplyShardingConstraintsPass
                                   moveAfterValue(shardingConstraintOp, input);
                                   return shardingConstraintOp;
                                 });
-
-                // If `shardingConstraintOp` is the last op in a chain of at
-                // least two sharding constraints, and the input of the chain
-                // isn't used by any other sharding constraint, then replace
-                // all uses of the input that are defined after
-                // `shardingConstraintOp` (and in the same block) with the
-                // latter.
-                // TODO(b/377454801): reconsider this logic.
-                if (ShardingConstraintOp firstInChain =
-                        getFirstShardingConstraintInChain(shardingConstraintOp);
-                    firstInChain && firstInChain != shardingConstraintOp &&
-                    !isUsedByOtherShardingConstraint(firstInChain.getInput(),
-                                                     firstInChain)) {
-                  firstInChain.getInput().replaceUsesWithIf(
-                      shardingConstraintOp.getResult(), [&](OpOperand& use) {
-                        return use.getOwner() != firstInChain &&
-                               shardingConstraintOp->getBlock() ==
-                                   use.getOwner()->getBlock() &&
-                               shardingConstraintOp->isBeforeInBlock(
-                                   use.getOwner());
-                      });
-                }
               })
           .Case<ManualComputationOp>(
               [&](ManualComputationOp manualComputationOp) {
