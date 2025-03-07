@@ -63,6 +63,8 @@ class BasicFactorPropagationTest : public PropagationTestBase {
   }
 };
 
+// NOLINTBEGIN(clang-diagnostic-pre-c++20-compat-pedantic)
+
 TEST_F(BasicFactorPropagationTest, FullAxesConflictsOnlyForSameFactor) {
   ShardingProjection projection(
       /*operands=*/
@@ -645,6 +647,8 @@ TEST_F(BasicFactorPropagationTest,
   EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0));
   EXPECT_EQ(projection, projectionExpected);
 }
+
+// NOLINTEND(clang-diagnostic-pre-c++20-compat-pedantic)
 
 }  // namespace
 }  // namespace sdy

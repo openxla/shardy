@@ -50,6 +50,8 @@ class AggressiveFactorPropagationTest : public PropagationTestBase {
   }
 };
 
+// NOLINTBEGIN(clang-diagnostic-pre-c++20-compat-pedantic)
+
 TEST_F(AggressiveFactorPropagationTest, RealAndFakeConflicts) {
   ShardingProjection projection(
       /*operands=*/
@@ -394,6 +396,8 @@ TEST_F(AggressiveFactorPropagationTest, PropagateAlongSpecificFactor) {
   // factor 0.
   propagateAlongFactor(propagateAnything(), propagateAlongFactor0Expected);
 }
+
+// NOLINTEND(clang-diagnostic-pre-c++20-compat-pedantic)
 
 }  // namespace
 }  // namespace sdy
