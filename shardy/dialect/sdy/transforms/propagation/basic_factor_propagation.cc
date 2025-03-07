@@ -398,16 +398,17 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
 
   // We propagate each factor separately.
   for (auto [factorIndex, factorSize] : llvm::enumerate(factorSizes)) {
+    PropagationDirection direction = directionAlongFactor(factorIndex);
     // For each factor, find the compatible major sharding axes that can shard
     // that factor for all tensors, those are the axes we will propagate to
     // tensors that aren't already sharded.
     SmallVector<AxisRefAttr> axesToPropagate = getCompatibleMajorShardingAxes(
-        projection, factorIndex, directionAlongFactor(factorIndex), factorSize,
-        mesh, op, conservativePropagation);
+        projection, factorIndex, direction, factorSize, mesh, op,
+        conservativePropagation);
 
     // Update all shardings along this factor if possible.
     auto [updateOperandForFactor, updateResultForFactor] =
-        projection.expandSharding(factorIndex, axesToPropagate);
+        projection.expandSharding(factorIndex, axesToPropagate, direction);
 
     result.updateOperands |= updateOperandForFactor;
     result.updateResults |= updateResultForFactor;

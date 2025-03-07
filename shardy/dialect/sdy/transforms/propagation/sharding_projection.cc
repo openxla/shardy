@@ -190,13 +190,24 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
 }
 
 UpdateTensorShardings ShardingProjection::expandSharding(
-    int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes) {
+    int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes,
+    PropagationDirection direction) {
   UpdateTensorShardings result(getNumOperands(), getNumResults());
-  for (auto [i, tensor] : llvm::enumerate(operands)) {
-    result.updateOperands[i] = tensor.expandShardingAxes(factorIndex, newAxes);
+  if (direction == PropagationDirection::NONE) {
+    return result;
   }
-  for (auto [i, tensor] : llvm::enumerate(results)) {
-    result.updateResults[i] = tensor.expandShardingAxes(factorIndex, newAxes);
+  // We don't propagate sideways between operands in forward propagation.
+  if (direction != PropagationDirection::FORWARD) {
+    for (auto [i, tensor] : llvm::enumerate(operands)) {
+      result.updateOperands[i] =
+          tensor.expandShardingAxes(factorIndex, newAxes);
+    }
+  }
+  // We don't propagate sideways between results in backwards propagation.
+  if (direction != PropagationDirection::BACKWARD) {
+    for (auto [i, tensor] : llvm::enumerate(results)) {
+      result.updateResults[i] = tensor.expandShardingAxes(factorIndex, newAxes);
+    }
   }
   return result;
 }

@@ -208,8 +208,15 @@ class ShardingProjection {
   // Expands the shardings of all tensors that are associated with
   // `factorIndex` to be `newAxes` for that factor. Returns two BitVectors
   // indicating whether the operands and results have been expanded.
+  //
+  // If direction is:
+  // - BOTH, both operands and results can be updated.
+  // - FORWARD, only results can be updated.
+  // - BACKWARD, only operands can be updated.
+  // - NONE, no tensors are updated.
   UpdateTensorShardings expandSharding(int64_t factorIndex,
-                                       ArrayRef<AxisRefAttr> newAxes);
+                                       ArrayRef<AxisRefAttr> newAxes,
+                                       PropagationDirection direction);
 
   // Updates the shardings of all tensors that are associated with
   // `factorIndex` to be `newAxes` and `newOverflowAxes` for that factor. Keep

@@ -397,6 +397,103 @@ TEST_F(AggressiveFactorPropagationTest, PropagateAlongSpecificFactor) {
   propagateAlongFactor(propagateAnything(), propagateAlongFactor0Expected);
 }
 
+// NOTE: This test is the same as the one in basic_factor_propagation_test.cc,
+// and verifies that we get the expected behavior in both strategies.
+TEST_F(AggressiveFactorPropagationTest,
+       DifferentDirectionsForDifferentFactors) {
+  ShardingProjection projection(
+      /*operands=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {createAxis("c")}}},
+                                  {3, {.axisRefs = {createAxis("d")}}},
+                                  {4, {.axisRefs = {}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {}}}}}},
+      /*results=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {createAxis("f")}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {createAxis("h")}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}}});
+
+  PropagationDirectionAlongFactor directionAlongFactor =
+      [](int64_t factorIndex) {
+        if (factorIndex == 0 || factorIndex == 4) {
+          return PropagationDirection::BOTH;
+        }
+        if (factorIndex == 1 || factorIndex == 5) {
+          return PropagationDirection::FORWARD;
+        }
+        if (factorIndex == 2 || factorIndex == 6) {
+          return PropagationDirection::BACKWARD;
+        }
+        return PropagationDirection::NONE;
+      };
+
+  ShardingProjection projectionExpected(
+      /*operands=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {createAxis("c")}}},
+                                  {3, {.axisRefs = {createAxis("d")}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}}},
+      /*results=*/
+      {{.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {createAxis("f")}}},
+                                  {6, {.axisRefs = {}}},
+                                  {7, {.axisRefs = {createAxis("h")}}}}},
+       {.factorIndexToSharding = {{0, {.axisRefs = {createAxis("a")}}},
+                                  {1, {.axisRefs = {createAxis("b")}}},
+                                  {2, {.axisRefs = {}}},
+                                  {3, {.axisRefs = {}}},
+                                  {4, {.axisRefs = {createAxis("e")}}},
+                                  {5, {.axisRefs = {}}},
+                                  {6, {.axisRefs = {createAxis("g")}}},
+                                  {7, {.axisRefs = {}}}}}});
+
+  auto [updateOperands, updateResults] =
+      propagateFactorShardings(projection, 8, directionAlongFactor);
+  EXPECT_THAT(toSetBitsVector(updateOperands), ElementsAre(0, 1));
+  EXPECT_THAT(toSetBitsVector(updateResults), ElementsAre(0, 1));
+  EXPECT_EQ(projection, projectionExpected);
+}
+
 // NOLINTEND(clang-diagnostic-pre-c++20-compat-pedantic)
 
 }  // namespace
