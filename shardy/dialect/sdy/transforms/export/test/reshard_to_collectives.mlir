@@ -652,6 +652,25 @@ func.func @reorder_device_ids_then_two_all_to_alls(%arg0 : tensor<16x8x8xf32> {s
   return %0 : tensor<16x8x8xf32>
 }
 
+// CHECK-LABEL: func @reshard_on_while_block_arg
+func.func @reshard_on_while_block_arg(%arg0: tensor<32x96xf32>, %arg1: tensor<i1>) -> tensor<32x96xf32> {
+  // CHECK-NEXT: stablehlo.while(%iterArg = %arg0) : tensor<32x96xf32>
+  // CHECK-SAME:  attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh2d, [{"x"}, {}]>]>}
+  // CHECK:        do {
+  // CHECK-NEXT:     %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"x"} 0->1 %iterArg out_sharding=<@mesh2d, [{}, {"x"}]>
+  // CHECK-NEXT:     stablehlo.return %[[ALL_TO_ALL]]
+  // CHECK-NEXT:   }
+  %0 = stablehlo.while(%iterArg = %arg0) : tensor<32x96xf32>
+    attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh2d, [{"x"}, {}]>]>}
+    cond {
+    stablehlo.return %arg1 : tensor<i1>
+  } do {
+    %1 = sdy.reshard %iterArg <@mesh2d, [{}, {"x"}]> : tensor<32x96xf32>
+    stablehlo.return %1 : tensor<32x96xf32>
+  }
+  return %0 : tensor<32x96xf32>
+}
+
 // TODO(b/391138813): Add proper support for axes that can't co-exist
 
 // LABEL: func @reshard_with_non_divisible_subaxes_same_pre_size

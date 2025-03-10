@@ -196,8 +196,8 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
     // Gets the sharding of the op result edge owner with the given `index`.
     TensorShardingAttr getOpResultEdgeOwnerSharding(unsigned index);
 
-    // Gets the sharding of the edge owner of the given `value`.
-    TensorShardingAttr getEdgeOwnerSharding(Value value);
+    // Gets the sharding of the given edge `owner`.
+    TensorShardingAttr getEdgeOwnerSharding(Value owner);
 
     // Sets the `sharding` of the block argument edge owner with the given
     // `index`.
@@ -208,9 +208,9 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
     void setOpResultEdgeOwnerSharding(
       unsigned index, TensorShardingAttr sharding);
 
-    // Sets the `sharding` of the edge owner of the given `value`.
+    // Sets the `sharding` of the given edge `owner`.
     void setEdgeOwnerSharding(
-        Value value, TensorShardingAttr sharding);
+        Value owner, TensorShardingAttr sharding);
   }];
 }
 
