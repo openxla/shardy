@@ -46,10 +46,11 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "shardy/dialect/sdy/ir/bytecode.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/enums.cc.inc"
-#include "shardy/dialect/sdy/ir/extensions/stablehlo_extensions.h"
 #include "shardy/dialect/sdy/ir/enums.h"
+#include "shardy/dialect/sdy/ir/extensions/stablehlo_extensions.h"
 #include "shardy/dialect/sdy/ir/parsers.h"   // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/printers.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -97,6 +98,7 @@ void SdyDialect::initialize() {
 #include "shardy/dialect/sdy/ir/ops.cc.inc"
       >();
   registerStablehloExtensions(getContext());
+  detail::addBytecodeInterface(this);
 }
 
 namespace details {

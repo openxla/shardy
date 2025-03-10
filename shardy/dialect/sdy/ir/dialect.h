@@ -18,12 +18,17 @@ limitations under the License.
 
 // IWYU pragma: begin_keep
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "mlir/Bytecode/BytecodeImplementation.h"
 #include "mlir/Bytecode/BytecodeOpInterface.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -73,7 +78,54 @@ void setOpResultEdgeOwnerShardingsImpl(Operation* op,
                                        ArrayRef<TensorShardingAttr> shardings);
 
 }  // namespace details
+
+struct SdyDialectVersion : public mlir::DialectVersion {
+  SdyDialectVersion(int64_t major, int64_t minor, int64_t patch)
+      : majorMinorPatch({major, minor, patch}) {}
+
+  int64_t getMajor() const { return majorMinorPatch[0]; }
+  int64_t getMinor() const { return majorMinorPatch[1]; }
+  int64_t getPatch() const { return majorMinorPatch[2]; }
+
+  bool operator<(const SdyDialectVersion& other) const {
+    return this->majorMinorPatch < other.majorMinorPatch;
+  }
+
+  // Current version of Shardy dialect.
+  static SdyDialectVersion getCurrentVersion() { return {0, 0, 0}; }
+
+  // Parse version in format "123.1235.13"
+  // each number is 0-max(int64_t)
+  static FailureOr<SdyDialectVersion> fromString(const StringRef& version) {
+    if (version == "current") return getCurrentVersion();
+    SmallVector<StringRef> parts;
+    version.split(parts, /*Separator=*/'.', /*MaxSplit=*/2,
+                  /*KeepEmpty=*/true);
+    if (parts.size() != 3) return failure();
+    int64_t major, minor, patch;
+    if (!llvm::to_integer(parts[0], major, 10) ||
+        !llvm::to_integer(parts[1], minor, 10) ||
+        !llvm::to_integer(parts[2], patch, 10))
+      return failure();
+    return SdyDialectVersion(
+        /*major=*/major, /*minor=*/minor, /*patch=*/patch);
+  }
+
+ private:
+  // The dialect version read from bytecode.
+  std::array<int64_t, 3> majorMinorPatch;
+};
+
 }  // namespace sdy
+
+// Allow printing to a stream.
+inline raw_ostream& operator<<(raw_ostream& os,
+                               sdy::SdyDialectVersion version) {
+  os << version.getMajor() << "." << version.getMinor() << "."
+     << version.getPatch();
+  return os;
+}
+
 }  // namespace mlir
 
 // ODS-generated op-interface classes.
