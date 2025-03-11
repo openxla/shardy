@@ -182,8 +182,14 @@ class ShardingProjection {
   ArrayRef<TensorFactorShardings> getOperands() const { return operands; }
   ArrayRef<TensorFactorShardings> getResults() const { return results; }
 
+  TensorFactorShardings& getOperand(int64_t operandNum) {
+    return operands[operandNum];
+  }
   const TensorFactorShardings& getOperand(int64_t operandNum) const {
     return operands[operandNum];
+  }
+  TensorFactorShardings& getResult(int64_t resultNum) {
+    return results[resultNum];
   }
   const TensorFactorShardings& getResult(int64_t resultNum) const {
     return results[resultNum];

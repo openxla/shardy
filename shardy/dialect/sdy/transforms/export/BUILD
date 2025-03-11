@@ -1,6 +1,7 @@
 # The SDY export passes and pipeline.
 
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
+load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -43,6 +44,7 @@ cc_library(
         "reshard_to_collectives.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
+        "temp_explicit_reshards_for_optimizations.cc",
         "update_non_divisible_input_output_shardings.cc",
     ],
     hdrs = [

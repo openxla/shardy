@@ -18,6 +18,8 @@ limitations under the License.
 
 // IWYU pragma: begin_keep
 
+#include <stdbool.h>
+
 #include <memory>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -39,7 +41,8 @@ namespace sdy {
 // propagation.
 void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
                        bool skipConvertToReshard = false,
-                       bool enableInsertExplicitCollectives = false);
+                       bool enableInsertExplicitCollectives = false,
+                       bool keepShardingRules = false);
 
 // Register the sdy-export-pipeline.
 void registerExportPipeline();
