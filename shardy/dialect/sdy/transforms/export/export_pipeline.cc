@@ -25,7 +25,8 @@ namespace sdy {
 
 void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
                        bool skipConvertToReshard,
-                       bool enableInsertExplicitCollectives) {
+                       bool enableInsertExplicitCollectives,
+                       bool keepShardingRules) {
   pm.addPass(createRemoveShardingGroupsPass());
   if (!skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
@@ -43,6 +44,13 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         dumpDirectory, "sdy_module_after_reshard_to_collectives"));
+  } else if (!skipConvertToReshard) {
+    pm.addNestedPass<func::FuncOp>(
+        createTempExplicitReshardsForOptimizationsPass());
+  }
+
+  if (!keepShardingRules) {
+    pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
 }
 

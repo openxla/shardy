@@ -16,7 +16,6 @@ limitations under the License.
 #include <memory>  // IWYU pragma: keep
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
-#include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
