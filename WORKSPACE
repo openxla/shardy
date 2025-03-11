@@ -29,20 +29,22 @@ http_archive(
 ###############################
 # Initialize non-hermetic Python
 
-rules_python_version="0.30.0"
+rules_python_version = "0.30.0"
+
 http_archive(
     name = "rules_python",
     strip_prefix = "rules_python-{}".format(rules_python_version),
-    url = "https://github.com/bazelbuild/rules_python/releases/download/{}/rules_python-{}.tar.gz".format(rules_python_version,rules_python_version),
+    url = "https://github.com/bazelbuild/rules_python/releases/download/{}/rules_python-{}.tar.gz".format(rules_python_version, rules_python_version),
 )
 
-load("@rules_python//python:repositories.bzl", "py_repositories")
+load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
+
 py_repositories()
 
 python_version = "3.11"
-load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+
 python_register_toolchains(
-    name = "local_config_python",#"python_{}".format(python_version_),
+    name = "local_config_python",  #"python_{}".format(python_version_),
     # Available versions are listed in @rules_python//python:versions.bzl.
     # We recommend using the same version your team is already standardized on.
     python_version = python_version,
@@ -56,8 +58,11 @@ python_register_toolchains(
 
 #These need to come in this specific order otherwise bazel complains of missing/circular dependencies.
 load("//third_party/llvm:workspace.bzl", llvm = "repo")
+
 llvm("llvm-raw")
+
 load("//third_party/llvm:setup.bzl", "llvm_setup")
+
 llvm_setup("llvm-project")
 
 ###############################
@@ -84,16 +89,12 @@ http_archive(
 
 ###############################
 
-load("//third_party/absl:workspace.bzl", absl = "repo")
-absl()
-
 load("//third_party/stablehlo:workspace.bzl", stablehlo = "repo")
+
 stablehlo()
 
 http_archive(
-  name = "com_google_googletest",
-  urls = ["https://github.com/google/googletest/archive/5ab508a01f9eb089207ee87fd547d290da39d015.zip"],
-  strip_prefix = "googletest-5ab508a01f9eb089207ee87fd547d290da39d015",
+    name = "com_google_googletest",
+    strip_prefix = "googletest-5ab508a01f9eb089207ee87fd547d290da39d015",
+    urls = ["https://github.com/google/googletest/archive/5ab508a01f9eb089207ee87fd547d290da39d015.zip"],
 )
-
-
