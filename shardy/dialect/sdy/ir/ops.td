@@ -48,7 +48,7 @@ def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
 }
 
 def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
-  [Elementwise, SameOperandsAndResultType, InferTypeOpInterface]> {
+  [SameOperandsAndResultType, InferTypeOpInterface]> {
   let summary = "Constrains a tensor to the specified sharding";
   let description = [{
     Attaches a sharding to an intermediate tensor (e.g. the result of a matmul)
@@ -78,7 +78,7 @@ def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
 }
 
 def Sdy_ReshardOp : Sdy_Op<"reshard",
-  [Pure, Elementwise, SameOperandsAndResultType, InferTypeOpInterface]> {
+  [Pure, SameOperandsAndResultType, InferTypeOpInterface]> {
   let summary = "Reshards a tensor to a different sharding";
   let description = [{
     Reshards the input tensor with the specified sharding, which is different
@@ -366,7 +366,7 @@ def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
 //===----------------------------------------------------------------------===//
 
 def Sdy_PropagationBarrierOp : Sdy_Op<"propagation_barrier",
-  [Pure, Elementwise, SameOperandsAndResultType,
+  [Pure, SameOperandsAndResultType,
    DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
   let summary = "Propagation barrier operation";
 

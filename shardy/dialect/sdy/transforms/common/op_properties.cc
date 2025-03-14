@@ -19,6 +19,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "stablehlo/dialect/Base.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -36,7 +37,10 @@ bool isElementwise(Operation* op) {
     return getTensorShape(bitcastConvert.getOperand()) ==
            getTensorShape(bitcastConvert.getResult());
   }
-  return false;
+  // We don't make our ops inherit the element-wise trait, because they aren't
+  // really element-wise. However, we want to treat them as element-wise for
+  // propagation purposes when it comes to the schedule.
+  return isa<PropagationBarrierOp, ShardingConstraintOp, ReshardOp>(op);
 }
 
 }  // namespace sdy
