@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <optional>
 
@@ -143,6 +144,26 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
   });
 }
 
+LogicalResult hasDifferentMeshShapes(
+    SmallVector<int64_t>& meshesWithAxisSizes, MeshAttr meshAttr,
+    ModuleOp moduleOp) {
+  ArrayRef<MeshAxisAttr> axes = meshAttr.getAxes();
+  SmallVector<int64_t> sizes;
+  if (!axes.empty()) {
+    sizes.reserve(axes.size());
+    llvm::transform(axes, std::back_inserter(sizes),
+                    [](MeshAxisAttr axis) { return axis.getSize(); });
+    if (meshesWithAxisSizes.empty()) {
+      meshesWithAxisSizes = sizes;
+    } else if (meshesWithAxisSizes != sizes) {
+      return moduleOp.emitError(
+          "JAX does not support multiple meshes with different "
+          "axis sizes.");
+    }
+  }
+  return mlir::success();
+}
+
 class SdyRoundTripImportShardyAttrsPass
     : public PassWrapper<SdyRoundTripImportShardyAttrsPass,
                          OperationPass<ModuleOp>> {
@@ -167,8 +188,17 @@ class SdyRoundTripImportShardyAttrsPass
     // Insert the meshes before any functions.
     rewriter.setInsertionPointToStart(moduleOp.getBody());
     SymbolTable symbolTable(moduleOp);
+    // TODO(b/402371282): allow different meshes with different axis sizes
+    // during import. Either support propagation through different mesh shapes
+    // or  error during propagation.
+    SmallVector<int64_t> meshesWithAxisSizes;
     for (NamedAttribute mesh : sdyMeshes) {
       auto meshAttr = cast<MeshAttr>(mesh.getValue());
+      if (hasDifferentMeshShapes(meshesWithAxisSizes, meshAttr, moduleOp)
+              .failed()) {
+        signalPassFailure();
+        return;
+      }
       symbolTable.insert(
           rewriter.create<MeshOp>(moduleOp.getLoc(), mesh.getName(), meshAttr));
     }
