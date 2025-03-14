@@ -21,7 +21,7 @@ limitations under the License.
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -29,13 +29,13 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
-#include "shardy/dialect/sdy/ir/constants.h"  // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/dialect.h"    // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/utils.h"      // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/enums.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
-#include "stablehlo/dialect/StablehloOps.h"  // IWYU pragma: keep
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -737,7 +737,9 @@ struct InsertExplicitReshardsPass
                  shardableDataFlowOp.getOpResultEdgeOwners(),
                  shardableDataFlowOp.getBlockArgumentEdgeOwners())) {
           TensorShardingAttr ownerSharding =
-              shardableDataFlowOp.getEdgeOwnerSharding(owner);
+              shardableDataFlowOp.transformTargetSharding(
+                  owner, shardableDataFlowOp.getEdgeOwnerSharding(owner),
+                  DataFlowShardingTransformType::kBeforeEdgePropagation);
           for (OpOperand* sourceOpOperand :
                shardableDataFlowOp.getEdgeSources(owner)) {
             Value source = sourceOpOperand->get();

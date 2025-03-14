@@ -2,7 +2,7 @@
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
 sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
-sdy.mesh @mesh_xyzt = <["x"=4, "y"=4, "z"=4, "t"=4]>
+sdy.mesh @mesh_xyzt = <["x"=4, "y"=4, "z"=4, "t"=8]>
 
 // CHECK-LABEL: func @dot_compatible_ik
 func.func @dot_compatible_ik(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}, %arg1: tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
@@ -1475,6 +1475,21 @@ func.func @manual_computation(%arg0: tensor<210xf32> {sdy.sharding = #sdy.shardi
     sdy.return %2 : tensor<210xf32>
   } : (tensor<210xf32>) -> (tensor<210xf32>)
   %1 = stablehlo.negate %0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
+  return %1 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @manual_computation_with_manual_axes
+func.func @manual_computation_with_manual_axes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x","y"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x","z"}]>}) {
+  %0 = sdy.manual_computation(%arg0)
+    in_shardings=[<@mesh_xyzt, [{"x","y"}]>] out_shardings=[<@mesh_xyzt, [{"x", "z"}]>] manual_axes={"x"} (%arg1: tensor<52xf32>) {
+    // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyzt, [{"t"}]> : tensor<52xf32>
+    // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"t"}]>]>} : tensor<52xf32>
+    // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[ABS]] <@mesh_xyzt, [{"z"}]> : tensor<52xf32>
+    // CHECK-NEXT: sdy.return %[[RESHARD2]] : tensor<52xf32>
+    %2 = stablehlo.abs %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh_xyzt, [{"t"}]>]>} : tensor<52xf32>
+    sdy.return %2 : tensor<52xf32>
+  } : (tensor<210xf32>) -> (tensor<210xf32>)
+  %1 = stablehlo.negate %0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_xyzt, [{"x","z"}]>]>} : tensor<210xf32>
   return %1 : tensor<210xf32>
 }
 
