@@ -609,7 +609,7 @@ of the barrier op and its operand.
 - `NONE` means no sharding can propagate through this op.
 - Cannot specify `BOTH`, as this op would be redundant.
 
-Traits: `AlwaysSpeculatableImplTrait`, `Elementwise`, `SameOperandsAndResultType`
+Traits: `AlwaysSpeculatableImplTrait`, `SameOperandsAndResultType`
 
 Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
 
@@ -661,7 +661,7 @@ operation ::= `sdy.reshard` $input $sharding attr-dict `:` type($result)
 // TODO(b/331680067). Add a canonicalization pattern to remove redundant
 // reshard ops.
 
-Traits: `AlwaysSpeculatableImplTrait`, `Elementwise`, `SameOperandsAndResultType`
+Traits: `AlwaysSpeculatableImplTrait`, `SameOperandsAndResultType`
 
 Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
 
@@ -741,7 +741,7 @@ This op can either:
   tensor might have a different sharding (if the input tensor has no other
   uses then the behavior is the same as the no uses case).
 
-Traits: `Elementwise`, `SameOperandsAndResultType`
+Traits: `SameOperandsAndResultType`
 
 Interfaces: `InferTypeOpInterface`
 
