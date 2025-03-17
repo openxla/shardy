@@ -112,6 +112,16 @@ the edge), and replaces the op with its input.
 -sink-debug-propagation-edge-sharding : Whether to sink the debug propagation edge sharding info. See `debug-propagation-edge-sharding` option in propagation for more info.
 ```
 
+### `-sdy-temp-explicit-reshards-for-optimizations`
+
+_Inserts explicit reshards for specific optimizations._
+
+This pass is a temporary solution until we can enable the
+`sdy-insert-explicit-reshards` pass by default.
+
+It allows us to improve specific use cases where the partitioner does the
+sub-optimal thing.
+
 ### `-sdy-update-non-divisible-input-output-shardings`
 
 _Makes FuncOp inputs/outputs evenly sharded, removing any need for padding due to non-divisible shardings._
