@@ -156,7 +156,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   bool allElementsAreEmpty = true;
   for (int64_t i = 0; i < factorSizes.size(); ++i) {
     SmallVector<AxisRefAttr>& axes = axesPerFactor.emplace_back(
-        getCompatibleMajorAxes(projection, i, directionAlongFactor(i), op));
+        getCompatibleMajorAxes(projection, i, directionAlongFactor(i)));
     if (!axes.empty()) {
       allElementsAreEmpty = false;
     }

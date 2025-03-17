@@ -288,7 +288,7 @@ std::pair<SmallVector<AxisRefAttr>, bool> getCompatibleMajorAxesInternal(
 
 SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorAxes(
     const ShardingProjection& projection, int64_t factorIndex,
-    PropagationDirection direction, Operation* op) const {
+    PropagationDirection direction) const {
   if (direction == PropagationDirection::NONE) {
     return {};
   }
@@ -370,10 +370,10 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
 SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
     const ShardingProjection& projection, int64_t factorIndex,
     PropagationDirection direction, int64_t factorSize, MeshAttr mesh,
-    Operation* op, bool conservativePropagation) const {
+    bool conservativePropagation) const {
   // Finds the compatible major axes ignoring conflicts.
   SmallVector<AxisRefAttr> resultAxes =
-      getCompatibleMajorAxes(projection, factorIndex, direction, op);
+      getCompatibleMajorAxes(projection, factorIndex, direction);
 
   // Removes the major-most axis that isn't compatible w.r.t. other factors or
   // the replicated axes, and all axes that are minor to it.
@@ -391,7 +391,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
 UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection,
     PropagationDirectionAlongFactor directionAlongFactor,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation*,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
                                projection.getNumResults());
@@ -403,7 +403,7 @@ UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     // tensors that aren't already sharded.
     SmallVector<AxisRefAttr> axesToPropagate = getCompatibleMajorShardingAxes(
         projection, factorIndex, directionAlongFactor(factorIndex), factorSize,
-        mesh, op, conservativePropagation);
+        mesh, conservativePropagation);
 
     // Update all shardings along this factor if possible.
     auto [updateOperandForFactor, updateResultForFactor] =
