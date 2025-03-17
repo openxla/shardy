@@ -107,6 +107,20 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+// TODO(b/402429253): delete when explicit reshards is enabled by default.
+def TempExplicitReshardsForOptimizationsPass : Pass<"sdy-temp-explicit-reshards-for-optimizations", "func::FuncOp"> {
+  let summary = "Inserts explicit reshards for specific optimizations.";
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let description = [{
+    This pass is a temporary solution until we can enable the
+    `sdy-insert-explicit-reshards` pass by default.
+
+    It allows us to improve specific use cases where the partitioner does the
+    sub-optimal thing.
+  }];
+}
+
+
 def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"> {
   let summary = "Converts ReshardOp into various Shardy collective ops.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];

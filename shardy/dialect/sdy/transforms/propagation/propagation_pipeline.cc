@@ -18,7 +18,6 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
-#include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/user_priority_propagation.h"
 
@@ -28,9 +27,14 @@ namespace sdy {
 void addPropagationPipeline(OpPassManager& pm,
                             const PropagationOptions& options) {
   addImportPipeline(pm, options.dumpDirectory, options.skipInline);
-  pm.addPass(createUserPriorityPropagationPass(options));
+  {
+    PropagationOptions optionsWithKeepShardingRules = options;
+    optionsWithKeepShardingRules.keepShardingRules = true;
+    pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules));
+  }
   addExportPipeline(pm, options.dumpDirectory, options.skipConvertToReshard,
-                    options.enableInsertExplicitCollectives);
+                    options.enableInsertExplicitCollectives,
+                    options.keepShardingRules);
 }
 
 void registerPropagationPipeline() {

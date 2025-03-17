@@ -188,6 +188,12 @@ class ShardingProjection {
   const TensorFactorShardings& getResult(int64_t resultNum) const {
     return results[resultNum];
   }
+  TensorFactorShardings& getMutableOperand(int64_t operandNum) {
+    return operands[operandNum];
+  }
+  TensorFactorShardings& getMutableResult(int64_t resultNum) {
+    return results[resultNum];
+  }
   // TODO(enver): Move expandTensorSharding from propagation code to sharding
   // projection and employ `getTensor`.
   const TensorFactorShardings& getTensor(int64_t tensorNum) const {

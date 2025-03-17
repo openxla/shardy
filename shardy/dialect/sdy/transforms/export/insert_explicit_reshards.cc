@@ -26,6 +26,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
@@ -694,9 +695,12 @@ struct InsertExplicitReshardsPass
       // TODO(enver): Check if data flow ops, data flow edge op, manual
       // computation op require extra check before creating sharding rule.
 
+      SmallVector<TensorShardingAttr> inShardings =
+          getShardings(op->getOperands());
+      SmallVector<TensorShardingAttr> outShardings =
+          getShardings(op->getResults());
       std::optional<StringRef> meshName =
-          getCommonMeshName(getShardings(op->getOperands()),
-                            getShardings(op->getResults()), symbolTable);
+          getCommonMeshName(inShardings, outShardings, symbolTable);
       if (!meshName.has_value()) {
         // This means none of the operands or results have a sharding attribute
         // or the sharding attributes use different meshes. Skip if so.
@@ -769,12 +773,11 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      // TODO(enver): Define get a SymbolTable at the start of the pass and use
-      // that one to find meshes.
-      MeshAttr mesh = getMeshAttr(op, meshName.value());
+      MeshAttr mesh = getMeshAttr(symbolTable, meshName.value());
       assert(mesh && "unknown mesh");
-      ShardingProjection shardingProjection = ShardingProjection::build(
-          op, shardingRule, mesh, /*closedIfMissing=*/true);
+      ShardingProjection shardingProjection =
+          ShardingProjection::build(inShardings, outShardings, shardingRule,
+                                    mesh, /*closedIfMissing=*/true);
 
       // TODO(enver): Handle dynamic slice ops.
       // TODO(enver): Handle convolution op.
