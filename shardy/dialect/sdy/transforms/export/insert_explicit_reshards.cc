@@ -776,10 +776,10 @@ struct InsertExplicitReshardsPass
       ShardingProjection shardingProjection = ShardingProjection::build(
           op, shardingRule, mesh, /*closedIfMissing=*/true);
 
-      // Return without inserting reshards for operations with special
-      // dimensions.
-      // TODO(enver): Insert explicit reshards if special dimensions are
-      // unsharded.
+      // TODO(enver): Handle dynamic slice ops.
+      // TODO(enver): Handle convolution op.
+      // TODO(enver): Handle custom call ops.
+      // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
       // TODO(enver): Add need replication factors to fft.
       if (isa<stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
               stablehlo::FftOp, stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
