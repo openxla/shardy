@@ -253,6 +253,12 @@ TensorShardingAttr getSharding(Value value);
 TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
                                        bool closedIfMissing = false);
 
+// Returns the sharding of the given `value`, or a fully open (closed) empty
+// `TensorShardingAttr` if `value` doesn't have a sharding and `closedIfMissing`
+// is false (true).
+TensorShardingAttr getOrCreateSharding(Value value, Attribute meshOrRef,
+                                       bool closedIfMissing = false);
+
 // Sets the `TensorShardingPerValueAttr` of the given `op`, but
 // replaces the sharding at the given `index` with the given `sharding`.
 //

@@ -132,16 +132,6 @@ func.func @all_gather_with_incompatible_result_sharding_subaxis(%arg0 : tensor<1
 
 // -----
 
-sdy.mesh @mesh = <["x"=2, "y"=2]>
-
-func.func @all_slice_on_operand_without_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
-  // expected-error @+1 {{collective on operand without sharding}}
-  %0 = sdy.all_slice [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
-  return %0 : tensor<16x8xf32>
-}
-
-// -----
-
 sdy.mesh @mesh1 = <["x"=2, "y"=2]>
 sdy.mesh @mesh2 = <["a"=2, "b"=2]>
 
@@ -398,6 +388,16 @@ func.func @all_to_all_incompatible_result_sharding_non_moved_dim(%arg0 : tensor<
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
+func.func @collective_permute_on_operand_without_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
+  // expected-error @+1 {{collective on operand without sharding}}
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
 func.func @collective_permute_invalid_out_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "x"}}
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{"y", "x"}, {"x"}]> :  tensor<16x8xf32>
@@ -517,15 +517,6 @@ sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
 // }
 
 
-// -----
-
-sdy.mesh @mesh = <["x"=2, "y"=2]>
-
-func.func @all_reduce_on_operand_without_sharding(%arg0 : tensor<16x2xf32>) -> tensor<16x2xf32> {
-  // expected-error @+1 {{'sdy.all_reduce' op collective on operand without sharding}}
-  %0 = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x2xf32>
-  return %0 : tensor<16x2xf32>
-}
 // -----
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>

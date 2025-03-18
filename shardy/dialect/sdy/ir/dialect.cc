@@ -788,6 +788,12 @@ TensorShardingAttr TensorShardingAttr::getReplicated(StringRef axisName,
 
 TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
                                                       int64_t rank,
+                                                      Attribute meshOrRef) {
+  return getTensorShardingAttr(context, rank, meshOrRef, /*isClosed=*/true);
+}
+
+TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
+                                                      int64_t rank,
                                                       StringRef meshName) {
   return getTensorShardingAttr(context, rank, meshName, /*isClosed=*/true);
 }
@@ -822,6 +828,13 @@ TensorShardingAttr TensorShardingAttr::getClosed(
   return TensorShardingAttr::get(context, meshOrRef, dimShardings,
                                  /*replicatedAxes=*/{});
 }
+
+TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
+                                                      int64_t rank,
+                                                      Attribute meshOrRef) {
+  return getTensorShardingAttr(context, rank, meshOrRef, /*isClosed=*/false);
+}
+
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
                                                     int64_t rank,
@@ -1394,12 +1407,28 @@ LogicalResult NamedComputationOp::inferReturnTypes(
 }
 
 //===----------------------------------------------------------------------===//
+// AllSliceOp
+//===----------------------------------------------------------------------===//
+
+bool AllSliceOp::allowMissingInputSharding() { return true; }
+
+Type AllSliceOp::getType() { return getResult().getType(); }
+
+//===----------------------------------------------------------------------===//
 // CollectivePermuteOp
 //===----------------------------------------------------------------------===//
 
 bool CollectivePermuteOp::allowDifferentMeshes() { return true; }
 
 Type CollectivePermuteOp::getType() { return getResult().getType(); }
+
+//===----------------------------------------------------------------------===//
+// AllReduceOp
+//===----------------------------------------------------------------------===//
+
+bool AllReduceOp::allowMissingInputSharding() { return true; }
+
+Type AllReduceOp::getType() { return getResult().getType(); }
 
 }  // namespace sdy
 }  // namespace mlir

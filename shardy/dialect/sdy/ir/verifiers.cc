@@ -18,7 +18,6 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <numeric>
 #include <optional>
 #include <utility>
@@ -1039,8 +1038,9 @@ LogicalResult verifyCollectiveWithAxesPerDim(
         DimensionShardingAttr operandDimSharding,
         ArrayRef<AxisRefAttr> dimCollectiveAxes, int64_t dim, MeshAttr mesh)>
         getExpectedResultDimSharding) {
-  TensorShardingAttr operandSharding = getSharding(op.getOperand());
   TensorShardingAttr resultSharding = op.getOutSharding();
+  TensorShardingAttr operandSharding =
+      getOrCreateSharding(op.getOperand(), resultSharding.getMeshOrRef());
   MeshAttr mesh = resultSharding.getMesh(op);
   MeshAttr operandMesh = operandSharding.getMesh(op);
 
@@ -1285,8 +1285,9 @@ LogicalResult verifyCollectiveOp(Operation* rawOp) {
     return failure();
   }
   // 1. Verify operand has a sharding.
-  TensorShardingAttr operandSharding = getSharding(collectiveOp.getTensor());
-  if (!operandSharding) {
+  TensorShardingAttr optionalOperandSharding =
+      getSharding(collectiveOp.getTensor());
+  if (!collectiveOp.allowMissingInputSharding() && !optionalOperandSharding) {
     return collectiveOp.emitOpError("collective on operand without sharding");
   }
 
@@ -1302,8 +1303,10 @@ LogicalResult verifyCollectiveOp(Operation* rawOp) {
   // 3. Verify MeshAttr of result and operand is the same.
   if (!collectiveOp.allowDifferentMeshes()) {
     MeshAttr mesh = resultSharding.getMesh(collectiveOp);
-    MeshAttr operandMesh = operandSharding.getMesh(collectiveOp);
-    if (mesh != operandMesh) {
+    MeshAttr operandMesh = optionalOperandSharding
+                               ? optionalOperandSharding.getMesh(collectiveOp)
+                               : nullptr;
+    if (operandMesh && mesh != operandMesh) {
       return collectiveOp.emitOpError("result mesh does not match operand mesh")
                  .attachNote(collectiveOp.getTensor().getLoc())
              << "operand mesh: " << operandMesh;
@@ -1311,12 +1314,11 @@ LogicalResult verifyCollectiveOp(Operation* rawOp) {
   }
 
   // 4. Verify same rank of the result sharding and operand sharding.
-  auto resultDimShardings = resultSharding.getRank();
-  auto operandDimShardings = operandSharding.getRank();
-  if (resultDimShardings != operandDimShardings) {
+  if (optionalOperandSharding &&
+      resultSharding.getRank() != optionalOperandSharding.getRank()) {
     return collectiveOp.emitOpError("result sharding has rank ")
-           << resultDimShardings << " but operand sharding has rank "
-           << operandDimShardings;
+           << resultSharding.getRank() << " but operand sharding has rank "
+           << optionalOperandSharding.getRank();
   }
   return success();
 }
@@ -1373,8 +1375,9 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
 }
 
 LogicalResult AllReduceOp::verify() {
-  TensorShardingAttr operandSharding = getSharding(getOperand());
   TensorShardingAttr resultSharding = getOutSharding();
+  TensorShardingAttr operandSharding =
+      getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
   MeshAttr mesh = resultSharding.getMesh(*this);
   if (!operandSharding.areDimAxesEqual(resultSharding)) {
     return emitOpError("operand and result sharding have different axes");

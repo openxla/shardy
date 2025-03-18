@@ -248,7 +248,8 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
     outSharding attribute.
 
     **Constraints:**
-    - Operand must have a sharding.
+    - Operand must have a sharding or `allowMissingInputSharding()` returns
+      true.
     - `out_sharding` is valid w.r.t the corresponding type.
     - Operand and result sharding must have the same mesh if
       `allowDifferentMeshes()` returns false.
@@ -288,6 +289,17 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
       }],
       /*retType=*/"bool",
       /*methodName=*/"allowDifferentMeshes",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/"return false;"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Indicated whether the collective op allows the input to have no
+        sharding, i.e, implicitly fully replicated.
+      }],
+      /*retType=*/"bool",
+      /*methodName=*/"allowMissingInputSharding",
       /*args=*/(ins),
       /*methodBody=*/"",
       /*defaultImplementation=*/"return false;"

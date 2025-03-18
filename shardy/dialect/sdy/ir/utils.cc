@@ -316,16 +316,23 @@ TensorShardingAttr getSharding(Value value) {
       });
 }
 
-TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
+TensorShardingAttr getOrCreateSharding(Value value, Attribute meshOrRef,
                                        const bool closedIfMissing) {
   if (TensorShardingAttr sharding = getSharding(value)) {
     return sharding;
   }
   return closedIfMissing
              ? TensorShardingAttr::getFullyClosed(
-                   value.getContext(), getTensorRank(value), meshName)
-             : TensorShardingAttr::getFullyOpen(value.getContext(),
-                                                getTensorRank(value), meshName);
+                   value.getContext(), getTensorRank(value), meshOrRef)
+             : TensorShardingAttr::getFullyOpen(
+                   value.getContext(), getTensorRank(value), meshOrRef);
+}
+
+TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
+                                       const bool closedIfMissing) {
+  return getOrCreateSharding(
+      value, FlatSymbolRefAttr::get(value.getContext(), meshName),
+      closedIfMissing);
 }
 
 void setSharding(Value value, TensorShardingAttr sharding) {

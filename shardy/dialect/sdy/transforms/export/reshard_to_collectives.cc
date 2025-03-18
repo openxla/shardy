@@ -1235,8 +1235,9 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
   LogicalResult matchAndRewrite(
       ReshardOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
-    TensorShardingAttr inSharding = getSharding(adaptor.getInput());
     TensorShardingAttr outSharding = adaptor.getSharding();
+    TensorShardingAttr inSharding =
+        getOrCreateSharding(adaptor.getInput(), outSharding.getMeshName());
     // Here it's safe to assume that shardings' meshes have a name.
     if (inSharding.getRank() != outSharding.getRank()) {
       return rewriter.notifyMatchFailure(

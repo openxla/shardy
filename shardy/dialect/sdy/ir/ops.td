@@ -493,7 +493,9 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
 }
 
 def Sdy_AllSliceOp : Sdy_Op<"all_slice",
-    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
+         /*methodOverrides=*/["allowMissingInputSharding"]>]> {
   let summary = "Performs a dynamic-slice operation along axes";
   let description = [{
     Slices chunks of a tensor along axes specified in `slicing_axes`. There is
@@ -633,7 +635,9 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
 }
 
 def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
-    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
+         /*methodOverrides=*/["allowMissingInputSharding"]>]> {
   let summary = "Perform an all-reduce comunication along axes";
   let description = [{
     Reduces chunks of a tensor along axes specified in `reduction_axes`.

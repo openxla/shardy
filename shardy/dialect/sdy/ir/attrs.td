@@ -734,6 +734,11 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
     // being marked closed (cannot be further replicated/sharded).
     static TensorShardingAttr getFullyClosed(
+        MLIRContext* context, int64_t rank, Attribute meshOrRef);
+
+    // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
+    // being marked closed (cannot be further replicated/sharded).
+    static TensorShardingAttr getFullyClosed(
         MLIRContext* context, int64_t rank, StringRef meshName);
 
     // Builds a fully closed `TensorShardingAttr` matching `sharding` in
@@ -749,6 +754,11 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     static TensorShardingAttr getClosed(
         MLIRContext* context, Attribute meshOrRef,
         ArrayRef<SmallVector<AxisRefAttr>> axesPerDim);
+
+    // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
+    // being marked open (can be further replicated/sharded).
+    static TensorShardingAttr getFullyOpen(
+        MLIRContext* context, int64_t rank, Attribute meshOrRef);
 
     // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
     // being marked open (can be further replicated/sharded).
