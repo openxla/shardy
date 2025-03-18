@@ -8,7 +8,8 @@ Interface for all collective ops. Encapsulates common get/set for
 outSharding attribute.
 
 **Constraints:**
-- Operand must have a sharding.
+- Operand must have a sharding or `allowMissingInputSharding()` returns
+  true.
 - `out_sharding` is valid w.r.t the corresponding type.
 - Operand and result sharding must have the same mesh if
   `allowDifferentMeshes()` returns false.
@@ -64,6 +65,17 @@ bool allowDifferentMeshes();
 
 Indicated whether the collective op allows the input and output sharding
 to have different meshes.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `allowMissingInputSharding`
+
+```c++
+bool allowMissingInputSharding();
+```
+
+Indicated whether the collective op allows the input to have no
+sharding, i.e, implicitly fully replicated.
 
 NOTE: This method *must* be implemented by the user.
 

@@ -91,7 +91,7 @@ affect the order of the corresponding replica groups.
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
 
 #### Attributes:
 
@@ -153,7 +153,7 @@ Example:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
 
 #### Attributes:
 
