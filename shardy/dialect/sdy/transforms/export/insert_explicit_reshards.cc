@@ -712,11 +712,9 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
 void insertExplicitReshardsToTargetSharding(OpOperand* opOperand,
                                             TensorShardingAttr targetSharding,
                                             IRRewriter& rewriter,
-                                            StringRef meshName,
                                             const bool insertAfterOperand) {
   Value operand = opOperand->get();
-  TensorShardingAttr operandSharding =
-      getOrCreateSharding(operand, meshName, /*closedIfMissing=*/true);
+  TensorShardingAttr operandSharding = getSharding(operand);
   if (shouldReshard(operandSharding, targetSharding)) {
     if (insertAfterOperand) {
       rewriter.setInsertionPointAfterValue(operand);
@@ -725,26 +723,26 @@ void insertExplicitReshardsToTargetSharding(OpOperand* opOperand,
         operand.getLoc(), operand,
         targetSharding
             ? targetSharding
+            // Since it should reshard and `targetSharding` is empty,
+            // `operandSharding` is guaranteed to be nonempty.
             : TensorShardingAttr::getFullyClosedLike(operandSharding));
     opOperand->set(reshardOp);
   }
 }
 
 void insertExplicitReshardsOnFuncReturn(Operation* op, func::FuncOp& funcOp,
-                                        IRRewriter& rewriter,
-                                        StringRef meshName) {
+                                        IRRewriter& rewriter) {
   rewriter.setInsertionPoint(op);
   for (const auto& [index, opOperand] : llvm::enumerate(op->getOpOperands())) {
     insertExplicitReshardsToTargetSharding(
         /*opOperand=*/&opOperand,
         /*targetSharding=*/getFuncResultSharding(funcOp, index), rewriter,
-        meshName, /*insertAfterOperand=*/false);
+        /*insertAfterOperand=*/false);
   }
 }
 
 void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
-                                        IRRewriter& rewriter,
-                                        StringRef meshName) {
+                                        IRRewriter& rewriter) {
   for (Value owner : llvm::concat<Value>(op.getOpResultEdgeOwners(),
                                          op.getBlockArgumentEdgeOwners())) {
     TensorShardingAttr ownerSharding = op.transformTargetSharding(
@@ -753,7 +751,7 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
     for (OpOperand* sourceOpOperand : op.getEdgeSources(owner)) {
       insertExplicitReshardsToTargetSharding(
           /*opOperand=*/sourceOpOperand,
-          /*targetSharding=*/ownerSharding, rewriter, meshName,
+          /*targetSharding=*/ownerSharding, rewriter,
           /*insertAfterOperand=*/true);
     }
   }
@@ -769,6 +767,21 @@ struct InsertExplicitReshardsPass
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
     funcOp.walk([&](Operation* op) {
+      // TODO(enver): Does not need to be part of the walk on the func, instead
+      // get the terminatior with getBodyTerminator.
+      if (isa<func::ReturnOp>(op)) {
+        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter);
+        return;
+      }
+
+      // TODO(enver): Prefer resharding the owner when multiple sources are
+      // sharded in the same way.
+      if (auto shardableDataFlowOp =
+              dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter);
+        return;
+      }
+
       SmallVector<TensorShardingAttr> inShardings =
           getShardings(op->getOperands());
       SmallVector<TensorShardingAttr> outShardings =
@@ -781,22 +794,6 @@ struct InsertExplicitReshardsPass
         // TODO(enver): Actually, we are moving towards supporting multiple
         // explicit reshards so operands and results are all bound by the same
         // mesh.
-        return;
-      }
-
-      // TODO(enver): Does not need to be part of the walk on the func, instead
-      // get the terminatior with getBodyTerminator.
-      if (isa<func::ReturnOp>(op)) {
-        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, *meshName);
-        return;
-      }
-
-      // TODO(enver): Prefer resharding the owner when multiple sources are
-      // sharded in the same way.
-      if (auto shardableDataFlowOp =
-              dyn_cast<ShardableDataFlowOpInterface>(op)) {
-        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
-                                           *meshName);
         return;
       }
 
