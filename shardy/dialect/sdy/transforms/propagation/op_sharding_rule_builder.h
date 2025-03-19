@@ -87,7 +87,7 @@ class OpShardingRuleBuilder {
       FactorType factorType = FactorType::kPassThrough);
 
   // Adds a pointwise factor for all dimensions of all operands/results that
-  // have rank at least 1. The factor type is determined by `predFactorType`.
+  // have rank at least 1. The factor type is determined by `getFactorType`.
   OpShardingRuleBuilder& addPointwise(
       ArrayRef<int64_t> shape,
       std::function<FactorType(int64_t)> getFactorType = [](int64_t) {
@@ -96,7 +96,7 @@ class OpShardingRuleBuilder {
 
   // Adds a pointwise factor for all dimensions that satisfy `pred` of all
   // operands/results that have rank at least 1. The factor type is determined
-  // by `predFactorType`.
+  // by `getFactorType`.
   OpShardingRuleBuilder& addPointwiseIf(
       ArrayRef<int64_t> shape, std::function<bool(int64_t)> pred,
       std::function<FactorType(int64_t)> getFactorType = [](int64_t) {
@@ -113,7 +113,7 @@ class OpShardingRuleBuilder {
           onMismatchFn = [](int64_t dim, OpShardingRuleBuilder& builder) {});
 
   // Adds a pointwise factor for all dimensions of all operands/results that
-  // have rank at least 1. The factor type is determined by `predFactorType`.
+  // have rank at least 1.
   //
   // Each dimension whose size in `inShape` and `outShape` is different, gets a
   // `mismatchFactorType` factor type.
