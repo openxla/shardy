@@ -345,6 +345,16 @@ class FactorAxesCandidateBag {
     bestCandidate = std::max(bestCandidate, candidate);
   }
 
+  void updateSourceTensorSizeAt(const int64_t factorIndex, const int64_t index,
+                                const int64_t sourceTensorSize) {
+    FactorAxesCandidate& candidate = candidates[index];
+    if (candidate.factorAxes.factorIndex == factorIndex) {
+      candidate.sourceTensorSize =
+          std::max(candidate.sourceTensorSize, sourceTensorSize);
+      bestCandidate = std::max(bestCandidate, candidate);
+    }
+  }
+
   // Resets best. Performs in constant-time.
   void resetBest() { bestCandidate = FactorAxesCandidate(); }
 
@@ -508,6 +518,27 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
         continue;
       }
       factorAxesCandidates.updateShardingSizeAt(candidateIndex++);
+    }
+
+    // TODO(enver): Optimize updating source tensor sizes.
+    factorAxesCandidates.resetBest();
+    for (const auto& [tensorIndex, tensorFactorSharding] :
+         llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+             projection.getOperands(), projection.getResults()))) {
+      int64_t localTensorSize = shardingRule.getTensorSizes()[tensorIndex];
+      for (const auto& [factorIndex, _] :
+           tensorFactorSharding.factorIndexToSharding) {
+        localTensorSize /= factorAxisRefs[factorIndex].getShardingSize(mesh);
+      }
+      for (const auto& [factorIndex, _] :
+           tensorFactorSharding.factorIndexToSharding) {
+        int64_t candidateIndex = 0;
+        while (candidateIndex < factorAxesCandidates.size()) {
+          factorAxesCandidates.updateSourceTensorSizeAt(
+              factorIndex, candidateIndex, localTensorSize);
+          candidateIndex++;
+        }
+      }
     }
   }
   return factorAxisRefs;
