@@ -42,9 +42,9 @@ cc_library(
 )
 
 cc_library(
-    name = "import_backend_func_calls",
-    srcs = ["import_backend_func_calls.cc"],
-    hdrs = ["import_backend_func_calls.h"],
+    name = "import_uninlineable_func_calls",
+    srcs = ["import_uninlineable_func_calls.cc"],
+    hdrs = ["import_uninlineable_func_calls.h"],
     deps = [
         ":constants",
         ":utils",
@@ -118,10 +118,10 @@ cc_library(
     srcs = ["pipelines.cc"],
     hdrs = ["pipelines.h"],
     deps = [
-        ":import_backend_func_calls",
         ":import_callback_custom_calls",
         ":import_sdy_custom_calls",
         ":import_shardy_attrs",
+        ":import_uninlineable_func_calls",
         ":shard_map_import",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:Pass",

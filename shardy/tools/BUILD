@@ -8,10 +8,10 @@ cc_binary(
     deps = [
         "//shardy/dialect/sdy/ir:register",
         "//shardy/dialect/sdy/transforms:passes",
-        "//shardy/round_trip_import:import_backend_func_calls",
         "//shardy/round_trip_import:import_callback_custom_calls",
         "//shardy/round_trip_import:import_sdy_custom_calls",
         "//shardy/round_trip_import:import_shardy_attrs",
+        "//shardy/round_trip_import:import_uninlineable_func_calls",
         "//shardy/round_trip_import:pipelines",
         "//shardy/round_trip_import:shard_map_import",
         "@llvm-project//mlir:AllPassesAndDialects",

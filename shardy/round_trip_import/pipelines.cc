@@ -23,7 +23,7 @@ limitations under the License.
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
-#include "shardy/round_trip_import/import_backend_func_calls.h"
+#include "shardy/round_trip_import/import_uninlineable_func_calls.h"
 #include "shardy/round_trip_import/import_callback_custom_calls.h"
 #include "shardy/round_trip_import/import_sdy_custom_calls.h"
 #include "shardy/round_trip_import/import_shardy_attrs.h"
@@ -45,7 +45,7 @@ void addSdyRoundTripImportPipeline(OpPassManager& pm) {
   pm.addPass(createSdyRoundTripImportShardyAttrsPass());
   pm.addPass(createSdyRoundTripShardMapImportPass());
   pm.addPass(createImportSdyCustomCallsPass());
-  pm.addPass(createImportBackendFuncCallsPass());
+  pm.addPass(createImportUninlineableFuncCallsPass());
 }
 
 void registerSdyRoundTripImportPipeline() {
@@ -57,7 +57,7 @@ void registerSdyRoundTripImportPipeline() {
 
 void registerAllSdyRoundTripImportPassesAndPipeline() {
   registerImportSdyCustomCallsPass();
-  registerImportBackendFuncCallsPass();
+  registerImportUninlineableFuncCallsPass();
   registerSdyRoundTripImportCallbackCustomCallsPass();
   registerSdyRoundTripImportShardyAttrsPass();
   registerSdyRoundTripShardMapImportPass();
