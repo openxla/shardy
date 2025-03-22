@@ -308,7 +308,7 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
     FactorAxesCandidate& candidate = factorAxesCountIt->second;
     candidate.count++;
     candidate.sourceTensorSize =
-        std::max(factorAxesCountIt->second.sourceTensorSize, sourceTensorSize);
+        std::max(candidate.sourceTensorSize, sourceTensorSize);
     return;
   }
   factorAxesCounts.try_emplace(factorAxes, factorAxes, /*count=*/1,
