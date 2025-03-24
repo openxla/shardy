@@ -5,10 +5,13 @@ sdy.mesh @mesh2d = <["x"=2, "y"=2]>
 sdy.mesh @mesh2d_4x2 = <["x"=4, "y"=2]>
 sdy.mesh @mesh2d_2x8 = <["x"=2, "y"=8]>
 sdy.mesh @mesh2d_2x3 = <["x"=2, "y"=3]>
+sdy.mesh @mesh2d_4x6 = <["x"=4, "y"=6]>
 sdy.mesh @mesh2d_non_iota = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
 sdy.mesh @mesh2d_non_iota_2 = <["x"=2, "y"=2], device_ids=[3, 1, 2, 0]>
 sdy.mesh @mesh3d = <["x"=2, "y"=2, "z"=2]>
 sdy.mesh @mesh3d_4x2x4 = <["x"=4, "y"=2, "z"=4]>
+sdy.mesh @mesh3d_4x6x2 = <["x"=4, "y"=6, "z"=2]>
+sdy.mesh @mesh3d_4x6x5 = <["x"=4, "y"=6, "z"=5]>
 sdy.mesh @mesh4d = <["x"=2, "y"=2, "z"=2, "w"=2]>
 sdy.mesh @mesh4d_z4 = <["x"=2, "y"=2, "z"=4, "w"=2]>
 sdy.mesh @mesh4d_w4 = <["x"=2, "y"=2, "z"=2, "w"=4]>
@@ -676,6 +679,87 @@ func.func @reshard_on_while_block_arg(%arg0: tensor<32x96xf32>, %arg1: tensor<i1
     stablehlo.return %1 : tensor<32x96xf32>
   }
   return %0 : tensor<32x96xf32>
+}
+
+// CHECK-LABEL: func @replace_smaller_axis_with_bigger_same_dim_non_divisible
+func.func @replace_smaller_axis_with_bigger_same_dim_non_divisible(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{"x"}, {}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %arg0 out_sharding=<@mesh2d_2x3, [{"x", "y"}, {}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_2x3, [{"y", "x"}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_2x3, [{"y"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh2d_2x3, [{"y"}, {}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// CHECK-LABEL: func @replace_bigger_axis_with_smaller_same_dim_non_divisible
+func.func @replace_bigger_axis_with_smaller_same_dim_non_divisible(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{"y"}, {}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh2d_2x3, [{"y", "x"}, {}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_2x3, [{"x", "y"}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"y"}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_2x3, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh2d_2x3, [{"x"}, {}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// CHECK-LABEL: func @replace_smaller_axis_with_bigger_gcd_greater_than_one
+func.func @replace_smaller_axis_with_bigger_gcd_greater_than_one(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh2d_4x6, [{"x"}, {}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y":(1)3}, {}] %arg0 out_sharding=<@mesh2d_4x6, [{"x", "y":(1)3}, {}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_4x6, [{"y", "x":(1)2}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x":(1)2}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_4x6, [{"y"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh2d_4x6, [{"y"}, {}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// CHECK-LABEL: func @replace_bigger_axis_with_smaller_gcd_greater_than_one
+func.func @replace_bigger_axis_with_smaller_gcd_greater_than_one(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh2d_4x6, [{"y"}, {}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x":(1)2}, {}] %arg0 out_sharding=<@mesh2d_4x6, [{"y", "x":(1)2}, {}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_4x6, [{"x", "y":(1)3}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"y":(1)3}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_4x6, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh2d_4x6, [{"x"}, {}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// CHECK-LABEL: func @swap_non_divisible_axes_diff_dim
+func.func @swap_non_divisible_axes_diff_dim(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{"x"}, {"y"}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"x"} 0->1 %arg0 out_sharding=<@mesh2d_2x3, [{}, {"y", "x"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_TO_ALL]] out_sharding=<@mesh2d_2x3, [{}, {"x", "y"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"y"} 1->0 %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_2x3, [{"y"}, {"x"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+ %0 = sdy.reshard %arg0 <@mesh2d_2x3, [{"y"}, {"x"}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// CHECK-LABEL: func @replace_axes_and_all_gather_gcd_greater_than_one
+func.func @replace_axes_and_all_gather_gcd_greater_than_one(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh2d_4x6, [{"x"}, {"y":(1)2}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y":(2)3}, {}] %arg0 out_sharding=<@mesh2d_4x6, [{"x", "y":(2)3}, {"y":(1)2}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh2d_4x6, [{"y", "x":(1)2}, {"x":(2)2}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x":(1)2}, {"x":(2)2}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_4x6, [{"y"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh2d_4x6, [{"y"}, {}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// TODO(b/402360806): better to keep dim 1 sharded on `z` in collective-permute.
+// CHECK-LABEL: func @replace_axes_and_all_gather_gcd_greater_than_one_2
+func.func @replace_axes_and_all_gather_gcd_greater_than_one_2(%arg0: tensor<12x12xf32> {sdy.sharding = #sdy.sharding<@mesh3d_4x6x2, [{"x"}, {"z"}]>}) -> tensor<12x12xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y":(1)3}, {}] %arg0 out_sharding=<@mesh3d_4x6x2, [{"x", "y":(1)3}, {"z"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d_4x6x2, [{"y", "x":(1)2}, {"x":(2)2}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x":(1)2}, {"x":(2)2}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d_4x6x2, [{"y"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh3d_4x6x2, [{"y"}, {}]> : tensor<12x12xf32>
+ return %0 : tensor<12x12xf32>
+}
+
+// CHECK-LABEL: func @replace_axes_and_all_gather_gcd_greater_than_one_3
+func.func @replace_axes_and_all_gather_gcd_greater_than_one_3(%arg0: tensor<12x10xf32> {sdy.sharding = #sdy.sharding<@mesh3d_4x6x5, [{"x"}, {"z"}]>}) -> tensor<12x10xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y":(1)3}, {}] %arg0 out_sharding=<@mesh3d_4x6x5, [{"x", "y":(1)3}, {"z"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d_4x6x5, [{"y", "x":(1)2}, {"z"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x":(1)2}, {"z"}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d_4x6x5, [{"y"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+ %0 = sdy.reshard %arg0 <@mesh3d_4x6x5, [{"y"}, {}]> : tensor<12x10xf32>
+ return %0 : tensor<12x10xf32>
 }
 
 // TODO(b/391138813): Add proper support for axes that can't co-exist

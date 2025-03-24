@@ -250,12 +250,21 @@ int64_t getShardedSize(const AxisList& axes, MeshAttr mesh) {
       [&](int64_t cur, AxisRefAttr axis) { return cur * axis.getSize(mesh); });
 }
 
+// Returns true if `a` is divisible by `b` or vice versa.
+bool areDivisible(int64_t a, int64_t b) { return a % b == 0 || b % a == 0; }
+
+// Returns true if the size of `a` is divisible by the size of `b` or vice
+// versa.
+bool areSizesDivisible(AxisRefAttr a, AxisRefAttr b, MeshAttr mesh) {
+  return areDivisible(a.getSize(mesh), b.getSize(mesh));
+}
+
 // When an `AxisRefAttr` needs to fit in a given capacity, we may need to split
 // it into two sub-axes, one that fits (`withinAxis`) and another that doesn't
 // (`remainderAxis`).
 struct AxisWithinCapacity {
-  AxisRefAttr withinAxis;
-  AxisRefAttr remainderAxis;
+  std::optional<AxisRefAttr> withinAxis;
+  std::optional<AxisRefAttr> remainderAxis;
 };
 
 // Returns an `AxisWithinCapacity` for the given `axis` w.r.t. to the given
@@ -265,12 +274,15 @@ struct AxisWithinCapacity {
 // fits.
 AxisWithinCapacity getAxisWithinCapacity(AxisRefAttr axis, int64_t& capacity,
                                          MeshAttr mesh) {
-  // TODO(b/394264845): we assume `capacity` and `axisSize` are divisible,
-  // this won't be the case if the mesh has axes that aren't all a power of 2.
   int64_t axisSize = axis.getSize(mesh);
+  // We could use `std::gcd(axisSize, capacity)` instead, but in practice this
+  // isn't needed because how all-slice insertion works for non-divisible case.
+  if (capacity <= 1 || !areDivisible(axisSize, capacity)) {
+    return {};
+  }
   if (capacity >= axisSize) {
     capacity /= axisSize;
-    return {axis, /*remainderAxis=*/nullptr};
+    return {axis, /*remainderAxis=*/std::nullopt};
   }
 
   auto withinAxis = AxisRefAttr::get(mesh.getContext(), axis.getName(),
@@ -365,27 +377,32 @@ class CollectiveInserter {
     // all-gather, we are left with an empty `outAxesPerDim`, since all out axes
     // can be handled by the previous collectives, so we are left with
     // all-gathering all axes in `inAxesPerDim` and we're done.
-
-    // 1. Try to insert an all-slice, that decreases the size of the tensor.
-    tryAllSlice();
-
-    // 2. Try to insert a collective permute, that preserves the size of the
-    // tensor and only communicates from each device to another device.
-    tryCollectivePermute();
-
-    // 3. Try to insert all-to-alls, that preserves the size of the tensor.
     //
-    // We first try to insert all-to-alls that move axes to the right position
-    // at the target dimension, to make sure multiple all-to-alls from different
-    // source dimensions to the same target dimension are inserted in the right
-    // order (to avoid the need for a collective permute), then we lift that
-    // constraint.
-    tryAllToAlls(/*allowOutOfOrderTarget=*/false);
-    tryAllToAlls(/*allowOutOfOrderTarget=*/true);
+    // Otherwise, we need at most 2 iterations.
 
-    // 4. Try to insert an all-gather, that increases the size of the tensor.
-    tryAllGather();
+    // TODO(tomnatan): consider looping only over all-to-all and collective
+    // permute as long as one of them was inserted.
+    for (int i = 0; i < 2 && !isDone(); ++i) {
+      // 1. Try to insert an all-slice, that decreases the size of the tensor.
+      tryAllSlice();
 
+      // 2. Try to insert a collective permute, that preserves the size of the
+      // tensor and only communicates from each device to another device.
+      tryCollectivePermute();
+
+      // 3. Try to insert all-to-alls, that preserves the size of the tensor.
+      //
+      // We first try to insert all-to-alls that move axes to the right position
+      // at the target dimension, to make sure multiple all-to-alls from
+      // different source dimensions to the same target dimension are inserted
+      // in the right order (to avoid the need for a collective permute), then
+      // we lift that constraint.
+      tryAllToAlls(/*allowOutOfOrderTarget=*/false);
+      tryAllToAlls(/*allowOutOfOrderTarget=*/true);
+
+      // 4. Try to insert an all-gather, that increases the size of the tensor.
+      tryAllGather();
+    }
     assert(isDone());
 
     return result;
@@ -413,25 +430,23 @@ class CollectiveInserter {
   // If an all-gather can be performed on `dim`, returns the axes to gather for
   // that dimension.
   //
-  // We gather all axes in `gatheringAxes = inAxesPerDim[dim]`, and update the
-  // internal state as follows:
-  //
-  // - `inAxesPerDim[dim]` is cleared.
-  // - `gatheringAxes` are popped from the back of `currentAxesPerDim[dim]`.
+  // We gather the suffix of axes (`gatheringAxes`) in `inAxesPerDim[dim]` that
+  // aren't present in `outAxesPerDim`, and update the internal state as
+  // follows: `gatheringAxes` are popped from the back of `inAxesPerDim[dim]`
+  // and `currentAxesPerDim[dim]`.
   //
   // For example:
   //
   // Input: `dim = 1`
   //
   // Initial state:
-  // - `inAxesPerDim = [[], ["x", "y"]]`
-  // - `outAxesPerDim = [[], []]`
-  // - `currentAxesPerDim = [["w"], ["z", "x", "y"]]`
+  // - `inAxesPerDim = [[], ["x", "y", "z", "w"]]`
+  // - `outAxesPerDim = [["y"], []]`
+  // - `currentAxesPerDim = [[], ["x", "y", "z", "w"]]`
   //
-  // Returns: `["x", "y"]`, and updates:
-  // - `inAxesPerDim = [[], []]`
-  // - `outAxesPerDim = [[], []]`
-  // - `currentAxesPerDim = [["w"], ["z"]]`
+  // Returns: `["z", "w"]`, and updates:
+  // - `inAxesPerDim = [[], ["x", "y"]]`
+  // - `currentAxesPerDim = [[], ["x", "y"]]`
   SmallVector<AxisRefAttr> getGatheringAxes(int64_t dim) {
     AxisList& inAxes = inAxesPerDim[dim];
     if (inAxes.empty()) {
@@ -440,12 +455,18 @@ class CollectiveInserter {
     SmallVector<AxisRefAttr>& currentAxes = currentAxesPerDim[dim];
     SmallVector<AxisRefAttr> gatheringAxes;
     gatheringAxes.reserve(inAxes.size());
-    popBackFromCurrentAxes(currentAxes, inAxes, inAxes.begin());
-    for (AxisRefAttr axis : inAxes) {
-      addAxisOrMerge(gatheringAxes, axis, mesh);
-      inAxisSet.erase(axis);
+    auto axisRevIt = inAxes.rbegin();
+    while (axisRevIt != inAxes.rend() &&
+           !outAxisToDimAndIndex.contains(*axisRevIt)) {
+      inAxisSet.erase(*axisRevIt);
+      --axisRevIt;
     }
-    inAxes.clear();
+    auto inAxisIt = axisRevIt.base();
+    popBackFromCurrentAxes(currentAxes, inAxes, inAxisIt);
+    while (inAxisIt != inAxes.end()) {
+      addAxisOrMerge(gatheringAxes, *inAxisIt, mesh);
+      inAxisIt = inAxes.erase(inAxisIt);
+    }
     return gatheringAxes;
   }
 
@@ -474,6 +495,7 @@ class CollectiveInserter {
   //   `size(A) >= capacityPerDim[d]`.
   // - Splits A into two sub-axes A1 and A2, such that
   //   `size(A1) == capacityPerDim[d]`, and adds A1 to `inAxesPerDim[d]`.
+  // - Skips A if it isn't divisible by `capacityPerDim[d]` or visa versa.
   //
   // For each axis A that is added to `inAxesPerDim[d]`, calls
   // `consumeAxisToAdd(A, d)`.
@@ -489,17 +511,21 @@ class CollectiveInserter {
          llvm::enumerate(llvm::zip_equal(inAxesPerDim, capacityPerDim))) {
       auto [inAxes, dimCapacity] = inAxesAndCapacity;
       auto inAxesIt = addToFront ? inAxes.begin() : inAxes.end();
-      while (!availableAxes.empty() && dimCapacity > 1) {
-        AxisRefAttr axis = availableAxes.front();
-        availableAxes.pop_front();
+      auto availableIt = availableAxes.begin();
+      while (availableIt != availableAxes.end() && dimCapacity > 1) {
         auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(axis, dimCapacity, mesh);
-        inAxes.insert(inAxesIt, withinAxis);
-        inAxisSet.insert(withinAxis);
-        consumeAxisToAdd(withinAxis, dim);
+            getAxisWithinCapacity(*availableIt, dimCapacity, mesh);
+        if (!withinAxis) {
+          ++availableIt;
+          continue;
+        }
+        availableIt = availableAxes.erase(availableIt);
+        inAxes.insert(inAxesIt, *withinAxis);
+        inAxisSet.insert(*withinAxis);
+        consumeAxisToAdd(*withinAxis, dim);
         if (remainderAxis) {
-          splitAddedAxes.push_back(withinAxis);
-          availableAxes.push_front(remainderAxis);
+          splitAddedAxes.push_back(*withinAxis);
+          availableAxes.push_front(*remainderAxis);
         }
       }
     }
@@ -645,9 +671,10 @@ class CollectiveInserter {
   //
   // We define the term capacity per dimension for all-slice - the product of
   // axis sizes in `outAxesPerDim[d]` divided by the product of axis sizes in
-  // `inAxesPerDim[d]` for each dimension d, or 1 if the former is not divisible
-  // by the latter. In other words, the capacity represents how much the output
-  // is sharded more than the input along a specific dimension.
+  // `inAxesPerDim[d]` for each dimension d, or the former divided by their GCD,
+  // if the former is not divisible by the latter (as the dimension size needs
+  // to be a multiplier of both). In other words, the capacity represents how
+  // much the output is sharded more than the input along a specific dimension.
   //
   // Constraint: we can only slice dimension d along axes whose product of
   // sizes doesn't exceed the capacity for that dimension, otherwise we will
@@ -743,9 +770,7 @@ class CollectiveInserter {
          llvm::zip_equal(inAxesPerDim, outAxesPerDim, capacityPerDim)) {
       int64_t inShardedSize = getShardedSize(inAxes, mesh);
       int64_t outShardedSize = getShardedSize(outAxes, mesh);
-      dimCapacity = outShardedSize % inShardedSize == 0
-                        ? outShardedSize / inShardedSize
-                        : 1;
+      dimCapacity = outShardedSize / std::gcd(inShardedSize, outShardedSize);
     }
 
     // 1. For a future all-to-all from a source dimension `d1` to a target
@@ -783,32 +808,31 @@ class CollectiveInserter {
         }
         // Out axis is available to slice.
 
-        // We still want to add available axes in this dimension to
-        // `availableOutAxes` so they can be added in the 2nd stage to another
-        // dimension.
-        if (dimCapacity <= 1) {
+        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+            outAxis, dimCapacity, mesh);
+        if (!withinAxis) {
+          // We still want to add available axes in this dimension to
+          // `availableOutAxes` so they can be added in the 2nd stage to another
+          // dimension.
           availableOutAxes.push_back(outAxis);
           ++outIt;
           continue;
         }
-
-        auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(outAxis, dimCapacity, mesh);
         hasSlicingAxes = true;
-        addAxisOrMerge(slicingAxes, withinAxis, mesh);
-        addAxisOrMerge(currentAxes, withinAxis, mesh);
+        addAxisOrMerge(slicingAxes, *withinAxis, mesh);
+        addAxisOrMerge(currentAxes, *withinAxis, mesh);
         if (inAxes.empty() && outIt == outAxes.begin()) {
           // Slicing axis is where it needs to be.
           outIt = outAxes.erase(outIt);
         } else {
-          inAxisSet.insert(withinAxis);
-          inAxes.push_back(withinAxis);
-          *outIt = withinAxis;
+          inAxisSet.insert(*withinAxis);
+          inAxes.push_back(*withinAxis);
+          *outIt = *withinAxis;
           ++outIt;
         }
         if (remainderAxis) {
-          outAxes.insert(outIt, remainderAxis);
-          availableOutAxes.push_back(remainderAxis);
+          outAxes.insert(outIt, *remainderAxis);
+          availableOutAxes.push_back(*remainderAxis);
         }
       }
     }
@@ -843,15 +867,17 @@ class CollectiveInserter {
   // We should insert a collective permute if one of the following holds:
   //
   // 1. Both `inAxesPerDim[d]` and `outAxesPerDim[d]` aren't empty for a certain
-  //    dimension d. This means we can replace a prefix of `inAxesPerDim[d]`
-  //    with a prefix of `outAxesPerDim[d]`, such that the prefixes sharded size
-  //    is the minimum of the two sharded sizes. The in and out prefixes might
-  //    contain different permutations of the same axes.
+  //    dimension d and their front axes are divisible. This means we can
+  //    replace a prefix of `inAxesPerDim[d]` with a prefix of
+  //    `outAxesPerDim[d]`, such that the prefixes sharded size is the minimum
+  //    of the two sharded sizes. The in and out prefixes might contain
+  //    different permutations of the same axes.
   //
   // 2. There is an axis A in `outAxesPerDim` that is not in `inAxesPerDim`
   //    (needs to be added to the current sharding), and an axis B in
   //    `inAxesPerDim` that is not in `outAxesPerDim` (needs to be removed from
-  //    the current sharding). This means we can replace B with A.
+  //    the current sharding), and A is divisible by B or vice versa. This means
+  //    we can replace B with A or a sub-axis of it.
   //
   // 3. `inAxesPerDim[d1] = [..., A, ..., B, C, ...]` such that A and C are
   //    in `outAxesPerDim[d2]` (d1 != d2) but B isn't, This means we can reorder
@@ -859,10 +885,11 @@ class CollectiveInserter {
   //    order in `outAxesPerDim[d2]`.
   //
   // 4. `inAxesPerDim[d1] = [..., A, B, ...]` such that A and B are in
-  //    `outAxesPerDim[d2]` (d1 != d2) but in different order or discontiguous.
-  //    This means we can replace A and B in `inAxesPerDim[d1]` with axes C and
-  //    D respectively such that `outAxesPerDim[d2] = [..., C, D, ...]` (note
-  //    that both C and D can be either A, B, or a different axis).
+  //    `outAxesPerDim[d2]` (d1 and d2 can be the same) but in different order
+  //    or discontiguous. This means we can replace A and B in
+  //    `inAxesPerDim[d1]` with axes C and D respectively such that
+  //    `outAxesPerDim[d2] = [..., C, D, ...]` (note that both C and D can be
+  //    either A, B, or a different axis).
   //
   // 5. `inAxesPerDim[d1] = [..., A, B, ...]` such that `outAxesPerDim[d]` is
   //    empty, A is in `outAxesPerDim[d2]` (d2 != d1) but B isn't in
@@ -870,17 +897,19 @@ class CollectiveInserter {
   //    that B is before A, and A can be moved to d2 via an all-to-all before B
   //    is all-gathered.
   bool shouldCollectivePermute() {
-    bool availableInAxis = false;
-    bool availableOutAxis = false;
-    for (auto [inAxes, outAxes] :
-         llvm::zip_equal(inAxesPerDim, outAxesPerDim)) {
-      if (!inAxes.empty() && !outAxes.empty()) {
+    std::optional<AxisRefAttr> availableInAxis;
+    std::optional<AxisRefAttr> availableOutAxis;
+    for (auto [dim, inOutAxes] :
+         llvm::enumerate(llvm::zip_equal(inAxesPerDim, outAxesPerDim))) {
+      auto [inAxes, outAxes] = inOutAxes;
+      if (!inAxes.empty() && !outAxes.empty() &&
+          areSizesDivisible(inAxes.front(), outAxes.front(), mesh)) {
         // We can replace in axes with out axes (condition #1).
         return true;
       }
       for (AxisRefAttr outAxis : outAxes) {
         if (!inAxisSet.contains(outAxis)) {
-          availableOutAxis = true;
+          availableOutAxis = outAxis;
         }
       }
       std::optional<int64_t> lastOutDim;
@@ -892,27 +921,28 @@ class CollectiveInserter {
             outAxisEntryIt != outAxisToDimAndIndex.end()) {
           curOutDim = outAxisEntryIt->second.dim;
           int64_t curOutIndex = outAxisEntryIt->second.index;
-          if (seenDims.test(*curOutDim) &&
+          if ((curOutDim == dim || seenDims.test(*curOutDim)) &&
               (lastOutDim != curOutDim || curOutIndex != lastOutIndex + 1)) {
-            // Discontiguous destination dim or axes out of order at destination
-            // dim (condition #3 & #4).
+            // Discontiguous destination dim or axes out of order at current or
+            // destination dim (condition #3 & #4).
             return true;
           }
           seenDims.set(*curOutDim);
           lastOutIndex = curOutIndex;
-        } else if (lastOutDim) {
+        } else if (lastOutDim && outAxes.empty()) {
           // Axis to all-gather not at the front and this dimension has no out
           // axes (condition #5).
           return true;
         } else {
-          availableInAxis = true;
+          availableInAxis = inAxis;
         }
         lastOutDim = curOutDim;
       }
     }
     // We can replace available in axes (axes that need to be gathered) with
     // available out axes (axes that need to be sliced) (condition #2).
-    return availableOutAxis && availableInAxis;
+    return availableOutAxis && availableInAxis &&
+           areSizesDivisible(*availableOutAxis, *availableInAxis, mesh);
   }
 
   // Performs a collective-permute, assuming `shouldCollectivePermute` is true.
@@ -1016,12 +1046,16 @@ class CollectiveInserter {
       inAxes.clear();
       while (dimCapacity > 1 && !outAxes.empty()) {
         AxisRefAttr outAxis = outAxes.front();
-        outAxes.pop_front();
         auto [withinAxis, remainderAxis] =
             getAxisWithinCapacity(outAxis, dimCapacity, mesh);
-        addAxisOrMerge(currentAxes, withinAxis, mesh);
+        if (!withinAxis) {
+          // Size of `outAxis` isn't divisible by capacity or vice versa.
+          break;
+        }
+        outAxes.pop_front();
+        addAxisOrMerge(currentAxes, *withinAxis, mesh);
         if (remainderAxis) {
-          outAxes.push_front(remainderAxis);
+          outAxes.push_front(*remainderAxis);
         }
       }
       llvm::copy(outAxes, std::back_inserter(availableOutAxes));
