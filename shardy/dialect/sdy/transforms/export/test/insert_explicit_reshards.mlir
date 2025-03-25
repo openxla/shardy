@@ -1685,3 +1685,32 @@ func.func @optimization_barrier_meshes_different_device_order(%arg0: tensor<210x
   return %2 : tensor<210xf32>
 }
 
+// CHECK-LABEL: func @negate_from_empty_sharding_to_iota_sharded
+func.func @negate_from_empty_sharding_to_iota_sharded(%arg0: tensor<210xf32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"x"}]>}) {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh_iota, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: stablehlo.negate %[[RESHARD]]
+  %0 = stablehlo.negate %arg0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_iota, [{"x"}]>]>} : tensor<210xf32>
+  return %0 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @negate_from_empty_sharding_to_iota_unsharded
+func.func @negate_from_empty_sharding_to_iota_unsharded(%arg0: tensor<210xf32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}]>}) {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.negate %arg0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_iota, [{}]>]>} : tensor<210xf32>
+  return %0 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @negate_from_empty_sharding_to_non_iota_sharded
+func.func @negate_from_empty_sharding_to_non_iota_sharded(%arg0: tensor<210xf32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}]>}) {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh_non_iota, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: stablehlo.negate %[[RESHARD]]
+  %0 = stablehlo.negate %arg0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_non_iota, [{"x"}]>]>} : tensor<210xf32>
+  return %0 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @negate_from_empty_sharding_to_non_iota_unsharded
+func.func @negate_from_empty_sharding_to_non_iota_unsharded(%arg0: tensor<210xf32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}]>}) {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.negate %arg0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_non_iota, [{}]>]>} : tensor<210xf32>
+  return %0 : tensor<210xf32>
+}
