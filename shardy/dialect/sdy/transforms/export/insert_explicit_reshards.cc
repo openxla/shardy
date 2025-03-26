@@ -74,8 +74,8 @@ bool hasShardedPermutationFactorsPerTensor(
                       });
 }
 
-bool hasShardedPermutationFactors(const ShardingProjection& projection,
-                                  OpShardingRuleAttr shardingRule) {
+bool findIfHasShardedPermutationFactors(const ShardingProjection& projection,
+                                        OpShardingRuleAttr shardingRule) {
   return llvm::any_of(llvm::concat<const TensorFactorShardings>(
                           projection.getOperands(), projection.getResults()),
                       [&](const TensorFactorShardings& tensorFactorSharding) {
@@ -434,13 +434,22 @@ FactorAxesCandidateBag findFactorAxesCandidates(
   return factorAxesCandidates;
 }
 
+AxesPerFactor toAxesPerFactor(const SmallVector<AxisListRef>& factorAxisRefs) {
+  AxesPerFactor factorCommonAxes(factorAxisRefs.size());
+  for (const auto& [factorCommonAxesOfFactor, factorAxisRef] :
+       llvm::zip_equal(factorCommonAxes, factorAxisRefs)) {
+    factorCommonAxesOfFactor = factorAxisRef.toVector();
+  }
+  return factorCommonAxes;
+}
+
 // Broadly the algorithm is, at each iteration, to pick a {factor,axis} pair
 // with the largest count from a list that is initialized with all the
 // pairs with non-zero count, assign the picked axis to the picked factor, and
 // delete all the pairs from the list that is either with the picked factor,
 // or with an axis that overlaps with the picked axis. Continue iterating
 // until the list is empty.
-SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
+AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
     MeshAttr mesh) {
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
@@ -510,7 +519,10 @@ SmallVector<AxisListRef> findCommonAxesUsingMajorityVoteHeuristic(
       factorAxesCandidates.updateShardingSizeAt(candidateIndex++);
     }
   }
-  return factorAxisRefs;
+
+  // TODO(enver): Consider to keep factorAxisRefs for longer until acutall
+  // needed to tcall toVector.
+  return toAxesPerFactor(factorAxisRefs);
 }
 
 std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
@@ -548,7 +560,7 @@ std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
 }
 
 // Assumes that tensors do not have factors that need replication.
-SmallVector<AxisListRef> findCommonAxesOnUnaryOperation(
+AxesPerFactor findCommonAxesOnUnaryOperation(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
     MeshAttr mesh, bool hasShardedPermutationFactors) {
   std::optional<int64_t> tensorIndexToPrefer =
@@ -563,7 +575,7 @@ SmallVector<AxisListRef> findCommonAxesOnUnaryOperation(
 
   // Set factor shardings to make sure factors that do not appear in the
   // preferred tensor are sharded on the other tensor.
-  SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
+  AxesPerFactor factorAxisRefs(shardingRule.getNumFactors());
   // TODO(enver): Add and use forEachFactorSharding helper method.
   for (const auto& [tensorIndex, tensorFactorSharding] :
        llvm::enumerate(llvm::concat<const TensorFactorShardings>(
@@ -572,7 +584,7 @@ SmallVector<AxisListRef> findCommonAxesOnUnaryOperation(
          tensorFactorSharding.factorIndexToSharding) {
       if (!factorSharding.axisRefs.empty()) {
         // TODO(enver): Drop the need for explicit AxisListRef casting.
-        factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
+        factorAxisRefs[factorIndex] = factorSharding.axisRefs;
       }
     }
   }
@@ -580,7 +592,7 @@ SmallVector<AxisListRef> findCommonAxesOnUnaryOperation(
   // Override with the factor shardings on the preferred tensor.
   for (const auto& [factorIndex, factorSharding] :
        projection.getTensor(*tensorIndexToPrefer).factorIndexToSharding) {
-    factorAxisRefs[factorIndex] = AxisListRef(factorSharding.axisRefs);
+    factorAxisRefs[factorIndex] = factorSharding.axisRefs;
   }
   return factorAxisRefs;
 }
@@ -632,26 +644,6 @@ void distributeAxisRefsToBatchingFactors(
   }
 }
 
-SmallVector<AxisListRef> findCommonAxesBeforeHandlingReplicatedFactors(
-    const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    MeshAttr mesh, const bool hasShardedPermutationFactors) {
-  // Handle the special case of unary operations without factors that need
-  // replication. Reshard only one of the tensors.
-  if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
-      shardingRule.getNeedReplicationFactors().empty()) {
-    return findCommonAxesOnUnaryOperation(projection, shardingRule, mesh,
-                                          hasShardedPermutationFactors);
-  }
-
-  // TODO(enver): Handle the case that tensors have sharded permutation factors.
-  if (hasShardedPermutationFactors) {
-    return {};
-  }
-
-  return findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule,
-                                                  mesh);
-}
-
 AxesPerFactor findCommonAxes(const ShardingProjection& projection,
                              OpShardingRuleAttr shardingRule, MeshAttr mesh) {
   // Return without inserting reshards if any factor sharding has overflow
@@ -667,25 +659,29 @@ AxesPerFactor findCommonAxes(const ShardingProjection& projection,
     return std::move(commonAxesPerFactor.value());
   }
 
-  SmallVector<AxisListRef> factorAxisRefs;
-  if (factorAxisRefs = findCommonAxesBeforeHandlingReplicatedFactors(
-          projection, shardingRule, mesh,
-          hasShardedPermutationFactors(projection, shardingRule));
-      factorAxisRefs.empty()) {
+  const bool hasShardedPermutationFactors =
+      findIfHasShardedPermutationFactors(projection, shardingRule);
+
+  // Handle the special case of unary operations without factors that need
+  // replication. Reshard only one of the tensors.
+  if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
+      shardingRule.getNeedReplicationFactors().empty()) {
+    return findCommonAxesOnUnaryOperation(projection, shardingRule, mesh,
+                                          hasShardedPermutationFactors);
+  }
+
+  // TODO(enver): Handle the case that tensors have sharded permutation factors.
+  if (hasShardedPermutationFactors) {
     return {};
   }
 
-  const int64_t numFactors = shardingRule.getNumFactors();
-  AxesPerFactor factorCommonAxes(numFactors);
-  for (const auto& [factorIndex, factorAxisRef] :
-       llvm::enumerate(factorAxisRefs)) {
-    factorCommonAxes[factorIndex] = factorAxisRef.toVector();
-  }
+  AxesPerFactor factorCommonAxes =
+      findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule, mesh);
 
   // Distribute the greatest common prefix of shardings of factors that need
   // replication to batching factors.
   AxesPerFactor greatestCommonPrefixShardings =
-      projection.getGreatestCommonPrefixAxes(numFactors);
+      projection.getGreatestCommonPrefixAxes(shardingRule.getNumFactors());
   for (const int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
     SmallVector<AxisRefAttr> axisRefsToDistribute =
         greatestCommonPrefixShardings[factorIndex];
