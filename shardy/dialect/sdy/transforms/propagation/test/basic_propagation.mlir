@@ -762,3 +762,15 @@ func.func @different_mesh_names_same_mesh_propagated(
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// CHECK-LABEL: func @blocked_propagation_factor
+// CHECK-SAME:      %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}, {"b"}, {"c"}]>})
+// CHECK-SAME:      -> (tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{?}, {"b", ?}, {?}]>}) {
+func.func @blocked_propagation_factor(%arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}, {"b"}, {"c"}]>}) -> tensor<8x8x8xf32> {
+  // CHECK:      stablehlo.custom_call @foo(%arg0) {
+  // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_2, [{?}, {"b", ?}, {?}]>]>,
+  // CHECK-SAME:     sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=8, k=8} need_replication={j, k} blocked_propagation={i, k}, custom>
+  // CHECK-SAME: } : (tensor<8x8x8xf32>) -> tensor<8x8x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=8, k=8} need_replication={j, k} blocked_propagation={i, k}, custom>} : (tensor<8x8x8xf32>) -> tensor<8x8x8xf32>
+  func.return %0 : tensor<8x8x8xf32>
+}

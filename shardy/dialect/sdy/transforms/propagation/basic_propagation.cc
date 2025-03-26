@@ -288,11 +288,19 @@ LogicalResult propagateTensorShardings(
 
   ShardingProjection shardingProjection = ShardingProjection::build(
       operandsParams.shardings, resultsParams.shardings, shardingRule, mesh);
+  PropagationDirectionAlongFactor localDirectionAlongFactor =
+      [shardingRule, directionAlongFactor](int64_t factorIndex) {
+        if (shardingRule.isBlockedPropagationFactor(factorIndex)) {
+          return PropagationDirection::NONE;
+        }
+        return directionAlongFactor(factorIndex);
+      };
+
   bool anyUpdated = false;
   auto updateShardings = [&]() {
     auto [updateOperand, updateResult] =
         factorPropagation.propagateFactorShardings(
-            shardingProjection, directionAlongFactor,
+            shardingProjection, localDirectionAlongFactor,
             shardingRule.getFactorSizes(), mesh, op, conservativePropagation);
     PropagationSharedParams params{shardingGroupMap, meshName.value(), mesh,
                                    notifyOpModified};
