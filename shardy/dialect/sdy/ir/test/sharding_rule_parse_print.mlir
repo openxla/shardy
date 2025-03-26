@@ -53,3 +53,10 @@ func.func @special_factors(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x11x7xf32> {
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction={j} need_replication={i, l} permutation={k}, custom>} : (tensor<2x3x5x7xf32>) -> tensor<2x11x7xf32>
   func.return %0: tensor<2x11x7xf32>
 }
+
+// CHECK-LABEL: func @blocked_propagation_factors
+func.func @blocked_propagation_factors(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x11x7xf32> {
+  // CHECK: {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction={j} need_replication={i, l} permutation={k} blocked_propagation={l}>}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction={j} need_replication={i, l} permutation={k} blocked_propagation={l}>} : (tensor<2x3x5x7xf32>) -> tensor<2x11x7xf32>
+  func.return %0: tensor<2x11x7xf32>
+}

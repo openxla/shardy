@@ -993,6 +993,10 @@ bool OpShardingRuleAttr::isPermutationFactor(int64_t factorIndex) const {
   return llvm::is_contained(getPermutationFactors(), factorIndex);
 }
 
+bool OpShardingRuleAttr::isBlockedPropagationFactor(int64_t factorIndex) const {
+  return llvm::is_contained(getBlockedPropagationFactors(), factorIndex);
+}
+
 bool OpShardingRuleAttr::isFactorInAllNonScalarTensors(
     int64_t factorIndex) const {
   for (const TensorMappingAttr& tensorMapping :

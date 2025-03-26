@@ -137,7 +137,7 @@ func.func @invalid_special_factor_index(%arg0: tensor<2x4x8xf32>) -> tensor<2x8x
 // -----
 
 func.func @a_factor_in_two_special_factor_sets(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
-  // expected-error@+1 {{a factor can only be in one of the special factor sets}}
+  // expected-error@+1 {{a factor can only be in one of the reduction, need replication, or permutation factor sets}}
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} reduction={j} need_replication={j}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
   func.return %0: tensor<2x8xf32>
 }
@@ -145,7 +145,15 @@ func.func @a_factor_in_two_special_factor_sets(%arg0: tensor<2x4x8xf32>) -> tens
 // -----
 
 func.func @a_factor_in_three_special_factor_sets(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
-  // expected-error@+1 {{a factor can only be in one of the special factor sets}}
+  // expected-error@+1 {{a factor can only be in one of the reduction, need replication, or permutation factor sets}}
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} reduction={j} need_replication={j} permutation={j}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
+  func.return %0: tensor<2x8xf32>
+}
+
+// -----
+
+func.func @unsorted_blocked_propagation_factors(%arg0: tensor<2x4x8xf32>) -> tensor<2x8xf32> {
+  // expected-error@+1 {{indices of special factors must be sorted}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, k]) {i=2, j=4, k=8} blocked_propagation={k, i}>} : (tensor<2x4x8xf32>) -> tensor<2x8xf32>
   func.return %0: tensor<2x8xf32>
 }

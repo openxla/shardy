@@ -118,7 +118,8 @@ OpShardingRuleAttr OpShardingRuleBuilder::build() {
 
   auto result = OpShardingRuleAttr::get(
       context, factorSizes, operandMappingAttrs, resultMappingAttrs,
-      reductionFactors, needReplicationFactors, permutationFactors);
+      reductionFactors, needReplicationFactors, permutationFactors,
+      blockedPropagationFactors);
 
   // Erase all added factors, to return the builder to its original state before
   // calling this method.

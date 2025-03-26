@@ -133,6 +133,8 @@ class OpShardingRuleBuilder {
 
   SmallVector<int64_t> reductionFactors, needReplicationFactors,
       permutationFactors;
+
+  SmallVector<int64_t> blockedPropagationFactors;
 };
 
 // Creates an identity mapping for an op with `numOperands` operands and

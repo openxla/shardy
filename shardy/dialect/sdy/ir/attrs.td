@@ -934,6 +934,10 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       that don't require any communication if sharded in the same way across all
       tensors that are mapped to them.
 
+    `blocked_propagation_factors` contains the factors along which shardings are
+    not allowed to be propagated. It is orthogonal to the factor types. Namely,
+    a blocked-propagation factor can be any of the factor types.
+
     `is_custom_rule` describes whether this is a rule defined by a user for a
     `stablehlo.custom_call` op. The partitioner doesn't know how to partition
     these ops, so a user must tell it how. When it is a custom rule, then the
@@ -965,7 +969,9 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
       OptionalArrayRefParameter<"int64_t",
           "factors requiring full replication">:$need_replication_factors,
       OptionalArrayRefParameter<"int64_t",
-          "factors corresponding to multiple sizes">:$permutation_factors,
+          "factors requiring collective-permute">:$permutation_factors,
+      OptionalArrayRefParameter<"int64_t",
+          "factors along which shardings are not propagated">:$blocked_propagation_factors,
       DefaultValuedParameter<"bool", "false",
           "whether the rule is for a stablehlo.custom_call">:$is_custom_rule
   );
@@ -979,6 +985,7 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     custom<FactorsWithType>($reduction_factors, "\"reduction\"") ``
     custom<FactorsWithType>($need_replication_factors, "\"need_replication\"") ``
     custom<FactorsWithType>($permutation_factors, "\"permutation\"") ``
+    custom<FactorsWithType>($blocked_propagation_factors, "\"blocked_propagation\"") ``
     custom<IsCustomRule>($is_custom_rule)
     `>`
   }];
@@ -989,10 +996,11 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
                      "ArrayRef<TensorMappingAttr>":$result_mappings,
                      "ArrayRef<int64_t>":$reduction_factors,
                      "ArrayRef<int64_t>":$need_replication_factors,
-                     "ArrayRef<int64_t>":$permutation_factors), [{
+                     "ArrayRef<int64_t>":$permutation_factors,
+                     "ArrayRef<int64_t>":$blocked_propagation_factors), [{
       return $_get($_ctxt, factor_sizes, operand_mappings, result_mappings,
                    reduction_factors, need_replication_factors,
-                   permutation_factors, /*is_custom_rule=*/false);
+                   permutation_factors, blocked_propagation_factors, /*is_custom_rule=*/false);
     }]>
   ];
 
@@ -1031,6 +1039,10 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 
     // Returns true if the `factorIndex` is a permutation factor.
     bool isPermutationFactor(int64_t factorIndex) const;
+
+    // Returns true if the `factorIndex` is in `blocked_propagation_factors`. If
+    // yes, then shardings are not allowed to be propagated along this factor.
+    bool isBlockedPropagationFactor(int64_t factorIndex) const;
 
     // Returns true if the `factorIndex` is a factor in all non-scalar tensors.
     bool isFactorInAllNonScalarTensors(int64_t factorIndex) const;

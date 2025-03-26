@@ -312,8 +312,9 @@ NB_MODULE(_sdy, m) {
              const std::vector<MlirAttribute>& resultMappings,
              const std::vector<int64_t>& reductionFactors,
              const std::vector<int64_t>& needReplicationFactors,
-             const std::vector<int64_t>& permutationFactors, bool isCustom,
-             MlirContext ctx) {
+             const std::vector<int64_t>& permutationFactors,
+             const std::vector<int64_t>& blockedPropagationFactors,
+             bool isCustom, MlirContext ctx) {
             return cls(sdyOpShardingRuleAttrGet(
                 ctx, factorSizes.size(), factorSizes.data(),
                 operandMappings.size(), operandMappings.data(),
@@ -321,13 +322,15 @@ NB_MODULE(_sdy, m) {
                 reductionFactors.size(), reductionFactors.data(),
                 needReplicationFactors.size(), needReplicationFactors.data(),
                 permutationFactors.size(), permutationFactors.data(),
-                isCustom));
+                blockedPropagationFactors.size(),
+                blockedPropagationFactors.data(), isCustom));
           },
           nb::arg("cls"), nb::arg("factor_sizes"), nb::arg("operand_mappings"),
           nb::arg("result_mappings"),
           nb::arg("reduction_factors") = std::vector<int64_t>(),
           nb::arg("need_replication_factors") = std::vector<int64_t>(),
           nb::arg("permutation_factors") = std::vector<int64_t>(),
+          nb::arg("blocked_propagation_factors") = std::vector<int64_t>(),
           nb::arg("is_custom") = false, nb::arg("context").none() = nb::none(),
           "Creates a OpShardingRuleAttr with the factor sizes and mappings for "
           "operands and results.")
@@ -370,11 +373,19 @@ NB_MODULE(_sdy, m) {
                 self, sdyOpShardingRuleAttrGetNeedReplicationFactorsSize,
                 sdyOpShardingRuleAttrGetNeedReplicationFactorsElem);
           })
-      .def_property_readonly("permutation_factors", [](MlirAttribute self) {
-        return propertyVector<intptr_t>(
-            self, sdyOpShardingRuleAttrGetPermutationFactorsSize,
-            sdyOpShardingRuleAttrGetPermutationFactorsElem);
-      });
+      .def_property_readonly(
+          "permutation_factors",
+          [](MlirAttribute self) {
+            return propertyVector<intptr_t>(
+                self, sdyOpShardingRuleAttrGetPermutationFactorsSize,
+                sdyOpShardingRuleAttrGetPermutationFactorsElem);
+          })
+      .def_property_readonly(
+          "blocked_propagation_factors", [](MlirAttribute self) {
+            return propertyVector<intptr_t>(
+                self, sdyOpShardingRuleAttrGetBlockedPropagationFactorsSize,
+                sdyOpShardingRuleAttrGetBlockedPropagationFactorsElem);
+          });
 
   mlir::python::nanobind_adaptors::mlir_attribute_subclass(
       m, "ManualAxesAttr", sdyAttributeIsAManualAxesAttr)

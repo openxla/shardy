@@ -316,14 +316,17 @@ MlirAttribute sdyOpShardingRuleAttrGet(
     intptr_t nReductionFactors, const int64_t* reductionFactors,
     intptr_t nNeedReplicationFactors, const int64_t* needReplicationFactors,
     intptr_t nPermutationFactors, const int64_t* permutationFactors,
-    bool isCustomRule) {
+    intptr_t nBlockedPropagationFactors,
+    const int64_t* blockedPropagationFactors, bool isCustomRule) {
   return wrap(sdy::OpShardingRuleAttr::get(
       unwrap(ctx), mlir::ArrayRef(factorSizes, nFactorSizes),
       unwrapAttrs<sdy::TensorMappingAttr>(operandMappings, nOperandMappings),
       unwrapAttrs<sdy::TensorMappingAttr>(resultMappings, nResultMappings),
       mlir::ArrayRef(reductionFactors, nReductionFactors),
       mlir::ArrayRef(needReplicationFactors, nNeedReplicationFactors),
-      mlir::ArrayRef(permutationFactors, nPermutationFactors), isCustomRule));
+      mlir::ArrayRef(permutationFactors, nPermutationFactors),
+      mlir::ArrayRef(blockedPropagationFactors, nBlockedPropagationFactors),
+      isCustomRule));
 }
 
 bool sdyOpShardingRuleAttrGetIsCustom(MlirAttribute attr) {
@@ -390,6 +393,19 @@ intptr_t sdyOpShardingRuleAttrGetPermutationFactorsSize(MlirAttribute attr) {
 int64_t sdyOpShardingRuleAttrGetPermutationFactorsElem(MlirAttribute attr,
                                                        intptr_t pos) {
   return unwrapAttr<sdy::OpShardingRuleAttr>(attr).getPermutationFactors()[pos];
+}
+
+intptr_t sdyOpShardingRuleAttrGetBlockedPropagationFactorsSize(
+    MlirAttribute attr) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr)
+      .getBlockedPropagationFactors()
+      .size();
+}
+
+int64_t sdyOpShardingRuleAttrGetBlockedPropagationFactorsElem(
+    MlirAttribute attr, intptr_t pos) {
+  return unwrapAttr<sdy::OpShardingRuleAttr>(attr)
+      .getBlockedPropagationFactors()[pos];
 }
 
 //===----------------------------------------------------------------------===//

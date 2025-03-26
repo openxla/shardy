@@ -549,8 +549,12 @@ LogicalResult verifyShardingRuleMapping(Operation* op, TypeRange types,
   return success();
 }
 
-LogicalResult verifyIndicesOfSpecialFactors(Operation* op, int64_t numFactors,
-                                            ArrayRef<int64_t> indices) {
+// Verifies the following for `indices`.
+// 1. It is sorted.
+// 2. Its elements are unique.
+// 3. Its elements are in range [0, `numFactors`).
+LogicalResult indicesSortedUniqueInBound(Operation* op, int64_t numFactors,
+                                         ArrayRef<int64_t> indices) {
   if (indices.empty()) {
     return success();
   }
@@ -611,16 +615,16 @@ LogicalResult verifyOpShardingRuleAttr(OpShardingRuleAttr shardingRule,
       shardingRule.getNeedReplicationFactors();
   ArrayRef<int64_t> permutationFactors = shardingRule.getPermutationFactors();
 
-  if (failed(verifyIndicesOfSpecialFactors(op, shardingRule.getNumFactors(),
-                                           reductionFactors))) {
+  if (failed(indicesSortedUniqueInBound(op, shardingRule.getNumFactors(),
+                                        reductionFactors))) {
     return failure();
   }
-  if (failed(verifyIndicesOfSpecialFactors(op, shardingRule.getNumFactors(),
-                                           needReplicationFactors))) {
+  if (failed(indicesSortedUniqueInBound(op, shardingRule.getNumFactors(),
+                                        needReplicationFactors))) {
     return failure();
   }
-  if (failed(verifyIndicesOfSpecialFactors(op, shardingRule.getNumFactors(),
-                                           permutationFactors))) {
+  if (failed(indicesSortedUniqueInBound(op, shardingRule.getNumFactors(),
+                                        permutationFactors))) {
     return failure();
   }
 
@@ -633,7 +637,14 @@ LogicalResult verifyOpShardingRuleAttr(OpShardingRuleAttr shardingRule,
                                    needReplicationFactors.size() +
                                    permutationFactors.size()) {
     return op->emitOpError(
-        "a factor can only be in one of the special factor sets");
+        "a factor can only be in one of the reduction, need replication, or "
+        "permutation factor sets");
+  }
+
+  if (failed(indicesSortedUniqueInBound(
+          op, shardingRule.getNumFactors(),
+          shardingRule.getBlockedPropagationFactors()))) {
+    return failure();
   }
 
   return success();
