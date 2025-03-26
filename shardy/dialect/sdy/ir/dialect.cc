@@ -313,6 +313,16 @@ llvm::SmallDenseMap<StringRef, int64_t> MeshAttr::getAxisNameToSize() const {
   return axisNameToSize;
 }
 
+bool MeshAttr::equals(MeshAttr other, const bool ignoreDeviceOrder) const {
+  if (!ignoreDeviceOrder) {
+    return *this == other;
+  }
+  if (this->isMaximal() != other.isMaximal()) {
+    return false;
+  }
+  return this->getAxes() == other.getAxes();
+}
+
 //===----------------------------------------------------------------------===//
 // SubAxisInfoAttr
 //===----------------------------------------------------------------------===//
