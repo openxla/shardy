@@ -141,6 +141,14 @@ AxisToDimAndIndex getAxisToDimAndIndex(ArrayRef<AxisList> axesPerDim) {
   return result;
 }
 
+AxisList concatAxisLists(MutableArrayRef<AxisList> axisLists) {
+  AxisList result;
+  for (AxisList& axes : axisLists) {
+    result.splice(result.end(), axes);
+  }
+  return result;
+}
+
 // Remove the common prefix of `inAxesPerDim` and `outAxesPerDim`.
 void removeCommonPrefix(SmallVector<AxisList>& inAxesPerDim,
                         SmallVector<AxisList>& outAxesPerDim) {
@@ -486,24 +494,23 @@ class CollectiveInserter {
     }
   }
 
-  // Distribute axes from `availableAxes` in `inAxesPerDim` based on the
-  // per-dimension capacity (`capacityPerDim`).
+  // For each dimension d, distribute axes from `getAvailableAxes(d)` in
+  // `inAxesPerDim[d]` based on the capacity for that dimension
+  // (`capacityPerDim[d]`).
   //
-  // Iterates over all axes in `availableAxes` and for each axis A, finds the
-  // first dimension d such `capacityPerDim[d] > 1` , and either:
-  // - Adds it as a whole to `inAxesPerDim[d]` if
-  //   `size(A) >= capacityPerDim[d]`.
+  // For each dimension d, as long as `capacityPerDim[d] > 1` , pops the first
+  // axis A in `getAvailableAxes(d), and either:
+  // - Adds A as a whole to `inAxesPerDim[d]` if `size(A) >= capacityPerDim[d]`.
   // - Splits A into two sub-axes A1 and A2, such that
-  //   `size(A1) == capacityPerDim[d]`, and adds A1 to `inAxesPerDim[d]`.
-  // - Skips A if it isn't divisible by `capacityPerDim[d]` or visa versa.
+  //   `size(A1) == capacityPerDim[d]`, adds A1 to `inAxesPerDim[d]`, and adds
+  //   A2 back to the front of `getAvailableAxes(d)`.
+  // - Skips A if it isn't divisible by `capacityPerDim[d]` or visa versa, and
+  //   adds it back to the front of `getAvailableAxes(d)`.
   //
   // For each axis A that is added to `inAxesPerDim[d]`, calls
   // `consumeAxisToAdd(A, d)`.
-  //
-  // `capacityPerDim` is updated for each added axis, but `totalCapacity`
-  // remains unchanged.
   void distributeInAxesWithinCapacity(
-      AxisList& availableAxes, bool addToFront,
+      bool addToFront, std::function<AxisList&(int64_t)> getAvailableAxes,
       std::function<void(AxisRefAttr, int64_t)> consumeAxisToAdd =
           [](AxisRefAttr, int64_t) {}) {
     SmallVector<AxisRefAttr> splitAddedAxes;
@@ -511,6 +518,7 @@ class CollectiveInserter {
          llvm::enumerate(llvm::zip_equal(inAxesPerDim, capacityPerDim))) {
       auto [inAxes, dimCapacity] = inAxesAndCapacity;
       auto inAxesIt = addToFront ? inAxes.begin() : inAxes.end();
+      AxisList& availableAxes = getAvailableAxes(dim);
       auto availableIt = availableAxes.begin();
       while (availableIt != availableAxes.end() && dimCapacity > 1) {
         auto [withinAxis, remainderAxis] =
@@ -533,6 +541,17 @@ class CollectiveInserter {
     // due to capacity constraint.
     llvm::sort(splitAddedAxes);
     alignSubAxesByDecomposition(outAxesPerDim, splitAddedAxes, mesh);
+  }
+
+  // Same as the overload above, but takes a single `availableAxes` to
+  // distribute across all dimensions.
+  void distributeInAxesWithinCapacity(
+      AxisList& availableAxes, bool addToFront,
+      std::function<void(AxisRefAttr, int64_t)> consumeAxisToAdd =
+          [](AxisRefAttr, int64_t) {}) {
+    distributeInAxesWithinCapacity(
+        addToFront, /*getAvailableAxes=*/
+        [&](int64_t) -> AxisList& { return availableAxes; }, consumeAxisToAdd);
   }
 
   // For an future all-to-all from source dimension `d1` to target dimension
@@ -962,8 +981,8 @@ class CollectiveInserter {
   // sharding, i.e., if we pick an axis of size n for dimension d, we divide
   // `capacityPerDim[d]` by n.
   //
-  // We first clear `inAxesPerDim`, then pick new axes across all dimensions in
-  // three stages:
+  // We first clear `inAxesPerDim` (let `prevInAxesPerDim` be the previous
+  // value), then pick new axes across all dimensions in three stages:
   //
   // 1. For each dimension d, we pop the first axis A in `outAxesPerDim[d]` as
   //    long as `curCapacity[d] > 1`, since the axis is now in the right place.
@@ -973,12 +992,18 @@ class CollectiveInserter {
   //    *back* of `inAxesPerDim[d]` for the first dimension d such that
   //    `curCapacity[d] > 1`.
   //
-  // 3. Finally, we iterate over all axes in `inAxesPerDim` that are not in
-  //    `outAxesPerDim`, i.e., axes that will need to be all-gathered, and
-  //    add each to the *front* of `inAxesPerDim[d]` for the first dimension d
-  //    such that `curCapacity[d] > 1`. We add to the front so that those axes
-  //    can be all-gathered *after* axes in the back are moved to another
-  //    dimension via an all-to-all.
+  // 3. Then, for each dimension d, we add axes in `prevInAxesPerDim[d]` that
+  //    are not in `outAxesPerDim[d]`, i.e., axes that will need to be
+  //    all-gathered, to the *front* of `inAxesPerDim[d]` as long as
+  //    `curCapacity[d] > 1`. We add to the front so that those axes can be
+  //    all-gathered *after* axes in the back are moved to another dimension via
+  //    an all-to-all. Those axes will essentially be added back in the same
+  //    place as they were before, which makes the collective-permute simpler.
+  //
+  // 4. Finally, we iterate over all remaining axes in `prevInAxesPerDim` that
+  //    are not in `outAxesPerDim` (those not used in #3), and add each to the
+  //    *front* of `inAxesPerDim[d]` for the first dimension d such that
+  //    `curCapacity[d] > 1`.
   //
   // In case `size(A) > curCapacity[d]`, we split A into two sub-axes A1 and A2,
   // such that `size(A1) == curCapacity[d]`, and pick A1 for that dimension
@@ -1014,14 +1039,14 @@ class CollectiveInserter {
   // - `currentAxesPerDim = [["x", "u"], [], ["z", "w"]]`
   //
   // Updates:
-  // - `inAxesPerDim = [["u", "y"], [], []]`,
+  // - `inAxesPerDim = [["x", "y"], [], []]`,
   // - `outAxesPerDim = [[], ["y"], []]`
-  // - `currentAxesPerDim = [["u", "y"], [], ["w", "z"]]`
+  // - `currentAxesPerDim = [["x", "y"], [], ["w", "z"]]`
   //
   // Example 2:
   //
   // Initial state:
-  // - `mesh = {"x": 2, "y": 2, "z": 2, "w": 2}`
+  // - `mesh = {"x": 2, "y": 2, "z": 2}`
   // - `inAxesPerDim = [["z", "y", "x"], [], []]`
   // - `outAxesPerDim = [[], ["y"], ["x", "z"]]`
   // - `currentAxesPerDim = [["z", "y", "x"], [], []]`
@@ -1030,26 +1055,37 @@ class CollectiveInserter {
   // - `inAxesPerDim = [["y", "x", "z"], [], []]`,
   // - `outAxesPerDim = [[], ["y"], ["x", "z"]]`
   // - `currentAxesPerDim = [["y", "x", "z"], [], []]`
+  //
+  // Example 3:
+  //
+  // Initial state:
+  // - `mesh = {"x": 2, "y": 2, "z": 2}`
+  // - `inAxesPerDim = [["x", "y"], ["z"]]`
+  // - `outAxesPerDim = [["z"], []]`
+  // - `currentAxesPerDim = [["x", "y"], ["z"]]`
+  //
+  // Updates:
+  // - `inAxesPerDim = [["y"], ["x"]]`,
+  // - `outAxesPerDim = [[], []]`
+  // - `currentAxesPerDim = [["z", "y"], ["x"]]`
   void performCollectivePermute() {
-    AxisList availableInAxes, availableOutAxes;
+    AxisList availableOutAxes;
+    SmallVector<AxisList> availableInAxesPerDim(getRank());
 
+    // 1. Place out axes in the right position.
     inAxisSet.clear();
-    for (auto [inAxes, outAxes, currentAxes, dimCapacity] : llvm::zip_equal(
-             inAxesPerDim, outAxesPerDim, currentAxesPerDim, capacityPerDim)) {
+    for (auto [inAxes, outAxes, currentAxes, dimCapacity, availableInAxes] :
+         llvm::zip_equal(inAxesPerDim, outAxesPerDim, currentAxesPerDim,
+                         capacityPerDim, availableInAxesPerDim)) {
       // TODO(tomnatan): consider reusing from `getSlicingAxesPerDim`.
       dimCapacity = getShardedSize(inAxes, mesh);
-      llvm::copy_if(inAxes, std::back_inserter(availableInAxes),
-                    [&](AxisRefAttr axis) {
-                      return !outAxisToDimAndIndex.contains(axis);
-                    });
+      int64_t usedCapacity = dimCapacity;
       popBackFromCurrentAxes(currentAxes, inAxes, inAxes.begin());
-      inAxes.clear();
       while (dimCapacity > 1 && !outAxes.empty()) {
-        AxisRefAttr outAxis = outAxes.front();
         auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(outAxis, dimCapacity, mesh);
+            getAxisWithinCapacity(outAxes.front(), dimCapacity, mesh);
         if (!withinAxis) {
-          // Size of `outAxis` isn't divisible by capacity or vice versa.
+          // Size of `outAxes.front()` not divisible by capacity or vice versa.
           break;
         }
         outAxes.pop_front();
@@ -1059,13 +1095,43 @@ class CollectiveInserter {
         }
       }
       llvm::copy(outAxes, std::back_inserter(availableOutAxes));
+
+      usedCapacity /= dimCapacity;
+      // Collect available in axes for this dimension. Place axes or sub-axes
+      // that weren't replaced by out axes (i.e., past `usedCapacity`) at the
+      // front, so we can put them back in their original position in step #3.
+      inAxes.remove_if([&](AxisRefAttr axis) {
+        return outAxisToDimAndIndex.contains(axis);
+      });
+      while (usedCapacity > 1 && !inAxes.empty()) {
+        auto [withinAxis, remainderAxis] =
+            getAxisWithinCapacity(inAxes.front(), usedCapacity, mesh);
+        if (!withinAxis) {
+          // Size of `inAxes.front()` not divisible by capacity or vice versa.
+          break;
+        }
+        inAxes.pop_front();
+        availableInAxes.push_back(*withinAxis);
+        if (remainderAxis) {
+          inAxes.push_front(*remainderAxis);
+        }
+      }
+      availableInAxes.splice(availableInAxes.begin(), inAxes);
     }
 
     // TODO(b/394552553): we should keep `availableOutAxes` in clusters by dim
     // and prioritize big clusters to big capacity.
 
+    // 2. Distribute available out axes in any dimension with capacity.
     distributeInAxesWithinCapacity(availableOutAxes, /*addToFront=*/false);
+    // 3. Distribute available in axes in their original position.
+    distributeInAxesWithinCapacity(
+        /*addToFront=*/true,
+        [&](int64_t dim) -> AxisList& { return availableInAxesPerDim[dim]; });
+    // 4. Distribute available in axes in any dimension with capacity.
+    AxisList availableInAxes = concatAxisLists(availableInAxesPerDim);
     distributeInAxesWithinCapacity(availableInAxes, /*addToFront=*/true);
+
     // We need to recreate the map because we might have split an out axis due
     // to capacity constraint.
     outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
