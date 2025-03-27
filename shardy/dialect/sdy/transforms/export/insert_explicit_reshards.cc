@@ -370,6 +370,32 @@ class FactorAxesCandidateBag {
     bestCandidate = std::max(bestCandidate, candidate);
   }
 
+  // Updates the source tensor sizes of all candidates.
+  // TODO(enver): Optimize updating source tensor sizes.
+  void updateSourceTensorSizes(const ShardingProjection& projection,
+                               OpShardingRuleAttr shardingRule,
+                               const SmallVector<AxisListRef>& factorAxisRefs) {
+    for (const auto& [tensorIndex, tensorFactorSharding] :
+         llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+             projection.getOperands(), projection.getResults()))) {
+      int64_t localTensorSize = shardingRule.getTensorSizes()[tensorIndex];
+      for (const auto& [factorIndex, _] :
+           tensorFactorSharding.factorIndexToSharding) {
+        // TODO(enver): Consider cases tensor size may not be divisable.
+        localTensorSize /= factorAxisRefs[factorIndex].getShardingSize(mesh);
+      }
+      for (const auto& [factorIndex, _] :
+           tensorFactorSharding.factorIndexToSharding) {
+        int64_t candidateIndex = 0;
+        while (candidateIndex < size()) {
+          updateSourceTensorSizeAt(factorIndex, candidateIndex,
+                                   localTensorSize);
+          candidateIndex++;
+        }
+      }
+    }
+  }
+
   // Resets best. Performs in constant-time.
   void resetBest() { bestCandidate = FactorAxesCandidate(); }
 
@@ -394,6 +420,16 @@ class FactorAxesCandidateBag {
   int64_t size() const { return candidates.size(); }
 
  private:
+  void updateSourceTensorSizeAt(const int64_t factorIndex, const int64_t index,
+                                const int64_t sourceTensorSize) {
+    FactorAxesCandidate& candidate = candidates[index];
+    if (candidate.factorAxes.factorIndex == factorIndex) {
+      candidate.sourceTensorSize =
+          std::max(candidate.sourceTensorSize, sourceTensorSize);
+      bestCandidate = std::max(bestCandidate, candidate);
+    }
+  }
+
   SmallVector<FactorAxesCandidate> candidates;
   FactorAxesCandidate bestCandidate;
   // Used for recalculating sharding size of a candidate.
@@ -543,6 +579,11 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       }
       factorAxesCandidates.updateShardingSizeAt(candidateIndex++);
     }
+
+    // TODO(enver): Optimize updating source tensor sizes.
+    factorAxesCandidates.resetBest();
+    factorAxesCandidates.updateSourceTensorSizes(projection, shardingRule,
+                                                 factorAxisRefs);
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until acutall
