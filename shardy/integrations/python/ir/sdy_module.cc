@@ -215,15 +215,17 @@ NB_MODULE(_sdy, m) {
              const std::variant<std::string, MlirAttribute>& meshOrRef,
              const std::vector<MlirAttribute>& dimensionShardings,
              const std::vector<MlirAttribute>& replicatedAxes,
-             MlirContext ctx) {
+             const std::vector<MlirAttribute>& unreducedAxes, MlirContext ctx) {
             return cls(sdyTensorShardingAttrGet(
                 ctx, toMeshOrRefAttr(ctx, meshOrRef), dimensionShardings.size(),
                 dimensionShardings.data(), replicatedAxes.size(),
-                replicatedAxes.data()));
+                replicatedAxes.data(), unreducedAxes.size(),
+                unreducedAxes.data()));
           },
           nb::arg("cls"), nb::arg("mesh_or_ref"),
           nb::arg("dimension_shardings"),
           nb::arg("replicated_axes") = std::vector<MlirAttribute>(),
+          nb::arg("unreduced_axes") = std::vector<MlirAttribute>(),
           nb::arg("context").none() = nb::none(),
           "Creates a TensorShardingAttr with either an inlined mesh or mesh "
           "name, dimension shardings, and replicated axes.")
@@ -238,10 +240,17 @@ NB_MODULE(_sdy, m) {
                                    sdyTensorShardingAttrGetDimShardingsSize,
                                    sdyTensorShardingAttrGetDimShardingsElem);
                              })
-      .def_property_readonly("replicated_axes", [](MlirAttribute self) {
+      .def_property_readonly("replicated_axes",
+                             [](MlirAttribute self) {
+                               return propertyVector<MlirAttribute>(
+                                   self,
+                                   sdyTensorShardingAttrGetReplicatedAxesSize,
+                                   sdyTensorShardingAttrGetReplicatedAxesElem);
+                             })
+      .def_property_readonly("unreduced_axes", [](MlirAttribute self) {
         return propertyVector<MlirAttribute>(
-            self, sdyTensorShardingAttrGetReplicatedAxesSize,
-            sdyTensorShardingAttrGetReplicatedAxesElem);
+            self, sdyTensorShardingAttrGetUnreducedAxesSize,
+            sdyTensorShardingAttrGetUnreducedAxesElem);
       });
 
   mlir::python::nanobind_adaptors::mlir_attribute_subclass(

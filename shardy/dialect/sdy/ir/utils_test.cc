@@ -59,7 +59,7 @@ class UtilsTest : public ::testing::Test {
     return TensorShardingAttr::get(
         &context, meshName,
         {DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
-        /*replicatedAxes=*/{});
+        /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
   }
 
   const SymbolTable& getSymbolTable() {

@@ -883,9 +883,10 @@ class TensorFactorShardingsTest : public PropagationTestBase {
 
   TensorShardingAttr createTensorSharding(
       ArrayRef<DimensionShardingAttr> dimShardings,
-      ArrayRef<AxisRefAttr> replicatedAxes = {}) {
+      ArrayRef<AxisRefAttr> replicatedAxes = {},
+      ArrayRef<AxisRefAttr> unreducedAxes = {}) {
     return TensorShardingAttr::get(&context, kMeshName, dimShardings,
-                                   replicatedAxes);
+                                   replicatedAxes, unreducedAxes);
   }
 };
 

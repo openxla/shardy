@@ -213,7 +213,9 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
   }
   result.reduceScatterOutSharding = TensorShardingAttr::get(
       context, allReduceOp.getOutShardingAttr().getMeshOrRef(),
-      reduceScatterOutDimShardings, allReduceInSharding.getReplicatedAxes());
+      reduceScatterOutDimShardings,
+      allSliceOp.getOutSharding().getReplicatedAxes(),
+      allSliceOp.getOutSharding().getUnreducedAxes());
 
   return result;
 }

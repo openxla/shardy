@@ -194,11 +194,14 @@ MlirAttribute sdyTensorShardingAttrGet(MlirContext ctx, MlirAttribute meshOrRef,
                                        intptr_t nDimShardings,
                                        const MlirAttribute* dimShardings,
                                        intptr_t nReplicatedAxes,
-                                       const MlirAttribute* replicatedAxes) {
+                                       const MlirAttribute* replicatedAxes,
+                                       intptr_t nunreducedAxes,
+                                       const MlirAttribute* unreducedAxes) {
   return wrap(sdy::TensorShardingAttr::get(
       unwrap(ctx), unwrap(meshOrRef),
       unwrapAttrs<sdy::DimensionShardingAttr>(dimShardings, nDimShardings),
-      unwrapAttrs<sdy::AxisRefAttr>(replicatedAxes, nReplicatedAxes)));
+      unwrapAttrs<sdy::AxisRefAttr>(replicatedAxes, nReplicatedAxes),
+      unwrapAttrs<sdy::AxisRefAttr>(unreducedAxes, nunreducedAxes)));
 }
 
 MlirAttribute sdyTensorShardingAttrGetMeshOrRef(MlirAttribute attr) {
@@ -223,6 +226,16 @@ MlirAttribute sdyTensorShardingAttrGetReplicatedAxesElem(MlirAttribute attr,
                                                          intptr_t pos) {
   return wrap(
       unwrapAttr<sdy::TensorShardingAttr>(attr).getReplicatedAxes()[pos]);
+}
+
+intptr_t sdyTensorShardingAttrGetUnreducedAxesSize(MlirAttribute attr) {
+  return unwrapAttr<sdy::TensorShardingAttr>(attr).getUnreducedAxes().size();
+}
+
+MlirAttribute sdyTensorShardingAttrGetUnreducedAxesElem(MlirAttribute attr,
+                                                         intptr_t pos) {
+  return wrap(
+      unwrapAttr<sdy::TensorShardingAttr>(attr).getUnreducedAxes()[pos]);
 }
 
 //===----------------------------------------------------------------------===//

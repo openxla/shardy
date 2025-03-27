@@ -31,6 +31,12 @@ namespace sdy {
 
 void printMeshOrRef(AsmPrinter& printer, Attribute meshOrRef);
 
+// Prints each optional axis list as ", <keyword>={<axes>}", in a predefined
+// order if multiple are present.
+void printReplicatedAndUnreducedAxes(AsmPrinter& printer,
+                                     ArrayRef<AxisRefAttr> replicatedAxes,
+                                     ArrayRef<AxisRefAttr> unreducedAxes);
+
 // Prints the factor sizes of an OpShardingRule. The keys in the list are the
 // indices in the factor mapping, with i=0, j=1, k=2,... z=17. For any index
 // greater than 17 it's printed as z_X where `X>0` and the index being X-17

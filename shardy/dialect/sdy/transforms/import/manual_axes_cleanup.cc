@@ -84,9 +84,9 @@ addUnusedManualAxesToReplicatedAxes(
     Attribute meshOrRef = sharding.getMesh(symbolTable).empty()
                               ? commonMeshOrRef
                               : sharding.getMeshOrRef();
-    newShardings.push_back(
-        TensorShardingAttr::get(sharding.getContext(), meshOrRef,
-                                sharding.getDimShardings(), newReplicatedAxes));
+    newShardings.push_back(TensorShardingAttr::get(
+        sharding.getContext(), meshOrRef, sharding.getDimShardings(),
+        newReplicatedAxes, sharding.getUnreducedAxes()));
     modified = true;
   }
   return modified ? std::make_optional(newShardings) : std::nullopt;
