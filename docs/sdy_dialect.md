@@ -1020,6 +1020,7 @@ Syntax:
   ::llvm::ArrayRef<int64_t>,   # reduction_factors
   ::llvm::ArrayRef<int64_t>,   # need_replication_factors
   ::llvm::ArrayRef<int64_t>,   # permutation_factors
+  ::llvm::ArrayRef<int64_t>,   # blocked_propagation_factors
   bool   # is_custom_rule
 >
 ```
@@ -1060,6 +1061,10 @@ one dimensions that correspond across operands and results.
   that don't require any communication if sharded in the same way across all
   tensors that are mapped to them.
 
+`blocked_propagation_factors` contains the factors along which shardings are
+not allowed to be propagated. It is orthogonal to the factor types. Namely,
+a blocked-propagation factor can be any of the factor types.
+
 `is_custom_rule` describes whether this is a rule defined by a user for a
 `stablehlo.custom_call` op. The partitioner doesn't know how to partition
 these ops, so a user must tell it how. When it is a custom rule, then the
@@ -1087,7 +1092,8 @@ for `stablehlo.custom_call` ops.
 | result_mappings | `::llvm::ArrayRef<TensorMappingAttr>` | result mappings |
 | reduction_factors | `::llvm::ArrayRef<int64_t>` | factors requiring reduction |
 | need_replication_factors | `::llvm::ArrayRef<int64_t>` | factors requiring full replication |
-| permutation_factors | `::llvm::ArrayRef<int64_t>` | factors corresponding to multiple sizes |
+| permutation_factors | `::llvm::ArrayRef<int64_t>` | factors requiring collective-permute |
+| blocked_propagation_factors | `::llvm::ArrayRef<int64_t>` | factors along which shardings are not propagated |
 | is_custom_rule | `bool` | whether the rule is for a stablehlo.custom_call |
 
 ### SubAxisInfoAttr
