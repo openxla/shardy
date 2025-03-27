@@ -134,6 +134,38 @@ std::optional<AxesPerFactor> getCompatibleFactorShardings(
   return commonAxesPerFactor;
 }
 
+void insertExplicitReshardsOnOperand(Operation* op, const int64_t operandIndex,
+                                     const ShardingProjection& projection,
+                                     OpShardingRuleAttr shardingRule,
+                                     const Mesh& mesh, IRRewriter& rewriter) {
+  auto operand = op->getOperand(operandIndex);
+  auto newTensorSharding =
+      projection.getOperand(operandIndex)
+          .createTensorShardingAttr(
+              mesh.getContext(), shardingRule.getOperandMapping(operandIndex),
+              shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
+  auto reshardOp =
+      rewriter.create<ReshardOp>(operand.getLoc(), operand, newTensorSharding);
+  op->setOperand(operandIndex, reshardOp);
+}
+
+void insertExplicitReshardsOnResult(Operation* op, const int64_t resultIndex,
+                                    const ShardingProjection& projection,
+                                    OpShardingRuleAttr shardingRule,
+                                    const Mesh& mesh, IRRewriter& rewriter) {
+  auto result = op->getResult(resultIndex);
+  auto newTensorSharding =
+      projection.getResult(resultIndex)
+          .createTensorShardingAttr(
+              mesh.getContext(), shardingRule.getResultMapping(resultIndex),
+              shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
+  auto reshardOp = rewriter.create<ReshardOp>(
+      result.getLoc(), result,
+      getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true));
+  rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
+  setSharding(result, newTensorSharding);
+}
+
 // Insert explicit reshards for operands and results that change by
 // the given `projection` for a given `op`. The reshards are inserted only to
 // make the given operation compatible.
@@ -174,30 +206,13 @@ void insertExplicitReshards(Operation* op, const ShardingProjection& projection,
                             OpShardingRuleAttr shardingRule, const Mesh& mesh) {
   rewriter.setInsertionPoint(op);
   for (int operandIndex : updateTensorShardings.updateOperands.set_bits()) {
-    auto operand = op->getOperand(operandIndex);
-    auto newTensorSharding =
-        projection.getOperand(operandIndex)
-            .createTensorShardingAttr(
-                mesh.getContext(), shardingRule.getOperandMapping(operandIndex),
-                shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
-    auto reshardOp = rewriter.create<ReshardOp>(operand.getLoc(), operand,
-                                                newTensorSharding);
-    op->setOperand(operandIndex, reshardOp);
+    insertExplicitReshardsOnOperand(op, operandIndex, projection, shardingRule,
+                                    mesh, rewriter);
   }
-
   rewriter.setInsertionPointAfter(op);
   for (int resultIndex : toSetBitsVector(updateTensorShardings.updateResults)) {
-    auto result = op->getResult(resultIndex);
-    auto newTensorSharding =
-        projection.getResult(resultIndex)
-            .createTensorShardingAttr(
-                mesh.getContext(), shardingRule.getResultMapping(resultIndex),
-                shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
-    auto reshardOp = rewriter.create<ReshardOp>(
-        result.getLoc(), result,
-        getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true));
-    rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
-    setSharding(result, newTensorSharding);
+    insertExplicitReshardsOnResult(op, resultIndex, projection, shardingRule,
+                                   mesh, rewriter);
   }
 }
 
