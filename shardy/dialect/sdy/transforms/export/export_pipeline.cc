@@ -57,6 +57,7 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
   if (!keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
+  pm.addNestedPass<func::FuncOp>(createDeduplicateConstantsPass());
 }
 
 void registerExportPipeline() {

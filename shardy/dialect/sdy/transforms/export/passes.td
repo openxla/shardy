@@ -169,3 +169,14 @@ def DropShardingRulesPass : Pass<"sdy-drop-sharding-rules", "func::FuncOp"> {
   let summary = "Drops `OpShardingRuleAttr` from all registered ops.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def DeduplicateConstantsPass : Pass<"sdy-deduplicate-constants", "func::FuncOp"> {
+  let summary = "Deduplicates constants with identical shardings";
+  let description = [{
+    Performss a lightweight CSE on constants with identical shardings.
+    This pass is used to simplify after constant splitting, while minimally
+    changing other aspects of the program to ensure sharding annotations remain
+    valid. I.e. don't lift computations out of op regions.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
