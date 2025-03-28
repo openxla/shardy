@@ -594,10 +594,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       })
       .Case<stablehlo::DynamicSliceOp>(
           [](stablehlo::DynamicSliceOp dynamicSlice) {
+            ArrayRef<int64_t> operandShape =
+                getTensorShape(dynamicSlice.getOperand());
+            ArrayRef<int64_t> resultShape =
+                getTensorShape(dynamicSlice.getResult());
             return OpShardingRuleBuilder(dynamicSlice)
                 .addPointwiseIfDimSizesMatch(
-                    getTensorShape(dynamicSlice.getOperand()),
-                    getTensorShape(dynamicSlice.getResult()))
+                    operandShape, resultShape,
+                    /*onMismatchFn=*/
+                    [&](int64_t dim, OpShardingRuleBuilder& builder) {
+                      builder.addFactor(dim, operandShape[dim],
+                                        FactorType::kNeedReplication,
+                                        /*isBlocked=*/true);
+                    })
                 .build();
           })
       .Case<stablehlo::DynamicUpdateSliceOp>(
@@ -946,24 +955,24 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           })
       .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
         ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());
-        // TODO(b/387351742). We should always add a factor of type
-        // kNeedReplication for the sort dimension. Currently, we only add it if
-        // we have batch dimensions with size > 1.
-        bool propagatingAlongSortDim =
-            llvm::any_of(llvm::enumerate(shape), [&](auto dimAndSize) {
-              return dimAndSize.index() != sort.getDimension() &&
-                     dimAndSize.value() > 1;
+        bool blockedPropagationAlongSortDim =
+            llvm::all_of(llvm::enumerate(shape), [&](auto dimAndSize) {
+              return dimAndSize.index() == sort.getDimension() ||
+                     dimAndSize.value() == 1;
             });
-        std::function<bool(int64_t)> pred = [&](int64_t dim) {
-          return propagatingAlongSortDim || dim != sort.getDimension();
-        };
-        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
-          return dim == sort.getDimension() ? FactorType::kNeedReplication
-                                            : FactorType::kPassThrough;
-        };
-        return OpShardingRuleBuilder(sort)
-            .addPointwiseIf(shape, pred, getFactorType)
-            .build();
+
+        OpShardingRuleBuilder builder(sort);
+        for (auto [dim, dimSize] : llvm::enumerate(shape)) {
+          if (dim == sort.getDimension()) {
+            // the sort dimension
+            builder.addFactor(dim, dimSize, FactorType::kNeedReplication,
+                              /*isBlocked=*/blockedPropagationAlongSortDim);
+          } else {
+            // batch dimensions
+            builder.addFactor(dim, dimSize);
+          }
+        }
+        return builder.build();
       })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);

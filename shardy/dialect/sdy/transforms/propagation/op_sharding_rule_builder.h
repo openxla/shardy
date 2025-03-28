@@ -76,7 +76,8 @@ class OpShardingRuleBuilder {
   // Skips operands and results with corresponding dimension `kNullDim`.
   OpShardingRuleBuilder& addFactor(
       ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
-      int64_t factorSize, FactorType factorType = FactorType::kPassThrough);
+      int64_t factorSize, FactorType factorType = FactorType::kPassThrough,
+      bool isBlocked = false);
 
   // Same as addFactor above, but updates the same dimension for all operands
   // and results that have rank at least 1.
@@ -84,7 +85,7 @@ class OpShardingRuleBuilder {
   // Useful when creating rules for pointwise ops.
   OpShardingRuleBuilder& addFactor(
       int64_t dim, int64_t factorSize,
-      FactorType factorType = FactorType::kPassThrough);
+      FactorType factorType = FactorType::kPassThrough, bool isBlocked = false);
 
   // Adds a pointwise factor for all dimensions of all operands/results that
   // have rank at least 1. The factor type is determined by `getFactorType`.
@@ -122,7 +123,8 @@ class OpShardingRuleBuilder {
       FactorType mismatchFactorType);
 
  private:
-  void updateFactorType(FactorType factorType, int64_t factorIndex);
+  void updateFactorType(FactorType factorType, int64_t factorIndex,
+                        bool isBlocked);
 
   MLIRContext* context;
   SmallVector<int64_t> factorSizes;
