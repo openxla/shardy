@@ -183,7 +183,8 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
 
 Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
                              ArrayRef<TensorShardingAttr> resultsShardings,
-                             const SymbolTable& symbolTable) {
+                             const SymbolTable& symbolTable,
+                             const bool ignoreDeviceOrder) {
   Attribute meshOrRef;
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
@@ -195,7 +196,8 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
     if (!mesh || mesh.empty()) {
       mesh = otherMesh;
       meshOrRef = sharding.getMeshOrRef();
-    } else if (otherMesh != mesh && !otherMesh.empty()) {
+    } else if (!otherMesh.equals(mesh, ignoreDeviceOrder) &&
+               !otherMesh.empty()) {
       // Found more than one mesh name.
       return nullptr;
     }
@@ -224,9 +226,9 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
 std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultsShardings,
-    const SymbolTable& symbolTable) {
-  Attribute meshOrRef =
-      getCommonMeshOrRef(operandShardings, resultsShardings, symbolTable);
+    const SymbolTable& symbolTable, const bool ignoreDeviceOrder) {
+  Attribute meshOrRef = getCommonMeshOrRef(operandShardings, resultsShardings,
+                                           symbolTable, ignoreDeviceOrder);
   // We assume that if there is a common mesh, then there can only be a unique
   // symbol name referencing that mesh.
   return meshOrRef

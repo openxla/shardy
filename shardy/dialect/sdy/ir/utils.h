@@ -137,11 +137,16 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
 //
 // Ignores empty meshes unless all meshes are empty.
 //
+// If `ignoreDeviceOrder` is true, returns the common mesh by ignoring the
+// device order. It means, it returns a mesh, that is common to all shardings on
+// axes, and the device order is arbitrary.
+//
 // If there is a common mesh, returns the first inlined common mesh or reference
 // to it encountered.
 Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
                              ArrayRef<TensorShardingAttr> resultsShardings,
-                             const SymbolTable& symbolTable);
+                             const SymbolTable& symbolTable,
+                             bool ignoreDeviceOrder = false);
 
 // Returns the common `MeshAttr` bound by all the `TensorShardingAttr`s or
 // nullptr if there is none.
@@ -165,10 +170,13 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
 // Ignores empty meshes unless all meshes are empty, and assumes there are no
 // inlined meshes and no two mesh names refer to the same `MeshAttr` (otherwise
 // one of will be returned arbitrarily).
+//
+// In case `ignoreDeviceOrder` is true, returns the name of a mesh, picked
+// arbitrarily, that is common to all tensor shardings on axes.
 std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultsShardings,
-    const SymbolTable& symbolTable);
+    const SymbolTable& symbolTable, bool ignoreDeviceOrder = false);
 
 // Creates the symbol equivalent of a factor index:
 //   -  0 -> 'i'
