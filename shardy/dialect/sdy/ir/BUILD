@@ -16,6 +16,7 @@ td_library(
     ],
     deps = [
         "@llvm-project//mlir:AttrTdFiles",
+        "@llvm-project//mlir:BuiltinDialectBytecodeTdFiles",
         "@llvm-project//mlir:BuiltinDialectTdFiles",
         "@llvm-project//mlir:BytecodeOpInterfaceTdFiles",
         "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
@@ -132,6 +133,22 @@ gentbl_cc_library(
     deps = [":sdy_td_files"],
 )
 
+gentbl_cc_library(
+    name = "bytecode_inc",
+    tbl_outs = [
+        (
+            [
+                "-gen-bytecode",
+                "-bytecode-dialect=sdy",
+            ],
+            "bytecode.cc.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "bytecode.td",
+    deps = [":sdy_td_files"],
+)
+
 gentbl_filegroup(
     name = "dialect_doc_gen",
     tbl_outs = [
@@ -151,7 +168,9 @@ gentbl_filegroup(
 cc_library(
     name = "dialect",
     srcs = [
+        "bytecode.cc",
         "canonicalization.cc",
+        "compatibility.cc",
         "dialect.cc",
         "extensions/stablehlo_extensions.cc",
         "parsers.cc",
@@ -160,6 +179,8 @@ cc_library(
         "verifiers.cc",
     ],
     hdrs = [
+        "bytecode.h",
+        "compatibility.h",
         "constants.h",
         "dialect.h",
         "enums.h",
@@ -171,6 +192,7 @@ cc_library(
     ],
     deps = [
         ":attrs_inc",
+        ":bytecode_inc",
         ":canonicalization_inc",
         ":dialect_inc",
         ":enums_inc",
