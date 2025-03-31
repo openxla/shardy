@@ -4,6 +4,17 @@
 
 _Closes tensor shardings and drops replicated axes._
 
+### `-sdy-constant-merger`
+
+_Merge identical constants with matching shardings._
+
+Performs a lightweight CSE on constants with identical shardings.
+
+The import pipeline splits and duplicates the constants such that sharding
+is not propagated between different uses of a constant sub-computation. If
+the constants have same shardings after propagation, this pass merges them
+to save compilation time.
+
 ### `-sdy-drop-sharding-rules`
 
 _Drops `OpShardingRuleAttr` from all registered ops._
