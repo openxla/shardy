@@ -36,6 +36,7 @@ cc_library(
     name = "passes",
     srcs = [
         "close_shardings.cc",
+        "constant_merger.cc",
         "drop_sharding_rules.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
@@ -68,6 +69,7 @@ cc_library(
         "@llvm-project//mlir:SideEffectInterfaces",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
+        "@llvm-project//mlir:Transforms",
         "@stablehlo//:stablehlo_ops",
     ],
 )

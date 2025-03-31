@@ -169,3 +169,16 @@ def DropShardingRulesPass : Pass<"sdy-drop-sharding-rules", "func::FuncOp"> {
   let summary = "Drops `OpShardingRuleAttr` from all registered ops.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def ConstantMergerPass : Pass<"sdy-constant-merger", "func::FuncOp"> {
+  let summary = "Merge identical constants with matching shardings.";
+  let description = [{
+    Performs a lightweight CSE on constants with identical shardings.
+
+    The import pipeline splits and duplicates the constants such that sharding
+    is not propagated between different uses of a constant sub-computation. If
+    the constants have same shardings after propagation, this pass merges them
+    to save compilation time.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

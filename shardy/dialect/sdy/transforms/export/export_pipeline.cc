@@ -27,6 +27,7 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
                        bool skipConvertToReshard,
                        bool enableInsertExplicitCollectives,
                        bool keepShardingRules) {
+  pm.addNestedPass<func::FuncOp>(createConstantMergerPass());
   pm.addPass(createRemoveShardingGroupsPass());
   if (!skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
