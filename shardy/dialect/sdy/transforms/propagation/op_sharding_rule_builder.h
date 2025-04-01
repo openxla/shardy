@@ -73,10 +73,14 @@ class OpShardingRuleBuilder {
   // to the corresponding dimension of each operand/result as specified by
   // `operandDims` and `resultDims`.
   //
+  // If `isBlocked` is true, the factor will be marked as blocked, i.e., Shardy
+  // will not propagate shardings along this factor.
+  //
   // Skips operands and results with corresponding dimension `kNullDim`.
   OpShardingRuleBuilder& addFactor(
       ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
-      int64_t factorSize, FactorType factorType = FactorType::kPassThrough);
+      int64_t factorSize, FactorType factorType = FactorType::kPassThrough,
+      bool isBlocked = false);
 
   // Same as addFactor above, but updates the same dimension for all operands
   // and results that have rank at least 1.
@@ -84,7 +88,7 @@ class OpShardingRuleBuilder {
   // Useful when creating rules for pointwise ops.
   OpShardingRuleBuilder& addFactor(
       int64_t dim, int64_t factorSize,
-      FactorType factorType = FactorType::kPassThrough);
+      FactorType factorType = FactorType::kPassThrough, bool isBlocked = false);
 
   // Adds a pointwise factor for all dimensions of all operands/results that
   // have rank at least 1. The factor type is determined by `getFactorType`.
@@ -104,25 +108,26 @@ class OpShardingRuleBuilder {
       });
 
   // Adds a pointwise factor for each dimension whose size in `inShape` and
-  // `outShape` is the same, and calls `onMismatchFn` on the rest.
+  // `outShape` is the same.
   //
   // If `inShape` and `outShape` are empty, this method does nothing.
   OpShardingRuleBuilder& addPointwiseIfDimSizesMatch(
-      ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
-      std::function<void(int64_t dim, OpShardingRuleBuilder& builder)>
-          onMismatchFn = [](int64_t dim, OpShardingRuleBuilder& builder) {});
+      ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape);
 
   // Adds a pointwise factor for all dimensions of all operands/results that
   // have rank at least 1.
   //
   // Each dimension whose size in `inShape` and `outShape` is different, gets a
-  // `mismatchFactorType` factor type.
+  // `mismatchFactorType` factor type and is marked as blocked if
+  // `mismatchFactorIsBlocked` is true.
   OpShardingRuleBuilder& addPointwiseWithDiffTypeForMismatch(
       ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
-      FactorType mismatchFactorType);
+      FactorType mismatchFactorType = FactorType::kNeedReplication,
+      bool mismatchFactorIsBlocked = false);
 
  private:
-  void updateFactorType(FactorType factorType, int64_t factorIndex);
+  void updateFactorType(FactorType factorType, int64_t factorIndex,
+                        bool isBlocked);
 
   MLIRContext* context;
   SmallVector<int64_t> factorSizes;

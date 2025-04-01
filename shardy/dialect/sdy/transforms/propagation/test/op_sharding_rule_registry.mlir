@@ -397,14 +397,14 @@ func.func @dot_general_many_mixed_dims(%arg0: tensor<2x4x8x4x64x32xf32>, %arg1: 
 
 // CHECK-LABEL: func @dynamic_slice
 func.func @dynamic_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<i32>, %arg2: tensor<i32>, %arg3: tensor<i32>) -> tensor<32x1x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [], [], [])->([i, l, m]) {i=32, j=1, k=1, l=1, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [], [], [])->([i, j, k]) {i=32, j=4, k=8} need_replication={j, k} blocked_propagation={j, k}>
   %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, %arg3, sizes = [32, 1, 2] : (tensor<32x4x8xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x1x2xf32>
   return %0 : tensor<32x1x2xf32>
 }
 
 // CHECK-LABEL: func @dynamic_update_slice
 func.func @dynamic_update_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2xf32>, %arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>) -> tensor<32x4x8xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, l, m], [], [], [])->([i, j, k]) {i=32, j=4, k=8, l=1, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, k, m], [], [], [])->([i, j, l]) {i=32, j=4, k=1, l=8, m=2} need_replication={k, m}>
   %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3, %arg4 : (tensor<32x4x8xf32>, tensor<32x1x2xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x4x8xf32>
   return %0 : tensor<32x4x8xf32>
 }
@@ -500,8 +500,6 @@ func.func @slice(%arg0: tensor<32x4x8xf32>) -> tensor<32x1x2xf32> {
   return %0 : tensor<32x1x2xf32>
 }
 
-// Sort is currently treated as a pointwise op, and we add a factor for the sort
-// dimension as well, but this decision could change in the future.
 // CHECK-LABEL: func @sort
 func.func @sort(%arg0: tensor<4x32x8xi32>, %arg1: tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>) {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k], [i, j, k]) {i=4, j=32, k=8} need_replication={i}>
@@ -515,7 +513,7 @@ func.func @sort(%arg0: tensor<4x32x8xi32>, %arg1: tensor<4x32x8xf32>) -> (tensor
 
 // CHECK-LABEL: func @sort_all_other_dims_size_one
 func.func @sort_all_other_dims_size_one(%arg0: tensor<1x4x1xi32>) -> tensor<1x4x1xi32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, j])->([i, l, j]) {i=1, j=1, k=1, l=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=1, j=4, k=1} need_replication={j} blocked_propagation={j}>
   %0 = "stablehlo.sort"(%arg0) ({
     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
       %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>

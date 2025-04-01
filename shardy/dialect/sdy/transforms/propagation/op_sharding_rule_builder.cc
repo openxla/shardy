@@ -147,7 +147,12 @@ OpShardingRuleAttr OpShardingRuleBuilder::buildPointwise(Operation* op) {
 }
 
 void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
-                                             int64_t factorIndex) {
+                                             int64_t factorIndex,
+                                             bool isBlocked) {
+  if (isBlocked) {
+    blockedPropagationFactors.push_back(factorIndex);
+  }
+
   switch (factorType) {
     case FactorType::kReduction:
       reductionFactors.push_back(factorIndex);
@@ -166,18 +171,19 @@ void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(
     ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
-    int64_t factorSize, FactorType factorType) {
+    int64_t factorSize, FactorType factorType, bool isBlocked) {
   int64_t factorIndex = factorSizes.size();
   mapDimsToFactor(operandMappings, operandDims, factorIndex);
   mapDimsToFactor(resultMappings, resultDims, factorIndex);
   factorSizes.push_back(factorSize);
-  updateFactorType(factorType, factorIndex);
+  updateFactorType(factorType, factorIndex, isBlocked);
   return *this;
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
                                                         int64_t factorSize,
-                                                        FactorType factorType) {
+                                                        FactorType factorType,
+                                                        bool isBlocked) {
   int64_t factorIndex = factorSizes.size();
   for (TensorMapping& tensorMapping :
        llvm::concat<TensorMapping>(operandMappings, resultMappings)) {
@@ -188,7 +194,7 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
     tensorMapping[dim].factorIndices.push_back(factorIndex);
   }
   factorSizes.push_back(factorSize);
-  updateFactorType(factorType, factorIndex);
+  updateFactorType(factorType, factorIndex, isBlocked);
   return *this;
 }
 
@@ -213,16 +219,12 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIf(
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIfDimSizesMatch(
-    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
-    std::function<void(int64_t dim, OpShardingRuleBuilder& builder)>
-        onMismatchFn) {
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
   for (auto [dim, dimSizes] :
        llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
     auto [inDimSize, outDimSize] = dimSizes;
     if (inDimSize == outDimSize) {
       addFactor(dim, inDimSize);
-    } else {
-      onMismatchFn(dim, *this);
     }
   }
   return *this;
@@ -231,13 +233,15 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIfDimSizesMatch(
 OpShardingRuleBuilder&
 OpShardingRuleBuilder::addPointwiseWithDiffTypeForMismatch(
     ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,
-    FactorType mismatchFactorType) {
+    FactorType mismatchFactorType, bool mismatchFactorIsBlocked) {
   for (auto [dim, dimSizes] :
        llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
     auto [inDimSize, outDimSize] = dimSizes;
-    addFactor(dim, inDimSize,
-              inDimSize == outDimSize ? FactorType::kPassThrough
-                                      : mismatchFactorType);
+    if (inDimSize == outDimSize) {
+      addFactor(dim, inDimSize);
+    } else {
+      addFactor(dim, inDimSize, mismatchFactorType, mismatchFactorIsBlocked);
+    }
   }
   return *this;
 }

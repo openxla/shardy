@@ -1109,8 +1109,8 @@ func.func @sort(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [
 
 // CHECK-LABEL: func @sort_all_other_dims_size_one
 func.func @sort_all_other_dims_size_one(%arg0: tensor<1x4x1xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<1x4x1xi32> {
-  // CHECK-NOT: sdy.reshard
-  // TODO(enver): Support this special case of sort in which all factors have size one.
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}, {}]> : tensor<1x4x1xi32>
+  // CHECK-NEXT: "stablehlo.sort"(%[[RESHARD]])
   %0 = "stablehlo.sort"(%arg0) ({
     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
       %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>

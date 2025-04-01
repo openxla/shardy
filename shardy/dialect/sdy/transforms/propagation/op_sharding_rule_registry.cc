@@ -595,9 +595,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case<stablehlo::DynamicSliceOp>(
           [](stablehlo::DynamicSliceOp dynamicSlice) {
             return OpShardingRuleBuilder(dynamicSlice)
-                .addPointwiseIfDimSizesMatch(
+                .addPointwiseWithDiffTypeForMismatch(
                     getTensorShape(dynamicSlice.getOperand()),
-                    getTensorShape(dynamicSlice.getResult()))
+                    getTensorShape(dynamicSlice.getResult()),
+                    FactorType::kNeedReplication,
+                    /*mismatchFactorIsBlocked=*/true)
                 .build();
           })
       .Case<stablehlo::DynamicUpdateSliceOp>(
@@ -608,15 +610,31 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                 getTensorShape(dynamicUpdateSlice.getUpdate());
             SmallVector<int64_t> operandDims(
                 dynamicUpdateSlice->getNumOperands(), kNullDim);
-            return OpShardingRuleBuilder(dynamicUpdateSlice)
-                .addPointwiseIfDimSizesMatch(
-                    operandShape, updateShape,
-                    /*onMismatchFn=*/
-                    [&](int64_t dim, OpShardingRuleBuilder& builder) {
-                      operandDims[0] = dim;
-                      builder.addFactor(operandDims, dim, operandShape[dim]);
-                    })
-                .build();
+            OpShardingRuleBuilder builder(dynamicUpdateSlice);
+            for (auto [dim, dimSizes] :
+                 llvm::enumerate(llvm::zip_equal(operandShape, updateShape))) {
+              auto [operandDimSize, updateDimSize] = dimSizes;
+              if (operandDimSize == updateDimSize) {
+                builder.addFactor(dim, operandDimSize);
+              } else {
+                // For slicing dimensions, the partitioner replicates the update
+                // and can keep the operand/result sharded. Each device can use
+                // its local indices to update the local shard of the operand.
+                //
+                // Thus, we add a factor for the operand/result slicing
+                // dimension with kPassThrough type. We also add a unique factor
+                // for the update with kNeedReplication type.
+                operandDims[0] = dim;
+                operandDims[1] = kNullDim;
+                builder.addFactor(operandDims, dim, operandDimSize);
+
+                operandDims[0] = kNullDim;
+                operandDims[1] = dim;
+                builder.addFactor(operandDims, kNullDim, updateDimSize,
+                                  FactorType::kNeedReplication);
+              }
+            }
+            return builder.build();
           })
       .Case<stablehlo::FftOp>([](stablehlo::FftOp fft) {
         ArrayRef<int64_t> inShape = getTensorShape(fft.getOperand());
@@ -946,24 +964,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           })
       .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
         ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());
-        // TODO(b/387351742). We should always add a factor of type
-        // kNeedReplication for the sort dimension. Currently, we only add it if
-        // we have batch dimensions with size > 1.
-        bool propagatingAlongSortDim =
-            llvm::any_of(llvm::enumerate(shape), [&](auto dimAndSize) {
-              return dimAndSize.index() != sort.getDimension() &&
-                     dimAndSize.value() > 1;
+        bool blockedPropagationAlongSortDim =
+            llvm::all_of(llvm::enumerate(shape), [&](auto dimAndSize) {
+              return dimAndSize.index() == sort.getDimension() ||
+                     dimAndSize.value() == 1;
             });
-        std::function<bool(int64_t)> pred = [&](int64_t dim) {
-          return propagatingAlongSortDim || dim != sort.getDimension();
-        };
-        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
-          return dim == sort.getDimension() ? FactorType::kNeedReplication
-                                            : FactorType::kPassThrough;
-        };
-        return OpShardingRuleBuilder(sort)
-            .addPointwiseIf(shape, pred, getFactorType)
-            .build();
+        OpShardingRuleBuilder builder(sort);
+        for (auto [dim, dimSize] : llvm::enumerate(shape)) {
+          if (dim == sort.getDimension()) {
+            // the sort dimension
+            builder.addFactor(dim, dimSize, FactorType::kNeedReplication,
+                              /*isBlocked=*/blockedPropagationAlongSortDim);
+          } else {
+            // batch dimensions
+            builder.addFactor(dim, dimSize);
+          }
+        }
+        return builder.build();
       })
       .Case<stablehlo::TransposeOp>([](stablehlo::TransposeOp transpose) {
         OpShardingRuleBuilder builder(transpose);
