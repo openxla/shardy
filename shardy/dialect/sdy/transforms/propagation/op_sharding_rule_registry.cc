@@ -498,9 +498,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           // Operands: [operand (array like)]
           // Results: [values, indices]
           return OpShardingRuleBuilder(customCall)
-              .addPointwiseIfDimSizesMatch(
+              .addPointwiseWithDiffTypeForMismatch(
                   getTensorShape(customCall.getOperand(0)),
-                  getTensorShape(customCall.getResult(0)))
+                  getTensorShape(customCall.getResult(0)),
+                  FactorType::kPassThrough, /*mismatchFactorIsBlocked=*/true)
               .build();
         }
         if (callTargetName == "ApproxTopK" ||
@@ -512,9 +513,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           // Operands: [operand, iota, init_val (scalar), init_arg (scalar)]
           // Results: [values, indices]
           return OpShardingRuleBuilder(customCall)
-              .addPointwiseIfDimSizesMatch(
+              .addPointwiseWithDiffTypeForMismatch(
                   getTensorShape(customCall.getOperand(0)),
-                  getTensorShape(customCall.getResult(0)))
+                  getTensorShape(customCall.getResult(0)),
+                  FactorType::kPassThrough, /*mismatchFactorIsBlocked=*/true)
               .build();
         }
         // TODO(b/327191011): output unregistered op stats instead.
@@ -686,16 +688,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case<stablehlo::PadOp>([conservativePropagation](stablehlo::PadOp pad) {
         // If `conservativePropagation` is false, we propagate through padded
         // dimensions, even though that would require communication.
-        ArrayRef<int64_t> inShape = getTensorShape(pad.getOperand());
-        ArrayRef<int64_t> outShape = getTensorShape(pad.getResult());
-        OpShardingRuleBuilder builder(pad);
-        if (conservativePropagation) {
-          builder.addPointwiseIfDimSizesMatch(inShape, outShape);
-        } else {
-          builder.addPointwiseWithDiffTypeForMismatch(inShape, outShape,
-                                                      FactorType::kPermutation);
-        }
-        return builder.build();
+        return OpShardingRuleBuilder(pad)
+            .addPointwiseWithDiffTypeForMismatch(
+                getTensorShape(pad.getOperand()),
+                getTensorShape(pad.getResult()), FactorType::kPermutation,
+                /*mismatchFactorIsBlocked=*/conservativePropagation)
+            .build();
       })
       .Case<stablehlo::ReduceOp>([](stablehlo::ReduceOp reduce) {
         OpShardingRuleBuilder builder(reduce);
@@ -750,18 +748,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // In conservative mode, we only add a factor if the input and
             // output dimension sizes are equal.
             // TODO(tomnatan): should the reduced factor be compound?
-            ArrayRef<int64_t> inShape =
-                getTensorShape(reduceWindow.getInputs().front());
-            ArrayRef<int64_t> outShape =
-                getTensorShape(reduceWindow.getResult(0));
-            OpShardingRuleBuilder builder(reduceWindow);
-            if (conservativePropagation) {
-              builder.addPointwiseIfDimSizesMatch(outShape, inShape);
-            } else {
-              builder.addPointwiseWithDiffTypeForMismatch(
-                  outShape, inShape, FactorType::kPermutation);
-            }
-            return builder.build();
+            return OpShardingRuleBuilder(reduceWindow)
+                .addPointwiseWithDiffTypeForMismatch(
+                    getTensorShape(reduceWindow.getResult(0)),
+                    getTensorShape(reduceWindow.getInputs().front()),
+                    FactorType::kPermutation,
+                    /*mismatchFactorIsBlocked=*/conservativePropagation)
+                .build();
           })
       .Case<stablehlo::ReshapeOp>([](stablehlo::ReshapeOp reshape) {
         RankedTensorType inType = reshape.getOperand().getType();
@@ -924,18 +917,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // In conservative mode, we only add a factor if the input and
             // source dimension sizes are equal.
             // TODO(tomnatan): should the reduced factor be compound?
-            ArrayRef<int64_t> operandShape =
-                getTensorShape(selectAndScatter.getOperand());
-            ArrayRef<int64_t> sourceShape =
-                getTensorShape(selectAndScatter.getSource());
-            OpShardingRuleBuilder builder(selectAndScatter);
-            if (conservativePropagation) {
-              builder.addPointwiseIfDimSizesMatch(sourceShape, operandShape);
-            } else {
-              builder.addPointwiseWithDiffTypeForMismatch(
-                  sourceShape, operandShape, FactorType::kPermutation);
-            }
-            return builder.build();
+            return OpShardingRuleBuilder(selectAndScatter)
+                .addPointwiseWithDiffTypeForMismatch(
+                    getTensorShape(selectAndScatter.getSource()),
+                    getTensorShape(selectAndScatter.getOperand()),
+                    FactorType::kPermutation,
+                    /*mismatchFactorIsBlocked=*/conservativePropagation)
+                .build();
           })
       .Case<stablehlo::SelectOp>([](stablehlo::SelectOp select) {
         // Case 1: `pred` is a scalar in which case it is broadcasted and must
@@ -957,16 +945,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // `conservativePropagation`, and the reason is that for `SliceOp`
             // the start indices are static, so we know how to shift the data
             // to keep the sliced dimension sharded.
-            ArrayRef<int64_t> inShape = getTensorShape(slice.getOperand());
-            ArrayRef<int64_t> outShape = getTensorShape(slice.getResult());
-            OpShardingRuleBuilder builder(slice);
-            if (conservativePropagation) {
-              builder.addPointwiseIfDimSizesMatch(inShape, outShape);
-            } else {
-              builder.addPointwiseWithDiffTypeForMismatch(
-                  inShape, outShape, FactorType::kPermutation);
-            }
-            return builder.build();
+            return OpShardingRuleBuilder(slice)
+                .addPointwiseWithDiffTypeForMismatch(
+                    getTensorShape(slice.getOperand()),
+                    getTensorShape(slice.getResult()), FactorType::kPermutation,
+                    /*mismatchFactorIsBlocked=*/conservativePropagation)
+                .build();
           })
       .Case<stablehlo::SortOp>([](stablehlo::SortOp sort) {
         ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());

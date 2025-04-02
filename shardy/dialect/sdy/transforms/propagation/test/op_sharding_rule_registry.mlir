@@ -277,7 +277,7 @@ func.func @custom_call_topk_of_1d(%arg0: tensor<16xf32>) -> (tensor<16xf32>, ten
 
 // CHECK-LABEL: func @custom_call_topk_of_2d
 func.func @custom_call_topk_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x1xf32>, tensor<16x1xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, k], [i, l]) {i=16, j=1, k=1, l=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j], [i, j]) {i=16, j=8} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
     mhlo.attributes = {
         k = 1 : i64,
@@ -289,7 +289,7 @@ func.func @custom_call_topk_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x1xf32>,
 
 // CHECK-LABEL: func @custom_call_top2_of_2d
 func.func @custom_call_top2_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x2xf32>, tensor<16x2xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, k], [i, l]) {i=16, j=1, k=1, l=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j], [i, j]) {i=16, j=8} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
     mhlo.attributes = {
         k = 2 : i64,
@@ -301,7 +301,7 @@ func.func @custom_call_top2_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x2xf32>,
 
 // CHECK-LABEL: func @custom_call_approx_topk
 func.func @custom_call_approx_topk(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, k], [], [])->([i, l], [i, m]) {i=16, j=1, k=1, l=1, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, j], [i, j]) {i=16, j=4} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @ApproxTopK(%arg0, %arg1, %arg2, %arg3) {
     mhlo.backend_config = {
       aggregate_to_topk = true,
@@ -316,7 +316,7 @@ func.func @custom_call_approx_topk(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf
 
 // CHECK-LABEL: func @custom_call_partial_reduce
 func.func @custom_call_partial_reduce(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, k], [], [])->([i, l], [i, m]) {i=16, j=1, k=1, l=1, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, j], [i, j]) {i=16, j=4} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @PartialReduce(%arg0, %arg1, %arg2, %arg3) {
     mhlo.backend_config = {
       aggregate_to_topk = true,
@@ -331,7 +331,7 @@ func.func @custom_call_partial_reduce(%arg0: tensor<16x4xf32>, %arg1: tensor<16x
 
 // CHECK-LABEL: func @custom_call_partial_reduce_string_backend_config
 func.func @custom_call_partial_reduce_string_backend_config(%arg0: tensor<16x4xf32>, %arg1: tensor<16x4xf32>, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32>, tensor<16x2xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, k], [], [])->([i, l], [i, m]) {i=16, j=1, k=1, l=1, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, j], [i, j]) {i=16, j=4} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @PartialReduce(%arg0, %arg1, %arg2, %arg3) {
     backend_config = "{\22log2_reduction\22: 5, \22reduction_dim\22: 1, \22to_apply_type\22: \22comparator\22, \22top_k\22: 2, \22recall_target\22: 0.950000}",
     called_computations = [@top_k_gt_f32_comparator]} :

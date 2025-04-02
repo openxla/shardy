@@ -23,7 +23,7 @@ func.func @conv(%arg0 : tensor<2x224x224x192xf32>, %arg1 : tensor<3x3x192x64xf32
 
 // CHECK-LABEL: func @pad
 func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x16xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, k, i], [])->([l, m, i]) {i=16, j=1, k=1, l=1, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [])->([i, j, k]) {i=28, j=28, k=16} permutation={i, j} blocked_propagation={i, j}>
   %0 = stablehlo.pad %arg0, %arg1, low = [1, -1, 0], high = [1, -1, 0], interior = [0, 0, 0] : (tensor<28x28x16xf32>, tensor<f32>) -> tensor<30x26x16xf32>
   return %0 : tensor<30x26x16xf32>
 }
@@ -31,7 +31,7 @@ func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x
 // CHECK-LABEL: func @reduce_window
 func.func @reduce_window(%arg0: tensor<48x48x3xf32>, %arg1: tensor<48x48x3xi32>, %arg2: tensor<f32>, %arg3: tensor<i32>)
     -> (tensor<16x48x1xf32>, tensor<16x48x1xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, i, k], [l, i, m], [], [])->([n, i, o], [p, i, q]) {i=48, j=1, k=1, l=1, m=1, n=1, o=1, p=1, q=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [], [])->([i, j, k], [i, j, k]) {i=16, j=48, k=1} permutation={i, k} blocked_propagation={i, k}>
   %0:2 = "stablehlo.reduce_window"(%arg0, %arg1, %arg2, %arg3) ({
   ^bb0(%arg4: tensor<f32>, %arg5 : tensor<i32>, %arg6: tensor<f32>, %arg7 : tensor<i32>):
     %1 = stablehlo.maximum %arg4, %arg6 : tensor<f32>
@@ -47,7 +47,7 @@ func.func @reduce_window(%arg0: tensor<48x48x3xf32>, %arg1: tensor<48x48x3xi32>,
 // CHECK-LABEL: func @select_and_scatter
 func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32>, %arg1: tensor<10x12x12x64xf32>, %arg2: tensor<f32>)
    -> tensor<10x24x24x64xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, l, j], [i, m, n, j], [])->([i, o, p, j]) {i=10, j=64, k=1, l=1, m=1, n=1, o=1, p=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l], [i, j, k, l], [])->([i, j, k, l]) {i=10, j=12, k=12, l=64} permutation={j, k} blocked_propagation={j, k}>
   %1 = "stablehlo.select_and_scatter"(%arg0, %arg1, %arg2) ({
   ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
     %2 = stablehlo.compare GT, %arg3, %arg4 :(tensor<f32>, tensor<f32>) -> tensor<i1>
@@ -65,7 +65,7 @@ func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32>, %arg1: tensor<10x1
 
 // CHECK-LABEL: func @slice
 func.func @slice(%arg0: tensor<32x4x8xf32>) -> tensor<32x1x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, l, m]) {i=32, j=1, k=1, l=1, m=1}>}
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=32, j=4, k=8} permutation={j, k} blocked_propagation={j, k}>
   %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:8:2] : (tensor<32x4x8xf32>) -> tensor<32x1x2xf32>
   return %0 : tensor<32x1x2xf32>
 }

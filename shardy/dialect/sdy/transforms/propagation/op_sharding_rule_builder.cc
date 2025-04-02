@@ -218,18 +218,6 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIf(
   return *this;
 }
 
-OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwiseIfDimSizesMatch(
-    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
-  for (auto [dim, dimSizes] :
-       llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
-    auto [inDimSize, outDimSize] = dimSizes;
-    if (inDimSize == outDimSize) {
-      addFactor(dim, inDimSize);
-    }
-  }
-  return *this;
-}
-
 OpShardingRuleBuilder&
 OpShardingRuleBuilder::addPointwiseWithDiffTypeForMismatch(
     ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape,

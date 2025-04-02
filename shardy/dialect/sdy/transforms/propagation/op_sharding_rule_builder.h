@@ -107,13 +107,6 @@ class OpShardingRuleBuilder {
         return FactorType::kPassThrough;
       });
 
-  // Adds a pointwise factor for each dimension whose size in `inShape` and
-  // `outShape` is the same.
-  //
-  // If `inShape` and `outShape` are empty, this method does nothing.
-  OpShardingRuleBuilder& addPointwiseIfDimSizesMatch(
-      ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape);
-
   // Adds a pointwise factor for all dimensions of all operands/results that
   // have rank at least 1.
   //
