@@ -77,11 +77,11 @@ SmallVector<int64_t> createOperandDimsForScatter(int64_t numInputs,
 
 using GatherScatterAddFactorFn =
     std::function<void(int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
-                       int64_t factorSize)>;
+                       int64_t factorSize, FactorType factorType)>;
 
 // Adds factors for either a gather or scatter op, as they have a similar
 // structure.
-void addGatherScatterFactors(RankedTensorType inputType,
+void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
                              RankedTensorType slicesType, int64_t indicesRank,
                              int64_t indexVectorDim,
                              ArrayRef<int64_t> offsetDims,
@@ -108,12 +108,16 @@ void addGatherScatterFactors(RankedTensorType inputType,
       // and `slicesDim`. Otherwise, we add a unique factor for `inputDim` and
       // `slicesDim` respectively.
       if (inputDimSize == slicesDimSize) {
-        addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize);
-      } else {
+        addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize,
+                    FactorType::kPassThrough);
+      } else if (isScatter) {
         addFactorFn(inputDim, /*indicesDim=*/kNullDim, /*slicesDim=*/kNullDim,
-                    inputDimSize);
+                    inputDimSize, FactorType::kPassThrough);
         addFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim, slicesDim,
-                    slicesDimSize);
+                    slicesDimSize, FactorType::kNeedReplication);
+      } else {
+        addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize,
+                    FactorType::kNeedReplication);
       }
       ++inputDim;
     } else {
@@ -127,11 +131,18 @@ void addGatherScatterFactors(RankedTensorType inputType,
       // dimension across input, indices, and result. Otherwise, it is an
       // implicit batch dimension across input and result only.
       const auto* batchingDimIt = llvm::find(indicesBatchingDims, indicesDim);
+      bool isExplicitBatchDim = batchingDimIt != indicesBatchingDims.end();
       int64_t inputBatchDim =
-          batchingDimIt == indicesBatchingDims.end()
-              ? kNullDim
-              : inputBatchingDims[batchingDimIt - indicesBatchingDims.begin()];
-      addFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize);
+          isExplicitBatchDim
+              ? inputBatchingDims[batchingDimIt - indicesBatchingDims.begin()]
+              : kNullDim;
+      // If the dimension exists only in the indices and slices, we need to add
+      // all-reduce on the scatter results.
+      FactorType factorType = (isScatter && !isExplicitBatchDim)
+                                  ? FactorType::kReduction
+                                  : FactorType::kPassThrough;
+      addFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize,
+                  factorType);
       ++batchDimPos;
     }
   }
@@ -139,8 +150,8 @@ void addGatherScatterFactors(RankedTensorType inputType,
   // We add factors for all collapsed slice dimensions.
   for (int64_t collapsedSliceDim : collapsedSliceDims) {
     addFactorFn(collapsedSliceDim, /*indicesDim=*/kNullDim,
-                /*slicesDim=*/kNullDim,
-                inputType.getDimSize(collapsedSliceDim));
+                /*slicesDim=*/kNullDim, inputType.getDimSize(collapsedSliceDim),
+                FactorType::kPassThrough);
   }
 }
 
@@ -659,13 +670,15 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             gather.getDimensionNumbers();
 
         addGatherScatterFactors(
-            inputType, slicesType, indicesRank, dimNums.getIndexVectorDim(),
-            dimNums.getOffsetDims(), dimNums.getCollapsedSliceDims(),
-            dimNums.getOperandBatchingDims(),
+            /*isScatter=*/false, inputType, slicesType, indicesRank,
+            dimNums.getIndexVectorDim(), dimNums.getOffsetDims(),
+            dimNums.getCollapsedSliceDims(), dimNums.getOperandBatchingDims(),
             dimNums.getStartIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
-                int64_t factorSize) {
-              builder.addFactor({inputDim, indicesDim}, slicesDim, factorSize);
+                int64_t factorSize, FactorType factorType) {
+              builder.addFactor(
+                  {inputDim, indicesDim}, slicesDim, factorSize, factorType,
+                  /*isBlocked=*/factorType == FactorType::kNeedReplication);
             });
 
         return builder.build();
@@ -884,26 +897,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             scatter.getScatterDimensionNumbers();
 
         addGatherScatterFactors(
-            inputType, slicesType, indicesRank, dimNums.getIndexVectorDim(),
+            /*isScatter=*/true, inputType, slicesType, indicesRank,
+            dimNums.getIndexVectorDim(),
             /*offsetDims=*/dimNums.getUpdateWindowDims(),
             /*collapsedSliceDims=*/dimNums.getInsertedWindowDims(),
             dimNums.getInputBatchingDims(),
             dimNums.getScatterIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
-                int64_t factorSize) {
-              // If the dimension exists only in the indices and slices, it
-              // requires reduction. If the dimension exists in all tensors, it
-              // is an explicit batch dimension and does not require reduction.
-              const bool needReduction = inputDim == kNullDim &&
-                                         indicesDim != kNullDim &&
-                                         slicesDim != kNullDim;
+                int64_t factorSize, FactorType factorType) {
               builder.addFactor(
                   createOperandDimsForScatter(numInputs, inputDim, indicesDim,
                                               /*updateDim=*/slicesDim),
                   /*resultDims=*/SmallVector<int64_t>(numInputs, inputDim),
-                  factorSize,
-                  needReduction ? FactorType::kReduction
-                                : FactorType::kPassThrough);
+                  factorSize, factorType);
             });
         return builder.build();
       })

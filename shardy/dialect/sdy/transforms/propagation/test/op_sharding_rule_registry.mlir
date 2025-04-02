@@ -439,7 +439,7 @@ func.func @fft_inverse_real_expanded_result(%arg0: tensor<8x32x33xcomplex<f32>>)
 
 // CHECK-LABEL: @gather
 func.func @gather(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [i, j, o])->([i, j, l, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, k, l], [i, j, n])->([i, j, k, l]) {i=2, j=3, k=4, l=2, m=3, n=1} need_replication={k} blocked_propagation={k}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [2, 3],
@@ -454,7 +454,7 @@ func.func @gather(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<
 
 // CHECK-LABEL: @gather_batching_dims
 func.func @gather_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x2xi64>) -> tensor<7x5x3x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, n, i, l], [i, j, k, o])->([i, j, k, m]) {i=7, j=5, k=3, l=4, m=2, n=3, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, m, i, l], [i, j, k, n])->([i, j, k, l]) {i=7, j=5, k=3, l=4, m=3, n=1} need_replication={l} blocked_propagation={l}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],
@@ -471,7 +471,7 @@ func.func @gather_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x
 
 // CHECK-LABEL: @gather_index_vector_dim_before_batching_dim
 func.func @gather_index_vector_dim_before_batching_dim(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x2x5x3xi64>) -> tensor<7x5x3x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, n, i, l], [i, o, j, k])->([i, j, k, m]) {i=7, j=5, k=3, l=4, m=2, n=3, o=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, m, i, l], [i, n, j, k])->([i, j, k, l]) {i=7, j=5, k=3, l=4, m=3, n=1} need_replication={l} blocked_propagation={l}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],
@@ -692,7 +692,7 @@ func.func @reverse(%arg0: tensor<4x32x8x2xf32>) -> tensor<4x32x8x2xf32> {
 
 // CHECK-LABEL: @scatter_single_input
 func.func @scatter_single_input(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>, %arg2: tensor<2x3x2x2xf32>) -> tensor<3x4x2xf32>{
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [i, j, o], [i, j, l, m])->([n, k, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1} reduction={i, j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [i, j, o], [i, j, l, m])->([n, k, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1} reduction={i, j} need_replication={l}>
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
@@ -711,7 +711,7 @@ func.func @scatter_single_input(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi6
 
 // CHECK-LABEL: @scatter_inserted_window_dim_is_last_one
 func.func @scatter_inserted_window_dim_is_last_one(%arg0: tensor<4x2x3xf32>, %arg1: tensor<2x3x2xi64>, %arg2: tensor<2x3x2x2xf32>) -> tensor<4x2x3xf32>{
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([k, m, n], [i, j, o], [i, j, l, m])->([k, m, n]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1} reduction={i, j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([k, m, n], [i, j, o], [i, j, l, m])->([k, m, n]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1} reduction={i, j} need_replication={l}>
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
@@ -730,7 +730,7 @@ func.func @scatter_inserted_window_dim_is_last_one(%arg0: tensor<4x2x3xf32>, %ar
 
 // CHECK-LABEL: @scatter_batching_dims
 func.func @scatter_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x2xi64>, %arg2: tensor<7x5x3x2xf32>) -> tensor<5x3x7x4xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, n, i, l], [i, j, k, o], [i, j, k, m])->([j, n, i, l]) {i=7, j=5, k=3, l=4, m=2, n=3, o=1} reduction={k}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, n, i, l], [i, j, k, o], [i, j, k, m])->([j, n, i, l]) {i=7, j=5, k=3, l=4, m=2, n=3, o=1} reduction={k} need_replication={m}>
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
@@ -756,7 +756,7 @@ func.func @scatter_multiple_input(%arg0: tensor<3x4x2xi32>,
                                   %arg3: tensor<2x3x2x2xi32>,
                                   %arg4: tensor<2x3x2x2xf32>)
     -> (tensor<3x4x2xi32>, tensor<3x4x2xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [n, k, m], [i, j, o], [i, j, l, m], [i, j, l, m])->([n, k, m], [n, k, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1} reduction={i, j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [n, k, m], [i, j, o], [i, j, l, m], [i, j, l, m])->([n, k, m], [n, k, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=1} reduction={i, j} need_replication={l}>
   %0:2 = "stablehlo.scatter"(%arg0, %arg1, %arg2, %arg3, %arg4) ({
     ^bb0(%arg5: tensor<i32>, %arg6: tensor<f32>, %arg7: tensor<i32>, %arg8: tensor<f32>):
       %1 = stablehlo.add %arg5, %arg7 : tensor<i32>
