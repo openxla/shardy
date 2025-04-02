@@ -876,13 +876,11 @@ struct InsertExplicitReshardsPass
           ShardingProjection::build(inShardings, outShardings, shardingRule,
                                     mesh.attr(), /*closedIfMissing=*/true);
 
-      // TODO(enver): Handle dynamic slice ops.
       // TODO(enver): Handle convolution op.
       // TODO(enver): Handle custom call ops.
       // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
       // TODO(enver): Add need replication factors to fft.
-      if (isa<stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
-              stablehlo::FftOp, stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
+      if (isa<stablehlo::FftOp, stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
               stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
               stablehlo::ConvolutionOp, stablehlo::CustomCallOp,
               stablehlo::AllReduceOp, stablehlo::AllGatherOp,
