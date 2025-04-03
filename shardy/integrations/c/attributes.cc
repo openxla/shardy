@@ -47,6 +47,8 @@ mlir::ArrayRef<AttrTy> unwrapAttrs(const MlirAttribute* attrs,
 // MeshAxisAttr
 //===----------------------------------------------------------------------===//
 
+extern "C" {
+
 bool sdyAttributeIsAMeshAxisAttr(MlirAttribute attr) {
   return mlir::isa<sdy::MeshAxisAttr>(unwrap(attr));
 }
@@ -430,3 +432,5 @@ MlirStringRef sdyManualAxesAttrGetAxesElem(
   MlirAttribute attr, intptr_t pos) {
   return wrap(unwrapAttr<sdy::ManualAxesAttr>(attr)[pos].getValue());
 }
+
+}  // extern "C"

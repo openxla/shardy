@@ -203,7 +203,7 @@ MLIR_CAPI_EXPORTED MlirAttribute sdyOpShardingRuleAttrGet(
     intptr_t nReductionFactors, const int64_t* reductionFactors,
     intptr_t nNeedReplicationFactors, const int64_t* needReplicationFactors,
     intptr_t nPermutationFactors, const int64_t* permutationFactors,
-    int64_t nBlockedPropagationFactors,
+    intptr_t nBlockedPropagationFactors,
     const int64_t* blockedPropagationFactors, bool isCustomRule);
 
 MLIR_CAPI_EXPORTED bool sdyOpShardingRuleAttrGetIsCustom(MlirAttribute attr);
