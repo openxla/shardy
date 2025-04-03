@@ -232,8 +232,7 @@ void insertAllReduces(Operation* op, const AxesPerFactor& commonAxesPerFactor,
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   for (Value result : op->getResults()) {
     auto allReduceOp = rewriter.create<AllReduceOp>(
-        result.getLoc(), result, allReduceAxes,
-        getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true));
+        result.getLoc(), result, allReduceAxes, getSharding(result));
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }

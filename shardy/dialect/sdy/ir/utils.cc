@@ -298,7 +298,9 @@ TensorShardingAttr getSharding(Value value) {
       .Case<ReshardOp>(
           [](ReshardOp reshardOp) { return reshardOp.getSharding(); })
       .Case<CollectiveOpInterface>([](CollectiveOpInterface collectiveOp) {
-        return collectiveOp.getOutSharding();
+        std::optional<TensorShardingAttr> outSharding =
+            collectiveOp.getOutSharding();
+        return outSharding? *outSharding: TensorShardingAttr();
       })
       // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.

@@ -261,7 +261,7 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
       /*desc=*/[{
         Returns the output tensor sharding of the collective op.
       }],
-      /*retType=*/"::mlir::sdy::TensorShardingAttr",
+      /*retType=*/"::std::optional<::mlir::sdy::TensorShardingAttr>",
       /*methodName=*/"getOutSharding"
     >,
     InterfaceMethod<

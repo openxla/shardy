@@ -1038,6 +1038,12 @@ LogicalResult NamedComputationOp::verify() {
 
 namespace {
 
+template <typename OpTy>
+TensorShardingAttr getOutShardingOrEmpty(OpTy op) {
+  std::optional<TensorShardingAttr> outSharding = op.getOutSharding();
+  return outSharding ? *outSharding : TensorShardingAttr();
+}
+
 // Verifies:
 // 1. All collective axes per dimension are valid (see `verifyAxisRefList`).
 // 2. Applying `collectiveAxesPerDim` to the operand sharding (via
@@ -1049,11 +1055,15 @@ LogicalResult verifyCollectiveWithAxesPerDim(
         DimensionShardingAttr operandDimSharding,
         ArrayRef<AxisRefAttr> dimCollectiveAxes, int64_t dim, MeshAttr mesh)>
         getExpectedResultDimSharding) {
-  TensorShardingAttr resultSharding = op.getOutSharding();
-  TensorShardingAttr operandSharding =
-      getOrCreateSharding(op.getOperand(), resultSharding.getMeshOrRef());
+  TensorShardingAttr resultSharding = getOutShardingOrEmpty(op);
+  TensorShardingAttr operandSharding = getSharding(op.getOperand());
+
+  // TODO(enver): Verify when result and/or operand sharding is empty.
+  if (!resultSharding) {
+    return success();
+  }
+
   MeshAttr mesh = resultSharding.getMesh(op);
-  MeshAttr operandMesh = operandSharding.getMesh(op);
 
   // 1. Verify all collective axes.
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
@@ -1170,7 +1180,13 @@ LogicalResult AllSliceOp::verify() {
 
 LogicalResult AllToAllOp::verify() {
   TensorShardingAttr operandSharding = getSharding(getOperand());
-  TensorShardingAttr resultSharding = getOutSharding();
+  TensorShardingAttr resultSharding = getOutShardingOrEmpty(*this);
+
+  if (!resultSharding) {
+    // In an all-to-all, both operand and result should be sharded.
+    return failure();
+  }
+
   MeshAttr mesh = resultSharding.getMesh(*this);
 
   // 1. Verify `axes` is a valid list of axes.
@@ -1249,7 +1265,13 @@ LogicalResult AllToAllOp::verify() {
 
 LogicalResult CollectivePermuteOp::verify() {
   TensorShardingAttr operandSharding = getSharding(getOperand());
-  TensorShardingAttr resultSharding = getOutSharding();
+  TensorShardingAttr resultSharding = getOutShardingOrEmpty(*this);
+
+  if (!resultSharding) {
+    // In a collective-permute, both operand and result should be sharded.
+    return failure();
+  }
+
   MeshAttr mesh = resultSharding.getMesh(*this);
   MeshAttr operandMesh = operandSharding.getMesh(*this);
   if (mesh.getAxes() != operandMesh.getAxes()) {
@@ -1303,7 +1325,11 @@ LogicalResult verifyCollectiveOp(Operation* rawOp) {
   }
 
   // 2. Verify result sharding is valid w.r.t the corresponding type.
-  TensorShardingAttr resultSharding = collectiveOp.getOutSharding();
+  TensorShardingAttr resultSharding = getOutShardingOrEmpty(collectiveOp);
+  // TODO(enver): Verify when result sharding is empty.
+  if (!resultSharding) {
+    return success();
+  }
   if (auto res =
           verifyTensorShardingAttr(resultSharding, collectiveOp.getType(),
                                    collectiveOp, getEmitErrorFn(collectiveOp));
@@ -1386,15 +1412,24 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
 }
 
 LogicalResult AllReduceOp::verify() {
-  TensorShardingAttr resultSharding = getOutSharding();
-  TensorShardingAttr operandSharding =
-      getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
-  MeshAttr mesh = resultSharding.getMesh(*this);
+  TensorShardingAttr resultSharding = getOutShardingOrEmpty(*this);
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+
+  if (!resultSharding) {
+    if (operandSharding && !operandSharding.isFullyReplicated()) {
+      return emitOpError(
+          "operand and result sharding are not equal: result is fully "
+          "replicated, operand is not.");
+    }
+    return success();
+  }
+
   if (!operandSharding.areDimAxesEqual(resultSharding)) {
     return emitOpError("operand and result sharding have different axes");
   }
 
   // 1. Verify all reduction axes are valid.
+  MeshAttr mesh = resultSharding.getMesh(*this);
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
