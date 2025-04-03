@@ -16,7 +16,7 @@ _Performs an all-gather communication along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_gather` $gathering_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.all_gather` $gathering_axes $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)
 ```
 
 Gathers chunks of a tensor along axes specified in `gathering_axes`.
@@ -77,7 +77,7 @@ _Perform an all-reduce comunication along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_reduce` $reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.all_reduce` $reduction_axes $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)
 ```
 
 Reduces chunks of a tensor along axes specified in `reduction_axes`.
@@ -122,7 +122,7 @@ _Performs a dynamic-slice operation along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_slice` $slicing_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.all_slice` $slicing_axes $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)
 ```
 
 Slices chunks of a tensor along axes specified in `slicing_axes`. There is
@@ -184,7 +184,7 @@ _Performs an all-to-all communication along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_to_all` $axes $src_dim `` `->` `` $tgt_dim $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.all_to_all` $axes $src_dim `` `->` `` $tgt_dim $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)
 ```
 
 Slices chunks of a tensor along dimension `tgt_dim` and axes specified in
@@ -253,7 +253,7 @@ _Performs a collective-permute communication to replace axes_
 Syntax:
 
 ```
-operation ::= `sdy.collective_permute` $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.collective_permute` $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)
 ```
 
 Sends a chunk of the input tensor from each device to another to

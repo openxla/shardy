@@ -484,10 +484,10 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
   let arguments = (ins
     AnyTensor:$tensor,
     Sdy_ListOfAxisRefLists:$gathering_axes,
-    Sdy_TensorSharding:$out_sharding
+    OptionalAttr<Sdy_TensorSharding>:$out_sharding
   );
   let results = (outs AnyTensor:$result);
-  let assemblyFormat = "$gathering_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "$gathering_axes $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
@@ -528,10 +528,10 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
   let arguments = (ins
     AnyTensor:$tensor,
     Sdy_ListOfAxisRefLists:$slicing_axes,
-    Sdy_TensorSharding:$out_sharding
+    OptionalAttr<Sdy_TensorSharding>:$out_sharding
   );
   let results = (outs AnyTensor:$result);
-  let assemblyFormat = "$slicing_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "$slicing_axes $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
@@ -578,10 +578,10 @@ def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
     I64Attr:$src_dim,
     I64Attr:$tgt_dim,
     Sdy_AxisRefList:$axes,
-    Sdy_TensorSharding:$out_sharding
+    OptionalAttr<Sdy_TensorSharding>:$out_sharding
   );
   let results = (outs AnyTensor:$result);
-  let assemblyFormat = "$axes $src_dim `` `->` `` $tgt_dim $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "$axes $src_dim `` `->` `` $tgt_dim $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
@@ -626,10 +626,10 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
 
   let arguments = (ins
     AnyTensor:$tensor,
-    Sdy_TensorSharding:$out_sharding
+    OptionalAttr<Sdy_TensorSharding>:$out_sharding
   );
   let results = (outs AnyTensor:$result);
-  let assemblyFormat = "$tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "$tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
@@ -653,10 +653,10 @@ def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
   let arguments = (ins
     AnyTensor:$tensor,
     Sdy_AxisRefList:$reduction_axes,
-    Sdy_TensorSharding:$out_sharding
+    OptionalAttr<Sdy_TensorSharding>:$out_sharding
   );
   let results = (outs AnyTensor:$result);
-  let assemblyFormat = "$reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "$reduction_axes $tensor (`out_sharding````=```$out_sharding^)? attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
