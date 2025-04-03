@@ -493,35 +493,6 @@ func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x
   return %0 : tensor<30x26x16xf32>
 }
 
-// CHECK-LABEL: func @slice
-func.func @slice(%arg0: tensor<32x4x8xf32>) -> tensor<32x1x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=32, j=4, k=8} permutation={j, k}>
-  %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:8:2] : (tensor<32x4x8xf32>) -> tensor<32x1x2xf32>
-  return %0 : tensor<32x1x2xf32>
-}
-
-// CHECK-LABEL: func @sort
-func.func @sort(%arg0: tensor<4x32x8xi32>, %arg1: tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k], [i, j, k]) {i=4, j=32, k=8} need_replication={i}>
-  %0:2 = "stablehlo.sort"(%arg0, %arg1) ({
-    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<f32>, %arg5: tensor<f32>):
-      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
-      stablehlo.return %1 : tensor<i1>
-  }) {dimension = 0 : i64, is_stable = true} : (tensor<4x32x8xi32>, tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>)
-  return %0#0, %0#1 : tensor<4x32x8xi32>, tensor<4x32x8xf32>
-}
-
-// CHECK-LABEL: func @sort_all_other_dims_size_one
-func.func @sort_all_other_dims_size_one(%arg0: tensor<1x4x1xi32>) -> tensor<1x4x1xi32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=1, j=4, k=1} need_replication={j} blocked_propagation={j}>
-  %0 = "stablehlo.sort"(%arg0) ({
-    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
-      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
-      stablehlo.return %1 : tensor<i1>
-  }) {dimension = 1 : i64, is_stable = true} : (tensor<1x4x1xi32>) -> tensor<1x4x1xi32>
-  return %0 : tensor<1x4x1xi32>
-}
-
 // CHECK-LABEL: func @reduce_single_result
 func.func @reduce_single_result(%arg0: tensor<2x64x13xf32>) -> tensor<2x13xf32> {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
@@ -807,6 +778,35 @@ func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32>, %arg1: tensor<10x1
     window_strides = array<i64: 1, 2, 2, 1>
   } : (tensor<10x24x24x64xf32>, tensor<10x12x12x64xf32>, tensor<f32>) -> tensor<10x24x24x64xf32>
   return %1 : tensor<10x24x24x64xf32>
+}
+
+// CHECK-LABEL: func @slice
+func.func @slice(%arg0: tensor<32x4x8xf32>) -> tensor<32x1x2xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=32, j=4, k=8} permutation={j, k}>
+  %0 = stablehlo.slice %arg0 [0:32, 1:2, 4:8:2] : (tensor<32x4x8xf32>) -> tensor<32x1x2xf32>
+  return %0 : tensor<32x1x2xf32>
+}
+
+// CHECK-LABEL: func @sort
+func.func @sort(%arg0: tensor<4x32x8xi32>, %arg1: tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k], [i, j, k]) {i=4, j=32, k=8} need_replication={i}>
+  %0:2 = "stablehlo.sort"(%arg0, %arg1) ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<f32>, %arg5: tensor<f32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {dimension = 0 : i64, is_stable = true} : (tensor<4x32x8xi32>, tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>)
+  return %0#0, %0#1 : tensor<4x32x8xi32>, tensor<4x32x8xf32>
+}
+
+// CHECK-LABEL: func @sort_all_other_dims_size_one
+func.func @sort_all_other_dims_size_one(%arg0: tensor<1x4x1xi32>) -> tensor<1x4x1xi32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=1, j=4, k=1} need_replication={j} blocked_propagation={j}>
+  %0 = "stablehlo.sort"(%arg0) ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {dimension = 1 : i64, is_stable = true} : (tensor<1x4x1xi32>) -> tensor<1x4x1xi32>
+  return %0 : tensor<1x4x1xi32>
 }
 
 // CHECK-LABEL: func @transpose
