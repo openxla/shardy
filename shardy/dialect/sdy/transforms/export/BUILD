@@ -1,6 +1,7 @@
 # The SDY export passes and pipeline.
 
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
+load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -50,6 +51,35 @@ cc_library(
     hdrs = [
         "passes.h",
     ],
+    deps = [
+        ":explicit_reshard_util",
+        ":passes_inc",
+        "//shardy/common:file_utils",
+        "//shardy/dialect/sdy/ir:axis_list_ref",
+        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:op_properties",
+        "//shardy/dialect/sdy/transforms/common:sharding_walker",
+        "//shardy/dialect/sdy/transforms/propagation:op_sharding_rule_registry",
+        "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
+        "//shardy/dialect/sdy/transforms/propagation:utils",
+        "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Rewrite",
+        "@llvm-project//mlir:SideEffectInterfaces",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
+        "@llvm-project//mlir:Transforms",
+        "@stablehlo//:stablehlo_ops",
+    ],
+)
+
+cc_library(
+    name = "explicit_reshard_util",
+    srcs = ["explicit_reshard_util.cc"],
+    hdrs = ["explicit_reshard_util.h"],
     deps = [
         ":passes_inc",
         "//shardy/common:file_utils",
