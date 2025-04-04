@@ -13,9 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#ifndef SHARDY_DIALECT_SDY_IR_AXIS_LIST_REF_H_
+#define SHARDY_DIALECT_SDY_IR_AXIS_LIST_REF_H_
+
+#include <cstdint>
+#include <iterator>
+#include <optional>
+#include <utility>
+
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
 
 namespace mlir {
@@ -169,7 +178,7 @@ class AxisListRef {
 
   // Trims axes to have the first `newSizeExcludingNewTail` axes and, in case
   // non-empty, `newTailAxisRef` as an additional final axis.
-
+  //
   // As a result, `newSizeExcludingNewTail` is the new size of AxisListRef
   // excluding `newTailAxisRef`. That is, if `newTailAxisRef` is non-empty then
   // the new size of AxisListRef equals to `newSizeExcludingNewTail`+1,
@@ -184,9 +193,8 @@ class AxisListRef {
   void trim(int64_t newSizeExcludingNewTail,
             std::optional<AxisRefAttr> newTailAxisRef);
 
-  // The axes that this FactorAxesPair holds is defined by `axisRefs` and
-  // `tailAxisRef` together as the concatantion of the two. If `tailAxisRef` is
-  // empty, then `axisRefs` is empty as well.
+  // `AxisListRef` is the concatenation of `axisRefs` and `tailAxisRef`. If
+  // `tailAxisRef` is empty, then `axisRefs` is empty as well.
   ArrayRef<AxisRefAttr> axisRefs;
   AxisRefAttr tailAxisRef;
 };
@@ -210,3 +218,5 @@ struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {
 
 }  // namespace sdy
 }  // namespace mlir
+
+#endif  // SHARDY_DIALECT_SDY_IR_AXIS_LIST_REF_H_
