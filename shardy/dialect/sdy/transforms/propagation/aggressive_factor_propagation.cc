@@ -16,6 +16,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/propagation/aggressive_factor_propagation.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <tuple>
 
@@ -85,13 +86,13 @@ SmallVector<TensorIndexSize> getFactorToSourceTensor(
 
 // Returns if `factorSharding` has a factor at `factorIndex` which is the
 // strict prefix of `shardingAxes`.
-bool isStrictPrefixOfFactorSharding(
-    const TensorFactorShardings& factorSharding, int64_t factorIndex,
-    ArrayRef<AxisRefAttr> shardingAxes) {
+bool isStrictPrefixOfFactorSharding(const TensorFactorShardings& factorSharding,
+                                    int64_t factorIndex,
+                                    ArrayRef<AxisRefAttr> shardingAxes) {
   if (auto it = factorSharding.factorIndexToSharding.find(factorIndex);
       it != factorSharding.factorIndexToSharding.end()) {
     return isAxisListPrefixOf(it->getSecond().axisRefs, shardingAxes) ==
-        PrefixStatus::STRICT_PREFIX;
+           PrefixStatus::STRICT_PREFIX;
   }
   return false;
 }
@@ -154,7 +155,7 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
   AxesPerFactor axesPerFactor;
   axesPerFactor.reserve(factorSizes.size());
   bool allElementsAreEmpty = true;
-  for (int64_t i = 0; i < factorSizes.size(); ++i) {
+  for (size_t i = 0; i < factorSizes.size(); ++i) {
     SmallVector<AxisRefAttr>& axes = axesPerFactor.emplace_back(
         getCompatibleMajorAxes(projection, i, directionAlongFactor(i)));
     if (!axes.empty()) {
