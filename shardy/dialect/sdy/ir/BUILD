@@ -147,6 +147,10 @@ cc_library(
         "utils.h",
         "verifiers.h",
     ],
+    visibility = [
+        "//shardy:friends",
+        "//third_party/tensorflow/compiler/mlir/lite/experimental/google/tooling:__pkg__",
+    ],
     deps = [
         ":attrs_inc",
         ":bytecode_inc",
