@@ -82,7 +82,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     Input:
     ```mlir
     mesh = <"x"=4, "y"=2>
-    %lhs : tensor<8x32xf32> {sdy.sharding=<@mesh, \[{"y"},{"x"}\]>}
+    %lhs : tensor<8x32xf32> {sdy.sharding=<@mesh, \[{"x"}, {"y"}\]>}
     %rhs : tensor<32x16xf32> {sdy.sharding=<@mesh, \[{"y"}, {"x"}\]>}
     stablehlo.dot %lhs, %rhs {sdy.sharding_per_value=<[<@mesh, \[{"x"}, {}\]>]>}
       : (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
@@ -98,11 +98,10 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
       : (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
     ```
 
-    In the example above, there is a conflict since `lhs` and `rhs` tensors
-    are both sharded on axis "x" on their non-contracting dimensions. Here,
-    `rhs` tensor is resharded before the dot operation explicitly, to be
-    sharded only on its first dimension and on axis "x". This way, the dot
-    operation becomes compatible.
+    In the example above, `lhs` and `rhs` are both sharded on axis "x" on their
+    non-contracting dimensions, which is incompatible. The pass inserts an
+    explicit reshard on `rhs` before the dot operation, so that the dot
+    operation has compatible shardings.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
