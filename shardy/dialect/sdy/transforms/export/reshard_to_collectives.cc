@@ -252,7 +252,8 @@ void popBackFromCurrentAxes(SmallVector<AxisRefAttr>& currentAxes,
 }
 
 // Returns the product of axis sizes in `axes`.
-int64_t getShardedSize(const AxisList& axes, MeshAttr mesh) {
+template <class AxisContainer>
+int64_t getShardedSize(const AxisContainer& axes, MeshAttr mesh) {
   return std::accumulate(
       axes.begin(), axes.end(), 1,
       [&](int64_t cur, AxisRefAttr axis) { return cur * axis.getSize(mesh); });
@@ -587,10 +588,10 @@ class CollectiveInserter {
   //   `inAxesPerDim[srcDim]` don't appear in `outAxesPerDim[tgtDim]`, otherwise
   //   a collective-permute will be needed to reorder or replace axes.
   //
-  // - `srcDim` can't accommodate all available axes in `outAxesPerDim[tgtDim]`
-  //   beyond `inAxesPerDim[srcDim].back()`, i.e., slicing those axes at
+  // - `srcDim` can accommodate all available axes in `outAxesPerDim[tgtDim]`
+  //   beyond `inAxesPerDim[srcDim].back()`. Otherwise, slicing those axes at
   //   `srcDim` would require padding as the dimension size isn't divisible by
-  //   the product of axis sizes (including `inAxesPerDim[srcDim]`).
+  //   the product of axis sizes.
   //
   // In which case, returns a range containing all axes in
   // `outAxesPerDim[tgtDim]` that are available to slice beyond
@@ -646,15 +647,14 @@ class CollectiveInserter {
     // in `tgtOutAxes`.
     auto inAxisRevIt = srcInAxes.rbegin();
     auto outAxisRevIt = std::make_reverse_iterator(startOutAxisIt);
-    int64_t allToAllSize = 1;
+    int64_t commonAxesSize = 1;
     while (inAxisRevIt != srcInAxes.rend() &&
            outAxisRevIt != tgtOutAxes.rend() && *inAxisRevIt == *outAxisRevIt) {
-      allToAllSize *= inAxisRevIt->getSize(mesh);
+      commonAxesSize *= inAxisRevIt->getSize(mesh);
       ++inAxisRevIt;
       ++outAxisRevIt;
     }
 
-    int64_t srcPrefixSize = 1;
     for (; inAxisRevIt != srcInAxes.rend(); ++inAxisRevIt) {
       if (outAxisEntryIt = outAxisToDimAndIndex.find(*inAxisRevIt);
           outAxisEntryIt != outAxisToDimAndIndex.end() &&
@@ -663,24 +663,28 @@ class CollectiveInserter {
         // `tgtOutAxes`.
         return std::nullopt;
       }
-      srcPrefixSize *= inAxisRevIt->getSize(mesh);
     }
 
     auto curOutAxisIt = startOutAxisIt;
+    int64_t addedSlicingAxesSize = 1;
     while (curOutAxisIt != tgtOutAxes.end() &&
            !inAxisSet.contains(*curOutAxisIt)) {
       // Current out axis is available to slice.
-      allToAllSize *= (curOutAxisIt++)->getSize(mesh);
+      addedSlicingAxesSize *= (curOutAxisIt++)->getSize(mesh);
     }
 
-    if (getTensorShape(result)[srcDim] % (srcPrefixSize * allToAllSize) != 0) {
-      // `srcDim` can't accommodate all output axes within range
-      // [startOutAxisIt, curOutAxisIt).
+    // After slicing, `srcDim` will be sharded by the current axes and the added
+    // slicing axes.
+    int64_t newShardedSizeOnSrcDim =
+        getShardedSize(currentAxesPerDim[srcDim], mesh) * addedSlicingAxesSize;
+    // If the dimension size is not divisible by the product of these axis
+    // sizes, we cannot slice.
+    if (getTensorShape(result)[srcDim] % newShardedSizeOnSrcDim != 0) {
       return std::nullopt;
     }
 
     // Divide the capacity of `tgtDim` by the new sharded size of `srcDim`.
-    capacityPerDim[tgtDim] /= allToAllSize;
+    capacityPerDim[tgtDim] /= commonAxesSize * addedSlicingAxesSize;
 
     return AxesToSliceForAllToAll{startOutAxisIt, curOutAxisIt};
   }
@@ -781,7 +785,7 @@ class CollectiveInserter {
   // - `outAxesPerDim = [[], [], ["x", "y", "z", "w"]]`
   // - `currentAxesPerDim = [["w"], ["x", "y", "z"], []]`
   std::optional<AxesPerDim> getSlicingAxesPerDim() {
-    AxesPerDim slicingAxesPerDim(currentAxesPerDim.size());
+    AxesPerDim slicingAxesPerDim(getRank());
     bool hasSlicingAxes = false;
 
     // Initialize capacity per dimension.

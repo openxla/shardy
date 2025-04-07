@@ -132,7 +132,6 @@ func.func @two_all_to_alls_same_tgt_dim_non_contiguous(%arg0 : tensor<16x8x8xf32
   return %0 : tensor<16x8x8xf32>
 }
 
-
 // CHECK-LABEL: func @slice_then_all_to_alls
 func.func @slice_then_all_to_alls(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d_4x2x4, [{}, {"y", "z"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}, {}] %arg0 out_sharding=<@mesh3d_4x2x4, [{"x"}, {"y", "z"}, {}]>
@@ -242,6 +241,15 @@ func.func @slice_on_one_src_dim_but_not_other(%arg0 : tensor<2x8x8xf32> {sdy.sha
   return %0 : tensor<2x8x8xf32>
 }
 
+// CHECK-LABEL: func @slice_on_src_dim_considering_existing_axes_on_src_dim
+func.func @slice_on_src_dim_considering_existing_axes_on_src_dim(%arg0 : tensor<8x4xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"x", "y"}, {}]>}) -> tensor<8x4xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"z"}, {}] %arg0 out_sharding=<@mesh3d, [{"x", "y", "z"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"y", "z"} 0->1 %[[ALL_SLICE]] out_sharding=<@mesh3d, [{"x"}, {"y", "z"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"x"}, {"y", "z"}]> : tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
 // CHECK-LABEL: func @slice_on_src_dim_and_replace_axis_in_another_dim
 func.func @slice_on_src_dim_and_replace_axis_in_another_dim(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh4d, [{"z"}, {"x"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"y"}, {}] %arg0 out_sharding=<@mesh4d, [{"z"}, {"x", "y"}, {}]>
@@ -251,7 +259,6 @@ func.func @slice_on_src_dim_and_replace_axis_in_another_dim(%arg0 : tensor<16x8x
   %0 = sdy.reshard %arg0 <@mesh4d, [{"w"}, {}, {"x", "y"}]> : tensor<16x8x8xf32>
   return %0 : tensor<16x8x8xf32>
 }
-
 
 // CHECK-LABEL: func @cannot_slice_on_src_dim_output_sharded
 func.func @cannot_slice_on_src_dim_output_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{}, {"x"}]>}) -> tensor<16x8xf32> {
@@ -315,6 +322,15 @@ func.func @cannot_slice_on_src_dim_size_too_small_2(%arg0 : tensor<16x4x8xf32> {
   return %0 : tensor<16x4x8xf32>
 }
 
+// CHECK-LABEL: func @cannot_slice_on_src_dim_considering_existing_axes_on_src_dim
+func.func @cannot_slice_on_src_dim_considering_existing_axes_on_src_dim(%arg0 : tensor<4x4xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"x", "y"}, {}]>}) -> tensor<4x4xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"z"}] %arg0 out_sharding=<@mesh3d, [{"x", "y"}, {"z"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d, [{"x", "z"}, {"y"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all {"z"} 0->1 %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{"x"}, {"y", "z"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"x"}, {"y", "z"}]> : tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}
 
 // CHECK-LABEL: func @cannot_slice_on_src_dim_size_non_divisible
 func.func @cannot_slice_on_src_dim_size_non_divisible(%arg0 : tensor<4x10xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{}, {"x"}]>}) -> tensor<4x10xf32> {
