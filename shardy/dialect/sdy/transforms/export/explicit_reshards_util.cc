@@ -770,8 +770,8 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                 const SymbolTable& symbolTable) {
   SmallVector<TensorShardingAttr> inShardings = getShardings(op->getOperands());
   SmallVector<TensorShardingAttr> outShardings = getShardings(op->getResults());
-  std::optional<StringRef> meshName =
-      getCommonMeshName(inShardings, outShardings, symbolTable);
+  std::optional<StringRef> meshName = getCommonMeshName(
+      inShardings, outShardings, symbolTable, /*ignoreDeviceIds=*/false);
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or
     // the sharding attributes use different meshes. Skip if so.

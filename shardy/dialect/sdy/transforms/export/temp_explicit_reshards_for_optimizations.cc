@@ -109,7 +109,8 @@ void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
     return;
   }
   std::optional<StringRef> meshName =
-      getCommonMeshName(inShardingAttrs, outShardingAttrs, symbolTable);
+      getCommonMeshName(inShardingAttrs, outShardingAttrs, symbolTable,
+                        /*ignoreDeviceIds=*/false);
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute
     // or the sharding attributes use different meshes. Skip if so.

@@ -15,9 +15,9 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/ir/dialect.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -37,13 +37,14 @@ class DialectTest : public ::testing::Test {
  protected:
   void SetUp() override { context.loadDialect<SdyDialect>(); }
 
-  MeshAttr createMesh(ArrayRef<StringRef> axisNames) {
+  MeshAttr createMesh(ArrayRef<std::pair<StringRef, int64_t>> axisNameAndSizes,
+                      ArrayRef<int64_t> deviceIds = {}) {
     SmallVector<MeshAxisAttr> meshAxisAttrs;
-    meshAxisAttrs.reserve(axisNames.size());
-    for (StringRef axisName : axisNames) {
-      meshAxisAttrs.push_back(MeshAxisAttr::get(&context, axisName, 1));
+    meshAxisAttrs.reserve(axisNameAndSizes.size());
+    for (auto [axisName, axisSize] : axisNameAndSizes) {
+      meshAxisAttrs.push_back(MeshAxisAttr::get(&context, axisName, axisSize));
     }
-    return MeshAttr::get(&context, meshAxisAttrs);
+    return MeshAttr::get(&context, meshAxisAttrs, deviceIds);
   }
 
   AxisRefAttr createAxis(StringRef name) {
@@ -499,7 +500,8 @@ TEST_F(DialectTest, TensorShardingAttrGetReplicated) {
       dimShardings,
       /*replicatedAxes=*/{createSubAxis("v", 2, 2), createAxis("y")});
 
-  MeshAttr mesh = createMesh({"u", "v", "w", "x", "y", "z"});
+  MeshAttr mesh =
+      createMesh({{"u", 1}, {"v", 1}, {"w", 1}, {"x", 1}, {"y", 1}, {"z", 1}});
 
   EXPECT_EQ(sharding.getReplicated("u", mesh),
             createTensorSharding(
@@ -693,6 +695,71 @@ TEST_F(DialectTest, OpShardingRuleAttrDynamicSlice) {
   };
   verifyNonBatchingFactor(1);
   verifyNonBatchingFactor(2);
+}
+
+TEST_F(DialectTest, MeshAttrEquals) {
+  auto checkEquality = [](MeshAttr a, MeshAttr b,
+                          bool ignoreDeviceIds = false) {
+    EXPECT_TRUE(a.equals(b, ignoreDeviceIds));
+    EXPECT_TRUE(b.equals(a, ignoreDeviceIds));
+  };
+  auto checkInequality = [](MeshAttr a, MeshAttr b,
+                            bool ignoreDeviceIds = false) {
+    EXPECT_FALSE(a.equals(b, ignoreDeviceIds));
+    EXPECT_FALSE(b.equals(a, ignoreDeviceIds));
+  };
+  {
+    MeshAttr mesh = createMesh({});
+    checkEquality(mesh, mesh);
+    // Do not ignore device order.
+    checkInequality(mesh, createMesh({{"x", 4}}));
+    checkInequality(mesh, createMesh({{"x", 1}}));
+    checkInequality(mesh, createMesh({}, /*deviceIds=*/{0}));
+    checkInequality(mesh, createMesh({}, /*deviceIds=*/{5}));
+    // Ignore device order.
+    checkInequality(mesh, createMesh({{"x", 4}}), true);
+    checkInequality(mesh, createMesh({{"x", 1}}), true);
+    checkInequality(mesh, createMesh({}, /*deviceIds=*/{0}), true);
+    checkInequality(mesh, createMesh({}, /*deviceIds=*/{5}), true);
+  }
+  {
+    MeshAttr mesh = createMesh({{"x", 3}, {"y", 2}});
+    checkEquality(mesh, mesh);
+    // Do not ignore device order.
+    checkInequality(mesh, createMesh({{"x", 2}, {"y", 3}}));
+    checkInequality(mesh, createMesh({{"x", 3}, {"z", 2}}));
+    checkInequality(mesh, createMesh({{"y", 2}, {"x", 3}}));
+    checkInequality(mesh, createMesh({{"x", 4}, {"y", 2}}));
+    checkInequality(mesh, createMesh({{"x", 3}, {"y", 2}},
+                                     /*deviceIds=*/{5, 4, 3, 2, 1, 0}));
+    // Ignore device order.
+    checkInequality(mesh, createMesh({{"x", 2}, {"y", 3}}), true);
+    checkInequality(mesh, createMesh({{"x", 3}, {"z", 2}}), true);
+    checkInequality(mesh, createMesh({{"y", 2}, {"x", 3}}), true);
+    checkInequality(mesh, createMesh({{"x", 4}, {"y", 2}}), true);
+    checkEquality(
+        mesh,
+        createMesh({{"x", 3}, {"y", 2}}, /*deviceIds=*/{5, 4, 3, 2, 1, 0}),
+        true);
+  }
+  {
+    MeshAttr mesh = createMesh({{"x", 4}}, /*deviceIds=*/{1, 0, 3, 2});
+    checkInequality(mesh, createMesh({{"x", 4}}, /*deviceIds=*/{3, 2, 1, 0}));
+    checkEquality(mesh, createMesh({{"x", 4}}, /*deviceIds=*/{3, 2, 1, 0}),
+                  /*ignoreDeviceIds=*/true);
+  }
+  {
+    MeshAttr mesh = createMesh({}, /*deviceIds=*/{3});
+    checkInequality(mesh, createMesh({}, /*deviceIds=*/{5}));
+    checkEquality(mesh, createMesh({}, /*deviceIds=*/{5}),
+                  /*ignoreDeviceIds=*/true);
+  }
+  {
+    MeshAttr mesh = createMesh({}, /*deviceIds=*/{0});
+    checkInequality(mesh, createMesh({{"x", 1}}));
+    checkInequality(mesh, createMesh({{"x", 1}}),
+                    /*ignoreDeviceIds=*/true);
+  }
 }
 
 }  // namespace
