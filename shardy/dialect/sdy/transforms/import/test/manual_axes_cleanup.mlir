@@ -126,3 +126,18 @@ func.func @empty_mesh_operand(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   } : (tensor<8xf32>) -> tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// CHECK-LABEL: @dont_add_manual_axes_to_non_shaped_types
+func.func @dont_add_manual_axes_to_non_shaped_types(%arg0: !stablehlo.token) -> !stablehlo.token {
+  // CHECK-NEXT: sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh, []>]
+  // CHECK-SAME{LITERAL}: out_shardings=[<@mesh, []>]
+  // CHECK-SAME{LITERAL}: manual_axes={"c"} (%arg1: !stablehlo.token) {
+  %0 = sdy.manual_computation(%arg0)
+      in_shardings=[<@mesh, []>]
+      out_shardings=[<@mesh, []>]
+      manual_axes={"c"} (%arg1: !stablehlo.token) {
+    sdy.return %arg1 : !stablehlo.token
+  } : (!stablehlo.token) -> !stablehlo.token
+  return %0 : !stablehlo.token
+}
