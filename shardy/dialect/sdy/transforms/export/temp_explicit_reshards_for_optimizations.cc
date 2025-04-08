@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
@@ -235,6 +236,9 @@ struct TempExplicitReshardsForOptimizationsPass
               [&](stablehlo::DotGeneralOp dotGeneralOp) {
                 processDot(dotGeneralOp, rewriter, symbolTable);
               });
+      if (op->getName().getStringRef().str() == "mhlo.ragged_dot") {
+        insertExplicitReshardsOnOp(op, rewriter, symbolTable);
+      }
     });
   }
 };
