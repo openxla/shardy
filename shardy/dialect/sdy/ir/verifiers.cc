@@ -20,6 +20,7 @@ limitations under the License.
 #include <functional>
 #include <numeric>
 #include <optional>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1173,77 +1174,101 @@ LogicalResult AllToAllOp::verify() {
   TensorShardingAttr resultSharding = getOutSharding();
   MeshAttr mesh = resultSharding.getMesh(*this);
 
-  // 1. Verify `axes` is a valid list of axes.
+  llvm::ArrayRef<AllToAllParamAttr> ataParams = getAtaParams();
+  auto decomposeAtaParam = [](AllToAllParamAttr ataParam)
+      -> std::tuple<ArrayRef<AxisRefAttr>, int64_t, int64_t> {
+    return std::make_tuple(ataParam.getAxes(), ataParam.getSrcDim().getInt(),
+                           ataParam.getTgtDim().getInt());
+  };
+
+  SmallDenseSet<int64_t> seenDims;
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
-  if (failed(verifyAxisRefList(getAxes(), axisNameToSize, seenAxisRefs,
-                               axisNameToSubAxes, getEmitErrorFn(*this)))) {
-    return failure();
-  }
-
-  // 2. Verify `src_dim` and `tgt_dim`.
-  int64_t rank = getTensorRank(getResult());
-  auto verifyDim = [this, rank](int64_t dim,
-                                StringRef dimName) -> LogicalResult {
-    if (dim < 0 || dim >= rank) {
-      return emitOpError(dimName)
-             << " dimension " << dim << " is out of range [0, " << rank << ")";
-    }
-    return success();
-  };
-  if (failed(verifyDim(getSrcDim(), "source"))) {
-    return failure();
-  }
-  if (failed(verifyDim(getTgtDim(), "target"))) {
-    return failure();
-  }
-  if (getSrcDim() == getTgtDim()) {
-    return emitOpError("source and target dimensions must be different");
-  }
-
   ArrayRef<DimensionShardingAttr> resultDimShardings =
       resultSharding.getDimShardings();
   ArrayRef<DimensionShardingAttr> operandDimShardings =
       operandSharding.getDimShardings();
-
-  // 3. Verify that moving `axes` from `src_dim` to `tgt_dim` in the operand
-  // sharding gets `out_sharding`.
-  for (auto [dim, dimShardings] : llvm::enumerate(
-           llvm::zip_equal(operandDimShardings, resultDimShardings))) {
-    auto [operandDimSharding, resultDimSharding] = dimShardings;
-    LogicalResult logicalResult = success();
-    auto verifyDimSharding =
-        [this, dim = dim, resultDimSharding = resultDimSharding](
-            ArrayRef<AxisRefAttr> expectedDimSharding) -> LogicalResult {
-      if (expectedDimSharding != resultDimSharding.getAxes()) {
-        return emitOpError("result sharding doesn't match expected sharding ")
-               << strippedAttrsString(ArrayRef(expectedDimSharding),
-                                      /*stripMnemonic=*/true)
-               << " on dimension " << dim;
+  for (auto ataParam : ataParams) {
+    auto [axes, srcDim, tgtDim] = decomposeAtaParam(ataParam);
+    // 1. Verify `axes` is a valid list of axes.
+    if (failed(verifyAxisRefList(axes, axisNameToSize, seenAxisRefs,
+                                 axisNameToSubAxes, getEmitErrorFn(*this)))) {
+      return failure();
+    }
+    // 2. Verify `src_dim` and `tgt_dim`.
+    if (srcDim == tgtDim) {
+      return emitOpError("source and target dimensions must be different");
+    }
+    // Verify that `src_dim` and `tgt_dim` are not overlapping.
+    for (auto dim : {srcDim, tgtDim}) {
+      if (!seenDims.insert(dim).second) {
+        return emitOpError("overlapping dimensions in all-to-all params: ")
+               << dim;
+      }
+    }
+    int64_t rank = getTensorRank(getResult());
+    auto verifyDim = [this, rank](int64_t dim,
+                                  StringRef dimName) -> LogicalResult {
+      if (dim < 0 || dim >= rank) {
+        return emitOpError(dimName) << " dimension " << dim
+                                    << " is out of range [0, " << rank << ")";
       }
       return success();
     };
-    if (dim == getSrcDim()) {
-      auto expectedDimShardingOrFailure =
-          gatherAxesAlongDim(operandDimSharding, getAxes(), getSrcDim(), mesh,
-                             "all-to-all", getEmitErrorFn(*this));
-      logicalResult =
-          succeeded(expectedDimShardingOrFailure)
-              ? verifyDimSharding(expectedDimShardingOrFailure.value())
-              : failure();
-    } else if (dim == getTgtDim()) {
-      logicalResult = verifyDimSharding(
-          sliceAxesAlongDim(operandDimShardings[getTgtDim()], getAxes(), mesh));
-    } else {
-      logicalResult = verifyDimSharding(operandDimSharding.getAxes());
-    }
 
-    if (failed(logicalResult)) {
+    if (failed(verifyDim(srcDim, "source"))) {
+      return failure();
+    }
+    if (failed(verifyDim(tgtDim, "target"))) {
       return failure();
     }
   }
-
+  // Move axes in another loop to avoid the overlapping dimensions error being
+  // covered by the dim sharding verification.
+  auto verifyDimSharding =
+      [this, &resultDimShardings](
+          int64_t dim,
+          ArrayRef<AxisRefAttr> expectedDimSharding) -> LogicalResult {
+    if (expectedDimSharding != resultDimShardings[dim].getAxes()) {
+      return emitOpError("result sharding doesn't match expected sharding ")
+             << strippedAttrsString(ArrayRef(expectedDimSharding),
+                                    /*stripMnemonic=*/true)
+             << " on dimension " << dim;
+    }
+    return success();
+  };
+  for (auto ataParam : ataParams) {
+    auto [axes, srcDim, tgtDim] = decomposeAtaParam(ataParam);
+    // 3. Verify that moving `axes` from `src_dim` to `tgt_dim` in the
+    // operand sharding gets `out_sharding`.
+    auto expectedSrcDimShardingOrFailure =
+        gatherAxesAlongDim(operandDimShardings[srcDim], axes, srcDim, mesh,
+                           "all-to-all", getEmitErrorFn(*this));
+    if (failed(expectedSrcDimShardingOrFailure)) {
+      return failure();
+    }
+    if (failed(verifyDimSharding(srcDim,
+                                 expectedSrcDimShardingOrFailure.value()))) {
+      return failure();
+    }
+    auto expectedTgtDimSharding =
+        sliceAxesAlongDim(operandDimShardings[tgtDim], axes, mesh);
+    if (failed(verifyDimSharding(tgtDim, expectedTgtDimSharding))) {
+      return failure();
+    }
+  }
+  // 4. Verify that moving `axes` from `src_dim` to `tgt_dim` in the
+  // operand sharding gets `out_sharding`.
+  for (auto [dim, dimShardings] : llvm::enumerate(
+           llvm::zip_equal(operandDimShardings, resultDimShardings))) {
+    auto [operandDimSharding, resultDimSharding] = dimShardings;
+    if (!seenDims.contains(dim)) {
+      if (failed(verifyDimSharding(dim, operandDimSharding.getAxes()))) {
+        return failure();
+      }
+    }
+  }
   return success();
 }
 
