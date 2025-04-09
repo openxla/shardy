@@ -129,8 +129,8 @@ _Inserts explicit reshards for specific optimizations._
 This pass is a temporary solution until we can enable the
 `sdy-insert-explicit-reshards` pass by default.
 
-It allows us to improve specific use cases where the partitioner does the
-sub-optimal thing.
+It allows us to insert explicit reshards on specific operations for
+optimizations.
 
 ### `-sdy-update-non-divisible-input-output-shardings`
 
