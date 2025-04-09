@@ -17,6 +17,8 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARD_UTIL_H_
 
 #include <cassert>
+#include <cstdint>
+#include <utility>
 
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
@@ -25,6 +27,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
@@ -34,15 +37,21 @@ namespace sdy {
 struct Mesh {
   MeshAttr mesh;
   StringRef meshName;
+  Mesh() = default;
+  Mesh(MeshAttr mesh, StringRef meshName) : mesh(mesh), meshName(meshName) {};
+  MLIRContext* getContext() const { return mesh.getContext(); }
+  MeshAttr attr() const { return mesh; }
+  StringRef name() const { return meshName; }
+};
 
-  Mesh(MeshAttr mesh, StringRef meshName);
-
-  // Returns the context of the mesh.
-  MLIRContext* getContext() const;
-  // Returns the mesh attribute.
-  MeshAttr attr() const;
-  // Returns the mesh name.
-  StringRef name() const;
+// The struct contains an array of axes list, and a mesh.
+struct AxesPerFactorWithMesh {
+  AxesPerFactor axes;
+  Mesh mesh;
+  AxesPerFactorWithMesh() = default;
+  AxesPerFactorWithMesh(AxesPerFactor axes, Mesh mesh)
+      : axes(std::move(axes)), mesh(mesh) {};
+  bool empty() const { return axes.empty(); }
 };
 
 // Returns true if a reshard is needed to go from source sharding to target
