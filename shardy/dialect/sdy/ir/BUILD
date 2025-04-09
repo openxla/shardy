@@ -164,6 +164,7 @@ cc_library(
         "@llvm-project//mlir:ShapeDialect",
         "@llvm-project//mlir:SideEffectInterfaces",
         "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:TransformUtils",
         "@stablehlo//:stablehlo_assembly_format",
         "@stablehlo//:stablehlo_ops",
         "@stablehlo//:stablehlo_type_inference",

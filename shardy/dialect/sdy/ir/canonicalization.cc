@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/IR/Region.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/Inliner.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -103,9 +104,11 @@ class RedundantManualComputationPattern
     }
 
     mlir::InlinerInterface inliner(manualComputationOp.getContext());
+    mlir::InlinerConfig config;
     if (inlineRegion(
-            inliner, &manualComputationOp.getRegion(),
-            manualComputationOp->getBlock(), manualComputationOp->getIterator(),
+            inliner, config.getCloneCallback(),
+            &manualComputationOp.getRegion(), manualComputationOp->getBlock(),
+            manualComputationOp->getIterator(),
             manualComputationOp.getOperands(), manualComputationOp.getResults())
             .failed()) {
       manualComputationOp.emitOpError(
