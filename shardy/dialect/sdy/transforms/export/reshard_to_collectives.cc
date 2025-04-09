@@ -1350,6 +1350,7 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
     MeshAttr inMesh = inSharding.getMesh(op);
     if (inSharding.getMeshName() != outSharding.getMeshName()) {
        MeshAttr outMesh = outSharding.getMesh(op);
+       // TODO(enver): Use MeshAttr::equals method instead.
        if (outMesh.getAxes() != inMesh.getAxes() ||
            inMesh.getDeviceIds() == outMesh.getDeviceIds() ||
            (inSharding.isFullyReplicated() &&

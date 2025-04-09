@@ -183,7 +183,8 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
 
 Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
                              ArrayRef<TensorShardingAttr> resultsShardings,
-                             const SymbolTable& symbolTable) {
+                             const SymbolTable& symbolTable,
+                             const bool ignoreDeviceIds) {
   Attribute meshOrRef;
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
@@ -192,12 +193,24 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
       continue;
     }
     MeshAttr otherMesh = sharding.getMesh(symbolTable);
+    // TODO(b/409516201): Why do we check mesh.empty(), and what if it ends up
+    // propagating to the sharding with the empty mesh.
     if (!mesh || mesh.empty()) {
       mesh = otherMesh;
       meshOrRef = sharding.getMeshOrRef();
-    } else if (otherMesh != mesh && !otherMesh.empty()) {
+      continue;
+    }
+    if (otherMesh.empty()) {
+      continue;
+    }
+    if (!otherMesh.equals(mesh, ignoreDeviceIds)) {
       // Found more than one mesh name.
       return nullptr;
+    }
+    // Prefer iota device id over non-iota.
+    if (ignoreDeviceIds && otherMesh.getDeviceIds().empty()) {
+      mesh = otherMesh;
+      meshOrRef = sharding.getMeshOrRef();
     }
   }
 
@@ -224,9 +237,10 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
 std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultsShardings,
-    const SymbolTable& symbolTable) {
-  Attribute meshOrRef =
-      getCommonMeshOrRef(operandShardings, resultsShardings, symbolTable);
+    const SymbolTable& symbolTable, const bool ignoreDeviceIds) {
+  Attribute meshOrRef = getCommonMeshOrRef(operandShardings, resultsShardings,
+                                           symbolTable, ignoreDeviceIds);
+
   // We assume that if there is a common mesh, then there can only be a unique
   // symbol name referencing that mesh.
   return meshOrRef
