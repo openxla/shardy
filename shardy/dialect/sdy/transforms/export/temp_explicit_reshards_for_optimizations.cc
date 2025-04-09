@@ -236,7 +236,7 @@ struct TempExplicitReshardsForOptimizationsPass
               [&](stablehlo::DotGeneralOp dotGeneralOp) {
                 processDot(dotGeneralOp, rewriter, symbolTable);
               });
-      if (op->getName().getStringRef().str() == "mhlo.ragged_dot") {
+      if (op->getName().getStringRef() == "mhlo.ragged_dot") {
         insertExplicitReshardsOnOp(op, rewriter, symbolTable);
       }
     });
