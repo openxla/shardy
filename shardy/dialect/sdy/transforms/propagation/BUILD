@@ -14,19 +14,13 @@ td_library(
 
 gentbl_cc_library(
     name = "passes_inc",
-    tbl_outs = [
-        (
-            [
-                "-gen-pass-decls",
-                "-name=SdyPropagation",
-            ],
-            "passes.h.inc",
-        ),
-        (
-            ["-gen-pass-doc"],
-            "g3doc/sdy_propagation_passes.md",
-        ),
-    ],
+    tbl_outs = {
+        "passes.h.inc": [
+            "-gen-pass-decls",
+            "-name=SdyPropagation",
+        ],
+        "g3doc/sdy_propagation_passes.md": ["-gen-pass-doc"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "passes.td",
     deps = [":passes_td_files"],

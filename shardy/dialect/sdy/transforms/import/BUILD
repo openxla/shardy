@@ -14,25 +14,16 @@ td_library(
 
 gentbl_cc_library(
     name = "passes_inc",
-    tbl_outs = [
-        (
-            [
-                "-gen-pass-decls",
-                "-name=SdyImport",
-            ],
-            "passes.h.inc",
-        ),
-        (
-            [
-                "-gen-pass-capi-header",
-            ],
-            "passes.capi.h.inc",
-        ),
-        (
-            ["-gen-pass-doc"],
-            "g3doc/sdy_import_passes.md",
-        ),
-    ],
+    tbl_outs = {
+        "passes.h.inc": [
+            "-gen-pass-decls",
+            "-name=SdyImport",
+        ],
+        "passes.capi.h.inc": [
+            "-gen-pass-capi-header",
+        ],
+        "g3doc/sdy_import_passes.md": ["-gen-pass-doc"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "passes.td",
     deps = [":passes_td_files"],

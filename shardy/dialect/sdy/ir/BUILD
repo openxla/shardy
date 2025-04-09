@@ -27,20 +27,11 @@ td_library(
 
 gentbl_cc_library(
     name = "op_interface_inc",
-    tbl_outs = [
-        (
-            ["-gen-op-interface-decls"],
-            "op_interface.h.inc",
-        ),
-        (
-            ["-gen-op-interface-defs"],
-            "op_interface.cc.inc",
-        ),
-        (
-            ["-gen-op-interface-docs"],
-            "g3doc/sdy_op_interfaces.md",
-        ),
-    ],
+    tbl_outs = {
+        "op_interface.h.inc": ["-gen-op-interface-decls"],
+        "op_interface.cc.inc": ["-gen-op-interface-defs"],
+        "g3doc/sdy_op_interfaces.md": ["-gen-op-interface-docs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "op_interface.td",
     deps = [
@@ -50,16 +41,10 @@ gentbl_cc_library(
 
 gentbl_cc_library(
     name = "dialect_inc",
-    tbl_outs = [
-        (
-            ["-gen-dialect-decls"],
-            "dialect.h.inc",
-        ),
-        (
-            ["-gen-dialect-defs"],
-            "dialect.cc.inc",
-        ),
-    ],
+    tbl_outs = {
+        "dialect.h.inc": ["-gen-dialect-decls"],
+        "dialect.cc.inc": ["-gen-dialect-defs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "dialect.td",
     deps = [
@@ -69,16 +54,10 @@ gentbl_cc_library(
 
 gentbl_cc_library(
     name = "ops_inc",
-    tbl_outs = [
-        (
-            ["-gen-op-decls"],
-            "ops.h.inc",
-        ),
-        (
-            ["-gen-op-defs"],
-            "ops.cc.inc",
-        ),
-    ],
+    tbl_outs = {
+        "ops.h.inc": ["-gen-op-decls"],
+        "ops.cc.inc": ["-gen-op-defs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "ops.td",
     deps = [
@@ -88,16 +67,10 @@ gentbl_cc_library(
 
 gentbl_cc_library(
     name = "attrs_inc",
-    tbl_outs = [
-        (
-            ["-gen-attrdef-decls"],
-            "attrs.h.inc",
-        ),
-        (
-            ["-gen-attrdef-defs"],
-            "attrs.cc.inc",
-        ),
-    ],
+    tbl_outs = {
+        "attrs.h.inc": ["-gen-attrdef-decls"],
+        "attrs.cc.inc": ["-gen-attrdef-defs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "attrs.td",
     deps = [":sdy_td_files"],
@@ -105,16 +78,10 @@ gentbl_cc_library(
 
 gentbl_cc_library(
     name = "enums_inc",
-    tbl_outs = [
-        (
-            ["-gen-enum-decls"],
-            "enums.h.inc",
-        ),
-        (
-            ["-gen-enum-defs"],
-            "enums.cc.inc",
-        ),
-    ],
+    tbl_outs = {
+        "enums.h.inc": ["-gen-enum-decls"],
+        "enums.cc.inc": ["-gen-enum-defs"],
+    },
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "enums.td",
     deps = [":sdy_td_files"],
@@ -122,12 +89,7 @@ gentbl_cc_library(
 
 gentbl_cc_library(
     name = "canonicalization_inc",
-    tbl_outs = [
-        (
-            ["-gen-rewriters"],
-            "canonicalization.cc.inc",
-        ),
-    ],
+    tbl_outs = {"canonicalization.cc.inc": ["-gen-rewriters"]},
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "canonicalization.td",
     deps = [":sdy_td_files"],
@@ -135,15 +97,10 @@ gentbl_cc_library(
 
 gentbl_cc_library(
     name = "bytecode_inc",
-    tbl_outs = [
-        (
-            [
-                "-gen-bytecode",
-                "-bytecode-dialect=sdy",
-            ],
-            "bytecode.cc.inc",
-        ),
-    ],
+    tbl_outs = {"bytecode.cc.inc": [
+        "-gen-bytecode",
+        "-bytecode-dialect=sdy",
+    ]},
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "bytecode.td",
     deps = [":sdy_td_files"],
