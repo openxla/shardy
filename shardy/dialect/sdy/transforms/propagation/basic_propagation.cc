@@ -247,8 +247,9 @@ LogicalResult propagateTensorShardings(
     const FactorPropagation& factorPropagation, bool conservativePropagation,
     Operation* op, const SymbolTable& symbolTable, PatternRewriter* rewriter,
     ShardingGroupMap shardingGroupMap) {
-  std::optional<StringRef> meshName = getCommonMeshName(
-      operandsParams.shardings, resultsParams.shardings, symbolTable);
+  std::optional<StringRef> meshName =
+      getCommonMeshName(operandsParams.shardings, resultsParams.shardings,
+                        symbolTable, /*ignoreDeviceIds=*/false);
 
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or

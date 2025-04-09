@@ -146,6 +146,10 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
 
     // Returns a map from axis name to axis size.
     llvm::SmallDenseMap<StringRef, int64_t> getAxisNameToSize() const;
+
+    // Returns true if this mesh is equal to `other` ignoring the device ids
+    // depending on `ignoreDeviceIds`.
+    bool equals(MeshAttr other, bool ignoreDeviceIds = false) const;
   }];
 }
 
