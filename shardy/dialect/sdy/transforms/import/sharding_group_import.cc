@@ -117,8 +117,8 @@ GroupIdToShardingGroups unifyShardingGroups(
   int64_t reindexId = 0;
   SmallDenseMap<int64_t, int64_t> reindexMap;
   for (const auto& group : shardingGroupEquivalences) {
-    if (group.isLeader()) {
-      reindexMap[group.getData()] = reindexId++;
+    if (group->isLeader()) {
+      reindexMap[group->getData()] = reindexId++;
     }
   }
 

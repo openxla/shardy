@@ -64,8 +64,8 @@ func.func @sharding_groups_reindexes_ids(%arg0: tensor<4xf32>, %arg1: tensor<4xf
 
 // CHECK-LABEL: sharding_groups_reindex_ordering_matches_min_element_ordering
 func.func @sharding_groups_reindex_ordering_matches_min_element_ordering(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>, %arg2: tensor<4xf32>) {
-  // CHECK: sdy.sharding_group %arg0 group_id=1 : tensor<4xf32>
-  // CHECK: sdy.sharding_group %arg1 group_id=0 : tensor<4xf32>
+  // CHECK: sdy.sharding_group %arg0 group_id=0 : tensor<4xf32>
+  // CHECK: sdy.sharding_group %arg1 group_id=1 : tensor<4xf32>
   // CHECK: sdy.sharding_group %arg2 group_id=2 : tensor<4xf32>
   sdy.sharding_group %arg0 group_id = 567 : tensor<4xf32>
   sdy.sharding_group %arg0 group_id = 23 : tensor<4xf32>
