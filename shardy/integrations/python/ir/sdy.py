@@ -16,4 +16,5 @@
 
 # pylint: disable=wildcard-import
 from .._mlir_libs._sdy import *
+from ._sdy_enums_gen import *
 from ._sdy_ops_gen import *

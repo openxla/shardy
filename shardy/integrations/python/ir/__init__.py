@@ -15,15 +15,6 @@
 """Python bindings for the SDY dialect."""
 
 # pylint: disable=g-multiple-import,g-importing-member,unused-import,useless-import-alias
-from ._sdy_ops_gen import (
-    ConstantOp as ConstantOp,
-    ManualComputationOp as ManualComputationOp,
-    MeshOp as MeshOp,
-    ReshardOp as ReshardOp,
-    ReturnOp as ReturnOp,
-    ShardingConstraintOp as ShardingConstraintOp,
-)
-
 from ._sdy import (
     register_dialect as register_dialect,
     MeshAxisAttr as MeshAxisAttr,
@@ -33,4 +24,15 @@ from ._sdy import (
     DimensionShardingAttr as DimensionShardingAttr,
     TensorShardingAttr as TensorShardingAttr,
     TensorShardingPerValueAttr as TensorShardingPerValueAttr,
+)
+
+from ._sdy_enums_gen import PropagationDirection as PropagationDirection
+
+from ._sdy_ops_gen import (
+    ConstantOp as ConstantOp,
+    ManualComputationOp as ManualComputationOp,
+    MeshOp as MeshOp,
+    ReshardOp as ReshardOp,
+    ReturnOp as ReturnOp,
+    ShardingConstraintOp as ShardingConstraintOp,
 )
