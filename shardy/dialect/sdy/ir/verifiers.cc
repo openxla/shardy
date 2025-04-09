@@ -865,7 +865,10 @@ LogicalResult verifyManualComputationValue(
     // 5. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     SmallVector<int64_t> newDimSizes;
-    auto globalRankedType = mlir::cast<RankedTensorType>(globalType);
+    auto globalRankedType = mlir::dyn_cast<RankedTensorType>(globalType);
+    if (!globalRankedType) {
+      continue;
+    }
     for (auto [dimensionSize, dimSharding] : llvm::zip_equal(
              globalRankedType.getShape(), sharding.getDimShardings())) {
       if (dimensionSize == ShapedType::kDynamic) {
