@@ -263,6 +263,13 @@ func.func @custom_call_erf(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
   return %0 : tensor<8x4xf32>
 }
 
+// CHECK-LABEL: func @custom_call_ragged_all_to_all
+func.func @custom_call_ragged_all_to_all(%arg0: tensor<6xf32>, %arg1: tensor<6xf32>, %arg2: tensor<3xi32>, %arg3: tensor<3xi32>, %arg4: tensor<3xi32>, %arg5: tensor<3xi32>) -> (tensor<6xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i], [i], [i], [i], [i], [i])->([i]) {i=6}>
+  %0 = stablehlo.custom_call @ragged_all_to_all(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5) {api_version = 4 : i32, backend_config = {channel_id = 1 : i64, replica_groups = dense<[[0, 1, 2]]> : tensor<1x3xi64>, mhlo.sharding = "{manual}"}} : (tensor<6xf32>, tensor<6xf32>, tensor<3xi32>, tensor<3xi32>, tensor<3xi32>, tensor<3xi32>) -> tensor<6xf32>
+  return %0 : tensor<6xf32>
+}
+
 // CHECK-LABEL: func @custom_call_topk_of_1d
 func.func @custom_call_topk_of_1d(%arg0: tensor<16xf32>) -> (tensor<16xf32>, tensor<16xi32>) {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i], [i]) {i=16}>
