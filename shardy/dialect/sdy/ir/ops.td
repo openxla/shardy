@@ -185,14 +185,6 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
 
     void setInSharding(int64_t operandIndex, TensorShardingAttr sharding);
     void setOutSharding(int64_t resultIndex, TensorShardingAttr sharding);
-
-    // Same as `getInSharding`, but removes any prefixed manual axes from each
-    // dim sharding.
-    TensorShardingAttr getInShardingWithoutManualAxes(int64_t operandIndex);
-
-    // Same as `getOutSharding`, but removes any prefixed manual axes from each
-    // dim sharding.
-    TensorShardingAttr getOutShardingWithoutManualAxes(int64_t resultIndex);
   }];
 }
 

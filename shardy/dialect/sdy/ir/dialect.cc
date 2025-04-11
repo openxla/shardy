@@ -1096,16 +1096,6 @@ TensorShardingAttr addFreeAxesToManualComputationSharding(
 
 }  // namespace
 
-TensorShardingAttr ManualComputationOp::getInShardingWithoutManualAxes(
-    int64_t operandIndex) {
-  return eraseManualAxes(getInSharding(operandIndex), getManualAxes());
-}
-
-TensorShardingAttr ManualComputationOp::getOutShardingWithoutManualAxes(
-    int64_t resultIndex) {
-  return eraseManualAxes(getOutSharding(resultIndex), getManualAxes());
-}
-
 void ManualComputationOp::setInShardings(
     ArrayRef<TensorShardingAttr> shardings) {
   setInShardingsAttr(TensorShardingPerValueAttr::get(getContext(), shardings));
@@ -1131,8 +1121,8 @@ SmallVector<TensorShardingAttr>
 ManualComputationOp::getBlockArgumentEdgeOwnerShardings() {
   SmallVector<TensorShardingAttr> shardings;
   shardings.reserve(getInShardings().size());
-  for (int64_t i = 0; i < getInShardings().size(); ++i) {
-    shardings.push_back(getInShardingWithoutManualAxes(i));
+  for (TensorShardingAttr sharding : getInShardings().getShardings()) {
+    shardings.push_back(eraseManualAxes(sharding, getManualAxes()));
   }
   return shardings;
 }
