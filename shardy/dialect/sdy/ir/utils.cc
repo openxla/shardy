@@ -493,14 +493,9 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
   for (DimensionShardingAttr dimSharding :
        outerManualSharding.getDimShardings()) {
     ArrayRef<AxisRefAttr> dimAxes = dimSharding.getAxes();
-    // Axes in the range [0, firstFreeAxis) are manual axes, and
-    // [firstFreeAxis, dimAxes.size()) are free axes.
-    llvm::ArrayRef<AxisRefAttr>::const_iterator firstFreeAxisIt =
-        llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
-          return llvm::is_contained(manualAxes, axis.getName());
-        });
-    newDimShardings.push_back(
-        shardingEraser(dimSharding, firstFreeAxisIt - dimAxes.begin()));
+    newDimShardings.push_back(shardingEraser(
+        dimSharding,
+        getFirstFreeAxisIter(dimAxes, manualAxes) - dimAxes.begin()));
   }
   // Grab any replicated axes that are not manual axes. Can't use
   // `partition_point` as there is no defined order for replicated axes.
@@ -531,6 +526,13 @@ TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
   return eraseAxesFromManualComputationSharding(
       outerManualSharding, manualAxes,
       std::mem_fn(&DimensionShardingAttr::takeFrontShardingAxes));
+}
+
+ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
+    ArrayRef<AxisRefAttr> dimAxes, ArrayRef<StringAttr> manualAxes) {
+  return llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
+    return llvm::is_contained(manualAxes, axis.getName());
+  });
 }
 
 }  // namespace sdy
