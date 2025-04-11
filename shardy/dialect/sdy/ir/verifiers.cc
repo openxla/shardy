@@ -32,6 +32,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -872,10 +873,10 @@ LogicalResult verifyManualComputationValue(
         newDimSizes.push_back(ShapedType::kDynamic);
       } else {
         // Safe to call `getMesh` because the sharding was already verified.
-        newDimSizes.push_back(
-            dimensionSize /
+        newDimSizes.push_back(llvm::divideCeil(
+            dimensionSize,
             accumulatedManualAxesSize(op, dimSharding.getAxes(), manualAxesSet,
-                                      sharding.getMesh(symbolTable)));
+                                      sharding.getMesh(symbolTable))));
       }
     }
     auto expectedLocalRankedType =
