@@ -2,7 +2,10 @@
 
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "gentbl_filegroup", "td_library")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = [
+    "//third_party/tensorflow/compiler/mlir/lite/experimental/google/tooling:__pkg__",
+    "//visibility:public",
+])
 
 td_library(
     name = "sdy_td_files",
