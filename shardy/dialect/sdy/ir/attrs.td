@@ -1094,4 +1094,23 @@ def Sdy_EmptyAxesPerDim : AttrConstraint<
           "               [](const AxisRefListAttr& al) { return al.size() == 0; })">,
     "is empty axes-per-dim">;
 
+def Sdy_AllToAllParamAttr : AttrDef<Sdy_Dialect, "AllToAllParam"> {
+  let mnemonic = "all_to_all_param";
+
+  let summary = "A tuple containing the axes and source/target dimensions to perform all-to-all on.";
+
+  let parameters = (ins
+    ArrayRefParameter<"AxisRefAttr", "the axes to perform all-to-all on">:$axes,
+    AttrOrTypeParameter<"int64_t", "the source dimension index">:$src_dim,
+    AttrOrTypeParameter<"int64_t", "the target dimension index">:$tgt_dim
+  );
+
+  let assemblyFormat = "`` `{` $axes `}` `` `:` $src_dim `` `->` `` $tgt_dim";
+}
+
+def Sdy_AlltoAllParamList : ArrayOfAttr<Sdy_Dialect, "AlltoAllParamList",
+                                 "all_to_all_param_list", "AllToAllParamAttr"> {
+  let summary = "A list of all-to-all parameters where each dimension appears at most once across all parameters.";
+}
+
 #endif  // SDY_ATTRS
