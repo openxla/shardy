@@ -1,4 +1,4 @@
-# Use the "local" spawn strategy to improve build performance
+# Use the "local" spawn strategy to improve build performance [test]
 build --spawn_strategy=local
 
 # Flag to enable remote config
