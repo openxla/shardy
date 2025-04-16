@@ -165,6 +165,19 @@ func.func @man_comp_result_rank_mistmatch(%arg0: tensor<16x32xf32>) -> tensor<16
 
 // -----
 
+sdy.mesh @mesh = <["a"=4]>
+
+func.func @dimension_size_not_divisible_by_manual_axes_size(%arg0: tensor<6xf32>) -> tensor<6xf32> {
+  // expected-error @+1 {{dimension size 6 is not divisible by the manual axes size 4}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}]>] out_shardings=[<@mesh, [{"a"}]>] manual_axes={"a"} (%arg1: tensor<1xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<1xf32>
+    sdy.return %1 : tensor<1xf32>
+  } : (tensor<6xf32>) -> tensor<6xf32>
+  func.return %0: tensor<6xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_operand_shape_mismatch_replicated(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {

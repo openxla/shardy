@@ -1716,7 +1716,7 @@ func.func @manual_computation(%arg0: tensor<210xf32> {sdy.sharding = #sdy.shardi
 }
 
 // CHECK-LABEL: func @manual_computation_with_manual_axes
-func.func @manual_computation_with_manual_axes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x","y"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x","z"}]>}) {
+func.func @manual_computation_with_manual_axes(%arg0: tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x","y"}]>}) -> (tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x","z"}]>}) {
   %0 = sdy.manual_computation(%arg0)
     in_shardings=[<@mesh_xyzt, [{"x","y"}]>] out_shardings=[<@mesh_xyzt, [{"x", "z"}]>] manual_axes={"x"} (%arg1: tensor<52xf32>) {
     // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyzt, [{"t"}]> : tensor<52xf32>
@@ -1725,9 +1725,9 @@ func.func @manual_computation_with_manual_axes(%arg0: tensor<210xf32> {sdy.shard
     // CHECK-NEXT: sdy.return %[[RESHARD2]] : tensor<52xf32>
     %2 = stablehlo.abs %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh_xyzt, [{"t"}]>]>} : tensor<52xf32>
     sdy.return %2 : tensor<52xf32>
-  } : (tensor<210xf32>) -> (tensor<210xf32>)
-  %1 = stablehlo.negate %0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_xyzt, [{"x","z"}]>]>} : tensor<210xf32>
-  return %1 : tensor<210xf32>
+  } : (tensor<208xf32>) -> (tensor<208xf32>)
+  %1 = stablehlo.negate %0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh_xyzt, [{"x","z"}]>]>} : tensor<208xf32>
+  return %1 : tensor<208xf32>
 }
 
 // CHECK-LABEL: func @optimization_barrier
