@@ -1078,8 +1078,8 @@ def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
 }
 
 def Sdy_EmptyAxisList: AttrConstraint<
-    CPred<"$_self.isa<AxisRefListAttr>() && "
-          "$_self.cast<AxisRefListAttr>().empty()">,
+    CPred<"isa<AxisRefListAttr>($_self) && "
+          "cast<AxisRefListAttr>($_self).empty()">,
     "axis list is empty">;
 
 def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
@@ -1088,8 +1088,8 @@ def Sdy_ListOfAxisRefLists : ArrayOfAttr<Sdy_Dialect, "ListOfAxisRefLists",
 }
 
 def Sdy_EmptyAxesPerDim : AttrConstraint<
-    CPred<"$_self.isa<ListOfAxisRefListsAttr>() && "
-          "llvm::all_of($_self.cast<ListOfAxisRefListsAttr>(),"
+    CPred<"isa<ListOfAxisRefListsAttr>($_self) && "
+          "llvm::all_of(cast<ListOfAxisRefListsAttr>($_self),"
           "               [](const AxisRefListAttr& al) { return al.size() == 0; })">,
     "is empty axes-per-dim">;
 
