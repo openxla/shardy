@@ -207,6 +207,20 @@ func.func @custom_call_x64_combine(%arg0: tensor<8x2xui32>, %arg1: tensor<8x2xui
   return %0 : tensor<8x2xui64>
 }
 
+// CHECK-LABEL: func @custom_call_x64_split_high
+func.func @custom_call_x64_split_high(%arg0: tensor<8x2xui64>) -> tensor<8x2xui32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=2}>
+  %0 = stablehlo.custom_call @X64SplitHigh(%arg0) {backend_config = ""} : (tensor<8x2xui64>) -> tensor<8x2xui32>
+  return %0 : tensor<8x2xui32>
+}
+
+// CHECK-LABEL: func @custom_call_x64_split_low
+func.func @custom_call_x64_split_low(%arg0: tensor<8x2xui64>) -> tensor<8x2xui32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=2}>
+  %0 = stablehlo.custom_call @X64SplitLow(%arg0) {backend_config = ""} : (tensor<8x2xui64>) -> tensor<8x2xui32>
+  return %0 : tensor<8x2xui32>
+}
+
 // CHECK-LABEL: func @custom_call_move_to_device
 func.func @custom_call_move_to_device(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>

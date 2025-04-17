@@ -418,9 +418,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "InvertDiagBlocksLowerTriangular" ||
             callTargetName == "InvertDiagBlocksUpperTriangular" ||
             callTargetName == "LayoutConstraint" ||
-            callTargetName == "MoveToDevice" ||
-            callTargetName == "MoveToHost" || callTargetName == "mhlo.erf" ||
-            callTargetName == "X64Combine") {
+            callTargetName == "mhlo.erf" || callTargetName == "MoveToDevice" ||
+            callTargetName == "MoveToHost" || callTargetName == "X64Combine" ||
+            callTargetName == "X64SplitHigh" ||
+            callTargetName == "X64SplitLow") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         if (callTargetName == "Eigh") {
