@@ -1,13 +1,5 @@
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
-func.func @custom_rule_not_custom_call(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // expected-error@+1 {{can only define custom sharding rules on stablehlo.custom_call}}
-  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding_rule = #sdy.op_sharding_rule<([i], [j])->([j]) {i=8, j=8}, custom>} : tensor<8xf32>
-  func.return %0 : tensor<8xf32>
-}
-
-// -----
-
 func.func @sharding_rule_wrong_attr_type(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // expected-error@+1 {{should have a sharding rule attribute of type OpShardingRuleAttr}}
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = 1 : i64} : (tensor<8xf32>) -> tensor<8xf32>

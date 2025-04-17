@@ -579,17 +579,10 @@ LogicalResult indicesSortedUniqueInBound(Operation* op, int64_t numFactors,
 
 // Verifies the following for an `OpShardingRuleAttr`:
 //
-// - If the rule is custom, the operation the rule is attached to is a
-//   `CustomCallOp`.
 // - All defined factor sizes are used by at least one operand/result mapping.
 // - All operand/result mappings are valid (see `verifyShardingRuleMapping`).
 LogicalResult verifyOpShardingRuleAttr(OpShardingRuleAttr shardingRule,
                                        Operation* op) {
-  if (shardingRule.isCustom() && !isa<stablehlo::CustomCallOp>(op)) {
-    return op->emitOpError(
-        "can only define custom sharding rules on stablehlo.custom_call");
-  }
-
   BitVector seenFactorIndices(shardingRule.getNumFactors());
   ArrayRef<int64_t> factorSizes = shardingRule.getFactorSizes();
   if (failed(verifyShardingRuleMapping(

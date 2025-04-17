@@ -942,11 +942,10 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
     not allowed to be propagated. It is orthogonal to the factor types. Namely,
     a blocked-propagation factor can be any of the factor types.
 
-    `is_custom_rule` describes whether this is a rule defined by a user for a
-    `stablehlo.custom_call` op. The partitioner doesn't know how to partition
-    these ops, so a user must tell it how. When it is a custom rule, then the
-    rule is always preserved/never removed. `is_custom_rule` can only be true
-    for `stablehlo.custom_call` ops.
+    `is_custom_rule` describes whether this is a rule defined by a user. Users
+    can define sharding rules for their custom calls or overwrite the
+    pre-defined sharding rules for the standard operations. A custom rule is
+    always preserved/never removed.
 
     **Constraints:**
     - Number of operand/result mappings must match the number of
