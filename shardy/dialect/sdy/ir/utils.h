@@ -21,6 +21,7 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
@@ -448,6 +449,14 @@ TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
 // suffix of free axes (if any exist) from each dim sharding.
 TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
                                  ArrayRef<StringAttr> manualAxes);
+
+// `dimAxes` is assumed to be the concatenation of some manual axes and some
+// free axes. This returns an iterator to the first free axis in `dimAxes`.
+//
+// Axes in the range [0, firstFreeAxis) are manual axes, and
+// [firstFreeAxis, dimAxes.size()) are free axes.
+ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
+    ArrayRef<AxisRefAttr> dimAxes, ArrayRef<StringAttr> manualAxes);
 
 }  // namespace sdy
 }  // namespace mlir
