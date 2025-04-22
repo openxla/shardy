@@ -486,6 +486,21 @@ func.func @dot_genaral_multiple_contracting_dims_sharded(
   return %0 : tensor<4x16xf32>
 }
 
+// The following test target is from b/410643498.
+// CHECK-LABEL: func @dot_genaral_multiple_contracting_dims_conflicts
+func.func @dot_genaral_multiple_contracting_dims_conflicts(
+  %arg0: tensor<16x32x64xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x"}, {"z"}, {"t"}]>},
+  %arg1: tensor<32x64x128xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"z"}, {"t"}, {"x", "y"}]>})
+  ->(tensor<16x128xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x"}, {"z", "t"}]>}) {
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyzt, [{"z"}, {"t"}, {}]> : tensor<32x64x128xf32>
+  // CHECK-NEXT: %[[DOTGENERAL:.*]] = stablehlo.dot_general %arg0, %[[RESHARD1]], contracting_dims = [1, 2] x [0, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"x"}, {}]>]>} : (tensor<16x32x64xf32>, tensor<32x64x128xf32>) -> tensor<16x128xf32>
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"z", "t"} %[[DOTGENERAL]] out_sharding=<@mesh_xyzt, [{"x"}, {}]> : tensor<16x128xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[ALL_REDUCE:.*]] <@mesh_xyzt, [{"x"}, {"z", "t"}]> : tensor<16x128xf32>
+  // CHECK-NEXT: return %[[RESHARD2]] : tensor<16x128xf32>
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1, 2] x [0, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"x"}, {"z", "t"}]>]>} : (tensor<16x32x64xf32>, tensor<32x64x128xf32>) -> tensor<16x128xf32>
+  return %0 : tensor<16x128xf32>
+}
+
 // CHECK-LABEL: func @dot_genaral_incompatable_with_batching_dims
 func.func @dot_genaral_incompatable_with_batching_dims(%arg0: tensor<4x8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}, %arg1: tensor<4x32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {"y"}]>}) -> (tensor<4x8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {"y"}]>}) {
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}, {}]> : tensor<4x8x32xf32>
