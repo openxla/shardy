@@ -69,10 +69,11 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
     // Attempt to extract the TensorShardingAttr from the frontend attributes of
     // the function argument/result.
     if (DictionaryAttr dictAttr = getFuncArgFrontendAttrs(funcOp, argNum)) {
-      funcOp.setArgAttr(argNum, kShardingAttr,
-                        parseStringAttr<TensorShardingAttr>(
-                            dictAttr, kShardingRoundTripAttr));
-      removeFrontendAttribute(funcOp, kShardingRoundTripAttr, argNum);
+      if (auto sharding = parseStringAttr<TensorShardingAttr>(
+              dictAttr, kShardingRoundTripAttr)) {
+        funcOp.setArgAttr(argNum, kShardingAttr, sharding);
+        removeFrontendAttribute(funcOp, kShardingRoundTripAttr, argNum);
+      }
     }
   }
 
@@ -93,8 +94,11 @@ void convertShardyAttrs(FuncOp funcOp, IRRewriter& rewriter) {
     // `SendOp` and `RecvOp` can have a sharding when doing TPU callbacks
     // through JAX.
     if (isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
-      op->setAttr(kShardingAttr, parseStringAttr<TensorShardingPerValueAttr>(
-                                     dictAttr, kShardingRoundTripAttr));
+      auto sharding = parseStringAttr<TensorShardingPerValueAttr>(
+          dictAttr, kShardingRoundTripAttr);
+      // Expect sharding to exist for SendOp/RecvOp.
+      assert(sharding != nullptr);
+      op->setAttr(kShardingAttr, sharding);
     }
     // NOTE: we are only setting the sharding on known custom-calls. For any
     // other op that has a `kShardingRoundTripAttr` we discard it. XLA sometimes
