@@ -804,6 +804,49 @@ Interfaces: `InferTypeOpInterface`
 
 ## Attributes
 
+### AllToAllParamAttr
+
+_All-to-all parameter_
+
+Syntax:
+
+```
+#sdy.all_to_all_param<
+  ::llvm::ArrayRef<AxisRefAttr>,   # axes
+  int64_t,   # src_dim
+  int64_t   # tgt_dim
+>
+```
+
+A tuple containing the axes and source/target dimensions to perform
+all-to-all on.
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| axes | `::llvm::ArrayRef<AxisRefAttr>` | the axes to perform all-to-all on |
+| src_dim | `int64_t` | the source dimension index |
+| tgt_dim | `int64_t` | the target dimension index |
+
+### AlltoAllParamListAttr
+
+_List of all-to-all parameters_
+
+Syntax:
+
+```
+#sdy.all_to_all_param_list<
+  ::llvm::ArrayRef<AllToAllParamAttr>   # value
+>
+```
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| value | `::llvm::ArrayRef<AllToAllParamAttr>` |  |
+
 ### AxisRefAttr
 
 _Reference to either a full axis or a split sub-axis_
