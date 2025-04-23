@@ -178,6 +178,26 @@ def Sdy_ListOfAxisRefListsAttrBc: DialectAttribute<(attr
   let cType = "ListOfAxisRefListsAttr";
 }
 
+//===----------------------------------------------------------------------===//
+// AllToAllParamAttr - assigned index 13
+//===----------------------------------------------------------------------===//
+def Sdy_AllToAllParamAttrBc: DialectAttribute<(attr
+  Array<Sdy_AxisRefAttrBc>:$axes,
+  SignedVarInt:$src_dim,
+  SignedVarInt:$tgt_dim
+)> {
+  let cType = "AllToAllParamAttr";
+}
+
+//===----------------------------------------------------------------------===//
+// AllToAllParamListAttr - assigned index 14
+//===----------------------------------------------------------------------===//
+def Sdy_AlltoAllParamListAttrBc: DialectAttribute<(attr
+  Array<Sdy_AllToAllParamAttrBc>:$value
+)> {
+  let cType = "AlltoAllParamListAttr";
+}
+
 // This enum contains marker codes used to indicate which attribute is
 // currently being decoded, and how it should be decoded. The order of these
 // codes should generally be unchanged, as any changes will inevitably break
@@ -199,6 +219,8 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
     /*index 10*/ Sdy_OpShardingRuleAttrBc,
     /*index 11*/ Sdy_AxisRefListAttrBc,
     /*index 12*/ Sdy_ListOfAxisRefListsAttrBc,
+    /*index 13*/ Sdy_AllToAllParamAttrBc,
+    /*index 14*/ Sdy_AlltoAllParamListAttrBc,
   ];
 }
 #endif // SDY_BYTECODE
