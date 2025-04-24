@@ -255,6 +255,16 @@ func.func @dot_incompatible_a_times_a(%arg0: tensor<16x16xf32> {sdy.sharding = #
   return %0 : tensor<16x16xf32>
 }
 
+// CHECK-LABEL: func @dot_incompatible_all_same_shardings
+// TODO(enver): Resharding LHS to [][x] before the dot, and reshading the result to [x][] would have less communication.
+func.func @dot_incompatible_all_same_shardings(%arg0: tensor<4x4096xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<4096x4096xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<4x4096xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg1 <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
+  // CHECK-NEXT return %[[DOT]]
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x4096xf32>, tensor<4096x4096xf32>) -> tensor<4x4096xf32>
+  return %0 : tensor<4x4096xf32>
+}
+
 // CHECK-LABEL: func @dot_incompatible_same_non_contracting_dims_out_i
 func.func @dot_incompatible_same_non_contracting_dims_out_i(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}, %arg1: tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
   // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg1 <@mesh, [{"y"}, {}]> : tensor<32x16xf32>
