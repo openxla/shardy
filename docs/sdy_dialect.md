@@ -184,12 +184,13 @@ _Performs an all-to-all communication along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_to_all` $axes $src_dim `` `->` `` $tgt_dim $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.all_to_all` $params $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
 ```
 
-Slices chunks of a tensor along dimension `tgt_dim` and axes specified in
-`axes`, scatteres those chunks along the axes, and concatenates them along
-dimension `src_dim`.
+For each (axes, src_dim, tgt_dim) tuple in the parameter list, this
+operation slices chunks of a tensor along dimension `tgt_dim` and axes
+specified in `axes`, scatteres those chunks along the axes, and concatenates
+them along dimension `src_dim`.
 
 This operation is essentially a combination of an all-gather along `src_dim`
 and `axes`, followed by an all-slice along `tgt_dim` and `axes`, i.e., a
@@ -206,15 +207,19 @@ this inferred sharding.
 
 Example:
 ```mlir
-%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}\]>]>} : tensor<8x8xf32>
-%2 = sdy.all_to_all {"b", "c"} 0->1 %1 out_sharding=<@mesh, [{"a"}, {"b", "c"}\]> : tensor<8x8xf32>
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b"}, {"c"}, {}, {}\]>]>} : tensor<8x8x4x4x32>
+%2 = sdy.all_to_all [{"b"}: 0->2, {"c"}: 1->3] %1 out_sharding=<@mesh, [{"a"}, {}, {"b"}, {"c"}\]> : tensor<8x8x4x4x32>
 ```
 
 **Constraints:**
 - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
-- `axes` must satisfy the constraints listed in `AxisRefListAttr`.
-- `src_dim` and `tgt_dim` must be valid dimensions (positive and less than
-  rank of tensor), and different from each other.
+- The parameter list must not be empty.
+- For each parameter in `params`:
+  - Elements in `axes` must satisfy the constraints of `AxisRefAttr`.
+  - `src_dim` and `tgt_dim` must be valid dimensions (non-negative and less
+  than rank of tensor).
+  - Any `src_dim` or `tgt_dim` must be unique across all parameters.
+  - `src_dim` must be sorted in ascending order across all parameters.
 - Moving `axes` from `src_dim` to `tgt_dim` in the operand sharding gets
   `out_sharding`.
 
@@ -226,9 +231,7 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
-<tr><td><code>src_dim</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
-<tr><td><code>tgt_dim</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
-<tr><td><code>axes</code></td><td>::mlir::sdy::AxisRefListAttr</td><td>List of axis refs</td></tr>
+<tr><td><code>params</code></td><td>::mlir::sdy::AlltoAllParamListAttr</td><td>List of all-to-all parameters</td></tr>
 <tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
