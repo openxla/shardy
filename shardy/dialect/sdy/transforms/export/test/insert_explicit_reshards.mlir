@@ -1168,6 +1168,20 @@ func.func @slice_both_input_and_output_permutation_dims_are_sharded(%arg0: tenso
   return %0 : tensor<4x8x128xf32>
 }
 
+// CHECK-LABEL: func @slice_both_operand_and_result_have_sharded_permutation_factors_result_has_larger_sharding_on_permutation_factor
+func.func @slice_both_operand_and_result_have_sharded_permutation_factors_result_has_larger_sharding_on_permutation_factor(%arg0: tensor<2048x1152x192xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x", "y"}, {}, {"z"}]>}) -> (tensor<2048x1024x128xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x", "z"}, {"y"}, {}]>}) {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.slice %arg0 [0:2048, 0:1024, 0:128] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "z"}, {"y"}, {}]>]>} : (tensor<2048x1152x192xf32>) -> tensor<2048x1024x128xf32>
+  return %0 : tensor<2048x1024x128xf32>
+}
+
+// CHECK-LABEL: func @slice_both_operand_and_result_have_sharded_permutation_factors_operand_has_larger_sharding_on_permutation_factor
+func.func @slice_both_operand_and_result_have_sharded_permutation_factors_operand_has_larger_sharding_on_permutation_factor(%arg0: tensor<2048x1152x192xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x", "z"}, {}, {"y"}]>}) -> (tensor<2048x1024x128xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x", "y"}, {"z"}, {}]>}) {
+  // CHECK-NOT: sdy.reshard
+  %0 = stablehlo.slice %arg0 [0:2048, 0:1024, 0:128] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "y"}, {"z"}, {}]>]>} : (tensor<2048x1152x192xf32>) -> tensor<2048x1024x128xf32>
+  return %0 : tensor<2048x1024x128xf32>
+}
+
 // CHECK-LABEL: func @sort
 func.func @sort(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<4x32x8xf32>) -> (tensor<4x32x8xi32>, tensor<4x32x8xf32>) {
   // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}, {}]> : tensor<4x32x8xi32>

@@ -70,14 +70,14 @@ bool hasShardedPermutationFactorsPerTensor(
                       });
 }
 
-bool findIfHasShardedPermutationFactors(const ShardingProjection& projection,
-                                        OpShardingRuleAttr shardingRule) {
-  return llvm::any_of(llvm::concat<const TensorFactorShardings>(
-                          projection.getOperands(), projection.getResults()),
-                      [&](const TensorFactorShardings& tensorFactorSharding) {
-                        return hasShardedPermutationFactorsPerTensor(
-                            tensorFactorSharding, shardingRule);
-                      });
+int64_t findTensorCountWithShardedPermutationFactor(
+    const ShardingProjection& projection, OpShardingRuleAttr shardingRule) {
+  return llvm::count_if(llvm::concat<const TensorFactorShardings>(
+                            projection.getOperands(), projection.getResults()),
+                        [&](const TensorFactorShardings& tensorFactorSharding) {
+                          return hasShardedPermutationFactorsPerTensor(
+                              tensorFactorSharding, shardingRule);
+                        });
 }
 
 // Checks if factor sharding is compatible, that is, it satisfies:
@@ -604,25 +604,23 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   return toAxesPerFactor(factorAxisRefs);
 }
 
+// Assumes either only operand or only result has sharded permutation factors,
+// or none.
 std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh, const bool hasShardedPermutationFactors) {
+    const Mesh& mesh) {
   // Find common axes on the larger tensor, hence reshard the smaller tensor.
   SmallVector<int64_t> tensorIndices = shardingRule.getNonScalarTensorIndices();
   const int64_t lhs = tensorIndices[0];
   const int64_t rhs = tensorIndices[1];
 
-  if (hasShardedPermutationFactors) {
-    if (!hasShardedPermutationFactorsPerTensor(projection.getTensor(lhs),
-                                               shardingRule)) {
-      return lhs;
-    }
-    if (!hasShardedPermutationFactorsPerTensor(projection.getTensor(rhs),
-                                               shardingRule)) {
-      return rhs;
-    }
-    // TODO(enver): Handle the case that both have sharded permutation factors.
-    return std::nullopt;
+  if (hasShardedPermutationFactorsPerTensor(projection.getTensor(lhs),
+                                            shardingRule)) {
+    return rhs;
+  }
+  if (hasShardedPermutationFactorsPerTensor(projection.getTensor(rhs),
+                                            shardingRule)) {
+    return lhs;
   }
 
   SmallVector<int64_t> tensorSizes = shardingRule.getTensorSizes();
@@ -666,11 +664,9 @@ AxesPerFactorWithMesh findCommonAxesOnUnaryOperation(
     const SmallVector<TensorShardingAttr>& inShardings,
     const SmallVector<TensorShardingAttr>& outShardings,
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const SymbolTable& symbolTable, const Mesh& mesh,
-    bool hasShardedPermutationFactors) {
+    const SymbolTable& symbolTable, const Mesh& mesh) {
   std::optional<int64_t> tensorIndexToPrefer =
-      findTensorIndexToPreferOnUnaryOperation(projection, shardingRule, mesh,
-                                              hasShardedPermutationFactors);
+      findTensorIndexToPreferOnUnaryOperation(projection, shardingRule, mesh);
 
   // If one tensor can not be chosen to be common axes, return empty so it skips
   // inserting explicit reshards for the operation.
@@ -800,20 +796,20 @@ AxesPerFactorWithMesh findCommonAxes(
     return AxesPerFactorWithMesh(std::move(commonAxesPerFactor.value()), mesh);
   }
 
-  const bool hasShardedPermutationFactors =
-      findIfHasShardedPermutationFactors(projection, shardingRule);
+  const int64_t tensorCountWithShardedPermutationFactor =
+      findTensorCountWithShardedPermutationFactor(projection, shardingRule);
 
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
-      shardingRule.getNeedReplicationFactors().empty()) {
+      shardingRule.getNeedReplicationFactors().empty() &&
+      tensorCountWithShardedPermutationFactor < 2) {
     return findCommonAxesOnUnaryOperation(inShardings, outShardings, projection,
-                                          shardingRule, symbolTable, mesh,
-                                          hasShardedPermutationFactors);
+                                          shardingRule, symbolTable, mesh);
   }
 
   // TODO(enver): Handle the case that tensors have sharded permutation factors.
-  if (hasShardedPermutationFactors) {
+  if (tensorCountWithShardedPermutationFactor > 0) {
     return AxesPerFactorWithMesh();
   }
 
