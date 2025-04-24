@@ -151,7 +151,7 @@ void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.add<AllToAllNoopPattern>(context);
+  // We don't have patterns for all-to-all for now.
 }
 
 void CollectivePermuteOp::getCanonicalizationPatterns(

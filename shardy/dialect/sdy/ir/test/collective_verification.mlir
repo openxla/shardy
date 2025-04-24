@@ -256,9 +256,19 @@ func.func @all_slice_with_incompatible_result_sharding_subaxis(%arg0 : tensor<16
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
+func.func @all_to_all_empty_param_list(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{parameter list is empty}}
+  %0 = sdy.all_to_all [] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
 func.func @all_to_all_on_operand_without_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
   // expected-error @+1 {{collective on operand without sharding}}
-  %0 = sdy.all_to_all {"x"} 1->0 %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"x"}: 1->0] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -270,7 +280,7 @@ sdy.mesh @mesh2 = <["a"=2, "b"=2]>
 // expected-note @+1 {{operand mesh: #sdy.mesh<["a"=2, "b"=2]>}}
 func.func @all_to_all_with_incompatible_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"a"}, {"b"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{result mesh does not match operand mesh}}
-  %0 = sdy.all_to_all {"b"} 1->0 %arg0 out_sharding=<@mesh1, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"b"}: 1->0] %arg0 out_sharding=<@mesh1, [{"y"}, {"x"}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -280,7 +290,7 @@ sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_invalid_out_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{duplicate axis ref: "x"}}
-  %0 = sdy.all_to_all {"y"} 0->1 %arg0 out_sharding=<@mesh, [{}, {"x", "x"}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"y"}: 0->1] %arg0 out_sharding=<@mesh, [{}, {"x", "x"}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -290,7 +300,7 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 
 func.func @all_to_all_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{two consecutive sub-axes can be merged: "x":(1)2, "x":(2)2}}
-  %0 = sdy.all_to_all {"x":(1)2, "x":(2)2} 1->0 %arg0 out_sharding=<@mesh, [{"y", "x"}, {}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"x":(1)2, "x":(2)2}: 1->0] %arg0 out_sharding=<@mesh, [{"y", "x"}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -300,7 +310,7 @@ sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_src_dim_out_of_range(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"y"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{source dimension 2 is out of range [0, 2}}
-  %0 = sdy.all_to_all {"y"} 2->1 %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"y"}: 2->1] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -310,7 +320,7 @@ sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_tgt_dim_out_of_range(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{target dimension -1 is out of range [0, 2}}
-  %0 = sdy.all_to_all {"y"} 0->-1 %arg0 out_sharding=<@mesh, [{}, {"y"}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"y"}: 0->-1] %arg0 out_sharding=<@mesh, [{}, {"y"}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -319,8 +329,8 @@ func.func @all_to_all_tgt_dim_out_of_range(%arg0 : tensor<16x8xf32> {sdy.shardin
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_src_and_tgt_dim_equal(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> tensor<16x8xf32> {
-  // expected-error @+1 {{source and target dimensions must be different}}
-  %0 = sdy.all_to_all {"y"} 0->0 %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  // expected-error @+1 {{overlapping source/target dimensions in all-to-all params: 0}}
+  %0 = sdy.all_to_all [{"y"}: 0->0] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -330,8 +340,58 @@ sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_with_too_many_axes_to_move(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{can't apply all-to-all axis "x" to operand sharding on dimension 0}}
-  %0 = sdy.all_to_all {"x", "y"} 0->1 %arg0 out_sharding=<@mesh, [{}, {"x", "y"}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"x", "y"}: 0->1] %arg0 out_sharding=<@mesh, [{}, {"x", "y"}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @all_to_all_with_swapped_dims(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{overlapping source/target dimensions in all-to-all params: 0}}
+  %0 = sdy.all_to_all [{"x"}: 1->0, {"y"}: 0->1] %arg0 out_sharding=<@mesh, [{"x"}, {"y"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @all_to_all_with_duplicate_src_dims(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x", "y"}, {}, {}]>}) -> tensor<16x8x8xf32> {
+  // expected-error @+1 {{overlapping source/target dimensions in all-to-all params: 0}}
+  %0 = sdy.all_to_all [{"x"}: 0->1, {"y"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {"x"}, {"y"}]> :  tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @all_to_all_with_duplicate_tgt_dims(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}, {"y"}]>}) -> tensor<16x8x8xf32> {
+  // expected-error @+1 {{overlapping source/target dimensions in all-to-all params: 1}}
+  %0 = sdy.all_to_all [{"x"}: 0->1, {"y"}: 2->1] %arg0 out_sharding=<@mesh, [{}, {"x", "y"}, {}]> :  tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @all_to_all_with_same_dim_as_src_tgt(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}) -> tensor<16x8x8xf32> {
+  // expected-error @+1 {{overlapping source/target dimensions in all-to-all params: 1}}
+  %0 = sdy.all_to_all [{"x"}: 0->1, {"y"}: 1->2] %arg0 out_sharding=<@mesh, [{}, {"x"}, {"y"}]> :  tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @all_to_all_with_dims_not_ascending(%arg0 : tensor<16x8x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}, {"y"}, {}]>}) -> tensor<16x8x8x8xf32> {
+  // expected-error @+1 {{source dimensions are not sorted in ascending order: 0 appears after 2}}
+  %0 = sdy.all_to_all [{"y"}: 2->1, {"x"}: 0->3] %arg0 out_sharding=<@mesh, [{}, {"y"}, {}, {"x"}]> :  tensor<16x8x8x8xf32>
+  return %0 : tensor<16x8x8x8xf32>
 }
 
 // -----
@@ -340,7 +400,7 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 
 func.func @all_to_all_with_incomatible_operand_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{can't apply all-to-all axis "x" to operand sharding on dimension 1}}
-  %0 = sdy.all_to_all {"x"} 1->0 %arg0 out_sharding=<@mesh, [{"y", "x"}, {}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"x"}: 1->0] %arg0 out_sharding=<@mesh, [{"y", "x"}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -350,7 +410,7 @@ sdy.mesh @mesh = <["x"=8, "y"=2]>
 
 func.func @all_to_all_with_incomatible_subaxis_to_move(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{can't apply all-to-all axis "x":(2)2 to operand sharding on dimension 1}}
-  %0 = sdy.all_to_all {"x":(2)2} 1->0 %arg0 out_sharding=<@mesh, [{"y", "x":(2)2}, {}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"x":(2)2}: 1->0] %arg0 out_sharding=<@mesh, [{"y", "x":(2)2}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -359,8 +419,8 @@ func.func @all_to_all_with_incomatible_subaxis_to_move(%arg0 : tensor<16x8xf32> 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_with_incompatible_result_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
-  // expected-error @+1 {{result sharding doesn't match expected sharding ["y", "x"] on dimension 0}}
-  %0 = sdy.all_to_all {"x"} 1->0 %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  // expected-error @+1 {{result sharding doesn't match expected sharding [] on dimension 1}}
+  %0 = sdy.all_to_all [{"x"}: 1->0] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -370,7 +430,7 @@ sdy.mesh @mesh = <["x"=8, "y"=2]>
 
 func.func @all_to_all_with_incompatible_result_sharding_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{result sharding doesn't match expected sharding ["x":(1)2] on dimension 1}}
-  %0 = sdy.all_to_all {"x":(2)4} 1->0 %arg0 out_sharding=<@mesh, [{"y", "x":(2)4}, {}]> :  tensor<16x8xf32>
+  %0 = sdy.all_to_all [{"x":(2)4}: 1->0] %arg0 out_sharding=<@mesh, [{"y", "x":(2)4}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -380,7 +440,7 @@ sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_to_all_incompatible_result_sharding_non_moved_dim(%arg0 : tensor<16x8x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}, {}]>}) -> tensor<16x8x4xf32> {
   // expected-error @+1 {{result sharding doesn't match expected sharding ["x"] on dimension 1}}
-  %0 = sdy.all_to_all {"y"} 0->2 %arg0 out_sharding=<@mesh, [{}, {}, {"y"}]> :  tensor<16x8x4xf32>
+  %0 = sdy.all_to_all [{"y"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {}, {"y"}]> :  tensor<16x8x4xf32>
   return %0 : tensor<16x8x4xf32>
 }
 

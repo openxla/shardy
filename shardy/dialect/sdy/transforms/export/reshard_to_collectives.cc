@@ -1312,8 +1312,11 @@ class CollectiveInserter {
   void tryAllToAlls(bool allowOutOfOrderTarget) {
     for (int64_t srcDim = 0; srcDim < getRank(); ++srcDim) {
       while (auto info = getAllToAllInfo(srcDim, allowOutOfOrderTarget)) {
-        result = rewriter.create<AllToAllOp>(loc, result, srcDim, info->tgtDim,
-                                             info->axes, getCurrentSharding());
+        result = rewriter.create<AllToAllOp>(
+            loc, result,
+            AllToAllParamAttr::get(rewriter.getContext(), info->axes, srcDim,
+                                   info->tgtDim),
+            getCurrentSharding());
       }
     }
   }
