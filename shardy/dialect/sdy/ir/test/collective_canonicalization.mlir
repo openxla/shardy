@@ -17,6 +17,13 @@ func.func @null_all_slice(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@
   return %0 : tensor<16x2xf32>
 }
 
+// CHECK-LABEL: func @null_all_to_all
+func.func @null_all_to_all(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: return %arg0 : tensor<16x2xf32>
+  %0 = sdy.all_to_all {} 0->1 %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
 // CHECK-LABEL: func @null_all_reduce
 func.func @null_all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
   // CHECK-NEXT: return %arg0 : tensor<16x2xf32>

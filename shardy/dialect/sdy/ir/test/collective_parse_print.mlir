@@ -128,116 +128,60 @@ func.func @all_slice_subaxis_suffix_of_subaxis(%arg0 : tensor<16x8xf32> {sdy.sha
   return %0 : tensor<16x8xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_target_dim_empty_single_param
-func.func @all_to_all_target_dim_empty_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"x"}: 0->1] %arg0 out_sharding=<@mesh1, [{}, {"x"}]>
-  %0 = sdy.all_to_all [{"x"}: 0->1] %arg0 out_sharding=<@mesh1, [{}, {"x"}]> : tensor<16x8xf32>
+// CHECK-LABEL: func @all_to_all_target_dim_empty
+func.func @all_to_all_target_dim_empty(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"x"} 0->1 %arg0 out_sharding=<@mesh1, [{}, {"x"}]>
+  %0 = sdy.all_to_all {"x"} 0->1 %arg0 out_sharding=<@mesh1, [{}, {"x"}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_target_dim_empty_multiple_params
-func.func @all_to_all_target_dim_empty_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {"y"}, {}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"x"}: 0->2, {"y"}: 1->3] %arg0 out_sharding=<@mesh1, [{}, {}, {"x"}, {"y"}]>
-  %0 = sdy.all_to_all [{"x"}: 0->2, {"y"}: 1->3] %arg0 out_sharding=<@mesh1, [{}, {}, {"x"}, {"y"}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_target_dim_not_empty_single_param
-func.func @all_to_all_target_dim_not_empty_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y"}: 1->0] %arg0 out_sharding=<@mesh1, [{"x", "y"}, {}]>
-  %0 = sdy.all_to_all [{"y"}: 1->0] %arg0 out_sharding=<@mesh1, [{"x", "y"}, {}]> : tensor<16x8xf32>
+// CHECK-LABEL: func @all_to_all_target_dim_not_empty
+func.func @all_to_all_target_dim_not_empty(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"y"} 1->0 %arg0 out_sharding=<@mesh1, [{"x", "y"}, {}]>
+  %0 = sdy.all_to_all {"y"} 1->0 %arg0 out_sharding=<@mesh1, [{"x", "y"}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_target_dim_not_empty_multiple_params
-func.func @all_to_all_target_dim_not_empty_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"x"}, {"y"}, {"z"}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"x"}: 0->1, {"z"}: 2->3] %arg0 out_sharding=<@mesh2, [{}, {"y", "x"}, {}, {"z"}]>
-  %0 = sdy.all_to_all [{"x"}: 0->1, {"z"}: 2->3] %arg0 out_sharding=<@mesh2, [{}, {"y", "x"}, {}, {"z"}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_multiple_axes_single_param
-func.func @all_to_all_multiple_axes_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"z", "y", "x"}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y", "x"}: 0->1] %arg0 out_sharding=<@mesh2, [{"z"}, {"y", "x"}]>
-  %0 = sdy.all_to_all [{"y", "x"}: 0->1] %arg0 out_sharding=<@mesh2, [{"z"}, {"y", "x"}]> : tensor<16x8xf32>
+// CHECK-LABEL: func @all_to_all_multiple_axes
+func.func @all_to_all_multiple_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"z", "y", "x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"y", "x"} 0->1 %arg0 out_sharding=<@mesh2, [{"z"}, {"y", "x"}]>
+  %0 = sdy.all_to_all {"y", "x"} 0->1 %arg0 out_sharding=<@mesh2, [{"z"}, {"y", "x"}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_multiple_axes_multiple_params
-func.func @all_to_all_multiple_axes_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"y", "z"}, {}, {"x"}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y", "z"}: 0->1, {"x"}: 2->3] %arg0 out_sharding=<@mesh2, [{}, {"y", "z"}, {}, {"x"}]>
-  %0 = sdy.all_to_all [{"y", "z"}: 0->1, {"x"}: 2->3] %arg0 out_sharding=<@mesh2, [{}, {"y", "z"}, {}, {"x"}]> : tensor<16x8x4x4xf32>
+// CHECK-LABEL: func @all_to_all_not_all_dims_involved
+func.func @all_to_all_not_all_dims_involved(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh5, [{"x"}, {"y", "z"}, {"w"}, {}]>}) -> tensor<16x8x4x4xf32> {
+  // CHECK-NEXT: dy.all_to_all {"w"} 2->0 %arg0 out_sharding=<@mesh5, [{"x", "w"}, {"y", "z"}, {}, {}]>
+  %0 = sdy.all_to_all {"w"} 2->0 %arg0 out_sharding=<@mesh5, [{"x", "w"}, {"y", "z"}, {}, {}]> : tensor<16x8x4x4xf32>
   return %0 : tensor<16x8x4x4xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_not_all_dims_involved_single_param
-func.func @all_to_all_not_all_dims_involved_single_param(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh5, [{"x"}, {"y", "z"}, {"w"}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: dy.all_to_all [{"w"}: 2->0] %arg0 out_sharding=<@mesh5, [{"x", "w"}, {"y", "z"}, {}, {}]>
-  %0 = sdy.all_to_all [{"w"}: 2->0] %arg0 out_sharding=<@mesh5, [{"x", "w"}, {"y", "z"}, {}, {}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_not_all_dims_involved_multiple_params
-func.func @all_to_all_not_all_dims_involved_multiple_params(%arg0 : tensor<16x8x4x4x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh5, [{"x"}, {"y", "z"}, {"w"}, {}, {}, {}]>}) -> tensor<16x8x4x4x4x4xf32> {
-  // CHECK-NEXT: dy.all_to_all [{"x"}: 0->2, {"z"}: 1->3] %arg0 out_sharding=<@mesh5, [{}, {"y"}, {"w", "x"}, {"z"}, {}, {}]>
-  %0 = sdy.all_to_all [{"x"}: 0->2, {"z"}: 1->3] %arg0 out_sharding=<@mesh5, [{}, {"y"}, {"w", "x"}, {"z"}, {}, {}]> : tensor<16x8x4x4x4x4xf32>
-  return %0 : tensor<16x8x4x4x4x4xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_subaxis_exact_match_single_param
-func.func @all_to_all_subaxis_exact_match_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"x":(1)2}: 1->0] %arg0 out_sharding=<@mesh3, [{"y", "x":(1)2}, {}]>
-  %0 = sdy.all_to_all [{"x":(1)2}: 1->0] %arg0 out_sharding=<@mesh3, [{"y", "x":(1)2}, {}]> : tensor<16x8xf32>
+// CHECK-LABEL: func @all_to_all_subaxis_exact_match
+func.func @all_to_all_subaxis_exact_match(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"x":(1)2} 1->0 %arg0 out_sharding=<@mesh3, [{"y", "x":(1)2}, {}]>
+  %0 = sdy.all_to_all {"x":(1)2} 1->0 %arg0 out_sharding=<@mesh3, [{"y", "x":(1)2}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_subaxis_exact_match_multiple_params
-func.func @all_to_all_subaxis_exact_match_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}, {}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y"}: 0->2, {"x":(1)2}: 1->3] %arg0 out_sharding=<@mesh3, [{}, {}, {"y"}, {"x":(1)2}]> : tensor<16x8x4x4xf32>
-  %0 = sdy.all_to_all [{"y"}: 0->2, {"x":(1)2}: 1->3] %arg0 out_sharding=<@mesh3, [{}, {}, {"y"}, {"x":(1)2}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_subaxis_ignored_single_param
-func.func @all_to_all_subaxis_ignored_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y"}: 0->1] %arg0 out_sharding=<@mesh3, [{}, {"x":(1)2, "y"}]>
-  %0 = sdy.all_to_all [{"y"}: 0->1] %arg0 out_sharding=<@mesh3, [{}, {"x":(1)2, "y"}]> : tensor<16x8xf32>
+// CHECK-LABEL: func @all_to_all_subaxis_ignored
+func.func @all_to_all_subaxis_ignored(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"y"} 0->1 %arg0 out_sharding=<@mesh3, [{}, {"x":(1)2, "y"}]>
+  %0 = sdy.all_to_all {"y"} 0->1 %arg0 out_sharding=<@mesh3, [{}, {"x":(1)2, "y"}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
-// CHECK-LABEL: func @all_to_all_subaxis_ignored_multiple_params
-func.func @all_to_all_subaxis_ignored_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}, {}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y"}: 0->2, {"x":(1)2}: 1->3] %arg0 out_sharding=<@mesh3, [{}, {}, {"y"}, {"x":(1)2}]>
-  %0 = sdy.all_to_all [{"y"}: 0->2, {"x":(1)2}: 1->3] %arg0 out_sharding=<@mesh3, [{}, {}, {"y"}, {"x":(1)2}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_subaxis_suffix_of_full_single_param
-func.func @all_to_all_subaxis_suffix_of_full_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"x", "z"}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"x":(4)2, "z"}: 1->0] %arg0 out_sharding=<@mesh4, [{"y", "x":(4)2, "z"}, {"x":(1)4}]>
-  %0 = sdy.all_to_all [{"x":(4)2, "z"}: 1->0] %arg0 out_sharding=<@mesh4, [{"y", "x":(4)2, "z"}, {"x":(1)4}]> : tensor<16x8xf32>
+// CHECK-LABEL: func @all_to_all_subaxis_suffix_of_full
+func.func @all_to_all_subaxis_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"x", "z"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"x":(4)2, "z"} 1->0 %arg0 out_sharding=<@mesh4, [{"y", "x":(4)2, "z"}, {"x":(1)4}]>
+  %0 = sdy.all_to_all {"x":(4)2, "z"} 1->0 %arg0 out_sharding=<@mesh4, [{"y", "x":(4)2, "z"}, {"x":(1)4}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_subaxis_suffix_of_full_multiple_params
-func.func @all_to_all_subaxis_suffix_of_full_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh5, [{"z"}, {"w", "x"}, {}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"z":(2)2}: 0->2, {"w":(2)2, "x"}: 1->3] %arg0 out_sharding=<@mesh5, [{"z":(1)2}, {"w":(1)2}, {"z":(2)2}, {"w":(2)2, "x"}]>
-  %0 = sdy.all_to_all [{"z":(2)2}: 0->2, {"w":(2)2, "x"}: 1->3] %arg0 out_sharding=<@mesh5, [{"z":(1)2}, {"w":(1)2}, {"z":(2)2}, {"w":(2)2, "x"}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
 }
 
 // CHECK-LABEL: func @all_to_all_subaxis_suffix_of_subaxis
-func.func @all_to_all_subaxis_suffix_of_subaxis_single_param(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"z", "x":(1)4}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"x":(2)2}: 1->0] %arg0 out_sharding=<@mesh4, [{"y", "x":(2)2}, {"z", "x":(1)2}]>
-  %0 = sdy.all_to_all [{"x":(2)2}: 1->0] %arg0 out_sharding=<@mesh4, [{"y", "x":(2)2}, {"z", "x":(1)2}]> : tensor<16x8xf32>
+func.func @all_to_all_subaxis_suffix_of_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"z", "x":(1)4}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all {"x":(2)2} 1->0 %arg0 out_sharding=<@mesh4, [{"y", "x":(2)2}, {"z", "x":(1)2}]>
+  %0 = sdy.all_to_all {"x":(2)2} 1->0 %arg0 out_sharding=<@mesh4, [{"y", "x":(2)2}, {"z", "x":(1)2}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
-}
-
-// CHECK-LABEL: func @all_to_all_subaxis_suffix_of_subaxis_multiple_params
-func.func @all_to_all_subaxis_suffix_of_subaxis_multiple_params(%arg0 : tensor<16x8x4x4xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"z", "x":(1)4}, {}, {}]>}) -> tensor<16x8x4x4xf32> {
-  // CHECK-NEXT: sdy.all_to_all [{"y"}: 0->2, {"x":(2)2}: 1->3] %arg0 out_sharding=<@mesh4, [{}, {"z", "x":(1)2}, {"y"}, {"x":(2)2}]>
-  %0 = sdy.all_to_all [{"y"}: 0->2, {"x":(2)2}: 1->3] %arg0 out_sharding=<@mesh4, [{}, {"z", "x":(1)2}, {"y"}, {"x":(2)2}]> : tensor<16x8x4x4xf32>
-  return %0 : tensor<16x8x4x4xf32>
 }
 
 // CHECK-LABEL: func @collective_permute_reorder_axes_single_dim
