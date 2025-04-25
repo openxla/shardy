@@ -460,7 +460,8 @@ FactorAxesCandidateBag findFactorAxesCandidates(
                                                  projection.getResults())) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
+      if (shardingRule.isNeedReplicationFactor(factorIndex) ||
+          shardingRule.isPermutationFactor(factorIndex)) {
         continue;
       }
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
@@ -808,10 +809,6 @@ AxesPerFactorWithMesh findCommonAxes(
                                           shardingRule, symbolTable, mesh);
   }
 
-  // TODO(enver): Handle the case that tensors have sharded permutation factors.
-  if (tensorCountWithShardedPermutationFactor > 0) {
-    return AxesPerFactorWithMesh();
-  }
 
   AxesPerFactor factorCommonAxes =
       findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule, mesh);
@@ -831,7 +828,12 @@ AxesPerFactorWithMesh findCommonAxes(
                                           mesh, factorCommonAxes);
     }
   }
-
+  for (const int64_t factorIndex : shardingRule.getPermutationFactors()) {
+    if (shardingRule.isFactorInAllNonScalarTensors(factorIndex)) {
+      factorCommonAxes[factorIndex] =
+          greatestCommonPrefixShardings[factorIndex];
+    }
+  }
   return AxesPerFactorWithMesh(std::move(factorCommonAxes), mesh);
 }
 
