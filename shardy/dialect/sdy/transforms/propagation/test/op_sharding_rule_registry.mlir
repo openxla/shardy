@@ -221,6 +221,13 @@ func.func @custom_call_x64_split_low(%arg0: tensor<8x2xui64>) -> tensor<8x2xui32
   return %0 : tensor<8x2xui32>
 }
 
+// CHECK-LABEL: func @custom_call_xla_megascale_provide_metadata
+func.func @custom_call_xla_megascale_provide_metadata(%arg0: tensor<8x2xbf16>) -> tensor<8x2xbf16> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=2}>
+  %0 = stablehlo.custom_call @xla.megascale.provide_metadata(%arg0) {backend_config = ""} : (tensor<8x2xbf16>) -> tensor<8x2xbf16>
+  return %0 : tensor<8x2xbf16>
+}
+
 // CHECK-LABEL: func @custom_call_move_to_device
 func.func @custom_call_move_to_device(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>

@@ -421,7 +421,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "mhlo.erf" || callTargetName == "MoveToDevice" ||
             callTargetName == "MoveToHost" || callTargetName == "X64Combine" ||
             callTargetName == "X64SplitHigh" ||
-            callTargetName == "X64SplitLow") {
+            callTargetName == "X64SplitLow" ||
+            callTargetName == "xla.megascale.provide_metadata") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         if (callTargetName == "Eigh") {
