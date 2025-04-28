@@ -37,24 +37,25 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
       createUpdateNonDivisibleInputOutputShardingsPass());
   if (enableInsertExplicitCollectives) {
     pm.addPass(createCloseShardingsPass());
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_sdy_export"));
-    pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
-    pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_reshard_to_collectives"));
-  } else if (!skipConvertToReshard) {
+  }
+  if (!enableInsertExplicitCollectives && !skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(
         createTempExplicitReshardsForOptimizationsPass());
   }
-
-  if (!enableInsertExplicitCollectives) {
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
+                                               "sdy_module_after_sdy_export"));
+  // TODO(enver, tomnatan): Consider having a pipeline specifically for
+  // reshards/collectives.
+  if (enableInsertExplicitCollectives) {
+    pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+    // TODO(b/414339524): Canonicalize reshards.
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_sdy_export"));
+        dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
+    pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+    // TODO(b/414339524): Canonicalize collectives.
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        dumpDirectory, "sdy_module_after_reshard_to_collectives"));
   }
-
   if (!keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
