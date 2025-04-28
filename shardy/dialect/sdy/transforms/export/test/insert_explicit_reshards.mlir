@@ -4,6 +4,7 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 sdy.mesh @mesh_xt = <["x"=2, "t"=4]>
 sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh_xyzt = <["x"=4, "y"=4, "z"=4, "t"=8]>
+sdy.mesh @mesh_xyzp = <["x"=4, "y"=2, "z"=4, "p"=3]>
 sdy.mesh @mesh_xy = <["x"=2, "y"=3]>
 sdy.mesh @mesh_iota = <["x"=3, "y"=2]>
 sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
@@ -1356,18 +1357,32 @@ func.func @triangular_solve_replicated_dim_is_sharded(%arg0: tensor<8x3x3xf32> {
   return %0 : tensor<8x3x5xf32>
 }
 
-// CHECK-LABEL: func @fft_complex
-func.func @fft_complex(%arg0: tensor<8x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<8x32x64xcomplex<f32>> {
+// CHECK-LABEL: func @fft
+func.func @fft(%arg0: tensor<8x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) -> (tensor<8x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) {
   // CHECK-NOT: sdy.reshard
-  %0  = stablehlo.fft %arg0, type = FFT, length = [32, 64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
+  %0  = stablehlo.fft %arg0, type = FFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>]>} : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
   return %0 : tensor<8x32x64xcomplex<f32>>
 }
 
-// CHECK-LABEL: func @fft_real
-func.func @fft_real(%arg0: tensor<8x32x64xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> tensor<8x32x33xcomplex<f32>> {
+// CHECK-LABEL: func @fft_inverse
+func.func @fft_inverse(%arg0: tensor<8x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) ->(tensor<8x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) {
   // CHECK-NOT: sdy.reshard
-  %0  = stablehlo.fft %arg0, type = RFFT, length = [32, 64] : (tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>>
+  %0  = stablehlo.fft %arg0, type = IFFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>]>} : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
+  return %0 : tensor<8x32x64xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_real_truncated_result
+func.func @fft_real_truncated_result(%arg0: tensor<8x32x64xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) -> (tensor<8x32x33xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"p"}]>}) {
+  // CHECK-NOT: sdy.reshard
+  %0  = stablehlo.fft %arg0, type = RFFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x"}, {"y"}, {"p"}]>]>} : (tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>>
   return %0 : tensor<8x32x33xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_inverse_real_expanded_result
+func.func @fft_inverse_real_expanded_result(%arg0: tensor<8x32x33xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"p"}]>}) -> (tensor<8x32x64xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) {
+  // CHECK-NOT: sdy.reshard
+  %0  = stablehlo.fft %arg0, type = IRFFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>]>} : (tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32>
+  return %0 : tensor<8x32x64xf32>
 }
 
 // CHECK-LABEL: func @reduce_window
