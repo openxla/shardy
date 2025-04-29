@@ -75,6 +75,10 @@ void moveAfterValue(Operation* op, Value value) {
 // Returns true if `input` should have its sharding set to `sharding` of a
 // sharding constraint.
 bool shouldApply(Value input, TensorShardingAttr sharding) {
+  if (!getShardableValue(input)) {
+    // A sharding can't be attached to `input`, it's likely a scalar block arg.
+    return false;
+  }
   if (getSharding(input)) {
     // `input` already has a sharding.
     return false;

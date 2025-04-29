@@ -774,3 +774,30 @@ func.func @blocked_propagation_factor(%arg0: tensor<8x8x8xf32> {sdy.sharding = #
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=8, k=8} need_replication={j, k} blocked_propagation={i, k}, custom>} : (tensor<8x8x8xf32>) -> tensor<8x8x8xf32>
   func.return %0 : tensor<8x8x8xf32>
 }
+
+// CHECK-LABEL: func @scalar_block_arg_with_sharding_constraint
+func.func @scalar_block_arg_with_sharding_constraint(
+  %arg0: tensor<4x1000xi32>, %arg1: tensor<4x1xi32>, %arg2: tensor<4xi32>)
+  -> tensor<4x1000xi32> {
+  // CHECK-NEXT: "stablehlo.scatter"(%arg0, %arg1, %arg2)
+  // CHECK-NOT:  sdy.sharding
+  // CHECK-NEXT:   ^bb0(%arg3: tensor<i32>, %arg4: tensor<i32>):
+  // CHECK-NEXT:     sdy.sharding_constraint %arg3 <@mesh_a_2_b_2, []> : tensor<i32>
+  // CHECK-NEXT:     sdy.sharding_constraint %arg4 <@mesh_a_2_b_2, []> : tensor<i32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) <{
+      indices_are_sorted = true,
+      scatter_dimension_numbers = #stablehlo.scatter<
+        inserted_window_dims = [1],
+        input_batching_dims = [0],
+        scatter_indices_batching_dims = [0],
+        scatter_dims_to_operand_dims = [1],
+        index_vector_dim = 1>,
+      unique_indices = true}> ({
+  ^bb0(%arg3: tensor<i32>, %arg4: tensor<i32>):
+    %1 = sdy.sharding_constraint %arg3 <@mesh_a_2_b_2, []> : tensor<i32>
+    %2 = sdy.sharding_constraint %arg4 <@mesh_a_2_b_2, []> : tensor<i32>
+    %3 = stablehlo.add %1, %2 : tensor<i32>
+    stablehlo.return %3 : tensor<i32>
+  }) : (tensor<4x1000xi32>, tensor<4x1xi32>, tensor<4xi32>) -> tensor<4x1000xi32>
+  return %0 : tensor<4x1000xi32>
+}

@@ -28,6 +28,33 @@ func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   return %1 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @cannot_attach_sharding_to_input
+func.func @cannot_attach_sharding_to_input(
+  %arg0: tensor<4x1000xi32>, %arg1: tensor<4x1xi32>, %arg2: tensor<4xi32>)
+  -> tensor<4x1000xi32> {
+  // CHECK-NEXT: "stablehlo.scatter"(%arg0, %arg1, %arg2)
+  // CHECK-NOT:  sdy.sharding
+  // CHECK-NEXT:   ^bb0(%arg3: tensor<i32>, %arg4: tensor<i32>):
+  // CHECK-NEXT:     sdy.sharding_constraint %arg3 <@mesh, []> : tensor<i32>
+  // CHECK-NEXT:     sdy.sharding_constraint %arg4 <@mesh, []> : tensor<i32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) <{
+      indices_are_sorted = true,
+      scatter_dimension_numbers = #stablehlo.scatter<
+        inserted_window_dims = [1],
+        input_batching_dims = [0],
+        scatter_indices_batching_dims = [0],
+        scatter_dims_to_operand_dims = [1],
+        index_vector_dim = 1>,
+      unique_indices = true}> ({
+  ^bb0(%arg3: tensor<i32>, %arg4: tensor<i32>):
+    %1 = sdy.sharding_constraint %arg3 <@mesh, []> : tensor<i32>
+    %2 = sdy.sharding_constraint %arg4 <@mesh, []> : tensor<i32>
+    %3 = stablehlo.add %1, %2 : tensor<i32>
+    stablehlo.return %3 : tensor<i32>
+  }) : (tensor<4x1000xi32>, tensor<4x1xi32>, tensor<4xi32>) -> tensor<4x1000xi32>
+  return %0 : tensor<4x1000xi32>
+}
+
 // CHECK-LABEL: func @input_is_func_input_with_one_use(
 // CHECK-SAMEL    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"b"}]>})
 func.func @input_is_func_input_with_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
