@@ -25,9 +25,11 @@ limitations under the License.
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
@@ -387,11 +389,12 @@ class FactorAxesCandidateBag {
   // TODO(enver): Optimize updating source tensor sizes.
   void updateSourceTensorSizes(const ShardingProjection& projection,
                                OpShardingRuleAttr shardingRule,
+                               ArrayRef<int64_t> tensorSizes,
                                const SmallVector<AxisListRef>& factorAxisRefs) {
     for (const auto& [tensorIndex, tensorFactorSharding] :
          llvm::enumerate(llvm::concat<const TensorFactorShardings>(
              projection.getOperands(), projection.getResults()))) {
-      int64_t localTensorSize = shardingRule.getTensorSizes()[tensorIndex];
+      int64_t localTensorSize = tensorSizes[tensorIndex];
       for (const auto& [factorIndex, _] :
            tensorFactorSharding.factorIndexToSharding) {
         // TODO(enver): Consider cases tensor size may not be divisable.
@@ -451,7 +454,7 @@ class FactorAxesCandidateBag {
 
 FactorAxesCandidateBag findFactorAxesCandidates(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh) {
+    ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
   // Find sets of candidate axes per factor.
   SmallVector<DenseSet<AxisListRef, AxisListRefInfo>> axesSets(
       shardingRule.getNumFactors());
@@ -488,14 +491,13 @@ FactorAxesCandidateBag findFactorAxesCandidates(
       FactorAxesPair factorAxes(factorIndex,
                                 AxisListRef(factorSharding.axisRefs));
       updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxes,
-                                shardingRule.getTensorSizes()[tensorIndex],
-                                mesh);
+                                tensorSizes[tensorIndex], mesh);
       // Increment counts for all its strict prefixes.
       for (const AxisListRef& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
-          updateFactorAxesCandidate(
-              factorAxesCandidatesMap, FactorAxesPair(factorIndex, axes),
-              shardingRule.getTensorSizes()[tensorIndex], mesh);
+          updateFactorAxesCandidate(factorAxesCandidatesMap,
+                                    FactorAxesPair(factorIndex, axes),
+                                    tensorSizes[tensorIndex], mesh);
         }
       }
     }
@@ -525,10 +527,10 @@ AxesPerFactor toAxesPerFactor(const SmallVector<AxisListRef>& factorAxisRefs) {
 // until the list is empty.
 AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh) {
+    ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates =
-      findFactorAxesCandidates(projection, shardingRule, mesh);
+      findFactorAxesCandidates(projection, shardingRule, tensorSizes, mesh);
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
   while (!factorAxesCandidates.empty()) {
@@ -596,7 +598,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     // TODO(enver): Optimize updating source tensor sizes.
     factorAxesCandidates.resetBest();
     factorAxesCandidates.updateSourceTensorSizes(projection, shardingRule,
-                                                 factorAxisRefs);
+                                                 tensorSizes, factorAxisRefs);
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until acutall
@@ -608,7 +610,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
 // or none.
 std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh) {
+    ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
   // Find common axes on the larger tensor, hence reshard the smaller tensor.
   SmallVector<int64_t> tensorIndices = shardingRule.getNonScalarTensorIndices();
   const int64_t lhs = tensorIndices[0];
@@ -623,7 +625,6 @@ std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
     return lhs;
   }
 
-  SmallVector<int64_t> tensorSizes = shardingRule.getTensorSizes();
   if (tensorSizes[lhs] != tensorSizes[rhs]) {
     return tensorSizes[lhs] < tensorSizes[rhs] ? rhs : lhs;
   }
@@ -664,9 +665,11 @@ AxesPerFactorWithMesh findCommonAxesOnUnaryOperation(
     const SmallVector<TensorShardingAttr>& inShardings,
     const SmallVector<TensorShardingAttr>& outShardings,
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const SymbolTable& symbolTable, const Mesh& mesh) {
+    ArrayRef<int64_t> tensorSizes, const SymbolTable& symbolTable,
+    const Mesh& mesh) {
   std::optional<int64_t> tensorIndexToPrefer =
-      findTensorIndexToPreferOnUnaryOperation(projection, shardingRule, mesh);
+      findTensorIndexToPreferOnUnaryOperation(projection, shardingRule,
+                                              tensorSizes, mesh);
 
   // If one tensor can not be chosen to be common axes, return empty so it skips
   // inserting explicit reshards for the operation.
@@ -779,7 +782,8 @@ AxesPerFactorWithMesh findCommonAxes(
     const SmallVector<TensorShardingAttr>& inShardings,
     const SmallVector<TensorShardingAttr>& outShardings,
     const ShardingProjection& projection, OpShardingRuleAttr shardingRule,
-    const SymbolTable& symbolTable, const Mesh& defaultMesh) {
+    ArrayRef<int64_t> tensorSizes, const SymbolTable& symbolTable,
+    const Mesh& defaultMesh) {
   // Return without inserting reshards if any factor sharding has overflow
   // axes. This case is not handled yet.
   // TODO(enver): Handle the case when factor shardings have overflow axes.
@@ -805,7 +809,8 @@ AxesPerFactorWithMesh findCommonAxes(
       shardingRule.getNeedReplicationFactors().empty() &&
       tensorCountWithShardedPermutationFactor < 2) {
     return findCommonAxesOnUnaryOperation(inShardings, outShardings, projection,
-                                          shardingRule, symbolTable, mesh);
+                                          shardingRule, tensorSizes,
+                                          symbolTable, mesh);
   }
 
   // TODO(enver): Handle the case that tensors have sharded permutation factors.
@@ -813,8 +818,8 @@ AxesPerFactorWithMesh findCommonAxes(
     return AxesPerFactorWithMesh();
   }
 
-  AxesPerFactor factorCommonAxes =
-      findCommonAxesUsingMajorityVoteHeuristic(projection, shardingRule, mesh);
+  AxesPerFactor factorCommonAxes = findCommonAxesUsingMajorityVoteHeuristic(
+      projection, shardingRule, tensorSizes, mesh);
 
   // Distribute the greatest common prefix of shardings of factors that need
   // replication to batching factors.
@@ -835,6 +840,17 @@ AxesPerFactorWithMesh findCommonAxes(
   return AxesPerFactorWithMesh(std::move(factorCommonAxes), mesh);
 }
 
+SmallVector<int64_t> getTensorSizes(Operation* op) {
+  SmallVector<int64_t> tensorSizes;
+  tensorSizes.reserve(op->getNumOperands() + op->getNumResults());
+  for (Type type :
+       llvm::concat<Type>(op->getOperandTypes(), op->getResultTypes())) {
+    ShapedType shapedType = dynCastStaticShapedType(type);
+    // Assign zero as the tensor size for dynamically shaped types.
+    tensorSizes.push_back(shapedType? shapedType.getNumElements(): 0);
+  }
+  return tensorSizes;
+}
 }  // namespace
 
 bool shouldReshard(TensorShardingAttr sourceSharding,
@@ -847,6 +863,7 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
 
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                 const SymbolTable& symbolTable) {
+  SmallVector<int64_t> tensorSizes = getTensorSizes(op);
   SmallVector<TensorShardingAttr> inShardings = getShardings(op->getOperands());
   SmallVector<TensorShardingAttr> outShardings = getShardings(op->getResults());
   std::optional<StringRef> meshName = getCommonMeshName(
@@ -895,7 +912,7 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                               shardingRule.getNumResults());
   AxesPerFactorWithMesh commonAxesPerFactorWithMesh =
       findCommonAxes(inShardings, outShardings, shardingProjection,
-                     shardingRule, symbolTable, defaultMesh);
+                     shardingRule, tensorSizes, symbolTable, defaultMesh);
   if (commonAxesPerFactorWithMesh.empty()) {
     return;
   }
