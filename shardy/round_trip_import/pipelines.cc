@@ -35,10 +35,10 @@ namespace sdy {
 
 void addSdyRoundTripImportPipeline(OpPassManager& pm) {
   GreedyRewriteConfig config;
-  config.useTopDownTraversal = true;
-  config.enableRegionSimplification = GreedySimplifyRegionLevel::Disabled;
-  config.fold = false;
-  config.cseConstants = false;
+  config.setUseTopDownTraversal(true)
+      .setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled)
+      .enableFolding(false)
+      .enableConstantCSE(false);
   pm.addNestedPass<func::FuncOp>(
       stablehlo::createStablehloAggressiveSimplificationPass(config));
   pm.addPass(createSdyRoundTripImportCallbackCustomCallsPass());

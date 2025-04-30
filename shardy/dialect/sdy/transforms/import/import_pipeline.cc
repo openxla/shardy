@@ -28,14 +28,13 @@ namespace sdy {
 namespace {
 
 GreedyRewriteConfig getCanonicalizerConfig(bool enableRegionSimplification) {
-  GreedyRewriteConfig config;
-  config.useTopDownTraversal = true;
-  config.enableRegionSimplification = enableRegionSimplification
-                                          ? GreedySimplifyRegionLevel::Normal
-                                          : GreedySimplifyRegionLevel::Disabled;
-  config.fold = false;
-  config.cseConstants = false;
-  return config;
+  return GreedyRewriteConfig()
+      .setUseTopDownTraversal(true)
+      .setRegionSimplificationLevel(enableRegionSimplification
+                                        ? GreedySimplifyRegionLevel::Normal
+                                        : GreedySimplifyRegionLevel::Disabled)
+      .enableFolding(false)
+      .enableConstantCSE(false);
 }
 
 }  // namespace

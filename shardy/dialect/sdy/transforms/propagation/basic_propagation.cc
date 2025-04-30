@@ -627,19 +627,19 @@ LogicalResult BasicPropagationPassImpl::propagate(
   // set the max iterations to 1, to avoid the redundant iteration to check
   // convergence.
   GreedyRewriteConfig config;
-  config.useTopDownTraversal = true;
-  config.enableRegionSimplification = mlir::GreedySimplifyRegionLevel::Disabled;
-  config.maxIterations = 1;
+  config.setUseTopDownTraversal(true)
+      .setRegionSimplificationLevel(mlir::GreedySimplifyRegionLevel::Disabled)
+      .enableFolding(false)
+      .enableConstantCSE(false)
+      .setMaxIterations(1);
 #ifndef NDEBUG
-  config.maxIterations = 2;
+  config.setMaxIterations(2);
 #endif
-  config.fold = false;
-  config.cseConstants = false;
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns), config)) &&
-      config.maxIterations > 1) {
+      config.getMaxIterations() > 1) {
     // We should always converge in 2 iterations, otherwise something is wrong.
     emitWarning(moduleOp->getLoc(), "Failed to converge after ")
-        << config.maxIterations << " iterations, this shouldn't happen. "
+        << config.getMaxIterations() << " iterations, this shouldn't happen. "
         << "please contact the Shardy team.";
   }
 
