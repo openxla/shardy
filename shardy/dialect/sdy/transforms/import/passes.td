@@ -81,10 +81,14 @@ def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "func:
       type `ShardingConstraintOp` or `ManualComputationOp` (otherwise it's not
       the last in the chain);
 
-    then this pass replaces all other uses of the input of the chain, that are
-    defined after the last `ShardingConstraintOp` in the chain (and within the
-    same block), with the result of the chain, as it should dictate the sharding
-    of those uses.
+    then this pass replaces all other uses of the input of the chain, that:
+
+    * Aren't a `func.return` op;
+    * Are defined after the last `ShardingConstraintOp` in the chain (and
+       within the same block)
+
+    with the result of the chain, as it should dictate the sharding of those
+    uses.
 
     NOTE: The `in_shardings` of a `ManualComputationOp` are in essence sharding
     constraints on the corresponding operands, so this pass will also apply

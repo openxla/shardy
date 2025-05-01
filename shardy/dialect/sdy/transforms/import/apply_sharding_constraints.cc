@@ -192,8 +192,9 @@ struct ApplyShardingConstraintsPass
           .Case<ShardingConstraintOp>(
               [](ShardingConstraintOp shardingConstraintOp) {
                 // If `getTailOfShardingConstraintChain` returns a non-null
-                // value, we replace all uses of `head`s input that are defined
-                // after `tail` (and in the same block) with `tail`.
+                // value, we replace all uses of `head`s input that:
+                // 1. Aren't a `func.return` op.
+                // 2. Are defined after `tail` (and in same block) with `tail`.
                 //
                 // Refer to `getTailOfShardingConstraintChain` for more details.
                 ShardingConstraintOp head = shardingConstraintOp;
@@ -202,6 +203,7 @@ struct ApplyShardingConstraintsPass
                   head.getInput().replaceUsesWithIf(
                       tail.getResult(), [&](OpOperand& use) {
                         return use.getOwner() != head &&
+                               !isa<func::ReturnOp>(use.getOwner()) &&
                                tail->getBlock() == use.getOwner()->getBlock() &&
                                tail->isBeforeInBlock(use.getOwner());
                       });
