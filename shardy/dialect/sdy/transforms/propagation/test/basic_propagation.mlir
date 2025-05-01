@@ -306,6 +306,20 @@ func.func @slice_then_concat(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shardin
   return %2 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @cx64_combine_used_then_rng_bit_generator
+func.func @cx64_combine_used_then_rng_bit_generator(
+    %arg0: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
+    %arg1: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>})
+    -> (tensor<4x1000xui32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}, tensor<2xui64>) {
+  // CHECK-NEXT: %[[X64_COMBINE:.*]] = stablehlo.custom_call @X64Combine(%arg0, %arg1)
+  // CHECK-NOT:  sdy.sharding
+  // CHECK-NEXT: %output_state, %output = stablehlo.rng_bit_generator %0, algorithm =  DEFAULT
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{?}]>, <@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>]>}
+  %0 = stablehlo.custom_call @X64Combine(%arg0, %arg1) : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  %output_state, %output = stablehlo.rng_bit_generator %0, algorithm =  DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<4x1000xui32>)
+  return %output, %0 : tensor<4x1000xui32>, tensor<2xui64>
+}
+
 // CHECK-LABEL: func @reshape_size_one_axes(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_1_b_2_c_1, [{"a", "b", "c"}]>})
 func.func @reshape_size_one_axes(

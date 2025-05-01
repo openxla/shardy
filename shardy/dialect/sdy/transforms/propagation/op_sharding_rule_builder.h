@@ -96,7 +96,7 @@ class OpShardingRuleBuilder {
       ArrayRef<int64_t> shape,
       std::function<FactorType(int64_t)> getFactorType = [](int64_t) {
         return FactorType::kPassThrough;
-      });
+      }, bool isBlocked = false);
 
   // Adds a pointwise factor for all dimensions that satisfy `pred` of all
   // operands/results that have rank at least 1. The factor type is determined

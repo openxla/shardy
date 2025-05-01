@@ -199,10 +199,10 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwise(
-    ArrayRef<int64_t> shape,
-    std::function<FactorType(int64_t)> getFactorType) {
+    ArrayRef<int64_t> shape, std::function<FactorType(int64_t)> getFactorType,
+    bool isBlocked) {
   for (auto [dim, dimSize] : llvm::enumerate(shape)) {
-    addFactor(dim, dimSize, getFactorType(dim));
+    addFactor(dim, dimSize, getFactorType(dim), isBlocked);
   }
   return *this;
 }

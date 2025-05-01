@@ -200,11 +200,26 @@ func.func @custom_call_compact_wy_helper(%arg0: tensor<128x128xf32>) -> tensor<1
   return %0 : tensor<128x128xf32>
 }
 
+// CHECK-LABEL: func @custom_call_inspect_sharding
+func.func @custom_call_inspect_sharding(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}>
+  %0 = stablehlo.custom_call @InspectSharding(%arg0) : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
 // CHECK-LABEL: func @custom_call_x64_combine
 func.func @custom_call_x64_combine(%arg0: tensor<8x2xui32>, %arg1: tensor<8x2xui32>) -> tensor<8x2xui64> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j]) {i=8, j=2}>
   %0 = stablehlo.custom_call @X64Combine(%arg0, %arg1) {backend_config = ""} : (tensor<8x2xui32>, tensor<8x2xui32>) -> tensor<8x2xui64>
   return %0 : tensor<8x2xui64>
+}
+
+// CHECK-LABEL: func @custom_call_x64_combine_used_by_rng_bit_generator
+func.func @custom_call_x64_combine_used_by_rng_bit_generator(%arg0: tensor<2xui32>, %arg1: tensor<2xui32>) -> (tensor<4x1000xui32>, tensor<2xui64>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i], [i])->([i]) {i=2} blocked_propagation={i}>
+  %0 = stablehlo.custom_call @X64Combine(%arg0, %arg1) : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  %output_state, %output = stablehlo.rng_bit_generator %0, algorithm =  DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<4x1000xui32>)
+  return %output, %0 : tensor<4x1000xui32>, tensor<2xui64>
 }
 
 // CHECK-LABEL: func @custom_call_x64_split_high
@@ -680,6 +695,13 @@ func.func @reverse(%arg0: tensor<4x32x8x2xf32>) -> tensor<4x32x8x2xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, j, k, l]) {i=4, j=32, k=8, l=2} permutation={j, l}>
   %0 = stablehlo.reverse %arg0, dims = [1, 3] : tensor<4x32x8x2xf32>
   return %0 : tensor<4x32x8x2xf32>
+}
+
+// CHECK-LABEL: func @rng_bit_generator
+func.func @rng_bit_generator(%arg0: tensor<2xui64>) -> tensor<4x1000xui32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i], [j, k]) {i=2, j=4, k=1000} need_replication={i} blocked_propagation={i}>
+  %output_state, %output = stablehlo.rng_bit_generator %arg0, algorithm =  DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<4x1000xui32>)
+  return %output : tensor<4x1000xui32>
 }
 
 // CHECK-LABEL: @scatter_single_input

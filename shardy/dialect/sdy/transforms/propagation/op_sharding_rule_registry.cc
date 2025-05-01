@@ -415,11 +415,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         if (callTargetName == "annotate_device_placement" ||
             callTargetName == "Cholesky" ||
             callTargetName == "CompactWyHelper" ||
+            callTargetName == "InspectSharding" ||
             callTargetName == "InvertDiagBlocksLowerTriangular" ||
             callTargetName == "InvertDiagBlocksUpperTriangular" ||
             callTargetName == "LayoutConstraint" ||
             callTargetName == "mhlo.erf" || callTargetName == "MoveToDevice" ||
-            callTargetName == "MoveToHost" || callTargetName == "X64Combine" ||
+            callTargetName == "MoveToHost" ||
             callTargetName == "X64SplitHigh" ||
             callTargetName == "X64SplitLow" ||
             callTargetName == "xla.megascale.provide_metadata") {
@@ -519,6 +520,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                   getTensorShape(customCall.getOperand(0)),
                   getTensorShape(customCall.getResult(0)),
                   FactorType::kPassThrough, /*mismatchFactorIsBlocked=*/true)
+              .build();
+        }
+        if (callTargetName == "X64Combine") {
+          // If any of the users of `X64Combine` is a `RngBitGeneratorOp`, then
+          // we don't want to propagate shardings from the operands of
+          // `X64Combine` to its result, since the operands of the
+          // `RngBitGeneratorOp` (initial state) must be replicated and there
+          // can't be a reshard on the result of the `X64Combine`.
+          bool usedByRngBitGenerator =
+              llvm::any_of(customCall->getUsers(), [](Operation* user) {
+                return isa<stablehlo::RngBitGeneratorOp>(user);
+              });
+          return OpShardingRuleBuilder(customCall)
+              .addPointwise(
+                  getTensorShape(customCall.getResult(0)),
+                  [](int64_t) { return FactorType::kPassThrough; },
+                  /*isBlocked=*/usedByRngBitGenerator)
               .build();
         }
         // TODO(b/327191011): output unregistered op stats instead.
@@ -877,6 +895,24 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             .addPointwise(getTensorShape(reverse.getResult()), getFactorType)
             .build();
       })
+      .Case<stablehlo::RngBitGeneratorOp>(
+          [](stablehlo::RngBitGeneratorOp rngBitGenerator) {
+            OpShardingRuleBuilder builder(rngBitGenerator);
+            // Both the initial state and output state must be replicated, and
+            // we don't want to propagate shardings between them.
+            for (auto [dim, dimSize] : llvm::enumerate(
+                     getTensorShape(rngBitGenerator.getInitialState()))) {
+              builder.addFactor(dim, {static_cast<int64_t>(dim), kNullDim},
+                                dimSize, FactorType::kNeedReplication,
+                                /*isBlocked=*/true);
+            }
+            for (auto [dim, dimSize] :
+                 llvm::enumerate(getTensorShape(rngBitGenerator.getOutput()))) {
+              builder.addFactor(kNullDim, {kNullDim, static_cast<int64_t>(dim)},
+                                dimSize);
+            }
+            return builder.build();
+          })
       .Case<stablehlo::ScatterOp>([](stablehlo::ScatterOp scatter) {
         OpShardingRuleBuilder builder(scatter);
 
@@ -1042,8 +1078,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             stablehlo::CreateTokenOp, stablehlo::GetTupleElementOp,
             stablehlo::InfeedOp, stablehlo::IotaOp, stablehlo::OutfeedOp,
             stablehlo::OptimizationBarrierOp, stablehlo::PartitionIdOp,
-            stablehlo::RecvOp, stablehlo::RngBitGeneratorOp, stablehlo::SendOp,
-            stablehlo::WhileOp>([](Operation*) { return OpShardingRuleAttr(); })
+            stablehlo::RecvOp, stablehlo::SendOp, stablehlo::WhileOp>(
+          [](Operation*) { return OpShardingRuleAttr(); })
       .Case<ShardingRuleOpInterface>(
           [](ShardingRuleOpInterface shardingRuleOp) {
             return shardingRuleOp.getShardingRule();
