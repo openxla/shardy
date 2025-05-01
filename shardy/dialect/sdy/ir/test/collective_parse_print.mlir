@@ -332,3 +332,59 @@ func.func @all_reduce_output_is_explicitly_replicated(%arg0 : tensor<16x2xf32> {
   %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh2, [{}, {"x", "y"}], replicated={"z"}> :  tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
 }
+
+// CHECK-LABEL: func @reduce_scatter1
+func.func @reduce_scatter1(%arg0 : tensor<16xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}]>}) -> tensor<16xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{"y"}] %arg0 out_sharding=<@mesh1, [{"x", "y"}]> : tensor<16xf32>
+  %0 = sdy.reduce_scatter [{"y"}] %arg0 out_sharding=<@mesh1, [{"x", "y"}]> : tensor<16xf32>
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter2
+func.func @reduce_scatter2(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{}, {"y"}] %arg0 out_sharding=<@mesh1, [{"x"}, {"y"}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{}, {"y"}] %arg0 out_sharding=<@mesh1, [{"x"}, {"y"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter3
+func.func @reduce_scatter3(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"x"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{"z"}, {}] %arg0 out_sharding=<@mesh2, [{"x", "z"}, {"y"}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{"z"}, {}] %arg0 out_sharding=<@mesh2, [{"x", "z"}, {"y"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_missing_in_sharding
+func.func @reduce_scatter_missing_in_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{"y"}, {"x"}] %arg0 out_sharding=<@mesh1, [{"y"}, {"x"}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{"y"}, {"x"}] %arg0 out_sharding=<@mesh1, [{"y"}, {"x"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_empty_reduce_scatter_axes
+func.func @reduce_scatter_empty_reduce_scatter_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{}, {}] %arg0 out_sharding=<@mesh1, [{"x"}, {}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{}, {}] %arg0 out_sharding=<@mesh1, [{"x"}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_subaxis_exact_match
+func.func @reduce_scatter_subaxis_exact_match(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{}, {"x":(1)2}] %arg0 out_sharding=<@mesh3, [{"y"}, {"x":(1)2}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{}, {"x":(1)2}] %arg0 out_sharding=<@mesh3, [{"y"}, {"x":(1)2}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_subaxis_suffix_of_full
+func.func @reduce_scatter_subaxis_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"x":(1)4}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{}, {"x":(4)2, "z"}] %arg0 out_sharding=<@mesh4, [{"y"}, {"x", "z"}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{}, {"x":(4)2, "z"}] %arg0 out_sharding=<@mesh4, [{"y"}, {"x", "z"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_subaxis_suffix_of_subaxis
+func.func @reduce_scatter_subaxis_suffix_of_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"z", "x":(1)2}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{"y"}, {"z", "x":(1)4}]> : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{"y"}, {"z", "x":(1)4}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

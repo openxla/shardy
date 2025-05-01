@@ -1459,5 +1459,15 @@ LogicalResult AllReduceOp::verify() {
   return success();
 }
 
+LogicalResult ReduceScatterOp::verify() {
+  return verifyCollectiveWithAxesPerDim(
+      *this, getReduceScatterAxes(),
+      [](DimensionShardingAttr operandDimSharding,
+         ArrayRef<AxisRefAttr> dimSlicingAxes, int64_t dim,
+         MeshAttr mesh) -> FailureOr<SmallVector<AxisRefAttr>> {
+        return sliceAxesAlongDim(operandDimSharding, dimSlicingAxes, mesh);
+      });
+}
+
 }  // namespace sdy
 }  // namespace mlir
