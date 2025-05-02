@@ -668,11 +668,11 @@ DimensionShardingAttr DimensionShardingAttr::getClosedLike(
 // TensorShardingAttr
 //===----------------------------------------------------------------------===//
 
-namespace {
-
 // Creates fully open or closed tensor sharding attr.
-TensorShardingAttr getTensorShardingAttr(MLIRContext* context, int64_t rank,
-                                         Attribute meshOrRef, bool isClosed) {
+TensorShardingAttr TensorShardingAttr::getFullyReplicated(MLIRContext* context,
+                                                          int64_t rank,
+                                                          Attribute meshOrRef,
+                                                          bool isClosed) {
   return TensorShardingAttr::get(
       context, meshOrRef,
       /*dimShardings=*/
@@ -682,13 +682,13 @@ TensorShardingAttr getTensorShardingAttr(MLIRContext* context, int64_t rank,
 }
 
 // Creates fully open or closed tensor sharding attr.
-TensorShardingAttr getTensorShardingAttr(MLIRContext* context, int64_t rank,
-                                         StringRef meshName, bool isClosed) {
-  return getTensorShardingAttr(
+TensorShardingAttr TensorShardingAttr::getFullyReplicated(MLIRContext* context,
+                                                          int64_t rank,
+                                                          StringRef meshName,
+                                                          bool isClosed) {
+  return getFullyReplicated(
       context, rank, FlatSymbolRefAttr::get(context, meshName), isClosed);
 }
-
-}  // namespace
 
 MeshAttr TensorShardingAttr::getMesh(const SymbolTable& symbolTable) const {
   return getMeshOrLookup(symbolTable, getMeshOrRef());
@@ -801,19 +801,19 @@ TensorShardingAttr TensorShardingAttr::getReplicated(StringRef axisName,
 TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
                                                       int64_t rank,
                                                       Attribute meshOrRef) {
-  return getTensorShardingAttr(context, rank, meshOrRef, /*isClosed=*/true);
+  return getFullyReplicated(context, rank, meshOrRef, /*isClosed=*/true);
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
                                                       int64_t rank,
                                                       StringRef meshName) {
-  return getTensorShardingAttr(context, rank, meshName, /*isClosed=*/true);
+  return getFullyReplicated(context, rank, meshName, /*isClosed=*/true);
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyClosedLike(
     TensorShardingAttr sharding) {
-  return getTensorShardingAttr(sharding.getContext(), sharding.getRank(),
-                               sharding.getMeshOrRef(), /*isClosed=*/true);
+  return getFullyReplicated(sharding.getContext(), sharding.getRank(),
+                            sharding.getMeshOrRef(), /*isClosed=*/true);
 }
 
 TensorShardingAttr TensorShardingAttr::getClosedLike(
@@ -844,20 +844,20 @@ TensorShardingAttr TensorShardingAttr::getClosed(
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
                                                       int64_t rank,
                                                       Attribute meshOrRef) {
-  return getTensorShardingAttr(context, rank, meshOrRef, /*isClosed=*/false);
+  return getFullyReplicated(context, rank, meshOrRef, /*isClosed=*/false);
 }
 
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
                                                     int64_t rank,
                                                     StringRef meshName) {
-  return getTensorShardingAttr(context, rank, meshName, /*isClosed=*/false);
+  return getFullyReplicated(context, rank, meshName, /*isClosed=*/false);
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyOpenLike(
     TensorShardingAttr sharding) {
-  return getTensorShardingAttr(sharding.getContext(), sharding.getRank(),
-                               sharding.getMeshOrRef(), /*isClosed=*/false);
+  return getFullyReplicated(sharding.getContext(), sharding.getRank(),
+                            sharding.getMeshOrRef(), /*isClosed=*/false);
 }
 
 RankedTensorType TensorShardingAttr::getLocalTensorType(
@@ -921,6 +921,12 @@ TensorShardingPerValueAttr TensorShardingPerValueAttr::getFullyOpen(
     MLIRContext* context, TypeRange types, StringRef meshName) {
   return TensorShardingPerValueAttr::get(
       context, getFullyOpenShardings(context, types, meshName));
+}
+
+TensorShardingPerValueAttr TensorShardingPerValueAttr::getFullyClosed(
+    MLIRContext* context, TypeRange types, StringRef meshName) {
+  return TensorShardingPerValueAttr::get(
+      context, getFullyClosedShardings(context, types, meshName));
 }
 
 TensorShardingPerValueAttr

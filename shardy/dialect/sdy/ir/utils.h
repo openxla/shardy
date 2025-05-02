@@ -428,6 +428,11 @@ SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
                                                       TypeRange types,
                                                       StringRef meshName);
 
+// Builds an closed `TensorSharding` for each type in `types`.
+SmallVector<TensorShardingAttr> getFullyClosedShardings(MLIRContext* context,
+                                                        TypeRange types,
+                                                        StringRef meshName);
+
 // Builds an open `TensorSharding` for each type in `types`, but
 // with the sharding at `index` replaced with `sharding`.
 SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(

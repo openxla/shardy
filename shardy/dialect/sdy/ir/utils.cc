@@ -442,9 +442,10 @@ void removeShardingRules(Operation* rootOp) {
   });
 }
 
-SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
-                                                      TypeRange types,
-                                                      StringRef meshName) {
+namespace {
+
+SmallVector<TensorShardingAttr> getFullyReplicatedShardings(
+    MLIRContext* context, TypeRange types, StringRef meshName, bool isClosed) {
   SmallVector<TensorShardingAttr> shardings;
   shardings.reserve(types.size());
   for (Type type : types) {
@@ -454,10 +455,26 @@ SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
       assert(tensorType.hasStaticShape());
       rank = tensorType.getRank();
     }
-    shardings.push_back(
-        TensorShardingAttr::getFullyOpen(context, rank, meshName));
+    shardings.push_back(TensorShardingAttr::getFullyReplicated(
+        context, rank, meshName, isClosed));
   }
   return shardings;
+}
+
+}  // namespace
+
+SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
+                                                      TypeRange types,
+                                                      StringRef meshName) {
+  return getFullyReplicatedShardings(context, types, meshName,
+                                     /*isClosed=*/false);
+}
+
+SmallVector<TensorShardingAttr> getFullyClosedShardings(MLIRContext* context,
+                                                        TypeRange types,
+                                                        StringRef meshName) {
+  return getFullyReplicatedShardings(context, types, meshName,
+                                     /*isClosed=*/true);
 }
 
 SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(

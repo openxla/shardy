@@ -735,18 +735,18 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
         std::function<InFlightDiagnostic(StringRef)> emitError,
         bool checkDivisibility = true);
 
-    // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
-    // being marked closed (cannot be further replicated/sharded).
+    // Builds a `TensorShardingAttr` with all dim shardings being empty and
+    // closed (cannot be further replicated/sharded).
     static TensorShardingAttr getFullyClosed(
         MLIRContext* context, int64_t rank, Attribute meshOrRef);
 
-    // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
-    // being marked closed (cannot be further replicated/sharded).
+    // Builds a `TensorShardingAttr` with all dim shardings being empty and
+    // closed (cannot be further replicated/sharded).
     static TensorShardingAttr getFullyClosed(
         MLIRContext* context, int64_t rank, StringRef meshName);
 
-    // Builds a fully closed `TensorShardingAttr` matching `sharding` in
-    // `mesh_or_ref` and rank.
+    // Builds a fully closed and replicated `TensorShardingAttr` matching
+    // `sharding` in `mesh_or_ref` and rank.
     static TensorShardingAttr getFullyClosedLike(TensorShardingAttr sharding);
 
     // Builds a `TensorShardingAttr` with all dim shardings being marked closed
@@ -759,19 +759,27 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
         MLIRContext* context, Attribute meshOrRef,
         ArrayRef<SmallVector<AxisRefAttr>> axesPerDim);
 
-    // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
-    // being marked open (can be further replicated/sharded).
+    // Builds a `TensorShardingAttr` with all dim shardings being empty and open
+    // (can be further sharded).
     static TensorShardingAttr getFullyOpen(
         MLIRContext* context, int64_t rank, Attribute meshOrRef);
 
-    // Builds a `TensorShardingAttr` with all dim shardings and replicated axes
-    // being marked open (can be further replicated/sharded).
+    // Builds a `TensorShardingAttr` with all dim shardings being empty and open
+    // (can be further sharded).
     static TensorShardingAttr getFullyOpen(
         MLIRContext* context, int64_t rank, StringRef meshName);
 
-    // Builds a fully open `TensorShardingAttr` matching `sharding` in
-    // `mesh_or_ref` and rank.
+    // Builds a fully open and replicated `TensorShardingAttr` matching
+    // `sharding` in `mesh_or_ref` and rank.
     static TensorShardingAttr getFullyOpenLike(TensorShardingAttr sharding);
+
+    // Builds a `TensorShardingAttr` with all dim shardings being empty and open/closed.
+    static TensorShardingAttr getFullyReplicated(
+        MLIRContext* context, int64_t rank, Attribute meshOrRef, bool isClosed);
+
+    // Builds a `TensorShardingAttr` with all dim shardings being empty and openclosed.
+    static TensorShardingAttr getFullyReplicated(
+        MLIRContext* context, int64_t rank, StringRef meshName, bool isClosed);
 
     // Gets the local tensor type from a global RankedTensorType w.r.t. the
     // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
@@ -810,8 +818,13 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
 
   let extraClassDeclaration = [{
     // Builds a `TensorSharding` for each type in `types`, with all dimension
-    // shardings marked open (can be further replicated/sharded).
+    // shardings empty and open (can be further sharded).
     static TensorShardingPerValueAttr getFullyOpen(
+        MLIRContext* context, TypeRange types, StringRef meshName);
+
+    // Builds a `TensorSharding` for each type in `types`, with all dimension
+    // shardings marked empty and closed (cannot be further sharded).
+    static TensorShardingPerValueAttr getFullyClosed(
         MLIRContext* context, TypeRange types, StringRef meshName);
 
     // Builds an open `TensorSharding` for each type in `types`, but
