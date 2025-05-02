@@ -26,7 +26,7 @@ all of the following:
 These conditions indicate that the `ShardingConstraintOp` dictates the
 sharding of its input.
 
-If the input is produced by a `DataFlowEdgeOp`, then instead of setting the
+If the input is a target of a data-flow edge, then instead of setting the
 op's sharding, we replace all uses of `input` with the
 `ShardingConstraintOp`, to avoid restricting the sharding of all targets of
 the edge.
