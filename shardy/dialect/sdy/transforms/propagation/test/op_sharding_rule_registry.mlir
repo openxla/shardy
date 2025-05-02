@@ -447,29 +447,57 @@ func.func @dynamic_update_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2x
 
 // CHECK-LABEL: func @fft
 func.func @fft(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={j, k}>
   %0  = stablehlo.fft %arg0, type = FFT, length = [32, 64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
   return %0 : tensor<8x32x64xcomplex<f32>>
 }
 
 // CHECK-LABEL: func @fft_inverse
 func.func @fft_inverse(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={j, k}>
   %0  = stablehlo.fft %arg0, type = IFFT, length = [32, 64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
   return %0 : tensor<8x32x64xcomplex<f32>>
 }
 
 // CHECK-LABEL: func @fft_real_truncated_result
 func.func @fft_real_truncated_result(%arg0: tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, l]) {i=8, j=32, k=1, l=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={j, k} blocked_propagation={k}>
   %0  = stablehlo.fft %arg0, type = RFFT, length = [32, 64] : (tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>>
   return %0 : tensor<8x32x33xcomplex<f32>>
 }
 
 // CHECK-LABEL: func @fft_inverse_real_expanded_result
 func.func @fft_inverse_real_expanded_result(%arg0: tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, l]) {i=8, j=32, k=1, l=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=33} need_replication={j, k} blocked_propagation={k}>
   %0  = stablehlo.fft %arg0, type = IRFFT, length = [32, 64] : (tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32>
+  return %0 : tensor<8x32x64xf32>
+}
+
+// CHECK-LABEL: func @fft_single_fft_dimension
+func.func @fft_single_fft_dimension(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={k}>
+  %0  = stablehlo.fft %arg0, type = FFT, length = [64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
+  return %0 : tensor<8x32x64xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_single_fft_dimension_inverse
+func.func @fft_single_fft_dimension_inverse(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={k}>
+  %0  = stablehlo.fft %arg0, type = IFFT, length = [64] : (tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>>
+  return %0 : tensor<8x32x64xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_single_fft_dimension_real_truncated_result
+func.func @fft_single_fft_dimension_real_truncated_result(%arg0: tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={k} blocked_propagation={k}>
+  %0  = stablehlo.fft %arg0, type = RFFT, length = [64] : (tensor<8x32x64xf32>) -> tensor<8x32x33xcomplex<f32>>
+  return %0 : tensor<8x32x33xcomplex<f32>>
+}
+
+// CHECK-LABEL: func @fft_single_fft_dimension_inverse_real_expanded_result
+func.func @fft_single_fft_dimension_inverse_real_expanded_result(%arg0: tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=33} need_replication={k} blocked_propagation={k}>
+  %0  = stablehlo.fft %arg0, type = IRFFT, length = [64] : (tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32>
   return %0 : tensor<8x32x64xf32>
 }
 

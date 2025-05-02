@@ -899,8 +899,7 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
   // TODO(enver): Handle convolution op.
   // TODO(enver): Handle custom call ops.
   // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
-  // TODO(enver): Add need replication factors to fft.
-  if (isa<stablehlo::FftOp, stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
+  if (isa<stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
           stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
           stablehlo::ConvolutionOp, stablehlo::CustomCallOp,
           stablehlo::AllReduceOp, stablehlo::AllGatherOp, stablehlo::AllToAllOp,

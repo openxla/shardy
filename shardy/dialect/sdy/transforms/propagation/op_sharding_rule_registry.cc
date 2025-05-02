@@ -672,15 +672,21 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case<stablehlo::FftOp>([](stablehlo::FftOp fft) {
         ArrayRef<int64_t> inShape = getTensorShape(fft.getOperand());
         ArrayRef<int64_t> outShape = getTensorShape(fft.getResult());
-        // The `FftOp` computes the Fourier transform across the trailing
-        // `fft.getFftLength().size()` dimensions of its operand, which means
-        // reductions are performed across those dimensions, the other
-        // dimensions are batch dimensions. We still want to propagate through
-        // the trailing dimensions even though that would require communication.
-        bool isLastDimTruncated = inShape.back() != outShape.back();
-        return OpShardingRuleBuilder(fft)
-            .addPointwise(inShape.drop_back(isLastDimTruncated ? 1 : 0))
-            .build();
+        OpShardingRuleBuilder builder(fft);
+        for (auto [dim, dimSize] : llvm::enumerate(inShape)) {
+          if (dim < inShape.size() - fft.getFftLength().size()) {
+            // Non-fft dimensions are batch dimensions.
+            builder.addFactor(dim, dimSize);
+          } else if (dim < inShape.size() - 1) {
+            // Fft dimensions need replication.
+            builder.addFactor(dim, dimSize, FactorType::kNeedReplication);
+          } else {
+            // Propation is blocked along last dimension, if truncated.
+            builder.addFactor(dim, dimSize, FactorType::kNeedReplication,
+                              /*isBlocked=*/inShape.back() != outShape.back());
+          }
+        }
+        return builder.build();
       })
       .Case<stablehlo::GatherOp>([](stablehlo::GatherOp gather) {
         OpShardingRuleBuilder builder(gather);
