@@ -146,9 +146,9 @@ Example:
 ```
 
 **Constraints:**
+- Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
 - Elements in `slicing_axes` must satisfy the constraints listed in
   `AxisRefListAttr`.
-- Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
 - Applying `slicing_axes` to the operand sharding gets `out_sharding`.
 
 Traits: `SameOperandsAndResultType`
@@ -637,6 +637,54 @@ Effects: `MemoryEffects::Effect{}`
 | Result | Description |
 | :----: | ----------- |
 | `result` | ranked tensor of any type values |
+
+
+
+### `sdy.reduce_scatter` (sdy::ReduceScatterOp)
+
+_Performs a reduce-scatter communication along axes_
+
+Syntax:
+
+```
+operation ::= `sdy.reduce_scatter` $reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+```
+
+Reduces chunks of a tensor along axes specified in `reduce_scatter_axes`,
+and then scatters the result along the same axes. This operation is
+essentially a combination of an `sdy.all_reduce` followed by an
+`sdy.all_slice` along the same `reduce_scatter_axes`.
+
+**Constraints:**
+- Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+- Elements in `reduce_scatter_axes` must satisfy the constraints listed in
+  `AxisRefListAttr`.
+- Applying `reduce_scatter_axes` to the operand sharding gets
+  `out_sharding`.
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>reduce_scatter_axes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | tensor of any type values |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | tensor of any type values |
 
 
 
