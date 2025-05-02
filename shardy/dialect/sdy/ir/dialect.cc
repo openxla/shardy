@@ -1436,6 +1436,14 @@ bool AllReduceOp::allowMissingInputSharding() { return true; }
 
 Type AllReduceOp::getType() { return getResult().getType(); }
 
+//===----------------------------------------------------------------------===//
+// ReduceScatterOp
+//===----------------------------------------------------------------------===//
+
+bool ReduceScatterOp::allowMissingInputSharding() { return true; }
+
+Type ReduceScatterOp::getType() { return getResult().getType(); }
+
 }  // namespace sdy
 }  // namespace mlir
 

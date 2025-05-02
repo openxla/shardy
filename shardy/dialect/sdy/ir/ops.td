@@ -512,9 +512,9 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
     ```
 
     **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - Elements in `slicing_axes` must satisfy the constraints listed in
       `AxisRefListAttr`.
-    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - Applying `slicing_axes` to the operand sharding gets `out_sharding`.
   }];
 
@@ -654,6 +654,36 @@ def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
   let assemblyFormat = "$reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
+}
+
+def Sdy_ReduceScatterOp: Sdy_Op<"reduce_scatter",
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
+        /*methodOverrides=*/["allowMissingInputSharding"]>]> {
+  let summary = "Performs a reduce-scatter communication along axes";
+  let description = [{
+    Reduces chunks of a tensor along axes specified in `reduce_scatter_axes`,
+    and then scatters the result along the same axes. This operation is
+    essentially a combination of an `sdy.all_reduce` followed by an
+    `sdy.all_slice` along the same `reduce_scatter_axes`.
+
+    **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+    - Elements in `reduce_scatter_axes` must satisfy the constraints listed in
+      `AxisRefListAttr`.
+    - Applying `reduce_scatter_axes` to the operand sharding gets
+      `out_sharding`.
+  }];
+
+  let arguments = (ins
+    AnyTensor:$tensor,
+    Sdy_ListOfAxisRefLists:$reduce_scatter_axes,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyTensor:$result);
+  let assemblyFormat = "$reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let hasVerifier = 1;
+  let hasCanonicalizer = 0;
 }
 
 #endif  // SDY_OPS
