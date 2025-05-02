@@ -101,10 +101,11 @@ bool shouldApply(Value input, TensorShardingAttr sharding) {
 // Applies the `sharding` of a sharding constraint to `input` if `shouldApply`
 // returns true.
 //
-// If `input` is produced by a `DataFlowEdgeOp`, then instead of setting the
-// ops's sharding to `sharding`, we replace all uses of `input` with the
-// `ShardingConstraintOp` returned by `getConstraintAfterValue`. This is to
-// avoid restricting the sharding of all targets of the edge and to match GSPMD.
+// If `input` is a target of a data-flow edge (see `DataFlowEdgeOp::lookup`),
+// then instead of setting the ops's sharding to `sharding`, we replace all uses
+// of `input` with the `ShardingConstraintOp` returned by
+// `getConstraintAfterValue`. This is to avoid restricting the sharding of all
+// targets of the edge and to match GSPMD.
 void applyConstraint(
     Value input, TensorShardingAttr sharding,
     std::function<ShardingConstraintOp()> getConstraintAfterValue) {
@@ -112,7 +113,7 @@ void applyConstraint(
     return;
   }
 
-  if (input.getDefiningOp<DataFlowEdgeOp>()) {
+  if (input.getDefiningOp<DataFlowEdgeOp>() || DataFlowEdgeOp::lookup(input)) {
     ShardingConstraintOp shardingConstraintOp = getConstraintAfterValue();
     input.replaceAllUsesExcept(shardingConstraintOp, shardingConstraintOp);
   } else {
