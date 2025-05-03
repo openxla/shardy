@@ -22,6 +22,7 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -280,6 +281,11 @@ struct FactorAxesPair {
   }
 
   bool empty() const { return factorIndex == kEmptyFactorIndex; }
+
+  bool isFull(OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+    return axes.getShardingSize(mesh) ==
+           shardingRule.getFactorSizes()[factorIndex];
+  }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
@@ -333,6 +339,8 @@ struct FactorAxesCandidate {
     // of another, the strict prefix one is smaller.
     return factorAxes < rhs.factorAxes;
   }
+
+  bool empty() const { return factorAxes.empty(); }
 };
 
 using FactorAxesCandidatesMap =
@@ -361,7 +369,10 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
 // while maintaining the best through explicit calls on its touchAt method.
 class FactorAxesCandidateBag {
  public:
-  FactorAxesCandidateBag(MeshAttr mesh) : mesh(mesh) {}
+  FactorAxesCandidateBag(MeshAttr mesh, OpShardingRuleAttr shardingRule)
+      : mesh(mesh) {
+    initFactorDependencies(shardingRule);
+  }
 
   // Returns whether the bag is empty.
   bool empty() const { return candidates.empty(); }
@@ -369,7 +380,9 @@ class FactorAxesCandidateBag {
   // Inserts a new candidate to the bag. Performs in constant-time.
   void insert(const FactorAxesCandidate& candidate) {
     candidates.push_back(candidate);
-    bestCandidate = std::max(bestCandidate, candidate);
+    if (isValid(candidate)) {
+      bestCandidate = std::max(bestCandidate, candidate);
+    }
   }
 
   // Updates the sharding size of the one at index as the  product of the
@@ -382,7 +395,9 @@ class FactorAxesCandidateBag {
     FactorAxesCandidate& candidate = candidates[index];
     candidate.shardingSize =
         candidate.factorAxes.axes.getExpandedShardingSize(mesh, prefix);
-    bestCandidate = std::max(bestCandidate, candidate);
+    if (isValid(candidate)) {
+      bestCandidate = std::max(bestCandidate, candidate);
+    }
   }
 
   // Updates the source tensor sizes of all candidates.
@@ -412,6 +427,15 @@ class FactorAxesCandidateBag {
     }
   }
 
+  void dropFactorDependencies(const int64_t factorIndex) {
+    for (llvm::SmallDenseSet<int64_t>& factorDependencies :
+         factorDependenciesList) {
+      if (factorDependencies.contains(factorIndex)) {
+        factorDependencies.erase(factorIndex);
+      }
+    }
+  }
+
   // Resets best. Performs in constant-time.
   void resetBest() { bestCandidate = FactorAxesCandidate(); }
 
@@ -436,16 +460,41 @@ class FactorAxesCandidateBag {
   int64_t size() const { return candidates.size(); }
 
  private:
+  void initFactorDependencies(OpShardingRuleAttr shardingRule) {
+    factorDependenciesList =
+        SmallVector<llvm::SmallDenseSet<int64_t>>(shardingRule.getNumFactors());
+    for (const TensorMappingAttr& tensorMapping :
+         llvm::concat<const TensorMappingAttr>(
+             shardingRule.getOperandMappings(),
+             shardingRule.getResultMappings())) {
+      for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
+        ArrayRef<int64_t> factorIndices = dimMapping.getFactorIndices();
+        for (int64_t index = 1; index < factorIndices.size(); index++) {
+          int64_t factorIndex = factorIndices[index];
+          int64_t dependsOn = factorIndices[index - 1];
+          factorDependenciesList[factorIndex].insert(dependsOn);
+        }
+      }
+    }
+  }
+
+  bool isValid(const FactorAxesCandidate& candidate) {
+    return factorDependenciesList[candidate.factorAxes.factorIndex].empty();
+  }
+
   void updateSourceTensorSizeAt(const int64_t factorIndex, const int64_t index,
                                 const int64_t sourceTensorSize) {
     FactorAxesCandidate& candidate = candidates[index];
     if (candidate.factorAxes.factorIndex == factorIndex) {
       candidate.sourceTensorSize =
           std::max(candidate.sourceTensorSize, sourceTensorSize);
-      bestCandidate = std::max(bestCandidate, candidate);
+      if (isValid(candidate)) {
+        bestCandidate = std::max(bestCandidate, candidate);
+      }
     }
   }
 
+  SmallVector<llvm::SmallDenseSet<int64_t>> factorDependenciesList;
   SmallVector<FactorAxesCandidate> candidates;
   FactorAxesCandidate bestCandidate;
   // Used for recalculating sharding size of a candidate.
@@ -503,7 +552,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
     }
   }
 
-  FactorAxesCandidateBag factorAxesCandidates(mesh.attr());
+  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule);
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
     factorAxesCandidates.insert(candidate);
   }
@@ -533,10 +582,13 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       findFactorAxesCandidates(projection, shardingRule, tensorSizes, mesh);
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
-  while (!factorAxesCandidates.empty()) {
+  while (!factorAxesCandidates.best().empty()) {
     FactorAxesPair bestFactorAxes = factorAxesCandidates.best().factorAxes;
     factorAxesCandidates.resetBest();
     factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
+    if (bestFactorAxes.isFull(shardingRule, mesh.attr())) {
+      factorAxesCandidates.dropFactorDependencies(bestFactorAxes.factorIndex);
+    }
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
     int64_t candidateIndex = 0;
@@ -778,6 +830,20 @@ Mesh getMostCommonMesh(const SmallVector<TensorShardingAttr>& inShardings,
   return mostCommonMesh;
 }
 
+bool hasDimensionsWithMultipleFactors(OpShardingRuleAttr shardingRule) {
+  for (const TensorMappingAttr& tensorMapping :
+       llvm::concat<const TensorMappingAttr>(
+           shardingRule.getOperandMappings(),
+           shardingRule.getResultMappings())) {
+    for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
+      if (dimMapping.getFactorIndices().size() > 1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 AxesPerFactorWithMesh findCommonAxes(
     const SmallVector<TensorShardingAttr>& inShardings,
     const SmallVector<TensorShardingAttr>& outShardings,
@@ -807,7 +873,8 @@ AxesPerFactorWithMesh findCommonAxes(
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
       shardingRule.getNeedReplicationFactors().empty() &&
-      tensorCountWithShardedPermutationFactor < 2) {
+      tensorCountWithShardedPermutationFactor < 2 &&
+      !hasDimensionsWithMultipleFactors(shardingRule)) {
     return findCommonAxesOnUnaryOperation(inShardings, outShardings, projection,
                                           shardingRule, tensorSizes,
                                           symbolTable, mesh);
