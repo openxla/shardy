@@ -463,14 +463,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           // sharding it in the same way, given how QR decomposition is
           // computed.
           ArrayRef<int64_t> inShape = getTensorShape(customCall.getOperand(0));
+          ArrayRef<int64_t> outShapeRhs =
+              getTensorShape(customCall.getResult(1));
           int64_t nonBatchDim1 = inShape.size() - 2;
           int64_t nonBatchDim2 = inShape.size() - 1;
           return OpShardingRuleBuilder(customCall)
               .addPointwise(inShape.drop_back(2))
               .addFactor(nonBatchDim1, {nonBatchDim1, kNullDim},
-                         inShape[nonBatchDim1])
+                         inShape[nonBatchDim1], FactorType::kNeedReplication)
               .addFactor(nonBatchDim2, {nonBatchDim2, kNullDim},
-                         inShape[nonBatchDim2])
+                         inShape[nonBatchDim2], FactorType::kNeedReplication)
+              .addFactor(kNullDim, {kNullDim, nonBatchDim1},
+                         outShapeRhs[nonBatchDim1],
+                         FactorType::kNeedReplication)
               .build();
         }
         if (callTargetName == "ProductOfElementaryHouseholderReflectors") {
@@ -482,15 +487,20 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           // would require communication. The 2nd input (taus) has a single
           // non-batch dimension that doesn't correspond to any dimension in the
           // other tensors.
-          ArrayRef<int64_t> inShape = getTensorShape(customCall.getOperand(0));
-          int64_t nonBatchDim1 = inShape.size() - 2;
-          int64_t nonBatchDim2 = inShape.size() - 1;
+          ArrayRef<int64_t> inShapeLhs =
+              getTensorShape(customCall.getOperand(0));
+          ArrayRef<int64_t> inShapeRhs =
+              getTensorShape(customCall.getOperand(1));
+          int64_t nonBatchDim1 = inShapeLhs.size() - 2;
+          int64_t nonBatchDim2 = inShapeLhs.size() - 1;
           return OpShardingRuleBuilder(customCall)
-              .addPointwise(inShape.drop_back(2))
+              .addPointwise(inShapeLhs.drop_back(2))
               .addFactor({nonBatchDim1, kNullDim}, nonBatchDim1,
-                         inShape[nonBatchDim1])
+                         inShapeLhs[nonBatchDim1], FactorType::kNeedReplication)
               .addFactor({nonBatchDim2, kNullDim}, nonBatchDim2,
-                         inShape[nonBatchDim2])
+                         inShapeLhs[nonBatchDim2], FactorType::kNeedReplication)
+              .addFactor({kNullDim, nonBatchDim1}, kNullDim,
+                         inShapeRhs[nonBatchDim1], FactorType::kNeedReplication)
               .build();
         }
         if (callTargetName == "mhlo.topk") {
