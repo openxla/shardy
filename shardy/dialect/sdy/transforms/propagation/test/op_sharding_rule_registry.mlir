@@ -104,37 +104,73 @@ func.func @clamp_scalar_min_max(%arg0: tensor<f32>, %arg1: tensor<4x8xf32>, %arg
 
 // CHECK-LABEL: func @concat_operands_dim_size_one
 func.func @concat_operands_dim_size_one(%arg0: tensor<4x1x256xf32>, %arg1: tensor<4x1x256xf32>, %arg2: tensor<4x1x256xf32>) -> tensor<4x3x256xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [i, j, k])->([i, j, k]) {i=4, j=3, k=256} permutation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [i, j, k])->([i, j, k]) {i=4, j=3, k=256} need_replication={j}>
  %0 = stablehlo.concatenate %arg0, %arg1, %arg2, dim = 1 : (tensor<4x1x256xf32>, tensor<4x1x256xf32>, tensor<4x1x256xf32>) -> tensor<4x3x256xf32>
  return %0 : tensor<4x3x256xf32>
 }
 
 // CHECK-LABEL: func @concat_gcd_is_one
 func.func @concat_gcd_is_one(%arg0: tensor<4x3x256xf32>, %arg1: tensor<4x5x256xf32>) -> tensor<4x8x256xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=8, k=256} permutation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=8, k=256} need_replication={j}>
  %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x3x256xf32>, tensor<4x5x256xf32>) -> tensor<4x8x256xf32>
  return %0 : tensor<4x8x256xf32>
 }
 
 // CHECK-LABEL: func @concat_operands_with_same_shape
 func.func @concat_operands_with_same_shape(%arg0: tensor<4x16x256xf32>, %arg1: tensor<4x16x256xf32>) -> tensor<4x32x256xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=32, k=256} permutation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=32, k=256} need_replication={j}>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x16x256xf32>, tensor<4x16x256xf32>) -> tensor<4x32x256xf32>
   return %0 : tensor<4x32x256xf32>
 }
 
 // CHECK-LABEL: func @concat_gcd_is_equal_to_operand_dim
 func.func @concat_gcd_is_equal_to_operand_dim(%arg0: tensor<4x32x256xf32>, %arg1: tensor<4x16x256xf32>) -> tensor<4x48x256xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=48, k=256} permutation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=48, k=256} need_replication={j}>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x16x256xf32>) -> tensor<4x48x256xf32>
   return %0 : tensor<4x48x256xf32>
 }
 
 // CHECK-LABEL: func @concat_gcd_is_greater_than_all_operand_dims
 func.func @concat_gcd_is_greater_than_all_operand_dims(%arg0: tensor<4x32x256xf32>, %arg1: tensor<4x48x256xf32>) -> tensor<4x80x256xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=80, k=256} permutation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=80, k=256} need_replication={j}>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
   return %0 : tensor<4x80x256xf32>
+}
+
+// CHECK-LABEL: func @concat_operands_are_results_of_slices
+func.func @concat_operands_are_results_of_slices(%arg0: tensor<4x40x256xf32>, %arg1: tensor<4x60x256xf32>) -> tensor<4x80x256xf32> {
+  %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
+  %1 = stablehlo.slice %arg1 [0:4, 0:48, 0:256] : (tensor<4x60x256xf32>) -> tensor<4x48x256xf32>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=80, k=256} permutation={j}>
+  %2 = stablehlo.concatenate %0, %1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  return %2 : tensor<4x80x256xf32>
+}
+
+// CHECK-LABEL: func @concat_operands_are_from_slices_of_the_same_tensor
+func.func @concat_operands_are_from_slices_of_the_same_tensor(%arg0: tensor<4x40x256xf32>) -> tensor<4x96x256xf32> {
+  %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
+  %1 = stablehlo.slice %arg0 [0:4, 0:24, 0:256] : (tensor<4x40x256xf32>) -> tensor<4x24x256xf32>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [i, j, k])->([i, j, k]) {i=4, j=96, k=256} permutation={j}>
+  %2 = stablehlo.concatenate %0, %arg0, %1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x40x256xf32>, tensor<4x24x256xf32>) -> tensor<4x96x256xf32>
+  return %2 : tensor<4x96x256xf32>
+}
+
+// CHECK-LABEL: func @concat_not_all_operands_are_results_of_slices
+func.func @concat_not_all_operands_are_results_of_slices(%arg0: tensor<4x40x256xf32>, %arg1: tensor<4x60x256xf32>) -> tensor<4x92x256xf32> {
+  %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
+  %1 = stablehlo.negate %arg1 : tensor<4x60x256xf32>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=4, j=92, k=256} need_replication={j}>
+  %2 = stablehlo.concatenate %0, %1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x60x256xf32>) -> tensor<4x92x256xf32>
+  return %2 : tensor<4x92x256xf32>
+}
+
+// CHECK-LABEL: func @concat_not_all_operands_are_from_slices_of_the_same_tensor
+func.func @concat_not_all_operands_are_from_slices_of_the_same_tensor(%arg0: tensor<4x40x256xf32>, %arg1: tensor<4x60x256xf32>) -> tensor<4x96x256xf32> {
+  %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
+  %1 = stablehlo.slice %arg1 [0:4, 0:24, 0:256] : (tensor<4x60x256xf32>) -> tensor<4x24x256xf32>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [i, j, k])->([i, j, k]) {i=4, j=96, k=256} need_replication={j}>
+  %2 = stablehlo.concatenate %0, %arg0, %1, dim = 1 : (tensor<4x32x256xf32>, tensor<4x40x256xf32>, tensor<4x24x256xf32>) -> tensor<4x96x256xf32>
+  return %2 : tensor<4x96x256xf32>
 }
 
 // CHECK-LABEL: func @conv_simple

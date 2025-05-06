@@ -155,6 +155,14 @@ void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
   }
 }
 
+Value findOperandBeforeSlice(Value operand) {
+  if (Operation* definingOp = operand.getDefiningOp<stablehlo::SliceOp>();
+      definingOp) {
+    return definingOp->getOperand(0);
+  }
+  return operand;
+}
+
 }  // namespace
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
@@ -287,14 +295,28 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
               // for the concat dimension.
               return !conservativePropagation || dim != concat.getDimension();
             };
-            // TODO(b/396121070): consider giving concat factor kPermutation
-            // under certain conditions, otherwise kNeedReplication.
             std::function<FactorType(int64_t)> getFactorType =
                 [&](int64_t dim) {
-                  // Concat dimension needs permutation.
-                  return dim == concat.getDimension()
-                             ? FactorType::kPermutation
-                             : FactorType::kPassThrough;
+                  if (dim != concat.getDimension()) {
+                    return FactorType::kPassThrough;
+                  }
+                  // In the pattern concat(slice(l), slice(r)), it needs
+                  // permutation.
+                  if (llvm::all_of(concat->getOperands(), [](Value operand) {
+                        return operand.getDefiningOp<stablehlo::SliceOp>();
+                      })) {
+                    return FactorType::kPermutation;
+                  }
+                  // In the pattern concat(slice(x), x, slice(x)), it needs
+                  // permutation.
+                  Value sameOperand =
+                      findOperandBeforeSlice(concat->getOperand(0));
+                  if (llvm::all_of(concat->getOperands(), [&](Value operand) {
+                        return sameOperand == findOperandBeforeSlice(operand);
+                      })) {
+                    return FactorType::kPermutation;
+                  }
+                  return FactorType::kNeedReplication;
                 };
             return OpShardingRuleBuilder(concat)
                 .addPointwiseIf(getTensorShape(concat.getResult()), pred,
