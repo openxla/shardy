@@ -155,6 +155,34 @@ void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
   }
 }
 
+Value findOperandBeforeSlice(Value operand) {
+  Operation* definingOp = operand.getDefiningOp();
+  if (isa_and_nonnull<stablehlo::SliceOp>(definingOp)) {
+    return definingOp->getOperand(0);
+  }
+  return operand;
+}
+
+bool doesConcatNeedPermutation(stablehlo::ConcatenateOp concat) {
+  // In the pattern concat(slice(l), slice(r)), it needs permutation.
+  if (llvm::all_of(concat->getOperands(), [](Value operand) {
+        Operation* definingOp = operand.getDefiningOp();
+        return isa_and_nonnull<stablehlo::SliceOp>(definingOp);
+      })) {
+    return true;
+  }
+
+  // In the pattern concat(slice(x), x, slice(x)), it needs permutation.
+  Value sameOperand = findOperandBeforeSlice(concat->getOperand(0));
+  if (llvm::all_of(concat->getOperands(), [&](Value operand) {
+        return sameOperand == findOperandBeforeSlice(operand);
+      })) {
+    return true;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
@@ -291,9 +319,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // under certain conditions, otherwise kNeedReplication.
             std::function<FactorType(int64_t)> getFactorType =
                 [&](int64_t dim) {
-                  // Concat dimension needs permutation.
                   return dim == concat.getDimension()
-                             ? FactorType::kPermutation
+                             ? doesConcatNeedPermutation(concat)
+                                   ? FactorType::kPermutation
+                                   : FactorType::kNeedReplication
                              : FactorType::kPassThrough;
                 };
             return OpShardingRuleBuilder(concat)
