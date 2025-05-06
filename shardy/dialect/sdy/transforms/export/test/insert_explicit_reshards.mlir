@@ -2331,3 +2331,14 @@ func.func @negate_different_maximal_meshes(%arg0: tensor<210xf32> {sdy.sharding 
   %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_maximal_another, []>]>} : tensor<210xf32>
   return %0 : tensor<210xf32>
 }
+
+// CHECK-LABEL: func @rng_bit_generator
+func.func @rng_bit_generator(%arg0: tensor<2xui64> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) -> tensor<2xui64> {
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{}]> : tensor<2xui64>
+  // CHECK-NEXT: %output_state, %output = stablehlo.rng_bit_generator %[[RESHARD1]], algorithm =  DEFAULT {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>, <@mesh, [{"y"}, {"x":(2)2}]>]>}
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %output_state <@mesh, [{"x":(1)2}]> : tensor<2xui64>
+  // CHECK-NEXT: stablehlo.negate %[[RESHARD2]]
+  %0, %output = stablehlo.rng_bit_generator %arg0, algorithm =  DEFAULT {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}]>, <@mesh, [{"y"}, {"x":(2)2}]>]>} : (tensor<2xui64>) -> (tensor<2xui64>, tensor<4x1000xui32>)
+  %1 = stablehlo.negate %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}]>]>} : tensor<2xui64>
+  return %1 : tensor<2xui64>
+}
