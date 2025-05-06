@@ -236,6 +236,17 @@ Gets the non-owner targets of a data flow edge given the edge `owner`.
 
 NOTE: This method *must* be implemented by the user.
 
+#### `shouldKeepEdgeOwnerShardingsDivisible`
+
+```c++
+bool shouldKeepEdgeOwnerShardingsDivisible();
+```
+
+Returns true if the sharding of the edge owners divides the
+dimension size, to avoid the need for padding.
+
+NOTE: This method *must* be implemented by the user.
+
 ## ShardingRuleOpInterface (`Sdy_ShardingRuleOpInterface`)
 
 An op interface that allows the op to define its own sharding rule.
@@ -253,5 +264,16 @@ mlir::sdy::OpShardingRuleAttr getShardingRule();
 ```
 
 Returns the sharding rule of the op.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `shouldKeepOutputShardingsDivisible`
+
+```c++
+bool shouldKeepOutputShardingsDivisible();
+```
+
+Returns true if the output sharding divides the dimension size,
+to avoid the need for padding.
 
 NOTE: This method *must* be implemented by the user.
