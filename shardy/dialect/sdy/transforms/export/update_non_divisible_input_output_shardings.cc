@@ -15,12 +15,10 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
-#include <functional>
 #include <numeric>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
@@ -30,9 +28,10 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "mlir/IR/Visitors.h"
+#include "mlir/IR/ValueRange.h"
 
 namespace mlir {
 namespace sdy {
@@ -136,6 +135,19 @@ void updateValueShardings(
   }
 }
 
+void updateValueShardings(
+    ValueRange values,
+    func::FuncOp funcOp) {
+  updateValueShardings(
+        values.getTypes(),
+        [&](int64_t index) { return getSharding(values[index]); },
+        [&](int64_t index, TensorShardingAttr sharding) {
+          setSharding(values[index], sharding);
+        },
+        funcOp);
+}
+
+
 struct UpdateNonDivisibleInputOutputShardingsPass
     : public impl::UpdateNonDivisibleInputOutputShardingsPassBase<
           UpdateNonDivisibleInputOutputShardingsPass> {
@@ -160,6 +172,35 @@ struct UpdateNonDivisibleInputOutputShardingsPass
           setFuncResultSharding(funcOp, index, sharding);
         },
         funcOp);
+
+    // Update edge owner shardings for `ShardableDataFlowOp`s and
+    // `ShardingRuleOp`s.
+    // TODO: b/415294308 - Make this pass more efficient by updating shardings
+    // all at once.
+    funcOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
+      return TypeSwitch<Operation*, WalkResult>(op)
+          .Case<ShardableDataFlowOpInterface>([&](ShardableDataFlowOpInterface
+                                                      shardableDataFlowOp)
+                                                  -> WalkResult {
+            if (shardableDataFlowOp.shouldKeepEdgeOwnerShardingsDivisible()) {
+              updateValueShardings(
+                  shardableDataFlowOp.getBlockArgumentEdgeOwners(), funcOp);
+              updateValueShardings(shardableDataFlowOp.getOpResultEdgeOwners(),
+                                   funcOp);
+            }
+            return WalkResult::skip();
+          })
+          .Case<ShardingRuleOpInterface>(
+              [&](ShardingRuleOpInterface shardableRuleOp) -> WalkResult {
+                if (shardableRuleOp.shouldKeepOutputShardingsDivisible()) {
+                  updateValueShardings(shardableRuleOp->getResults(), funcOp);
+                }
+                return WalkResult::skip();
+              })
+          .Default([&](Operation* op) -> WalkResult {
+            return WalkResult::advance();
+          });
+    });
   }
 };
 

@@ -185,6 +185,17 @@ def Sdy_ShardableDataFlowOpInterface : OpInterface<"ShardableDataFlowOpInterface
       /*methodBody=*/"",
       /*defaultImplementation=*/"return {};"
     >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns true if the sharding of the edge owners divides the
+        dimension size, to avoid the need for padding.
+      }],
+      /*retType=*/"bool",
+      /*methodName=*/"shouldKeepEdgeOwnerShardingsDivisible",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/"return false;"
+    >,
   ];
 
   let extraClassDeclaration = [{
@@ -234,6 +245,17 @@ def Sdy_ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
       }],
       /*retType=*/"mlir::sdy::OpShardingRuleAttr",
       /*methodName=*/"getShardingRule"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns true if the output sharding divides the dimension size,
+        to avoid the need for padding.
+      }],
+      /*retType=*/"bool",
+      /*methodName=*/"shouldKeepOutputShardingsDivisible",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/"return false;"
     >,
   ];
 }
