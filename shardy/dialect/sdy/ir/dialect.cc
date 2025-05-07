@@ -1249,6 +1249,10 @@ Value ManualComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
   return sdy::getEdgeOwnerFromSource(source, *this);
 }
 
+bool ManualComputationOp::shouldKeepEdgeOwnerShardingsDivisible() {
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // ShardingGroupOp
 //===----------------------------------------------------------------------===//

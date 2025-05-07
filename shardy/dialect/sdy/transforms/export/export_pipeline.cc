@@ -33,8 +33,7 @@ void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   }
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
-  pm.addNestedPass<func::FuncOp>(
-      createUpdateNonDivisibleInputOutputShardingsPass());
+  pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
   if (enableInsertExplicitCollectives) {
     pm.addPass(createCloseShardingsPass());
   }
