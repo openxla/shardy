@@ -130,7 +130,8 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
                             "transformTargetSharding",
                             "getBlockArgumentEdgeOwners",
                             "setBlockArgumentEdgeOwnerShardings",
-                            "getBlockArgumentEdgeOwnerShardings"]>]> {
+                            "getBlockArgumentEdgeOwnerShardings",
+                            "shouldKeepEdgeOwnerShardingsDivisible"]>]> {
   let summary = "Multi-device parallelism operation with manual collectives";
   let description = [{
     Jump into a region written in terms of per-device local code with explicit

@@ -15,23 +15,27 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <numeric>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "mlir/IR/Visitors.h"
-#include "mlir/IR/ValueRange.h"
 
 namespace mlir {
 namespace sdy {
@@ -58,10 +62,11 @@ namespace {
 //   - [{"y","x"}] : tensor<4xf32> -> [{"y","x":(1)2}] : tensor<4xf32>
 // See update_non_divisible_input_output_shardings.mlir for more examples.
 TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
-                                    ShapedType type, func::FuncOp funcOp) {
-  MeshAttr mesh = sharding.getMesh(funcOp);
+                                    ShapedType type,
+                                    const SymbolTable& symbolTable) {
+  MeshAttr mesh = sharding.getMesh(symbolTable);
   assert(mesh && "unknown mesh");
-  MLIRContext* ctx = funcOp->getContext();
+  MLIRContext* ctx = sharding.getContext();
   llvm::SmallVector<DimensionShardingAttr> newDimShardings;
   newDimShardings.reserve(sharding.getRank());
   for (auto [dimSharding, dimSize] :
@@ -125,28 +130,32 @@ void updateValueShardings(
     TypeRange types,
     std::function<TensorShardingAttr(int64_t index)> getSharding,
     std::function<void(int64_t index, TensorShardingAttr sharding)> setSharding,
-    func::FuncOp funcOp) {
+    const SymbolTable& symbolTable) {
   for (auto [index, type] : llvm::enumerate(types)) {
     TensorShardingAttr sharding = getSharding(index);
     if (auto tensorType = dynCastStaticShapedType(type);
         sharding && tensorType) {
-      setSharding(index, getEvenlySharded(sharding, tensorType, funcOp));
+      setSharding(index, getEvenlySharded(sharding, tensorType, symbolTable));
     }
   }
 }
 
 void updateValueShardings(
-    ValueRange values,
-    func::FuncOp funcOp) {
-  updateValueShardings(
-        values.getTypes(),
-        [&](int64_t index) { return getSharding(values[index]); },
-        [&](int64_t index, TensorShardingAttr sharding) {
-          setSharding(values[index], sharding);
-        },
-        funcOp);
+    ValueRange values, ArrayRef<TensorShardingAttr> shardings,
+    std::function<void(ArrayRef<TensorShardingAttr> newShardings)> setShardings,
+    const SymbolTable& symbolTable) {
+  if (shardings.empty()) {
+    return;
+  }
+  SmallVector<TensorShardingAttr> newShardings = llvm::to_vector(shardings);
+  for (auto [type, sharding] :
+       llvm::zip_equal(values.getTypes(), newShardings)) {
+    if (auto tensorType = dynCastStaticShapedType(type)) {
+      sharding = getEvenlySharded(sharding, tensorType, symbolTable);
+    }
+  }
+  setShardings(newShardings);
 }
-
 
 struct UpdateNonDivisibleInputOutputShardingsPass
     : public impl::UpdateNonDivisibleInputOutputShardingsPassBase<
@@ -155,45 +164,63 @@ struct UpdateNonDivisibleInputOutputShardingsPass
       UpdateNonDivisibleInputOutputShardingsPassBase;
 
   void runOnOperation() final {
-    func::FuncOp funcOp = getOperation();
-    // Update arguments.
-    updateValueShardings(
-        funcOp.getArgumentTypes(),
-        [&](int64_t index) { return getSharding(funcOp.getArgument(index)); },
-        [&](int64_t index, TensorShardingAttr sharding) {
-          setSharding(funcOp.getArgument(index), sharding);
-        },
-        funcOp);
-    // Update results.
-    updateValueShardings(
-        funcOp.getResultTypes(),
-        [&](int64_t index) { return getFuncResultSharding(funcOp, index); },
-        [&](int64_t index, TensorShardingAttr sharding) {
-          setFuncResultSharding(funcOp, index, sharding);
-        },
-        funcOp);
+    ModuleOp moduleOp = getOperation();
+    SymbolTable symbolTable(moduleOp);
+    for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
+      // Update arguments.
+      updateValueShardings(
+          funcOp.getArgumentTypes(),
+          [&](int64_t index) { return getSharding(funcOp.getArgument(index)); },
+          [&](int64_t index, TensorShardingAttr sharding) {
+            setSharding(funcOp.getArgument(index), sharding);
+          },
+          symbolTable);
+      // Update results.
+      updateValueShardings(
+          funcOp.getResultTypes(),
+          [&](int64_t index) { return getFuncResultSharding(funcOp, index); },
+          [&](int64_t index, TensorShardingAttr sharding) {
+            setFuncResultSharding(funcOp, index, sharding);
+          },
+          symbolTable);
+    }
 
     // Update edge owner shardings for `ShardableDataFlowOp`s and
     // `ShardingRuleOp`s.
-    // TODO: b/415294308 - Make this pass more efficient by updating shardings
-    // all at once.
-    funcOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
+    moduleOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
       return TypeSwitch<Operation*, WalkResult>(op)
           .Case<ShardableDataFlowOpInterface>([&](ShardableDataFlowOpInterface
-                                                      shardableDataFlowOp)
-                                                  -> WalkResult {
+                                                      shardableDataFlowOp) {
             if (shardableDataFlowOp.shouldKeepEdgeOwnerShardingsDivisible()) {
               updateValueShardings(
-                  shardableDataFlowOp.getBlockArgumentEdgeOwners(), funcOp);
-              updateValueShardings(shardableDataFlowOp.getOpResultEdgeOwners(),
-                                   funcOp);
+                  shardableDataFlowOp.getBlockArgumentEdgeOwners(),
+                  shardableDataFlowOp.getBlockArgumentEdgeOwnerShardings(),
+                  [&](ArrayRef<TensorShardingAttr> shardings) {
+                    shardableDataFlowOp.setBlockArgumentEdgeOwnerShardings(
+                        shardings);
+                  },
+                  symbolTable);
+              updateValueShardings(
+                  shardableDataFlowOp.getOpResultEdgeOwners(),
+                  shardableDataFlowOp.getOpResultEdgeOwnerShardings(),
+                  [&](ArrayRef<TensorShardingAttr> shardings) {
+                    shardableDataFlowOp.setOpResultEdgeOwnerShardings(
+                        shardings);
+                  },
+                  symbolTable);
             }
             return WalkResult::skip();
           })
           .Case<ShardingRuleOpInterface>(
-              [&](ShardingRuleOpInterface shardableRuleOp) -> WalkResult {
+              [&](ShardingRuleOpInterface shardableRuleOp) {
                 if (shardableRuleOp.shouldKeepOutputShardingsDivisible()) {
-                  updateValueShardings(shardableRuleOp->getResults(), funcOp);
+                  updateValueShardings(
+                      shardableRuleOp->getResults(),
+                      getShardings(shardableRuleOp),
+                      [&](ArrayRef<TensorShardingAttr> shardings) {
+                        setShardings(shardableRuleOp, shardings);
+                      },
+                      symbolTable);
                 }
                 return WalkResult::skip();
               })
