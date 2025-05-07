@@ -431,7 +431,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         StringRef callTargetName = customCall.getCallTargetName();
         // TODO(b/327191011): output unregistered op stats instead.
         if (callTargetName == "sdy_testonly" ||
-            callTargetName == "tpu_custom_call") {
+            callTargetName == "tpu_custom_call" ||
+            callTargetName == "xla_python_cpu_callback" ||
+            callTargetName == "xla_python_gpu_callback" ||
+            callTargetName == "xla_ffi_python_cpu_callback" ||
+            callTargetName == "xla_ffi_python_gpu_callback") {
           return OpShardingRuleAttr();
         }
         if (callTargetName == "annotate_device_placement" ||

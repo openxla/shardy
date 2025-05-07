@@ -80,22 +80,6 @@ cc_library(
 )
 
 cc_library(
-    name = "import_callback_custom_calls",
-    srcs = ["import_callback_custom_calls.cc"],
-    hdrs = ["import_callback_custom_calls.h"],
-    deps = [
-        ":utils",
-        "//shardy/dialect/sdy/ir:dialect",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Pass",
-        "@llvm-project//mlir:Support",
-        "@llvm-project//mlir:TransformUtils",
-        "@stablehlo//:stablehlo_ops",
-    ],
-)
-
-cc_library(
     name = "shard_map_import",
     srcs = ["shard_map_import.cc"],
     hdrs = ["shard_map_import.h"],
@@ -118,7 +102,6 @@ cc_library(
     srcs = ["pipelines.cc"],
     hdrs = ["pipelines.h"],
     deps = [
-        ":import_callback_custom_calls",
         ":import_sdy_custom_calls",
         ":import_shardy_attrs",
         ":import_uninlineable_func_calls",

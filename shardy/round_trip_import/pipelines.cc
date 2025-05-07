@@ -24,11 +24,9 @@ limitations under the License.
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/round_trip_import/import_uninlineable_func_calls.h"
-#include "shardy/round_trip_import/import_callback_custom_calls.h"
 #include "shardy/round_trip_import/import_sdy_custom_calls.h"
 #include "shardy/round_trip_import/import_shardy_attrs.h"
 #include "shardy/round_trip_import/shard_map_import.h"
-#include "stablehlo/transforms/Passes.h"
 #include "stablehlo/transforms/optimization/Passes.h"
 
 namespace mlir {
@@ -42,7 +40,6 @@ void addSdyRoundTripImportPipeline(OpPassManager& pm) {
       .enableConstantCSE(false);
   pm.addNestedPass<func::FuncOp>(
       stablehlo::createStablehloAggressiveSimplificationPass({}, config));
-  pm.addPass(createSdyRoundTripImportCallbackCustomCallsPass());
   pm.addPass(createSdyRoundTripImportShardyAttrsPass());
   pm.addPass(createSdyRoundTripShardMapImportPass());
   pm.addPass(createImportSdyCustomCallsPass());
@@ -59,7 +56,6 @@ void registerSdyRoundTripImportPipeline() {
 void registerAllSdyRoundTripImportPassesAndPipeline() {
   registerImportSdyCustomCallsPass();
   registerImportUninlineableFuncCallsPass();
-  registerSdyRoundTripImportCallbackCustomCallsPass();
   registerSdyRoundTripImportShardyAttrsPass();
   registerSdyRoundTripShardMapImportPass();
 

@@ -114,20 +114,6 @@ bool hasKey(DictionaryAttr dictAttr, StringRef key) {
   return dictAttr && dictAttr.contains(key);
 }
 
-CustomCallOp cloneCustomCallWithNewResultTypes(CustomCallOp op,
-                                               TypeRange resultTypes,
-                                               IRRewriter& rewriter) {
-  auto customCallOp = rewriter.create<CustomCallOp>(
-      op.getLoc(), resultTypes, op.getOperands(), op.getCallTargetNameAttr(),
-      op.getHasSideEffectAttr(), op.getBackendConfigAttr(),
-      op.getApiVersionAttr(), op.getCalledComputations(),
-      op.getOperandLayoutsAttr(), op.getResultLayoutsAttr(),
-      op.getOutputOperandAliases());
-  customCallOp->setDiscardableAttrs(DictionaryAttr::get(
-      op->getContext(), llvm::to_vector(op->getDiscardableAttrs())));
-  return customCallOp;
-};
-
 bool isPythonCallbackCustomCall(stablehlo::CustomCallOp op) {
   StringRef targetName = op.getCallTargetName();
   return targetName == kPythonCpuCallbackCustomCallTargetName ||

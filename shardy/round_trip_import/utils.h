@@ -82,11 +82,6 @@ std::optional<AttrTy> tryGetFrontendAttr(Operation* op, StringRef attrName) {
   return std::nullopt;
 }
 
-// Builds a new `stablehlo.custom_call` with the same operands and attributes
-// as `op` but with new `resultTypes`.
-stablehlo::CustomCallOp cloneCustomCallWithNewResultTypes(
-    stablehlo::CustomCallOp op, TypeRange resultTypes, IRRewriter& rewriter);
-
 // Whether `op` is a Python callback custom call.
 bool isPythonCallbackCustomCall(stablehlo::CustomCallOp op);
 
