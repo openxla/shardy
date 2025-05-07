@@ -29,7 +29,6 @@ limitations under the License.
 #include "shardy/round_trip_import/import_shardy_attrs.h"
 #include "shardy/round_trip_import/shard_map_import.h"
 #include "stablehlo/transforms/Passes.h"
-#include "stablehlo/transforms/optimization/Passes.h"
 
 namespace mlir {
 namespace sdy {
@@ -41,7 +40,7 @@ void addSdyRoundTripImportPipeline(OpPassManager& pm) {
       .enableFolding(false)
       .enableConstantCSE(false);
   pm.addNestedPass<func::FuncOp>(
-      stablehlo::createStablehloAggressiveSimplificationPass({}, config));
+      stablehlo::createStablehloAggressiveSimplificationPass(config));
   pm.addPass(createSdyRoundTripImportCallbackCustomCallsPass());
   pm.addPass(createSdyRoundTripImportShardyAttrsPass());
   pm.addPass(createSdyRoundTripShardMapImportPass());
