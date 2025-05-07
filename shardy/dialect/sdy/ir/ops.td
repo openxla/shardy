@@ -683,7 +683,7 @@ def Sdy_ReduceScatterOp: Sdy_Op<"reduce_scatter",
   let results = (outs AnyTensor:$result);
   let assemblyFormat = "$reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasVerifier = 1;
-  let hasCanonicalizer = 0;
+  let hasCanonicalizer = 1;
 }
 
 #endif  // SDY_OPS
