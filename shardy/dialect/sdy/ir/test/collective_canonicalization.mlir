@@ -222,3 +222,34 @@ func.func @reduce_scatter_fusion_no_subaxis_prefix_match(%arg0 : tensor<64x16xf3
   %1 = sdy.all_slice [{"r", "x", "z"}, {"y", "q"}] %0 out_sharding=<@mesh2, [{"r", "x", "z"}, {"y", "q"}]> : tensor<64x16xf32>
   return %1 : tensor<64x16xf32>
 }
+
+// CHECK-LABEL: func @all_to_all_fusion_success
+func.func @all_to_all_fusion_success(%arg0 : tensor<64x16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}, {}, {}]>}) -> tensor<64x16x8x8xf32> {
+  // CHECK-NEXT: %0 = sdy.all_to_all [{"x"}: 0->2, {"y"}: 1->3] %arg0 out_sharding=<@mesh, [{}, {}, {"x"}, {"y"}]> : tensor<64x16x8x8xf32>
+  // CHECK-NEXT: return %0 : tensor<64x16x8x8xf32>
+  %0 = sdy.all_to_all [{"x"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {"y"}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  %1 = sdy.all_to_all [{"y"}: 1->3] %0 out_sharding=<@mesh, [{}, {}, {"x"}, {"y"}]> : tensor<64x16x8x8xf32>
+  return %1 : tensor<64x16x8x8xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_fusion_overlapping_dims
+func.func @all_to_all_fusion_overlapping_dims(%arg0 : tensor<64x16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}, {}, {}]>}) -> tensor<64x16x8x8xf32> {
+  // CHECK-NEXT: %0 = sdy.all_to_all [{"x"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {"y"}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  // CHECK-NEXT: %1 = sdy.all_to_all [{"y"}: 1->0] %0 out_sharding=<@mesh, [{"y"}, {}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  // CHECK-NEXT: return %1 : tensor<64x16x8x8xf32>
+  %0 = sdy.all_to_all [{"x"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {"y"}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  %1 = sdy.all_to_all [{"y"}: 1->0] %0 out_sharding=<@mesh, [{"y"}, {}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  return %1 : tensor<64x16x8x8xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_fusion_multiple_uses
+func.func @all_to_all_fusion_multiple_uses(%arg0 : tensor<64x16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}, {}, {}]>}) -> tensor<64x16x8x8xf32> {
+  // CHECK-NEXT: %0 = sdy.all_to_all [{"x"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {"y"}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  // CHECK-NEXT: %1 = sdy.all_to_all [{"y"}: 1->0] %0 out_sharding=<@mesh, [{"y"}, {}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  // CHECK-NEXT: %2 = sdy.all_to_all [{"x"}: 2->0] %0 out_sharding=<@mesh, [{"x"}, {"y"}, {}, {}]> : tensor<64x16x8x8xf32>
+  // CHECK-NEXT: return %2 : tensor<64x16x8x8xf32>
+  %0 = sdy.all_to_all [{"x"}: 0->2] %arg0 out_sharding=<@mesh, [{}, {"y"}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  %1 = sdy.all_to_all [{"y"}: 1->0] %0 out_sharding=<@mesh, [{"y"}, {}, {"x"}, {}]> : tensor<64x16x8x8xf32>
+  %2 = sdy.all_to_all [{"x"}: 2->0] %0 out_sharding=<@mesh, [{"x"}, {"y"}, {}, {}]> : tensor<64x16x8x8xf32>
+  return %2 : tensor<64x16x8x8xf32>
+}
