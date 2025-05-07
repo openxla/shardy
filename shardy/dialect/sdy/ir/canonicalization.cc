@@ -314,6 +314,54 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
   }
 };
 
+class AlltoAllFusion : public OpRewritePattern<AllToAllOp> {
+ public:
+  using OpRewritePattern<AllToAllOp>::OpRewritePattern;
+
+ private:
+  LogicalResult matchAndRewrite(AllToAllOp allToAllOp,
+                                PatternRewriter& rewriter) const override {
+    if (range_size(allToAllOp->getUsers()) != 1) {
+      return rewriter.notifyMatchFailure(
+          allToAllOp, "op has multiple users");
+    }
+    auto userAllToAllOp = dyn_cast<AllToAllOp>(*allToAllOp->user_begin());
+    if (!userAllToAllOp) {
+      return rewriter.notifyMatchFailure(
+          allToAllOp, "user is not all-to-all");
+    }
+    // Combine the params of the two all-to-all ops into one.
+    SmallVector<AllToAllParamAttr> combinedParams;
+    combinedParams.reserve(allToAllOp.getParams().size() +
+                           userAllToAllOp.getParams().size());
+    combinedParams.append(allToAllOp.getParams().begin(),
+                          allToAllOp.getParams().end());
+    combinedParams.append(userAllToAllOp.getParams().begin(),
+                          userAllToAllOp.getParams().end());
+    // Check for overlap in the source and target dimensions.
+    BitVector seenDims(getTensorRank(allToAllOp.getResult()));
+    for (AllToAllParamAttr param : combinedParams) {
+      for (int64_t dim : {param.getSrcDim(), param.getTgtDim()}) {
+        if (seenDims.test(dim)) {
+          return rewriter.notifyMatchFailure(
+              allToAllOp, "overlapping dimensions in the combined parameters");
+        }
+        seenDims.set(dim);
+      }
+    }
+    llvm::sort(combinedParams,
+               [](const AllToAllParamAttr& a, const AllToAllParamAttr& b) {
+                 return a.getSrcDim() < b.getSrcDim();
+               });
+    rewriter.replaceOpWithNewOp<AllToAllOp>(
+        userAllToAllOp, userAllToAllOp.getResult().getType(),
+        allToAllOp.getTensor(), combinedParams,
+        userAllToAllOp.getOutSharding());
+    rewriter.eraseOp(allToAllOp);
+    return success();
+  }
+};
+
 }  // namespace
 
 void ManualComputationOp::getCanonicalizationPatterns(
@@ -345,7 +393,7 @@ void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  // We don't have patterns for all-to-all for now.
+  results.add<AlltoAllFusion>(context);
 }
 
 void CollectivePermuteOp::getCanonicalizationPatterns(
