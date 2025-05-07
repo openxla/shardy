@@ -1074,6 +1074,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 
     // Returns a vector of batching factor indices.
     SmallVector<int64_t> getBatchingFactors() const;
+
+    bool hasDimensionsWithMultipleFactors() const;
   }];
 }
 

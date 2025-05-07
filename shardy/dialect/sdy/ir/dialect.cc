@@ -1061,6 +1061,19 @@ SmallVector<int64_t> OpShardingRuleAttr::getBatchingFactors() const {
   return factorIndices;
 }
 
+bool OpShardingRuleAttr::hasDimensionsWithMultipleFactors() const {
+  for (const TensorMappingAttr& tensorMapping :
+       llvm::concat<const TensorMappingAttr>(getOperandMappings(),
+                                             getResultMappings())) {
+    for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
+      if (dimMapping.getFactorIndices().size() > 1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 // ManualComputationOp
 //===----------------------------------------------------------------------===//

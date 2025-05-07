@@ -807,7 +807,8 @@ AxesPerFactorWithMesh findCommonAxes(
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
       shardingRule.getNeedReplicationFactors().empty() &&
-      tensorCountWithShardedPermutationFactor < 2) {
+      tensorCountWithShardedPermutationFactor < 2 &&
+      !shardingRule.hasDimensionsWithMultipleFactors()) {
     return findCommonAxesOnUnaryOperation(inShardings, outShardings, projection,
                                           shardingRule, tensorSizes,
                                           symbolTable, mesh);
