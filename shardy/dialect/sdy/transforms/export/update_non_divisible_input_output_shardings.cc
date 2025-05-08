@@ -188,7 +188,7 @@ struct UpdateNonDivisibleInputOutputShardingsPass
     // Update edge owner shardings for `ShardableDataFlowOp`s and
     // `ShardingRuleOp`s.
     moduleOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
-      return TypeSwitch<Operation*, WalkResult>(op)
+      TypeSwitch<Operation*>(op)
           .Case<ShardableDataFlowOpInterface>([&](ShardableDataFlowOpInterface
                                                       shardableDataFlowOp) {
             if (shardableDataFlowOp.shouldKeepEdgeOwnerShardingsDivisible()) {
@@ -209,7 +209,6 @@ struct UpdateNonDivisibleInputOutputShardingsPass
                   },
                   symbolTable);
             }
-            return WalkResult::skip();
           })
           .Case<ShardingRuleOpInterface>(
               [&](ShardingRuleOpInterface shardableRuleOp) {
@@ -222,11 +221,7 @@ struct UpdateNonDivisibleInputOutputShardingsPass
                       },
                       symbolTable);
                 }
-                return WalkResult::skip();
-              })
-          .Default([&](Operation* op) -> WalkResult {
-            return WalkResult::advance();
-          });
+              });
     });
   }
 };
