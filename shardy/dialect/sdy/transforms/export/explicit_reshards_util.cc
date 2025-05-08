@@ -898,12 +898,11 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
       /*closedIfMissing=*/true);
 
   // TODO(enver): Handle convolution op.
-  // TODO(enver): Handle custom call ops.
   // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
   if (isa<stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
           stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
-          stablehlo::ConvolutionOp, stablehlo::CustomCallOp,
-          stablehlo::AllReduceOp, stablehlo::AllGatherOp, stablehlo::AllToAllOp,
+          stablehlo::ConvolutionOp, stablehlo::AllReduceOp,
+          stablehlo::AllGatherOp, stablehlo::AllToAllOp,
           stablehlo::CollectivePermuteOp>(op)) {
     return;
   }
