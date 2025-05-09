@@ -859,9 +859,14 @@ LogicalResult verifyManualComputationValue(
     }
 
     SmallVector<int64_t> newDimSizes;
-    auto globalRankedType = mlir::cast<RankedTensorType>(globalType);
+    auto globalShapedType = mlir::dyn_cast<ShapedType>(globalType);
+    if (!globalShapedType) {
+      // Skipping verification for non-shaped types. This could for example be
+      // a token type.
+      continue;
+    }
     for (auto [dimensionSize, dimSharding] : llvm::zip_equal(
-             globalRankedType.getShape(), sharding.getDimShardings())) {
+        globalShapedType.getShape(), sharding.getDimShardings())) {
       if (dimensionSize == ShapedType::kDynamic) {
         newDimSizes.push_back(ShapedType::kDynamic);
       } else {
@@ -884,7 +889,7 @@ LogicalResult verifyManualComputationValue(
     // 6. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     auto expectedLocalRankedType =
-        RankedTensorType::get(newDimSizes, globalRankedType.getElementType());
+        RankedTensorType::get(newDimSizes, globalShapedType.getElementType());
     auto localRankedType = mlir::cast<RankedTensorType>(localType);
     if (expectedLocalRankedType != localRankedType) {
       return op->emitOpError(valueKindStr)
