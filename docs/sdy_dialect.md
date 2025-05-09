@@ -466,6 +466,9 @@ communication.
 The body is local wrt the manual_axes. Propagation will occur through
 the body on any free axes - those not in the manual_axes list.
 
+Note that any unranked tensors are expected to have a sharding with rank 0,
+i.e. fully replicated.
+
 **Constraints:**
 - Elements in `in_shardings` and `out_shardings` must satisfy the constraints listed in `TensorShardingAttr`.
 - The number of global and local tensor inputs/outputs of the op region must match.
@@ -491,13 +494,13 @@ Interfaces: `ShardableDataFlowOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of ranked tensor of any type values |
+| `tensors` | variadic of any type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `results` | variadic of ranked tensor of any type values |
+| `results` | variadic of any type |
 
 
 
@@ -1274,9 +1277,10 @@ name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 - Elements in `dim_shardings` must satisfy the constraints listed in `DimensionShardingAttr`.
 - Elements in `replicated_axes` must satisfy the constraints listed in `AxisRefListAttr`.
 - If the corresponding tensor type isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
-- The tensor should have a rank.
-- The number of dimension shardings is equal to the rank of the tensor.
-- Dimensions of size 0 aren't sharded.
+- If it is a `ShapedType`, then:
+  - The tensor should have a rank.
+  - The number of dimension shardings is equal to the rank of the tensor.
+  - Dimensions of size 0 aren't sharded.
 - Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
 
 #### Parameters:
