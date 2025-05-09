@@ -180,6 +180,23 @@ func.func @named_computation_skip_tokens(%arg0: tensor<8x2xi32>, %arg1: !stableh
   return %0#0, %0#1 : tensor<8x2xi32>, !stablehlo.token
 }
 
+// CHECK-LABEL: func @manual_computation_skip_tokens
+func.func @manual_computation_skip_tokens(%arg0: tensor<8x2xi32>, %arg1: !stablehlo.token) -> (tensor<8x2xi32>, !stablehlo.token) {
+  // CHECK-NEXT: %[[MC:.*]]:2 = sdy.manual_computation(%arg0, %arg1)
+  // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg2 sharding=<@mesh, [{"a", ?}, {?}]> : tensor<8x2xi32>
+  // CHECK-NEXT:   sdy.return %[[EDGE_1]], %arg3 : tensor<8x2xi32>, !stablehlo.token
+  // CHECK-NEXT: } : (tensor<8x2xi32>, !stablehlo.token) -> (tensor<8x2xi32>, !stablehlo.token)
+  // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %[[MC]]#0 sharding=<@mesh, [{"a", ?}, {?}], replicated={"b"}> : tensor<8x2xi32>
+  // CHECK-NEXT: return %[[EDGE_2]], %[[MC]]#1 : tensor<8x2xi32>, !stablehlo.token
+  %0:2 = sdy.manual_computation(%arg0, %arg1)
+      in_shardings=[<@mesh, [{"a", ?}, {?}], replicated={"b"}>, <@mesh, []>]
+      out_shardings=[<@mesh, [{"a", ?}, {?}], replicated={"b"}>, <@mesh, []>]
+      manual_axes={"b"}  (%arg2: tensor<8x2xi32>, %arg3: !stablehlo.token) {
+    sdy.return %arg2, %arg3 : tensor<8x2xi32>, !stablehlo.token
+  } : (tensor<8x2xi32>, !stablehlo.token) -> (tensor<8x2xi32>, !stablehlo.token)
+  return %0#0, %0#1 : tensor<8x2xi32>, !stablehlo.token
+}
+
 // CHECK-LABEL: func @manual_computation_multiple_inputs_outputs
 func.func @manual_computation_multiple_inputs_outputs(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>) {
   // CHECK-NEXT: %[[MC:.*]]:2 = sdy.manual_computation(%arg0, %arg1)
