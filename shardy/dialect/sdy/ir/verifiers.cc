@@ -230,7 +230,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        EmitErrorFn emitError,
                                        bool checkDivisibility,
                                        ManualAxisToOwner alreadyManualAxes) {
-  if (mesh.isMaximal()) {
+  if (mesh.isMaximal() || (!type && shardingAttr.isFullyReplicated())) {
     // A maximal sharding says that this op should be executed on a single
     // device. Skip checking against the type of the op. Just make sure there
     // are no dimension shardings and replicated axes.
@@ -397,11 +397,14 @@ LogicalResult verifyTensorShardingPerValueAttr(
     bool verifyCommonMesh = true) {
   ArrayRef<TensorShardingAttr> shardingsPerValue =
       shardingPerValueAttr.getShardings();
-  if (types.empty() && shardingsPerValue.size() == 1 &&
-      shardingsPerValue.front().getMesh(symbolTable).isMaximal()) {
-    return verifyTensorShardingAttr(
-        shardingsPerValue.front(), Type(), op, symbolTable,
-        getEmitValueInRangeErrorFn(emitError, types.size(), /*index=*/0));
+  if (types.empty() && shardingsPerValue.size() == 1) {
+    TensorShardingAttr firstSharding = shardingsPerValue.front();
+    if (firstSharding.getMesh(symbolTable).isMaximal() ||
+        firstSharding.isFullyReplicated()) {
+      return verifyTensorShardingAttr(
+          firstSharding, Type(), op, symbolTable,
+          getEmitValueInRangeErrorFn(emitError, types.size(), /*index=*/0));
+    }
   }
   if (shardingsPerValue.size() != types.size()) {
     return emitError("shardings don't match number of values: ")
@@ -859,9 +862,14 @@ LogicalResult verifyManualComputationValue(
     }
 
     SmallVector<int64_t> newDimSizes;
-    auto globalRankedType = mlir::cast<RankedTensorType>(globalType);
+    auto globalShapedType = mlir::dyn_cast<ShapedType>(globalType);
+    if (!globalShapedType) {
+      // Skipping verification for non-shaped types. This could for example be
+      // a token type.
+      continue;
+    }
     for (auto [dimensionSize, dimSharding] : llvm::zip_equal(
-             globalRankedType.getShape(), sharding.getDimShardings())) {
+             globalShapedType.getShape(), sharding.getDimShardings())) {
       if (dimensionSize == ShapedType::kDynamic) {
         newDimSizes.push_back(ShapedType::kDynamic);
       } else {
@@ -884,7 +892,7 @@ LogicalResult verifyManualComputationValue(
     // 6. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     auto expectedLocalRankedType =
-        RankedTensorType::get(newDimSizes, globalRankedType.getElementType());
+        RankedTensorType::get(newDimSizes, globalShapedType.getElementType());
     auto localRankedType = mlir::cast<RankedTensorType>(localType);
     if (expectedLocalRankedType != localRankedType) {
       return op->emitOpError(valueKindStr)

@@ -576,9 +576,10 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     - Elements in `dim_shardings` must satisfy the constraints listed in `DimensionShardingAttr`.
     - Elements in `replicated_axes` must satisfy the constraints listed in `AxisRefListAttr`.
     - If the corresponding tensor type isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
-    - The tensor should have a rank.
-    - The number of dimension shardings is equal to the rank of the tensor.
-    - Dimensions of size 0 aren't sharded.
+    - If it is a `ShapedType`, then:
+      - The tensor should have a rank.
+      - The number of dimension shardings is equal to the rank of the tensor.
+      - Dimensions of size 0 aren't sharded.
     - Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
   }];
   let parameters = (ins
