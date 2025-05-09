@@ -166,3 +166,12 @@ func.func @maximal_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32
   stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
   return %arg0 : tensor<8x8xf32>
 }
+
+// CHECK-LABEL: func @replicated_sharding_no_results
+// CHECK-SAME:      (%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func @replicated_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@foo, []>]>} : (tensor<8x8xf32>) -> ()
+  // CHECK-NEXT: return %arg0 : tensor<8x8xf32>
+  stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@foo, []>]>} : (tensor<8x8xf32>) -> ()
+  return %arg0 : tensor<8x8xf32>
+}

@@ -17,6 +17,7 @@ limitations under the License.
 #define SDY_OPS
 
 include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/BuiltinAttributeInterfaces.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/SymbolInterfaces.td"
@@ -142,6 +143,9 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
     The body is local wrt the manual_axes. Propagation will occur through
     the body on any free axes - those not in the manual_axes list.
 
+    Note that any unranked tensors are expected to have a sharding with rank 0,
+    i.e. fully replicated.
+
     **Constraints:**
     - Elements in `in_shardings` and `out_shardings` must satisfy the constraints listed in `TensorShardingAttr`.
     - The number of global and local tensor inputs/outputs of the op region must match.
@@ -152,12 +156,12 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   }];
 
   let arguments = (ins
-    Variadic<AnyRankedTensor>:$tensors,
+    Variadic<AnyType>:$tensors,
     Sdy_TensorShardingPerValue:$in_shardings,
     Sdy_TensorShardingPerValue:$out_shardings,
     Sdy_ManualAxes:$manual_axes
   );
-  let results = (outs Variadic<AnyRankedTensor>:$results);
+  let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$body);
 
   let assemblyFormat = [{

@@ -488,3 +488,31 @@ func.func @dont_propagate_into_in_sharding_closed_dim_from_outside(%arg0: tensor
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %1: tensor<32x32xf32>
 }
+
+// CHECK-LABEL: func @manual_computation_with_tokens
+// CHECK-SAME:      %arg0: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>},
+// CHECK-SAME:      %arg1: tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b", ?}]>})
+// CHECK-SAME:      -> (!stablehlo.token, tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
+func.func @manual_computation_with_tokens(
+    %arg0: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>},
+    %arg1: tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>}
+) -> (!stablehlo.token, tensor<4x4xi64>) {
+  // CHECK-NEXT: %[[MAN_COMP:.*]]:2 = sdy.manual_computation(%arg0, %arg1)
+  // CHECK-SAME{LITERAL}:   in_shardings=[<@mesh, []>, <@mesh, [{"a", ?}, {"b"}]>]
+  // CHECK-SAME{LITERAL}:   out_shardings=[<@mesh, []>, <@mesh, [{"a", ?}, {"b"}]>]
+  // CHECK-SAME{LITERAL}:   manual_axes={"b"} (%arg2: !stablehlo.token, %arg3: tensor<4x2xi64>) {
+  // CHECK-NEXT:   %[[TOK:.*]] = stablehlo.custom_call @sdy_testonly(%arg2) : (!stablehlo.token) -> !stablehlo.token
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg3, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<4x2xi64>
+  // CHECK-NEXT:   sdy.return %[[TOK]], %[[ADD]] : !stablehlo.token, tensor<4x2xi64>
+  // CHECK-NEXT: } : (!stablehlo.token, tensor<4x4xi64>) -> (!stablehlo.token, tensor<4x4xi64>)
+  // CHECK-NEXT: return %[[MAN_COMP]]#0, %[[MAN_COMP]]#1 : !stablehlo.token, tensor<4x4xi64>
+  %0:2 = sdy.manual_computation(%arg0, %arg1)
+      in_shardings=[<@mesh, []>, <@mesh, [{?}, {"b"}]>]
+      out_shardings=[<@mesh, []>, <@mesh, [{?}, {"b"}]>]
+      manual_axes={"b"} (%arg2: !stablehlo.token, %arg3: tensor<4x2xi64>) {
+    %1 = stablehlo.custom_call @sdy_testonly(%arg2) : (!stablehlo.token) -> (!stablehlo.token)
+    %2 = stablehlo.add %arg3, %arg3 : tensor<4x2xi64>
+    sdy.return %1, %2 : !stablehlo.token, tensor<4x2xi64>
+  } : (!stablehlo.token, tensor<4x4xi64>) -> (!stablehlo.token, tensor<4x4xi64>)
+  return %0#0, %0#1 : !stablehlo.token, tensor<4x4xi64>
+}
