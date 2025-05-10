@@ -97,9 +97,9 @@ TensorShardingAttr getUpdatedShardingForPriority(
                 std::back_inserter(newReplicatedAxes), [&](AxisRefAttr axis) {
                   return !seenAxesWithCurrentPriority.contains(axis);
                 });
-  return TensorShardingAttr::get(curSharding.getContext(),
-                                 curSharding.getMeshOrRef(), newDimShardings,
-                                 newReplicatedAxes);
+  return TensorShardingAttr::get(
+      curSharding.getContext(), curSharding.getMeshOrRef(), newDimShardings,
+      newReplicatedAxes, curSharding.getUnreducedAxes());
 }
 
 // Updates the current sharding of all referenced values and function results in
@@ -147,7 +147,8 @@ TensorShardingAttr getInitializedSharding(TensorShardingAttr originalSharding,
   // updating? or can we assume we won't see split axes?
 
   return TensorShardingAttr::get(ctx, originalSharding.getMeshOrRef(),
-                                 newDimShardings, newReplicatedAxes);
+                                 newDimShardings, newReplicatedAxes,
+                                 originalSharding.getUnreducedAxes());
 }
 
 // Clears `priorities` and add all non-zero priorities in `sharding` to it.

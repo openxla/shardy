@@ -48,7 +48,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -214,9 +213,13 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 // - The number of dimension shardings is equal to the rank of the tensor.
 // - Replicated axes are ordered w.r.t. `mesh` (see
 //   AxisRefAttr::getMeshComparator).
-// - All dimension shardings and the replicated axes are each a valid axis-ref
-//   list (see `verifyAxisRefList`).
+// - Unreduced axes are ordered w.r.t. `mesh` (see
+//   AxisRefAttr::getMeshComparator).
+// - All dimension shardings, replicated axes, and unreduced axes are each a
+//   valid axis-ref list (see `verifyAxisRefList`).
 // - All sub-axes in `shardingAttr` (see `verifySubAxes`).
+// - There are no duplicate axis-refs or sub-axes that overlap with one another
+//   across all fields.
 // - If `alreadyManualAxes` is not empty, then it verifies that when
 //   shardingAttr is inside a ManualComputationOp (possibly
 //   nested), then it only operates on axes not already marked as manual.
@@ -234,11 +237,12 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
     // A maximal sharding says that this op should be executed on a single
     // device. Skip checking against the type of the op. Just make sure there
     // are no dimension shardings and replicated axes.
-    if (!shardingAttr.getDimShardings().empty() ||
-        !shardingAttr.getReplicatedAxes().empty()) {
+    if (shardingAttr.getRank() != 0 ||
+        !shardingAttr.getReplicatedAxes().empty() ||
+        !shardingAttr.getUnreducedAxes().empty()) {
       return emitError(
-          "a maximal sharding must have no dimension shardings and "
-          "no replicated axes.");
+          "a maximal sharding can only have a sharding with rank 0 and no "
+          "replicated or unreduced axes.");
     }
     return success();
   }
@@ -252,10 +256,11 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   }
   if (!tensorType) {
     if (shardingAttr.getRank() != 0 ||
-        !shardingAttr.getReplicatedAxes().empty()) {
+        !shardingAttr.getReplicatedAxes().empty() ||
+        !shardingAttr.getUnreducedAxes().empty()) {
       return emitError(
                  "non-shaped tensors can only have a sharding with rank 0 ")
-             << "and no replicated axes. type: " << type
+             << "and no replicated or unreduced axes. type: " << type
              << ", sharding: " << shardingAttr;
     }
     return success();
@@ -310,14 +315,25 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
     }
   }
 
-  // Verify replicated axes
   auto axisRefComparator = AxisRefAttr::getMeshComparator(mesh);
-  ArrayRef<AxisRefAttr> replicatedAxes = shardingAttr.getReplicatedAxes();
-  if (!llvm::is_sorted(replicatedAxes, axisRefComparator)) {
-    return emitError("replicated axes are not ordered w.r.t. mesh");
+  auto verifySortedAxisRefList = [&](ArrayRef<AxisRefAttr> axisRefList,
+                                     StringRef name) -> LogicalResult {
+    if (!llvm::is_sorted(axisRefList, axisRefComparator)) {
+      return emitError(name) << " axes are not ordered w.r.t. mesh";
+    }
+    return verifyAxisRefList(axisRefList, axisNameToSize, seenAxisRefs,
+                             axisNameToSubAxes, emitError);
+  };
+
+  // Verify replicated axes
+  if (failed(verifySortedAxisRefList(shardingAttr.getReplicatedAxes(),
+                                     "replicated"))) {
+    return failure();
   }
-  if (failed(verifyAxisRefList(replicatedAxes, axisNameToSize, seenAxisRefs,
-                               axisNameToSubAxes, emitError))) {
+
+  // Verify unreduced axes
+  if (failed(verifySortedAxisRefList(shardingAttr.getUnreducedAxes(),
+                                     "unreduced"))) {
     return failure();
   }
 

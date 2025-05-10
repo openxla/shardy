@@ -56,9 +56,9 @@ MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
 
 TensorShardingAttr replaceMesh(TensorShardingAttr sharding,
                                StringAttr meshName) {
-  return TensorShardingAttr::get(sharding.getContext(), meshName,
-                                 sharding.getDimShardings(),
-                                 sharding.getReplicatedAxes());
+  return TensorShardingAttr::get(
+      sharding.getContext(), meshName, sharding.getDimShardings(),
+      sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
 }
 
 struct LiftInlinedMeshesPass

@@ -35,6 +35,21 @@ func.func @simple(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2
   return %1 : tensor<8x16xf32>
 }
 
+sdy.mesh @mesh = <["replica"=2, "data"=64, "model"=4]>
+
+func.func @main(
+    %arg0: tensor<128x8192x256128xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"replica", "data"}, {}, {"model"}]>},
+    %arg1: tensor<128x8192x256128xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"replica", "data"}, {}, {}]>},
+    %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<128x8192x4096xf32>, tensor<128x8192x4096xi32>) {
+  %0:2 = stablehlo.custom_call @PartialReduce(%arg0, %arg1, %arg2, %arg3)
+    {backend_config = "{\22log2_reduction\22: 6, \22reduction_dim\22: 2, \22to_apply_type\22: \22comparator\22, \22top_k\22: 128, \22recall_target\22: 0.960000}",
+     called_computations = [@top_k_gt_f32_comparator.12746.clone.clone.clone.clone.clone],
+     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"replica", "data", ?}, {?}, {?}]>, <@mesh, [{"replica", "data", ?}, {?}, {?}]>]>} :
+     (tensor<128x8192x256128xf32>, tensor<128x8192x256128xi32>, tensor<f32>, tensor<i32>) -> (tensor<128x8192x4096xf32>, tensor<128x8192x4096xi32>)
+  return %0#0, %0#1 : tensor<128x8192x4096xf32>, tensor<128x8192x4096xi32>
+}
+
+
 // CHECK-LABEL: func @pointwise_size_zero_dim(
 // CHECK-SAME:      %arg0: tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
 // CHECK-SAME:  -> (tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>}) {

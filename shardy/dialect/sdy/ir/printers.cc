@@ -62,6 +62,26 @@ void printMeshOrRef(AsmPrinter& printer, Attribute meshOrRef) {
   }
 }
 
+namespace {
+
+void printOptionalNamedAxisList(AsmPrinter& printer, StringRef keyword,
+                                ArrayRef<AxisRefAttr> axisList) {
+  if (!axisList.empty()) {
+    printer << ", " << keyword << "={";
+    printer.printStrippedAttrOrType(axisList);
+    printer << "}";
+  }
+}
+
+}  // namespace
+
+void printReplicatedAndUnreducedAxes(AsmPrinter& printer,
+                                     ArrayRef<AxisRefAttr> replicatedAxes,
+                                     ArrayRef<AxisRefAttr> unreducedAxes) {
+  printOptionalNamedAxisList(printer, "replicated", replicatedAxes);
+  printOptionalNamedAxisList(printer, "unreduced", unreducedAxes);
+}
+
 void printFactorSizes(AsmPrinter& printer, ArrayRef<int64_t> factorSizes) {
   if (factorSizes.empty()) {
     return;
