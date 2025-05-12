@@ -34,6 +34,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
@@ -70,16 +71,6 @@ bool hasShardedPermutationFactorsPerTensor(
                         return !factorSharding.axisRefs.empty() &&
                                shardingRule.isPermutationFactor(factorIndex);
                       });
-}
-
-int64_t findTensorCountWithShardedPermutationFactor(
-    const ShardingProjection& projection, OpShardingRuleAttr shardingRule) {
-  return llvm::count_if(llvm::concat<const TensorFactorShardings>(
-                            projection.getOperands(), projection.getResults()),
-                        [&](const TensorFactorShardings& tensorFactorSharding) {
-                          return hasShardedPermutationFactorsPerTensor(
-                              tensorFactorSharding, shardingRule);
-                        });
 }
 
 // Checks if factor sharding is compatible, that is, it satisfies:
@@ -309,19 +300,25 @@ struct FactorAxesCandidate {
   // to axes A, and this factor-axes pair has axes B, the size of further
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
   int64_t shardingSize = 0;
+  int64_t factorTypePrecedence = 0;
 
   FactorAxesCandidate(FactorAxesPair factorAxes, int64_t count,
-                      int64_t sourceTensorSize, int64_t shardingSize)
+                      int64_t sourceTensorSize, int64_t shardingSize,
+                      FactorType factorType)
       : factorAxes(factorAxes),
         count(count),
         sourceTensorSize(sourceTensorSize),
-        shardingSize(shardingSize) {}
+        shardingSize(shardingSize),
+        factorTypePrecedence(precedence(factorType)) {}
 
   FactorAxesCandidate() = default;
 
   bool operator<(const FactorAxesCandidate& rhs) const {
     if (count != rhs.count) {
       return count < rhs.count;
+    }
+    if (factorTypePrecedence != rhs.factorTypePrecedence) {
+      return factorTypePrecedence < rhs.factorTypePrecedence;
     }
     if (sourceTensorSize != rhs.sourceTensorSize) {
       return sourceTensorSize < rhs.sourceTensorSize;
@@ -333,6 +330,21 @@ struct FactorAxesCandidate {
     // of another, the strict prefix one is smaller.
     return factorAxes < rhs.factorAxes;
   }
+
+  // A candidate with a higher precedence will always be preferable to a
+  // candiate with a lower precedence when finding the the best candidate to
+  // extend the factor sharding assignment during the majority vote heuristic.
+  int64_t precedence(FactorType factorType) {
+    switch (factorType) {
+      case FactorType::kPassThrough:
+      case FactorType::kReduction:
+        return 2;
+      case FactorType::kPermutation:
+        return 1;
+      case FactorType::kNeedReplication:
+        return 0;
+    }
+  }
 };
 
 using FactorAxesCandidatesMap =
@@ -342,7 +354,8 @@ using FactorAxesCandidatesMap =
 // to keep the largest.
 void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
                                const FactorAxesPair& factorAxes,
-                               int64_t sourceTensorSize, const Mesh& mesh) {
+                               int64_t sourceTensorSize, const Mesh& mesh,
+                               const FactorType factorType) {
   if (auto factorAxesCountIt = factorAxesCounts.find(factorAxes);
       factorAxesCountIt != factorAxesCounts.end()) {
     FactorAxesCandidate& candidate = factorAxesCountIt->second;
@@ -351,9 +364,9 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
         std::max(candidate.sourceTensorSize, sourceTensorSize);
     return;
   }
-  factorAxesCounts.try_emplace(factorAxes, factorAxes, /*count=*/1,
-                               sourceTensorSize,
-                               factorAxes.axes.getShardingSize(mesh.attr()));
+  factorAxesCounts.try_emplace(
+      factorAxes, factorAxes, /*count=*/1, sourceTensorSize,
+      factorAxes.axes.getShardingSize(mesh.attr()), factorType);
 }
 
 // A container for FactorAxesCandidates where the order of iteration does not
@@ -491,13 +504,15 @@ FactorAxesCandidateBag findFactorAxesCandidates(
       FactorAxesPair factorAxes(factorIndex,
                                 AxisListRef(factorSharding.axisRefs));
       updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxes,
-                                tensorSizes[tensorIndex], mesh);
+                                tensorSizes[tensorIndex], mesh,
+                                shardingRule.getFactorType(factorIndex));
       // Increment counts for all its strict prefixes.
       for (const AxisListRef& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
           updateFactorAxesCandidate(factorAxesCandidatesMap,
                                     FactorAxesPair(factorIndex, axes),
-                                    tensorSizes[tensorIndex], mesh);
+                                    tensorSizes[tensorIndex], mesh,
+                                    shardingRule.getFactorType(factorIndex));
         }
       }
     }
@@ -807,12 +822,6 @@ AxesPerFactorWithMesh findCommonAxes(
     return findCommonAxesOnUnaryOperation(inShardings, outShardings, projection,
                                           shardingRule, tensorSizes,
                                           symbolTable, mesh);
-  }
-
-  // TODO(enver): Handle the case that tensors have sharded permutation factors.
-  if (findTensorCountWithShardedPermutationFactor(projection, shardingRule) >
-      0) {
-    return AxesPerFactorWithMesh();
   }
 
   AxesPerFactor factorCommonAxes = findCommonAxesUsingMajorityVoteHeuristic(
