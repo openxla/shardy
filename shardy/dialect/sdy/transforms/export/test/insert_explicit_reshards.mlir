@@ -5,6 +5,7 @@ sdy.mesh @mesh_xt = <["x"=2, "t"=4]>
 sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh_xyzt = <["x"=4, "y"=4, "z"=4, "t"=8]>
 sdy.mesh @mesh_xyzp = <["x"=4, "y"=2, "z"=4, "p"=3]>
+sdy.mesh @mesh_xpq = <["x"=4, "p"=3, "q"=5]>
 sdy.mesh @mesh_xy = <["x"=2, "y"=3]>
 sdy.mesh @mesh_iota = <["x"=3, "y"=2]>
 sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
@@ -2048,26 +2049,39 @@ func.func @custom_call_eigh(%arg0: tensor<8x4x4xf32> {sdy.sharding = #sdy.shardi
 }
 
 // CHECK-LABEL: func @custom_call_qr
-func.func @custom_call_qr(%arg0: tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>) {
+// TODO(enver): Actually the factors that need replication can be moved to batching dim.
+func.func @custom_call_qr(%arg0: tensor<8x5x3xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"q"}, {"p"}]>}) -> (tensor<8x5x3xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"q"}, {"p"}]>}, tensor<8x3xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"p"}]>}) {
   // NOTE: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k], [i, l]) {i=8, j=5, k=3, l=3} need_replication={j, k, l}>
-  // CHECK-NOT: sdy.reshard
-  %0:2 = stablehlo.custom_call @Qr(%arg0) : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xpq, [{"x"}, {}, {}]> : tensor<8x5x3xf32>
+  // CHECK-NEXT: %[[CUSTOM_CALL:.*]]:2 = stablehlo.custom_call @Qr(%[[RESHARD1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{"x"}, {}, {}]>, <@mesh_xpq, [{"x"}, {}]>]>} : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[CUSTOM_CALL]]#0 <@mesh_xpq, [{"x"}, {"q"}, {"p"}]> : tensor<8x5x3xf32>
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[CUSTOM_CALL]]#1 <@mesh_xpq, [{"x"}, {"p"}]> : tensor<8x3xf32>
+  // CHECK-NEXT: return %[[RESHARD2]], %[[RESHARD3]] : tensor<8x5x3xf32>, tensor<8x3xf32>
+  %0:2 = stablehlo.custom_call @Qr(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{"x"}, {"q"}, {"p"}]>, <@mesh_xpq, [{"x"}, {"p"}]>]>} : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
   return %0#0, %0#1 : tensor<8x5x3xf32>, tensor<8x3xf32>
 }
 
 // CHECK-LABEL: func @custom_call_qr_decomposition_block
-func.func @custom_call_qr_decomposition_block(%arg0: tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>) {
+func.func @custom_call_qr_decomposition_block(%arg0: tensor<8x5x3xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"q"}, {"p"}]>}) -> (tensor<8x5x3xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"q"}, {"p"}]>}, tensor<8x3xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"p"}]>}) {
   // NOTE: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k], [i, l]) {i=8, j=5, k=3, l=3} need_replication={j, k, l}>
-  // CHECK-NOT: sdy.reshard
-  %0:2 = stablehlo.custom_call @QrDecompositionBlock(%arg0) : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xpq, [{"x"}, {}, {}]> : tensor<8x5x3xf32>
+  // CHECK-NEXT: %[[CUSTOM_CALL:.*]]:2 = stablehlo.custom_call @QrDecompositionBlock(%[[RESHARD1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{"x"}, {}, {}]>, <@mesh_xpq, [{"x"}, {}]>]>} : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[CUSTOM_CALL]]#0 <@mesh_xpq, [{"x"}, {"q"}, {"p"}]> : tensor<8x5x3xf32>
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[CUSTOM_CALL]]#1 <@mesh_xpq, [{"x"}, {"p"}]> : tensor<8x3xf32>
+  // CHECK-NEXT: return %[[RESHARD2]], %[[RESHARD3]] : tensor<8x5x3xf32>, tensor<8x3xf32>
+  %0:2 = stablehlo.custom_call @QrDecompositionBlock(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{"x"}, {"q"}, {"p"}]>, <@mesh_xpq, [{"x"}, {"p"}]>]>} : (tensor<8x5x3xf32>) -> (tensor<8x5x3xf32>, tensor<8x3xf32>)
   return %0#0, %0#1 : tensor<8x5x3xf32>, tensor<8x3xf32>
 }
 
 // CHECK-LABEL: func @custom_call_householder_product
-func.func @custom_call_householder_product(%arg0: tensor<8x12x16xf32>, %arg1: tensor<8x5xf32>) -> tensor<8x12x16xf32> {
+func.func @custom_call_householder_product(%arg0: tensor<8x12x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x":(1)2}, {"p"}, {"x":(2)2}]>}, %arg1: tensor<8x5xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {"q"}]>}) -> (tensor<8x12x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x":(1)2}, {"p"}, {"x":(2)2}]>}) {
   // NOTE: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, l])->([i, j, k]) {i=8, j=12, k=16, l=5} need_replication={j, k, l}>
-  // CHECK-NOT: sdy.reshard
-  %0 = stablehlo.custom_call @ProductOfElementaryHouseholderReflectors(%arg0, %arg1) : (tensor<8x12x16xf32>, tensor<8x5xf32>) -> tensor<8x12x16xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xpq, [{"x"}, {}, {}]> : tensor<8x12x16xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg1 <@mesh_xpq, [{"x"}, {}]> : tensor<8x5xf32>
+  // CHECK-NEXT: %[[CUSTOM_CALL:.*]] = stablehlo.custom_call @ProductOfElementaryHouseholderReflectors(%[[RESHARD1]], %[[RESHARD2]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{"x"}, {}, {}]>]>} : (tensor<8x12x16xf32>, tensor<8x5xf32>) -> tensor<8x12x16xf32>
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[CUSTOM_CALL]] <@mesh_xpq, [{"x":(1)2}, {"p"}, {"x":(2)2}]> : tensor<8x12x16xf32>
+  // CHECK-NEXT: return %[[RESHARD3]] : tensor<8x12x16xf32>
+  %0 = stablehlo.custom_call @ProductOfElementaryHouseholderReflectors(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{"x":(1)2}, {"p"}, {"x":(2)2}]>]>} : (tensor<8x12x16xf32>, tensor<8x5xf32>) -> tensor<8x12x16xf32>
   return %0 : tensor<8x12x16xf32>
 }
 
