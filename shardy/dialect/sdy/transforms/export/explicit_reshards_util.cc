@@ -21,7 +21,9 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -271,6 +273,11 @@ struct FactorAxesPair {
   }
 
   bool empty() const { return factorIndex == kEmptyFactorIndex; }
+
+  bool isFullySharded(OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+    return axes.getShardingSize(mesh) ==
+           shardingRule.getFactorSizes()[factorIndex];
+  }
 };
 
 struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
@@ -345,6 +352,8 @@ struct FactorAxesCandidate {
         return 0;
     }
   }
+
+  bool empty() const { return factorAxes.empty(); }
 };
 
 using FactorAxesCandidatesMap =
@@ -374,7 +383,10 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
 // while maintaining the best through explicit calls on its touchAt method.
 class FactorAxesCandidateBag {
  public:
-  FactorAxesCandidateBag(MeshAttr mesh) : mesh(mesh) {}
+  FactorAxesCandidateBag(MeshAttr mesh, OpShardingRuleAttr shardingRule)
+      : mesh(mesh) {
+    initFactorDependencies(shardingRule);
+  }
 
   // Returns whether the bag is empty.
   bool empty() const { return candidates.empty(); }
@@ -382,7 +394,7 @@ class FactorAxesCandidateBag {
   // Inserts a new candidate to the bag. Performs in constant-time.
   void insert(const FactorAxesCandidate& candidate) {
     candidates.push_back(candidate);
-    bestCandidate = std::max(bestCandidate, candidate);
+    updateBestCandidateIfValid(candidate);
   }
 
   // Updates the sharding size of the one at index as the  product of the
@@ -395,7 +407,7 @@ class FactorAxesCandidateBag {
     FactorAxesCandidate& candidate = candidates[index];
     candidate.shardingSize =
         candidate.factorAxes.axes.getExpandedShardingSize(mesh, prefix);
-    bestCandidate = std::max(bestCandidate, candidate);
+    updateBestCandidateIfValid(candidate);
   }
 
   // Updates the source tensor sizes of all candidates.
@@ -425,6 +437,12 @@ class FactorAxesCandidateBag {
     }
   }
 
+  void dropFactorDependencies(const int64_t factorIndex) {
+    for (auto& [_, factorDependencies] : factorDependenciesMap) {
+      factorDependencies.reset(factorIndex);
+    }
+  }
+
   // Resets best. Performs in constant-time.
   void resetBest() { bestCandidate = FactorAxesCandidate(); }
 
@@ -449,16 +467,60 @@ class FactorAxesCandidateBag {
   int64_t size() const { return candidates.size(); }
 
  private:
+  void initFactorDependencies(OpShardingRuleAttr shardingRule) {
+    for (const TensorMappingAttr& tensorMapping :
+         llvm::concat<const TensorMappingAttr>(
+             shardingRule.getOperandMappings(),
+             shardingRule.getResultMappings())) {
+      for (DimMappingAttr dimMapping : tensorMapping.getDimMappings()) {
+        ArrayRef<int64_t> factorIndices = dimMapping.getFactorIndices();
+        for (int64_t index = 1; index < factorIndices.size(); index++) {
+          int64_t factorIndex = factorIndices[index];
+          int64_t dependsOn = factorIndices[index - 1];
+          if (!factorDependenciesMap.contains(factorIndex)) {
+            factorDependenciesMap.try_emplace(factorIndex,
+                                              shardingRule.getNumFactors());
+          }
+          factorDependenciesMap[factorIndex].set(dependsOn);
+        }
+      }
+    }
+  }
+
+  void updateBestCandidateIfValid(const FactorAxesCandidate& candidate) {
+    if (isValid(candidate)) {
+      bestCandidate = std::max(bestCandidate, candidate);
+    }
+  }
+
+  bool isValid(const FactorAxesCandidate& candidate) {
+    auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
+    return it == factorDependenciesMap.end() || it->second.none();
+  }
+
   void updateSourceTensorSizeAt(const int64_t factorIndex, const int64_t index,
                                 const int64_t sourceTensorSize) {
     FactorAxesCandidate& candidate = candidates[index];
     if (candidate.factorAxes.factorIndex == factorIndex) {
       candidate.sourceTensorSize =
           std::max(candidate.sourceTensorSize, sourceTensorSize);
-      bestCandidate = std::max(bestCandidate, candidate);
+      updateBestCandidateIfValid(candidate);
     }
   }
 
+  // A factor is non-full if its sharding size is smaller than the size of the
+  // factor. `factorDependenciesMap` is a map from factor indices to bitvectors,
+  // each bitvector is associated with a factor f, and represents the set of
+  // non-full factor indices that factor f depends on. A factor f depends on
+  // factor g if two factors appear together in any tensor dimension, and g
+  // appears immediately before f. This list is used to determine if a
+  // factor-axes candidate is valid yet since a factor should not be sharded
+  // until it does have zero dependencies, that is, all factors that appear, in
+  // any tensor dimension, before the factor needs to be fully-sharded,
+  // otherwise it would introduce a strided view which is not supported yet.
+  // Note that a factor may depend on separate factors on separate dimensions,
+  // hence it may depend on multiple factors.
+  llvm::SmallDenseMap<int64_t, BitVector> factorDependenciesMap;
   SmallVector<FactorAxesCandidate> candidates;
   FactorAxesCandidate bestCandidate;
   // Used for recalculating sharding size of a candidate.
@@ -518,7 +580,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
     }
   }
 
-  FactorAxesCandidateBag factorAxesCandidates(mesh.attr());
+  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule);
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
     factorAxesCandidates.insert(candidate);
   }
@@ -548,10 +610,13 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
       findFactorAxesCandidates(projection, shardingRule, tensorSizes, mesh);
   // TODO(enver): Assign an axis to a factor immediately if the count is more
   // than floor(n/2) where n is the number of tensors.
-  while (!factorAxesCandidates.empty()) {
+  while (!factorAxesCandidates.best().empty()) {
     FactorAxesPair bestFactorAxes = factorAxesCandidates.best().factorAxes;
     factorAxesCandidates.resetBest();
     factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
+    if (bestFactorAxes.isFullySharded(shardingRule, mesh.attr())) {
+      factorAxesCandidates.dropFactorDependencies(bestFactorAxes.factorIndex);
+    }
     // Invalidate axes that overlaps with the picked one across all unseen
     // factors. During the iteration, also find the new best.
     int64_t candidateIndex = 0;
