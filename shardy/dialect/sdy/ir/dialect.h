@@ -92,7 +92,7 @@ struct SdyDialectVersion : public mlir::DialectVersion {
   }
 
   // Current version of Shardy dialect.
-  static SdyDialectVersion getCurrentVersion() { return {0, 0, 0}; }
+  static SdyDialectVersion getCurrentVersion() { return {0, 0, 1}; }
 
   // Parse version in format "123.1235.13"
   // each number is 0-max(int64_t)

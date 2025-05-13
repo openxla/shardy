@@ -514,16 +514,21 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
         dimSharding,
         getFirstFreeAxisIter(dimAxes, manualAxes) - dimAxes.begin()));
   }
-  // Grab any replicated axes that are not manual axes. Can't use
-  // `partition_point` as there is no defined order for replicated axes.
+  // Grab any replicated/unreduced axes that are not manual axes. Can't use
+  // `partition_point` as there is no defined order for replicated/unreduced
+  // axes.
+  auto isFreeAxis = [&](AxisRefAttr axis) {
+    return !llvm::is_contained(manualAxes, axis.getName());
+  };
   SmallVector<AxisRefAttr> newReplicatedAxes;
   llvm::copy_if(outerManualSharding.getReplicatedAxes(),
-                std::back_inserter(newReplicatedAxes), [&](AxisRefAttr axis) {
-                  return !llvm::is_contained(manualAxes, axis.getName());
-                });
-  return TensorShardingAttr::get(outerManualSharding.getContext(),
-                                 outerManualSharding.getMeshOrRef(),
-                                 newDimShardings, newReplicatedAxes);
+                std::back_inserter(newReplicatedAxes), isFreeAxis);
+  SmallVector<AxisRefAttr> newUnreducedAxes;
+  llvm::copy_if(outerManualSharding.getUnreducedAxes(),
+                std::back_inserter(newUnreducedAxes), isFreeAxis);
+  return TensorShardingAttr::get(
+      outerManualSharding.getContext(), outerManualSharding.getMeshOrRef(),
+      newDimShardings, newReplicatedAxes, newUnreducedAxes);
 }
 
 }  // namespace

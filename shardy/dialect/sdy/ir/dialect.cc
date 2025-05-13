@@ -678,7 +678,7 @@ TensorShardingAttr TensorShardingAttr::getFullyReplicated(MLIRContext* context,
       /*dimShardings=*/
       SmallVector<DimensionShardingAttr>(
           rank, DimensionShardingAttr::get(context, {}, isClosed)),
-      /*replicatedAxes=*/{});
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
 }
 
 // Creates fully open or closed tensor sharding attr.
@@ -699,7 +699,7 @@ MeshAttr TensorShardingAttr::getMesh(Operation* op) const {
 }
 
 bool TensorShardingAttr::emptyAxes() const {
-  return getReplicatedAxes().empty() &&
+  return getReplicatedAxes().empty() && getUnreducedAxes().empty() &&
          llvm::all_of(getDimShardings(),
                       [](const DimensionShardingAttr& dimSharding) {
                         return dimSharding.emptyAxes();
@@ -713,7 +713,8 @@ bool TensorShardingAttr::anyOfAxisRef(
       return true;
     }
   }
-  return llvm::any_of(getReplicatedAxes(), predicate);
+  return llvm::any_of(getReplicatedAxes(), predicate) ||
+         llvm::any_of(getUnreducedAxes(), predicate);
 }
 
 void TensorShardingAttr::forEachAxisRef(
@@ -722,6 +723,7 @@ void TensorShardingAttr::forEachAxisRef(
     llvm::for_each(dimSharding.getAxes(), callback);
   }
   llvm::for_each(getReplicatedAxes(), callback);
+  llvm::for_each(getUnreducedAxes(), callback);
 }
 
 bool TensorShardingAttr::isBound(StringRef axisName) const {
@@ -747,7 +749,7 @@ TensorShardingAttr TensorShardingAttr::closeShardingDims(
         getContext(), dimShardings[dim].getAxes(), /*isClosed=*/true);
   }
   return TensorShardingAttr::get(getContext(), getMeshOrRef(), dimShardings,
-                                 getReplicatedAxes());
+                                 getReplicatedAxes(), getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::openShardingDims(
@@ -759,7 +761,7 @@ TensorShardingAttr TensorShardingAttr::openShardingDims(
         getContext(), dimShardings[dim].getAxes(), /*isClosed=*/false);
   }
   return TensorShardingAttr::get(getContext(), getMeshOrRef(), dimShardings,
-                                 getReplicatedAxes());
+                                 getReplicatedAxes(), getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::replaceDimSharding(
@@ -767,13 +769,14 @@ TensorShardingAttr TensorShardingAttr::replaceDimSharding(
   SmallVector<DimensionShardingAttr> shardings(getDimShardings());
   shardings[dim] = sharding;
   return TensorShardingAttr::get(getContext(), getMeshOrRef(), shardings,
-                                 getReplicatedAxes());
+                                 getReplicatedAxes(), getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::replaceReplicatedAxes(
     ArrayRef<AxisRefAttr> replicatedAxes) const {
   return TensorShardingAttr::get(getContext(), getMeshOrRef(),
-                                 getDimShardings(), replicatedAxes);
+                                 getDimShardings(), replicatedAxes,
+                                 getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::getSharded(int64_t dim,
@@ -795,7 +798,8 @@ TensorShardingAttr TensorShardingAttr::getReplicated(StringRef axisName,
       newAxisRef);
 
   return TensorShardingAttr::get(getContext(), getMeshOrRef(),
-                                 getDimShardings(), newReplicatedAxes);
+                                 getDimShardings(), newReplicatedAxes,
+                                 getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyClosed(MLIRContext* context,
@@ -825,7 +829,7 @@ TensorShardingAttr TensorShardingAttr::getClosedLike(
   }
   return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
                                  /*dimShardings=*/closedDimShardings,
-                                 /*replicatedAxes=*/{});
+                                 /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
 }
 
 TensorShardingAttr TensorShardingAttr::getClosed(
@@ -838,7 +842,7 @@ TensorShardingAttr TensorShardingAttr::getClosed(
         DimensionShardingAttr::get(context, axes, /*is_closed=*/true));
   }
   return TensorShardingAttr::get(context, meshOrRef, dimShardings,
-                                 /*replicatedAxes=*/{});
+                                 /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
@@ -1110,7 +1114,8 @@ TensorShardingAttr addFreeAxesToManualComputationSharding(
   }
   return TensorShardingAttr::get(newSharding.getContext(),
                                  newSharding.getMeshOrRef(), resultDimShardings,
-                                 outerManualSharding.getReplicatedAxes());
+                                 outerManualSharding.getReplicatedAxes(),
+                                 outerManualSharding.getUnreducedAxes());
 }
 
 }  // namespace

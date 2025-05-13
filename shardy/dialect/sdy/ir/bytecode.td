@@ -107,23 +107,48 @@ def Sdy_DimensionShardingAttrBc: DialectAttribute<(attr
 
 
 //===----------------------------------------------------------------------===//
-// TensorShardingAttr - assigned index 6
+// TensorShardingAttr V1 - assigned index 6
 //===----------------------------------------------------------------------===//
-def Sdy_TensorShardingAttrBc : DialectAttribute<(attr
+def Sdy_TensorShardingAttrV1Bc : DialectAttribute<(attr
   Attribute:$mesh_or_ref,
   Array<Sdy_DimensionShardingAttrBc>:$dim_shardings,
   Array<Sdy_AxisRefAttrBc>:$replicated_axes
 )> {
   let cType = "TensorShardingAttr";
+  let printerPredicate = "$_val.getUnreducedAxes().empty()";
 }
 
 //===----------------------------------------------------------------------===//
-// TensorShardingPerValueAttr - assigned index 7
+// TensorShardingAttr V2 - assigned index 15
 //===----------------------------------------------------------------------===//
-def Sdy_TensorShardingPerValueAttrBc : DialectAttribute<(attr
-  Array<Sdy_TensorShardingAttrBc>:$shardings
+def Sdy_TensorShardingAttrV2Bc : DialectAttribute<(attr
+  Attribute:$mesh_or_ref,
+  Array<Sdy_DimensionShardingAttrBc>:$dim_shardings,
+  Array<Sdy_AxisRefAttrBc>:$replicated_axes,
+  Array<Sdy_AxisRefAttrBc>:$unreduced_axes
+)> {
+  let cType = "TensorShardingAttr";
+  let printerPredicate = "!$_val.getUnreducedAxes().empty()";
+}
+
+//===----------------------------------------------------------------------===//
+// TensorShardingPerValueAttr V1 - assigned index 7
+//===----------------------------------------------------------------------===//
+def Sdy_TensorShardingPerValueAttrV1Bc : DialectAttribute<(attr
+  Array<Sdy_TensorShardingAttrV1Bc>:$shardings
 )> {
   let cType = "TensorShardingPerValueAttr";
+  let printerPredicate = "!$_val.anyShardingHasUnreducedAxes()";
+}
+
+//===----------------------------------------------------------------------===//
+// TensorShardingPerValueAttr V2 - assigned index 16
+//===----------------------------------------------------------------------===//
+def Sdy_TensorShardingPerValueAttrV2Bc : DialectAttribute<(attr
+  Array<Sdy_TensorShardingAttrV2Bc>:$shardings
+)> {
+  let cType = "TensorShardingPerValueAttr";
+  let printerPredicate = "$_val.anyShardingHasUnreducedAxes()";
 }
 
 //===----------------------------------------------------------------------===//
@@ -212,8 +237,8 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
     /*index  3*/ Sdy_SubAxisInfoAttrBc,
     /*index  4*/ Sdy_AxisRefAttrBc,
     /*index  5*/ Sdy_DimensionShardingAttrBc,
-    /*index  6*/ Sdy_TensorShardingAttrBc,
-    /*index  7*/ Sdy_TensorShardingPerValueAttrBc,
+    /*index  6*/ Sdy_TensorShardingAttrV1Bc,
+    /*index  7*/ Sdy_TensorShardingPerValueAttrV1Bc,
     /*index  8*/ Sdy_DimMappingAttrBc,
     /*index  9*/ Sdy_TensorMappingAttrBc,
     /*index 10*/ Sdy_OpShardingRuleAttrBc,
@@ -221,6 +246,8 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
     /*index 12*/ Sdy_ListOfAxisRefListsAttrBc,
     /*index 13*/ Sdy_AllToAllParamAttrBc,
     /*index 14*/ Sdy_AlltoAllParamListAttrBc,
+    /*index 15*/ Sdy_TensorShardingAttrV2Bc,
+    /*index 16*/ Sdy_TensorShardingPerValueAttrV2Bc,
   ];
 }
 #endif // SDY_BYTECODE

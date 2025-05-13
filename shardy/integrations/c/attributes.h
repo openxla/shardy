@@ -125,7 +125,8 @@ MLIR_CAPI_EXPORTED bool sdyAttributeIsATensorShardingAttr(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute sdyTensorShardingAttrGet(
     MlirContext ctx, MlirAttribute meshOrRef, intptr_t nDimShardings,
     const MlirAttribute* dimShardings, intptr_t nReplicatedAxes,
-    const MlirAttribute* replicatedAxes);
+    const MlirAttribute* replicatedAxes, intptr_t nUnreducedAxes,
+    const MlirAttribute* unreducedAxes);
 
 MLIR_CAPI_EXPORTED MlirAttribute
 sdyTensorShardingAttrGetMeshOrRef(MlirAttribute attr);
@@ -141,6 +142,12 @@ sdyTensorShardingAttrGetReplicatedAxesSize(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute
 sdyTensorShardingAttrGetReplicatedAxesElem(MlirAttribute attr, intptr_t pos);
+
+MLIR_CAPI_EXPORTED intptr_t
+sdyTensorShardingAttrGetUnreducedAxesSize(MlirAttribute attr);
+
+MLIR_CAPI_EXPORTED MlirAttribute
+sdyTensorShardingAttrGetUnreducedAxesElem(MlirAttribute attr, intptr_t pos);
 
 //===----------------------------------------------------------------------===//
 // TensorShardingPerValueAttr

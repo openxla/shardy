@@ -334,7 +334,7 @@ func.func @correct_dynamic_dim_static_dim_mismatch(%arg0: tensor<?x32xf32>) -> t
 sdy.mesh @mesh = <["a"=2]>
 
 func.func @ranked_sharding_on_token(%arg0: !stablehlo.token) -> !stablehlo.token {
-  // expected-error @+1 {{'sdy.manual_computation' op operand - non-shaped tensors can only have a sharding with rank 0 and no replicated axes.}}
+  // expected-error @+1 {{'sdy.manual_computation' op operand - non-shaped tensors can only have a sharding with rank 0 and no replicated or unreduced axes.}}
   %0 = sdy.manual_computation(%arg0)
       in_shardings=[<@mesh, [{"a"}]>]
       out_shardings=[<@mesh, [{"a"}]>]

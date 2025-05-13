@@ -185,8 +185,9 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
         DimensionShardingAttr::get(ctx, dimSharding, isClosed));
   }
 
-  return TensorShardingAttr::get(ctx, meshName, newDimShardings,
-                                 replicatedAxes);
+  // TODO(b/416657717): preserve unreduced axes.
+  return TensorShardingAttr::get(ctx, meshName, newDimShardings, replicatedAxes,
+                                 /*unreducedAxes=*/{});
 }
 
 UpdateTensorShardings ShardingProjection::expandSharding(

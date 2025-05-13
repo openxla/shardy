@@ -119,11 +119,13 @@ TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
     }
     newDimShardings.push_back(newDimSharding);
   }
-  // NOTE: no need to account for replicated axes, since we end with a sharding
-  // that covers less-than-or-equal amount of axes than we started with. So no
-  // way the final sharding can use an axis/sub-axis from the replicated axes.
+  // NOTE: no need to account for replicated/unreduced axes, since we end with
+  // a sharding that covers less-than-or-equal amount of axes than we started
+  // with. So no way the final sharding can use an axis/sub-axis from the
+  // replicated/unreduced axes.
   return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), newDimShardings,
-                                 sharding.getReplicatedAxes());
+                                 sharding.getReplicatedAxes(),
+                                 sharding.getUnreducedAxes());
 }
 
 void updateValueShardings(

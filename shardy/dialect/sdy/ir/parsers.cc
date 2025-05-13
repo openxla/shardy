@@ -127,6 +127,54 @@ ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef) {
 
 namespace {
 
+ParseResult parseEqualsAxisList(AsmParser& parser,
+                                SmallVector<AxisRefAttr>& axes) {
+  if (parser.parseEqual() || parser.parseLBrace()) {
+    return failure();
+  }
+  auto parsedAxes = FieldParser<SmallVector<AxisRefAttr>>::parse(parser);
+  if (failed(parsedAxes)) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "failed to parse axis list which is expected to "
+                            "be an `ArrayRef<AxisRefAttr>`");
+  }
+  if (parser.parseRBrace()) {
+    return failure();
+  }
+  axes = std::move(*parsedAxes);
+  return success();
+}
+
+}  // namespace
+
+ParseResult parseReplicatedAndUnreducedAxes(
+    AsmParser& parser, SmallVector<AxisRefAttr>& replicatedAxes,
+    SmallVector<AxisRefAttr>& unreducedAxes) {
+  while (!parser.parseOptionalComma()) {
+    if (replicatedAxes.empty() && !parser.parseOptionalKeyword("replicated")) {
+      if (parseEqualsAxisList(parser, replicatedAxes)) {
+        return parser.emitError(
+            parser.getCurrentLocation(),
+            "failed to parse Sdy_TensorSharding parameter 'replicated_axes'");
+      }
+    } else if (unreducedAxes.empty() &&
+               !parser.parseOptionalKeyword("unreduced")) {
+      if (parseEqualsAxisList(parser, unreducedAxes)) {
+        return parser.emitError(
+            parser.getCurrentLocation(),
+            "failed to parse Sdy_TensorSharding parameter 'unreduced_axes'");
+      }
+    } else {
+      return parser.emitError(parser.getCurrentLocation(),
+                              "failed to parse Sdy_TensorSharding, expected "
+                              "valid named axis list after comma");
+    }
+  }
+  return success();
+}
+
+namespace {
+
 // Removes and returns the index from the symbol in factorsStr. For example:
 // 'jkl' -> factorsStr set to 'kl` and returns 1
 // 'z_2z_1' -> factorsStr set to 'z_1` and returns 27 (2 + 'z')

@@ -62,9 +62,10 @@ class DialectTest : public ::testing::Test {
 
   TensorShardingAttr createTensorSharding(
       ArrayRef<DimensionShardingAttr> dimShardings,
-      ArrayRef<AxisRefAttr> replicatedAxes = {}) {
+      ArrayRef<AxisRefAttr> replicatedAxes = {},
+      ArrayRef<AxisRefAttr> unreducedAxes = {}) {
     return TensorShardingAttr::get(&context, "mesh", dimShardings,
-                                   replicatedAxes);
+                                   replicatedAxes, unreducedAxes);
   }
 
   DimMappingAttr createDimMapping(ArrayRef<int64_t> factorIndices) {

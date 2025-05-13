@@ -572,39 +572,84 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     The mesh this sharding is bound to can either be specified by a symbol
     name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 
+    A sharding can have unreduced axes (specified by `unreduced_axes`), meaning
+    the tensor is unreduced along these axes. For example, if the contracting
+    dimension of a matmul is sharded along axis `x` in both the lhs and rhs, the
+    result is unreduced along `x`. Applying an all-reduce on the tensor along
+    the unreduced axes will make the tensor replicated along those axes.
+    However, a tensor with unreduced axes doesn't have to be all-reduced
+    immediately, it can remain unreduced when passed to linear operations like
+    `stablehlo.add` (as long as both lhs and rhs are unreduced) and all-reduced
+    afterwards. We assume the reduction type is sum, other reductions may be
+    supported in the future.
+
     **Constraints:**
-    - Elements in `dim_shardings` must satisfy the constraints listed in `DimensionShardingAttr`.
-    - Elements in `replicated_axes` must satisfy the constraints listed in `AxisRefListAttr`.
-    - If the corresponding tensor type isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
+    - Elements in `dim_shardings` must satisfy the constraints listed in
+      `DimensionShardingAttr`.
+    - Elements in `replicated_axes` must satisfy the constraints listed in
+      `AxisRefListAttr`.
+    - Elements in `unreduced_axes` must satisfy the constraints listed in
+      `AxisRefListAttr`.
+    - If the corresponding tensor type isn't a `ShapedType`, the sharding must
+      have rank 0 and no replicated axes.
     - If it is a `ShapedType`, then:
       - The tensor should have a rank.
       - The number of dimension shardings is equal to the rank of the tensor.
       - Dimensions of size 0 aren't sharded.
-    - Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
+    - There are no duplicate axis-refs or sub-axes that overlap with one another
+      across `dim_shardings`, `replicated_axes`, and `unreduced_axes`.
+    - Items in `replicated_axes` and `unreduced_axes` are ordered w.r.t.
+      `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
   }];
   let parameters = (ins
       Sdy_MeshOrRef:$mesh_or_ref,
       OptionalArrayRefParameter<"DimensionShardingAttr",
           "dimension shardings">:$dim_shardings,
-      Sdy_AxisRefs:$replicated_axes
+      Sdy_AxisRefs:$replicated_axes,
+      Sdy_AxisRefs:$unreduced_axes
   );
   let assemblyFormat = [{
     `<` custom<MeshOrRef>($mesh_or_ref) `,` `[` (`]`):($dim_shardings^ `]`)? ``
-        (`,` `replicated` `` `=` `` `{` $replicated_axes^ `}`)? `>`
+        custom<ReplicatedAndUnreducedAxes>($replicated_axes, $unreduced_axes)
+    `>`
   }];
 
   let builders = [
     AttrBuilder<(ins "StringAttr":$mesh_name,
                      "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes,
+                     "ArrayRef<AxisRefAttr>":$unreduced_axes), [{
+      return $_get($_ctxt, FlatSymbolRefAttr::get(mesh_name),
+                   dim_shardings, replicated_axes, unreduced_axes);
+    }]>,
+    AttrBuilder<(ins "StringRef":$mesh_name,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes,
+                     "ArrayRef<AxisRefAttr>":$unreduced_axes), [{
+      return $_get($_ctxt, FlatSymbolRefAttr::get($_ctxt, mesh_name),
+                   dim_shardings, replicated_axes, unreduced_axes);
+    }]>,
+
+    // TODO(tomnatan): cleanup once no longer used.
+    AttrBuilder<(ins "Attribute":$mesh_or_ref,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes), [{
+      return $_get($_ctxt, mesh_or_ref, dim_shardings, replicated_axes,
+                  /*unreduced_axes=*/ArrayRef<AxisRefAttr>());
+    }]>,
+    AttrBuilder<(ins "StringAttr":$mesh_name,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
                      "ArrayRef<AxisRefAttr>":$replicated_axes), [{
       return $_get($_ctxt, FlatSymbolRefAttr::get(mesh_name),
-                   dim_shardings, replicated_axes);
+                   dim_shardings, replicated_axes,
+                   /*unreduced_axes=*/ArrayRef<AxisRefAttr>());
     }]>,
     AttrBuilder<(ins "StringRef":$mesh_name,
                      "ArrayRef<DimensionShardingAttr>":$dim_shardings,
                      "ArrayRef<AxisRefAttr>":$replicated_axes), [{
       return $_get($_ctxt, FlatSymbolRefAttr::get($_ctxt, mesh_name),
-                   dim_shardings, replicated_axes);
+                   dim_shardings, replicated_axes,
+                   /*unreduced_axes=*/ArrayRef<AxisRefAttr>());
     }]>
   ];
 
@@ -659,19 +704,19 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     MeshAttr getMesh(Operation* op) const;
 
     // Returns true if all dimension shardings are empty and there are no
-    // replicated axes.
+    // replicated/unreduced axes.
     bool emptyAxes() const;
 
     // Like `llvm::any_of` but checks the predicate against all dimension
-    // sharding and replicated `AxisRefAttr`s.
+    // sharding and replicated/unreduced `AxisRefAttr`s.
     bool anyOfAxisRef(std::function<bool(AxisRefAttr)> predicate) const;
 
     // Like `llvm::for_each` but applies the `callback` against all dimension
-    // sharding and replicated `AxisRefAttr`s.
+    // sharding and replicated/unreduced `AxisRefAttr`s.
     void forEachAxisRef(std::function<void(AxisRefAttr)> callback) const;
 
     // Returns true if `axisName` or a sub-axis of it is used to shard any
-    // dimension or is replicated.
+    // dimension or is replicated/unreduced.
     bool isBound(StringRef axisName) const;
 
     // Returns true if dimension `dim` can be further sharded on the full
@@ -839,6 +884,12 @@ def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> 
 
     // Returns the number of values.
     int64_t size() const { return getShardings().size(); }
+
+    bool anyShardingHasUnreducedAxes() const {
+      return llvm::any_of(getShardings(), [](TensorShardingAttr sharding) {
+        return !sharding.getUnreducedAxes().empty();
+      });
+    }
 
     // Returns the sharding of a value at `operandIndex`.
     //

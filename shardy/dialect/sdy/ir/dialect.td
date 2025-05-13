@@ -21,9 +21,14 @@ include "mlir/IR/OpBase.td"
 def Sdy_Dialect : Dialect {
   let name = "sdy";
   let cppNamespace = "::mlir::sdy";
-  let summary = [{
+  let summary = "The Shardy (SDY) dialect";
+
+  let description = [{
     The Shardy (SDY) dialect defines an axis-based tensor sharding
     representation and additional API components to attach shardings to tensors.
+
+    Version log:
+      0.0.1: Add unreduced axes to TensorShardingAttr.
   }];
 
   let useDefaultAttributePrinterParser = 1;

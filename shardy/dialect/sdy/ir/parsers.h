@@ -30,6 +30,12 @@ namespace sdy {
 
 ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef);
 
+// Parses each optional axis list as ", <keyword>={<axes>}", allowing any order
+// if multiple are present.
+ParseResult parseReplicatedAndUnreducedAxes(
+    AsmParser& parser, SmallVector<AxisRefAttr>& replicatedAxes,
+    SmallVector<AxisRefAttr>& unreducedAxes);
+
 // Parses the factor sizes of an OpShardingRule. The keys in the list are the
 // indices in the factor mapping, with i=0, j=1, k=2,... z=17. For any index
 // greater than 17 it should be parsed as z_X where `X>0` and the index
