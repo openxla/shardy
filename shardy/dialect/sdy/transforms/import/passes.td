@@ -32,6 +32,15 @@ def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def InlineMeshesPass : Pass<"sdy-inline-meshes", "ModuleOp"> {
+  let summary = "Inlines `MeshAttr`s into `TensorShardingAttr`s.";
+  let description = [{
+    Replaces mesh symbol names in `TensorShardingAttr`s with inlined
+    `MeshAttr`s, and removes all unused `MeshOp`s.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
   let summary = "Inserts `DataFlowEdgeOp` for every data-flow edge.";
   let description = [{

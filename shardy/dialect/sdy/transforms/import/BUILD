@@ -36,6 +36,7 @@ cc_library(
         "apply_sharding_constraints.cc",
         "constant_splitter.cc",
         "import_pipeline.cc",
+        "inline_meshes.cc",
         "lift_inlined_meshes.cc",
         "manual_axes_cleanup.cc",
         "sharding_group_import.cc",
