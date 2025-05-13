@@ -85,6 +85,13 @@ within that sub-computation.
 NOTE: This pass is the MLIR equivalent of `xla::HloConstantSplitter`,
 needed for the purpose of Shardy Propagation.
 
+### `-sdy-inline-meshes`
+
+_Inlines `MeshAttr`s into `TensorShardingAttr`s._
+
+Replaces mesh symbol names in `TensorShardingAttr`s with inlined
+`MeshAttr`s, and removes all unused `MeshOp`s.
+
 ### `-sdy-lift-inlined-meshes`
 
 _Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s._

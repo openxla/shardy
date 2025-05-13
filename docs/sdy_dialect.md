@@ -2,8 +2,13 @@
 
 # 'sdy' Dialect
 
-_The Shardy (SDY) dialect defines an axis-based tensor sharding
-    representation and additional API components to attach shardings to tensors._
+_The Shardy (SDY) dialect_
+
+The Shardy (SDY) dialect defines an axis-based tensor sharding
+representation and additional API components to attach shardings to tensors.
+
+Version log:
+  0.0.1: Add unreduced axes to TensorShardingAttr.
 
 [TOC]
 
@@ -1260,7 +1265,8 @@ Syntax:
 #sdy.sharding<
   ::mlir::Attribute,   # mesh_or_ref
   ::llvm::ArrayRef<DimensionShardingAttr>,   # dim_shardings
-  ::llvm::ArrayRef<AxisRefAttr>   # replicated_axes
+  ::llvm::ArrayRef<AxisRefAttr>,   # replicated_axes
+  ::llvm::ArrayRef<AxisRefAttr>   # unreduced_axes
 >
 ```
 
@@ -1273,15 +1279,34 @@ explicitly (if they appear in the list of replicated axes) replicated.
 The mesh this sharding is bound to can either be specified by a symbol
 name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 
+A sharding can have unreduced axes (specified by `unreduced_axes`), meaning
+the tensor is unreduced along these axes. For example, if the contracting
+dimension of a matmul is sharded along axis `x` in both the lhs and rhs, the
+result is unreduced along `x`. Applying an all-reduce on the tensor along
+the unreduced axes will make the tensor replicated along those axes.
+However, a tensor with unreduced axes doesn't have to be all-reduced
+immediately, it can remain unreduced when passed to linear operations like
+`stablehlo.add` (as long as both lhs and rhs are unreduced) and all-reduced
+afterwards. We assume the reduction type is sum, other reductions may be
+supported in the future.
+
 **Constraints:**
-- Elements in `dim_shardings` must satisfy the constraints listed in `DimensionShardingAttr`.
-- Elements in `replicated_axes` must satisfy the constraints listed in `AxisRefListAttr`.
-- If the corresponding tensor type isn't a `ShapedType`, the sharding must have rank 0 and no replicated axes.
+- Elements in `dim_shardings` must satisfy the constraints listed in
+  `DimensionShardingAttr`.
+- Elements in `replicated_axes` must satisfy the constraints listed in
+  `AxisRefListAttr`.
+- Elements in `unreduced_axes` must satisfy the constraints listed in
+  `AxisRefListAttr`.
+- If the corresponding tensor type isn't a `ShapedType`, the sharding must
+  have rank 0 and no replicated axes.
 - If it is a `ShapedType`, then:
   - The tensor should have a rank.
   - The number of dimension shardings is equal to the rank of the tensor.
   - Dimensions of size 0 aren't sharded.
-- Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
+- There are no duplicate axis-refs or sub-axes that overlap with one another
+  across `dim_shardings`, `replicated_axes`, and `unreduced_axes`.
+- Items in `replicated_axes` and `unreduced_axes` are ordered w.r.t.
+  `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
 
 #### Parameters:
 
@@ -1290,6 +1315,7 @@ name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 | mesh_or_ref | `::mlir::Attribute` | mesh attr or flat mesh symbol reference attr |
 | dim_shardings | `::llvm::ArrayRef<DimensionShardingAttr>` | dimension shardings |
 | replicated_axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
+| unreduced_axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
 
 ### TensorShardingPerValueAttr
 
