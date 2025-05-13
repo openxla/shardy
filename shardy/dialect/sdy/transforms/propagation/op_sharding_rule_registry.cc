@@ -551,12 +551,24 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           //
           // Operands: [operand, iota, init_val (scalar), init_arg (scalar)]
           // Results: [values, indices]
-          return OpShardingRuleBuilder(customCall)
-              .addPointwiseWithDiffTypeForMismatch(
-                  getTensorShape(customCall.getOperand(0)),
-                  getTensorShape(customCall.getResult(0)),
-                  FactorType::kPassThrough, /*mismatchFactorIsBlocked=*/true)
-              .build();
+          OpShardingRuleBuilder builder(customCall);
+          for (auto [dim, dimSizes] : llvm::enumerate(
+                   llvm::zip_equal(getTensorShape(customCall.getOperand(0)),
+                                   getTensorShape(customCall.getResult(0))))) {
+            auto [inDimSize, outDimSize] = dimSizes;
+            if (inDimSize == outDimSize) {
+              builder.addFactor(dim, inDimSize);
+            } else {
+              // Reduction dimension.
+              int64_t rDim = dim;
+              builder.addFactor({rDim, rDim, kNullDim, kNullDim},
+                                {kNullDim, kNullDim}, inDimSize);
+              builder.addFactor(
+                  {kNullDim, kNullDim, kNullDim, kNullDim}, {rDim, rDim},
+                  outDimSize, FactorType::kNeedReplication, /*isBlocked=*/true);
+            }
+          }
+          return builder.build();
         }
         if (callTargetName == "X64Combine") {
           // If any of the users of `X64Combine` is a `RngBitGeneratorOp`, then
