@@ -297,38 +297,38 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
 
 struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
-  int64_t count = 0;
+  // The total size of the source tensors.
+  int64_t totalSourceTensorSize = 0;
   // The size of the source tensor. In case the factor-axes pair has multiple
   // source tensors, the size of the largest one. A tensor is a source for a
   // factor-axes pair if the axes is a prefix of the factor sharding on the
   // tensor.
-  int64_t sourceTensorSize = 0;
+  int64_t largestSourceTensorSize = 0;
   // The size of axes to shard further. Hence, if the factor is already assigned
   // to axes A, and this factor-axes pair has axes B, the size of further
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
   int64_t shardingSize = 0;
   int64_t factorTypePrecedence = 0;
 
-  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t count,
-                      int64_t sourceTensorSize, int64_t shardingSize,
-                      FactorType factorType)
+  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t sourceTensorSize,
+                      int64_t shardingSize, FactorType factorType)
       : factorAxes(factorAxes),
-        count(count),
-        sourceTensorSize(sourceTensorSize),
+        totalSourceTensorSize(sourceTensorSize),
+        largestSourceTensorSize(sourceTensorSize),
         shardingSize(shardingSize),
         factorTypePrecedence(precedence(factorType)) {}
 
   FactorAxesCandidate() = default;
 
   bool operator<(const FactorAxesCandidate& rhs) const {
-    if (count != rhs.count) {
-      return count < rhs.count;
+    if (totalSourceTensorSize != rhs.totalSourceTensorSize) {
+      return totalSourceTensorSize < rhs.totalSourceTensorSize;
     }
     if (factorTypePrecedence != rhs.factorTypePrecedence) {
       return factorTypePrecedence < rhs.factorTypePrecedence;
     }
-    if (sourceTensorSize != rhs.sourceTensorSize) {
-      return sourceTensorSize < rhs.sourceTensorSize;
+    if (largestSourceTensorSize != rhs.largestSourceTensorSize) {
+      return largestSourceTensorSize < rhs.largestSourceTensorSize;
     }
     if (shardingSize != rhs.shardingSize) {
       return shardingSize < rhs.shardingSize;
@@ -368,14 +368,14 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
   if (auto factorAxesCountIt = factorAxesCounts.find(factorAxes);
       factorAxesCountIt != factorAxesCounts.end()) {
     FactorAxesCandidate& candidate = factorAxesCountIt->second;
-    candidate.count++;
-    candidate.sourceTensorSize =
-        std::max(candidate.sourceTensorSize, sourceTensorSize);
+    candidate.totalSourceTensorSize += sourceTensorSize;
+    candidate.largestSourceTensorSize =
+        std::max(candidate.largestSourceTensorSize, sourceTensorSize);
     return;
   }
-  factorAxesCounts.try_emplace(
-      factorAxes, factorAxes, /*count=*/1, sourceTensorSize,
-      factorAxes.axes.getShardingSize(mesh.attr()), factorType);
+  factorAxesCounts.try_emplace(factorAxes, factorAxes, sourceTensorSize,
+                               factorAxes.axes.getShardingSize(mesh.attr()),
+                               factorType);
 }
 
 // A container for FactorAxesCandidates where the order of iteration does not
@@ -416,6 +416,10 @@ class FactorAxesCandidateBag {
                                OpShardingRuleAttr shardingRule,
                                ArrayRef<int64_t> tensorSizes,
                                const SmallVector<AxisListRef>& factorAxisRefs) {
+    // Since the (local) source tensor sizes get smaller at each iteration on
+    // which we extend sharding of a factor, in order to recompute largest
+    // source tensor sizes, we first need to reset them to zero.
+    resetLargestSourceTensorSizes();
     for (const auto& [tensorIndex, tensorFactorSharding] :
          llvm::enumerate(llvm::concat<const TensorFactorShardings>(
              projection.getOperands(), projection.getResults()))) {
@@ -467,6 +471,12 @@ class FactorAxesCandidateBag {
   int64_t size() const { return candidates.size(); }
 
  private:
+  void resetLargestSourceTensorSizes() {
+    for (FactorAxesCandidate& candidate : candidates) {
+      candidate.largestSourceTensorSize = 0;
+    }
+  }
+
   void initFactorDependencies(OpShardingRuleAttr shardingRule) {
     for (const TensorMappingAttr& tensorMapping :
          llvm::concat<const TensorMappingAttr>(
@@ -502,8 +512,8 @@ class FactorAxesCandidateBag {
                                 const int64_t sourceTensorSize) {
     FactorAxesCandidate& candidate = candidates[index];
     if (candidate.factorAxes.factorIndex == factorIndex) {
-      candidate.sourceTensorSize =
-          std::max(candidate.sourceTensorSize, sourceTensorSize);
+      candidate.largestSourceTensorSize =
+          std::max(candidate.largestSourceTensorSize, sourceTensorSize);
       updateBestCandidateIfValid(candidate);
     }
   }
