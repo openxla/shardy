@@ -249,7 +249,7 @@ LogicalResult propagateTensorShardings(
     ShardingGroupMap shardingGroupMap) {
   std::optional<StringRef> meshName =
       getCommonMeshName(operandsParams.shardings, resultsParams.shardings,
-                        symbolTable, /*ignoreDeviceIds=*/false);
+                        symbolTable, /*ignoreDeviceIds=*/true);
 
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or

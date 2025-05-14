@@ -18,6 +18,7 @@ sdy.mesh @mesh_a_4_b_2_c_2 = <["a"=4, "b"=2, "c"=2]>
 sdy.mesh @mesh_a_2_b_3_c_2 = <["a"=2, "b"=3, "c"=2]>
 sdy.mesh @mesh_a_2_b_3_c_2_d_2 = <["a"=2, "b"=3, "c"=2, "d"=2]>
 sdy.mesh @mesh_a_3_another = <["a"=3]>
+sdy.mesh @mesh_a_3_non_iota = <["a"=3], device_ids=[2, 1, 0]>
 
 // CHECK-LABEL: func @simple(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
@@ -768,10 +769,22 @@ func.func @different_meshes_and_empty_mesh_not_propagated(
 // CHECK-LABEL: func @different_mesh_names_same_mesh_propagated(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a"}, {?}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{"a"}, {?}]>})
-// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a", ?}, {?}]>}) {
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{"a", ?}, {?}]>}) {
 func.func @different_mesh_names_same_mesh_propagated(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a"}, {?}]>},
     %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_another, [{"a"}, {?}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_3_another, [{"a", ?}, {?}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @different_mesh_names_same_axes_different_device_orders_propagated(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a"}, {?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a", ?}, {?}]>})
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a", ?}, {?}]>}) {
+func.func @different_mesh_names_same_axes_different_device_orders_propagated(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3, [{"a"}, {?}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_3_non_iota, [{?}, {?}]>}) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_3, [{"a", ?}, {?}]>]>}
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
