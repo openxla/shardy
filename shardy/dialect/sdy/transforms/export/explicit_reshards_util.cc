@@ -977,12 +977,10 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
       inShardings, outShardings, shardingRule, defaultMesh.attr(),
       /*closedIfMissing=*/true);
 
-  // TODO(enver): Handle convolution op.
   // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
   if (isa<stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
           stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
-          stablehlo::ConvolutionOp, stablehlo::AllReduceOp,
-          stablehlo::AllGatherOp, stablehlo::AllToAllOp,
+          stablehlo::AllReduceOp, stablehlo::AllGatherOp, stablehlo::AllToAllOp,
           stablehlo::CollectivePermuteOp>(op)) {
     return;
   }
