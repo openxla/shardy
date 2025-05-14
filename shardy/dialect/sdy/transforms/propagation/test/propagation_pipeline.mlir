@@ -179,12 +179,11 @@ sdy.mesh @mesh_a_2 = <["a"=2]>
 // CHECK-LABEL: func @dot_lhs_from_broadcast_and_large_rhs(
 // CHECK-SAME:      %arg0: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2, [{"a"}]>}
 // CHECK-SAME:      %arg1: tensor<1024x1024xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2, [{"a"}, {}]>}
-// CHECK-SAME:  -> (tensor<4x1024xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2, [{"a"}, {}]>}) {
+// CHECK-SAME:  -> tensor<4x1024xf32> {
 func.func @dot_lhs_from_broadcast_and_large_rhs(%arg0: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2, [{"a", ?}]>}, %arg1: tensor<1024x1024xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2, [{"a", ?}, {?}]>}) -> tensor<4x1024xf32> {
-  // TODO(enver): Should instead propagate in a way such that: broadcast has [][a] and dot has [][a],[a][]->[a][].
-  // CHECK-NEXT: %[[BROADCAST_IN_DIM:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2, [{"a"}, {}]>]>}
-  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[BROADCAST_IN_DIM]], %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2, [{"a"}, {}]>]>}
-  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[DOT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[BROADCAST_IN_DIM:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2, [{}, {"a"}]>]>}
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[BROADCAST_IN_DIM]], %arg1 :
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[DOT]] :
   // CHECK-NEXT: return %[[NEGATE]] : tensor<4x1024xf32>
   %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<4xf32>) -> tensor<4x1024xf32>
   %1 = stablehlo.dot %0, %arg1 : (tensor<4x1024xf32>, tensor<1024x1024xf32>) -> tensor<4x1024xf32>

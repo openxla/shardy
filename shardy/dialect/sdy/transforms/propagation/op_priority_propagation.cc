@@ -118,9 +118,18 @@ PropagationDirection onlyPassThroughFactorsBroadcastBackward(
   return PropagationDirection::BOTH;
 }
 
-constexpr std::array<GetDirectionToPropagateFnPtr, 4> opPropagationSchedule = {
+PropagationDirection propagateAnyExceptBroadcastForward(Operation* op,
+                                                        int64_t) {
+  if (isa<stablehlo::BroadcastInDimOp>(op)) {
+    return PropagationDirection::BACKWARD;
+  }
+  return PropagationDirection::BOTH;
+}
+
+constexpr std::array<GetDirectionToPropagateFnPtr, 5> opPropagationSchedule = {
     isPassThroughOpSingleUse, isPassThroughOpMultiUse,
-    onlyPassThroughFactorsBroadcastBackward, propagateAny};
+    onlyPassThroughFactorsBroadcastBackward, propagateAnyExceptBroadcastForward,
+    propagateAny};
 
 // Returns the direction in which the given operation should be propagated.
 //
