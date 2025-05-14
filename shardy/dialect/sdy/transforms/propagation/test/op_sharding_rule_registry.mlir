@@ -336,20 +336,20 @@ func.func @custom_call_erf(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
 }
 
 // CHECK-LABEL: func @custom_call_topk_of_1d
-func.func @custom_call_topk_of_1d(%arg0: tensor<16xf32>) -> (tensor<16xf32>, tensor<16xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i], [i]) {i=16}>
+func.func @custom_call_topk_of_1d(%arg0: tensor<16xf32>) -> (tensor<1xf32>, tensor<1xi32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i])->([i], [i]) {i=16} need_replication={i} blocked_propagation={i}>
   %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
     mhlo.attributes = {
         k = 1 : i64,
         largest = true},
     mhlo.version = 1 : i64}
-    : (tensor<16xf32>) -> (tensor<16xf32>, tensor<16xi32>)
-  return %0#0, %0#1 : tensor<16xf32>, tensor<16xi32>
+    : (tensor<16xf32>) -> (tensor<1xf32>, tensor<1xi32>)
+  return %0#0, %0#1 : tensor<1xf32>, tensor<1xi32>
 }
 
 // CHECK-LABEL: func @custom_call_topk_of_2d
 func.func @custom_call_topk_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x1xf32>, tensor<16x1xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j], [i, j]) {i=16, j=8} blocked_propagation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j], [i, j]) {i=16, j=8} need_replication={j} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
     mhlo.attributes = {
         k = 1 : i64,
@@ -361,7 +361,7 @@ func.func @custom_call_topk_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x1xf32>,
 
 // CHECK-LABEL: func @custom_call_top2_of_2d
 func.func @custom_call_top2_of_2d(%arg0: tensor<16x8xf32>) -> (tensor<16x2xf32>, tensor<16x2xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j], [i, j]) {i=16, j=8} blocked_propagation={j}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j], [i, j]) {i=16, j=8} need_replication={j} blocked_propagation={j}>
   %0:2 = stablehlo.custom_call @mhlo.topk(%arg0) {
     mhlo.attributes = {
         k = 2 : i64,
