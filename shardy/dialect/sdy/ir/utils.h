@@ -91,6 +91,9 @@ int64_t getTensorRank(Value value);
 // Returns true if the value is a tensor with rank 0.
 int64_t isScalar(Value value);
 
+// Returns the product of the given mesh axis sizes.
+int64_t getTotalAxesSize(ArrayRef<MeshAxisAttr> axes);
+
 // Looks up the mesh symbol with the given `meshName` in `symbolTable`, and
 // returns it if it exists in the table, or nullptr otherwise.
 MeshOp getMeshOp(const SymbolTable& symbolTable, StringRef meshName);

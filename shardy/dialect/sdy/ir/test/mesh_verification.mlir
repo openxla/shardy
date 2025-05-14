@@ -26,10 +26,6 @@ sdy.mesh @mesh = <["a"=2, "b"=2], device_ids=[0, 2, 1, 3, 4, 5]>
 sdy.mesh @mesh = <["a"=2], device_ids=[0]>
 
 // -----
-// expected-error @+1 {{custom op 'sdy.mesh' if the ordered device ids are the same as iota(product(axes)), no need to specify them for simplicity}}
-sdy.mesh @mesh_iota_device_ids = <["a"=2], device_ids=[0, 1]>
-
-// -----
 // expected-error @+1 {{custom op 'sdy.mesh' sorted device ids must be iota(product(axes)), got: 1, 1}}
 sdy.mesh @mesh_duplicated_device_ids = <["a"=2], device_ids=[1, 1]>
 

@@ -263,10 +263,7 @@ int64_t MeshAttr::getAxisSize(StringRef axisName) const {
 }
 
 int64_t MeshAttr::getTotalSize() const {
-  ArrayRef<MeshAxisAttr> axes = getAxes();
-  return std::accumulate(
-      axes.begin(), axes.end(), 1,
-      [](int64_t cur, MeshAxisAttr axis) { return cur * axis.getSize(); });
+  return getTotalAxesSize(getAxes());
 }
 
 bool MeshAttr::isMaximal(int64_t deviceId) const {

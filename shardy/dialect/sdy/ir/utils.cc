@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <string>
 
@@ -126,6 +127,12 @@ int64_t isScalar(Value value) {
     return tensorType.getRank() == 0;
   }
   return false;
+}
+
+int64_t getTotalAxesSize(ArrayRef<MeshAxisAttr> axes) {
+  return std::accumulate(
+      axes.begin(), axes.end(), 1,
+      [](int64_t cur, MeshAxisAttr axis) { return cur * axis.getSize(); });
 }
 
 MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName) {

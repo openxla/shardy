@@ -94,13 +94,23 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   }];
 
   let genVerifyDecl = 1;
+  let skipDefaultBuilders = 1;
 
   let builders = [
+    // We override the default builder to discard `device_ids` if they are iota.
+    AttrBuilder<(ins "mlir::ArrayRef<MeshAxisAttr>":$axes,
+                     "mlir::ArrayRef<int64_t>":$device_ids), [{
+      bool isIota = !axes.empty() &&
+                    llvm::equal(device_ids,
+                                llvm::seq<int64_t>(0, getTotalAxesSize(axes)));
+      return $_get($_ctxt, axes, isIota ? ArrayRef<int64_t>() : device_ids);
+    }]>,
     AttrBuilder<(ins "mlir::ArrayRef<MeshAxisAttr>":$axes), [{
-      return $_get($_ctxt, axes, /*device_id=*/std::nullopt);
+      return $_get($_ctxt, axes, /*device_ids=*/std::nullopt);
     }]>,
     AttrBuilder<(ins "int64_t":$device_id), [{
-      return $_get($_ctxt, /*axes=*/ArrayRef<MeshAxisAttr>(), ArrayRef<int64_t>(device_id));
+      return $_get($_ctxt, /*axes=*/ArrayRef<MeshAxisAttr>(),
+                   ArrayRef<int64_t>(device_id));
     }]>,
   ];
 

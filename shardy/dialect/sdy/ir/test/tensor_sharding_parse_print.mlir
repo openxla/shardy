@@ -79,6 +79,22 @@ func.func @inlined_mesh_and_ref(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>
   return %0#0, %0#1 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func @inlined_mesh_non_iota_device_ids
+func.func @inlined_mesh_non_iota_device_ids(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add
+  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<mesh<["x"=2], device_ids=[1, 0]>, [{"x"}, {}]>]>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2], device_ids=[1, 0]>, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @inlined_mesh_iota_device_ids
+func.func @inlined_mesh_iota_device_ids(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add
+  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}, {}]>]>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2], device_ids=[0, 1]>, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
 // CHECK-LABEL: func @tensor_with_open_dimension_shardings
 func.func @tensor_with_open_dimension_shardings(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add
