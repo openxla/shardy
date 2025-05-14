@@ -77,7 +77,7 @@ addUnusedManualAxesToReplicatedAxes(
     SmallVector<AxisRefAttr> newReplicatedAxes =
         llvm::to_vector(sharding.getReplicatedAxes());
     llvm::transform(unusedManualAxes, std::back_inserter(newReplicatedAxes),
-                    [&](StringRef axis) {
+                    [sharding = sharding](StringRef axis) {
                       return AxisRefAttr::get(sharding.getContext(), axis);
                     });
     llvm::sort(newReplicatedAxes, meshComparator);
