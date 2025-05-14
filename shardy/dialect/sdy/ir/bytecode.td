@@ -217,10 +217,10 @@ def Sdy_AllToAllParamAttrBc: DialectAttribute<(attr
 //===----------------------------------------------------------------------===//
 // AllToAllParamListAttr - assigned index 14
 //===----------------------------------------------------------------------===//
-def Sdy_AlltoAllParamListAttrBc: DialectAttribute<(attr
+def Sdy_AllToAllParamListAttrBc: DialectAttribute<(attr
   Array<Sdy_AllToAllParamAttrBc>:$value
 )> {
-  let cType = "AlltoAllParamListAttr";
+  let cType = "AllToAllParamListAttr";
 }
 
 // This enum contains marker codes used to indicate which attribute is
@@ -245,7 +245,7 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
     /*index 11*/ Sdy_AxisRefListAttrBc,
     /*index 12*/ Sdy_ListOfAxisRefListsAttrBc,
     /*index 13*/ Sdy_AllToAllParamAttrBc,
-    /*index 14*/ Sdy_AlltoAllParamListAttrBc,
+    /*index 14*/ Sdy_AllToAllParamListAttrBc,
     /*index 15*/ Sdy_TensorShardingAttrV2Bc,
     /*index 16*/ Sdy_TensorShardingPerValueAttrV2Bc,
   ];

@@ -1187,7 +1187,7 @@ def Sdy_AllToAllParamAttr : AttrDef<Sdy_Dialect, "AllToAllParam"> {
   let assemblyFormat = "`` `{` $axes `}` `` `:` $src_dim `` `->` `` $tgt_dim";
 }
 
-def Sdy_AlltoAllParamList : ArrayOfAttr<Sdy_Dialect, "AlltoAllParamList",
+def Sdy_AllToAllParamList : ArrayOfAttr<Sdy_Dialect, "AllToAllParamList",
                                  "all_to_all_param_list", "AllToAllParamAttr"> {
   let summary = "List of all-to-all parameters";
 }

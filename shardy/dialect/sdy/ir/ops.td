@@ -577,7 +577,7 @@ def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
 
   let arguments = (ins
     AnyTensor:$tensor,
-    Sdy_AlltoAllParamList:$params,
+    Sdy_AllToAllParamList:$params,
     Sdy_TensorSharding:$out_sharding
   );
   let results = (outs AnyTensor:$result);
