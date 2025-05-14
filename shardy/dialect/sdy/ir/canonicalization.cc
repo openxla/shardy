@@ -77,8 +77,9 @@ class ManualComputationUnusedInputsPattern
   }
 };
 
-// Pattern to inline a ManualComputationOp when the product of all manual axes
-// is 1.
+// Pattern to:
+// 1. Inline a ManualComputationOp when the product of all manual axes is 1.
+// 2. Erase a ManualComputationOp that has no inputs/outputs and an empty body.
 class RedundantManualComputationPattern
     : public OpRewritePattern<ManualComputationOp> {
  public:
@@ -91,6 +92,12 @@ class RedundantManualComputationPattern
         manualComputationOp.getInShardings().getShardings();
     ArrayRef<TensorShardingAttr> outShardings =
         manualComputationOp.getOutShardings().getShardings();
+
+    if (inShardings.empty() && outShardings.empty() &&
+        isa<ReturnOp>(manualComputationOp.getBody().front().front())) {
+      rewriter.eraseOp(manualComputationOp);
+      return success();
+    }
 
     int64_t manualAxesProduct = 1;
     if (!inShardings.empty() || !outShardings.empty()) {

@@ -4,12 +4,23 @@
 sdy.mesh @meshA = <["a"=2, "b"=2]>
 sdy.mesh @meshB = <["a"=4]>
 
-// CHECK-LABEL: func @manual_computation_no_inputs_or_outputs
-func.func @manual_computation_no_inputs_or_outputs() {
+// CHECK-LABEL: func @manual_computation_no_inputs_outputs_and_no_manual_axes
+func.func @manual_computation_no_inputs_outputs_and_no_manual_axes() {
   // CHECK-NEXT: sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={} () {
   // CHECK-NEXT:   sdy.return
   // CHECK-NEXT: } : () -> ()
   sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={} () {
+    sdy.return
+  } : () -> ()
+  func.return
+}
+
+// CHECK-LABEL: func @manual_computation_with_manual_axes_no_inputs_outputs_and_empty_body
+func.func @manual_computation_with_manual_axes_no_inputs_outputs_and_empty_body() {
+  // CHECK-NEXT: sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={"x", "y"} () {
+  // CHECK-NEXT:   sdy.return
+  // CHECK-NEXT: } : () -> ()
+  sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={"x", "y"} () {
     sdy.return
   } : () -> ()
   func.return

@@ -17,13 +17,23 @@ func.func @unused_args(%arg0: tensor<8xf32>, %arg1: tensor<32x32xf32>, %arg2: te
   func.return %0: tensor<32x32xf32>
 }
 
-// CHECK-LABEL: func @inline_no_inputs_outputs
-func.func @inline_no_inputs_outputs(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+// CHECK-LABEL: func @inline_no_inputs_outputs_and_no_manual_axes
+func.func @inline_no_inputs_outputs_and_no_manual_axes(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: stablehlo.custom_call @foo() {has_side_effect = true} : () -> ()
   // CHECK-NEXT: return %arg0 : tensor<8xf32>
   sdy.manual_computation() in_shardings=[] out_shardings=[]
       manual_axes={} () {
     stablehlo.custom_call @foo() {has_side_effect = true} : () -> ()
+    sdy.return
+  } : () -> ()
+  return %arg0: tensor<8xf32>
+}
+
+// CHECK-LABEL: func @erase_no_inputs_outputs_and_empty_body
+func.func @erase_no_inputs_outputs_and_empty_body(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: return %arg0 : tensor<8xf32>
+  sdy.manual_computation() in_shardings=[] out_shardings=[]
+      manual_axes={"x", "y"} () {
     sdy.return
   } : () -> ()
   return %arg0: tensor<8xf32>

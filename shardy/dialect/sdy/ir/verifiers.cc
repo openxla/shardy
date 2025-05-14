@@ -956,10 +956,12 @@ LogicalResult ManualComputationOp::verify() {
     }
   }
 
-  if (getInShardings().empty() && getOutShardings().empty() &&
+  bool noInOutShardings = getInShardings().empty() && getOutShardings().empty();
+  if (noInOutShardings && !isa<ReturnOp>(&getBody().front().front()) &&
       !getManualAxes().empty()) {
     return emitOpError(
-        "cannot have manual_axes when there are no input/output shardings.");
+        "cannot have manual_axes when there are no in/out shardings and the "
+        "body is not empty.");
   }
 
   SymbolTable symbolTable(getOperation()->getParentOfType<ModuleOp>());
@@ -972,6 +974,10 @@ LogicalResult ManualComputationOp::verify() {
           *this, getResultTypes(), getBodyTerminatorOpOperandTypes(*this),
           getOutShardings(), symbolTable, manualAxesSet, "result"))) {
     return failure();
+  }
+
+  if (noInOutShardings) {
+    return success();
   }
 
   // We verify a common mesh here so an invalid mesh name reference will be
