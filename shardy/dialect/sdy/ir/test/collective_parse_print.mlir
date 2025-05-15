@@ -296,6 +296,13 @@ func.func @all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh
   return %0 : tensor<16x2xf32>
 }
 
+// CHECK-LABEL: func @all_reduce_unreduced_in_sharding
+func.func @all_reduce_unreduced_in_sharding(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {"x"}], unreduced={"y", "z"}>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh2, [{}, {"x"}], replicated={"y"}, unreduced={"z"}> :  tensor<16x2xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh2, [{}, {"x"}], replicated={"y"}, unreduced={"z"}> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
 // CHECK-LABEL: func @all_reduce_missing_in_sharding
 func.func @all_reduce_missing_in_sharding(%arg0 : tensor<16x2xf32>) -> tensor<16x2xf32> {
   // CHECK-NEXT: sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh1, [{}, {}]> :  tensor<16x2xf32>

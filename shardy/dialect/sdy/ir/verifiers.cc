@@ -1461,15 +1461,28 @@ LogicalResult AllReduceOp::verify() {
     return res;
   }
 
-  // 2. Verify no axis from reduction_axes overlap with the operand sharding
-  // axes.
   for (AxisRefAttr reductionAxisRef : reductionAxes) {
-    if (operandSharding.anyOfAxisRef([reductionAxisRef](AxisRefAttr axisRef) {
-          return axisRef.overlaps(reductionAxisRef);
-        })) {
+    auto overlapsPref = [&](AxisRefAttr axisRef) {
+      return axisRef.overlaps(reductionAxisRef);
+    };
+
+    // 2. Verify `reductionAxisRef` does not overlap with the operand dimension
+    // sharding and replicated axes (it can overlap with unreduced axes).
+    if (operandSharding.anyOfDimShardingOrReplicatedAxis(overlapsPref)) {
       return emitOpError("reduction axis ")
              << reductionAxisRef.toString()
-             << " overlaps with operand sharding";
+             << " overlaps with operand dimension sharding or replicated axes";
+    }
+
+    // TODO(tomnatan): we should eventually require all reduction axes to be
+    // unreduced in the operand sharding.
+
+    // 3. Verify `reductionAxisRef` does not overlap with the result unreduced
+    // axes.
+    if (llvm::any_of(resultSharding.getUnreducedAxes(), overlapsPref)) {
+      return emitOpError("reduction axis ")
+             << reductionAxisRef.toString()
+             << " overlaps with result unreduced axes";
     }
   }
 

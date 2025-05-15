@@ -545,8 +545,8 @@ func.func @all_reduce_mismatch_output_mesh(%arg0 : tensor<16x2xf32> {sdy.shardin
 
 sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
 
-func.func @all_reduce_overlapping_part_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
-  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "y":(2)2 overlaps with operand sharding}}
+func.func @all_reduce_overlapping_operand_sharding_sub_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "y":(2)2 overlaps with operand dimension sharding or replicated axes}}
   %0 = sdy.all_reduce {"y":(2)2} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
 }
@@ -555,8 +555,8 @@ func.func @all_reduce_overlapping_part_axis(%arg0 : tensor<16x32xf32> {sdy.shard
 
 sdy.mesh @mesh= <["x"=2, "y"=8, "y2"=8, "z"=2]>
 
-func.func @all_reduce_overlapping_axis_minor(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y", "y2"}, {"x"}]>}) -> tensor<16x32xf32> {
-  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "y2" overlaps with operand sharding}}
+func.func @all_reduce_overlapping_operand_sharding_axis_minor(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y", "y2"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "y2" overlaps with operand dimension sharding or replicated axes}}
   %0 = sdy.all_reduce {"y2"} %arg0 out_sharding=<@mesh, [{"y", "y2"}, {"x"}]> :  tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
 }
@@ -565,9 +565,29 @@ func.func @all_reduce_overlapping_axis_minor(%arg0 : tensor<16x32xf32> {sdy.shar
 
 sdy.mesh @mesh= <["x"=2, "y"=8, "y2"=8, "z"=2]>
 
-func.func @all_reduce_overlapping_axis_major(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y", "y2"}, {"x"}]>}) -> tensor<16x32xf32> {
-  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "y" overlaps with operand sharding}}
+func.func @all_reduce_overlapping_operand_sharding_axis_major(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y", "y2"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "y" overlaps with operand dimension sharding or replicated axes}}
   %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"y", "y2"}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
+
+func.func @all_reduce_overlapping_result_unreduced_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "z" overlaps with result unreduced axes}}
+  %0 = sdy.all_reduce {"z"} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}], unreduced = {"z"}> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh= <["x"=2, "y"=2, "z"=8]>
+
+func.func @all_reduce_overlapping_result_unreduced_sub_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op reduction axis "z":(2)2 overlaps with result unreduced axes}}
+  %0 = sdy.all_reduce {"z":(2)2} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}], unreduced = {"z"}> :  tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
 }
 

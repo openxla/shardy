@@ -699,6 +699,11 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // sharding and replicated/unreduced `AxisRefAttr`s.
     bool anyOfAxisRef(std::function<bool(AxisRefAttr)> predicate) const;
 
+    // Like `llvm::any_of` but checks the predicate against all dimension
+    // sharding and replicated `AxisRefAttr`s.
+    bool anyOfDimShardingOrReplicatedAxis(
+        std::function<bool(AxisRefAttr)> predicate) const;
+
     // Like `llvm::for_each` but applies the `callback` against all dimension
     // sharding and replicated/unreduced `AxisRefAttr`s.
     void forEachAxisRef(std::function<void(AxisRefAttr)> callback) const;

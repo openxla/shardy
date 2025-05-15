@@ -660,7 +660,9 @@ def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
     **Constraints:**
     - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`;
-    - `reduction_axes` must not overlap with the operand sharding axes;
+    - `reduction_axes` must not overlap with the operand dimension sharding and
+      replicated axes (it can overlap with unreduced axes);
+    - `reduction_axes` must not overlap with the result unreduced axes.
   }];
 
   let arguments = (ins
