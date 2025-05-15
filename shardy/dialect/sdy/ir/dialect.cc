@@ -843,11 +843,10 @@ TensorShardingAttr TensorShardingAttr::getClosed(
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
-                                                      int64_t rank,
-                                                      Attribute meshOrRef) {
+                                                    int64_t rank,
+                                                    Attribute meshOrRef) {
   return getFullyReplicated(context, rank, meshOrRef, /*isClosed=*/false);
 }
-
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
                                                     int64_t rank,
