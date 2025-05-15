@@ -236,7 +236,7 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
-<tr><td><code>params</code></td><td>::mlir::sdy::AlltoAllParamListAttr</td><td>List of all-to-all parameters</td></tr>
+<tr><td><code>params</code></td><td>::mlir::sdy::AllToAllParamListAttr</td><td>List of all-to-all parameters</td></tr>
 <tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
@@ -888,7 +888,7 @@ all-to-all on.
 | src_dim | `int64_t` | the source dimension index |
 | tgt_dim | `int64_t` | the target dimension index |
 
-### AlltoAllParamListAttr
+### AllToAllParamListAttr
 
 _List of all-to-all parameters_
 
