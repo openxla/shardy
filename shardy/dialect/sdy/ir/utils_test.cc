@@ -41,12 +41,16 @@ class UtilsTest : public ::testing::Test {
     moduleOp = mlir::parseSourceString<ModuleOp>(
         "module {\n"
         "  sdy.mesh @mesh_empty = <[]>\n"
+        "  sdy.mesh @mesh_empty_another = <[]>\n"
         "  sdy.mesh @mesh_ab_23 = <[\"a\"=2, \"b\"=3]>\n"
         "  sdy.mesh @mesh_xy_23 = <[\"x\"=2, \"y\"=3]>\n"
         "  sdy.mesh @mesh_xy_23_non_iota = <[\"x\"=2, \"y\"=3], "
         "device_ids=[5, 4, 3, 2, 1, 0]>\n"
         "  sdy.mesh @mesh_xy_23_non_iota_another = <[\"x\"=2, \"y\"=3], "
         "device_ids=[1, 2, 3, 4, 5, 0]>\n"
+        "  sdy.mesh @mesh_maximal = #sdy.mesh<[], device_ids=[0]>\n"
+        "  sdy.mesh @mesh_maximal_copy = #sdy.mesh<[], device_ids=[0]>\n"
+        "  sdy.mesh @mesh_maximal_another = #sdy.mesh<[], device_ids=[1]>\n"
         "  func.func @main(%arg0: tensor<24xf32>) -> tensor<24xf32> {\n"
         "    return %arg0 : tensor<24xf32>\n"
         "  }\n"
@@ -94,6 +98,72 @@ TEST_F(UtilsTest, GetCommonMeshName_AllEmptyMeshes) {
             "mesh_empty");
 }
 
+TEST_F(UtilsTest, GetCommonMeshName_AllIdenticalEmptyMeshesDifferentNames) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_empty_another")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_empty_another");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_empty_another")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_empty_another");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_MixOfEmptyAndNonEmptyMeshEmptyFirst) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_xy_23")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_xy_23");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_xy_23")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_xy_23");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_MixOfEmptyAndNonEmptyMeshNonEmptyFirst) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_empty")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_xy_23");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_empty")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_xy_23");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_MixOfEmptyAndMaximalMesh) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_maximal");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_maximal");
+}
+
+TEST_F(UtilsTest,
+       GetCommonMeshName_MixOfEmptyAndMaximalAndNonEmptyNonMaximalMesh) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_xy_23")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_xy_23")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            std::nullopt);
+}
+
 TEST_F(UtilsTest, GetCommonMeshName_AllEmptyShardings) {
   EXPECT_EQ(getCommonMeshName(TensorShardingAttr(), TensorShardingAttr(),
                               getSymbolTable(), /*ignoreDeviceIds=*/false),
@@ -110,6 +180,46 @@ TEST_F(UtilsTest, GetCommonMeshName_AllSameIgnoringDeviceIds) {
             std::nullopt);
   EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23")},
                               {createTensorSharding("mesh_xy_23_non_iota")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_xy_23");
+}
+
+TEST_F(UtilsTest,
+       GetCommonMeshName_AllSameIgnoringDeviceIdsIncludingEmptyMesh) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_xy_23_non_iota")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_xy_23_non_iota")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_xy_23");
+}
+
+TEST_F(
+    UtilsTest,
+    GetCommonMeshName_AllSameIgnoringDeviceIdsIncludingEmptyMeshAndEmptyMeshIsFirst) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_xy_23")},
+                              {createTensorSharding("mesh_xy_23_non_iota")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty"),
+                               createTensorSharding("mesh_xy_23")},
+                              {createTensorSharding("mesh_xy_23_non_iota")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_xy_23");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_AllSameIgnoringDeviceIdsNonIotaIsFirst) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23_non_iota")},
+                              {createTensorSharding("mesh_xy_23")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23_non_iota")},
+                              {createTensorSharding("mesh_xy_23")},
                               getSymbolTable(), /*ignoreDeviceIds=*/true),
             "mesh_xy_23");
 }
@@ -177,6 +287,99 @@ TEST_F(UtilsTest, GetCommonMeshName_AllSameIgnoringDeviceIdsMultipleMeshes) {
                         {createTensorSharding("mesh_xy_23_non_iota_another")},
                         getSymbolTable(), /*ignoreDeviceIds=*/true),
       "mesh_xy_23");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_AllSameMaximalMeshes) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_maximal"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_maximal");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_maximal"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_maximal");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_AllIdenticalMaximalMeshes) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_maximal"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_maximal_copy")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_maximal");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_maximal"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_maximal_copy")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_maximal");
+}
+
+TEST_F(UtilsTest, GetCommonMeshName_DifferentMaximalMeshes) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_maximal"),
+                               createTensorSharding("mesh_maximal_copy")},
+                              {createTensorSharding("mesh_maximal_another")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_maximal"),
+                               createTensorSharding("mesh_maximal_copy")},
+                              {createTensorSharding("mesh_maximal_another")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_maximal");
+}
+
+TEST_F(UtilsTest,
+       GetCommonMeshName_MixOfMaximalAndNonMaximalMeshesMajorityIsMaximal) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_maximal")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            std::nullopt);
+}
+
+TEST_F(UtilsTest,
+       GetCommonMeshName_MixOfMaximalAndNonMaximalMeshesMajorityIsNonMaximal) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_xy_23")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            std::nullopt);
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_xy_23"),
+                               createTensorSharding("mesh_xy_23")},
+                              {createTensorSharding("mesh_maximal")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            std::nullopt);
+}
+
+// TODO(enver): Should it return nullopt instead when one mesh does not exist.
+TEST_F(UtilsTest,
+       GetCommonMeshName_MixOfEmptyMeshAndInexistingMeshEmptyMeshFirst) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_does_not_exist")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_does_not_exist");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_empty")},
+                              {createTensorSharding("mesh_does_not_exist")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_does_not_exist");
+}
+
+// TODO(enver): Should it return nullopt instead when one mesh does not exist.
+TEST_F(UtilsTest,
+       GetCommonMeshName_MixOfEmptyMeshAndInexistingMeshInexistingMeshFirst) {
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_does_not_exist")},
+                              {createTensorSharding("mesh_empty")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/false),
+            "mesh_empty");
+  EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_does_not_exist")},
+                              {createTensorSharding("mesh_empty")},
+                              getSymbolTable(), /*ignoreDeviceIds=*/true),
+            "mesh_empty");
 }
 }  // namespace
 
