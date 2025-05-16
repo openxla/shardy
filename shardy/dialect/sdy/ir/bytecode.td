@@ -115,6 +115,10 @@ def Sdy_TensorShardingAttrV1Bc : DialectAttribute<(attr
   Array<Sdy_AxisRefAttrBc>:$replicated_axes
 )> {
   let cType = "TensorShardingAttr";
+  let cBuilder = [{
+    $_resultType::get(context, mesh_or_ref, dim_shardings, replicated_axes,
+      /*unreduced_axes=*/{})
+  }];
   let printerPredicate = "$_val.getUnreducedAxes().empty()";
 }
 

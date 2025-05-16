@@ -639,28 +639,6 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
       return $_get($_ctxt, FlatSymbolRefAttr::get($_ctxt, mesh_name),
                    dim_shardings, replicated_axes, unreduced_axes);
     }]>,
-
-    // TODO(tomnatan): cleanup once no longer used.
-    AttrBuilder<(ins "Attribute":$mesh_or_ref,
-                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
-                     "ArrayRef<AxisRefAttr>":$replicated_axes), [{
-      return $_get($_ctxt, mesh_or_ref, dim_shardings, replicated_axes,
-                  /*unreduced_axes=*/ArrayRef<AxisRefAttr>());
-    }]>,
-    AttrBuilder<(ins "StringAttr":$mesh_name,
-                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
-                     "ArrayRef<AxisRefAttr>":$replicated_axes), [{
-      return $_get($_ctxt, FlatSymbolRefAttr::get(mesh_name),
-                   dim_shardings, replicated_axes,
-                   /*unreduced_axes=*/ArrayRef<AxisRefAttr>());
-    }]>,
-    AttrBuilder<(ins "StringRef":$mesh_name,
-                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
-                     "ArrayRef<AxisRefAttr>":$replicated_axes), [{
-      return $_get($_ctxt, FlatSymbolRefAttr::get($_ctxt, mesh_name),
-                   dim_shardings, replicated_axes,
-                   /*unreduced_axes=*/ArrayRef<AxisRefAttr>());
-    }]>
   ];
 
   let extraClassDeclaration = [{
