@@ -75,20 +75,25 @@ SmallVector<int64_t> createOperandDimsForScatter(int64_t numInputs,
   return operandDims;
 }
 
-using GatherScatterAddFactorFn =
-    std::function<void(int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
-                       int64_t factorSize, FactorType factorType)>;
+using GatherScatterAddFactorFn = std::function<void(
+    int64_t inputDim, int64_t indicesDim, int64_t slicesDim, int64_t factorSize,
+    FactorType factorType, bool isBlocked)>;
 
 // Adds factors for either a gather or scatter op, as they have a similar
 // structure.
-void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
-                             RankedTensorType slicesType, int64_t indicesRank,
-                             int64_t indexVectorDim,
-                             ArrayRef<int64_t> offsetDims,
-                             ArrayRef<int64_t> collapsedSliceDims,
-                             ArrayRef<int64_t> inputBatchingDims,
-                             ArrayRef<int64_t> indicesBatchingDims,
-                             GatherScatterAddFactorFn addFactorFn) {
+void addGatherScatterFactors(
+    bool isScatter, RankedTensorType inputType, RankedTensorType slicesType,
+    RankedTensorType startIndices, int64_t indexVectorDim,
+    ArrayRef<int64_t> offsetDims, ArrayRef<int64_t> collapsedSliceDims,
+    ArrayRef<int64_t> inputBatchingDims, ArrayRef<int64_t> indicesBatchingDims,
+    GatherScatterAddFactorFn addFactorFn) {
+  auto addUnblockedFactorFn =
+      [addFactorFn](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
+                    int64_t factorSize, FactorType factorType) {
+        return addFactorFn(inputDim, indicesDim, slicesDim, factorSize,
+                           factorType, /*isBlocked=*/false);
+      };
+
   int64_t inputDim = 0;
   int64_t batchDimPos = 0;
   for (auto [slicesDim, slicesDimSize] :
@@ -108,16 +113,18 @@ void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
       // and `slicesDim`. Otherwise, we add a unique factor for `inputDim` and
       // `slicesDim` respectively.
       if (inputDimSize == slicesDimSize) {
-        addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize,
-                    FactorType::kPassThrough);
+        addUnblockedFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim,
+                             inputDimSize, FactorType::kPassThrough);
       } else if (isScatter) {
-        addFactorFn(inputDim, /*indicesDim=*/kNullDim, /*slicesDim=*/kNullDim,
-                    inputDimSize, FactorType::kPassThrough);
-        addFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim, slicesDim,
-                    slicesDimSize, FactorType::kNeedReplication);
+        addUnblockedFactorFn(inputDim, /*indicesDim=*/kNullDim,
+                             /*slicesDim=*/kNullDim, inputDimSize,
+                             FactorType::kPassThrough);
+        addUnblockedFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim,
+                             slicesDim, slicesDimSize,
+                             FactorType::kNeedReplication);
       } else {
         addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize,
-                    FactorType::kNeedReplication);
+                    FactorType::kNeedReplication, /*isBlocked=*/true);
       }
       ++inputDim;
     } else {
@@ -125,7 +132,7 @@ void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
       // We must now look up which one it is in `indicesType`.
       auto indicesDim =
           batchDimPos < indexVectorDim ? batchDimPos : batchDimPos + 1;
-      assert(indicesDim < indicesRank);
+      assert(indicesDim < startIndices.getRank());
 
       // If `indicesDim` is in `indicesBatchingDims`, This is an explicit batch
       // dimension across input, indices, and result. Otherwise, it is an
@@ -141,17 +148,26 @@ void addGatherScatterFactors(bool isScatter, RankedTensorType inputType,
       FactorType factorType = (isScatter && !isExplicitBatchDim)
                                   ? FactorType::kReduction
                                   : FactorType::kPassThrough;
-      addFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize,
-                  factorType);
+      addUnblockedFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize,
+                           factorType);
       ++batchDimPos;
     }
   }
 
   // We add factors for all collapsed slice dimensions.
   for (int64_t collapsedSliceDim : collapsedSliceDims) {
-    addFactorFn(collapsedSliceDim, /*indicesDim=*/kNullDim,
-                /*slicesDim=*/kNullDim, inputType.getDimSize(collapsedSliceDim),
-                FactorType::kPassThrough);
+    addUnblockedFactorFn(collapsedSliceDim, /*indicesDim=*/kNullDim,
+                         /*slicesDim=*/kNullDim,
+                         inputType.getDimSize(collapsedSliceDim),
+                         FactorType::kPassThrough);
+  }
+
+  // Add a factor for the index-vector-dim, if it's present.
+  if (indexVectorDim < startIndices.getRank()) {
+    addUnblockedFactorFn(kNullDim, /*indicesDim=*/indexVectorDim,
+                         /*slicesDim=*/kNullDim,
+                         startIndices.getDimSize(indexVectorDim),
+                         FactorType::kNeedReplication);
   }
 }
 
@@ -285,44 +301,42 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             .addPointwise(getTensorShape(clamp.getOperand()))
             .build();
       })
-      .Case<stablehlo::ConcatenateOp>(
-          [conservativePropagation](stablehlo::ConcatenateOp concat) {
-            // TODO(tomnatan): once strided-view is supported, consider adding
-            // compound factors using GCD.
+      .Case<stablehlo::ConcatenateOp>([conservativePropagation](
+                                          stablehlo::ConcatenateOp concat) {
+        // TODO(tomnatan): once strided-view is supported, consider adding
+        // compound factors using GCD.
 
-            std::function<bool(int64_t)> pred = [&](int64_t dim) {
-              // If we are in conservative propagation, we do not add a factor
-              // for the concat dimension.
-              return !conservativePropagation || dim != concat.getDimension();
-            };
-            std::function<FactorType(int64_t)> getFactorType =
-                [&](int64_t dim) {
-                  if (dim != concat.getDimension()) {
-                    return FactorType::kPassThrough;
-                  }
-                  // In the pattern concat(slice(l), slice(r)), it needs
-                  // permutation.
-                  if (llvm::all_of(concat->getOperands(), [](Value operand) {
-                        return operand.getDefiningOp<stablehlo::SliceOp>();
-                      })) {
-                    return FactorType::kPermutation;
-                  }
-                  // In the pattern concat(slice(x), x, slice(x)), it needs
-                  // permutation.
-                  Value sameOperand =
-                      findOperandBeforeSlice(concat->getOperand(0));
-                  if (llvm::all_of(concat->getOperands(), [&](Value operand) {
-                        return sameOperand == findOperandBeforeSlice(operand);
-                      })) {
-                    return FactorType::kPermutation;
-                  }
-                  return FactorType::kNeedReplication;
-                };
-            return OpShardingRuleBuilder(concat)
-                .addPointwiseIf(getTensorShape(concat.getResult()), pred,
-                                getFactorType)
-                .build();
-          })
+        std::function<bool(int64_t)> pred = [&](int64_t dim) {
+          // If we are in conservative propagation, we do not add a factor
+          // for the concat dimension.
+          return !conservativePropagation || dim != concat.getDimension();
+        };
+        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
+          if (dim != concat.getDimension()) {
+            return FactorType::kPassThrough;
+          }
+          // In the pattern concat(slice(l), slice(r)), it needs
+          // permutation.
+          if (llvm::all_of(concat->getOperands(), [](Value operand) {
+                return operand.getDefiningOp<stablehlo::SliceOp>();
+              })) {
+            return FactorType::kPermutation;
+          }
+          // In the pattern concat(slice(x), x, slice(x)), it needs
+          // permutation.
+          Value sameOperand = findOperandBeforeSlice(concat->getOperand(0));
+          if (llvm::all_of(concat->getOperands(), [&](Value operand) {
+                return sameOperand == findOperandBeforeSlice(operand);
+              })) {
+            return FactorType::kPermutation;
+          }
+          return FactorType::kNeedReplication;
+        };
+        return OpShardingRuleBuilder(concat)
+            .addPointwiseIf(getTensorShape(concat.getResult()), pred,
+                            getFactorType)
+            .build();
+      })
       .Case<stablehlo::ConvolutionOp>([conservativePropagation](
                                           stablehlo::ConvolutionOp conv) {
         stablehlo::ConvDimensionNumbersAttr dimNums =
@@ -742,20 +756,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
 
         RankedTensorType inputType = gather.getOperand().getType();
         RankedTensorType slicesType = gather.getType();
-        int64_t indicesRank = getTensorRank(gather.getStartIndices());
         stablehlo::GatherDimensionNumbersAttr dimNums =
             gather.getDimensionNumbers();
 
         addGatherScatterFactors(
-            /*isScatter=*/false, inputType, slicesType, indicesRank,
-            dimNums.getIndexVectorDim(), dimNums.getOffsetDims(),
-            dimNums.getCollapsedSliceDims(), dimNums.getOperandBatchingDims(),
+            /*isScatter=*/false, inputType, slicesType,
+            gather.getStartIndices().getType(), dimNums.getIndexVectorDim(),
+            dimNums.getOffsetDims(), dimNums.getCollapsedSliceDims(),
+            dimNums.getOperandBatchingDims(),
             dimNums.getStartIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
-                int64_t factorSize, FactorType factorType) {
-              builder.addFactor(
-                  {inputDim, indicesDim}, slicesDim, factorSize, factorType,
-                  /*isBlocked=*/factorType == FactorType::kNeedReplication);
+                int64_t factorSize, FactorType factorType, bool isBlocked) {
+              builder.addFactor({inputDim, indicesDim}, slicesDim, factorSize,
+                                factorType, isBlocked);
             });
 
         return builder.build();
@@ -917,8 +930,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           } else if (prodFactorsIn < prodFactorsOut) {
             // In and out factors have already diverged. Add a factor for the
             // input if its factors are behind the output factors.
-            nextInFactor = getNextFactorIfDivereged(
-                nextInFactor, prodFactorsIn, prodFactorsOut);
+            nextInFactor = getNextFactorIfDivereged(nextInFactor, prodFactorsIn,
+                                                    prodFactorsOut);
             builder.addFactor(inDim, kNullDim, nextInFactor);
             prodFactorsIn *= nextInFactor;
           } else {
@@ -977,25 +990,24 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             cast<RankedTensorType>(scatter.getInputs()[0].getType());
         auto slicesType =
             cast<RankedTensorType>(scatter.getUpdates()[0].getType());
-        int64_t indicesRank = getTensorRank(scatter.getScatterIndices());
         size_t numInputs = scatter.getInputs().size();
         stablehlo::ScatterDimensionNumbersAttr dimNums =
             scatter.getScatterDimensionNumbers();
 
         addGatherScatterFactors(
-            /*isScatter=*/true, inputType, slicesType, indicesRank,
-            dimNums.getIndexVectorDim(),
+            /*isScatter=*/true, inputType, slicesType,
+            scatter.getScatterIndices().getType(), dimNums.getIndexVectorDim(),
             /*offsetDims=*/dimNums.getUpdateWindowDims(),
             /*collapsedSliceDims=*/dimNums.getInsertedWindowDims(),
             dimNums.getInputBatchingDims(),
             dimNums.getScatterIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
-                int64_t factorSize, FactorType factorType) {
+                int64_t factorSize, FactorType factorType, bool isBlocked) {
               builder.addFactor(
                   createOperandDimsForScatter(numInputs, inputDim, indicesDim,
                                               /*updateDim=*/slicesDim),
                   /*resultDims=*/SmallVector<int64_t>(numInputs, inputDim),
-                  factorSize, factorType);
+                  factorSize, factorType, isBlocked);
             });
         return builder.build();
       })
