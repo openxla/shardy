@@ -540,7 +540,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
               .addPointwiseWithDiffTypeForMismatch(
                   getTensorShape(customCall.getOperand(0)),
                   getTensorShape(customCall.getResult(0)),
-                  FactorType::kPassThrough, /*mismatchFactorIsBlocked=*/true)
+                  FactorType::kNeedReplication,
+                  /*mismatchFactorIsBlocked=*/true)
               .build();
         }
         if (callTargetName == "ApproxTopK" ||
