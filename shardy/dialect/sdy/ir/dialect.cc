@@ -27,6 +27,7 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -60,6 +61,7 @@ namespace mlir {
 namespace sdy {
 
 namespace {
+using llvm::SmallDenseSet;
 
 struct ShardyDialectInlinerInterface : public DialectInlinerInterface {
   using DialectInlinerInterface::DialectInlinerInterface;
@@ -1072,6 +1074,37 @@ bool OpShardingRuleAttr::hasDimensionsWithMultipleFactors() const {
     }
   }
   return false;
+}
+
+//===----------------------------------------------------------------------===//
+// AllToAllParamList
+//===----------------------------------------------------------------------===//
+
+bool AllToAllParamListAttr::overlaps(AllToAllParamListAttr other) const {
+  SmallDenseSet<int64_t> seenDims;
+  seenDims.reserve(getValue().size() + other.getValue().size());
+  for (AllToAllParamAttr param :
+       llvm::concat<const AllToAllParamAttr>(getValue(), other.getValue())) {
+    for (int64_t dim : {param.getSrcDim(), param.getTgtDim()}) {
+      if (!seenDims.insert(dim).second) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+AllToAllParamListAttr AllToAllParamListAttr::combineAndSort(
+    AllToAllParamListAttr other) const {
+  SmallVector<AllToAllParamAttr> combinedParams;
+  combinedParams.reserve(size() + other.size());
+  combinedParams.append(begin(), end());
+  combinedParams.append(other.begin(), other.end());
+  llvm::sort(combinedParams,
+             [](const AllToAllParamAttr& a, const AllToAllParamAttr& b) {
+               return a.getSrcDim() < b.getSrcDim();
+             });
+  return AllToAllParamListAttr::get(getContext(), combinedParams);
 }
 
 //===----------------------------------------------------------------------===//

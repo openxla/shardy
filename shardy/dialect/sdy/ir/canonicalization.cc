@@ -354,7 +354,7 @@ void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  // We don't have patterns for all-to-all for now.
+  results.add<AllToAllFusionPattern, AllToAllNoUsePattern>(context);
 }
 
 void CollectivePermuteOp::getCanonicalizationPatterns(

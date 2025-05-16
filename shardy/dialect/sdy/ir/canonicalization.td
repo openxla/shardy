@@ -53,4 +53,21 @@ def AllSliceOfAllGatherPattern : Pat<
   (replaceWithValue $tensor),
   [(Constraint<AllMatchPred<["gatheringAxes", "slicingAxes"]>, "axes match">)]>;
 
+def AllToAllParamsNoOverlap: Constraint<CPred<"!$0.overlaps($1)">, "no overlap">;
+
+def CombineAllToAllParams: NativeCodeCall<"$0.combineAndSort($1)">;
+
+def AllToAllNoUsePattern : Pat<
+  (Sdy_AllToAllOp:$all_to_all $tensor, $params, $sharding),
+  (replaceWithValue $tensor),
+  [(HasNoUseOf: $all_to_all)]>;
+
+def AllToAllFusionPattern : Pat<
+  (Sdy_AllToAllOp
+    (Sdy_AllToAllOp:$inner_all_to_all $inner_tensor, $inner_params, $inner_sharding),
+    $outer_params, $outer_sharding),
+  (Sdy_AllToAllOp $inner_tensor, (CombineAllToAllParams $inner_params, $outer_params),
+                  $outer_sharding),
+  [(HasOneUse:$inner_all_to_all), (AllToAllParamsNoOverlap $inner_params, $outer_params)]>;
+
 #endif  // SDY_CANONICALIZATION

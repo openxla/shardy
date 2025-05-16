@@ -1168,6 +1168,25 @@ def Sdy_AllToAllParamAttr : AttrDef<Sdy_Dialect, "AllToAllParam"> {
 def Sdy_AllToAllParamList : ArrayOfAttr<Sdy_Dialect, "AllToAllParamList",
                                  "all_to_all_param_list", "AllToAllParamAttr"> {
   let summary = "List of all-to-all parameters";
+
+  let extraClassDeclaration = [{
+    bool empty() const { return getValue().empty(); }
+
+    size_t size() const { return getValue().size(); }
+
+    ArrayRef<AllToAllParamAttr>::iterator begin() const { return getValue().begin(); }
+
+    ArrayRef<AllToAllParamAttr>::iterator end() const { return getValue().end(); }
+
+    // Returns true if this parameter list's dimensions overlap with 'other'.
+    bool overlaps(AllToAllParamListAttr other) const;
+
+    // Returns a list of parameters that combines this list and `other`, sorted
+    // by source dimension. This function assumes that this list and `other`
+    // do not have overlapping dimensions, and should only be called after
+    // checking `overlaps` is false.
+    AllToAllParamListAttr combineAndSort(AllToAllParamListAttr other) const;
+  }];
 }
 
 #endif  // SDY_ATTRS
