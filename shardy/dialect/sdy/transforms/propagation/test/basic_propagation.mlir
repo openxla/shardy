@@ -815,3 +815,38 @@ func.func @scalar_block_arg_with_sharding_constraint(
   }) : (tensor<4x1000xi32>, tensor<4x1xi32>, tensor<4xi32>) -> tensor<4x1000xi32>
   return %0 : tensor<4x1000xi32>
 }
+
+// CHECK-LABEL: func @does_propagate_to_empty_mesh(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>}
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>}) {
+func.func @does_propagate_to_empty_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
+                  %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {"b", ?}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{?}, {?}]>]>} : tensor<8x8xf32>
+  return %0: tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @does_not_propagate_to_empty_mesh_with_closed_sharding(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}
+// CHECK-SAME:      %arg1: tensor<8x8xf32>)
+// CHECK-SAME:  -> tensor<8x8xf32> {
+func.func @does_not_propagate_to_empty_mesh_with_closed_sharding(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
+                  %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}, {}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}, {}]>]>} : tensor<8x8xf32>
+  return %0: tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @propagate_to_empty_mesh_with_partially_open_sharding(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>}
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>}
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>}) {
+func.func @propagate_to_empty_mesh_with_partially_open_sharding(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
+                  %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", ?}, {}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{?}, {}]>]>} : tensor<8x8xf32>
+  return %0: tensor<8x8xf32>
+}
+
+
