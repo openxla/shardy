@@ -129,20 +129,68 @@ void insertExplicitReshardsOnOperand(Operation* op, const int64_t operandIndex,
   op->setOperand(operandIndex, reshardOp);
 }
 
+TensorShardingAttr transposeOfSharding(stablehlo::TransposeOp transposeOp,
+                                       TensorShardingAttr inSharding,
+                                       StringRef meshName) {
+  SmallVector<DimensionShardingAttr> newDimShardings(
+      transposeOp.getPermutation().size());
+  for (auto [outDim, inDim] : llvm::enumerate(transposeOp.getPermutation())) {
+    newDimShardings[inDim] = DimensionShardingAttr::getClosedLike(
+        inSharding.getDimShardings()[outDim]);
+  }
+  return TensorShardingAttr::get(transposeOp.getContext(), meshName,
+                                 newDimShardings,
+                                 /*replicatedAxes=*/{},
+                                 /*unreducedAxes=*/{});
+}
+
+bool maybeReshardAfterSingleUseThatIsTranspose(
+    Operation* op, TensorShardingAttr tensorShardingBeforeReshard,
+    TensorShardingAttr tensorShardingAfterReshard, StringRef meshName,
+    IRRewriter& rewriter) {
+  if (!op->hasOneUse()) {
+    return false;
+  }
+  for (Operation* user : op->getUsers()) {
+    auto transposeOp = dyn_cast<stablehlo::TransposeOp>(user);
+    if (!transposeOp) {
+      return false;
+    }
+    auto transposeResult = transposeOp.getResult();
+    setSharding(transposeResult,
+                transposeOfSharding(transposeOp, tensorShardingBeforeReshard,
+                                    meshName));
+    rewriter.setInsertionPointAfter(transposeOp);
+    auto reshardOp = rewriter.create<ReshardOp>(
+        transposeResult.getLoc(), transposeResult,
+        transposeOfSharding(transposeOp, tensorShardingAfterReshard, meshName));
+    rewriter.replaceAllUsesExcept(transposeResult, reshardOp, reshardOp);
+  }
+  return true;
+}
+
 void insertExplicitReshardsOnResult(Operation* op, const int64_t resultIndex,
                                     const ShardingProjection& projection,
                                     OpShardingRuleAttr shardingRule,
                                     const Mesh& mesh, IRRewriter& rewriter) {
   auto result = op->getResult(resultIndex);
+  auto initialResultSharding =
+      getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true);
   auto newTensorSharding =
       projection.getResult(resultIndex)
           .createTensorShardingAttr(
               mesh.getContext(), shardingRule.getResultMapping(resultIndex),
               shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
-  auto reshardOp = rewriter.create<ReshardOp>(
-      result.getLoc(), result,
-      getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true));
-  rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
+  // TODO(enver): Replace it with a pattern rewriter: reshard+transpose to
+  // transpose reshard, hwen the transpose is the only use of the reshard.
+  if (!maybeReshardAfterSingleUseThatIsTranspose(op, newTensorSharding,
+                                                 initialResultSharding,
+                                                 mesh.name(), rewriter)) {
+    rewriter.setInsertionPointAfter(op);
+    auto reshardOp = rewriter.create<ReshardOp>(result.getLoc(), result,
+                                                initialResultSharding);
+    rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
+  }
   setSharding(result, newTensorSharding);
 }
 
@@ -212,7 +260,6 @@ void insertExplicitReshards(Operation* op,
                                       shardingRule, mesh, rewriter);
     }
   }
-  rewriter.setInsertionPointAfter(op);
   for (const auto& [resultIndex, resultSharding] :
        llvm::enumerate(outShardings)) {
     if (updateTensorShardings.updateResults.test(resultIndex) ||
