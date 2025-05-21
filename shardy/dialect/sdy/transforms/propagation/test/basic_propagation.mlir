@@ -848,5 +848,3 @@ func.func @propagate_to_empty_mesh_with_partially_open_sharding(%arg0: tensor<8x
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{?}, {}]>]>} : tensor<8x8xf32>
   return %0: tensor<8x8xf32>
 }
-
-
