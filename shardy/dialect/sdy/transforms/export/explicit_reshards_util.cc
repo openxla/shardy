@@ -928,7 +928,7 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
        llvm::concat<Type>(op->getOperandTypes(), op->getResultTypes())) {
     ShapedType shapedType = dynCastStaticShapedType(type);
     // Assign zero as the tensor size for dynamically shaped types.
-    tensorSizes.push_back(shapedType? shapedType.getNumElements(): 0);
+    tensorSizes.push_back(shapedType ? shapedType.getNumElements() : 0);
   }
   return tensorSizes;
 }
@@ -982,7 +982,8 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
   if (isa<stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
           stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
           stablehlo::AllReduceOp, stablehlo::AllGatherOp, stablehlo::AllToAllOp,
-          stablehlo::CollectivePermuteOp>(op)) {
+          stablehlo::CollectivePermuteOp, stablehlo::CollectiveBroadcastOp>(
+          op)) {
     return;
   }
 
