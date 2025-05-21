@@ -403,14 +403,12 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
 //
 // - The number of tensor shardings is equal to the number of tensors (size of
 //   `types`).
-// - All shardings must have the same mesh if `verifyCommonMesh` is true.
 // - All shardings are valid (see `verifyTensorShardingAttr`).
 // TODO(bartchr): relax this to allow different meshes when the op is a dataflow
 // op
 LogicalResult verifyTensorShardingPerValueAttr(
     TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
-    Operation* op, EmitErrorFn emitError, const SymbolTable& symbolTable,
-    bool verifyCommonMesh = true) {
+    Operation* op, EmitErrorFn emitError, const SymbolTable& symbolTable) {
   ArrayRef<TensorShardingAttr> shardingsPerValue =
       shardingPerValueAttr.getShardings();
   if (types.empty() && shardingsPerValue.size() == 1) {
@@ -436,17 +434,6 @@ LogicalResult verifyTensorShardingPerValueAttr(
     if (failed(verifyTensorShardingAttr(shardingAttr, resultType, op,
                                         symbolTable, valueEmitError))) {
       return failure();
-    }
-
-    // We verify a common mesh here so an invalid mesh name reference will be
-    // caught before.
-    if (verifyCommonMesh) {
-      MeshAttr commonMesh = getCommonMesh(shardingsPerValue,
-                                          /*resultsShardings=*/{}, symbolTable);
-      if (!commonMesh) {
-        return emitError(
-            "shardings can only be bound to the same mesh or an empty mesh");
-      }
     }
   }
 
@@ -843,7 +830,7 @@ LogicalResult verifyManualComputationValue(
           [op, valueKindStr](StringRef msg) {
             return op->emitOpError(valueKindStr) << " " << msg;
           },
-          symbolTable, /*verifyCommonMesh=*/false))) {
+          symbolTable))) {
     return failure();
   }
 
