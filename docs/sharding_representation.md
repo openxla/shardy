@@ -78,8 +78,10 @@ features.
 ```c++
 @mesh_xy = <["x"=2, "y"=4, "z"=2]>
 
-// The 1st tensor dimension is sharded along axis "x" and the 2nd tensor dimension is
-// sharded along axis "z" then further along axis "y". The local shape of this tensor (i.e. the shape on a single device), would be tensor<2x1xf32>.
+// The 1st tensor dimension is sharded along axis "x" and the 2nd tensor
+// dimension is sharded along axis "z" then further along axis "y".
+// The local shape of this tensor (i.e. the shape on a single device),
+// would be tensor<2x1xf32>.
 sharding<@mesh_xy, [{"x"}, {"z", "y"}]> : tensor<4x8xf32>
 ```
 
@@ -371,11 +373,11 @@ For example:
 ```
 
 Priorities give users more fine grained control over propagation, e.g., batch
-parallelism first, then [megatron](arxiv.org/abs/1909.08053), and finally
-[ZeRO](https://arxiv.org/abs/1910.02054) sharding. This allows for strong
-guarantees about what's partitioned and allows for better debuggability by
-having more fine grained sharding strategies (can see how the program looks
-after just megatron in isolation).
+parallelism first, then [megatron](https://arxiv.org/abs/1909.08053),
+and finally [ZeRO](https://arxiv.org/abs/1910.02054) sharding. This allows
+for strong guarantees about what's partitioned and allows for better
+debuggability by having more fine grained sharding strategies (can see how the
+program looks after just megatron in isolation).
 
 We allow attaching a priority to each dimension sharding (0 by default), which
 indicates that all shardings with priority `<i` will be propagated to the entire
