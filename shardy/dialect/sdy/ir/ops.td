@@ -178,6 +178,19 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
 
+  let builders = [
+    OpBuilder<(ins "TypeRange":$results, "ValueRange":$tensors,
+                   "ArrayRef<TensorShardingAttr>":$in_shardings,
+                   "ArrayRef<TensorShardingAttr>":$out_shardings,
+                   "ArrayRef<StringAttr>":$manual_axes), [{
+      MLIRContext* ctx = $_builder.getContext();
+      return build($_builder, $_state, results, tensors,
+                   TensorShardingPerValueAttr::get(ctx, in_shardings),
+                   TensorShardingPerValueAttr::get(ctx, out_shardings),
+                   manual_axes);
+    }]>,
+  ];
+
   let extraClassDeclaration = [{
     TensorShardingAttr getInSharding(int64_t operandIndex) {
       return getInShardings().getSharding(operandIndex);
