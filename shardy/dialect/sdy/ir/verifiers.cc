@@ -1446,11 +1446,12 @@ LogicalResult AllReduceOp::verify() {
   TensorShardingAttr operandSharding =
       getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
   MeshAttr mesh = resultSharding.getMesh(*this);
+  // 1. Verify that the operand and result have equivalent dimension shardings.
   if (!operandSharding.areDimAxesEqual(resultSharding)) {
     return emitOpError("operand and result sharding have different axes");
   }
 
-  // 1. Verify all reduction axes are valid.
+  // 2. Verify all reduction axes are valid.
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
@@ -1461,15 +1462,30 @@ LogicalResult AllReduceOp::verify() {
     return res;
   }
 
-  // 2. Verify no axis from reduction_axes overlap with the operand sharding
-  // axes.
   for (AxisRefAttr reductionAxisRef : reductionAxes) {
-    if (operandSharding.anyOfAxisRef([reductionAxisRef](AxisRefAttr axisRef) {
-          return axisRef.overlaps(reductionAxisRef);
-        })) {
+    auto overlapsWithReductionAxis = [&](AxisRefAttr axisRef) {
+      return axisRef.overlaps(reductionAxisRef);
+    };
+
+    // 3. Verify `reductionAxisRef` does not overlap with the operand dimension
+    // sharding and replicated axes (it can overlap with unreduced axes).
+    if (operandSharding.anyOfDimShardingOrReplicatedAxis(
+            overlapsWithReductionAxis)) {
       return emitOpError("reduction axis ")
              << reductionAxisRef.toString()
-             << " overlaps with operand sharding";
+             << " overlaps with operand dimension sharding or replicated axes";
+    }
+
+    // TODO(tomnatan): we should eventually require all reduction axes to be
+    // unreduced in the operand sharding.
+
+    // 4. Verify `reductionAxisRef` does not overlap with the result unreduced
+    // axes.
+    if (llvm::any_of(resultSharding.getUnreducedAxes(),
+                     overlapsWithReductionAxis)) {
+      return emitOpError("reduction axis ")
+             << reductionAxisRef.toString()
+             << " overlaps with result unreduced axes";
     }
   }
 

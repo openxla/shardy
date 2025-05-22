@@ -707,13 +707,18 @@ bool TensorShardingAttr::emptyAxes() const {
 
 bool TensorShardingAttr::anyOfAxisRef(
     std::function<bool(AxisRefAttr)> predicate) const {
+  return anyOfDimShardingOrReplicatedAxis(predicate) ||
+         llvm::any_of(getUnreducedAxes(), predicate);
+}
+
+bool TensorShardingAttr::anyOfDimShardingOrReplicatedAxis(
+    std::function<bool(AxisRefAttr)> predicate) const {
   for (DimensionShardingAttr dimSharding : getDimShardings()) {
     if (llvm::any_of(dimSharding.getAxes(), predicate)) {
       return true;
     }
   }
-  return llvm::any_of(getReplicatedAxes(), predicate) ||
-         llvm::any_of(getUnreducedAxes(), predicate);
+  return llvm::any_of(getReplicatedAxes(), predicate);
 }
 
 void TensorShardingAttr::forEachAxisRef(
