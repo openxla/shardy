@@ -863,7 +863,8 @@ TensorShardingAttr TensorShardingAttr::getFullyOpenLike(
 }
 
 RankedTensorType TensorShardingAttr::getLocalTensorType(
-    RankedTensorType globalTensorType, MeshAttr mesh) const {
+    RankedTensorType globalTensorType, MeshAttr mesh,
+    bool allowNonDivisible) const {
   if (getDimShardings().empty()) {
     return globalTensorType;
   }
@@ -876,6 +877,9 @@ RankedTensorType TensorShardingAttr::getLocalTensorType(
       localShape.push_back(globalDimSize);
     } else {
       int64_t shardSize = dimSharding.getShardedSize(mesh);
+      if (!allowNonDivisible && globalDimSize % shardSize != 0) {
+        return nullptr;
+      }
       // We allow non divisible sharding.
       int64_t localSize = (globalDimSize + shardSize - 1) / shardSize;
       localShape.push_back(localSize);
