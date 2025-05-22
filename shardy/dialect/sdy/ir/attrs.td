@@ -818,8 +818,12 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // Gets the local tensor type from a global RankedTensorType w.r.t. the
     // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
     // mesh and tensor type.
+    //
+    // If `allowNonDivisible` is false, returns nullptr if a dimension sharding
+    // doesn't divide the corresponding size.
     RankedTensorType getLocalTensorType(RankedTensorType globalTensorType,
-                                        MeshAttr mesh) const;
+                                        MeshAttr mesh,
+                                        bool allowNonDivisible = true) const;
 
     // Gets the global tensor type from a local RankedTensorType w.r.t. the
     // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
