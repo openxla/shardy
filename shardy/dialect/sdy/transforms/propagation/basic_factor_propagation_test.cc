@@ -49,7 +49,7 @@ class BasicFactorPropagationTest : public PropagationTestBase {
       MeshAttr mesh = nullptr, bool conservativePropagation = false) {
     return BasicFactorPropagation().propagateFactorShardings(
         projection, directionAlongFactor, SmallVector<int64_t>(numFactors, 1),
-        mesh, /*op=*/nullptr, conservativePropagation);
+        mesh, conservativePropagation);
   }
 
   UpdateTensorShardings propagateFactorShardings(
@@ -58,7 +58,7 @@ class BasicFactorPropagationTest : public PropagationTestBase {
           propagateAnything(),
       MeshAttr mesh = nullptr) {
     return BasicFactorPropagation().propagateFactorShardings(
-        projection, directionAlongFactor, factorSizes, mesh, /*op=*/nullptr,
+        projection, directionAlongFactor, factorSizes, mesh,
         /*conservativePropagation=*/false);
   }
 };

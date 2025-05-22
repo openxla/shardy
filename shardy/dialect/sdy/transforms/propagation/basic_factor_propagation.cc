@@ -391,7 +391,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
 UpdateTensorShardings BasicFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection,
     PropagationDirectionAlongFactor directionAlongFactor,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation*,
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
                                projection.getNumResults());

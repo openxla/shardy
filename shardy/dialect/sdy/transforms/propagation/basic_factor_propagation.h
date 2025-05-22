@@ -44,7 +44,7 @@ class BasicFactorPropagation : public FactorPropagation {
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection,
       PropagationDirectionAlongFactor directionAlongFactor,
-      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation*,
+      ArrayRef<int64_t> factorSizes, MeshAttr mesh,
       bool conservativePropagation) const override;
 
  protected:

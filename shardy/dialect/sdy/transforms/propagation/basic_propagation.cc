@@ -302,7 +302,7 @@ LogicalResult propagateTensorShardings(
     auto [updateOperand, updateResult] =
         factorPropagation.propagateFactorShardings(
             shardingProjection, localDirectionAlongFactor,
-            shardingRule.getFactorSizes(), mesh, op, conservativePropagation);
+            shardingRule.getFactorSizes(), mesh, conservativePropagation);
     PropagationSharedParams params{shardingGroupMap, meshName.value(), mesh,
                                    notifyOpModified};
 

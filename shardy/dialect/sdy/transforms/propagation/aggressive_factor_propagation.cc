@@ -132,7 +132,7 @@ AggressiveFactorPropagation::getPropagatedFactorSharding(
 UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection,
     PropagationDirectionAlongFactor directionAlongFactor,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh,
     bool conservativePropagation) const {
   UpdateTensorShardings result(projection.getNumOperands(),
                                projection.getNumResults());

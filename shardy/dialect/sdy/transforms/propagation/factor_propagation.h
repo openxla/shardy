@@ -43,7 +43,6 @@ class FactorPropagation {
   //   propagation should happen for a given factor.
   // * `factorSizes` is the size of each factor.
   // * `mesh` is the mesh that the factors are sharded over.
-  // * `op` is the operation that the factor shardings are propagated through.
   //
   // `conservativePropagation` specifies whether to disallow sub axes when
   // calculating the compatible major axes. If the projection contains a
@@ -52,7 +51,7 @@ class FactorPropagation {
   virtual UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection,
       PropagationDirectionAlongFactor directionAlongFactor,
-      ArrayRef<int64_t> factorSizes, MeshAttr mesh, Operation* op,
+      ArrayRef<int64_t> factorSizes, MeshAttr mesh,
       bool conservativePropagation) const = 0;
 };
 

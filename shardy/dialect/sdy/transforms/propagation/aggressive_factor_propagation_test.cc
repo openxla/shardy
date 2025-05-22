@@ -46,7 +46,7 @@ class AggressiveFactorPropagationTest : public PropagationTestBase {
           propagateAnything()) {
     return AggressiveFactorPropagation().propagateFactorShardings(
         projection, directionAlongFactor, SmallVector<int64_t>(numFactors, 1),
-        /*mesh=*/nullptr, /*op=*/nullptr, /*conservativePropagation=*/false);
+        /*mesh=*/nullptr, /*conservativePropagation=*/false);
   }
 };
 
