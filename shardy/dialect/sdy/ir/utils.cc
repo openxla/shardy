@@ -114,11 +114,15 @@ ArrayRef<int64_t> getTensorShape(Value value) {
   return {};
 }
 
-int64_t getTensorRank(Value value) {
-  if (auto tensorType = dyn_cast<ShapedType>(value.getType())) {
+int64_t getTensorRank(Type type) {
+  if (auto tensorType = dyn_cast<ShapedType>(type)) {
     return tensorType.getRank();
   }
   return 0;
+}
+
+int64_t getTensorRank(Value value) {
+  return getTensorRank(value.getType());
 }
 
 int64_t isScalar(Value value) {

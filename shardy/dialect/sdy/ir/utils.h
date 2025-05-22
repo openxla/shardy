@@ -82,6 +82,12 @@ bool isStaticShapedType(Type type);
 // Assumes the `ShapeTensor` has a rank.
 ArrayRef<int64_t> getTensorShape(Value value);
 
+// Returns the rank of the given `type` if it is a `ShapedType`, otherwise
+// returns 0.
+//
+// Assumes the `ShapedType` has a rank.
+int64_t getTensorRank(Type type);
+
 // Returns the rank of the given `value` if its type is a `ShapeTensor`,
 // otherwise returns 0.
 //
