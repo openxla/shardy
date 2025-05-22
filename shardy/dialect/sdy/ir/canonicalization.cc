@@ -33,6 +33,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Inliner.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 
@@ -333,38 +334,44 @@ void ManualComputationOp::getCanonicalizationPatterns(
 
 void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                             MLIRContext* context) {
-  results.add<ReshardOfReshardPattern>(context);
+  results.addWithLabel<ReshardOfReshardPattern>(StringRef(kReshardLabel),
+                                                context);
 }
 
 void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* context) {
-  results.add<AllGatherNoopPattern>(context);
+  results.addWithLabel<AllGatherNoopPattern>(StringRef(kCollectiveLabel),
+                                             context);
 }
 
 void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.add<AllSliceOfAllGatherPattern>(context);
-  results.add<AllSliceNoopPattern>(context);
+  results.addWithLabel<AllSliceOfAllGatherPattern, AllSliceNoopPattern>(
+      StringRef(kCollectiveLabel), context);
 }
 
 void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* context) {
-  results.add<AllReduceNoopPattern>(context);
+  results.addWithLabel<AllReduceNoopPattern>(StringRef(kCollectiveLabel),
+                                             context);
 }
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.add<AllToAllFusionPattern, AllToAllNoUsePattern>(context);
+  results.addWithLabel<AllToAllFusionPattern, AllToAllNoUsePattern>(
+      StringRef(kCollectiveLabel), context);
 }
 
 void CollectivePermuteOp::getCanonicalizationPatterns(
     RewritePatternSet& results, MLIRContext* context) {
-  results.add<CollectivePermuteNoopPattern>(context);
+  results.addWithLabel<CollectivePermuteNoopPattern>(
+      StringRef(kCollectiveLabel), context);
 }
 
 void ReduceScatterOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                   MLIRContext* context) {
-  results.add<ReduceScatterFusion>(context);
+  results.addWithLabel<ReduceScatterFusion>(StringRef(kCollectiveLabel),
+                                            context);
 }
 
 }  // namespace sdy

@@ -21,10 +21,13 @@ limitations under the License.
 #include <stdbool.h>
 
 #include <memory>
+#include <string>
 
+#include "llvm/Support/CommandLine.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassOptions.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
@@ -37,12 +40,30 @@ namespace sdy {
 #define GEN_PASS_REGISTRATION
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
+struct ExportOptions : public PassPipelineOptions<ExportOptions> {
+  Option<std::string> dumpDirectory{
+      *this, "dump-directory",
+      llvm::cl::desc("Directory to dump intermediate MLIR modules."),
+      llvm::cl::init("")};
+
+  Option<bool> skipConvertToReshard{
+      *this, "skip-convert-to-reshard",
+      llvm::cl::desc("Skip converting sdy.sharding_constraint to sdy.reshard."),
+      llvm::cl::init(false)};
+
+  Option<bool> enableInsertExplicitCollectives{
+      *this, "enable-insert-explicit-collectives",
+      llvm::cl::desc("Enable inserting explicit collective ops during export."),
+      llvm::cl::init(false)};
+
+  Option<bool> keepShardingRules{
+      *this, "keep-sharding-rules",
+      llvm::cl::desc("Keep sdy.sharding_rule attrs."), llvm::cl::init(false)};
+};
+
 // Adds a sequence of export passes needed as a post-processing step for SDY
 // propagation.
-void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
-                       bool skipConvertToReshard = false,
-                       bool enableInsertExplicitCollectives = false,
-                       bool keepShardingRules = false);
+void addExportPipeline(OpPassManager& pm, const ExportOptions& options = {});
 
 // Register the sdy-export-pipeline.
 void registerExportPipeline();

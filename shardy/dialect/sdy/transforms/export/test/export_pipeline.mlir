@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-export-pipeline 2>&1 | FileCheck %s
 
-// NOTE: We apply `sdy-add-data-flow-edges` first, to make sure\
+// NOTE: We apply `sdy-add-data-flow-edges` first, to make sure
 // `sdy-sink-data-flow-edges` is applied before any pass that operated on
 // `ShardableDataFlowOpInterface` rather than `DataFlowEdgeOp`.
 

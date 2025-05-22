@@ -17,6 +17,8 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_IR_CONSTANTS_H_
 
 #include <cstdint>
+#include <string>
+
 #include "llvm/ADT/StringRef.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 
@@ -70,6 +72,13 @@ inline constexpr int64_t kDefaultPriority = 0;
 // Index of when to use i/j/k as the symbols for factor indices, or to switch
 // to z_1/z_2/z_3/....
 inline constexpr int kStartAtZ = 'z' - 'i';  // 17
+
+// Labels for rewrite patterns.
+// Note: Using std::string instead of StringRef to avoid string copies when
+// using `createCanonicalizerPass`'s enabled/disabled patterns, which accepts
+// `ArrayRef<std::string>`.
+inline const std::string kReshardLabel = "sdy-reshard";
+inline const std::string kCollectiveLabel = "sdy-collective";
 
 }  // namespace sdy
 }  // namespace mlir

@@ -13,57 +13,73 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <optional>
+#include <string>
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 
 namespace mlir {
 namespace sdy {
 
-void addExportPipeline(OpPassManager& pm, StringRef dumpDirectory,
-                       bool skipConvertToReshard,
-                       bool enableInsertExplicitCollectives,
-                       bool keepShardingRules) {
+namespace {
+
+void addCanonicalizerPass(OpPassManager& pm,
+                          ArrayRef<std::string> enabledPatterns) {
+  pm.addPass(createCanonicalizerPass(GreedyRewriteConfig(),
+                                     /*disabledPatterns=*/std::nullopt,
+                                     /*enabledPatterns=*/enabledPatterns));
+}
+
+}  // namespace
+
+void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   pm.addNestedPass<func::FuncOp>(createConstantMergerPass());
   pm.addPass(createRemoveShardingGroupsPass());
-  if (!skipConvertToReshard) {
+  if (!options.skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   }
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addPass(createCloseShardingsPass());
-  if (!enableInsertExplicitCollectives && !skipConvertToReshard) {
+  if (!options.enableInsertExplicitCollectives &&
+      !options.skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(
         createTempExplicitReshardsForOptimizationsPass());
   }
-  pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(options.dumpDirectory,
                                                "sdy_module_after_sdy_export"));
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
-  if (enableInsertExplicitCollectives) {
+  if (options.enableInsertExplicitCollectives) {
     pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
-    // TODO(b/414339524): Canonicalize reshards.
+    addCanonicalizerPass(pm, kReshardLabel);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
+        options.dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
-    // TODO(b/414339524): Canonicalize collectives.
+    addCanonicalizerPass(pm, kCollectiveLabel);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_reshard_to_collectives"));
+        options.dumpDirectory, "sdy_module_after_reshard_to_collectives"));
   }
-  if (!keepShardingRules) {
+  if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
 }
 
 void registerExportPipeline() {
-  PassPipelineRegistration<>(
+  PassPipelineRegistration<ExportOptions>(
       "sdy-export-pipeline",
       "Run a sequence of export passes needed as a post-processing step for "
       "Shardy propagation",
-      [](OpPassManager& pm) { return addExportPipeline(pm); });
+      [](OpPassManager& pm, const ExportOptions& options) {
+        return addExportPipeline(pm, options);
+      });
 }
 
 }  // namespace sdy

@@ -24,6 +24,19 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+namespace {
+
+void populateExportOptions(ExportOptions& options,
+                           const PropagationOptions& propOptions) {
+  options.keepShardingRules = propOptions.keepShardingRules;
+  options.dumpDirectory = propOptions.dumpDirectory.str();
+  options.skipConvertToReshard = propOptions.skipConvertToReshard;
+  options.enableInsertExplicitCollectives =
+      propOptions.enableInsertExplicitCollectives;
+}
+
+}  // namespace
+
 void addPropagationPipeline(OpPassManager& pm,
                             const PropagationOptions& options) {
   addImportPipeline(pm, options.dumpDirectory, options.skipInline);
@@ -32,9 +45,9 @@ void addPropagationPipeline(OpPassManager& pm,
     optionsWithKeepShardingRules.keepShardingRules = true;
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules));
   }
-  addExportPipeline(pm, options.dumpDirectory, options.skipConvertToReshard,
-                    options.enableInsertExplicitCollectives,
-                    options.keepShardingRules);
+  ExportOptions exportOptions;
+  populateExportOptions(exportOptions, options);
+  addExportPipeline(pm, exportOptions);
 }
 
 void registerPropagationPipeline() {
