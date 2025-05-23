@@ -91,8 +91,14 @@ affect the order of the corresponding replica groups.
 
 **Constraints:**
 - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
-- `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`;
-- `reduction_axes` must not overlap with the operand sharding axes;
+- `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`.
+- The operand sharding and `out_sharding` must have equivalent dimension
+  shardings.
+- `reduction_axes` must not overlap with the operand dimension sharding and
+  replicated axes (it can overlap with unreduced axes).
+- `reduction_axes` must not overlap with the unreduced axes of
+  `out_sharding`. In other words, `out_sharding` must be be replicated along
+  `reduction_axes` (implicitly or explicitly).
 
 Traits: `SameOperandsAndResultType`
 
