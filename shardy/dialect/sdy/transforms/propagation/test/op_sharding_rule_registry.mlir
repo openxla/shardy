@@ -538,23 +538,23 @@ func.func @fft_single_fft_dimension_inverse_real_expanded_result(%arg0: tensor<8
 }
 
 // CHECK-LABEL: @gather
-func.func @gather(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, k, l], [i, j, n])->([i, j, k, l]) {i=2, j=3, k=4, l=2, m=3, n=2} need_replication={k, n} blocked_propagation={k}>
+func.func @gather(%arg0: tensor<3x4x2x5xf32>, %arg1: tensor<2x3x3xi64>) -> tensor<2x3x2x2x1xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([o, k, l, m], [i, j, p])->([i, j, k, l, n]) {i=2, j=3, k=4, l=2, m=5, n=1, o=3, p=3} reduction={m, o} need_replication={k, n, p} blocked_propagation={k}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
-      offset_dims = [2, 3],
+      offset_dims = [2, 3, 4],
       collapsed_slice_dims = [0],
-      start_index_map = [1, 0],
+      start_index_map = [1, 0, 3],
       index_vector_dim = 2>,
-    slice_sizes = array<i64: 1, 2, 2>,
+    slice_sizes = array<i64: 1, 2, 2, 1>,
     indices_are_sorted = false
-  } : (tensor<3x4x2xf32>, tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32>
-  return %0 : tensor<2x3x2x2xf32>
+  } : (tensor<3x4x2x5xf32>, tensor<2x3x3xi64>) -> tensor<2x3x2x2x1xf32>
+  return %0 : tensor<2x3x2x2x1xf32>
 }
 
 // CHECK-LABEL: @gather_implicit_index_vector_dim
 func.func @gather_implicit_index_vector_dim(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, n, l], [i, j, k])->([i, j, k, l]) {i=2, j=3, k=2, l=2, m=3, n=4}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, n, l], [i, j, k])->([i, j, k, l]) {i=2, j=3, k=2, l=2, m=3, n=4} reduction={m, n}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],
@@ -569,7 +569,7 @@ func.func @gather_implicit_index_vector_dim(%arg0: tensor<3x4x2xf32>, %arg1: ten
 
 // CHECK-LABEL: @gather_batching_dims
 func.func @gather_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x2xi64>) -> tensor<7x5x3x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, m, i, l], [i, j, k, n])->([i, j, k, l]) {i=7, j=5, k=3, l=4, m=3, n=2} need_replication={l, n} blocked_propagation={l}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, m, i, l], [i, j, k, n])->([i, j, k, l]) {i=7, j=5, k=3, l=4, m=3, n=2} reduction={m} need_replication={l, n} blocked_propagation={l}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],
@@ -586,7 +586,7 @@ func.func @gather_batching_dims(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x5x3x
 
 // CHECK-LABEL: @gather_index_vector_dim_before_batching_dim
 func.func @gather_index_vector_dim_before_batching_dim(%arg0: tensor<5x3x7x4xf32>, %arg1: tensor<7x2x5x3xi64>) -> tensor<7x5x3x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, m, i, l], [i, n, j, k])->([i, j, k, l]) {i=7, j=5, k=3, l=4, m=3, n=2} need_replication={l, n} blocked_propagation={l}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, m, i, l], [i, n, j, k])->([i, j, k, l]) {i=7, j=5, k=3, l=4, m=3, n=2} reduction={m} need_replication={l, n} blocked_propagation={l}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],

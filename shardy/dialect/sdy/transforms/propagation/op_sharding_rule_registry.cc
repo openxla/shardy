@@ -122,6 +122,14 @@ void addGatherScatterFactors(
         addUnblockedFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim,
                              slicesDim, slicesDimSize,
                              FactorType::kNeedReplication);
+      } else if (slicesDimSize == 1) {
+        // To keep the operand dim sharded, we need an all-reduce on the result.
+        addUnblockedFactorFn(inputDim, /*indicesDim=*/kNullDim,
+                             /*slicesDim=*/kNullDim, inputDimSize,
+                             FactorType::kReduction);
+        addUnblockedFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim,
+                             slicesDim, slicesDimSize,
+                             FactorType::kNeedReplication);
       } else {
         addFactorFn(inputDim, /*indicesDim=*/kNullDim, slicesDim, inputDimSize,
                     FactorType::kNeedReplication, /*isBlocked=*/true);
@@ -156,10 +164,12 @@ void addGatherScatterFactors(
 
   // We add factors for all collapsed slice dimensions.
   for (int64_t collapsedSliceDim : collapsedSliceDims) {
-    addUnblockedFactorFn(collapsedSliceDim, /*indicesDim=*/kNullDim,
-                         /*slicesDim=*/kNullDim,
-                         inputType.getDimSize(collapsedSliceDim),
-                         FactorType::kPassThrough);
+    // To keep the operand dim sharded for gather, we need an all-reduce on the
+    // result.
+    addUnblockedFactorFn(
+        collapsedSliceDim, /*indicesDim=*/kNullDim,
+        /*slicesDim=*/kNullDim, inputType.getDimSize(collapsedSliceDim),
+        isScatter ? FactorType::kPassThrough : FactorType::kReduction);
   }
 
   // Add a factor for the index-vector-dim, if it's present.
