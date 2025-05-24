@@ -161,10 +161,10 @@ func.func @append_in_sharding_from_outside_multiple_operands(%arg0: tensor<32x32
   // CHECK-SAME{LITERAL}:   manual_axes={"b"} (%arg2: tensor<32x32xf32>, %arg3: tensor<16x32xf32>) {
   %1 = sdy.manual_computation(%arg0, %0) in_shardings=[<@mesh, [{?}, {?}], replicated={"b"}>, <@mesh, [{"b", ?}, {?}]>] out_shardings=[<@mesh, [{"b", ?}, {?}]>] manual_axes={"b"} (%arg2: tensor<32x32xf32>, %arg3: tensor<16x32xf32>) {
     // CHECK:      %[[INNER_ADD:.*]] = stablehlo.add %arg3, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
-    // CHECK-NEXT: stablehlo.custom_call @sdy_testonly(%arg2) : (tensor<32x32xf32>) -> ()
+    // CHECK-NEXT: stablehlo.custom_call @sdy_testonly(%arg2) {has_side_effect = true} : (tensor<32x32xf32>) -> ()
     // CHECK-NEXT: sdy.return %[[INNER_ADD]] : tensor<16x32xf32>
     %2 = stablehlo.add %arg3, %arg3 : tensor<16x32xf32>
-    stablehlo.custom_call @sdy_testonly(%arg2) : (tensor<32x32xf32>) -> ()
+    stablehlo.custom_call @sdy_testonly(%arg2) {has_side_effect = true} : (tensor<32x32xf32>) -> ()
     sdy.return %2 : tensor<16x32xf32>
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %1: tensor<32x32xf32>
