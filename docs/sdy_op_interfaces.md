@@ -40,7 +40,7 @@ NOTE: This method *must* be implemented by the user.
 #### `getTensor`
 
 ```c++
-::mlir::TypedValue<::mlir::TensorType> getTensor();
+::mlir::TypedValue<::mlir::ShapedType> getTensor();
 ```
 
 Get the tensor operand of the collective op.

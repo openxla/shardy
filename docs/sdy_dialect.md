@@ -65,13 +65,13 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -116,13 +116,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -178,13 +178,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -250,13 +250,13 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -313,13 +313,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -692,13 +692,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -744,13 +744,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | tensor of any type values |
+| `input` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
@@ -822,13 +822,13 @@ Interfaces: `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | tensor of any type values |
+| `input` | shaped of any type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | shaped of any type values |
 
 
 
