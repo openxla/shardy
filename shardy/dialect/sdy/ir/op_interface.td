@@ -296,7 +296,7 @@ def Sdy_CollectiveOpInterface : OpInterface<"CollectiveOpInterface"> {
     >,
     InterfaceMethod<
       /*desc=*/[{ Get the tensor operand of the collective op. }],
-      /*retType=*/"::mlir::TypedValue<::mlir::TensorType>",
+      /*retType=*/"::mlir::TypedValue<::mlir::ShapedType>",
       /*methodName=*/"getTensor"
     >,
     InterfaceMethod<
