@@ -229,19 +229,26 @@ void insertAllReduces(Operation* op,
                       const AxesPerFactorWithMesh& commonAxesPerFactorWithMesh,
                       OpShardingRuleAttr shardingRule, IRRewriter& rewriter) {
   rewriter.setInsertionPointAfter(op);
-  SmallVector<AxisRefAttr> allReduceAxes;
+  SmallVector<AxisRefAttr> reductionAxes;
   for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    allReduceAxes.append(commonAxesPerFactorWithMesh.axes[reductionFactor]);
+    reductionAxes.append(commonAxesPerFactorWithMesh.axes[reductionFactor]);
   }
-  if (allReduceAxes.empty()) {
+  if (reductionAxes.empty()) {
     return;
   }
+  MeshAttr mesh = commonAxesPerFactorWithMesh.mesh.attr();
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   for (Value result : op->getResults()) {
-    auto allReduceOp = rewriter.create<AllReduceOp>(
-        result.getLoc(), result, allReduceAxes,
+    TensorShardingAttr resultSharding =
         getOrCreateSharding(result, commonAxesPerFactorWithMesh.mesh.name(),
-                            /*closedIfMissing=*/true));
+                            /*closedIfMissing=*/true);
+    SmallVector<AxisRefAttr> allReduceAxes =
+        getAxisSetDiff(reductionAxes, resultSharding.getUnreducedAxes(), mesh);
+    if (allReduceAxes.empty()) {
+      continue;
+    }
+    auto allReduceOp = rewriter.create<AllReduceOp>(
+        result.getLoc(), result, allReduceAxes, resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }
@@ -934,12 +941,38 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
 }
 }  // namespace
 
+// DO NOT SUBMIT - what about unreduced to replicated?!
 bool shouldReshard(TensorShardingAttr sourceSharding,
                    TensorShardingAttr targetSharding) {
   if (isFullyReplicated(sourceSharding) && isFullyReplicated(targetSharding)) {
     return false;
   }
   return sourceSharding != targetSharding;
+}
+
+TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
+    OpOperand& use, TensorShardingAttr sourceSharding,
+    ArrayRef<AxisRefAttr> targetUnreducedAxes, MeshAttr mesh,
+    IRRewriter& rewriter) {
+  if (!sourceSharding) {
+    return nullptr;
+  }
+  if (sourceSharding.getUnreducedAxes().empty() ||
+      targetUnreducedAxes == sourceSharding.getUnreducedAxes()) {
+    return sourceSharding;
+  }
+
+  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
+      sourceSharding.getUnreducedAxes(), targetUnreducedAxes, mesh);
+  if (allReduceAxes.empty()) {
+    return sourceSharding;
+  }
+  TensorShardingAttr allReduceSharding =
+      sourceSharding.replaceUnreducedAxes(targetUnreducedAxes);
+  auto allReduceOp = rewriter.create<AllReduceOp>(
+      use.get().getLoc(), use.get(), allReduceAxes, allReduceSharding);
+  use.set(allReduceOp);
+  return allReduceSharding;
 }
 
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
@@ -957,19 +990,35 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
     return;
   }
 
+  Mesh defaultMesh(getMeshAttr(symbolTable, *meshName), *meshName);
+  assert(defaultMesh.attr() && "unknown mesh");
+  // TODO(enver): Support maximal meshes.
+  if (defaultMesh.attr().isMaximal()) {
+    return;
+  }
+
+  // For each operand that has unreduced axes, insert an all-reduce if any of
+  // the unreduced axes isn't unreduced in the target sharding.
+  //
+  // We assume all results of an op should have the same unreduced axes, so we
+  // look at the first result.
+  ArrayRef<AxisRefAttr> targetUnreducedAxes =
+      !outShardings.empty() && outShardings.front()
+          ? outShardings.front().getUnreducedAxes()
+          : ArrayRef<AxisRefAttr>();
+  rewriter.setInsertionPoint(op);
+  for (auto [operand, sharding] :
+       llvm::zip_equal(op->getOpOperands(), inShardings)) {
+    sharding = insertAllReduceIfUnreducedToReplicated(
+        operand, sharding, targetUnreducedAxes, defaultMesh.attr(), rewriter);
+  }
+
   // NOTE: Creating a sharding rule requires data flow edges are present.
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
       op, /*conservativePropagation=*/false, /*setShardingRuleOnOp=*/false);
   if (!shardingRule) {
     // Insert explicit reshards only on operations with sharding rules, since
     // all the operations of interest got their sharding rules.
-    return;
-  }
-
-  Mesh defaultMesh(getMeshAttr(symbolTable, *meshName), *meshName);
-  assert(defaultMesh.attr() && "unknown mesh");
-  // TODO(enver): Support maximal meshes.
-  if (defaultMesh.attr().isMaximal()) {
     return;
   }
 

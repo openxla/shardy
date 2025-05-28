@@ -25,9 +25,11 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
@@ -218,6 +220,31 @@ void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
 }
 
+void insertAlReduceIfUnreducedToReplicated(OpOperand& opOperand,
+                                           TensorShardingAttr targetSharding,
+                                           IRRewriter& rewriter,
+                                           const SymbolTable& symbolTable,
+                                           const bool insertAfterOperand) {
+  Value operand = opOperand.get();
+  TensorShardingAttr operandSharding = getSharding(operand);
+
+  if (insertAfterOperand) {
+    rewriter.setInsertionPointAfterValue(operand);
+  }
+
+  if (operandSharding) {
+    // If `operandSharding` has unreduced axes, insert an all-reduce if any of
+    // the axes isn't unreduced in the target sharding.
+    ArrayRef<AxisRefAttr> targetUnreducedAxes =
+        targetSharding ? targetSharding.getUnreducedAxes()
+                       : ArrayRef<AxisRefAttr>();
+    operandSharding = insertAllReduceIfUnreducedToReplicated(
+        opOperand, operandSharding, targetUnreducedAxes,
+        operandSharding.getMesh(symbolTable), rewriter);
+    operand = opOperand.get();
+  }
+}
+
 struct TempExplicitReshardsForOptimizationsPass
     : public impl::TempExplicitReshardsForOptimizationsPassBase<
           TempExplicitReshardsForOptimizationsPass> {
@@ -229,6 +256,61 @@ struct TempExplicitReshardsForOptimizationsPass
     IRRewriter rewriter(funcOp.getContext());
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
     funcOp->walk([&](Operation* op) {
+      if (isa<func::ReturnOp>(op)) {
+        rewriter.setInsertionPoint(op);
+        for (const auto& [index, opOperand] :
+             llvm::enumerate(op->getOpOperands())) {
+          insertAlReduceIfUnreducedToReplicated(
+              opOperand,
+              /*targetSharding=*/getFuncResultSharding(funcOp, index), rewriter,
+              symbolTable,
+              /*insertAfterOperand=*/false);
+        }
+        return;
+      }
+
+      if (auto shardableDataFlow = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        for (Value owner : llvm::concat<Value>(
+                 shardableDataFlow.getOpResultEdgeOwners(),
+                 shardableDataFlow.getBlockArgumentEdgeOwners())) {
+          TensorShardingAttr ownerSharding =
+              shardableDataFlow.transformTargetSharding(
+                  owner, shardableDataFlow.getEdgeOwnerSharding(owner),
+                  DataFlowShardingTransformType::kBeforeEdgePropagation);
+          for (OpOperand* sourceOpOperand :
+               shardableDataFlow.getEdgeSources(owner)) {
+            insertAlReduceIfUnreducedToReplicated(
+                *sourceOpOperand,
+                /*targetSharding=*/ownerSharding, rewriter, symbolTable,
+                /*insertAfterOperand=*/true);
+          }
+        }
+        return;
+      }
+
+      if (op->getName().getStringRef() == "mhlo.ragged_dot") {
+        insertExplicitReshardsOnOp(op, rewriter, symbolTable);
+      } else if (!op->getResults().empty()) {
+        // For each operand that has unreduced axes, insert an all-reduce if any
+        // of the unreduced axes isn't unreduced in the target sharding.
+        //
+        // We assume all results of an op should have the same unreduced axes,
+        // so we look at the first result.
+        TensorShardingAttr outSharding = getSharding(op->getResult(0));
+        ArrayRef<AxisRefAttr> targetUnreducedAxes =
+            outSharding ? outSharding.getUnreducedAxes()
+                        : ArrayRef<AxisRefAttr>();
+        rewriter.setInsertionPoint(op);
+        for (OpOperand& operand : op->getOpOperands()) {
+          TensorShardingAttr inSharding = getSharding(operand.get());
+          if (inSharding) {
+            insertAllReduceIfUnreducedToReplicated(
+                operand, inSharding, targetUnreducedAxes,
+                inSharding.getMesh(symbolTable), rewriter);
+          }
+        }
+      }
+
       TypeSwitch<Operation*>(op)
           .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
             processDot(dotOp, rewriter, symbolTable);
@@ -237,9 +319,6 @@ struct TempExplicitReshardsForOptimizationsPass
               [&](stablehlo::DotGeneralOp dotGeneralOp) {
                 processDot(dotGeneralOp, rewriter, symbolTable);
               });
-      if (op->getName().getStringRef() == "mhlo.ragged_dot") {
-        insertExplicitReshardsOnOp(op, rewriter, symbolTable);
-      }
     });
   }
 };

@@ -35,12 +35,12 @@ namespace sdy {
 // along a factor. This strategy can propagate different sharding axes to
 // different tensors along the same factor. For example, Tensors T0, T1, T2
 // contain Factor F0. T0/F0 is already sharded along ["a", "b"], and "b" is
-// already used by T2 ("b" can be explicitly replicated, or it is used to shard
-// another factor). `BasicFactorPropagation` propagates ["a"] to both T1/F0 and
-// T2/F0, while this strategy propagates ["a", "b"] to T1/F0 and ["a"] to T2/F0,
-// respectively. If T2/F0 is closed, `BasicFactorPropagation` propagates
-// nothing, while this strategy propagates nothing to T2/F0 and still propagates
-// ["a", "b"] to T1/F0.
+// already used by T2 ("b" can be explicitly replicated/unreduced, or it is used
+// to shard another factor). `BasicFactorPropagation` propagates ["a"] to both
+// T1/F0 and T2/F0, while this strategy propagates ["a", "b"] to T1/F0 and ["a"]
+// to T2/F0, respectively. If T2/F0 is closed, `BasicFactorPropagation`
+// propagates nothing, while this strategy propagates nothing to T2/F0 and still
+// propagates ["a", "b"] to T1/F0.
 //
 // `BasicFactorPropagation` is conservative in terms of conflicts across
 // factors. The overlapped axis between factors cannot be propagated. This

@@ -568,6 +568,48 @@ std::optional<AxisRefAttr> AxisRefAttr::getSuffixWithoutOverlap(
                           thisNextPreSize / otherNextPreSize);
 }
 
+std::optional<AxisRefAttr> AxisRefAttr::getGreatestCommonPrefix(
+    AxisRefAttr other) const {
+  if (!canCoexist(other)) {
+    return std::nullopt;
+  }
+  if (prefixOf(other)) {
+    return *this;
+  }
+  if (other.prefixOf(*this)) {
+    return other;
+  }
+  return std::nullopt;
+}
+
+ArrayRef<AxisRefAttr>::iterator AxisRefAttr::getFirstOverlapping(
+    ArrayRef<AxisRefAttr> orderedAxes) const {
+  if (orderedAxes.empty()) {
+    return orderedAxes.end();
+  }
+  auto* afterIt = llvm::lower_bound(orderedAxes, *this);
+  // If there is at least one overlapping axis, the first one is necessarily
+  // `afterIt` or `beforeIt = std::prev(afterIt)`.
+  //
+  // Proof:
+  // Given the definition of `lower_bound`, we have `beforeIt < A <= afterIt`,
+  // where A is `axis`.
+  //
+  // - For any entry B with `B < beforeIt < A`, B and `beforeIt` cannot overlap
+  //   (assumption of this method). Thus `beforeIt` isolates A and B such that
+  //   they cannot overlap.
+  // - For any entry C with `A <= afterIt < C`, if A and C overlap, then A and
+  //   `afterIt` must overlap as well.
+
+  if (afterIt != orderedAxes.begin() && overlaps(*std::prev(afterIt))) {
+    return std::prev(afterIt);
+  }
+  if (afterIt != orderedAxes.end() && overlaps(*afterIt)) {
+    return afterIt;
+  }
+  return orderedAxes.end();
+}
+
 bool AxisRefAttr::canMerge(AxisRefAttr other) const {
   if (other.getName() != getName()) {
     return false;
@@ -587,20 +629,6 @@ AxisRefAttr AxisRefAttr::merge(AxisRefAttr other, MeshAttr mesh) const {
     return AxisRefAttr::get(getContext(), getName());
   }
   return AxisRefAttr::get(getContext(), getName(), preSize, size);
-}
-
-std::optional<AxisRefAttr> AxisRefAttr::getGreatestCommonPrefix(
-    AxisRefAttr other) const {
-  if (!canCoexist(other)) {
-    return std::nullopt;
-  }
-  if (prefixOf(other)) {
-    return *this;
-  }
-  if (other.prefixOf(*this)) {
-    return other;
-  }
-  return std::nullopt;
 }
 
 //===----------------------------------------------------------------------===//
@@ -781,6 +809,13 @@ TensorShardingAttr TensorShardingAttr::replaceReplicatedAxes(
   return TensorShardingAttr::get(getContext(), getMeshOrRef(),
                                  getDimShardings(), replicatedAxes,
                                  getUnreducedAxes());
+}
+
+TensorShardingAttr TensorShardingAttr::replaceUnreducedAxes(
+    ArrayRef<AxisRefAttr> unreducedAxes) const {
+  return TensorShardingAttr::get(getContext(), getMeshOrRef(),
+                                 getDimShardings(), getReplicatedAxes(),
+                                 unreducedAxes);
 }
 
 TensorShardingAttr TensorShardingAttr::getSharded(int64_t dim,

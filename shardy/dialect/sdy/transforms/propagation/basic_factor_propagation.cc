@@ -77,12 +77,14 @@ BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
 std::optional<AxisRefAttr>
 BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> replicatedAxes,
-    const FactorSharding& factorSharding, int64_t prevShardedSize,
-    int64_t factorSize, MeshAttr mesh) const {
+    ArrayRef<AxisRefAttr> unreducedAxes, const FactorSharding& factorSharding,
+    int64_t prevShardedSize, int64_t factorSize, MeshAttr mesh) const {
   AxisRefAttr result = axisRef;
 
   SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
       result, getPrefixWithoutOverlap(result, replicatedAxes));
+  SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+      result, getPrefixWithoutOverlap(result, unreducedAxes));
 
   ArrayRef<AxisRefAttr> factorAxes = factorSharding.axisRefs;
   if (llvm::any_of(factorAxes, [&](AxisRefAttr shardingAxis) {
@@ -340,15 +342,16 @@ std::optional<AxisRefAttr> BasicFactorPropagation::compatiblePrefix(
     // This tensor does not contain the factor at `factorIndex`. We can not
     // propagate `axisRef` to this tensor at `factorIndex`. Hence, the only
     // conflict is the overlap between `axisRef` and other factor shardings. The
-    // overlap between `axisRef` and (implicitly or explicitly) replicated axes
-    // does not trigger conflicts.
+    // overlap between `axisRef` and (implicitly or explicitly)
+    // replicated/unreduced axes does not trigger conflicts.
     return result;
   }
 
   // This tensor contains the factor at `factorIndex`. We remove conflicts
   // within the factor.
   return compatiblePrefixNoConflictsWithinFactor(
-      result, tensorFactorSharding.replicatedAxes, factorShardingIt->second,
+      result, tensorFactorSharding.replicatedAxes,
+      tensorFactorSharding.unreducedAxes, factorShardingIt->second,
       prevShardedSize, factorSize, mesh);
 }
 
@@ -376,7 +379,7 @@ SmallVector<AxisRefAttr> BasicFactorPropagation::getCompatibleMajorShardingAxes(
       getCompatibleMajorAxes(projection, factorIndex, direction);
 
   // Removes the major-most axis that isn't compatible w.r.t. other factors or
-  // the replicated axes, and all axes that are minor to it.
+  // the replicated/unreduced axes, and all axes that are minor to it.
   truncateAxesByRemovingConflicts(
       resultAxes,
       [&](AxisRefAttr axisRef, int64_t prevShardedSize) {

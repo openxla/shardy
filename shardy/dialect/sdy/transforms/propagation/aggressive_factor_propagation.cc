@@ -105,7 +105,8 @@ AggressiveFactorPropagation::getPropagatedFactorSharding(
        &tensorFactorShardings = tensorFactorShardings](
           AxisRefAttr axisRef, int64_t prevShardedSize) {
         return compatiblePrefixNoConflictsWithinFactor(
-            axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
+            axisRef, tensorFactorShardings.replicatedAxes,
+            tensorFactorShardings.unreducedAxes, factorSharding,
             prevShardedSize, factorSizes[factorIndex], mesh);
       },
       mesh, conservativePropagation);

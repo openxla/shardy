@@ -78,10 +78,12 @@ struct TensorFactorShardings {
   // TODO(tomnatan): consider using a vector with null for unmapped factors.
   FactorIndexToSharding factorIndexToSharding;
   SmallVector<AxisRefAttr> replicatedAxes;
+  SmallVector<AxisRefAttr> unreducedAxes;
 
   bool operator==(const TensorFactorShardings& other) const {
     return factorIndexToSharding == other.factorIndexToSharding &&
-           replicatedAxes == other.replicatedAxes;
+           replicatedAxes == other.replicatedAxes &&
+           unreducedAxes == other.unreducedAxes;
   }
 
   bool operator!=(const TensorFactorShardings& other) const {
