@@ -978,9 +978,8 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
       /*closedIfMissing=*/true);
 
   // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
-  // TODO(kostiantynl): Handle Gather/Scatter.
-  if (isa<stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
-          stablehlo::SelectAndScatterOp, stablehlo::GatherOp,
+  if (isa<stablehlo::ReduceWindowOp,
+          stablehlo::SelectAndScatterOp,
           stablehlo::AllReduceOp, stablehlo::AllGatherOp, stablehlo::AllToAllOp,
           stablehlo::CollectivePermuteOp, stablehlo::CollectiveBroadcastOp>(
           op)) {
