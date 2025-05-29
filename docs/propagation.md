@@ -171,11 +171,11 @@ that, we have three steps as shown in the figure below:
 We will use the following table to visualize the sharding propagation problem
 and algorithm.
 
-    | F0  | F1  | F2  | Explicitly replicated axes
-:-- | :-- | :-- | :-- | :-------------------------
-T0  |     |     |     |
-T1  |     |     |     |
-T2  |     |     |     |
+|     | F0  | F1  | F2  | Explicitly replicated axes |
+| :-- | :-- | :-- | :-- | :------------------------- |
+| T0  |     |     |     |                            |
+| T1  |     |     |     |                            |
+| T2  |     |     |     |                            |
 
 *   Each column represents a factor. F0 means the factor with index 0. We
     propagate shardings along factors (columns).
@@ -190,21 +190,21 @@ tensors. The table for `C = dot(A, B)` is below. The cells containing an `N`
 imply that the factor is not in the tensor. For example, F2 is in T1 and T2, but
 not in T0.
 
-`C = dot(A, B)` | F0 Batching dim | F1 Non-contracting dim | F2 Non-contracting dim | F3 Contracting dim | Explicitly replicated axes
-:-------------- | :-------------- | :--------------------- | :--------------------- | :----------------- | :-------------------------
-T0 = A          |                 |                        | N                      |                    |
-T1 = B          |                 | N                      |                        |                    |
-T2 = C          |                 |                        |                        | N                  |
+| `C = dot(A, B)` | F0 Batching dim | F1 Non-contracting dim | F2 Non-contracting dim | F3 Contracting dim | Explicitly replicated axes |
+| :-------------- | :-------------- | :--------------------- | :--------------------- | :----------------- | :------------------------- |
+| T0 = A          |                 |                        | N                      |                    |                            |
+| T1 = B          |                 | N                      |                        |                    |                            |
+| T2 = C          |                 |                        |                        | N                  |                            |
 
 #### Collect and propagate sharding axes
 
 We use a simple example shown below to visualize the propagation.
 
-    | F0       | F1       | F2  | Explicitly replicated axes
-:-- | :------- | :------- | :-- | :-------------------------
-T0  | "a"      |          | "f" |
-T1  | "a", "b" | "c", "d" | "g" |
-T2  |          | "c", "e" |     |
+|     | F0       | F1       | F2  | Explicitly replicated axes |
+| :-- | :------- | :------- | :-- | :------------------------- |
+| T0  | "a"      |          | "f" |                            |
+| T1  | "a", "b" | "c", "d" | "g" |                            |
+| T2  |          | "c", "e" |     |                            |
 
 **Step 1.** Find axes to propagate along each factor (a.k.a. the (longest)
 compatible major sharding axes). For this example, we propagate `["a", "b"]`
@@ -212,11 +212,11 @@ along F0, propagate `["c"]` along F1, and propagate nothing along F2.
 
 **Step 2.** Expand the factor shardings to obtain the following result.
 
-    | F0           | F1       | F2  | Explicitly replicated axes
-:-- | :----------- | :------- | :-- | :-------------------------
-T0  | "a", **"b"** | **"c"**  | "f" |
-T1  | "a", "b"     | "c", "d" | "g" |
-T2  | **"a", "b"** | "c", "e" |     |
+|     | F0           | F1       | F2  | Explicitly replicated axes |
+| :-- | :----------- | :------- | :-- | :------------------------- |
+| T0  | "a", **"b"** | **"c"**  | "f" |                            |
+| T1  | "a", "b"     | "c", "d" | "g" |                            |
+| T2  | **"a", "b"** | "c", "e" |     |                            |
 
 ### Data flow ops
 
