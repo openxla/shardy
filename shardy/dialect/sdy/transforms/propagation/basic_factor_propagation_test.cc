@@ -24,7 +24,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
+#include "shardy/dialect/sdy/ir/testing_utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -40,7 +40,7 @@ PropagationDirectionAlongFactor propagateAnything() {
   return [](int64_t) { return PropagationDirection::BOTH; };
 }
 
-class BasicFactorPropagationTest : public PropagationTestBase {
+class BasicFactorPropagationTest : public ShardyTestBase {
  protected:
   UpdateTensorShardings propagateFactorShardings(
       ShardingProjection& projection, int64_t numFactors,

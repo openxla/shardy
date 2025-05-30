@@ -62,11 +62,7 @@ PropagationDirection intersectionOfPropagationDirections(
 }
 
 bool isFullyReplicated(TensorShardingAttr sharding) {
-  return !sharding ||
-         llvm::all_of(sharding.getDimShardings(),
-                      [](const DimensionShardingAttr& dimSharding) {
-                        return dimSharding.emptyAxes();
-                      });
+  return !sharding || sharding.isFullyReplicated();
 }
 
 }  // namespace sdy

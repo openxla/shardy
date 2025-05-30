@@ -20,13 +20,13 @@ limitations under the License.
 #include <string>
 
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/register.h"
+#include "shardy/dialect/sdy/ir/testing_utils.h"
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 namespace mlir {
@@ -34,10 +34,13 @@ namespace sdy {
 
 namespace {
 
-class UtilsTest : public ::testing::Test {
+using ::testing::ElementsAre;
+using ::testing::IsEmpty;
+
+class UtilsTest : public ShardyTestBase {
  protected:
   void SetUp() override {
-    loadAllRequiredDialects(&context);
+    ShardyTestBase::SetUp();
     moduleOp = mlir::parseSourceString<ModuleOp>(
         "module {\n"
         "  sdy.mesh @mesh_empty = <[]>\n"
@@ -71,7 +74,6 @@ class UtilsTest : public ::testing::Test {
   }
 
  private:
-  MLIRContext context;
   OwningOpRef<ModuleOp> moduleOp;
   mlir::SymbolTableCollection symbolTableCollection;
 };
@@ -381,6 +383,48 @@ TEST_F(UtilsTest,
                               getSymbolTable(), /*ignoreDeviceIds=*/true),
             "mesh_empty");
 }
+
+TEST_F(UtilsTest, GetAxisSetDiff) {
+  MeshAttr mesh = createMesh({{"a", 8}, {"b", 4}, {"c", 2}, {"d", 4}});
+
+  EXPECT_THAT(getAxisSetDiff({}, {createAxis("c"), createAxis("d")}, mesh),
+              IsEmpty());
+
+  EXPECT_THAT(getAxisSetDiff({createAxis("b"), createAxis("a")}, {}, mesh),
+              ElementsAre(AxisRefIs("b"), AxisRefIs("a")));
+
+  EXPECT_THAT(getAxisSetDiff({createAxis("a"), createSubAxis("b", 1, 2)},
+                             {createSubAxis("b", 1, 2), createAxis("a")}, mesh),
+              IsEmpty());
+
+  EXPECT_THAT(getAxisSetDiff({createAxis("b"), createAxis("a")},
+                             {createAxis("c"), createSubAxis("d", 1, 2)}, mesh),
+              ElementsAre(AxisRefIs("b"), AxisRefIs("a")));
+
+  EXPECT_THAT(getAxisSetDiff({createAxis("b"), createAxis("a")},
+                             {createAxis("b"), createAxis("d")}, mesh),
+              ElementsAre(AxisRefIs("a")));
+
+  EXPECT_THAT(getAxisSetDiff({createAxis("b"), createSubAxis("a", 1, 4)},
+                             {createAxis("a"), createSubAxis("b", 2, 2)}, mesh),
+              ElementsAre(SubAxisRefIs("b", 1, 2)));
+
+  EXPECT_THAT(getAxisSetDiff({createSubAxis("a", 2, 4)},
+                             {createSubAxis("a", 1, 4)}, mesh),
+              ElementsAre(SubAxisRefIs("a", 4, 2)));
+
+  EXPECT_THAT(getAxisSetDiff(
+                  {createSubAxis("b", 1, 2), createAxis("a")},
+                  {createSubAxis("a", 2, 2), createSubAxis("b", 2, 2)}, mesh),
+              ElementsAre(SubAxisRefIs("b", 1, 2), SubAxisRefIs("a", 1, 2),
+                          SubAxisRefIs("a", 4, 2)));
+
+  EXPECT_THAT(getAxisSetDiff(
+                  {createAxis("a")},
+                  {createSubAxis("a", 1, 2), createSubAxis("a", 4, 2)}, mesh),
+              ElementsAre(SubAxisRefIs("a", 2, 2)));
+}
+
 }  // namespace
 
 }  // namespace sdy

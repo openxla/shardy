@@ -17,12 +17,12 @@ limitations under the License.
 
 #include <cstdint>
 #include <optional>
-#include <utility>
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/testing_utils.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -33,28 +33,8 @@ namespace {
 
 using ::testing::HasSubstr;
 
-class DialectTest : public ::testing::Test {
+class DialectTest : public ShardyTestBase {
  protected:
-  void SetUp() override { context.loadDialect<SdyDialect>(); }
-
-  MeshAttr createMesh(ArrayRef<std::pair<StringRef, int64_t>> axisNameAndSizes,
-                      ArrayRef<int64_t> deviceIds = {}) {
-    SmallVector<MeshAxisAttr> meshAxisAttrs;
-    meshAxisAttrs.reserve(axisNameAndSizes.size());
-    for (auto [axisName, axisSize] : axisNameAndSizes) {
-      meshAxisAttrs.push_back(MeshAxisAttr::get(&context, axisName, axisSize));
-    }
-    return MeshAttr::get(&context, meshAxisAttrs, deviceIds);
-  }
-
-  AxisRefAttr createAxis(StringRef name) {
-    return AxisRefAttr::get(&context, name);
-  }
-
-  AxisRefAttr createSubAxis(StringRef name, int64_t preSize, int64_t size) {
-    return AxisRefAttr::get(&context, name, preSize, size);
-  }
-
   DimensionShardingAttr createDimSharding(ArrayRef<AxisRefAttr> axes,
                                           bool isClosed = false) {
     return DimensionShardingAttr::get(&context, axes, isClosed);
@@ -88,8 +68,6 @@ class DialectTest : public ::testing::Test {
                                    needReplicationFactors, permutationFactors,
                                    isCustomRule);
   }
-
-  MLIRContext context;
 };
 
 TEST_F(DialectTest, AxisRefAttrContains) {
@@ -444,6 +422,52 @@ TEST_F(DialectTest, AxisRefAttrGetGreatestCommonPrefix) {
   prefix(createSubAxis("x", 1, 4), createAxis("x"));
   prefix(createSubAxis("x", 1, 2), createSubAxis("x", 1, 4));
   prefix(createSubAxis("x", 2, 4), createSubAxis("x", 2, 8));
+}
+
+TEST_F(DialectTest, AxisRefAttrGetFirstOverlapping) {
+  SmallVector<AxisRefAttr> orderedAxes = {
+      createAxis("x"), createSubAxis("y", 1, 2), createSubAxis("y", 4, 4),
+      createSubAxis("y", 64, 2), createSubAxis("z", 2, 2)};
+
+  // No overlapping.
+  EXPECT_EQ(createAxis("a").getFirstOverlapping(orderedAxes),
+            orderedAxes.end());
+  EXPECT_EQ(createSubAxis("a", 1, 2).getFirstOverlapping(orderedAxes),
+            orderedAxes.end());
+  EXPECT_EQ(createSubAxis("y", 2, 2).getFirstOverlapping(orderedAxes),
+            orderedAxes.end());
+  EXPECT_EQ(createSubAxis("y", 16, 4).getFirstOverlapping(orderedAxes),
+            orderedAxes.end());
+
+  // First overlapping "x"
+  EXPECT_EQ(createAxis("x").getFirstOverlapping(orderedAxes),
+            orderedAxes.begin());
+  EXPECT_EQ(createSubAxis("x", 1, 2).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin());
+
+  // First overlapping "y":(1)2
+  EXPECT_EQ(createAxis("y").getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 1);
+  EXPECT_EQ(createSubAxis("y", 1, 2).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 1);
+  EXPECT_EQ(createSubAxis("y", 1, 4).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 1);
+  EXPECT_EQ(createSubAxis("y", 1, 32).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 1);
+
+  // First overlapping "y":(4)4
+  EXPECT_EQ(createSubAxis("y", 2, 4).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 2);
+  EXPECT_EQ(createSubAxis("y", 2, 16).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 2);
+  EXPECT_EQ(createSubAxis("y", 4, 2).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 2);
+  EXPECT_EQ(createSubAxis("y", 8, 2).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 2);
+
+  // First overlapping "y":(64)2
+  EXPECT_EQ(createSubAxis("y", 32, 4).getFirstOverlapping(orderedAxes),
+            orderedAxes.begin() + 3);
 }
 
 TEST_F(DialectTest, TensorShardingAttrCanShardOrReplicate) {

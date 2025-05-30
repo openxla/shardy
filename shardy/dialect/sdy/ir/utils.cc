@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/ir/utils.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <functional>
@@ -566,6 +567,48 @@ ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
   return llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
     return llvm::is_contained(manualAxes, axis.getName());
   });
+}
+
+SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
+                                        ArrayRef<AxisRefAttr> axesB,
+                                        MeshAttr mesh) {
+  if (axesA.empty()) {
+    return {};
+  }
+  if (axesB.empty()) {
+    return llvm::to_vector(axesA);
+  }
+
+  SmallVector<AxisRefAttr> setB(axesB.begin(), axesB.end());
+  llvm::sort(setB);
+
+  SmallVector<AxisRefAttr> result;
+  result.reserve(axesA.size() - std::min(axesA.size(), axesB.size()));
+  AxisRefAttr curA = axesA.front();
+  axesA = axesA.drop_front();
+  while (curA) {
+    if (auto* bIt = curA.getFirstOverlapping(setB); bIt != setB.end()) {
+      if (auto prefix = curA.getPrefixWithoutOverlap(*bIt)) {
+        result.push_back(*prefix);
+      }
+      if (auto suffix = curA.getSuffixWithoutOverlap(*bIt, mesh)) {
+        curA = *suffix;
+        continue;
+      }
+      // No suffix without overlap means we are done with `curA`.
+    } else {
+      result.push_back(curA);
+    }
+
+    // We should advance `curA`.
+    if (axesA.empty()) {
+      curA = nullptr;
+    } else {
+      curA = axesA.front();
+      axesA = axesA.drop_front();
+    }
+  }
+  return result;
 }
 
 }  // namespace sdy

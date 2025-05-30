@@ -81,35 +81,6 @@ SmallVector<InnerAxisList> getAxesPerDim(TensorShardingAttr sharding) {
   return axesPerDim;
 }
 
-// Returns an iterator to the first axis in `orderedAxes` that overlaps with
-// `axis`, or `orderedAxes.end()` if there is no such axis.
-ArrayRef<AxisRefAttr>::iterator getFirstOverlapping(
-    AxisRefAttr axis, ArrayRef<AxisRefAttr> orderedAxes) {
-  if (orderedAxes.empty()) {
-    return orderedAxes.end();
-  }
-  auto* afterIt = llvm::lower_bound(orderedAxes, axis);
-  // If there is at least one overlapping axis, the first one is necessarily
-  // `afterIt` or `beforeIt = std::prev(afterIt)`.
-  //
-  // Proof:
-  // Given the definition of `lower_bound`, we have `beforeIt < A <= afterIt`,
-  // where A is `axis`.
-  //
-  // - For any entry B with `B < beforeIt < A`, B and `beforeIt` cannot overlap.
-  //   Thus `beforeIt` isolates A and B such that they cannot overlap.
-  // - For any entry C with `A <= afterIt < C`, if A and C overlap, then A and
-  //   `afterIt` must overlap as well.
-
-  if (afterIt != orderedAxes.begin() && std::prev(afterIt)->overlaps(axis)) {
-    return std::prev(afterIt);
-  }
-  if (afterIt != orderedAxes.end() && afterIt->overlaps(axis)) {
-    return afterIt;
-  }
-  return orderedAxes.end();
-}
-
 // Returns a sorted vector containing all axes in `axesPerDim`.
 SmallVector<AxisRefAttr> getOrderedAxes(ArrayRef<AxisList> axesPerDim) {
   SmallVector<AxisRefAttr> result;
@@ -171,7 +142,7 @@ void alignSubAxesByDecomposition(AxisList& axes,
   auto axisIt = axes.begin();
   while (axisIt != axes.end()) {
     AxisRefAttr axis = *axisIt;
-    auto* overlapIt = getFirstOverlapping(axis, orderedOtherAxes);
+    auto* overlapIt = axis.getFirstOverlapping(orderedOtherAxes);
     // There are two paths to complete the while loop below:
     // 1. the while condition is not met from the start, in which case we need
     //    to advance `axisIt`.
