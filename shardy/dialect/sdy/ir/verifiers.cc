@@ -213,8 +213,6 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 // - The number of dimension shardings is equal to the rank of the tensor.
 // - Replicated axes are ordered w.r.t. `mesh` (see
 //   AxisRefAttr::getMeshComparator).
-// - Unreduced axes are ordered w.r.t. `mesh` (see
-//   AxisRefAttr::getMeshComparator).
 // - All dimension shardings, replicated axes, and unreduced axes are each a
 //   valid axis-ref list (see `verifyAxisRefList`).
 // - All sub-axes in `shardingAttr` (see `verifySubAxes`).
@@ -316,24 +314,19 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   }
 
   auto axisRefComparator = AxisRefAttr::getMeshComparator(mesh);
-  auto verifySortedAxisRefList = [&](ArrayRef<AxisRefAttr> axisRefList,
-                                     StringRef name) -> LogicalResult {
-    if (!llvm::is_sorted(axisRefList, axisRefComparator)) {
-      return emitError(name) << " axes are not ordered w.r.t. mesh";
-    }
-    return verifyAxisRefList(axisRefList, axisNameToSize, seenAxisRefs,
-                             axisNameToSubAxes, emitError);
-  };
 
   // Verify replicated axes
-  if (failed(verifySortedAxisRefList(shardingAttr.getReplicatedAxes(),
-                                     "replicated"))) {
+  if (!llvm::is_sorted(shardingAttr.getReplicatedAxes(), axisRefComparator)) {
+    return emitError("replicated axes are not ordered w.r.t. mesh");
+  }
+  if (failed(verifyAxisRefList(shardingAttr.getReplicatedAxes(), axisNameToSize,
+                               seenAxisRefs, axisNameToSubAxes, emitError))) {
     return failure();
   }
 
   // Verify unreduced axes
-  if (failed(verifySortedAxisRefList(shardingAttr.getUnreducedAxes(),
-                                     "unreduced"))) {
+  if (failed(verifyAxisRefList(shardingAttr.getUnreducedAxes(), axisNameToSize,
+                               seenAxisRefs, axisNameToSubAxes, emitError))) {
     return failure();
   }
 

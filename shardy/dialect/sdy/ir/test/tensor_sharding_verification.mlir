@@ -305,16 +305,6 @@ func.func @unordered_replicated_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf
 
 // -----
 
-sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
-
-func.func @unordered_unreduced_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // expected-error @+1 {{unreduced axes are not ordered w.r.t. mesh}}
-  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"a", "b", "c"}>]>} : tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}
-
-// -----
-
 sdy.mesh @mesh = <["a"=2,"b"=4]>
 
 func.func @empty_closed_dim_sharding_with_priority(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
@@ -370,16 +360,6 @@ sdy.mesh @mesh = <["a"=8, "b"=2]>
 func.func @unordered_replicated_sub_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // expected-error @+1 {{replicated axes are not ordered w.r.t. mesh}}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {}], replicated={"a":(4)2, "a":(1)2, "b"}>]>} : tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}
-
-// -----
-
-sdy.mesh @mesh = <["a"=8, "b"=2]>
-
-func.func @unordered_unreduced_sub_axes(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // expected-error @+1 {{unreduced axes are not ordered w.r.t. mesh}}
-  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"a":(4)2, "a":(1)2, "b"}>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 

@@ -42,8 +42,8 @@ func.func @replicated_axes(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> 
 // CHECK-LABEL: func @unreduced_axes
 func.func @unreduced_axes(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add
-  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced={"a", "b"}>]>
-  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced={"a", "b"}>]>} : tensor<8x8xf32>
+  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced={"b", "a"}>]>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced={"b", "a"}>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 
