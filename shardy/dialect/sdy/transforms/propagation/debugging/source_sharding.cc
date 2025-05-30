@@ -454,7 +454,7 @@ void saveShardingOrigins(ValueToOriginShardingMap& valueToOriginShardingMap,
   }
   for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
     for (AxisRefAttr axisRef : dimSharding.getAxes()) {
-      valueToOriginShardingMap[value].try_emplace(
+      valueToOriginShardingMap[getShardableValue(value)].try_emplace(
           axisRef, OriginSharding{type, valueIndex, sourceId});
     }
   }
@@ -505,7 +505,7 @@ void overrideOriginsToSelf(ModuleOp moduleOp) {
                        shardingConstraintOp->getAttrOfType<StringAttr>(
                            kShardingOriginNameAttr));
   });
-  moduleOp.walk([&](func::FuncOp funcOp) {
+  for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
     for (int64_t operandIndex = 0; operandIndex < funcOp.getNumArguments();
          ++operandIndex) {
       if (DictionaryAttr newDict = convertFuncOriginsToSelf(
@@ -524,7 +524,7 @@ void overrideOriginsToSelf(ModuleOp moduleOp) {
         funcOp.setResultAttr(resultIndex, kShardingOriginsAttr, newDict);
       }
     }
-  });
+  }
   moduleOp.walk([&](ManualComputationOp manualComputationOp) {
     auto originName =
         manualComputationOp->getAttrOfType<StringAttr>(kShardingOriginNameAttr);
@@ -554,21 +554,6 @@ void prepareShardingOriginsHandler(
     ModuleOp moduleOp, ValueToOriginShardingMap& valueToOriginShardingMap) {
   MLIRContext* context = moduleOp.getContext();
   // Build the initial sharding origin map.
-  // NOTE(bartchr): This assumes that we do not propagate across different
-  // functions. As all func inputs/outputs have the same source name. Update
-  // this if we do propagate across `FuncOp`s.
-  moduleOp.walk([&](func::FuncOp funcOp) {
-    for (BlockArgument arg : funcOp.getArguments()) {
-      saveShardingOrigins(valueToOriginShardingMap, getSharding(arg),
-                          OriginShardingType::INPUT, arg, arg.getArgNumber());
-    }
-    for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
-      int64_t valueIndex = returnOperand.getOperandNumber();
-      saveShardingOrigins(
-          valueToOriginShardingMap, getFuncResultSharding(funcOp, valueIndex),
-          OriginShardingType::OUTPUT, returnOperand.get(), valueIndex);
-    }
-  });
   // NOTE: all `ManualComputationOp`s and `ShardingConstraintOp`s will have a
   // unique source name, no matter if they aren't in the same `FuncOp`.
   int64_t sourceId = 0;
@@ -582,6 +567,16 @@ void prepareShardingOriginsHandler(
         shardingOriginToString(OriginSharding{OriginShardingType::CONSTRAINT,
                                               /*index=*/0, sourceId},
                                context));
+
+    // Handle operand of ShardingConstraintOp
+    Value operand = shardingConstraintOp.getOperand();
+    if (TensorShardingAttr operandSharding = getSharding(operand)) {
+      // valueIndex is always 0 because ShardingConstraintOp can have only
+      // operand.
+      saveShardingOrigins(valueToOriginShardingMap, operandSharding,
+                          OriginShardingType::CONSTRAINT, operand,
+                          /*valueIndex=*/0, sourceId);
+    }
     ++sourceId;
   });
   sourceId = 0;
@@ -595,6 +590,14 @@ void prepareShardingOriginsHandler(
       saveShardingOrigins(valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_INPUT, edge.getResult(), i,
                           sourceId);
+
+      // Handle input sources of ManualComputationOp
+      assert(edge.getSources().size() == 1);
+      Value src = edge.getSources().front();
+      if (TensorShardingAttr srcSharding = getSharding(src)) {
+        saveShardingOrigins(valueToOriginShardingMap, srcSharding,
+                            OriginShardingType::MC_INPUT, src, i, sourceId);
+      }
     }
     for (auto [i, sharding] : llvm::enumerate(
              manualComputationOp.getOutShardings().getShardings())) {
@@ -610,6 +613,24 @@ void prepareShardingOriginsHandler(
         StringAttr::get(context, llvm::formatv("mc_{0}", sourceId)));
     ++sourceId;
   });
+  // NOTE(bartchr): This assumes that we do not propagate across different
+  // functions. As all func inputs/outputs have the same source name. Update
+  // this if we do propagate across `FuncOp`s.
+  // FuncOp walk has to be done after ShardingConstraintOp and
+  // ManualComputationOp walks because the sharding origins of the func
+  // inputs/outputs could be updated by the above walks.
+  for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
+    for (BlockArgument arg : funcOp.getArguments()) {
+      saveShardingOrigins(valueToOriginShardingMap, getSharding(arg),
+                          OriginShardingType::INPUT, arg, arg.getArgNumber());
+    }
+    for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
+      int64_t valueIndex = returnOperand.getOperandNumber();
+      saveShardingOrigins(
+          valueToOriginShardingMap, getFuncResultSharding(funcOp, valueIndex),
+          OriginShardingType::OUTPUT, returnOperand.get(), valueIndex);
+    }
+  }
 }
 
 // Sets up `funcResultToEdgesMap` for saving the edge source information
@@ -620,10 +641,10 @@ void prepareShardingOriginsHandler(
 // rewrite patterns.
 void prepareFuncResultToEdgesHandler(
     ModuleOp moduleOp, FuncResultToEdgesMap& funcResultToEdgesMap) {
-  moduleOp.walk([&](func::FuncOp funcOp) {
+  for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
     funcResultToEdgesMap[funcOp] =
         SmallVector<AxisToEdgesMap>(funcOp.getNumResults());
-  });
+  }
 }
 
 OriginSharding lookUpValueOriginSharding(
@@ -708,7 +729,7 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
       }
     }
     if (mappings->debugShardingOrigins) {
-      mappings->valueToOriginShardingMap[value].try_emplace(
+      mappings->valueToOriginShardingMap[getShardableValue(value)].try_emplace(
           axisRef, lookUpOriginSharding(edge.source, axisRef));
     }
   };
@@ -747,9 +768,9 @@ void SourceShardingHandler::saveOnModule(ModuleOp moduleOp) {
   }
   if (mappings->debugPropagationEdgeSharding) {
     saveEdgesOnModule(context, mappings->operationToEdgesMap);
-    moduleOp.walk([&](func::FuncOp funcOp) {
+    for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
       saveEdgesOnFuncResults(funcOp, mappings->funcResultToEdgesMap);
-    });
+    }
   }
 }
 

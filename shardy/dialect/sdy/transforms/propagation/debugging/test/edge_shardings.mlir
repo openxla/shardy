@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-aggressive-propagate=debug-propagation-edge-sharding=true -sdy-sink-data-flow-edges="sink-debug-propagation-edge-sharding=true" 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-apply-sharding-constraints -sdy-aggressive-propagate=debug-propagation-edge-sharding=true -sdy-sink-data-flow-edges="sink-debug-propagation-edge-sharding=true" 2>&1 | FileCheck %s
 
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
