@@ -176,6 +176,7 @@ cc_test(
     srcs = ["dialect_test.cc"],
     deps = [
         ":dialect",
+        ":testing_utils",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
@@ -208,6 +209,19 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "testing_utils",
+    hdrs = ["testing_utils.h"],
+    deps = [
+        ":dialect",
+        ":register",
+        "@com_google_googletest//:gtest",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
 cc_test(
     name = "axis_list_ref_test",
     srcs = ["axis_list_ref_test.cc"],
@@ -227,7 +241,7 @@ cc_test(
     srcs = ["utils_test.cc"],
     deps = [
         ":dialect",
-        ":register",
+        ":testing_utils",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",

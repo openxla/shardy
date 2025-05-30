@@ -16,12 +16,8 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_TESTING_UTILS_H_
 #define SHARDY_DIALECT_SDY_TRANSFORMS_PROPAGATION_TESTING_UTILS_H_
 
-#include <cstdint>
-
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/register.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -32,22 +28,6 @@ namespace sdy {
 using ::testing::DescribeMatcher;
 using ::testing::IsEmpty;
 using ::testing::PrintToString;
-
-MATCHER_P(AxisRefIs, axisName,
-          (negation ? "axis isn't " : "axis is ") + PrintToString(axisName)) {
-  *result_listener << "where axis is " << arg.toString();
-  return arg.getName() == axisName;
-}
-
-MATCHER_P3(SubAxisRefIs, axisName, preSize, size,
-           (negation ? "sub-axis isn't " : "sub-axis is ") +
-               PrintToString(axisName) + ":(" + PrintToString(preSize) + ")" +
-               PrintToString(size)) {
-  *result_listener << "where sub-axis is " << arg.toString();
-  return arg.getName() == axisName && arg.getSubAxisInfo() &&
-         arg.getSubAxisInfo().getPreSize() == preSize &&
-         arg.getSubAxisInfo().getSize() == size;
-}
 
 MATCHER_P5(FactorShardingWithOverflowIs, index, isClosed, isMinorMost,
            axisRefsMatcher, overflowAxesMatcher,
@@ -123,21 +103,6 @@ MATCHER_P2(TensorFactorShardingsIs, factorIndexToShardingMatcher,
   return ExplainMatchResult(replicatedAxesMatcher, arg.replicatedAxes,
                             result_listener);
 }
-
-class PropagationTestBase : public ::testing::Test {
- protected:
-  void SetUp() override { loadAllRequiredDialects(&context); }
-
-  AxisRefAttr createAxis(StringRef name) {
-    return AxisRefAttr::get(&context, name);
-  }
-
-  AxisRefAttr createSubAxis(StringRef name, int64_t preSize, int64_t size) {
-    return AxisRefAttr::get(&context, name, preSize, size);
-  }
-
-  MLIRContext context;
-};
 
 }  // namespace sdy
 }  // namespace mlir

@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/testing_utils.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/testing_utils.h"
@@ -120,7 +121,7 @@ ShardingProjection getShardingProjection(
 // reconstructed `TensorShardingAttr` for each tensor matches the original one.
 //===----------------------------------------------------------------------===//
 
-class ShardingProjectionBuildTest : public PropagationTestBase {};
+class ShardingProjectionBuildTest : public ShardyTestBase {};
 
 TEST_F(ShardingProjectionBuildTest, DotGeneralSimple) {
   const std::string program = R"mlir(
@@ -741,7 +742,7 @@ TEST_F(ShardingProjectionBuildTest,
 // Tests for ShardingProjection::expandSharding
 //===----------------------------------------------------------------------===//
 
-class ShardingProjectionExpandShardingTest : public PropagationTestBase {};
+class ShardingProjectionExpandShardingTest : public ShardyTestBase {};
 
 TEST_F(ShardingProjectionExpandShardingTest, DotGeneralSimple) {
   const std::string program = R"mlir(
@@ -822,7 +823,7 @@ TEST_F(ShardingProjectionExpandShardingTest, DotGeneralSimple) {
 // Tests for IsAxisListPrefixOfTest
 //===----------------------------------------------------------------------===//
 
-class IsAxisListPrefixOfTest : public PropagationTestBase {};
+class IsAxisListPrefixOfTest : public ShardyTestBase {};
 
 TEST_F(IsAxisListPrefixOfTest, IsAxisListPrefixOfTest) {
   auto sameAxes = [](ArrayRef<AxisRefAttr> axes) {
@@ -871,7 +872,7 @@ TEST_F(IsAxisListPrefixOfTest, IsAxisListPrefixOfTest) {
 // test case, here we only test the special cases that aren't tested above.
 //===----------------------------------------------------------------------===//
 
-class TensorFactorShardingsTest : public PropagationTestBase {
+class TensorFactorShardingsTest : public ShardyTestBase {
  protected:
   DimensionShardingAttr openDimSharding(ArrayRef<AxisRefAttr> axes) {
     return DimensionShardingAttr::get(&context, axes, /*isClosed=*/false);
@@ -1069,10 +1070,11 @@ TEST_F(TensorFactorShardingsTest, ExpandShardingAxes_Expands) {
       &context, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
       kMeshName, getMeshAttr(module.get()));
 
-  verifyShardingAttrsMatch(shardingAttr,
-                           createTensorSharding(
-                               /*dimShardings=*/{openDimSharding(
-                                   {createAxis("b"),createAxis("c"), createAxis("a")})}));
+  verifyShardingAttrsMatch(
+      shardingAttr,
+      createTensorSharding(
+          /*dimShardings=*/{openDimSharding(
+              {createAxis("b"), createAxis("c"), createAxis("a")})}));
 }
 
 
@@ -1137,7 +1139,7 @@ TEST_F(TensorFactorShardingsTest, UpdateShardingAxes_DoesNotUpdate) {
 // Tests for ShardingProjection::getGreatestCommonPrefixAxes
 //===----------------------------------------------------------------------===//
 class ShardingProjectionGetGreatestCommonPrefixAxesTest
-    : public PropagationTestBase {};
+    : public ShardyTestBase {};
 
 TEST_F(ShardingProjectionGetGreatestCommonPrefixAxesTest, DotGeneralSimple) {
   const std::string program = R"mlir(

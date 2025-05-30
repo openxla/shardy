@@ -457,6 +457,13 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
     //  "a":(1)2, "a":(2)4 -> std::nullopt
     std::optional<AxisRefAttr> getGreatestCommonPrefix(AxisRefAttr other) const;
 
+    // Returns an iterator to the first axis in `orderedAxes` that overlaps with
+    // this axis, or `orderedAxes.end()` if there is no such axis.
+    //
+    // Assumes no two axes in `orderedAxes` overlap.
+    ArrayRef<AxisRefAttr>::iterator getFirstOverlapping(
+        ArrayRef<AxisRefAttr> orderedAxes) const;
+
     // Returns whether this axis-ref can be merged with `other`, i.e., they are
     // consecutive sub-axes of the same full axis and this sub-axis is major to
     // `other`.
@@ -740,6 +747,13 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // must return a new instance.
     TensorShardingAttr replaceReplicatedAxes(
         ArrayRef<AxisRefAttr> replicatedAxes) const;
+
+    // Sets the unreduced axes to `unreducedAxes`.
+    //
+    // Attributes are immutable, so we can't update the sharding in place and
+    // must return a new instance.
+    TensorShardingAttr replaceUnreducedAxes(
+        ArrayRef<AxisRefAttr> unreducedAxes) const;
 
     // Shards dimension `dim` further along `axisName`.
     //

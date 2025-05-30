@@ -472,6 +472,17 @@ TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
 ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
     ArrayRef<AxisRefAttr> dimAxes, ArrayRef<StringAttr> manualAxes);
 
+// Returns all axes or sub-axes in `axesA` that are not in `axesB`.
+//
+// Both `axesA` and `axesB` don't need to be sorted. If an axis A in `axesA`
+// overlaps with an axis B in `axesB`, the prefix and suffix of A that don't
+// overlap with B are added to the result.
+//
+// The order of axes in `axesA` is preserved in the returned vector.
+SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
+                                        ArrayRef<AxisRefAttr> axesB,
+                                        MeshAttr mesh);
+
 }  // namespace sdy
 }  // namespace mlir
 
