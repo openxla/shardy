@@ -1311,8 +1311,8 @@ supported in the future.
   - Dimensions of size 0 aren't sharded.
 - There are no duplicate axis-refs or sub-axes that overlap with one another
   across `dim_shardings`, `replicated_axes`, and `unreduced_axes`.
-- Items in `replicated_axes` are ordered w.r.t. `mesh_or_ref` (see
-  `AxisRefAttr::getMeshComparator`).
+- Items in `replicated_axes` and `unreduced_axes` are ordered w.r.t.
+  `mesh_or_ref` (see `AxisRefAttr::getMeshComparator`).
 
 #### Parameters:
 
