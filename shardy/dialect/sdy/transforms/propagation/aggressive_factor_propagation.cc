@@ -23,7 +23,6 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
-#include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
@@ -105,7 +104,8 @@ AggressiveFactorPropagation::getPropagatedFactorSharding(
        &tensorFactorShardings = tensorFactorShardings](
           AxisRefAttr axisRef, int64_t prevShardedSize) {
         return compatiblePrefixNoConflictsWithinFactor(
-            axisRef, tensorFactorShardings.replicatedAxes, factorSharding,
+            axisRef, tensorFactorShardings.replicatedAxes,
+            tensorFactorShardings.unreducedAxes, factorSharding,
             prevShardedSize, factorSizes[factorIndex], mesh);
       },
       mesh, conservativePropagation);

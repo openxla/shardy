@@ -55,10 +55,10 @@ class BasicFactorPropagation : public FactorPropagation {
   // that shard the given factor. We then truncate the list of axes by removing
   // conflicts.
   // 1. No conflicts within the factor. If a tensor is mapped to the given
-  //    factor, the result cannot overlap with the tensor's replicated axes or
-  //    the factor's overflow axes. If the tensor isn't already sharded along
-  //    that factor and axis (or is only sharded along a sub-axis of it), all of
-  //    the following must hold for its factor sharding:
+  //    factor, the result cannot overlap with the tensor's replicated/unreduced
+  //    axes or the factor's overflow axes. If the tensor isn't already sharded
+  //    along that factor and axis (or is only sharded along a sub-axis of it),
+  //    all of the following must hold for its factor sharding:
   //   * it's open.
   //   * it has no overflow axes.
   //   * it's either minor-most or the sharded size up to and including this
@@ -77,8 +77,9 @@ class BasicFactorPropagation : public FactorPropagation {
   // sub-axis, then the axes (and any axes further sharding the factor) is
   // excluded from the result.
   //
-  // For example (assuming compatibility with other factors and replicated) if
-  // `direction` is `BOTH` and `conservativePropagation` is `false`.
+  // For example (assuming compatibility with other factors and
+  // replicated/unreduced axes) if `direction` is `BOTH` and
+  // `conservativePropagation` is `false`.
   //   - Given factor shardings ["a", "b"] and ["a", "c"], returns ["a"].
   //   - Given factor shardings ["a"], [], ["a", "b", "c"], and ["a", "b", "d"],
   //     returns ["a","b"].
@@ -96,7 +97,8 @@ class BasicFactorPropagation : public FactorPropagation {
   // - Have a prefix of the longest prefix sharding the given factor, and aren't
   //   sharded further along that factor.
   // - Aren't mapped to the given factor.
-  // This method does not resolve conflicts across factors or replicated axes.
+  // This method does not resolve conflicts across factors or
+  // replicated/unreduced axes.
   SmallVector<AxisRefAttr> getCompatibleMajorAxes(
       const ShardingProjection& projection, int64_t factorIndex,
       PropagationDirection direction) const;
@@ -115,11 +117,11 @@ class BasicFactorPropagation : public FactorPropagation {
       int64_t factorIndex) const;
 
   // Returns the largest compatible prefix of `axisRef` by removing conflicts
-  // with `replicatedAxes` and `factorSharding`.
+  // with `replicatedAxes`, `unreducedAxes`, and `factorSharding`.
   //
-  // The returned prefix is not explicitly replicated, and it either:
-  // 1. is already in the `factorSharding.axisRefs`
-  // 2. is not in the `factorSharding.axisRefs`, and the factor satisfies
+  // The returned prefix is not explicitly replicated/unreduced, and is either:
+  // 1. already in the `factorSharding.axisRefs`
+  // 2. not in the `factorSharding.axisRefs`, and the factor satisfies
   //    * it is open.
   //    * it has no overflow axes.
   //    * it is minor-most or the returned prefix does not overflow the factor
@@ -128,8 +130,8 @@ class BasicFactorPropagation : public FactorPropagation {
   // Returns std::nullopt if the compatible prefix does not exist.
   std::optional<AxisRefAttr> compatiblePrefixNoConflictsWithinFactor(
       AxisRefAttr axisRef, ArrayRef<AxisRefAttr> replicatedAxes,
-      const FactorSharding& factorSharding, int64_t prevShardedSize,
-      int64_t factorSize, MeshAttr mesh) const;
+      ArrayRef<AxisRefAttr> unreducedAxes, const FactorSharding& factorSharding,
+      int64_t prevShardedSize, int64_t factorSize, MeshAttr mesh) const;
 
   // For each axis in `axes`, call `removeConflicts` to get the compatible
   // prefix.

@@ -157,7 +157,7 @@ TEST_F(AggressiveFactorPropagationTest, TwoFactorsDoNotCoExistInAnyTensor) {
 }
 
 TEST_F(AggressiveFactorPropagationTest,
-       ConflictsBetweenDifferentFactorsAndReplicated) {
+       ConflictsBetweenDifferentFactorsAndReplicatedOrUnreduced) {
   ShardingProjection projection(
       /*operands=*/
       {
@@ -166,7 +166,8 @@ TEST_F(AggressiveFactorPropagationTest,
                    {0, {.axisRefs = {createAxis("a")}}},
                    {3,
                     {.axisRefs = {createSubAxis("h", 1, 2), createAxis("i")}}},
-               }},
+               },
+           .unreducedAxes = {createAxis("c")}},
           {.factorIndexToSharding =
                {
                    {1, {.axisRefs = {createAxis("b")}}},
@@ -212,12 +213,11 @@ TEST_F(AggressiveFactorPropagationTest,
       {
           {.factorIndexToSharding =
                {
-                   {0,
-                    {.axisRefs = {createAxis("a"), createAxis("b"),
-                                  createAxis("c")}}},
+                   {0, {.axisRefs = {createAxis("a"), createAxis("b")}}},
                    {3,
                     {.axisRefs = {createSubAxis("h", 1, 2), createAxis("i")}}},
-               }},
+               },
+           .unreducedAxes = {createAxis("c")}},
           projection.getOperand(1),
           {.factorIndexToSharding =
                {

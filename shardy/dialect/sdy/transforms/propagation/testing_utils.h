@@ -87,20 +87,28 @@ MATCHER_P2(FactorShardingIsMinorMostIs, index, isMinorMost,
   return true;
 }
 
-MATCHER_P2(TensorFactorShardingsIs, factorIndexToShardingMatcher,
-           replicatedAxesMatcher,
+MATCHER_P3(TensorFactorShardingsIs, factorIndexToShardingMatcher,
+           replicatedAxesMatcher, unreducedAxesMatcher,
            "tensor factor shardings that:\n" +
                DescribeMatcher<FactorIndexToSharding>(
                    factorIndexToShardingMatcher, negation) +
                "\n" + (negation ? "or" : "and") + " replicated axes that " +
                DescribeMatcher<ArrayRef<AxisRefAttr>>(replicatedAxesMatcher,
+                                                      negation) +
+               "\n" + (negation ? "or" : "and") + " unreduced axes that " +
+               DescribeMatcher<ArrayRef<AxisRefAttr>>(unreducedAxesMatcher,
                                                       negation)) {
   if (!ExplainMatchResult(factorIndexToShardingMatcher,
                           arg.factorIndexToSharding, result_listener)) {
     return false;
   }
   *result_listener << "\nand replicated axes ";
-  return ExplainMatchResult(replicatedAxesMatcher, arg.replicatedAxes,
+  if (!ExplainMatchResult(replicatedAxesMatcher, arg.replicatedAxes,
+                          result_listener)) {
+    return false;
+  }
+  *result_listener << "\nand unreduced axes ";
+  return ExplainMatchResult(unreducedAxesMatcher, arg.unreducedAxes,
                             result_listener);
 }
 

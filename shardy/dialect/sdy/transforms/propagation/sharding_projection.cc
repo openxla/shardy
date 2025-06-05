@@ -185,9 +185,8 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
         DimensionShardingAttr::get(ctx, dimSharding, isClosed));
   }
 
-  // TODO(b/416657717): preserve unreduced axes.
   return TensorShardingAttr::get(ctx, meshName, newDimShardings, replicatedAxes,
-                                 /*unreducedAxes=*/{});
+                                 unreducedAxes);
 }
 
 UpdateTensorShardings ShardingProjection::expandSharding(
@@ -272,7 +271,7 @@ TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, TensorShardingAttr optionalSharding,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, const bool closedIfMissing) {
   TensorFactorShardings result;
-  auto& [factorIndexToSharding, replicatedAxes] = result;
+  auto& [factorIndexToSharding, replicatedAxes, unreducedAxes] = result;
   factorIndexToSharding.reserve(factorSizes.size());
 
   if (optionalSharding) {
@@ -360,10 +359,12 @@ TensorFactorShardings buildTensorFactorShardings(
     }
   }
 
-  // 2. Populate replicated axes
+  // 2. Populate replicated and unreduced axes
   if (optionalSharding) {
     replicatedAxes.assign(optionalSharding.getReplicatedAxes().begin(),
                           optionalSharding.getReplicatedAxes().end());
+    unreducedAxes.assign(optionalSharding.getUnreducedAxes().begin(),
+                         optionalSharding.getUnreducedAxes().end());
   }
 
   return result;
@@ -373,7 +374,6 @@ TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping,
     AxesPerFactorRef axesPerFactor) {
   TensorFactorShardings result;
-  // TODO(enver): Drop replicatedAxes after propagation, perhaps isClosed too.
   result.factorIndexToSharding.reserve(axesPerFactor.size());
   for (const auto& dimMapping : tensorMapping.getDimMappings()) {
     for (int64_t factorIndex : dimMapping.getFactorIndices()) {
