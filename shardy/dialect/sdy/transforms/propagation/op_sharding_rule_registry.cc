@@ -209,30 +209,53 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
 OpShardingRuleAttr createOpShardingRule(Operation* op,
                                         const bool conservativePropagation) {
   return TypeSwitch<Operation*, OpShardingRuleAttr>(op)
-      .Case<
-          ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
-          stablehlo::AllGatherOp, stablehlo::AllReduceOp, stablehlo::AllToAllOp,
-          stablehlo::AndOp, stablehlo::Atan2Op, stablehlo::CbrtOp,
-          stablehlo::CeilOp, stablehlo::ClzOp, stablehlo::CollectivePermuteOp,
-          stablehlo::CompareOp, stablehlo::ComplexOp, stablehlo::ConvertOp,
-          stablehlo::CosineOp, stablehlo::CrossReplicaSumOp, stablehlo::DivOp,
-          stablehlo::ExpOp, stablehlo::Expm1Op, stablehlo::FloorOp,
-          stablehlo::ImagOp, stablehlo::IsFiniteOp, stablehlo::Log1pOp,
-          stablehlo::LogOp, stablehlo::LogisticOp, stablehlo::MaxOp,
-          stablehlo::MinOp, stablehlo::MulOp, stablehlo::NegOp,
-          stablehlo::NotOp, stablehlo::OrOp, stablehlo::PopulationCountOp,
-          stablehlo::PowOp, stablehlo::RealOp, stablehlo::ReducePrecisionOp,
-          stablehlo::ReduceScatterOp, stablehlo::RemOp,
-          stablehlo::RoundNearestEvenOp, stablehlo::RoundOp, stablehlo::RsqrtOp,
-          stablehlo::ShiftLeftOp, stablehlo::ShiftRightArithmeticOp,
-          stablehlo::ShiftRightLogicalOp, stablehlo::SignOp, stablehlo::SineOp,
-          stablehlo::SqrtOp, stablehlo::SubtractOp, stablehlo::TanOp,
-          stablehlo::TanhOp, stablehlo::XorOp>([](Operation* pointwiseOp) {
+      .Case<ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
+            stablehlo::AllReduceOp, stablehlo::AndOp, stablehlo::Atan2Op,
+            stablehlo::CbrtOp, stablehlo::CeilOp, stablehlo::ClzOp,
+            stablehlo::CollectiveBroadcastOp, stablehlo::CollectivePermuteOp,
+            stablehlo::CompareOp, stablehlo::ComplexOp, stablehlo::ConvertOp,
+            stablehlo::CosineOp, stablehlo::CrossReplicaSumOp, stablehlo::DivOp,
+            stablehlo::ExpOp, stablehlo::Expm1Op, stablehlo::FloorOp,
+            stablehlo::ImagOp, stablehlo::IsFiniteOp, stablehlo::Log1pOp,
+            stablehlo::LogOp, stablehlo::LogisticOp, stablehlo::MaxOp,
+            stablehlo::MinOp, stablehlo::MulOp, stablehlo::NegOp,
+            stablehlo::NotOp, stablehlo::OrOp, stablehlo::PopulationCountOp,
+            stablehlo::PowOp, stablehlo::RealOp, stablehlo::ReducePrecisionOp,
+            stablehlo::RemOp, stablehlo::RoundNearestEvenOp, stablehlo::RoundOp,
+            stablehlo::RsqrtOp, stablehlo::ShiftLeftOp,
+            stablehlo::ShiftRightArithmeticOp, stablehlo::ShiftRightLogicalOp,
+            stablehlo::SignOp, stablehlo::SineOp, stablehlo::SqrtOp,
+            stablehlo::SubtractOp, stablehlo::TanOp, stablehlo::TanhOp,
+            stablehlo::XorOp>([](Operation* pointwiseOp) {
         return OpShardingRuleBuilder::buildPointwise(pointwiseOp);
       })
       //===----------------------------------------------------------------===//
       // NOTE: Please keep the order of cases alphabetical.
       //===----------------------------------------------------------------===//
+      .Case<stablehlo::AllGatherOp>([](stablehlo::AllGatherOp allGather) {
+        const uint64_t allGatherDim = allGather.getAllGatherDim();
+        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
+          return (dim == allGatherDim) ? FactorType::kNeedReplication
+                                       : FactorType::kPassThrough;
+        };
+        return OpShardingRuleBuilder(allGather)
+            .addPointwise(getTensorShape(allGather.getOperands()[0]),
+                          getFactorType)
+            .build();
+      })
+      .Case<stablehlo::AllToAllOp>([](stablehlo::AllToAllOp allToAll) {
+        const uint64_t splitDim = allToAll.getSplitDimension();
+        const uint64_t concatDim = allToAll.getConcatDimension();
+        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
+          return ((dim == splitDim) || (dim == concatDim))
+                     ? FactorType::kNeedReplication
+                     : FactorType::kPassThrough;
+        };
+        return OpShardingRuleBuilder(allToAll)
+            .addPointwise(getTensorShape(allToAll.getOperands()[0]),
+                          getFactorType)
+            .build();
+      })
       .Case<stablehlo::BitcastConvertOp>(
           [](stablehlo::BitcastConvertOp bitcastConvert) {
             ArrayRef<int64_t> inShape =
@@ -835,6 +858,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         assert(outDim == resultType.getRank());
         return builder.build();
       })
+      .Case<stablehlo::ReduceScatterOp>(
+          [](stablehlo::ReduceScatterOp reduceScatter) {
+            const uint64_t scatterDim = reduceScatter.getScatterDimension();
+            std::function<FactorType(int64_t)> getFactorType =
+                [&](int64_t dim) {
+                  return (dim == scatterDim) ? FactorType::kNeedReplication
+                                             : FactorType::kPassThrough;
+                };
+            return OpShardingRuleBuilder(reduceScatter)
+                .addPointwise(getTensorShape(reduceScatter.getOperand()),
+                              getFactorType)
+                .build();
+          })
       .Case<stablehlo::ReduceWindowOp>(
           [conservativePropagation](stablehlo::ReduceWindowOp reduceWindow) {
             // Since all results have compatible shapes, we can look at the

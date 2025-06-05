@@ -25,6 +25,33 @@ func.func @scalar_op(%arg0: tensor<f32>) -> tensor<f32> {
 // NOTE: Please keep the order of ops alphabetical.
 //===----------------------------------------------------------------------===//
 
+
+// CHECK-LABEL: func @all_gather
+func.func @all_gather(%arg0: tensor<2x2xi64>, %arg1: tensor<2x2xi64>) -> (tensor<2x4xi64>, tensor<2x4xi64>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j], [i, j]) {i=2, j=2} need_replication={j}>
+  %0:2 = "stablehlo.all_gather"(%arg0, %arg1) {
+    all_gather_dim = 1 : i64,
+    replica_groups = dense<[[0, 1]]> : tensor<1x2xi64>,
+    // channel_id = 0
+    channel_handle = #stablehlo.channel_handle<handle = 0, type = 0>
+    // use_global_device_ids = false
+  } : (tensor<2x2xi64>, tensor<2x2xi64>) -> (tensor<2x4xi64>, tensor<2x4xi64>)
+  return %0#0, %0#1 :  tensor<2x4xi64>, tensor<2x4xi64>
+}
+
+// CHECK-LABEL: func @all_to_all
+func.func @all_to_all(%arg0: tensor<2x4xi64>, %arg1: tensor<2x4xi64>) -> (tensor<4x2xi64>, tensor<4x2xi64>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j], [i, j]) {i=2, j=4} need_replication={i, j}>
+  %0:2 = "stablehlo.all_to_all"(%arg0, %arg1) {
+    split_dimension = 1 : i64,
+    concat_dimension = 0 : i64,
+    split_count = 2 : i64,
+    replica_groups = dense<[[0, 1]]> : tensor<1x2xi64>
+    // channel_id = 0
+  } : (tensor<2x4xi64>, tensor<2x4xi64>) -> (tensor<4x2xi64>, tensor<4x2xi64>)
+  return %0#0, %0#1 :  tensor<4x2xi64>, tensor<4x2xi64>
+}
+
 // CHECK-LABEL: func @bitcast_convert_upcast
 func.func @bitcast_convert_upcast(%arg0: tensor<4x2x2xui32>) -> tensor<4x2xui64> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j]) {i=4, j=2, k=2} need_replication={k}>
@@ -638,6 +665,21 @@ func.func @reduce_size_one_dim(%arg0: tensor<2x64x1x13xf32>) -> tensor<2x1x13xf3
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l], [])->([i, k, l]) {i=2, j=64, k=1, l=13} reduction={j}>
   %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [1] : (tensor<2x64x1x13xf32>, tensor<f32>) -> tensor<2x1x13xf32>
   return %1 : tensor<2x1x13xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter
+func.func @reduce_scatter(%arg0: tensor<2x64x1x13xi64>) -> tensor<2x32x1x13xi64> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, j, k, l]) {i=2, j=64, k=1, l=13} need_replication={j}>
+  %0 = "stablehlo.reduce_scatter"(%arg0) ({
+    ^bb0(%arg3: tensor<i64>, %arg4: tensor<i64>):
+    %0 = "stablehlo.add"(%arg3, %arg4) : (tensor<i64>, tensor<i64>) -> tensor<i64>
+    "stablehlo.return"(%0) : (tensor<i64>) -> ()
+  }) {
+    scatter_dimension = 1 : i64,
+    replica_groups = dense<[[0, 1]]> : tensor<1x2xi64>,
+    channel_handle = #stablehlo.channel_handle<handle = 0, type = 0>
+  } : (tensor<2x64x1x13xi64>) -> tensor<2x32x1x13xi64>
+  return %0 : tensor<2x32x1x13xi64>
 }
 
 // CHECK-LABEL: func @reduce_window
