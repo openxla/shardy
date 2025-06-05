@@ -17,7 +17,6 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARD_UTIL_H_
 
 #include <cassert>
-#include <cstdint>
 #include <utility>
 
 #include "mlir/IR/MLIRContext.h"
@@ -58,6 +57,29 @@ struct AxesPerFactorWithMesh {
 // sharding.
 bool shouldReshard(TensorShardingAttr sourceSharding,
                    TensorShardingAttr targetSharding);
+
+// Inserts an `sdy.all-reduce` on `use` if `sourceSharding` has unreduced axes
+// or sub-axes that aren't in `targetUnreducedAxes`.
+//
+// The inserted all-reduce will have `sourceSharding.getUnreducedAxes() -
+// targetUnreducedAxes` as the reduction axes.
+//
+// NOTE: we don't verify correctness of an operation that takes an unreduced
+// input and produces an unreduced output, we simply respect the existing
+// shardings and match cases where an unreduced axis becomes sharded/replicated.
+//
+// Returns the sharding of the inserted all-reduce, or `sourceSharding` if none
+// was inserted.
+TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
+    OpOperand& use, TensorShardingAttr sourceSharding,
+    ArrayRef<AxisRefAttr> targetUnreducedAxes, MeshAttr mesh,
+    IRRewriter& rewriter);
+
+// Same as above, but gets the target unreduced axes from `userSharding` if
+// present, or an empty array otherwise.
+TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
+    OpOperand& use, TensorShardingAttr sourceSharding,
+    TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter);
 
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.

@@ -572,7 +572,7 @@ ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
 SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
                                         ArrayRef<AxisRefAttr> axesB,
                                         MeshAttr mesh) {
-  if (axesA.empty()) {
+  if (axesA.empty() || axesA == axesB) {
     return {};
   }
   if (axesB.empty()) {

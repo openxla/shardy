@@ -804,6 +804,16 @@ func.func @replace_axes_and_all_gather_gcd_greater_than_one_3(%arg0: tensor<12x1
  return %0 : tensor<12x10xf32>
 }
 
+// CHECK-LABEL: func @out_unreduced_axes_preserved
+func.func @out_unreduced_axes_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"y", "z"}, {}], unreduced={"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{"z", "y"}, {}], unreduced={"x"}>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y"}: 0->1] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{"z"}, {"y"}], unreduced={"x"}>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z"}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh3d, [{}, {"y"}], unreduced={"x"}>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{}, {"y"}], unreduced={"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
 // TODO(b/391138813): Add proper support for axes that can't co-exist
 
 // LABEL: func @reshard_with_non_divisible_subaxes_same_pre_size

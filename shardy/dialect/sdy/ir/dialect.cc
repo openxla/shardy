@@ -868,12 +868,14 @@ TensorShardingAttr TensorShardingAttr::getClosedLike(
   }
   return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
                                  /*dimShardings=*/closedDimShardings,
-                                 /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+                                 /*replicatedAxes=*/{},
+                                 sharding.getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::getClosed(
     MLIRContext* context, Attribute meshOrRef,
-    ArrayRef<SmallVector<AxisRefAttr>> axesPerDim) {
+    ArrayRef<SmallVector<AxisRefAttr>> axesPerDim,
+    ArrayRef<AxisRefAttr> unreducedAxes) {
   SmallVector<DimensionShardingAttr> dimShardings;
   dimShardings.reserve(axesPerDim.size());
   for (ArrayRef<AxisRefAttr> axes : axesPerDim) {
@@ -881,7 +883,7 @@ TensorShardingAttr TensorShardingAttr::getClosed(
         DimensionShardingAttr::get(context, axes, /*is_closed=*/true));
   }
   return TensorShardingAttr::get(context, meshOrRef, dimShardings,
-                                 /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+                                 /*replicatedAxes=*/{}, unreducedAxes);
 }
 
 TensorShardingAttr TensorShardingAttr::getFullyOpen(MLIRContext* context,
@@ -1262,6 +1264,8 @@ void ManualComputationOp::setOpResultEdgeOwnerShardings(
 TensorShardingAttr ManualComputationOp::transformTargetSharding(
     Value target, TensorShardingAttr sharding,
     DataFlowShardingTransformType transformType) {
+  // We always expect a target sharding.
+  assert(sharding);
   switch (transformType) {
     case DataFlowShardingTransformType::kBeforeEdgePropagation: {
       if (auto blockArg = dyn_cast<BlockArgument>(target)) {

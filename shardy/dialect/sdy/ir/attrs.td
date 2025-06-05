@@ -810,7 +810,8 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // list in `axesPerDim`.
     static TensorShardingAttr getClosed(
         MLIRContext* context, Attribute meshOrRef,
-        ArrayRef<SmallVector<AxisRefAttr>> axesPerDim);
+        ArrayRef<SmallVector<AxisRefAttr>> axesPerDim,
+        ArrayRef<AxisRefAttr> unreducedAxes);
 
     // Builds a `TensorShardingAttr` with all dim shardings being empty and open
     // (can be further sharded).

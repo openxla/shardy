@@ -37,16 +37,28 @@ namespace sdy {
 
 namespace {
 
-void insertExplicitReshardsToTargetSharding(OpOperand* opOperand,
+void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
                                             TensorShardingAttr targetSharding,
                                             IRRewriter& rewriter,
+                                            const SymbolTable& symbolTable,
                                             const bool insertAfterOperand) {
-  Value operand = opOperand->get();
+  Value operand = opOperand.get();
   TensorShardingAttr operandSharding = getSharding(operand);
+
+  if (insertAfterOperand) {
+    rewriter.setInsertionPointAfterValue(operand);
+  }
+
+  if (operandSharding) {
+    // If `operandSharding` has unreduced axes, insert an all-reduce if any of
+    // the axes isn't unreduced in the target sharding.
+    operandSharding = insertAllReduceIfUnreducedToReplicated(
+        opOperand, operandSharding, targetSharding,
+        operandSharding.getMesh(symbolTable), rewriter);
+    operand = opOperand.get();
+  }
+
   if (shouldReshard(operandSharding, targetSharding)) {
-    if (insertAfterOperand) {
-      rewriter.setInsertionPointAfterValue(operand);
-    }
     auto reshardOp = rewriter.create<ReshardOp>(
         operand.getLoc(), operand,
         targetSharding
@@ -54,23 +66,24 @@ void insertExplicitReshardsToTargetSharding(OpOperand* opOperand,
             // Since it should reshard and `targetSharding` is empty,
             // `operandSharding` is guaranteed to be nonempty.
             : TensorShardingAttr::getFullyClosedLike(operandSharding));
-    opOperand->set(reshardOp);
+    opOperand.set(reshardOp);
   }
 }
 
 void insertExplicitReshardsOnFuncReturn(Operation* op, func::FuncOp& funcOp,
-                                        IRRewriter& rewriter) {
+                                        IRRewriter& rewriter,
+                                        const SymbolTable& symbolTable) {
   rewriter.setInsertionPoint(op);
   for (const auto& [index, opOperand] : llvm::enumerate(op->getOpOperands())) {
     insertExplicitReshardsToTargetSharding(
-        /*opOperand=*/&opOperand,
-        /*targetSharding=*/getFuncResultSharding(funcOp, index), rewriter,
-        /*insertAfterOperand=*/false);
+        opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
+        rewriter, symbolTable, /*insertAfterOperand=*/false);
   }
 }
 
 void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
-                                        IRRewriter& rewriter) {
+                                        IRRewriter& rewriter,
+                                        const SymbolTable& symbolTable) {
   for (Value owner : llvm::concat<Value>(op.getOpResultEdgeOwners(),
                                          op.getBlockArgumentEdgeOwners())) {
     TensorShardingAttr ownerSharding = op.transformTargetSharding(
@@ -78,8 +91,8 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
         DataFlowShardingTransformType::kBeforeEdgePropagation);
     for (OpOperand* sourceOpOperand : op.getEdgeSources(owner)) {
       insertExplicitReshardsToTargetSharding(
-          /*opOperand=*/sourceOpOperand,
-          /*targetSharding=*/ownerSharding, rewriter,
+          *sourceOpOperand,
+          /*targetSharding=*/ownerSharding, rewriter, symbolTable,
           /*insertAfterOperand=*/true);
     }
   }
@@ -98,7 +111,7 @@ struct InsertExplicitReshardsPass
       // TODO(enver): Does not need to be part of the walk on the func, instead
       // get the terminatior with getBodyTerminator.
       if (isa<func::ReturnOp>(op)) {
-        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter);
+        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable);
         return;
       }
 
@@ -106,7 +119,8 @@ struct InsertExplicitReshardsPass
       // sharded in the same way.
       if (auto shardableDataFlowOp =
               dyn_cast<ShardableDataFlowOpInterface>(op)) {
-        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter);
+        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
+                                           symbolTable);
         return;
       }
 

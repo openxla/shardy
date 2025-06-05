@@ -325,11 +325,17 @@ class CollectiveInserter {
         mesh(inSharding.getMesh(op)),
         curMeshName(inSharding.getMeshSymName()),
         outMeshName(outSharding.getMeshSymName()),
+        unreducedAxes(outSharding.getUnreducedAxes()),
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
         currentAxesPerDim(getAxesPerDim<SmallVector<AxisRefAttr>>(inSharding)),
         capacityPerDim(inSharding.getRank(), 1),
         collectiveAxesPerDim(inSharding.getRank()) {
+    // Unreduced axes in the input and output sharding must match, given we
+    // insert an all-reduce if an unreduced axis becomes replicated/sharded, and
+    // never insert a reshard that goes from replicated/sharded to unreduced.
+    assert(inSharding.getUnreducedAxes() == outSharding.getUnreducedAxes());
+
     // We align sub-axes between the input and output axes, so that we can treat
     // sub-axes like full axes and assume any two sub-axes that overlap are also
     // equal, which allows using them as keys in a hash map.
@@ -404,7 +410,7 @@ class CollectiveInserter {
 
   TensorShardingAttr getCurrentSharding() const {
     return TensorShardingAttr::getClosed(getContext(), curMeshName,
-                                         currentAxesPerDim);
+                                         currentAxesPerDim, unreducedAxes);
   }
 
   // If an all-gather can be performed on `dim`, returns the axes to gather for
@@ -1297,6 +1303,7 @@ class CollectiveInserter {
   Value result;
   MeshAttr mesh;
   FlatSymbolRefAttr curMeshName, outMeshName;
+  ArrayRef<AxisRefAttr> unreducedAxes;
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;
   AxesPerDim currentAxesPerDim;
   SmallVector<int64_t> capacityPerDim;
