@@ -65,6 +65,10 @@ inline constexpr StringRef kResultPropagationEdgesAttr =
 // `sdy.sharding_constraint`, or `sdy.ManualComputationOp` input/output.
 inline constexpr StringRef kShardingOriginNameAttr = "sdy.sharding_origin_name";
 
+// Attribute name for indicating whether a value has unreduced axes. Is either
+// `true` or not set.
+inline constexpr StringRef kHasUnreducedAxis = "sdy.has_unreduced_axis";
+
 // Default priority for a `DimensionShardingAttr` that doesn't have a
 // user-defined priority.
 inline constexpr int64_t kDefaultPriority = 0;
