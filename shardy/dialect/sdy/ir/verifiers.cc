@@ -796,16 +796,15 @@ ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
 
 // For each set of op values (operands/results) and corresponding sharding for
 // each value, verifies:
-// 1. the sharding list itself wrt the mesh and `globalTypes`,
-// 2. the in/out shardings are valid w.r.t the corresponding global type,
+// 1. the sharding list itself wrt the mesh and `globalTypes`.
+// 2. the in/out shardings are valid w.r.t the corresponding global type.
 // 3. the number of global and local tensor inputs/outputs of the op region
-//    match,
-// 4. the manual axes come before any free axes in each dim sharding,
+//    match.
+// 4. the manual axes come before any free axes in each dim sharding.
 // 5. The manual axes cannot introduce padding. The dimension size must be
 //    divisible by the corresponding manual axes size.
 // 6. the global shape and local shapes of the op regions arguments/results
-//    match, and
-// 7. No manual axes are split.
+//    match.
 //
 // `valueKindStr` is a string included in any verification error message
 // specifying whether the values we are verifying are the operands or results.
@@ -903,18 +902,6 @@ LogicalResult verifyManualComputationValue(
              << " shape at index " << valueIndex
              << " must match. Expected local shape " << expectedLocalRankedType
              << ", actual local shape " << localRankedType;
-    }
-
-    // 7. No manual axes are split.
-    if (sharding.anyOfAxisRef([&](AxisRefAttr axis) {
-          return axis.getSubAxisInfo() &&
-                 manualAxesSet.contains(axis.getName());
-        })) {
-      return op->emitOpError(valueKindStr)
-             << " sharding at index " << valueIndex
-             << " cannot use a manual axis as a sub/split axis. Saw manual "
-                "axes {"
-             << manualAxesSet << "} and sharding " << sharding << ".";
     }
   }
 
