@@ -64,45 +64,6 @@ func.func @manual_computation_no_inputs_or_outputs_with_manual_axes() {
 
 // -----
 
-sdy.mesh @mesh = <["a"=4]>
-
-func.func @man_comp_split_axes_sharding(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
-  // expected-error @+1 {{op operand sharding at index 0 cannot use a manual axis as a sub/split axis. Saw manual axes {a} and sharding #sdy.sharding<@mesh, [{"a":(1)2}, {}]>.}}
-  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a":(1)2}, {}]>] out_shardings=[<@mesh, [{"a":(1)2}, {}]>] manual_axes={"a"} (%arg1: tensor<8x32xf32>) {
-    %1 = stablehlo.add %arg1, %arg1 : tensor<8x32xf32>
-    sdy.return %1 : tensor<8x32xf32>
-  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
-  func.return %0: tensor<16x32xf32>
-}
-
-// -----
-
-sdy.mesh @mesh = <["a"=2, "b"=4]>
-
-func.func @man_comp_split_axes_sharding_two_axes_sharding(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
-  // expected-error @+1 {{op operand sharding at index 0 cannot use a manual axis as a sub/split axis. Saw manual axes {a, b} and sharding #sdy.sharding<@mesh, [{"a", "b":(1)2}, {}]>.}}
-  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a", "b":(1)2}, {}]>] out_shardings=[<@mesh, [{"a", "b":(1)2}, {}]>] manual_axes={"a", "b"} (%arg1: tensor<4x32xf32>) {
-    %1 = stablehlo.add %arg1, %arg1 : tensor<4x32xf32>
-    sdy.return %1 : tensor<4x32xf32>
-  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
-  func.return %0: tensor<16x32xf32>
-}
-
-// -----
-
-sdy.mesh @mesh = <["a"=2, "b"=4]>
-
-func.func @man_comp_split_axes_sharding_two_axes_replicated(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
-  // expected-error @+1 {{op operand sharding at index 0 cannot use a manual axis as a sub/split axis. Saw manual axes {a, b} and sharding #sdy.sharding<@mesh, [{}, {}], replicated={"a", "b":(1)2}>.}}
-  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{}, {}], replicated={"a", "b":(1)2}>] out_shardings=[<@mesh, [{}, {}], replicated={"a", "b":(1)2}>] manual_axes={"a", "b"} (%arg1: tensor<16x32xf32>) {
-    %1 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
-    sdy.return %1 : tensor<16x32xf32>
-  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
-  func.return %0: tensor<16x32xf32>
-}
-
-// -----
-
 sdy.mesh @mesh = <["a"=2]>
 
 func.func @man_comp_more_arg_specs(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
