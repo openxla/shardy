@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
+#include <cstdint>
 #include <memory>  // IWYU pragma: keep
 #include <utility>
 
@@ -32,6 +33,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
@@ -142,6 +144,7 @@ struct ConstantSplitterPass
 
   void runOnOperation() final {
     FuncOp funcOp = getOperation();
+    IRRewriter rewriter(funcOp);
 
     // We first convert any `stablehlo::ConstantOp` to an `sdy::ConstantOp`, so
     // that constants won't be deduped via folding.
@@ -180,6 +183,36 @@ struct ConstantSplitterPass
       eraseShardingGroupUsers(op);
       op->erase();
     }
+
+    funcOp.walk([&](Operation* op) {
+      auto broadcastOp = dyn_cast<stablehlo::BroadcastInDimOp>(op);
+      if (!broadcastOp) {
+        return;
+      }
+      auto operand = broadcastOp.getOperand();
+      if (!getTensorShape(operand).empty()) {
+        return;
+      }
+      auto result = broadcastOp.getResult();
+      rewriter.setInsertionPointAfter(broadcastOp);
+      SmallVector<std::pair<Operation*, int64_t>> uses;
+      for (OpOperand& use : result.getUses()) {
+        uses.push_back(std::make_pair(use.getOwner(), use.getOperandNumber()));
+      }
+      for (auto& [user, operandIndex] : llvm::reverse(uses)) {
+        if (user->getOperand(operandIndex) != result) {
+          continue;
+        }
+        auto cloneBroadcastInDimOp =
+            rewriter.create<stablehlo::BroadcastInDimOp>(
+                operand.getLoc(), broadcastOp.getResult().getType(), operand,
+                broadcastOp.getBroadcastDimensions());
+        result.replaceUsesWithIf(cloneBroadcastInDimOp, [&](OpOperand& use) {
+          return use.getOwner() == user;
+        });
+      }
+      broadcastOp.erase();
+    });
   }
 
  private:
