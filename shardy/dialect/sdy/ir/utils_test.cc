@@ -16,7 +16,9 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/ir/utils.h"
 
+#include <algorithm>
 #include <optional>
+#include <random>
 #include <string>
 
 #include "mlir/IR/BuiltinOps.h"
@@ -423,6 +425,27 @@ TEST_F(UtilsTest, GetAxisSetDiff) {
                   {createAxis("a")},
                   {createSubAxis("a", 1, 2), createSubAxis("a", 4, 2)}, mesh),
               ElementsAre(SubAxisRefIs("a", 2, 2)));
+}
+
+TEST_F(UtilsTest, SortAndMergeAxes) {
+  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}, {"c", 8}, {"d", 8}});
+
+  SmallVector<AxisRefAttr> axes = {
+      createSubAxis("a", 1, 2), createSubAxis("a", 4, 2),
+      createSubAxis("b", 1, 2), createSubAxis("b", 2, 2),
+      createSubAxis("b", 4, 2), createAxis("c"),
+      createSubAxis("d", 2, 2), createSubAxis("d", 4, 2)};
+
+  // Shuffle the vector
+  std::random_device rd;
+  std::mt19937 g(rd());
+  std::shuffle(axes.begin(), axes.end(), g);
+
+  sortAndMergeAxes(axes, mesh);
+
+  EXPECT_THAT(axes, ElementsAre(SubAxisRefIs("a", 1, 2),
+                                SubAxisRefIs("a", 4, 2), AxisRefIs("b"),
+                                AxisRefIs("c"), SubAxisRefIs("d", 2, 4)));
 }
 
 }  // namespace

@@ -267,6 +267,26 @@ std::string factorSymbolString(int64_t factor) {
   return "z_" + std::to_string(factor - kStartAtZ);
 }
 
+void sortAndMergeAxes(SmallVector<AxisRefAttr>& axes, MeshAttr mesh) {
+  if (axes.empty()) {
+    return;
+  }
+
+  llvm::sort(axes, AxisRefAttr::getMeshComparator(mesh));
+  auto* it = axes.begin();
+  auto* next = it + 1;
+  while (next != axes.end()) {
+    assert(!it->overlaps(*next) && "Axes should not overlap");
+    if (it->canMerge(*next)) {
+      *it = it->merge(*next, mesh);
+      next = axes.erase(next);
+    } else {
+      it++;
+      next = it + 1;
+    }
+  }
+}
+
 Operation* getOwningOp(Value value) {
   if (Operation* op = value.getDefiningOp()) {
     return op;
