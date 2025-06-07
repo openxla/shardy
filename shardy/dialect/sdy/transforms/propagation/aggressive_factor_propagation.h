@@ -80,7 +80,7 @@ class AggressiveFactorPropagation : public BasicFactorPropagation {
       ShardingProjection& projection,
       PropagationDirectionAlongFactor directionAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh,
-      bool conservativePropagation) const override;
+      bool conservativePropagation, Operation* op) const override;
 
  private:
   // Returns the axes to propagate to an individual factor in the given

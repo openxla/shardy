@@ -23,8 +23,11 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
@@ -132,8 +135,8 @@ AggressiveFactorPropagation::getPropagatedFactorSharding(
 UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
     ShardingProjection& projection,
     PropagationDirectionAlongFactor directionAlongFactor,
-    ArrayRef<int64_t> factorSizes, MeshAttr mesh,
-    bool conservativePropagation) const {
+    ArrayRef<int64_t> factorSizes, MeshAttr mesh, bool conservativePropagation,
+    Operation* op) const {
   UpdateTensorShardings result(projection.getNumOperands(),
                                projection.getNumResults());
 
@@ -154,18 +157,26 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
 
   // We sort the factors based on:
   // 1. larger source tensor size first
-  // 2. smaller source tensor index first
-  // 3. smaller factor index first
+  // 2. [elementwise ops] most sharded factor first
+  // 3. smaller source tensor index first
+  // 4. smaller factor index first
   // Unstable sort is fine because there is no equality in the candidates.
   // TODO(b/376233527): reevaluate this conflict resolution heuristic.
   SmallVector<int64_t> sortedFactorIndices =
       llvm::to_vector(llvm::seq<int64_t>(0, factorSizes.size()));
   SmallVector<TensorIndexSize> factorToSourceTensor =
       getFactorToSourceTensor(projection, factorSizes, axesPerFactor);
+
+  bool isElementwiseOp = op && isElementwise(op);
+
   llvm::sort(sortedFactorIndices, [&](int64_t i, int64_t j) {
-    return std::forward_as_tuple(-factorToSourceTensor[i].size,
+    int64_t iShardingSize =
+        isElementwiseOp ? getTotalAxesSize(axesPerFactor[i], mesh) : 0;
+    int64_t jShardingSize =
+        isElementwiseOp ? getTotalAxesSize(axesPerFactor[j], mesh) : 0;
+    return std::forward_as_tuple(-factorToSourceTensor[i].size, -iShardingSize,
                                  factorToSourceTensor[i].index, i) <
-           std::forward_as_tuple(-factorToSourceTensor[j].size,
+           std::forward_as_tuple(-factorToSourceTensor[j].size, -jShardingSize,
                                  factorToSourceTensor[j].index, j);
   });
 

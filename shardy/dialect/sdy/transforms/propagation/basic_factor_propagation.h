@@ -45,7 +45,7 @@ class BasicFactorPropagation : public FactorPropagation {
       ShardingProjection& projection,
       PropagationDirectionAlongFactor directionAlongFactor,
       ArrayRef<int64_t> factorSizes, MeshAttr mesh,
-      bool conservativePropagation) const override;
+      bool conservativePropagation, Operation*) const override;
 
  protected:
   // Finds all compatible major axes that can shard the given factor for all

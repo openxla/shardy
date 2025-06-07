@@ -140,6 +140,13 @@ int64_t getTotalAxesSize(ArrayRef<MeshAxisAttr> axes) {
       [](int64_t cur, MeshAxisAttr axis) { return cur * axis.getSize(); });
 }
 
+int64_t getTotalAxesSize(ArrayRef<AxisRefAttr> axes, MeshAttr mesh) {
+  return std::accumulate(axes.begin(), axes.end(), 1,
+                         [mesh](int64_t cur, AxisRefAttr axis) {
+                           return cur * axis.getSize(mesh);
+                         });
+}
+
 MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName) {
   return SymbolTable::lookupNearestSymbolFrom<sdy::MeshOp>(
       op, meshSymName);
