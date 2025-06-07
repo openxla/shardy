@@ -212,3 +212,165 @@ func.func @splits_const_subexpr_with_sharding_group(%arg0: tensor<4x8xi32>) -> (
   %3 = stablehlo.maximum %2, %1 : tensor<4x8xi32>
   return %2, %3 : tensor<4x8xi32>, tensor<4x8xi32>
 }
+
+// CHECK-LABEL: func @does_not_split_broadcast_single_use
+func.func @does_not_split_broadcast_single_use(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: return %1 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  return %1 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @does_not_split_broadcast_on_non_scalar_input
+func.func @does_not_split_broadcast_on_non_scalar_input(%arg0: tensor<2xf32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<2xf32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.abs %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  // CHECK-NEXT: return %3 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<2xf32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  %2 = stablehlo.abs %0 : tensor<2x64xf32>
+  %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  return %3 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @does_not_split_broadcast_on_one_dimensional_input_of_size_one
+func.func @does_not_split_broadcast_on_one_dimensional_input_of_size_one(%arg0: tensor<1xf32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<1xf32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.abs %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  // CHECK-NEXT: return %3 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<1xf32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  %2 = stablehlo.abs %0 : tensor<2x64xf32>
+  %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  return %3 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_broadcast_simple
+func.func @splits_broadcast_simple(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.abs %1 : tensor<2x64xf32>
+  // CHECK-NEXT: %4 = stablehlo.multiply %2, %3 : tensor<2x64xf32>
+  // CHECK-NEXT: return %4 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  %2 = stablehlo.abs %0 : tensor<2x64xf32>
+  %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  return %3 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_multiple_broadcast_use_same_scalar
+func.func @splits_multiple_broadcast_use_same_scalar(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.add %0, %1 : tensor<2x64xf32>
+  // CHECK-NEXT: return %2 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %2 = stablehlo.add %0, %1 : tensor<2x64xf32>
+  return %2 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_multiple_broadcasts
+func.func @splits_multiple_broadcasts(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.abs %1 : tensor<2x64xf32>
+  // CHECK-NEXT: %4 = stablehlo.multiply %2, %3 : tensor<2x64xf32>
+  // CHECK-NEXT: %5 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %6 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %7 = stablehlo.negate %5 : tensor<2x64xf32>
+  // CHECK-NEXT: %8 = stablehlo.abs %6 : tensor<2x64xf32>
+  // CHECK-NEXT: %9 = stablehlo.multiply %7, %8 : tensor<2x64xf32>
+  // CHECK-NEXT: %10 = stablehlo.add %4, %9 : tensor<2x64xf32>
+  // CHECK-NEXT: return %10 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  %2 = stablehlo.abs %0 : tensor<2x64xf32>
+  %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  %4 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %5 = stablehlo.negate %4 : tensor<2x64xf32>
+  %6 = stablehlo.abs %4 : tensor<2x64xf32>
+  %7 = stablehlo.multiply %5, %6 : tensor<2x64xf32>
+  %8 = stablehlo.add %3, %7 : tensor<2x64xf32>
+  return %8 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_broadcast_use_and_itself_on_same_op
+func.func @splits_broadcast_use_and_itself_on_same_op(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
+  // CHECK-NEXT: return %3 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  %2 = stablehlo.multiply %0, %1 : tensor<2x64xf32>
+  return %2 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_broadcast_one_of_multiple_use_is_func_return
+func.func @splits_broadcast_one_of_multiple_use_is_func_return(%arg0: tensor<f32>) -> (tensor<2x64xf32>, tensor<2x64xf32>) {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.negate %0 : tensor<2x64xf32>
+  // CHECK-NEXT: return %1, %2 : tensor<2x64xf32>, tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.negate %0 : tensor<2x64xf32>
+  return %0, %1 : tensor<2x64xf32>, tensor<2x64xf32>
+}
+
+
+// CHECK-LABEL: func @does_not_split_broadcast_all_uses_on_same_op
+func.func @does_not_split_broadcast_all_uses_on_same_op(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %1 = stablehlo.add %0, %0 : tensor<2x64xf32>
+  // CHECK-NEXT: return %1 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.add %0, %0 : tensor<2x64xf32>
+  return %1 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_broadcast_multiple_uses
+func.func @splits_broadcast_multiple_uses(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK: %1 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK: %2 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.add %0, %0 : tensor<2x64xf32>
+  // CHECK-NEXT: %4 = stablehlo.negate %1 : tensor<2x64xf32>
+  // CHECK-NEXT: %5 = stablehlo.divide %2, %4 : tensor<2x64xf32>
+  // CHECK-NEXT: %6 = stablehlo.multiply %3, %5 : tensor<2x64xf32>
+  // CHECK-NEXT: return %6 :  tensor<2x64xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %1 = stablehlo.add %0, %0 : tensor<2x64xf32>
+  %2 = stablehlo.negate %0 : tensor<2x64xf32>
+  %3 = stablehlo.divide %0, %2 : tensor<2x64xf32>
+  %4 = stablehlo.multiply %1, %3 : tensor<2x64xf32>
+  return %4 :  tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @splits_broadcast_on_constant
+func.func @splits_broadcast_on_constant() -> tensor<2x64xf32> {
+  // CHECK: %0 = sdy.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.negate %1 : tensor<2x64xf32>
+  // CHECK-NEXT: %4 = stablehlo.abs %2 : tensor<2x64xf32>
+  // CHECK-NEXT: %5 = stablehlo.multiply %3, %4 : tensor<2x64xf32>
+  // CHECK-NEXT: return %5 : tensor<2x64xf32>
+  %0 = stablehlo.constant dense<0.0> : tensor<f32>
+  %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %2 = stablehlo.negate %1 : tensor<2x64xf32>
+  %3 = stablehlo.abs %1 : tensor<2x64xf32>
+  %4 = stablehlo.multiply %2, %3 : tensor<2x64xf32>
+  return %4 : tensor<2x64xf32>
+}
+

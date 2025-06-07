@@ -13,7 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
 #include <memory>  // IWYU pragma: keep
+#include <tuple>
 #include <utility>
 
 #include "llvm/Support/Casting.h"
@@ -22,10 +24,14 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Region.h"
+#include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -48,7 +54,6 @@ struct ConstantMergerPass
     // regions and potentially invalidate sharding annotations.
     llvm::DenseMap<std::pair<DictionaryAttr, Region*>, Operation*>
         constantsCache;
-
     getOperation().walk([&](Operation* op) {
       if (!llvm::isa<sdy::ConstantOp>(op) &&
           !op->hasTrait<OpTrait::ConstantLike>()) {
@@ -65,6 +70,36 @@ struct ConstantMergerPass
       LLVM_DEBUG(llvm::dbgs() << "Deduplicating constant: " << *op << "\n"
                               << "With: " << *cachedConstant << "\n");
       op->replaceAllUsesWith(cachedConstant);
+      op->erase();
+    });
+
+    llvm::DenseMap<
+        std::tuple<DictionaryAttr, Region*, Type, Value, ArrayRef<int64_t>>,
+        Operation*>
+        broadcastsCache;
+    getOperation().walk([&](Operation* op) {
+      auto broadcastOp = dyn_cast<stablehlo::BroadcastInDimOp>(op);
+      if (!broadcastOp) {
+        return;
+      }
+      auto operand = broadcastOp.getOperand();
+      if (!getTensorShape(operand).empty()) {
+        return;
+      }
+      auto key = std::make_tuple(broadcastOp->getAttrDictionary(),
+                                 broadcastOp->getParentRegion(),
+                                 broadcastOp.getResult().getType(), operand,
+                                 broadcastOp.getBroadcastDimensions());
+      auto [cachedIt, inserted] = broadcastsCache.try_emplace(key, op);
+      if (inserted) {
+        // If insert was successful, then this is a new constant.
+        return;
+      }
+
+      Operation* cachedBroadcast = cachedIt->second;
+      LLVM_DEBUG(llvm::dbgs() << "Deduplicating broadcast: " << *op << "\n"
+                              << "With: " << *cachedBroadcast << "\n");
+      op->replaceAllUsesWith(cachedBroadcast);
       op->erase();
     });
   }

@@ -1,5 +1,7 @@
 // RUN: sdy_opt %s --sdy-constant-merger | FileCheck %s
 
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
 // CHECK-LABEL: func @merge_constants_sdy
 func.func @merge_constants_sdy() -> tensor<f32> {
   // CHECK: %[[C0:.*]] = sdy.constant dense<1.0{{.*}}> : tensor<f32>
@@ -63,4 +65,45 @@ func.func @dont_merge_constants_different_annotations() -> tensor<f32> {
   // CHECK: stablehlo.add %[[C0]], %[[C1]] : tensor<f32>
   %2 = stablehlo.add %0, %1 : tensor<f32>
   return %2 : tensor<f32>
+}
+
+// CHECK-LABEL: func @merge_broadcasts
+func.func @merge_broadcasts() -> tensor<2x64xf32> {
+  // CHECK: %0 = sdy.constant dense<1.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.add %1, %1 : tensor<2x64xf32>
+  // CHECK-NEXT: return %2 : tensor<2x64xf32>
+  %0 = sdy.constant dense<1.000000e+00> : tensor<f32>
+  %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %2 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %3 = stablehlo.add %1, %2 : tensor<2x64xf32>
+  return %3 : tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @does_not_merge_broadcasts_different_sharding
+func.func @does_not_merge_broadcasts_different_sharding() -> tensor<2x64xf32> {
+  // CHECK: %0 = sdy.constant dense<1.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.broadcast_in_dim %0, dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.add %1, %2 : tensor<2x64xf32>
+  // CHECK-NEXT: return %3 : tensor<2x64xf32>
+  %0 = sdy.constant dense<1.000000e+00> : tensor<f32>
+  %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %2 = stablehlo.broadcast_in_dim %0, dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<f32>) -> tensor<2x64xf32>
+  %3 = stablehlo.add %1, %2 : tensor<2x64xf32>
+  return %3 : tensor<2x64xf32>
+}
+
+// CHECK-LABEL: func @does_not_merge_broadcasts_with_different_uses
+func.func @does_not_merge_broadcasts_with_different_uses(%arg0: tensor<f32>) -> tensor<2x64xf32> {
+  // CHECK: %0 = sdy.constant dense<1.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %2 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  // CHECK-NEXT: %3 = stablehlo.add %1, %2 : tensor<2x64xf32>
+  // CHECK-NEXT: return %3 : tensor<2x64xf32>
+  %0 = sdy.constant dense<1.000000e+00> : tensor<f32>
+  %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %2 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
+  %3 = stablehlo.add %1, %2 : tensor<2x64xf32>
+  return %3 : tensor<2x64xf32>
 }
