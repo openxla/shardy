@@ -3,8 +3,8 @@
 sdy.mesh @empty_mesh = <[]>
 
 sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
-
-sdy.mesh @mesh_xyz = <["z"=2, "x"=2, "y"=2]>
+sdy.mesh @mesh_xyz = <["x"=2, "y"=2, "z"=2]>
+sdy.mesh @mesh_x_8_y_8 = <["x"=8, "y"=8]>
 
 // CHECK-LABEL: @add_new_replicated
 func.func @add_new_replicated(%arg0: tensor<8xf32>) -> tensor<8xf32> {
@@ -61,12 +61,12 @@ func.func @sort_manual_axes_and_add_out_shardings(%arg0: tensor<8xf32>) -> tenso
 // CHECK-LABEL: @inlined_mesh_add_replicated_and_sort
 func.func @inlined_mesh_add_replicated_and_sort(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: sdy.manual_computation(%arg0)
-  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh_xyz, [{"x", ?}], replicated={"z", "y"}>]
-  // CHECK-SAME{LITERAL}: out_shardings=[<mesh<["z"=2, "x"=2, "y"=2]>, [{"z", ?}], replicated={"x", "y"}>]
-  // CHECK-SAME{LITERAL}: manual_axes={"z", "x", "y"} (%arg1: tensor<4xf32>) {
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh_xyz, [{"y", ?}], replicated={"x", "z"}>]
+  // CHECK-SAME{LITERAL}: out_shardings=[<@mesh_xyz, [{"z", ?}], replicated={"x", "y"}>]
+  // CHECK-SAME{LITERAL}: manual_axes={"x", "y", "z"} (%arg1: tensor<4xf32>) {
   %0 = sdy.manual_computation(%arg0)
-      in_shardings=[<@mesh_xyz, [{"x", ?}]>]
-      out_shardings=[<mesh<["z"=2, "x"=2, "y"=2]>, [{"z", ?}], replicated={"y"}>]
+      in_shardings=[<@mesh_xyz, [{"y", ?}]>]
+      out_shardings=[<mesh<["x"=2, "y"=2, "z"=2]>, [{"z", ?}], replicated={"y"}>]
       manual_axes={"y", "x", "z"} (%arg1: tensor<4xf32>) {
     sdy.return %arg1 : tensor<4xf32>
   } : (tensor<8xf32>) -> tensor<8xf32>
@@ -140,4 +140,16 @@ func.func @dont_add_manual_axes_to_non_shaped_types(%arg0: !stablehlo.token, %ar
     sdy.return %arg2, %arg3 : !stablehlo.token, tensor<8xf32>
   } : (!stablehlo.token, tensor<8xf32>) -> (!stablehlo.token, tensor<8xf32>)
   return %0#0, %0#1 : !stablehlo.token, tensor<8xf32>
+}
+
+// CHECK-LABEL: @sub_axes_in_out_shardings
+func.func @sub_axes_in_out_shardings(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh_x_8_y_8, [{"y":(2)2}], replicated={"x", "y":(1)2, "y":(4)2}>]
+  // CHECK-SAME{LITERAL}: out_shardings=[<@mesh_x_8_y_8, [{"y":(1)2}], replicated={"x", "y":(2)4}>]
+  // CHECK-SAME{LITERAL}: manual_axes={"x", "y"} (%arg1: tensor<4xf32>) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh_x_8_y_8, [{"y":(2)2}]>] out_shardings=[<@mesh_x_8_y_8, [{"y":(1)2}], replicated={"x":(2)2}>] manual_axes={"x", "y"} (%arg1: tensor<4xf32>) {
+    sdy.return %arg1 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
 }

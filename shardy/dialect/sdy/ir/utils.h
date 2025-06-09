@@ -238,6 +238,10 @@ void addAxisOrMerge(Container& container, AxisRefAttr axis, MeshAttr mesh) {
   }
 }
 
+// Sorts `axes` by `mesh`s comparator, and merges axes that can be merged.
+// Assumes that there is no overlap between elements in `axes`.
+void sortAndMergeAxes(SmallVector<AxisRefAttr>& axes, MeshAttr mesh);
+
 // Returns the defining op of `value`, if it's an op result, or the parent op
 // if it's a block argument.
 Operation* getOwningOp(Value value);

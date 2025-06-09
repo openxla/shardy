@@ -20,7 +20,6 @@ limitations under the License.
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -50,11 +49,11 @@ namespace {
 // If a sharding that needs to be updated is bound to an empty mesh, replaces
 // its mesh with `commonMeshOrRef`.
 std::optional<SmallVector<TensorShardingAttr>>
-addUnusedManualAxesToReplicatedAxes(
-    ArrayRef<TensorShardingAttr> shardings, TypeRange types,
-    ArrayRef<StringAttr> manualAxes, Attribute commonMeshOrRef,
-    const SymbolTable& symbolTable,
-    std::function<bool(AxisRefAttr lhs, AxisRefAttr rhs)> meshComparator) {
+addUnusedManualAxesToReplicatedAxes(ArrayRef<TensorShardingAttr> shardings,
+                                    TypeRange types,
+                                    ArrayRef<AxisRefAttr> manualAxes,
+                                    Attribute commonMeshOrRef,
+                                    const SymbolTable& symbolTable) {
   SmallVector<TensorShardingAttr> newShardings;
   bool modified = false;
   for (auto [sharding, type] : llvm::zip_equal(shardings, types)) {
@@ -62,12 +61,15 @@ addUnusedManualAxesToReplicatedAxes(
       newShardings.push_back(sharding);
       continue;
     }
-    llvm::SmallSet<StringRef, 2> unusedManualAxes;
-    unusedManualAxes.insert(manualAxes.begin(), manualAxes.end());
-    sharding.forEachAxisRef([&unusedManualAxes](AxisRefAttr axis) {
-      unusedManualAxes.erase(axis.getName());
+
+    SmallVector<AxisRefAttr> axesInSharding;
+    sharding.forEachAxisRef([&](AxisRefAttr axis) {
+      axesInSharding.push_back(axis);
     });
 
+    MeshAttr mesh = getMeshOrLookup(symbolTable, commonMeshOrRef);
+    SmallVector<AxisRefAttr> unusedManualAxes =
+        getAxisSetDiff(manualAxes, axesInSharding, mesh);
     if (unusedManualAxes.empty()) {
       // Already uses all the manual axes, no need to create a new one.
       newShardings.push_back(sharding);
@@ -76,16 +78,10 @@ addUnusedManualAxesToReplicatedAxes(
 
     SmallVector<AxisRefAttr> newReplicatedAxes =
         llvm::to_vector(sharding.getReplicatedAxes());
-    llvm::transform(unusedManualAxes, std::back_inserter(newReplicatedAxes),
-                    [sharding = sharding](StringRef axis) {
-                      return AxisRefAttr::get(sharding.getContext(), axis);
-                    });
-    llvm::sort(newReplicatedAxes, meshComparator);
-    Attribute meshOrRef = sharding.getMesh(symbolTable).empty()
-                              ? commonMeshOrRef
-                              : sharding.getMeshOrRef();
+    llvm::append_range(newReplicatedAxes, unusedManualAxes);
+    sortAndMergeAxes(newReplicatedAxes, mesh);
     newShardings.push_back(TensorShardingAttr::get(
-        sharding.getContext(), meshOrRef, sharding.getDimShardings(),
+        sharding.getContext(), commonMeshOrRef, sharding.getDimShardings(),
         newReplicatedAxes, sharding.getUnreducedAxes()));
     modified = true;
   }
@@ -99,20 +95,24 @@ void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op, MeshAttr mesh,
                                          const SymbolTable& symbolTable) {
   OpBuilder builder(op);
 
-  ArrayRef<StringAttr> manualAxes = op.getManualAxes();
-  auto meshComparator = AxisRefAttr::getMeshComparator(mesh);
+  SmallVector<AxisRefAttr> manualAxes;
+  manualAxes.reserve(op.getManualAxes().size());
+  llvm::transform(op.getManualAxes(), std::back_inserter(manualAxes),
+                  [&](StringAttr axis) {
+                    return AxisRefAttr::get(builder.getContext(), axis);
+                  });
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
               op.getInShardings().getShardings(), op->getOperandTypes(),
-              manualAxes, commonMeshOrRef, symbolTable, meshComparator)) {
+              manualAxes, commonMeshOrRef, symbolTable)) {
     op.setInShardings(*newShardings);
   }
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
               op.getOutShardings().getShardings(), op->getResultTypes(),
-              manualAxes, commonMeshOrRef, symbolTable, meshComparator)) {
+              manualAxes, commonMeshOrRef, symbolTable)) {
     op.setOutShardings(*newShardings);
   }
 }
