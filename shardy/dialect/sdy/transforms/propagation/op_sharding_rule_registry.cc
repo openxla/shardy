@@ -443,11 +443,14 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             FactorType::kReduction);
 
         // Add the output feature size factor.
-        builder.addFactor(
-            {kNullDim, dimNums.getKernelOutputFeatureDimension()},
-            dimNums.getOutputFeatureDimension(),
-            outType.getDimSize(dimNums.getOutputFeatureDimension()) /
-                (conv.getBatchGroupCount() * conv.getFeatureGroupCount()));
+        if (int64_t outputFeatureSize =
+                (outType.getDimSize(dimNums.getOutputFeatureDimension()) /
+                 (conv.getBatchGroupCount() * conv.getFeatureGroupCount()));
+            outputFeatureSize > 1) {
+          builder.addFactor(
+              {kNullDim, dimNums.getKernelOutputFeatureDimension()},
+              dimNums.getOutputFeatureDimension(), outputFeatureSize);
+        }
 
         return builder.build();
       })

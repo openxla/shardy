@@ -215,6 +215,20 @@ func.func @conv_batch_group_count(%arg0: tensor<8x224x224x192xf32>, %arg1: tenso
   return %0 : tensor<2x112x112x256xf32>
 }
 
+// CHECK-LABEL: func @conv_per_group_batch_size_one
+func.func @conv_per_group_batch_size_one(%arg0: tensor<4x224x224x192xf32>, %arg1: tensor<3x3x192x256xf32>) -> tensor<1x112x112x256xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, kl, mn, o], [l, n, o, ip])->([j, k, m, ip]) {i=4, j=1, k=112, l=2, m=112, n=2, o=192, p=64} reduction={l, n, o} permutation={k, m}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [2, 2], pad = [[0, 1], [0, 1]]} {
+      batch_group_count = 4 : i64,
+      feature_group_count = 1 : i64,
+      lhs_dilations = dense<1> : tensor<2xi64>,
+      rhs_dilations = dense<1> : tensor<2xi64>
+    } : (tensor<4x224x224x192xf32>, tensor<3x3x192x256xf32>) -> tensor<1x112x112x256xf32>
+  return %0 : tensor<1x112x112x256xf32>
+}
+
 // CHECK-LABEL: func @conv_feature_group_count
 func.func @conv_feature_group_count(%arg0: tensor<8x224x224x192xf32>, %arg1: tensor<3x3x12x256xf32>) -> tensor<8x112x112x256xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, lm, no], [k, m, o, np])->([i, j, l, np]) {i=8, j=112, k=2, l=112, m=2, n=16, o=12, p=16} reduction={k, m, o} permutation={j, l}>
@@ -227,6 +241,34 @@ func.func @conv_feature_group_count(%arg0: tensor<8x224x224x192xf32>, %arg1: ten
       rhs_dilations = dense<1> : tensor<2xi64>
     } : (tensor<8x224x224x192xf32>, tensor<3x3x12x256xf32>) -> tensor<8x112x112x256xf32>
   return %0 : tensor<8x112x112x256xf32>
+}
+
+// CHECK-LABEL: func @conv_per_group_input_feature_size_one
+func.func @conv_per_group_input_feature_size_one(%arg0: tensor<8x224x224x16xf32>, %arg1: tensor<3x3x1x256xf32>) -> tensor<8x112x112x256xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, lm, n], [k, m, o, np])->([i, j, l, np]) {i=8, j=112, k=2, l=112, m=2, n=16, o=1, p=16} reduction={k, m, o} permutation={j, l}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [2, 2], pad = [[0, 1], [0, 1]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 16 : i64,
+      lhs_dilations = dense<1> : tensor<2xi64>,
+      rhs_dilations = dense<1> : tensor<2xi64>
+    } : (tensor<8x224x224x16xf32>, tensor<3x3x1x256xf32>) -> tensor<8x112x112x256xf32>
+  return %0 : tensor<8x112x112x256xf32>
+}
+
+// CHECK-LABEL: func @conv_output_feature_size_one
+func.func @conv_output_feature_size_one(%arg0: tensor<8x224x224x192xf32>, %arg1: tensor<3x3x12x16xf32>) -> tensor<8x112x112x16xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, lm, no], [k, m, o, n])->([i, j, l, n]) {i=8, j=112, k=2, l=112, m=2, n=16, o=12} reduction={k, m, o} permutation={j, l}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [2, 2], pad = [[0, 1], [0, 1]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 16 : i64,
+      lhs_dilations = dense<1> : tensor<2xi64>,
+      rhs_dilations = dense<1> : tensor<2xi64>
+    } : (tensor<8x224x224x192xf32>, tensor<3x3x12x16xf32>) -> tensor<8x112x112x16xf32>
+  return %0 : tensor<8x112x112x16xf32>
 }
 
 // CHECK-LABEL: func @custom_call_compact_wy_helper

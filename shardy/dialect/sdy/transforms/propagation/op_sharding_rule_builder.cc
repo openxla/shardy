@@ -68,15 +68,24 @@ SmallVector<TensorMappingAttr> buildTensorMappingAttrList(
 
 // Maps the given `tensorDims` that are not equal to `kNullDim` to
 // `factorIndex`.
+//
+// If the tensor dimension is already mapped to a factor, appends `factorIndex`
+// to the mapping iff the factor size is not 1.
 void mapDimsToFactor(SmallVector<TensorMapping>& tensorMappings,
-                        ArrayRef<int64_t> tensorDims, int64_t factorIndex) {
+                     ArrayRef<int64_t> tensorDims, int64_t factorIndex,
+                     int64_t factorSize) {
   for (auto [tensorMapping, tensorDim] :
        llvm::zip_equal(tensorMappings, tensorDims)) {
     if (tensorDim == kNullDim) {
       continue;
     }
     assert(tensorDim >= 0);
-    tensorMapping[tensorDim].factorIndices.push_back(factorIndex);
+    SmallVector<int64_t>& mappedFactors =
+        tensorMapping[tensorDim].factorIndices;
+    if (factorSize == 1 && !mappedFactors.empty()) {
+      continue;
+    }
+    mappedFactors.push_back(factorIndex);
   }
 }
 
@@ -173,8 +182,8 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(
     ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
     int64_t factorSize, FactorType factorType, bool isBlocked) {
   int64_t factorIndex = factorSizes.size();
-  mapDimsToFactor(operandMappings, operandDims, factorIndex);
-  mapDimsToFactor(resultMappings, resultDims, factorIndex);
+  mapDimsToFactor(operandMappings, operandDims, factorIndex, factorSize);
+  mapDimsToFactor(resultMappings, resultDims, factorIndex, factorSize);
   factorSizes.push_back(factorSize);
   updateFactorType(factorType, factorIndex, isBlocked);
   return *this;
