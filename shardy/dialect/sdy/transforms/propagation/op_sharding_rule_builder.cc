@@ -89,6 +89,23 @@ void mapDimsToFactor(SmallVector<TensorMapping>& tensorMappings,
   }
 }
 
+// Maps the given `tensorDim` to `factorIndex` for all `tensorMappings`.
+//
+// If the tensor dimension is already mapped to a factor, appends `factorIndex`
+// to the mapping iff the factor size is not 1.
+void mapSingleDimOverAllMappingsToFactor(
+    SmallVector<TensorMapping>& tensorMappings, int64_t tensorDim,
+    int64_t factorIndex) {
+  assert(tensorDim >= 0);
+  for (TensorMapping& tensorMapping : tensorMappings) {
+    if (tensorMapping.empty()) {
+      // Rank is 0.
+      continue;
+    }
+    tensorMapping[tensorDim].factorIndices.push_back(factorIndex);
+  }
+}
+
 }  // namespace
 
 OpShardingRuleBuilder::OpShardingRuleBuilder(
@@ -155,9 +172,12 @@ OpShardingRuleAttr OpShardingRuleBuilder::buildPointwise(Operation* op) {
   return builder.build();
 }
 
-void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
-                                             int64_t factorIndex,
+int64_t OpShardingRuleBuilder::reserveFactor(int64_t factorSize,
+                                             FactorType factorType,
                                              bool isBlocked) {
+  int64_t factorIndex = factorSizes.size();
+  factorSizes.push_back(factorSize);
+
   if (isBlocked) {
     blockedPropagationFactors.push_back(factorIndex);
   }
@@ -165,27 +185,41 @@ void OpShardingRuleBuilder::updateFactorType(FactorType factorType,
   switch (factorType) {
     case FactorType::kReduction:
       reductionFactors.push_back(factorIndex);
-      return;
+      return factorIndex;
     case FactorType::kNeedReplication:
       needReplicationFactors.push_back(factorIndex);
-      return;
+      return factorIndex;
     case FactorType::kPermutation:
       permutationFactors.push_back(factorIndex);
-      return;
+      return factorIndex;
     case FactorType::kPassThrough:
-      return;
+      return factorIndex;
   }
   llvm_unreachable("unknown FactorType");
+};
+
+OpShardingRuleBuilder& OpShardingRuleBuilder::addFactorSameForAllOperands(
+    int64_t operandDim, int64_t factorSize, FactorType factorType,
+    bool isBlocked) {
+  int64_t factorIndex = reserveFactor(factorSize, factorType, isBlocked);
+  mapSingleDimOverAllMappingsToFactor(operandMappings, operandDim, factorIndex);
+  return *this;
+}
+
+OpShardingRuleBuilder& OpShardingRuleBuilder::addFactorSameForAllResults(
+    int64_t resultDim, int64_t factorSize, FactorType factorType,
+    bool isBlocked) {
+  int64_t factorIndex = reserveFactor(factorSize, factorType, isBlocked);
+  mapSingleDimOverAllMappingsToFactor(resultMappings, resultDim, factorIndex);
+  return *this;
 }
 
 OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(
     ArrayRef<int64_t> operandDims, ArrayRef<int64_t> resultDims,
     int64_t factorSize, FactorType factorType, bool isBlocked) {
-  int64_t factorIndex = factorSizes.size();
+  int64_t factorIndex = reserveFactor(factorSize, factorType, isBlocked);
   mapDimsToFactor(operandMappings, operandDims, factorIndex, factorSize);
   mapDimsToFactor(resultMappings, resultDims, factorIndex, factorSize);
-  factorSizes.push_back(factorSize);
-  updateFactorType(factorType, factorIndex, isBlocked);
   return *this;
 }
 
@@ -193,17 +227,9 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
                                                         int64_t factorSize,
                                                         FactorType factorType,
                                                         bool isBlocked) {
-  int64_t factorIndex = factorSizes.size();
-  for (TensorMapping& tensorMapping :
-       llvm::concat<TensorMapping>(operandMappings, resultMappings)) {
-    if (tensorMapping.empty()) {
-      // Rank is 0
-      continue;
-    }
-    tensorMapping[dim].factorIndices.push_back(factorIndex);
-  }
-  factorSizes.push_back(factorSize);
-  updateFactorType(factorType, factorIndex, isBlocked);
+  int64_t factorIndex = reserveFactor(factorSize, factorType, isBlocked);
+  mapSingleDimOverAllMappingsToFactor(operandMappings, dim, factorIndex);
+  mapSingleDimOverAllMappingsToFactor(resultMappings, dim, factorIndex);
   return *this;
 }
 

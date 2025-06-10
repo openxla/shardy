@@ -82,6 +82,18 @@ class OpShardingRuleBuilder {
       int64_t factorSize, FactorType factorType = FactorType::kPassThrough,
       bool isBlocked = false);
 
+  // Same as addFactor above, but updates the same dimension for all
+  // operands that have rank at least 1.
+  OpShardingRuleBuilder& addFactorSameForAllOperands(
+      int64_t operandDim, int64_t factorSize,
+      FactorType factorType = FactorType::kPassThrough, bool isBlocked = false);
+
+  // Same as addFactor above, but updates the same dimension for all
+  // results that have rank at least 1.
+  OpShardingRuleBuilder& addFactorSameForAllResults(
+      int64_t resultDim, int64_t factorSize,
+      FactorType factorType = FactorType::kPassThrough, bool isBlocked = false);
+
   // Same as addFactor above, but updates the same dimension for all operands
   // and results that have rank at least 1.
   //
@@ -94,9 +106,9 @@ class OpShardingRuleBuilder {
   // have rank at least 1. The factor type is determined by `getFactorType`.
   OpShardingRuleBuilder& addPointwise(
       ArrayRef<int64_t> shape,
-      std::function<FactorType(int64_t)> getFactorType = [](int64_t) {
-        return FactorType::kPassThrough;
-      }, bool isBlocked = false);
+      std::function<FactorType(int64_t)> getFactorType =
+          [](int64_t) { return FactorType::kPassThrough; },
+      bool isBlocked = false);
 
   // Adds a pointwise factor for all dimensions that satisfy `pred` of all
   // operands/results that have rank at least 1. The factor type is determined
@@ -119,8 +131,8 @@ class OpShardingRuleBuilder {
       bool mismatchFactorIsBlocked = false);
 
  private:
-  void updateFactorType(FactorType factorType, int64_t factorIndex,
-                        bool isBlocked);
+  int64_t reserveFactor(int64_t factorSize, FactorType factorType,
+                         bool isBlocked);
 
   MLIRContext* context;
   SmallVector<int64_t> factorSizes;
