@@ -153,8 +153,8 @@ func.func @reduce_multiple_results_unreduced(
   return %2#0, %2#1 : tensor<64xf32>, tensor<64xi32>
 }
 
-// CHECK-LABEL: func @manual_computation
-func.func @manual_computation(%arg0: tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x", "y"}>})
+// CHECK-LABEL: func @manual_computation_all_reduce_free_axis_on_return_value
+func.func @manual_computation_all_reduce_free_axis_on_return_value(%arg0: tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x", "y"}>})
     -> (tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
   // CHECK-NEXT: %[[ALL_REDUCE_X:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}], unreduced={"y"}>
   // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE_X]] <@mesh, [{"x"}], unreduced={"y"}>
@@ -171,6 +171,29 @@ func.func @manual_computation(%arg0: tensor<208xf32> {sdy.sharding = #sdy.shardi
     in_shardings=[<@mesh, [{"x"}], unreduced={"y"}>] out_shardings=[<@mesh, [{"x"}]>] manual_axes={"x"} (%arg1: tensor<52xf32>) {
     %1 = stablehlo.abs %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}], unreduced={"y"}>]>} : tensor<52xf32>
     sdy.return %1 : tensor<52xf32>
+  } : (tensor<208xf32>) -> tensor<208xf32>
+  return %0 : tensor<208xf32>
+}
+
+// Note that in sharding is unreduced along manual axis "x", but out sharding
+// isn't, this is supported and the user is expected to reduce along the manual
+// axis given it becomes replicated (which isn't done in this test case).
+// CHECK-LABEL: func @manual_computation_all_reduce_free_axis_on_block_arg
+func.func @manual_computation_all_reduce_free_axis_on_block_arg(%arg0: tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x", "y"}>})
+    -> (tensor<208xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) {
+  // CHECK-NEXT: %[[MANUAL_COMP:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{}], unreduced={"x", "y"}>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{}]>] manual_axes={"x"}
+  // CHECK-SAME:   (%arg1: tensor<208xf32>) {
+  // CHECK-NEXT:   %[[ALL_REDUCE_Y:.*]] = sdy.all_reduce {"y"} %arg1 out_sharding=<@mesh, [{}]>
+  // CHECK-NEXT:   %[[ABS:.*]] = stablehlo.abs %[[ALL_REDUCE_Y]]
+  // CHECK-NEXT:   sdy.return %[[ABS]]
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[MANUAL_COMP]]
+  %0 = sdy.manual_computation(%arg0)
+    in_shardings=[<@mesh, [{}], unreduced={"x", "y"}>] out_shardings=[<@mesh, [{}]>] manual_axes={"x"} (%arg1: tensor<208xf32>) {
+    %1 = stablehlo.abs %arg1 : tensor<208xf32>
+    sdy.return %1 : tensor<208xf32>
   } : (tensor<208xf32>) -> tensor<208xf32>
   return %0 : tensor<208xf32>
 }
