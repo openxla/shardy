@@ -81,6 +81,19 @@ PropagationDirection getDirectionBasedOnUses(Operation* op,
 
 PropagationDirection isPassThroughOp(Operation* op, int64_t factorIndex,
                                      bool allowMultiUse) {
+  if (auto customCallOp = dyn_cast<stablehlo::CustomCallOp>(op);
+      customCallOp &&
+      (customCallOp.getCallTargetName() == "Cholesky" ||
+       customCallOp.getCallTargetName() == "MoveToDevice" ||
+       customCallOp.getCallTargetName() == "MoveToHost" ||
+       customCallOp.getCallTargetName() == "PinToDevice" ||
+       customCallOp.getCallTargetName() == "PinToDeviceSram" ||
+       customCallOp.getCallTargetName() == "ResizeBilinear" ||
+       customCallOp.getCallTargetName() == "ResizeBilinearGrad" ||
+       customCallOp.getCallTargetName() == "ResizeNearest" ||
+       customCallOp.getCallTargetName() == "ResizeNearestGrad")) {
+    return PropagationDirection::BOTH;
+  }
   if (isElementwise(op) ||
       isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
     return getDirectionBasedOnUses(op, allowMultiUse);
