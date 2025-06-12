@@ -49,7 +49,6 @@ limitations under the License.
 #include "mlir/Transforms/InliningUtils.h"
 #include "shardy/dialect/sdy/ir/bytecode.h"
 #include "shardy/dialect/sdy/ir/constants.h"
-#include "shardy/dialect/sdy/ir/enums.cc.inc"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/extensions/stablehlo_extensions.h"
 #include "shardy/dialect/sdy/ir/parsers.h"   // IWYU pragma: keep
@@ -1553,6 +1552,7 @@ Type ReduceScatterOp::getType() { return getResult().getType(); }
 }  // namespace mlir
 
 #include "shardy/dialect/sdy/ir/dialect.cc.inc"
+#include "shardy/dialect/sdy/ir/enums.cc.inc"
 #define GET_ATTRDEF_CLASSES
 #include "shardy/dialect/sdy/ir/attrs.cc.inc"
 #define GET_OP_INTERFACE_CLASSES
