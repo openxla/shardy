@@ -40,7 +40,7 @@ void addCanonicalizerPass(OpPassManager& pm,
 }  // namespace
 
 void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
-  pm.addNestedPass<func::FuncOp>(createConstantMergerPass());
+  pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
   pm.addPass(createRemoveShardingGroupsPass());
   if (!options.skipConvertToReshard) {
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());

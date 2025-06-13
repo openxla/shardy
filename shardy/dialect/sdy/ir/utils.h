@@ -490,6 +490,14 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
                                         ArrayRef<AxisRefAttr> axesB,
                                         MeshAttr mesh);
 
+// Returns true if `op` is only used by ops of the specified types.
+template <class... OpTys>
+bool hasOnlyUsersOfType(Operation* op) {
+  return llvm::all_of(op->getUsers(), [](Operation* user) {
+    return mlir::isa<OpTys...>(user);
+  });
+}
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -34,7 +34,7 @@ cc_library(
     srcs = [
         "add_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
-        "constant_splitter.cc",
+        "constant_or_scalar_splitter.cc",
         "import_pipeline.cc",
         "inline_meshes.cc",
         "lift_inlined_meshes.cc",

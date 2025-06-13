@@ -30,7 +30,7 @@ cc_library(
     name = "passes",
     srcs = [
         "close_shardings.cc",
-        "constant_merger.cc",
+        "constant_or_scalar_merger.cc",
         "drop_sharding_rules.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",

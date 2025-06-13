@@ -32,13 +32,14 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
 
-#define GEN_PASS_DEF_CONSTANTSPLITTERPASS
+#define GEN_PASS_DEF_CONSTANTORSCALARSPLITTERPASS
 #include "shardy/dialect/sdy/transforms/import/passes.h.inc"
 
 namespace {
@@ -79,13 +80,23 @@ bool isConstantExpression(Operation* op,
          });
 }
 
+// Returns true if the given op is a broadcast of scalar.
+bool isScalarExpansion(Operation* op) {
+  // TODO(enver): Allow for any tensor with exactly one element.
+  if (auto broadcastOp = dyn_cast<stablehlo::BroadcastInDimOp>(op);
+      broadcastOp && isScalar(broadcastOp.getOperand())) {
+    return true;
+  }
+  return false;
+}
+
 // Recursively clones all operands of the given op, that are not already mapped
-// in `mapping`, and finally clones the op itself.
+// in `mapping`, and finally clones the op itself. We do not clone scalars as
+// they do not get sharded.
 void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
-  if (mapping.lookupOrNull(opResult)) {
+  if (isScalar(opResult) || mapping.lookupOrNull(opResult)) {
     return;
   }
-
   Operation* op = opResult.getOwner();
   for (Value operand : op->getOperands()) {
     if (auto defOpResult = dyn_cast<OpResult>(operand)) {
@@ -100,10 +111,14 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping) {
 }
 
 // Recursively clones all operands of the given op, that are not already cloned,
-// and finally clones the op itself.
+// and finally clones the op itself. We do not clone scalars as they do not get
+// sharded.
 //
 // Returns the cloned op result.
 Value cloneSubComputation(OpResult opResult) {
+  if (isScalar(opResult)) {
+    return opResult;
+  }
   IRMapping mapping;
   cloneSubComputation(opResult, mapping);
   return mapping.lookup(opResult);
@@ -124,9 +139,10 @@ class ConstantPattern : public OpConversionPattern<stablehlo::ConstantOp> {
   }
 };
 
-struct ConstantSplitterPass
-    : public impl::ConstantSplitterPassBase<ConstantSplitterPass> {
-  using ConstantSplitterPassBase::ConstantSplitterPassBase;
+struct ConstantOrScalarSplitterPass
+    : public impl::ConstantOrScalarSplitterPassBase<
+          ConstantOrScalarSplitterPass> {
+  using ConstantOrScalarSplitterPassBase::ConstantOrScalarSplitterPassBase;
 
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
@@ -150,7 +166,7 @@ struct ConstantSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    llvm::SetVector<Operation*> constantOps;
+    llvm::SetVector<Operation*> constantOps, scalarExpansionOps;
     funcOp.walk([&](Operation* op) {
       if (isa<ShardingGroupOp>(op)) {
         return;
@@ -159,14 +175,20 @@ struct ConstantSplitterPass
         constantOps.insert(op);
         return;
       }
+      if (isScalarExpansion(op)) {
+        scalarExpansionOps.insert(op);
+        return;
+      }
       for (OpOperand& operand : op->getOpOperands()) {
         if (auto defOpResult = dyn_cast<OpResult>(operand.get());
-            defOpResult && constantOps.contains(defOpResult.getOwner())) {
+            defOpResult &&
+            (constantOps.contains(defOpResult.getOwner()) ||
+             scalarExpansionOps.contains(defOpResult.getOwner()))) {
           // `op` is not a constant expression, while its `operand` is. We
-          // recursively clone the sub-computation whose root is `defOpResult`,
-          // and replace the `operand` with the cloned defining op. The cloned
-          // constant sub-computation has only one user `op`, so that it is
-          // isolated from the rest of the computation.
+          // recursively clone the sub-computation whose root is
+          // `defOpResult`, and replace the `operand` with the cloned defining
+          // op. The cloned constant sub-computation has only one user `op`,
+          // so that it is isolated from the rest of the computation.
           operand.set(cloneSubComputation(defOpResult));
         }
       }
@@ -175,10 +197,14 @@ struct ConstantSplitterPass
     // Since for every op in `constantOps` that has a use that isn't in
     // `constantOps`, we replaced the use with a clone of the entire
     // sub-computation, we can now erase all ops in `constantOps` as long as we
-    // iterate in reverse order.
-    for (Operation* op : llvm::reverse(constantOps)) {
-      eraseShardingGroupUsers(op);
-      op->erase();
+    // iterate in reverse order. Note that we did not clone scalars so we keep
+    // the original.
+    for (Operation* op : llvm::concat<Operation* const>(
+             scalarExpansionOps, llvm::reverse(constantOps))) {
+      if (hasOnlyUsersOfType<ShardingGroupOp>(op)) {
+        eraseShardingGroupUsers(op);
+        op->erase();
+      }
     }
   }
 

@@ -54,7 +54,7 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
   }
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
-  pm.addNestedPass<func::FuncOp>(createConstantSplitterPass());
+  pm.addNestedPass<func::FuncOp>(createConstantOrScalarSplitterPass());
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addPass(createManualAxesCleanupPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
