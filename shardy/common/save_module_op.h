@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef THIRD_PARTY_OPENXLA_SHARDY_SRC_SHARDY_COMMON_SAVE_MODULE_OP_H_
-#define THIRD_PARTY_OPENXLA_SHARDY_SRC_SHARDY_COMMON_SAVE_MODULE_OP_H_
+#ifndef SHARDY_COMMON_SAVE_MODULE_OP_H_
+#define SHARDY_COMMON_SAVE_MODULE_OP_H_
 
 #include "llvm/ADT/StringRef.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -28,4 +28,4 @@ void saveModuleOp(ModuleOp moduleOp, StringRef dumpDirectory,
 }  // namespace sdy
 }  // namespace mlir
 
-#endif  // THIRD_PARTY_OPENXLA_SHARDY_SRC_SHARDY_COMMON_SAVE_MODULE_OP_H_
+#endif  // SHARDY_COMMON_SAVE_MODULE_OP_H_
