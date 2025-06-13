@@ -61,11 +61,12 @@ constraints on the corresponding operands, so this pass will also apply
 their sharding if the above conditions are satisfied (except for the
 dangling case).
 
-### `-sdy-constant-splitter`
+### `-sdy-constant-or-scalar-splitter`
 
-_Splits constant sub-computations so each has a single use._
+_Splits constant and scalar expansions so each has a single use._
 
-Splits constant sub-computations such that they have a single user.
+Splits constant sub-computations and scalar expansions such that they have a
+single user.
 
 This ensures that a sharding isn't propagated between different uses of a
 constant sub-computation, as this is considered a false dependency (the uses
@@ -79,10 +80,15 @@ A constant sub-computation is either:
   defined by constant sub-computations (recursively), along with the entire
   sub-computations that define its operands.
 
+A scalar expansion is a broadcast of a scalar.
+
 Note that within a constant sub-computation, a value can have multiple uses
 within that sub-computation.
 
-NOTE: This pass is the MLIR equivalent of `xla::HloConstantSplitter`,
+Also note that this pass does not split scalar tensors as they don't get
+sharded (they have rank 0).
+
+NOTE: This pass covers the MLIR equivalent of `xla::HloConstantSplitter`,
 needed for the purpose of Shardy Propagation.
 
 ### `-sdy-inline-meshes`
