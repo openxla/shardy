@@ -79,9 +79,17 @@ PropagationDirection getDirectionBasedOnUses(Operation* op,
                                 : PropagationDirection::BOTH;
 }
 
+bool isOffloadCustomCallOp(Operation* op) {
+  if (auto customCallOp = dyn_cast<stablehlo::CustomCallOp>(op)) {
+    return customCallOp.getCallTargetName() == "MoveToDevice" ||
+           customCallOp.getCallTargetName() == "MoveToHost";
+  }
+  return false;
+}
+
 PropagationDirection isPassThroughOp(Operation* op, int64_t factorIndex,
                                      bool allowMultiUse) {
-  if (isElementwise(op) ||
+  if (isElementwise(op) || isOffloadCustomCallOp(op) ||
       isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
     return getDirectionBasedOnUses(op, allowMultiUse);
   }
