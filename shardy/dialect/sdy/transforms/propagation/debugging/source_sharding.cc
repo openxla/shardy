@@ -21,6 +21,7 @@ limitations under the License.
 #include <optional>
 #include <string>
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -45,6 +46,13 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
+
+using TargetToSourcesMap =
+    llvm::SmallDenseMap<EdgeValueRefAttr, llvm::DenseSet<EdgeValueRefAttr>>;
+using AxisToPropagationEdgeMap =
+    llvm::SmallDenseMap<AxisRefAttr, TargetToSourcesMap>;
+using StepToAxisPropagationDetailsMap =
+    DenseMap<int64_t, AxisToPropagationEdgeMap>;
 
 namespace {
 
@@ -319,23 +327,6 @@ void saveShardingOriginsOnModule(
   }
 }
 
-// Converts the `node` to a `NamedAttribute`.
-StringAttr edgeNodeToString(EdgeNode node, Builder& builder) {
-  std::string typeString;
-  switch (node.type) {
-    case EdgeNodeType::OPERAND: {
-      typeString = "operand";
-      break;
-    }
-    case EdgeNodeType::RESULT: {
-      typeString = "result";
-      break;
-    }
-  }
-  return builder.getStringAttr(
-      llvm::formatv("{0}: {1}", typeString, node.index));
-}
-
 // In the case where we have a Value used multiple times as an operand, we
 // should only add the edge once. For example:
 // ```mlir
@@ -353,8 +344,9 @@ bool insertSeenValue(Operation* op, const PropagationEdge& edge,
   switch (target.type) {
     case EdgeNodeType::OPERAND: {
       if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
-        return seenValues.insert(
-            getBodyTerminator(funcOp)->getOperand(target.index)).second;
+        return seenValues
+            .insert(getBodyTerminator(funcOp)->getOperand(target.index))
+            .second;
       }
       return seenValues.insert(op->getOperand(target.index)).second;
     }
@@ -364,38 +356,59 @@ bool insertSeenValue(Operation* op, const PropagationEdge& edge,
   }
 }
 
-// Create a list of entries from the `axisToEdge` map to save as a
-// `DictionaryAttr`.
-DictionaryAttr createEdgeEntries(Operation* op,
-                                 const AxisToEdgesMap& axisToEdges,
-                                 MLIRContext* context) {
+PropagationEdgesAttr createPropagationEdges(Operation* op,
+                                            const AxisToEdgesMap& axisToEdges,
+                                            MLIRContext* context) {
   Builder builder(context);
-  SmallVector<NamedAttribute> entries;
+  StepToAxisPropagationDetailsMap perStepEdgesForAxis;
   for (const auto& [axisRef, edges] : axisToEdges) {
-    std::string axisRefString = axisRef.toString();
-    eraseDoubleQuotesInAxisRefString(axisRefString);
-    SmallVector<Attribute> axisEntries;
-    llvm::SmallDenseSet<Value> seenTargetValues;
     for (const PropagationEdge& edge : edges) {
-      assert(edge.source.type == EdgeNodeType::OPERAND ||
-             edge.source.type == EdgeNodeType::RESULT);
-      if (!insertSeenValue(op, edge, seenTargetValues)) {
-        continue;
-      }
-      StringAttr sourceEntry = edgeNodeToString(edge.source, builder);
-      StringAttr targetEntry = edgeNodeToString(edge.target, builder);
-      DictionaryAttr edgeEntry = builder.getDictionaryAttr({
-          builder.getNamedAttr("source", sourceEntry),
-          builder.getNamedAttr("target", targetEntry),
-          builder.getNamedAttr("propagation_step",
-                               builder.getI64IntegerAttr(edge.propagationStep)),
-      });
-      axisEntries.push_back(edgeEntry);
+      auto source =
+          EdgeValueRefAttr::get(context, edge.source.type, edge.source.index);
+      auto target =
+          EdgeValueRefAttr::get(context, edge.target.type, edge.target.index);
+      perStepEdgesForAxis[edge.propagationStep][axisRef][source].insert(target);
     }
-    entries.emplace_back(builder.getStringAttr(axisRefString),
-                         builder.getArrayAttr(axisEntries));
   }
-  return builder.getDictionaryAttr(entries);
+
+  SmallVector<PropagationOneStepAttr> perStepEdges;
+  for (const auto& [step, edgesForAxis] : perStepEdgesForAxis) {
+    SmallVector<AxisToPropagationDetailsAttr> axis_entries;
+    for (const auto& [axisRef, edges] : edgesForAxis) {
+      // There should only be one source in the edge map.
+      assert(edges.size() == 1);
+      EdgeValueRefAttr source = edges.begin()->first;
+      DenseSet<EdgeValueRefAttr> targets = edges.begin()->second;
+      // Sort the targets for deterministic ordering in the output attr.
+      SmallVector<EdgeValueRefAttr> targetsArray(targets.begin(),
+                                                 targets.end());
+      llvm::stable_sort(targetsArray,
+                        [](EdgeValueRefAttr a, EdgeValueRefAttr b) {
+                          if (a.getType() == b.getType()) {
+                            return a.getIndex() < b.getIndex();
+                          }
+                          return a.getType() < b.getType();
+                        });
+      AxisToPropagationDetailsAttr axisToPropagationDetails =
+          AxisToPropagationDetailsAttr::get(context, axisRef, source,
+                                            targetsArray);
+      axis_entries.push_back(axisToPropagationDetails);
+    }
+    // Sort the axes by name for deterministic ordering in the output attr.
+    llvm::stable_sort(axis_entries, [](AxisToPropagationDetailsAttr a,
+                                       AxisToPropagationDetailsAttr b) {
+      return a.getAxisName() < b.getAxisName();
+    });
+    perStepEdges.push_back(
+        PropagationOneStepAttr::get(context, step, axis_entries));
+  }
+
+  // Sort the edges by step index.
+  llvm::stable_sort(perStepEdges,
+                    [](PropagationOneStepAttr a, PropagationOneStepAttr b) {
+                      return a.getStepIndex() < b.getStepIndex();
+                    });
+  return PropagationEdgesAttr::get(context, perStepEdges);
 }
 
 // Saves the originating sharding debug information on each `op` in
@@ -416,8 +429,11 @@ void saveEdgesOnModule(MLIRContext* context,
     if (isa<func::FuncOp>(op)) {
       continue;
     }
-    op->setAttr(kPropagationEdgesAttr,
-                createEdgeEntries(op, axisToEdges, context));
+    PropagationEdgesAttr propagationEdges =
+        createPropagationEdges(op, axisToEdges, context);
+    if (!propagationEdges.empty()) {
+      op->setAttr(kPropagationEdgesAttr, propagationEdges);
+    }
   }
 }
 
@@ -437,9 +453,12 @@ void saveEdgesOnFuncResults(func::FuncOp funcOp,
   for (auto [funcOp, resultToEdgesMap] : funcResultToEdgesMap) {
     for (auto [resultIndex, axisToEdgesMap] :
          llvm::enumerate(resultToEdgesMap)) {
-      funcOp.setResultAttr(
-          resultIndex, kPropagationEdgesAttr,
-          createEdgeEntries(funcOp, axisToEdgesMap, funcOp->getContext()));
+      PropagationEdgesAttr propagationEdges =
+          createPropagationEdges(funcOp, axisToEdgesMap, funcOp->getContext());
+      if (!propagationEdges.empty()) {
+        funcOp.setResultAttr(resultIndex, kPropagationEdgesAttr,
+                             propagationEdges);
+      }
     }
   }
 }
@@ -706,11 +725,11 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
   auto lookUpOriginSharding = [&](EdgeNode edgeNode,
                                   AxisRefAttr axisRef) -> OriginSharding {
     switch (edgeNode.type) {
-      case OPERAND:
+      case EdgeNodeType::OPERAND:
         return lookUpValueOriginSharding(
             sourceShardingAction.operands[edgeNode.index], axisRef,
             mappings->valueToOriginShardingMap);
-      case RESULT:
+      case EdgeNodeType::RESULT:
         return lookUpValueOriginSharding(
             sourceShardingAction.results[edgeNode.index], axisRef,
             mappings->valueToOriginShardingMap);
@@ -779,16 +798,33 @@ namespace {
 // Looks for the debug info dictionary on the `dataFlowEdgeOp` called
 // `debugAttrName` and pushes it back to the `debugInfoDict`. If the dictionary
 // doesn't exist, pushes an empty dictionary.
-void pushBackToDebugInfoDict(DataFlowEdgeOp dataFlowEdgeOp,
-                             StringRef debugAttrName,
-                             SmallVector<Attribute>& debugInfoDict,
-                             IRRewriter& rewriter) {
+void pushBackDictionaryToDebugInfo(DataFlowEdgeOp dataFlowEdgeOp,
+                                   StringRef debugAttrName,
+                                   SmallVector<Attribute>& debugInfoDict,
+                                   IRRewriter& rewriter) {
   assert(dataFlowEdgeOp);
   if (auto edgeDebugInfo =
           dataFlowEdgeOp->getAttrOfType<DictionaryAttr>(debugAttrName)) {
     debugInfoDict.push_back(edgeDebugInfo);
   } else {
-    debugInfoDict.push_back(rewriter.getDictionaryAttr({}));
+    rewriter.getDictionaryAttr({});
+  }
+}
+
+// Looks for the PropagationEdgesAttr on the `dataFlowEdgeOp` called
+// `debugAttrName` and pushes it back to the `debugInfoDict` if there are
+// any propagation edges.
+void pushBackPropagationEdgesToDebugInfo(DataFlowEdgeOp dataFlowEdgeOp,
+                                         StringRef debugAttrName,
+                                         SmallVector<Attribute>& debugInfoDict,
+                                         IRRewriter& rewriter) {
+  assert(dataFlowEdgeOp);
+  if (auto edgeDebugInfo =
+          dataFlowEdgeOp->getAttrOfType<PropagationEdgesAttr>(debugAttrName)) {
+    if (auto propagationEdges = dyn_cast<PropagationEdgesAttr>(edgeDebugInfo);
+        !propagationEdges.empty()) {
+      debugInfoDict.push_back(edgeDebugInfo);
+    }
   }
 }
 
@@ -802,6 +838,7 @@ void saveDebugInfoDictsFromDataFlowEdges(ValueRange edgeOwners, Operation* op,
   if (!sinkDebugShardingOrigins && !sinkDebugPropagationEdgeSharding) {
     return;
   }
+
   SmallVector<Attribute> originShardingDicts;
   if (sinkDebugShardingOrigins) {
     originShardingDicts.reserve(edgeOwners.size());
@@ -810,15 +847,17 @@ void saveDebugInfoDictsFromDataFlowEdges(ValueRange edgeOwners, Operation* op,
   if (sinkDebugPropagationEdgeSharding) {
     propagationEdgeDicts.reserve(edgeOwners.size());
   }
+
   for (Value edgeOwner : edgeOwners) {
     if (auto dataFlowEdgeOp = DataFlowEdgeOp::lookup(edgeOwner)) {
       if (sinkDebugShardingOrigins) {
-        pushBackToDebugInfoDict(dataFlowEdgeOp, kShardingOriginsAttr,
-                                originShardingDicts, rewriter);
+        pushBackDictionaryToDebugInfo(dataFlowEdgeOp, kShardingOriginsAttr,
+                                      originShardingDicts, rewriter);
       }
       if (sinkDebugPropagationEdgeSharding) {
-        pushBackToDebugInfoDict(dataFlowEdgeOp, kPropagationEdgesAttr,
-                                propagationEdgeDicts, rewriter);
+        pushBackPropagationEdgesToDebugInfo(dataFlowEdgeOp,
+                                            kPropagationEdgesAttr,
+                                            propagationEdgeDicts, rewriter);
       }
     }
   }
