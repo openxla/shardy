@@ -19,7 +19,9 @@ limitations under the License.
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/IR/EnumAttr.td"
 include "shardy/dialect/sdy/ir/dialect.td"
+include "shardy/dialect/sdy/ir/enums.td"
 
 // NOTE: we use `` in assemblyFormat to avoid whitespaces between literals and
 // parameters.
@@ -1218,6 +1220,51 @@ def Sdy_AllToAllParamList : ArrayOfAttr<Sdy_Dialect, "AllToAllParamList",
     // checking `overlaps` is false.
     AllToAllParamListAttr combineAndSort(AllToAllParamListAttr other) const;
   }];
+}
+
+// Represents a reference to a particular operand or result of the *current* operation.
+def Sdy_ValueRef : AttrDef<Sdy_Dialect, "ValueRef"> {
+  let mnemonic = "value_ref";
+  let summary = "Reference to a particular index of a value edge of type `type`.";
+  let parameters = (ins
+    EnumParameter<Sdy_EdgeNodeType>:$type,
+    AttrOrTypeParameter<"int64_t", "index">:$index // The integer index (0, 1, 2, etc.)
+  );
+  // This assembly format directly matches your desired string representation.
+  let assemblyFormat = "``$type```_```$index";
+}
+
+// Represents the propagation details for a single named axis within a specific step.
+def Sdy_AxisToPropagationDetails : AttrDef<Sdy_Dialect, "AxisToPropagationDetails"> {
+  let mnemonic = "axis_to_propagation_details";
+  let summary = "Propagation details for a specific axis, mapping a source value reference to a list of target value references.";
+  let parameters = (ins
+    Sdy_AxisRef:$axis_name,
+    Sdy_ValueRef:$source,
+    OptionalArrayRefParameter<"ValueRefAttr", "targets">:$targets
+  );
+  let assemblyFormat = "`{`$axis_name`:`$source`->` `[`$targets`]` `}`";
+}
+
+// Represents propagation details for all axes within a single step, identified by a step index.
+def Sdy_PropagationOneStep : AttrDef<Sdy_Dialect, "PropagationOneStep"> {
+  let mnemonic = "propagation_one_step";
+  let summary = "Propagation details for all axes within a single propagation step, mapped by step index.";
+  let parameters = (ins
+    AttrOrTypeParameter<"int64_t", "step_index">:$step_index,
+    ArrayRefParameter<"AxisToPropagationDetailsAttr", "axis_entries">:$axis_entries
+  );
+  let assemblyFormat = "`{` `step_```$step_index`=` `[`$axis_entries`]` `}`";
+}
+
+// Represents a list of propagation edges for all steps, mapped by step index.
+def Sdy_PropagationEdges : AttrDef<Sdy_Dialect, "PropagationEdges"> {
+  let mnemonic = "propagation_edges";
+  let summary = "Propagation details for all axes across all propagation steps, keyed by step index.";
+  let parameters = (ins
+    ArrayRefParameter<"PropagationOneStepAttr", "per_step_edges">:$per_step_edges
+  );
+  let assemblyFormat = "`<` `[`$per_step_edges`]` `>`";
 }
 
 #endif  // SDY_ATTRS
