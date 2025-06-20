@@ -135,13 +135,16 @@ struct PropagationTensorParams {
   ValueRange tensors;
   ArrayRef<TensorShardingAttr> shardings;
   SetShardingPerTensorCallback setShardingCallback;
+  bool isFuncResult = false;
 
   PropagationTensorParams(ValueRange tensors,
                           ArrayRef<TensorShardingAttr> shardings,
-                          SetShardingPerTensorCallback setShardingCallback)
+                          SetShardingPerTensorCallback setShardingCallback,
+                          bool isFuncResult = false)
       : tensors(tensors),
         shardings(shardings),
-        setShardingCallback(setShardingCallback) {}
+        setShardingCallback(setShardingCallback),
+        isFuncResult(isFuncResult) {}
 };
 
 // Update the sharding of `value` to the sharding in `tensorFactorShardings`.
@@ -154,7 +157,8 @@ bool updateTensorSharding(Value modifiedValue,
                           const TensorFactorShardings& tensorFactorShardings,
                           TensorMappingAttr tensorMapping,
                           ArrayRef<int64_t> factorSizes,
-                          const PropagationSharedParams& params) {
+                          const PropagationSharedParams& params,
+                          bool isFuncResult) {
   // We can assume `modifiedValue` exists since we are updating its sharding.
   assert(modifiedValue && "modified value should exist");
   TensorShardingAttr newSharding =
@@ -173,6 +177,12 @@ bool updateTensorSharding(Value modifiedValue,
   }
 
   setTensorShardingCallback(newSharding);
+
+  if (isFuncResult) {
+    // Nothing more to do for a func result as it doesn't affect any tensor
+    // other than the return value and can't be part of a sharding group.
+    return true;
+  }
 
   if (params.notifyOpModified) {
     notifyShardingModified(modifiedValue, *params.notifyOpModified);
@@ -212,7 +222,8 @@ void updateTensorShardings(
                               std::bind(tensorParams.setShardingCallback,
                                         std::placeholders::_1, index),
                               tensorFactorShardings[index],
-                              tensorMappings[index], factorSizes, params)) {
+                              tensorMappings[index], factorSizes, params,
+                              tensorParams.isFuncResult)) {
       updateTensor.reset(index);
     }
   }
@@ -397,9 +408,11 @@ void propagateFuncResults(FuncOp funcOp, const SymbolTable& symbolTable,
     PropagationTensorParams resultsParams = PropagationTensorParams(
         /*tensors=*/returnValue,
         /*shardings=*/resultsShardingRef,
-        /*setShardingCallback=*/[&](TensorShardingAttr sharding, int64_t) {
+        /*setShardingCallback=*/
+        [&](TensorShardingAttr sharding, int64_t) {
           setFuncResultSharding(funcOp, resNum, sharding);
-        });
+        },
+        /*isFuncResult=*/true);
 
     (void)propagateTensorShardings(
         operandsParams, resultsParams,
@@ -678,6 +691,7 @@ void BasicPropagationPassImpl::runOnOperation() {
   // group. These maps are passed through the propagation methods so that
   // `updateTensorShardings` can enforce the sharding group constraints.
   ShardingGroupMap shardingGroupMap(moduleOp);
+  shardingGroupMap.syncGroupMemberShardings(moduleOp);
   if (failed(propagate(moduleOp, symbolTable, shardingGroupMap))) {
     signalPassFailure();
     return;

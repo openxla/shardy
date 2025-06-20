@@ -40,9 +40,6 @@ func.func @main(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
 
 // -----
 
-// Verifies that both the -sdy-sharding-group-unification pass and sharding
-// group canonicalizer pass are applied in order. This is checked by asserting
-// group merging, reindexing and deduplication of ops are all applied.
 // CHECK-LABEL: func @main
 func.func @main(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) {
   // CHECK-DAG: sdy.sharding_group %arg0 group_id=0 : tensor<8x8xf32>
@@ -52,61 +49,6 @@ func.func @main(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) {
   sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
   sdy.sharding_group %arg1 group_id = 3456 : tensor<8x8xf32>
   func.return
-}
-
-// -----
-
-// Verifies that the `-apply-sharding-constraints` pass is applied before the
-// `-sharding-group-import` pass. This is validated by asserting that members
-// of a sharding group pick up the sharding of a group member with a sharding
-// constraint (the constraint needs to be added to the value in order for it to
-// be applied to other group members).
-sdy.mesh @mesh = <["a"=2]>
-// CHECK-LABEL: func.func @main
-func.func @main(%arg0: tensor<16x16xf32>) -> tensor<16x16xf32> {
-  // CHECK: %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
-  %0 = stablehlo.add %arg0, %arg0 : tensor<16x16xf32>
-  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"a"}]> :  tensor<16x16xf32>
-  // CHECK: %2 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
-  %2 = stablehlo.add %arg0, %arg0 : tensor<16x16xf32>
-  sdy.sharding_group %0 group_id = 32 : tensor<16x16xf32>
-  sdy.sharding_group %2 group_id = 32 : tensor<16x16xf32>
-  return %1 : tensor<16x16xf32>
-}
-
-// -----
-
-// Verifies that the `-sdy-add-data-flow-edges` pass is applied before the
-// `-sharding-group-import` pass. This is validated by adding a block argument
-// of a while op to a sharding group which has a sharding constraint. This
-// should be applied to other members of the group but can only happen if the
-// `-sdy-add-data-flow-edges` pass is applied first.
-
-sdy.mesh @mesh = <["a"=2]>
-
-// CHECK: func.func @main
-// CHECK-SAME %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}
-func.func @main(%arg0: tensor<16x16xf32>) -> tensor<16x16xf32> {
-  %0 = stablehlo.constant dense<0> : tensor<i32>
-  %inc = stablehlo.constant dense<1> : tensor<i32>
-  %comp = stablehlo.constant dense<32> : tensor<i32>
-  %1:2 = stablehlo.while(%iterArg = %arg0, %iterArg_2 = %0) : tensor<16x16xf32>, tensor<i32>
-    cond {
-    %2 = stablehlo.compare  LT, %iterArg_2, %comp : (tensor<i32>, tensor<i32>) -> tensor<i1>
-    stablehlo.return %2 : tensor<i1>
-  } do {
-    %2 = stablehlo.add %iterArg_2, %inc : tensor<i32>
-    // Add a value with an explicit sharding to group_id=50 which will apply an
-    // initial sharding to the result of the WhileOp outside of the loop.
-    %3 = stablehlo.add %iterArg, %iterArg : tensor<16x16xf32>
-    %4 = sdy.sharding_constraint %3 <@mesh, [{"a"}, {}]> :  tensor<16x16xf32>
-    sdy.sharding_group %3 group_id = 50 : tensor<16x16xf32>
-    stablehlo.return %3, %2 : tensor<16x16xf32>, tensor<i32>
-  }
-
-  // CHECK: sdy.data_flow_edge %3#0 sharding=<@mesh, [{"a"}, {}]> : tensor<16x16xf32>
-  sdy.sharding_group %1#0 group_id = 50 : tensor<16x16xf32>
-  return %1#0 : tensor<16x16xf32>
 }
 
 // -----

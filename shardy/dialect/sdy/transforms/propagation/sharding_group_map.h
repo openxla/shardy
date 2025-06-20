@@ -31,6 +31,15 @@ class ShardingGroupMap {
  public:
   ShardingGroupMap(ModuleOp moduleOp);
 
+  // For each sharding group, sync the shardings of all its members by applying
+  // the common sharding of members with an existing non-replicated sharding.
+  //
+  // If there is a conflict in the initial shardings of members within a
+  // sharding group, then we insert an open sharding constraint on all members
+  // in the group, which replace the members themselves. This is to ensure that
+  // the group is still valid after propagation.
+  void syncGroupMemberShardings(ModuleOp module);
+
   // Returns the set of Values which are in the same sharding group as `value`
   // (including `value`) or an empty range if none exist.
   ValueRange getGroupMembers(const Value& value) const;

@@ -25,8 +25,6 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
@@ -151,86 +149,6 @@ void eraseDuplicateGroups(GroupIdToShardingGroups& groupIdToShardingGroups) {
   }
 }
 
-struct CommonSharding {
-  TensorShardingAttr sharding;
-  bool allMatchingShardings;
-};
-
-// Find the common sharding for the given sharding group. Also returns a bool
-// indicating whether all shardings in the group match. If they don't, the
-// returned sharding is the sharding of the first value in the group.
-CommonSharding findCommonSharding(
-    int64_t groupId, MutableArrayRef<ShardingGroupOp> shardingGroupOps,
-    const SymbolTable& symbolTable) {
-  if (shardingGroupOps.size() == 1) {
-    return {getSharding(shardingGroupOps.front().getInput()), true};
-  }
-  ShardingGroupOp firstShardingGroupOp = shardingGroupOps.front();
-  TensorShardingAttr sharding;
-  for (ShardingGroupOp shardingGroupOp : shardingGroupOps) {
-    TensorShardingAttr candidateSharding =
-        getSharding(shardingGroupOp.getInput());
-    if (!candidateSharding) {
-      continue;
-    }
-    if (!sharding) {
-      sharding = candidateSharding;
-    } else if (candidateSharding && sharding != candidateSharding) {
-      // TODO(bartchr): Revisit using jax.shard_alike as the example once others
-      // like PyTorch use Shardy.
-      firstShardingGroupOp.emitWarning(
-          "The initial operand shardings on the sharding groups of groupID: ")
-          << groupId << " do not match. Inserting an open "
-          << "sharding constraint to all constrained values. "
-          << "This can be caused when shardings from different values are "
-          << "grouped (e.g. from jax.shard_alike) but have separate "
-          << "inconsistent sharding constraints on them.";
-      return {sharding, false};
-    }
-  }
-
-  return {sharding, true};
-}
-
-// Add any sharding constraint ops when there is a conflict in the initial
-// shardings of values within a sharding group, or apply the common sharding.
-//
-// If there is a conflict in the initial shardings of values within a sharding
-// group, then we insert an open sharding constraint to all values in the group.
-// This is to ensure that the group is still valid after propagation.
-void addOrApplyInitialShardingConstraints(
-    ModuleOp module, GroupIdToShardingGroups& groupIdToShardingGroups) {
-  SymbolTable symbolTable(module);
-  for (const auto& [groupId, shardingGroupOps] :
-       llvm::enumerate(groupIdToShardingGroups)) {
-    auto [sharding, allmatchingShardings] =
-        findCommonSharding(groupId, shardingGroupOps, symbolTable);
-    if (!sharding) {
-      continue;
-    }
-    if (allmatchingShardings) {
-      for (ShardingGroupOp shardingGroupOp : shardingGroupOps) {
-        setSharding(shardingGroupOp.getInput(), sharding);
-      }
-      continue;
-    }
-    // NOTE: Arbitrarily use the mesh name of `sharding`. If the one already
-    // in `groupIdToConstrainedValues` is different, then once we support
-    // propagating through different meshes, this won't be an issue. Think
-    // it's fine to not error since this is a really rare case.
-    for (ShardingGroupOp shardingGroupOp : shardingGroupOps) {
-      IRRewriter rewriter(shardingGroupOp);
-      Value value = shardingGroupOp.getInput();
-      rewriter.setInsertionPointAfterValue(value);
-      auto openShardingConstraint = rewriter.create<ShardingConstraintOp>(
-          value.getLoc(), value,
-          TensorShardingAttr::getFullyOpenLike(sharding));
-      rewriter.replaceAllUsesExcept(value, openShardingConstraint,
-                                    openShardingConstraint);
-    }
-  }
-}
-
 struct ShardingGroupImportPass
     : public impl::ShardingGroupImportPassBase<ShardingGroupImportPass> {
   using ShardingGroupImportPassBase::ShardingGroupImportPassBase;
@@ -252,10 +170,7 @@ struct ShardingGroupImportPass
 
     GroupIdToShardingGroups groupIdToReindexedTensors =
         unifyShardingGroups(tensorToGroups);
-    // Since we may add new `ShardingConstraintOp`s in
-    // `addOrApplyInitialShardingConstraints`, erase any duplicates.
     eraseDuplicateGroups(groupIdToReindexedTensors);
-    addOrApplyInitialShardingConstraints(module, groupIdToReindexedTensors);
   }
 };
 

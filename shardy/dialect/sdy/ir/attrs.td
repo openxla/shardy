@@ -675,6 +675,13 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
                       });
     }
 
+    bool isFullyReplicatedAndOpen() const {
+      return llvm::all_of(
+          getDimShardings(), [](const DimensionShardingAttr dimSharding) {
+            return dimSharding.emptyAxes() && !dimSharding.getIsClosed();
+          });
+    }
+
     // Returns the mesh `FlatSymbolRefAttr` this sharding references, assuming
     // it doesn't have an inlined `MeshAttr`.
     FlatSymbolRefAttr getMeshSymName() const {

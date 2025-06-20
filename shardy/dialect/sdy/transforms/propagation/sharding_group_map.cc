@@ -20,13 +20,16 @@ limitations under the License.
 #include <cstdint>
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -49,6 +52,83 @@ ShardingGroupMap::ShardingGroupMap(ModuleOp moduleOp) {
     }
     shardingGroupToValues[op.getGroupId()].push_back(op.getInput());
   });
+}
+
+namespace {
+
+struct CommonSharding {
+  TensorShardingAttr sharding;
+  bool hasConflict;
+};
+
+// Find the common sharding for the given sharding group. Also returns a bool
+// indicating whether there is conflict between some shardings in the group
+// If they do, the returned sharding is the sharding of the first value in the
+// group.
+CommonSharding findCommonSharding(int64_t groupId, ValueRange groupMembers) {
+  if (groupMembers.size() == 1) {
+    return {getSharding(groupMembers.front()), false};
+  }
+  Value firstMember = groupMembers.front();
+  TensorShardingAttr sharding;
+  for (Value member : groupMembers) {
+    TensorShardingAttr candidateSharding = getSharding(member);
+    if (!candidateSharding || candidateSharding.isFullyReplicatedAndOpen()) {
+      continue;
+    }
+    if (!sharding) {
+      sharding = candidateSharding;
+    } else if (candidateSharding != sharding) {
+      // TODO(bartchr): Revisit using jax.shard_alike as the example once others
+      // like PyTorch use Shardy.
+      getOwningOp(firstMember)
+              ->emitWarning(
+                  "The initial operand shardings on the sharding groups of "
+                  "groupID: ")
+          << groupId << " do not match. Inserting an open "
+          << "sharding constraint to all constrained values. "
+          << "This can be caused when shardings from different values are "
+          << "grouped (e.g. from jax.shard_alike) but have separate "
+          << "inconsistent sharding constraints on them.";
+      return {sharding, true};
+    }
+  }
+
+  return {sharding, false};
+}
+
+}  // namespace
+
+void ShardingGroupMap::syncGroupMemberShardings(ModuleOp module) {
+  for (auto [groupId, groupMembers] : llvm::enumerate(shardingGroupToValues)) {
+    auto [sharding, hasConflict] = findCommonSharding(groupId, groupMembers);
+    if (!sharding) {
+      continue;
+    }
+    if (!hasConflict) {
+      for (Value member : groupMembers) {
+        setSharding(member, sharding);
+      }
+      continue;
+    }
+    // NOTE: Arbitrarily use the mesh name of `sharding`. This would be an
+    // issue, before we support propagating through different meshes, if the
+    // existing mesh of the member is different. It's fine to not error since
+    // this is a really rare case.
+    for (Value& member : groupMembers) {
+      IRRewriter rewriter(module.getContext());
+      rewriter.setInsertionPointAfterValue(member);
+      auto openShardingConstraint = rewriter.create<ShardingConstraintOp>(
+          member.getLoc(), member,
+          TensorShardingAttr::getFullyOpenLike(sharding));
+      rewriter.replaceAllUsesExcept(member, openShardingConstraint,
+                                    openShardingConstraint);
+      // Replace member.
+      valueToShardingGroup.erase(member);
+      member = openShardingConstraint;
+      valueToShardingGroup.try_emplace(member, groupId);
+    }
+  }
 }
 
 ValueRange ShardingGroupMap::getGroupMembers(const Value& value) const {

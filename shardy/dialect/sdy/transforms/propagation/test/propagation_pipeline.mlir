@@ -92,22 +92,77 @@ func.func @inlined_mesh(
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
-// CHECK-LABEL: add_extra_sharding_constraint_for_incompatible_sharding_shardings(
+// CHECK-LABEL: func @add_extra_sharding_constraint_for_incompatible_group_member_shardings(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}
-// CHECK-SAME:  ) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
-func.func @add_extra_sharding_constraint_for_incompatible_sharding_shardings(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.reshard %[[WSC_0]] <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[WSC_2:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[WSC_3:.*]] = sdy.reshard %[[WSC_2]] <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC_1]], %[[WSC_3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>} : tensor<8x8xf32>
-  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+// CHECK-SAME:  ) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+// CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
+func.func @add_extra_sharding_constraint_for_incompatible_group_member_shardings(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[RESHARD_0:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[RESHARD_1:.*]] = sdy.reshard %[[RESHARD_0]] <@mesh, [{"a"}, {"b"}]>
+  // CHECK-NEXT: %[[RESHARD_2:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {"b"}]>
+  // CHECK-NEXT: %[[RESHARD_3:.*]] = sdy.reshard %[[RESHARD_2]] <@mesh, [{"a"}, {"b"}]>
+  // CHECK-NEXT: return %[[RESHARD_1]], %[[RESHARD_3]]
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{}, {"b", ?}]> : tensor<8x8xf32>
   sdy.sharding_group %0 group_id=1183 : tensor<8x8xf32>
   %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {?}]> : tensor<8x8xf32>
   sdy.sharding_group %1 group_id=1183 : tensor<8x8xf32>
-  %2 = stablehlo.add %0, %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : tensor<8x8xf32>
-  func.return %2: tensor<8x8xf32>
+  return %0, %1 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
+
+// Verifies the interaction between the `-apply-sharding-constraints` pass and
+// sharding group propagation. This is validated by asserting that members of a
+// sharding group pick up the sharding of a group member with a sharding
+// constraint (the constraint needs to be added to the value in order for it to
+// be applied to other group members).
+sdy.mesh @mesh = <["a"=2]>
+
+// CHECK-LABEL: func @sharding_group_on_value_with_sharding_constraint
+func.func @sharding_group_on_value_with_sharding_constraint(%arg0: tensor<16x16xf32>, %arg1: tensor<16x16xf32>) -> (tensor<16x16xf32>, tensor<16x16xf32>) {
+  // CHECK: %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 : tensor<16x16xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"a"}]> :  tensor<16x16xf32>
+  // CHECK: %2 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
+  %2 = stablehlo.add %arg1, %arg1 : tensor<16x16xf32>
+  sdy.sharding_group %0 group_id = 32 : tensor<16x16xf32>
+  sdy.sharding_group %2 group_id = 32 : tensor<16x16xf32>
+  return %1, %2 : tensor<16x16xf32>, tensor<16x16xf32>
+}
+
+// -----
+
+// Verifies the interaction between the `-sdy-add-data-flow-edges` pass and
+// sharding group propagation. This is validated by adding a block argument
+// of a while op to a sharding group which has a sharding constraint. This
+// should be applied to other members of the group but can only happen if the
+// `-sdy-add-data-flow-edges` pass is applied first.
+
+sdy.mesh @mesh = <["a"=2]>
+
+// CHECK-LABEL: func @sharding_group_on_while_result
+func.func @sharding_group_on_while_result(%arg0: tensor<16x16xf32>, %arg1: tensor<16x16xf32>) -> (tensor<16x16xf32>, tensor<16x16xf32>) {
+  %0 = stablehlo.constant dense<0> : tensor<i32>
+  %inc = stablehlo.constant dense<1> : tensor<i32>
+  %comp = stablehlo.constant dense<32> : tensor<i32>
+  // CHECK:      stablehlo.while(%iterArg = %arg0, %iterArg_0 = %0) : tensor<16x16xf32>, tensor<i32>
+  // CHECK-SAME:   attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>, <@mesh, []>]>}
+  %1:2 = stablehlo.while(%iterArg = %arg0, %iterArg_2 = %0) : tensor<16x16xf32>, tensor<i32>
+    cond {
+    %3 = stablehlo.compare  LT, %iterArg_2, %comp : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    stablehlo.return %3 : tensor<i1>
+  } do {
+    %3 = stablehlo.add %iterArg_2, %inc : tensor<i32>
+    %4 = stablehlo.add %iterArg, %iterArg : tensor<16x16xf32>
+    stablehlo.return %4, %3 : tensor<16x16xf32>, tensor<i32>
+  }
+  sdy.sharding_group %1#0 group_id = 50 : tensor<16x16xf32>
+
+  // Add a value with an explicit sharding to group_id=50 which will apply an
+  // initial sharding to the result of the WhileOp outside of the loop.
+  %2 = sdy.sharding_constraint %arg1 <@mesh, [{"a"}, {}]> :  tensor<16x16xf32>
+  sdy.sharding_group %2 group_id = 50 : tensor<16x16xf32>
+  return %1#0, %2 : tensor<16x16xf32>, tensor<16x16xf32>
 }
 
 // -----
