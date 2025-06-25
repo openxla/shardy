@@ -41,15 +41,15 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
-  pm.addPass(createRemoveShardingGroupsPass());
-  if (!options.skipConvertToReshard) {
+  if (!options.avoidExportForPartitioning) {
+    pm.addPass(createRemoveShardingGroupsPass());
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   }
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addPass(createCloseShardingsPass());
   if (!options.enableInsertExplicitCollectives &&
-      !options.skipConvertToReshard) {
+      !options.avoidExportForPartitioning) {
     pm.addNestedPass<func::FuncOp>(
         createTempExplicitReshardsForOptimizationsPass());
   }

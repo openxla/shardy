@@ -46,9 +46,11 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       llvm::cl::desc("Directory to dump intermediate MLIR modules."),
       llvm::cl::init("")};
 
-  Option<bool> skipConvertToReshard{
-      *this, "skip-convert-to-reshard",
-      llvm::cl::desc("Skip converting sdy.sharding_constraint to sdy.reshard."),
+  Option<bool> avoidExportForPartitioning{
+      *this, "avoid-export-for-partitioning",
+      llvm::cl::desc(
+          "Avoid exporting the module for partitioning so that the module will "
+          "be compatible for another round of propagation."),
       llvm::cl::init(false)};
 
   Option<bool> enableInsertExplicitCollectives{

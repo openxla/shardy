@@ -47,9 +47,9 @@ struct PropagationOptions {
   bool debugShardingOrigins = false;
   // Whether to save debug information about the edge shardings on the module.
   bool debugPropagationEdgeSharding = false;
-  // Whether to avoid converting `sdy::ShardingConstraintOp` to
-  // `sdy::ReshardOp`.
-  bool skipConvertToReshard = false;
+  // Whether to avoid exporting the module for partitioning so that the module
+  // will be compatible for another round of propagation.
+  bool avoidExportForPartitioning = false;
   // Whether to skip inlining in the module.
   bool skipInline = false;
   // Whether to enable inserting explicit collectives.

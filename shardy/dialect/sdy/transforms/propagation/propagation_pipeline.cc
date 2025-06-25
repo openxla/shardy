@@ -30,7 +30,7 @@ void populateExportOptions(ExportOptions& options,
                            const PropagationOptions& propOptions) {
   options.keepShardingRules = propOptions.keepShardingRules;
   options.dumpDirectory = propOptions.dumpDirectory.str();
-  options.skipConvertToReshard = propOptions.skipConvertToReshard;
+  options.avoidExportForPartitioning = propOptions.avoidExportForPartitioning;
   options.enableInsertExplicitCollectives =
       propOptions.enableInsertExplicitCollectives;
 }
