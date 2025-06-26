@@ -80,6 +80,20 @@ ParseResult parseSingleBlockRegionNoBlockId(OpAsmParser& parser,
 ParseResult parseStrippedTensorShardingPerValueAttr(
     AsmParser& parser, TensorShardingPerValueAttr& shardingPerValue);
 
+// Parses a ValueRef to extract the EdgeNodeType and index.
+//
+// This is needed for using `custom<ValueRef>` in `assemblyFormat`.
+ParseResult parseValueRef(AsmParser& parser, EdgeNodeType& type,
+                          int64_t& index);
+
+// Parses a step index from a `PropagationOneStep` attribute.
+//
+// The custom parsing removes the `step-` prefix from the assembly format.
+//
+// This is needed for using `custom<StepIndex>` in
+// `assemblyFormat`.
+ParseResult parseStepIndex(AsmParser& parser, int64_t& stepIndex);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -982,6 +982,21 @@ LogicalResult PropagationBarrierOp::verify() {
   return success();
 }
 
+LogicalResult PropagationEdgesAttr::verify(
+    llvm::function_ref<InFlightDiagnostic()> emitError,
+    ArrayRef<PropagationOneStepAttr> propagationEdges) {
+  DenseSet<int64_t> seenStepIndices;
+  for (PropagationOneStepAttr propagationEdge : propagationEdges) {
+    int64_t stepIndex = propagationEdge.getStepIndex();
+    if (seenStepIndices.contains(stepIndex)) {
+      return emitError() << "propagation edges have duplicate step index: "
+                         << stepIndex;
+    }
+    seenStepIndices.insert(stepIndex);
+  }
+  return success();
+}
+
 namespace {
 
 LogicalResult allInnerAndOuterTypesMatchInNamedComputation(

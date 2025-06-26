@@ -80,6 +80,18 @@ void printStrippedTensorShardingPerValueAttr(
     AsmPrinter& printer, Operation* op,
     TensorShardingPerValueAttr shardingPerValue);
 
+// Prints a ValueRef as $type-$index.
+//
+// This is needed for using `custom<ValueRef>` in
+// `assemblyFormat`.
+void printValueRef(AsmPrinter& printer, EdgeNodeType type, int64_t index);
+
+// Prints a step index as `step-`$index for a `PropagationOneStep` attribute
+//
+// This is needed for using `custom<StepIndex>` in
+// `assemblyFormat`.
+void printStepIndex(AsmPrinter& printer, int64_t stepIndex);
+
 }  // namespace sdy
 }  // namespace mlir
 
