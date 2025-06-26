@@ -542,6 +542,65 @@ TEST_F(DialectTest, TensorShardingAttrGetReplicated) {
                                           createAxis("y"), createAxis("z")}));
 }
 
+TEST_F(DialectTest, TensorShardingAttrGetLocalTypeUnranked) {
+  OpBuilder builder(&context);
+  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2),
+                                       MeshAxisAttr::get(&context, "y", 3),
+                                       MeshAxisAttr::get(&context, "z", 4)});
+
+  TensorShardingAttr shardingWithAxes =
+      createTensorSharding({createDimSharding({createAxis("x")}),
+                            createDimSharding({createAxis("y")})});
+
+  Type i32Type = builder.getI32Type();
+  EXPECT_EQ(shardingWithAxes.getLocalType(i32Type, mesh), i32Type);
+
+  Type f32Type = builder.getF32Type();
+  EXPECT_EQ(shardingWithAxes.getLocalType(f32Type, mesh), f32Type);
+
+  Type indexType = builder.getIndexType();
+  EXPECT_EQ(shardingWithAxes.getLocalType(indexType, mesh), indexType);
+
+  Type unrankedType = UnrankedTensorType::get(i32Type);
+  EXPECT_EQ(shardingWithAxes.getLocalType(unrankedType, mesh), unrankedType);
+
+  Type noneType = builder.getNoneType();
+  EXPECT_EQ(shardingWithAxes.getLocalType(noneType, mesh), noneType);
+
+  Type complexType = ComplexType::get(f32Type);
+  EXPECT_EQ(shardingWithAxes.getLocalType(complexType, mesh), complexType);
+
+  Type tupleType = TupleType::get(&context, {i32Type, f32Type});
+  EXPECT_EQ(shardingWithAxes.getLocalType(tupleType, mesh), tupleType);
+}
+
+TEST_F(DialectTest, TensorShardingAttrGetLocalTypeVector) {
+  OpBuilder builder(&context);
+  auto globalType = VectorType::get({8, 4}, builder.getI32Type());
+  auto mesh = MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2),
+                                       MeshAxisAttr::get(&context, "y", 3),
+                                       MeshAxisAttr::get(&context, "z", 4)});
+
+  TensorShardingAttr sharding1 = createTensorSharding({});
+  EXPECT_EQ(sharding1.getLocalType(globalType, mesh), globalType);
+
+  TensorShardingAttr sharding2 = createTensorSharding(
+      {createDimSharding({createAxis("x")}), createDimSharding({})});
+  EXPECT_EQ(sharding2.getLocalType(globalType, mesh),
+            VectorType::get({4, 4}, builder.getI32Type()));
+
+  TensorShardingAttr sharding3 = createTensorSharding(
+      {createDimSharding({createAxis("y")}), createDimSharding({})});
+  EXPECT_EQ(sharding3.getLocalType(globalType, mesh),
+            VectorType::get({3, 4}, builder.getI32Type()));
+
+  TensorShardingAttr sharding4 = createTensorSharding(
+      {createDimSharding({createAxis("x"), createAxis("z")}),
+       createDimSharding({createAxis("y")})});
+  EXPECT_EQ(sharding4.getLocalType(globalType, mesh),
+            VectorType::get({1, 2}, builder.getI32Type()));
+}
+
 TEST_F(DialectTest, TensorShardingAttrGetLocalTensorType) {
   OpBuilder builder(&context);
   auto globalType = RankedTensorType::get({8, 4}, builder.getI32Type());

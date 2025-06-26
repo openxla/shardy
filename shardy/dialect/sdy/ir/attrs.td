@@ -842,6 +842,16 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     static TensorShardingAttr getFullyReplicated(
         MLIRContext* context, int64_t rank, StringRef meshName, bool isClosed);
 
+    // Gets the local mlir::Type from a global mlir::Type w.r.t. the given mesh
+    // and sharding. Assumes that the sharding is valid w.r.t. the mesh and
+    // global type. Returns the global mlir::Type if it is not a
+    // mlir::ShapedType with a rank.
+    //
+    // If `allowNonDivisible` is false, returns nullptr if a dimension sharding
+    // doesn't divide the corresponding size.
+    Type getLocalType(Type globalType, MeshAttr mesh,
+                      bool allowNonDivisible = true) const;
+
     // Gets the local tensor type from a global RankedTensorType w.r.t. the
     // given mesh and sharding. Assumes that the sharding is valid w.r.t. the
     // mesh and tensor type.

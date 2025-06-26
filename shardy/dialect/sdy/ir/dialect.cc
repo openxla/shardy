@@ -26,11 +26,11 @@ limitations under the License.
 #include <string>
 #include <utility>
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
@@ -263,9 +263,7 @@ int64_t MeshAttr::getAxisSize(StringRef axisName) const {
   llvm::report_fatal_error("unknown axis name");
 }
 
-int64_t MeshAttr::getTotalSize() const {
-  return getTotalAxesSize(getAxes());
-}
+int64_t MeshAttr::getTotalSize() const { return getTotalAxesSize(getAxes()); }
 
 bool MeshAttr::isMaximal(int64_t deviceId) const {
   return isMaximal() && getMaximalDeviceId() == deviceId;
@@ -903,17 +901,20 @@ TensorShardingAttr TensorShardingAttr::getFullyOpenLike(
                             sharding.getMeshOrRef(), /*isClosed=*/false);
 }
 
-RankedTensorType TensorShardingAttr::getLocalTensorType(
-    RankedTensorType globalTensorType, MeshAttr mesh,
-    bool allowNonDivisible) const {
+Type TensorShardingAttr::getLocalType(Type globalType, MeshAttr mesh,
+                                      bool allowNonDivisible) const {
   if (getDimShardings().empty()) {
-    return globalTensorType;
+    return globalType;
+  }
+  auto globalShapedType = dyn_cast<ShapedType>(globalType);
+  if (!globalShapedType || !globalShapedType.hasRank()) {
+    return globalType;
   }
   SmallVector<int64_t> localShape;
-  localShape.reserve(globalTensorType.getRank());
+  localShape.reserve(globalShapedType.getRank());
 
   for (auto [globalDimSize, dimSharding] :
-       llvm::zip_equal(globalTensorType.getShape(), getDimShardings())) {
+       llvm::zip_equal(globalShapedType.getShape(), getDimShardings())) {
     if (ShapedType::isDynamic(globalDimSize)) {
       localShape.push_back(globalDimSize);
     } else {
@@ -922,12 +923,20 @@ RankedTensorType TensorShardingAttr::getLocalTensorType(
         return nullptr;
       }
       // We allow non divisible sharding.
-      int64_t localSize = (globalDimSize + shardSize - 1) / shardSize;
+      int64_t localSize = llvm::divideCeil(globalDimSize, shardSize);
       localShape.push_back(localSize);
     }
   }
-  return RankedTensorType::get(ArrayRef<int64_t>(localShape),
-                               globalTensorType.getElementType());
+  return globalShapedType.clone(ArrayRef<int64_t>(localShape));
+}
+
+RankedTensorType TensorShardingAttr::getLocalTensorType(
+    RankedTensorType globalTensorType, MeshAttr mesh,
+    bool allowNonDivisible) const {
+  // getLocalType should always return something castable to RankedTensorType if
+  // a RankedTensorType is passed in.
+  return cast<RankedTensorType>(
+      getLocalType(globalTensorType, mesh, allowNonDivisible));
 }
 
 RankedTensorType TensorShardingAttr::getGlobalTensorType(
