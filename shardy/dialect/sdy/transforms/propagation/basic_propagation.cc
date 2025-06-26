@@ -598,8 +598,7 @@ bool allValidShapes(ModuleOp moduleOp) {
                     return WalkResult::interrupt();
                   }
                   if (auto tupleType = dyn_cast<TupleType>(type)) {
-                    op->emitError(
-                        "Shardy propagation doesn't support tuples: ")
+                    op->emitError("Shardy propagation doesn't support tuples: ")
                         << tupleType;
                     return WalkResult::interrupt();
                   }

@@ -19,7 +19,9 @@ limitations under the License.
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/IR/EnumAttr.td"
 include "shardy/dialect/sdy/ir/dialect.td"
+include "shardy/dialect/sdy/ir/enums.td"
 
 // NOTE: we use `` in assemblyFormat to avoid whitespaces between literals and
 // parameters.
@@ -1231,6 +1233,54 @@ def Sdy_AllToAllParamList : ArrayOfAttr<Sdy_Dialect, "AllToAllParamList",
     // checking `overlaps` is false.
     AllToAllParamListAttr combineAndSort(AllToAllParamListAttr other) const;
   }];
+}
+
+def Sdy_EdgeValueRef : AttrDef<Sdy_Dialect, "EdgeValueRef"> {
+  let mnemonic = "edge_value_ref";
+  let summary = "Reference to a particular index of a value edge of type `type`.";
+  let parameters = (ins
+    EnumParameter<Sdy_EdgeNodeType>:$type,
+    AttrOrTypeParameter<"int64_t", "The integer index (0, 1, 2, etc.)">:$index
+  );
+  let assemblyFormat = "``custom<EdgeValueRef>($type, $index)";
+}
+
+def Sdy_AxisToPropagationDetails : AttrDef<Sdy_Dialect, "AxisToPropagationDetails"> {
+  let mnemonic = "axis_to_propagation_details";
+  let summary = "Propagation edge flow details for a specific axis and source.";
+  let description = [{
+    Maps a source value reference to a list of target value references along a particular axis.
+  }];
+  let parameters = (ins
+    Sdy_AxisRef:$axis_name,
+    Sdy_EdgeValueRef:$source,
+    ArrayRefParameter<"EdgeValueRefAttr", "list of edge target values">:$targets
+  );
+  let assemblyFormat = "`{` $axis_name `=` $source`->` `[`$targets`]` `}`";
+}
+
+def Sdy_PropagationOneStep : AttrDef<Sdy_Dialect, "PropagationOneStep"> {
+  let mnemonic = "propagation_one_step";
+  let summary = "Per-step propagation metadata.";
+  let description = [{
+    Propagation details for all axes for a single propagation step.
+  }];
+  let parameters = (ins
+    AttrOrTypeParameter<"int64_t", "step index">:$step_index,
+    ArrayRefParameter<"AxisToPropagationDetailsAttr",
+        "Axis propagation details per propagation decision">:$axis_entries
+  );
+  let assemblyFormat = " `{` custom<StepIndex>($step_index) `=` `[`$axis_entries`]` `}`";
+}
+
+def Sdy_PropagationEdges : ArrayOfAttr<Sdy_Dialect, "PropagationEdges",
+                                 "propagation_edges", "PropagationOneStepAttr"> {
+  let summary = "Propagation edge metadata for all propagation steps.";
+  let description = [{
+    A list of per-axis propagation details for a value, grouped by step index.
+  }];
+  let assemblyFormat = "`<` `[`$value`]` `>`";
+  let genVerifyDecl = 1;
 }
 
 #endif  // SDY_ATTRS

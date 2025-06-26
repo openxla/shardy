@@ -54,11 +54,11 @@ limitations under the License.
 
 // Dialect main class is defined in ODS, we include it here.
 #include "shardy/dialect/sdy/ir/dialect.h.inc"
+// ODS-generated enum classes.
+#include "shardy/dialect/sdy/ir/enums.h.inc"
 // ODS-generated attribute classes.
 #define GET_ATTRDEF_CLASSES
 #include "shardy/dialect/sdy/ir/attrs.h.inc"
-// ODS-generated enum classes.
-#include "shardy/dialect/sdy/ir/enums.h.inc"
 
 // Below are methods that are the bodies of ODS-generated op-interface classes
 // which cannot be inlined due to cyclic dependencies on helper functions.
