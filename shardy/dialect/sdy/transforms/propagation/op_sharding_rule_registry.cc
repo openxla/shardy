@@ -21,6 +21,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <numeric>
+#include <optional>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -46,6 +47,22 @@ namespace mlir {
 namespace sdy {
 
 namespace {
+
+bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
+                            std::optional<ArrayRef<int64_t>> windowDimensions,
+                            int64_t dim) {
+  if (operandPadding.has_value()) {
+    // Check if start and end padding are 0.
+    if ((*(operandPadding->begin() + (2 * dim))).getSExtValue() != 0) {
+      return false;
+    }
+    if ((*(operandPadding->begin() + (2 * dim + 1))).getSExtValue() != 0) {
+      return false;
+    }
+  }
+  // and window dimensions are 1.
+  return !windowDimensions.has_value() || (*windowDimensions)[dim] == 1;
+}
 
 bool isTranspose(stablehlo::Transpose transpose) {
   switch (transpose) {
@@ -907,23 +924,24 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                 .build();
           })
       .Case<stablehlo::ReduceWindowOp>(
-          [conservativePropagation](stablehlo::ReduceWindowOp reduceWindow) {
+          [](stablehlo::ReduceWindowOp reduceWindow) {
             // Since all results have compatible shapes, we can look at the
             // first. The size of each result dimension is the number of input
             // windows reduced along that dimension. The corresponding input
             // dimension size can be sharded along the number of windows,
             // therefore we add a factor with that size.
-            //
-            // In conservative mode, we only add a factor if the input and
-            // output dimension sizes are equal.
-            // TODO(tomnatan): should the reduced factor be compound?
-            return OpShardingRuleBuilder(reduceWindow)
-                .addPointwiseWithDiffTypeForMismatch(
-                    getTensorShape(reduceWindow.getResult(0)),
-                    getTensorShape(reduceWindow.getInputs().front()),
-                    FactorType::kPermutation,
-                    /*mismatchFactorIsBlocked=*/conservativePropagation)
-                .build();
+            OpShardingRuleBuilder builder(reduceWindow);
+            for (auto [dim, outDimSize] :
+                 llvm::enumerate(getTensorShape(reduceWindow.getResult(0)))) {
+              if (isWindowPassthroughDim(reduceWindow.getPadding(),
+                                         reduceWindow.getWindowDimensions(),
+                                         dim)) {
+                builder.addFactor(dim, outDimSize);
+                continue;
+              }
+              builder.addFactor(dim, outDimSize, FactorType::kPermutation);
+            }
+            return builder.build();
           })
       .Case<stablehlo::ReshapeOp>([](stablehlo::ReshapeOp reshape) {
         RankedTensorType inType = reshape.getOperand().getType();
@@ -1093,23 +1111,29 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         return builder.build();
       })
       .Case<stablehlo::SelectAndScatterOp>(
-          [conservativePropagation](
-              stablehlo::SelectAndScatterOp selectAndScatter) {
+          [](stablehlo::SelectAndScatterOp selectAndScatter) {
             // The size of each source dimension is the number of input windows
             // reduced along that dimension. The corresponding input dimension
             // size can be sharded along the number of windows, therefore we add
             // a factor with that size.
-            //
-            // In conservative mode, we only add a factor if the input and
-            // source dimension sizes are equal.
-            // TODO(tomnatan): should the reduced factor be compound?
-            return OpShardingRuleBuilder(selectAndScatter)
-                .addPointwiseWithDiffTypeForMismatch(
-                    getTensorShape(selectAndScatter.getSource()),
-                    getTensorShape(selectAndScatter.getOperand()),
-                    FactorType::kPermutation,
-                    /*mismatchFactorIsBlocked=*/conservativePropagation)
-                .build();
+            // SingleOperand, SingleSourceValues, SingleResult
+            OpShardingRuleBuilder builder(selectAndScatter);
+            for (auto [dim, outDimSize] : llvm::enumerate(
+                     getTensorShape(selectAndScatter.getResult()))) {
+              if (isWindowPassthroughDim(selectAndScatter.getPadding(),
+                                         selectAndScatter.getWindowDimensions(),
+                                         dim)) {
+                builder.addFactor(dim, outDimSize);
+                continue;
+              }
+              // replicate the factor from the source
+              builder.addFactor({kNullDim, static_cast<int64_t>(dim), kNullDim},
+                                kNullDim, 1, FactorType::kNeedReplication);
+              // permute the factor from input to result
+              builder.addFactor({static_cast<int64_t>(dim), kNullDim, kNullDim},
+                                dim, outDimSize, FactorType::kPermutation);
+            }
+            return builder.build();
           })
       .Case<stablehlo::SelectOp>([](stablehlo::SelectOp select) {
         // Case 1: `pred` is a scalar in which case it is broadcasted and must
