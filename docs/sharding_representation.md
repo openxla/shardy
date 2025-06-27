@@ -31,8 +31,10 @@ We first reshape the 4 devices `[0, 1, 2, 3]` into a 2-d array `[[0, 1], [2,
 3]]` to create a mesh with 2 axes:
 
 ```c++
-@mesh_xy = <["x"=2, "y"=2]>
+@mesh_xy = <["d"=2, "m"=2]>
 ```
+
+Where `"d"` represents the rows of the 2D matrix, while `"m"` the columns.
 
 We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
 
@@ -107,6 +109,9 @@ GSPMD's `unspecified_dims`.
 If a dimension is open we add a `?` following the axes that the dimension is
 already sharded on (see example below).
 
+Note that a fully open tensor sharding is equivalent to no sharding attribute
+attached to the tensor.
+
 #### Closed
 
 A closed dimension is one that isn't available for propagation to add further
@@ -160,8 +165,9 @@ We can extend our example from above to have an explicitly replicated axis.
 
 // Since "y" is explicitly replicated, it can't be used to shard the 2nd
 // dimension that is open. However, "z" is implicitly replicated so it can be
-// used to shard that dimension. The local shape of this tensor (i.e. the
-// shape on a single device), would be tensor<2x8xf32>.
+// used to shard that dimension. "z" doesn't shard that dimension here, so the
+// local shape of this tensor (i.e. the shape on a single device), would be
+// tensor<2x8xf32>.
 sharding<@mesh_xyz, [{"x"}, {?}], replicated={"y"}> : tensor<4x8xf32>
 ```
 
