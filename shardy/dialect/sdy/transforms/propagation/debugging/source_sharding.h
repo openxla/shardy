@@ -19,7 +19,6 @@ limitations under the License.
 #include <cstdint>
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Action.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -54,9 +53,6 @@ struct OriginSharding {
   // the origin.
   int64_t sourceId = 0;
 };
-
-// Specifies whether a sharding came from an operand or a result.
-enum EdgeNodeType { OPERAND, RESULT };
 
 // The operand/result a sharding came from through an `Operation` to modify the
 // sharding of some `Value` in the `Operation`.
