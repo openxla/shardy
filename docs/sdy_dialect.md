@@ -1281,6 +1281,9 @@ the tensor, along which axes (or sub-axes) it is sharded from major to
 minor. All other axes that don’t shard a dimension are either implicitly or
 explicitly (if they appear in the list of replicated axes) replicated.
 
+Note that no sharding attribute on a tensor is equivalent to a fully open
+tensor sharding.
+
 The mesh this sharding is bound to can either be specified by a symbol
 name, referencing a corresponding `MeshOp` symbol, or an inlined `MeshAttr`.
 
