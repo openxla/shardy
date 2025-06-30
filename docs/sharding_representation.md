@@ -31,8 +31,10 @@ We first reshape the 4 devices `[0, 1, 2, 3]` into a 2-d array `[[0, 1], [2,
 3]]` to create a mesh with 2 axes:
 
 ```c++
-@mesh_xy = <["x"=2, "y"=2]>
+@mesh_dm = <["d"=2, "m"=2]>
 ```
+
+Where `"d"` represents the rows of the 2D matrix, while `"m"` the columns.
 
 We can then shard the following rank 2 tensor `[[a, b], [c, d]]` as follows:
 
@@ -76,13 +78,13 @@ We will start with a simple example and extend it as we describe additional
 features.
 
 ```c++
-@mesh_xy = <["x"=2, "y"=4, "z"=2]>
+@mesh_xyz = <["x"=2, "y"=4, "z"=2]>
 
 // The 1st tensor dimension is sharded along axis "x" and the 2nd tensor
 // dimension is sharded along axis "z" then further along axis "y".
 // The local shape of this tensor (i.e. the shape on a single device),
 // would be tensor<2x1xf32>.
-sharding<@mesh_xy, [{"x"}, {"z", "y"}]> : tensor<4x8xf32>
+sharding<@mesh_xyz, [{"x"}, {"z", "y"}]> : tensor<4x8xf32>
 ```
 
 #### Invariants
@@ -107,6 +109,9 @@ GSPMD's `unspecified_dims`.
 If a dimension is open we add a `?` following the axes that the dimension is
 already sharded on (see example below).
 
+Note that no sharding attribute on a tensor is equivalent to a fully open tensor
+sharding.
+
 #### Closed
 
 A closed dimension is one that isn't available for propagation to add further
@@ -119,12 +124,12 @@ We can extend the example from above to have an open dimension and a closed
 dimension.
 
 ```c++
-@mesh_xy = <["x"=2, "y"=4, "z"=2]>
+@mesh_xyz = <["x"=2, "y"=4, "z"=2]>
 
 // The 1st dimension is closed, therefore it can't be further sharded and {"x"}
 // will remain its sharding. The 2nd dimension is open, and can therefore be
 // further sharded during propagation, e.g. by "y".
-sharding<@mesh_xy, [{"x"}, {"z", ?}]> : tensor<4x8xf32>
+sharding<@mesh_xyz, [{"x"}, {"z", ?}]> : tensor<4x8xf32>
 ```
 
 ### Explicitly replicated axes
@@ -143,7 +148,7 @@ But, for consistency only, the axes will be stored in the order they are
 specified in the top level mesh. For example, if the mesh is:
 
 ```c++
-@mesh_xy = <["c"=2, "a"=2, "b"=2]>
+@mesh_cab = <["c"=2, "a"=2, "b"=2]>
 ```
 
 And we want axes `"a"` and `"c"` to be explicitly replicated, the order should
@@ -160,8 +165,9 @@ We can extend our example from above to have an explicitly replicated axis.
 
 // Since "y" is explicitly replicated, it can't be used to shard the 2nd
 // dimension that is open. However, "z" is implicitly replicated so it can be
-// used to shard that dimension. The local shape of this tensor (i.e. the
-// shape on a single device), would be tensor<2x8xf32>.
+// used to shard any dimension. "z" doesn't shard any dimension here, so the
+// local shape of this tensor (i.e. the shape on a single device), would be
+// tensor<2x8xf32>.
 sharding<@mesh_xyz, [{"x"}, {?}], replicated={"y"}> : tensor<4x8xf32>
 ```
 
@@ -366,10 +372,10 @@ representation (replicated axes don't have priorities).
 For example:
 
 ```c++
-@mesh_xy = <["w"=6, "x"=2, "y"=4, "z"=2]>
+@mesh_wxyz = <["w"=6, "x"=2, "y"=4, "z"=2]>
 
 //                                    |-> y is implicitly p0
-%arg4 : sharding<@mesh_xy, [{"x"}p1, {"y"}, {"z",?}p2], replicated={}}>
+%arg4 : sharding<@mesh_wxyz, [{"x"}p1, {"y"}, {"z",?}p2], replicated={}}>
 ```
 
 Priorities give users more fine grained control over propagation, e.g., batch
@@ -411,9 +417,9 @@ require the dimension to be padded).
 For example:
 
 ```c++
-@mesh_xy = <["x"=8, "y"=2, "z"=3]>
+@mesh_xyz = <["x"=8, "y"=2, "z"=3]>
 
-sharding<@mesh_xy, [{"x"}, {"y"}, {"z"}]> : tensor<7x3x8xf32>
+sharding<@mesh_xyz, [{"x"}, {"y"}, {"z"}]> : tensor<7x3x8xf32>
 ```
 
 ## Grammar

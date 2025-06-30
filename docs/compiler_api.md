@@ -66,6 +66,10 @@ func @main(%arg0: tensor<8x8xf32>
 }
 ```
 
+If an input or output doesn't have a sharding, this is equivalent to a
+fully open [sharding representation](sharding_representation.md). Propagation
+will be able to shard it in whatever way it sees fit.
+
 ### Sharding Constraint
 
 Allows users to attach a sharding to an intermediate tensor in their program,
