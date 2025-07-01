@@ -39,6 +39,8 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 
+using AxisRefVector = SmallVector<AxisRefAttr>;
+
 class UtilsTest : public ShardyTestBase {
  protected:
   void SetUp() override {
@@ -430,11 +432,10 @@ TEST_F(UtilsTest, GetAxisSetDiff) {
 TEST_F(UtilsTest, SortAndMergeAxes) {
   MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}, {"c", 8}, {"d", 8}});
 
-  SmallVector<AxisRefAttr> axes = {
-      createSubAxis("a", 1, 2), createSubAxis("a", 4, 2),
-      createSubAxis("b", 1, 2), createSubAxis("b", 2, 2),
-      createSubAxis("b", 4, 2), createAxis("c"),
-      createSubAxis("d", 2, 2), createSubAxis("d", 4, 2)};
+  AxisRefVector axes = {createSubAxis("a", 1, 2), createSubAxis("a", 4, 2),
+                        createSubAxis("b", 1, 2), createSubAxis("b", 2, 2),
+                        createSubAxis("b", 4, 2), createAxis("c"),
+                        createSubAxis("d", 2, 2), createSubAxis("d", 4, 2)};
 
   // Shuffle the vector
   std::random_device rd;
@@ -446,6 +447,68 @@ TEST_F(UtilsTest, SortAndMergeAxes) {
   EXPECT_THAT(axes, ElementsAre(SubAxisRefIs("a", 1, 2),
                                 SubAxisRefIs("a", 4, 2), AxisRefIs("b"),
                                 AxisRefIs("c"), SubAxisRefIs("d", 2, 4)));
+}
+
+TEST_F(UtilsTest, AddAxisOrMergeInserterSingleAxisNoMerge) {
+  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}});
+  AxisRefVector axes = {createSubAxis("a", 1, 2), createAxis("b")};
+  AxisRefVector newAxes;
+  std::transform(axes.begin(), axes.end(),
+                  AddAxisOrMergeInserter(&newAxes, &mesh),
+                  [&](AxisRefAttr axis) {
+                    if (axis.getName() == "b") {
+                      return createSubAxis("c", 4, 2);
+                    }
+                    return axis;
+                  });
+  EXPECT_THAT(newAxes,
+              ElementsAre(SubAxisRefIs("a", 1, 2), SubAxisRefIs("c", 4, 2)));
+}
+
+TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesNoMerge) {
+  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}, {"c", 8}, {"d", 8}});
+  AxisRefVector axes = {createAxis("a"), createSubAxis("b", 1, 2)};
+  AxisRefVector newAxes;
+  std::transform(axes.begin(), axes.end(),
+                  AddAxisOrMergeInserter(&newAxes, &mesh),
+                  [&](AxisRefAttr axis) -> AxisRefVector {
+                    if (axis.getName() == "b") {
+                      return {createAxis("c"), createAxis("d")};
+                    }
+                    return {};
+                  });
+  EXPECT_THAT(newAxes, ElementsAre(AxisRefIs("c"), AxisRefIs("d")));
+}
+
+TEST_F(UtilsTest, AddAxisOrMergeInserterSingleAxisMerge) {
+  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}});
+  AxisRefVector axes = {createSubAxis("a", 1, 2), createAxis("b")};
+  AxisRefVector newAxes;
+  std::transform(axes.begin(), axes.end(),
+                  AddAxisOrMergeInserter(&newAxes, &mesh),
+                  [&](AxisRefAttr axis) {
+                    if (axis.getName() == "b") {
+                      return createSubAxis("a", 2, 2);
+                    }
+                    return axis;
+                  });
+  EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("a", 1, 4)));
+}
+
+TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesMerge) {
+  MeshAttr mesh = createMesh({{"a", 8}, {"b", 16}});
+  AxisRefVector axes = {createAxis("a"), createSubAxis("b", 8, 2)};
+  AxisRefVector newAxes;
+  std::transform(axes.begin(), axes.end(),
+                  AddAxisOrMergeInserter(&newAxes, &mesh),
+                  [&](AxisRefAttr axis) -> AxisRefVector {
+                    if (axis.getName() == "a") {
+                      return {createSubAxis("b", 2, 2),
+                              createSubAxis("b", 4, 2)};
+                    }
+                    return {axis};
+                  });
+  EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("b", 2, 8)));
 }
 
 }  // namespace
