@@ -133,6 +133,14 @@ void printStrippedTensorShardingPerValueAttr(
   printer << "]";
 }
 
+void printEdgeValueRef(AsmPrinter& printer, EdgeNodeType type, int64_t index) {
+  printer << stringifyEdgeNodeType(type) << "-" << index;
+}
+
+void printStepIndex(AsmPrinter& printer, int64_t stepIndex) {
+  printer << "step-" << stepIndex;
+}
+
 void ConstantOp::print(OpAsmPrinter& p) {
   hlo::printConstantOp(p, getOperation(), getValue());
 }
