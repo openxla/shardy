@@ -490,12 +490,29 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
                                         ArrayRef<AxisRefAttr> axesB,
                                         MeshAttr mesh);
 
+// Returns true if any of `values` is used by any op of the specified types.
+template <class... OpTys>
+bool hasAnyUserOfType(ValueRange values) {
+  for (Value value : values) {
+    return llvm::any_of(value.getUsers(), [](Operation* user) {
+      return mlir::isa<OpTys...>(user);
+    });
+  }
+  return false;
+}
+
 // Returns true if `op` is only used by ops of the specified types.
 template <class... OpTys>
 bool hasOnlyUsersOfType(Operation* op) {
   return llvm::all_of(op->getUsers(), [](Operation* user) {
     return mlir::isa<OpTys...>(user);
   });
+}
+
+// Returns true if `op` is used by any op of the specified types.
+template <class... OpTys>
+bool hasAnyUserOfType(Operation* op) {
+  return hasAnyUserOfType(op->getResults());
 }
 
 }  // namespace sdy
