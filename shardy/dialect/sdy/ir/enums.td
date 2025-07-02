@@ -38,4 +38,17 @@ def Sdy_PropagationDirection :
   let cppNamespace = Sdy_Dialect.cppNamespace;
 }
 
+// Type of value referenced by a propagation edge.
+//
+// Edge shardings correspond to either the operand or result of an operation.
+// This enum distinguishes between the two.
+def Sdy_EdgeNodeType :
+    I32EnumAttr<"EdgeNodeType",
+        "edge node type enum", [
+        I32EnumAttrCase<"OPERAND", 0>,
+        I32EnumAttrCase<"RESULT", 1>]> {
+  let genSpecializedAttr = 1;
+  let cppNamespace = Sdy_Dialect.cppNamespace;
+}
+
 #endif  // SDY_ENUMS

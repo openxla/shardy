@@ -411,6 +411,35 @@ ParseResult parseStrippedTensorShardingPerValueAttr(
   return success();
 }
 
+ParseResult parseEdgeValueRef(AsmParser& parser, EdgeNodeType& type,
+                              int64_t& index) {
+  auto edgeTypeOrFailure = mlir::FieldParser<EdgeNodeType>::parse(parser);
+  if (failed(edgeTypeOrFailure)) {
+    return failure();
+  }
+  type = edgeTypeOrFailure.value();
+  if (parser.parseMinus()) {
+    return failure();
+  }
+  if (parser.parseInteger(index)) {
+    return failure();
+  }
+  return success();
+}
+
+ParseResult parseStepIndex(AsmParser& parser, int64_t& stepIndex) {
+  if (parser.parseKeyword("step")) {
+    return failure();
+  }
+  if (parser.parseMinus()) {
+    return failure();
+  }
+  if (parser.parseInteger(stepIndex)) {
+    return failure();
+  }
+  return success();
+}
+
 ParseResult ConstantOp::parse(OpAsmParser& parser, OperationState& result) {
   return hlo::parseConstantOp(parser, result);
 }

@@ -984,6 +984,110 @@ LogicalResult PropagationBarrierOp::verify() {
 
 namespace {
 
+LogicalResult verifyEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
+  if (edgeValueRef.getType() == EdgeNodeType::RESULT) {
+    int64_t index = edgeValueRef.getIndex();
+    if (index < 0 || index >= op->getNumResults()) {
+      return op->emitOpError(
+                 "expected a value ref to have a result index in range [0, ")
+             << op->getNumResults() << "), got: " << index;
+    }
+  } else if (edgeValueRef.getType() == EdgeNodeType::OPERAND) {
+    int64_t index = edgeValueRef.getIndex();
+    if (index < 0 || index >= op->getNumOperands()) {
+      return op->emitOpError(
+                 "expected a value ref to have an operand index in range [0, ")
+             << op->getNumOperands() << "), got: " << index;
+    }
+  }
+  return success();
+}
+
+LogicalResult verifyPropagationEdgesShardingAttr(
+    PropagationEdgesAttr propagationEdges, Operation* op) {
+  ArrayRef<TensorShardingAttr> shardings = getShardings(op);
+  if (shardings.empty()) {
+    return op->emitOpError(
+        "expected sharding attrs for propagation edges attr.");
+  }
+
+  // llvm::errs() << "HERE!\n";
+  MeshAttr mesh = getCommonMesh(shardings, op);
+  if (!mesh) {
+    return op->emitOpError(
+        "expected a common mesh for propagation edges attr.");
+  }
+  // llvm::errs() << "HERE!2 \n";
+
+  for (PropagationOneStepAttr propagationEdge : propagationEdges) {
+    for (AxisToPropagationDetailsAttr axisEntry :
+         propagationEdge.getAxisEntries()) {
+      bool meshContainsAxis = false;
+      if (mesh.hasAxis(axisEntry.getAxisName().getName())) {
+        meshContainsAxis = true;
+      }
+
+      if (!meshContainsAxis) {
+        return op->emitOpError("expected axis ref to be in one of the meshes");
+      }
+
+      EdgeValueRefAttr source = axisEntry.getSource();
+      if (failed(verifyEdgeValueRef(source, op))) {
+        return failure();
+      }
+      for (EdgeValueRefAttr target : axisEntry.getTargets()) {
+        if (failed(verifyEdgeValueRef(target, op))) {
+          return failure();
+        }
+      }
+    }
+  }
+  return success();
+}
+
+}  // namespace
+
+LogicalResult PropagationEdgesAttr::verify(
+    llvm::function_ref<InFlightDiagnostic()> emitError,
+    ArrayRef<PropagationOneStepAttr> propagationEdges) {
+  DenseSet<int64_t> seenStepIndices;
+  for (PropagationOneStepAttr propagationEdge : propagationEdges) {
+    int64_t stepIndex = propagationEdge.getStepIndex();
+    if (stepIndex < 0) {
+      return emitError() << "propagation edges have negative step index: "
+                         << stepIndex;
+    }
+    if (seenStepIndices.contains(stepIndex)) {
+      return emitError() << "propagation edges have duplicate step index: "
+                         << stepIndex;
+    }
+    seenStepIndices.insert(stepIndex);
+
+    for (AxisToPropagationDetailsAttr axisEntry :
+         propagationEdge.getAxisEntries()) {
+      EdgeValueRefAttr source = axisEntry.getSource();
+      DenseSet<EdgeValueRefAttr> seenTargets;
+      for (EdgeValueRefAttr target : axisEntry.getTargets()) {
+        if (source == target) {
+          return emitError() << "propagation edges have a source that is the "
+                                "same as a target";
+        }
+        if (seenTargets.contains(target)) {
+          return emitError()
+                 << "propagation edges have duplicate targets for step index: "
+                 << stepIndex
+                 << " and axis: " << axisEntry.getAxisName().getName().str();
+        }
+        seenTargets.insert(target);
+      }
+    }
+  }
+
+  return success();
+}
+
+namespace {
+
 LogicalResult allInnerAndOuterTypesMatchInNamedComputation(
     NamedComputationOp op, TypeRange innerTypes, TypeRange outerTypes,
     StringRef innerName, StringRef outerName) {
@@ -1423,6 +1527,20 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
              << "'";
     }
     return verifyOpShardingRuleAttr(shardingRule, op);
+  }
+
+  if (attr.getName() == kPropagationEdgesAttr ||
+      attr.getName() == kResultPropagationEdgesAttr ||
+      attr.getName() == kBlockArgPropagationEdgesAttr) {
+    auto edgeSharding = dyn_cast<PropagationEdgesAttr>(attr.getValue());
+    if (!edgeSharding) {
+      return op->emitOpError(
+                 "should have a propagation edges attribute of type ")
+             << "PropagationEdgesAttr for attr named '" << kPropagationEdgesAttr
+             << "', '" << kResultPropagationEdgesAttr << "', or '"
+             << kBlockArgPropagationEdgesAttr << "'";
+    }
+    return verifyPropagationEdgesShardingAttr(edgeSharding, op);
   }
 
   return success();
