@@ -236,6 +236,11 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
   return meshOrRef;
 }
 
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings, Operation* op) {
+  return getCommonMesh(shardings, {},
+                       SymbolTable(op->getParentOfType<ModuleOp>()));
+}
+
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        const SymbolTable& symbolTable) {
