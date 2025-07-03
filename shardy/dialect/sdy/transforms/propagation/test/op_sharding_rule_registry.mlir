@@ -739,18 +739,46 @@ func.func @reduce_scatter(%arg0: tensor<2x64x1x13xi64>) -> tensor<2x32x1x13xi64>
 
 // CHECK-LABEL: func @reduce_window
 func.func @reduce_window(%arg0: tensor<48x48x3xf32>, %arg1: tensor<48x48x3xi32>, %arg2: tensor<f32>, %arg3: tensor<i32>)
-    -> (tensor<16x48x1xf32>, tensor<16x48x1xi32>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [], [])->([i, j, k], [i, j, k]) {i=16, j=48, k=1} permutation={i, k}>
+    -> (tensor<16x48x3xf32>, tensor<16x48x3xi32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k], [], [])->([i, j, k], [i, j, k]) {i=16, j=48, k=3} permutation={i, j}>
   %0:2 = "stablehlo.reduce_window"(%arg0, %arg1, %arg2, %arg3) ({
   ^bb0(%arg4: tensor<f32>, %arg5 : tensor<i32>, %arg6: tensor<f32>, %arg7 : tensor<i32>):
     %1 = stablehlo.maximum %arg4, %arg6 : tensor<f32>
     %2 = stablehlo.maximum %arg5, %arg7 : tensor<i32>
     stablehlo.return %1, %2 : tensor<f32>, tensor<i32>
-  }) {window_dimensions = array<i64: 3, 1, 3>,
-      window_strides = array<i64: 3, 1, 3>,
+  }) {window_dimensions = array<i64: 3, 1, 1>,
+      window_strides = array<i64: 3, 1, 1>,
       padding = dense<[[0, 0], [2, -2], [0, 0]]> : tensor<3x2xi64>}
-      : (tensor<48x48x3xf32>, tensor<48x48x3xi32>, tensor<f32>, tensor<i32>) -> (tensor<16x48x1xf32>, tensor<16x48x1xi32>)
-  func.return %0#0, %0#1 : tensor<16x48x1xf32>, tensor<16x48x1xi32>
+      : (tensor<48x48x3xf32>, tensor<48x48x3xi32>, tensor<f32>, tensor<i32>) -> (tensor<16x48x3xf32>, tensor<16x48x3xi32>)
+  func.return %0#0, %0#1 : tensor<16x48x3xf32>, tensor<16x48x3xi32>
+}
+
+// CHECK-LABEL: func @reduce_window_permute_only
+func.func @reduce_window_permute_only(%arg0: tensor<8x16xf32>, %arg1: tensor<f32>)
+    -> tensor<8x16xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [])->([i, j]) {i=8, j=16} permutation={i, j}>
+  %0 = "stablehlo.reduce_window"(%arg0, %arg1) ({
+  ^bb0(%arg4: tensor<f32>, %arg5 : tensor<f32>):
+    %1 = stablehlo.maximum %arg4, %arg5 : tensor<f32>
+    stablehlo.return %1 : tensor<f32>
+  }) {window_dimensions = array<i64: 1, 1>,
+      padding = dense<[[-1, 1], [2, -2]]> : tensor<2x2xi64>}
+      : (tensor<8x16xf32>, tensor<f32>) -> tensor<8x16xf32>
+  func.return %0 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_window_passthrough_dim
+func.func @reduce_window_passthrough_dim(%arg0: tensor<8x16xf32>, %arg1: tensor<f32>)
+    -> tensor<8x16xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [])->([i, j]) {i=8, j=16}
+  %0 = "stablehlo.reduce_window"(%arg0, %arg1) ({
+  ^bb0(%arg4: tensor<f32>, %arg5 : tensor<f32>):
+    %1 = stablehlo.maximum %arg4, %arg5 : tensor<f32>
+    stablehlo.return %1 : tensor<f32>
+  }) {window_dimensions = array<i64: 1, 1>,
+      padding = dense<[[0, 0], [0, 0]]> : tensor<2x2xi64>}
+      : (tensor<8x16xf32>, tensor<f32>) -> tensor<8x16xf32>
+  func.return %0 : tensor<8x16xf32>
 }
 
 // CHECK-LABEL: func @reshape_scalar
@@ -1000,9 +1028,9 @@ func.func @select_scalar_pred(%arg0: tensor<i1>, %arg1: tensor<4x8xf32>, %arg2: 
 }
 
 // CHECK-LABEL: func @select_and_scatter
-func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32>, %arg1: tensor<10x12x12x64xf32>, %arg2: tensor<f32>)
+func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32>, %arg1: tensor<9x12x12x64xf32>, %arg2: tensor<f32>)
    -> tensor<10x24x24x64xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l], [i, j, k, l], [])->([i, j, k, l]) {i=10, j=12, k=12, l=64} permutation={j, k}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([j, l, n, o], [i, k, m, o], [])->([j, l, n, o]) {i=9, j=10, k=12, l=24, m=12, n=24, o=64} need_replication={i, k, m} permutation={j, l, n}>
   %1 = "stablehlo.select_and_scatter"(%arg0, %arg1, %arg2) ({
   ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
     %2 = stablehlo.compare GT, %arg3, %arg4 :(tensor<f32>, tensor<f32>) -> tensor<i1>
@@ -1013,8 +1041,9 @@ func.func @select_and_scatter(%arg0: tensor<10x24x24x64xf32>, %arg1: tensor<10x1
     stablehlo.return %2 : tensor<f32>
   }) {
     window_dimensions = array<i64: 1, 2, 2, 1>,
+    padding = dense<[[-1, 0], [0, 0], [0, 0], [0, 0]]> : tensor<4x2xi64>,
     window_strides = array<i64: 1, 2, 2, 1>
-  } : (tensor<10x24x24x64xf32>, tensor<10x12x12x64xf32>, tensor<f32>) -> tensor<10x24x24x64xf32>
+  } : (tensor<10x24x24x64xf32>, tensor<9x12x12x64xf32>, tensor<f32>) -> tensor<10x24x24x64xf32>
   return %1 : tensor<10x24x24x64xf32>
 }
 

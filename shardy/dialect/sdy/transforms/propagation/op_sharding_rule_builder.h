@@ -110,6 +110,12 @@ class OpShardingRuleBuilder {
           [](int64_t) { return FactorType::kPassThrough; },
       bool isBlocked = false);
 
+  // Overload to be able to provide conditional blocking.
+  OpShardingRuleBuilder& addPointwise(
+      ArrayRef<int64_t> shape,
+      std::function<FactorType(int64_t)> getFactorType,
+      std::function<bool(FactorType)> getIsBlocked);
+
   // Adds a pointwise factor for all dimensions that satisfy `pred` of all
   // operands/results that have rank at least 1. The factor type is determined
   // by `getFactorType`.
@@ -132,7 +138,7 @@ class OpShardingRuleBuilder {
 
  private:
   int64_t reserveFactor(int64_t factorSize, FactorType factorType,
-                         bool isBlocked);
+                        bool isBlocked);
 
   MLIRContext* context;
   SmallVector<int64_t> factorSizes;

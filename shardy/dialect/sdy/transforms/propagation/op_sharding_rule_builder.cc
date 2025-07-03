@@ -236,7 +236,16 @@ OpShardingRuleBuilder& OpShardingRuleBuilder::addFactor(int64_t dim,
 OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwise(
     ArrayRef<int64_t> shape, std::function<FactorType(int64_t)> getFactorType,
     bool isBlocked) {
+  return addPointwise(shape, getFactorType,
+                      [isBlocked](FactorType) { return isBlocked; });
+}
+
+OpShardingRuleBuilder& OpShardingRuleBuilder::addPointwise(
+    ArrayRef<int64_t> shape, std::function<FactorType(int64_t)> getFactorType,
+    std::function<bool(FactorType)> getIsBlocked) {
   for (auto [dim, dimSize] : llvm::enumerate(shape)) {
+    FactorType factorType = getFactorType(dim);
+    bool isBlocked = getIsBlocked(factorType);
     addFactor(dim, dimSize, getFactorType(dim), isBlocked);
   }
   return *this;
