@@ -16,7 +16,6 @@ limitations under the License.
 #include <cassert>
 #include <functional>
 #include <iterator>
-#include <memory>  // IWYU pragma: keep
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
@@ -24,15 +23,15 @@ limitations under the License.
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
-#include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
 
 namespace mlir {
 namespace sdy {
