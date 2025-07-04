@@ -638,5 +638,14 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
   return result;
 }
 
+bool isUsedBy(Value value, Operation* user) {
+  for (OpOperand& use : value.getUses()) {
+    if (use.getOwner() == user) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace sdy
 }  // namespace mlir

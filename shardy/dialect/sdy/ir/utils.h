@@ -515,6 +515,9 @@ bool hasAnyUserOfType(Operation* op) {
   return hasAnyUserOfType(op->getResults());
 }
 
+// Returns true if `value` is used by `user`.
+bool isUsedBy(Value value, Operation* user);
+
 }  // namespace sdy
 }  // namespace mlir
 
