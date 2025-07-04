@@ -30,7 +30,6 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
-#include "mlir/Rewrite/FrozenRewritePatternSet.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -155,9 +154,6 @@ struct ManualAxesCleanupPass
       addUnusedManualAxesToReplicatedAxes(op, mesh, meshOrRef, symbolTable);
     });
   }
-
- private:
-  FrozenRewritePatternSet patterns;
 };
 
 }  // namespace
