@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
-#include <memory>  // IWYU pragma: keep
 #include <utility>
 
 #include "llvm/ADT/DenseMap.h"
@@ -27,10 +26,10 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Visitors.h"
-#include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
 
 namespace mlir {
 namespace sdy {

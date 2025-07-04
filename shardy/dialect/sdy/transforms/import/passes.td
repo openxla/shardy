@@ -175,3 +175,13 @@ def ManualAxesCleanupPass : Pass<"sdy-manual-axes-cleanup", "ModuleOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def RemoveSizeOneAxesPass : Pass<"sdy-remove-size-one-axes", "ModuleOp"> {
+  let summary = "Removes size one axes from shardings.";
+  let description = [{
+    removes axes of size one from all shardings and manual computation ops, to
+    avoid conflict during propagation that are due to such axes. Note that the
+    axes in the meshes are not removed.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

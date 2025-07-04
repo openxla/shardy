@@ -39,6 +39,7 @@ cc_library(
         "inline_meshes.cc",
         "lift_inlined_meshes.cc",
         "manual_axes_cleanup.cc",
+        "remove_size_one_axes.cc",
         "sharding_group_import.cc",
     ],
     hdrs = [
