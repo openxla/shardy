@@ -122,6 +122,14 @@ _Cleans up the use of manual axes in `ManualComputationOp`s_
    always fully specified.
 2. Sorts the manual axes in mesh axis declaration order.
 
+### `-sdy-remove-size-one-axes`
+
+_Removes size one axes from shardings._
+
+removes axes of size one from all shardings and manual computation ops, to
+avoid conflict during propagation that are due to such axes. Note that the
+axes in the meshes are not removed.
+
 ### `-sdy-sharding-group-import`
 
 _Canonicalization and validation pass for sharding groups._
