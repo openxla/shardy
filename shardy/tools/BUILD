@@ -8,7 +8,6 @@ cc_binary(
     deps = [
         "//shardy/dialect/sdy/ir:register",
         "//shardy/dialect/sdy/transforms:passes",
-        "//shardy/round_trip_import:pipelines",
         "@llvm-project//mlir:AllPassesAndDialects",
         "@llvm-project//mlir:FuncExtensions",
         "@llvm-project//mlir:IR",
