@@ -339,7 +339,7 @@ func.func @while_loop_with_multiple_results(
   // CHECK-NEXT: %[[C_1:.*]] = stablehlo.constant dense<32> : tensor<i32>
   // CHECK-NEXT: %[[WHILE:.*]]:3 = stablehlo.while(%iterArg = %arg0, %iterArg_2 = %arg1, %iterArg_3 = %c)
   // CHECK-SAME:     : tensor<8x4xf32>, tensor<8x4xf32>, tensor<i32> attributes {
-  // CHECK-SAME:     sdy.result_sharding_origins = [{a = "input: 0"}, {b = "output: 1"}, {}],
+  // CHECK-SAME:     sdy.result_sharding_origins = [{a = "input: 0"}, {b = "output: 1"}],
   // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>, <@mesh, [{?}, {"b", ?}]>, <@mesh, []>]>}
   // CHECK-NEXT: cond {
   // CHECK-NEXT:   %1 = stablehlo.compare  LT, %iterArg_3, %c_1 : (tensor<i32>, tensor<i32>) -> tensor<i1>

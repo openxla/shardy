@@ -122,9 +122,7 @@ int64_t getTensorRank(Type type) {
   return 0;
 }
 
-int64_t getTensorRank(Value value) {
-  return getTensorRank(value.getType());
-}
+int64_t getTensorRank(Value value) { return getTensorRank(value.getType()); }
 
 int64_t isScalar(Value value) {
   if (auto tensorType = dyn_cast<ShapedType>(value.getType());
@@ -148,8 +146,7 @@ int64_t getTotalAxesSize(ArrayRef<AxisRefAttr> axes, MeshAttr mesh) {
 }
 
 MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName) {
-  return SymbolTable::lookupNearestSymbolFrom<sdy::MeshOp>(
-      op, meshSymName);
+  return SymbolTable::lookupNearestSymbolFrom<sdy::MeshOp>(op, meshSymName);
 }
 
 MeshOp getMeshOp(Operation* op, StringRef meshName) {
@@ -159,7 +156,6 @@ MeshOp getMeshOp(Operation* op, StringRef meshName) {
 MeshOp getMeshOp(const SymbolTable& symbolTable, StringRef meshName) {
   return symbolTable.lookup<MeshOp>(meshName);
 }
-
 
 MeshAttr getMeshOrLookup(const SymbolTable& symbolTable, Attribute meshOrRef) {
   if (auto mesh = dyn_cast<MeshAttr>(meshOrRef)) {
@@ -234,6 +230,11 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
   }
 
   return meshOrRef;
+}
+
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings,
+                       const SymbolTable& symbolTable) {
+  return getCommonMesh(shardings, {}, symbolTable);
 }
 
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,

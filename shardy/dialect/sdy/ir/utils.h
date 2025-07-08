@@ -167,6 +167,13 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
 // nullptr if there is none.
 //
 // Ignores empty meshes unless all meshes are empty.
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings,
+                       const SymbolTable& symbolTable);
+
+// Returns the common `MeshAttr` bound by all the `TensorShardingAttr`s or
+// nullptr if there is none.
+//
+// Ignores empty meshes unless all meshes are empty.
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        const SymbolTable& symbolTable);
@@ -220,7 +227,7 @@ std::string strippedAttrString(AttrTy attr, bool stripMnemonic = false) {
 // If `stripMnemonic` is true, also strips the mnemonic of the attribute.
 template <class AttrTy>
 std::string strippedAttrsString(ArrayRef<AttrTy> attrs,
-                                       bool stripMnemonic = false) {
+                                bool stripMnemonic = false) {
   std::string result = "[";
   llvm::raw_string_ostream os(result);
   llvm::interleaveComma(attrs, os, [&](AttrTy attr) {
