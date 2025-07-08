@@ -134,11 +134,11 @@ void printStrippedTensorShardingPerValueAttr(
 }
 
 void printEdgeValueRef(AsmPrinter& printer, EdgeNodeType type, int64_t index) {
-  printer << stringifyEdgeNodeType(type) << "-" << index;
+  printer << stringifyEdgeNodeType(type) << "_" << index;
 }
 
 void printStepIndex(AsmPrinter& printer, int64_t stepIndex) {
-  printer << "step-" << stepIndex;
+  printer << "step_" << stepIndex;
 }
 
 void ConstantOp::print(OpAsmPrinter& p) {

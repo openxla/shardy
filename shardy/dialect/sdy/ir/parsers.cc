@@ -413,29 +413,59 @@ ParseResult parseStrippedTensorShardingPerValueAttr(
 
 ParseResult parseEdgeValueRef(AsmParser& parser, EdgeNodeType& type,
                               int64_t& index) {
-  auto edgeTypeOrFailure = mlir::FieldParser<EdgeNodeType>::parse(parser);
-  if (failed(edgeTypeOrFailure)) {
+  StringRef valueRefStr;
+  if (parser.parseOptionalKeyword(&valueRefStr)) {
     return failure();
   }
-  type = edgeTypeOrFailure.value();
-  if (parser.parseMinus()) {
-    return failure();
+
+  StringRef edgeNodeIndex;
+  if (valueRefStr.starts_with("OPERAND_")) {
+    type = EdgeNodeType::OPERAND;
+    edgeNodeIndex = valueRefStr.drop_front(8);
+  } else if (valueRefStr.starts_with("RESULT_")) {
+    type = EdgeNodeType::RESULT;
+    edgeNodeIndex = valueRefStr.drop_front(7);
+  } else {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expecting 'OPERAND' or 'RESULT', got: ")
+           << valueRefStr;
   }
-  if (parser.parseInteger(index)) {
-    return failure();
+
+  if (edgeNodeIndex.empty()) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected integer directly after '_'");
+  }
+  if (!llvm::to_integer(edgeNodeIndex, index)) {
+    return parser.emitError(
+               parser.getCurrentLocation(),
+               "value ref should have integer edge node index, received: ")
+           << edgeNodeIndex;
   }
   return success();
 }
 
 ParseResult parseStepIndex(AsmParser& parser, int64_t& stepIndex) {
-  if (parser.parseKeyword("step")) {
+  StringRef stepIndexStr;
+  if (parser.parseOptionalKeyword(&stepIndexStr)) {
     return failure();
   }
-  if (parser.parseMinus()) {
-    return failure();
+  constexpr StringRef kStepPrefix = "step_";
+  if (!stepIndexStr.starts_with(kStepPrefix)) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expecting 'step_' followed by an integer, got: ")
+           << stepIndexStr;
   }
-  if (parser.parseInteger(stepIndex)) {
-    return failure();
+  StringRef numberStr = stepIndexStr.drop_front(kStepPrefix.size());
+  if (numberStr.empty()) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected integer directly after 'step_'");
+  }
+
+  if (!llvm::to_integer(numberStr, stepIndex)) {
+    return parser.emitError(
+               parser.getCurrentLocation(),
+               "propagation edges should have integer step index, received: ")
+           << numberStr;
   }
   return success();
 }
