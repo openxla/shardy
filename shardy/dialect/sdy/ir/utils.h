@@ -17,6 +17,7 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -508,6 +509,43 @@ bool hasOnlyUsersOfType(Operation* op) {
     return mlir::isa<OpTys...>(user);
   });
 }
+
+// Helper class to insert or merge `AxisRefAttr`s into a `SmallVector`.
+// It implements the interface required by `llvm::transform` to be used as an
+// output iterator.
+class AddAxisOrMergeInserter {
+ public:
+  using iterator_category = std::output_iterator_tag;
+  using value_type = void;
+  using difference_type = void;
+  using pointer = void;
+  using reference = void;
+
+  explicit AddAxisOrMergeInserter(SmallVector<AxisRefAttr>* newAxisRefs,
+                                  const MeshAttr* mesh)
+      : axisRefs(newAxisRefs), mesh(mesh) {}
+
+  AddAxisOrMergeInserter& operator=(AxisRefAttr value) {
+    sdy::addAxisOrMerge(*axisRefs, value, *mesh);
+    return *this;
+  }
+
+  AddAxisOrMergeInserter& operator=(ArrayRef<AxisRefAttr> values) {
+    for (AxisRefAttr value : values) {
+      *this = value;
+    }
+    return *this;
+  }
+
+  AddAxisOrMergeInserter& operator*() { return *this; }
+  AddAxisOrMergeInserter& operator++() { return *this; }
+  AddAxisOrMergeInserter& operator++(int) { return *this; }
+
+ private:
+  // Use pointers so that callers like `llvm::transform` can copy the inserter.
+  SmallVector<AxisRefAttr>* axisRefs;
+  const MeshAttr* mesh;
+};
 
 // Returns true if `op` is used by any op of the specified types.
 template <class... OpTys>
