@@ -960,6 +960,30 @@ Syntax:
 | :-------: | :-------: | ----------- |
 | value | `::llvm::ArrayRef<AxisRefAttr>` |  |
 
+### AxisToPropagationDetailsAttr
+
+_Propagation edge flow details for a specific axis and source._
+
+Syntax:
+
+```
+#sdy.axis_to_propagation_details<
+  ::mlir::sdy::AxisRefAttr,   # axis_name
+  ::mlir::sdy::EdgeValueRefAttr,   # source
+  ::llvm::ArrayRef<EdgeValueRefAttr>   # targets
+>
+```
+
+Maps a source value reference to a list of target value references along a particular axis.
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| axis_name | `::mlir::sdy::AxisRefAttr` | Reference to either a full axis or a split sub-axis |
+| source | `::mlir::sdy::EdgeValueRefAttr` | Reference to a particular index of a value edge of type `type`. |
+| targets | `::llvm::ArrayRef<EdgeValueRefAttr>` | list of edge target values |
+
 ### DimMappingAttr
 
 _List of factor indices for a dimension_
@@ -1003,6 +1027,26 @@ highest priority is assumed when the priority is missing in the annotation.
 | axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
 | is_closed | `bool` | whether this dimension can't be further sharded |
 | priority | `std::optional<int64_t>` | the priority used during user priority based propagation |
+
+### EdgeValueRefAttr
+
+_Reference to a particular index of a value edge of type `type`._
+
+Syntax:
+
+```
+#sdy.edge_value_ref<
+  ::mlir::sdy::EdgeNodeType,   # type
+  int64_t   # index
+>
+```
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| type | `::mlir::sdy::EdgeNodeType` | an enum of type EdgeNodeType |
+| index | `int64_t` | The integer index (0, 1, 2, etc.) |
 
 ### ListOfAxisRefListsAttr
 
@@ -1203,6 +1247,48 @@ always preserved/never removed.
 | blocked_propagation_factors | `::llvm::ArrayRef<int64_t>` | factors along which shardings are not propagated |
 | is_custom_rule | `bool` | whether the rule is for a stablehlo.custom_call |
 
+### PropagationEdgesAttr
+
+_Propagation edge metadata for all propagation steps._
+
+Syntax:
+
+```
+#sdy.propagation_edges<
+  ::llvm::ArrayRef<PropagationOneStepAttr>   # value
+>
+```
+
+A list of per-axis propagation details for a value, grouped by step index.
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| value | `::llvm::ArrayRef<PropagationOneStepAttr>` |  |
+
+### PropagationOneStepAttr
+
+_Per-step propagation metadata._
+
+Syntax:
+
+```
+#sdy.propagation_one_step<
+  int64_t,   # step_index
+  ::llvm::ArrayRef<AxisToPropagationDetailsAttr>   # axis_entries
+>
+```
+
+Propagation details for all axes for a single propagation step.
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| step_index | `int64_t` | step index |
+| axis_entries | `::llvm::ArrayRef<AxisToPropagationDetailsAttr>` | Axis propagation details per propagation decision |
+
 ### SubAxisInfoAttr
 
 _Info about how this sub-axis is derived from the full axis_
@@ -1349,6 +1435,17 @@ A list of `TensorShardingAttr`s, one for each operand/result of an op.
 | shardings | `::llvm::ArrayRef<TensorShardingAttr>` | sharding per value |
 
 ## Enums
+
+### EdgeNodeType
+
+_Edge node type enum_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| OPERAND | `0` | OPERAND |
+| RESULT | `1` | RESULT |
 
 ### PropagationDirection
 
