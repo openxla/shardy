@@ -45,8 +45,8 @@ def Sdy_PropagationDirection :
 def Sdy_EdgeNodeType :
     I32EnumAttr<"EdgeNodeType",
         "edge node type enum", [
-        I32EnumAttrCase<"OPERAND", 0>,
-        I32EnumAttrCase<"RESULT", 1>]> {
+        I32EnumAttrCase<"OPERAND", 0, "operand">,
+        I32EnumAttrCase<"RESULT", 1, "result">]> {
   let genSpecializedAttr = 1;
   let cppNamespace = Sdy_Dialect.cppNamespace;
 }
