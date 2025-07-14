@@ -1,6 +1,7 @@
 # The SDY import passes and pipeline.
 
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
+load("//third_party/bazel_rules/rules_cc/cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
