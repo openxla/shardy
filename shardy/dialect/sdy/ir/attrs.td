@@ -110,10 +110,6 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     AttrBuilder<(ins "mlir::ArrayRef<MeshAxisAttr>":$axes), [{
       return $_get($_ctxt, axes, /*device_ids=*/std::nullopt);
     }]>,
-    AttrBuilder<(ins "int64_t":$device_id), [{
-      return $_get($_ctxt, /*axes=*/ArrayRef<MeshAxisAttr>(),
-                   ArrayRef<int64_t>(device_id));
-    }]>,
   ];
 
   let extraClassDeclaration = [{
@@ -143,6 +139,9 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     // A maximal-sharding mesh is a mesh with an empty axis list and a single
     // device ID.
     bool isMaximal(int64_t deviceId) const;
+
+    // Creates a maximal mesh with the given `deviceId`.
+    static MeshAttr getMaximal(MLIRContext* ctx, int64_t deviceId);
 
     // If this mesh is a maximal-sharding mesh, returns the maximal device ID,
     // otherwise, returns std::nullopt.

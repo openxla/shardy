@@ -273,6 +273,10 @@ bool MeshAttr::isMaximal() const {
   return getAxes().empty() && getDeviceIds().size() == 1;
 }
 
+MeshAttr MeshAttr::getMaximal(MLIRContext* ctx, int64_t deviceId) {
+  return MeshAttr::get(ctx, /*axes=*/{}, deviceId);
+}
+
 std::optional<int64_t> MeshAttr::getMaximalDeviceId() const {
   if (isMaximal()) {
     return getDeviceIds().front();
