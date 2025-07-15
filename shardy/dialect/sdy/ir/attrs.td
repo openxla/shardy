@@ -108,7 +108,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
       return $_get($_ctxt, axes, isIota ? ArrayRef<int64_t>() : device_ids);
     }]>,
     AttrBuilder<(ins "mlir::ArrayRef<MeshAxisAttr>":$axes), [{
-      return $_get($_ctxt, axes, /*device_ids=*/std::nullopt);
+      return $_get($_ctxt, axes, /*device_ids=*/ArrayRef<int64_t>());
     }]>,
   ];
 
