@@ -13,7 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <optional>
 #include <string>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -33,7 +32,7 @@ namespace {
 void addCanonicalizerPass(OpPassManager& pm,
                           ArrayRef<std::string> enabledPatterns) {
   pm.addPass(createCanonicalizerPass(GreedyRewriteConfig(),
-                                     /*disabledPatterns=*/std::nullopt,
+                                     /*disabledPatterns=*/{},
                                      /*enabledPatterns=*/enabledPatterns));
 }
 
