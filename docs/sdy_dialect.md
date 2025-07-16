@@ -1444,8 +1444,8 @@ _Edge node type enum_
 
 | Symbol | Value | String |
 | :----: | :---: | ------ |
-| OPERAND | `0` | OPERAND |
-| RESULT | `1` | RESULT |
+| OPERAND | `0` | operand |
+| RESULT | `1` | result |
 
 ### PropagationDirection
 
