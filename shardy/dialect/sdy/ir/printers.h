@@ -80,17 +80,11 @@ void printStrippedTensorShardingPerValueAttr(
     AsmPrinter& printer, Operation* op,
     TensorShardingPerValueAttr shardingPerValue);
 
-// Prints a EdgeValueRef as $type-$index.
-//
-// This is needed for using `custom<EdgeValueRef>` in
-// `assemblyFormat`.
-void printEdgeValueRef(AsmPrinter& printer, EdgeNodeType type, int64_t index);
-
-// Prints a step index as `step-`$index for a `PropagationOneStep` attribute
-//
-// This is needed for using `custom<StepIndex>` in
-// `assemblyFormat`.
-void printStepIndex(AsmPrinter& printer, int64_t stepIndex);
+// Prints a minus symbol. Pass in any string for `StringRef` as it is not used.
+// TODO(bartchr): figure out how we can avoid requiring a StringRef. It makes
+// the assembly format a bit ugly having to pass in an empty string. Issue seems
+// to be MLIR tblgen requires 2 arguments for a custom parser/printer.
+void printMinus(AsmPrinter& printer, StringRef);
 
 }  // namespace sdy
 }  // namespace mlir

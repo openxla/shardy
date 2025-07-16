@@ -80,19 +80,11 @@ ParseResult parseSingleBlockRegionNoBlockId(OpAsmParser& parser,
 ParseResult parseStrippedTensorShardingPerValueAttr(
     AsmParser& parser, TensorShardingPerValueAttr& shardingPerValue);
 
-// Parses a EdgeValueRef to extract the EdgeNodeType and index.
-//
-// This is needed for using `custom<EdgeValueRef>` in `assemblyFormat`.
-ParseResult parseEdgeValueRef(AsmParser& parser, EdgeNodeType& type,
-                              int64_t& index);
-
-// Parses a step index from a `PropagationOneStep` attribute.
-//
-// The custom parsing removes the `step-` prefix from the assembly format.
-//
-// This is needed for using `custom<StepIndex>` in
-// `assemblyFormat`.
-ParseResult parseStepIndex(AsmParser& parser, int64_t& stepIndex);
+// Parses a minus symbol. Pass in any string for `StringRef` as it is not used.
+// TODO: b/432183398 - figure out how we can avoid requiring a StringRef. It
+// makes the assembly format a bit ugly having to pass in an empty string. Issue
+// seems to be MLIR tblgen requires 2 arguments for a custom parser/printer.
+ParseResult parseMinus(AsmParser& parser, StringRef);
 
 }  // namespace sdy
 }  // namespace mlir

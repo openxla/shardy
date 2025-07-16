@@ -1241,7 +1241,9 @@ def Sdy_EdgeValueRef : AttrDef<Sdy_Dialect, "EdgeValueRef"> {
     EnumParameter<Sdy_EdgeNodeType>:$type,
     AttrOrTypeParameter<"int64_t", "The integer index (0, 1, 2, etc.)">:$index
   );
-  let assemblyFormat = "``custom<EdgeValueRef>($type, $index)";
+  let assemblyFormat = [{
+    ``$type``custom<Minus>("\"\"")``$index
+  }];
 }
 
 def Sdy_AxisToPropagationDetails : AttrDef<Sdy_Dialect, "AxisToPropagationDetails"> {
@@ -1255,7 +1257,7 @@ def Sdy_AxisToPropagationDetails : AttrDef<Sdy_Dialect, "AxisToPropagationDetail
     Sdy_EdgeValueRef:$source,
     ArrayRefParameter<"EdgeValueRefAttr", "list of edge target values">:$targets
   );
-  let assemblyFormat = "`{` $axis_name `=` $source`->` `[`$targets`]` `}`";
+  let assemblyFormat = "`{` $axis_name `=` $source`->` `[```$targets`]` `}`";
 }
 
 def Sdy_PropagationOneStep : AttrDef<Sdy_Dialect, "PropagationOneStep"> {
@@ -1269,7 +1271,12 @@ def Sdy_PropagationOneStep : AttrDef<Sdy_Dialect, "PropagationOneStep"> {
     ArrayRefParameter<"AxisToPropagationDetailsAttr",
         "Axis propagation details per propagation decision">:$axis_entries
   );
-  let assemblyFormat = " `{` custom<StepIndex>($step_index) `=` `[`$axis_entries`]` `}`";
+  let assemblyFormat = [{
+     `{`
+     `step` `` custom<Minus>("\"\"") ``
+     $step_index `=` `[`$axis_entries`]`
+     `}`
+  }];
 }
 
 def Sdy_PropagationEdges : ArrayOfAttr<Sdy_Dialect, "PropagationEdges",

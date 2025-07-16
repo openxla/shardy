@@ -427,14 +427,8 @@ ParseResult parseEdgeValueRef(AsmParser& parser, EdgeNodeType& type,
   return success();
 }
 
-ParseResult parseStepIndex(AsmParser& parser, int64_t& stepIndex) {
-  if (parser.parseKeyword("step")) {
-    return failure();
-  }
+ParseResult parseMinus(AsmParser& parser, StringRef) {
   if (parser.parseMinus()) {
-    return failure();
-  }
-  if (parser.parseInteger(stepIndex)) {
     return failure();
   }
   return success();
