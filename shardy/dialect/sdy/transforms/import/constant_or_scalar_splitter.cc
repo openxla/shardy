@@ -64,14 +64,15 @@ void eraseShardingGroupUsers(Operation* op) {
 
 // Returns true if the given op is either:
 // - A constant or iota op.
-// - A broadcast, slice, or pure element-wise op whose operands are all
-// constants (exist in `constantOps`).
+// - A broadcast, reshape, slice, or pure element-wise op whose operands are all
+//   constants (exist in `constantOps`).
 bool isConstantExpression(Operation* op,
                           const llvm::SetVector<Operation*>& constantOps) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
-  return (isa<stablehlo::BroadcastInDimOp, stablehlo::SliceOp>(op) ||
+  return (isa<stablehlo::BroadcastInDimOp, stablehlo::ReshapeOp,
+              stablehlo::SliceOp>(op) ||
           isElementwise(op)) &&
          isPure(op) && llvm::all_of(op->getOperands(), [&](Value operand) {
            return operand.getDefiningOp() &&

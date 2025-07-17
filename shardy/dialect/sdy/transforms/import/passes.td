@@ -121,9 +121,9 @@ def ConstantOrScalarSplitterPass : Pass<"sdy-constant-or-scalar-splitter", "func
 
     A constant sub-computation is either:
     * a constant or iota op (no operands)
-    * a broadcast, slice, or pure element-wise op, whose operands are all
-      defined by constant sub-computations (recursively), along with the entire
-      sub-computations that define its operands.
+    * a broadcast, reshape, slice, or pure element-wise op, whose operands are
+      all defined by constant sub-computations (recursively), along with the
+      entire sub-computations that define its operands.
 
     A scalar expansion is a broadcast of a scalar.
 

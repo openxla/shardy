@@ -136,6 +136,18 @@ func.func @multiple_broadcasts_using_the_same_const_sub_computation(%arg0: tenso
   return %3, %5 : tensor<3x5xi32>, tensor<2x4xi32>
 }
 
+// CHECK-LABEL: func @constant_reshape_multiple_users
+func.func @constant_reshape_multiple_users() -> (tensor<5x2xi32>, tensor<5x2xi32>) {
+  // CHECK-NEXT: %[[IOTA_0:.*]] = stablehlo.iota dim = 0
+  // CHECK-NEXT: %[[IOTA_1:.*]] = stablehlo.iota dim = 0
+  // CHECK-NEXT: %[[RESHAPE_0:.*]] = stablehlo.reshape %[[IOTA_0]]
+  // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[IOTA_1]]
+  // CHECK-NEXT: return %[[RESHAPE_0]], %[[RESHAPE_1]]
+  %0 = stablehlo.iota dim = 0 : tensor<10xi32>
+  %1 = stablehlo.reshape %0 : (tensor<10xi32>) -> tensor<5x2xi32>
+  return %1, %1 : tensor<5x2xi32>, tensor<5x2xi32>
+}
+
 // CHECK-LABEL: func @constant_slice_multiple_users
 func.func @constant_slice_multiple_users(%arg0: tensor<8xi32>) -> (tensor<8xi32>, tensor<8xi32>) {
   // CHECK-NEXT: %[[IOTA_0:.*]] = stablehlo.iota dim = 0
