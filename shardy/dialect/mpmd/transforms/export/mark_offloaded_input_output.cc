@@ -141,8 +141,8 @@ Value WalkBackwardThroughOffloadCompatibleResult(OpResult res) {
 // Returns whether a value is a result, and whether the result is stored on the
 // host memory via an annotate custom call on the source of the result, or if
 // the result was computed on host.
-bool IsResultAndOnHostMemory(Value val) {
-  auto res = dyn_cast_if_present<OpResult>(val);
+bool IsResultAndOnHostMemory(Value val, mlir::StringRef memory_kind) {
+  auto res = mlir::dyn_cast_if_present<OpResult>(val);
   if (!res) {
     return false;
   }
@@ -155,10 +155,20 @@ bool IsResultAndOnHostMemory(Value val) {
     }
   }
   if (Value operand = WalkBackwardThroughOffloadCompatibleResult(res)) {
-    return IsResultAndOnHostMemory(operand);
+    return IsResultAndOnHostMemory(operand, memory_kind);
   }
 
-  return GetOffloadValueIfExists(res.getOwner()) == kMemoryKindPinnedHost;
+  return GetOffloadValueIfExists(res.getOwner()) == memory_kind;
+}
+
+std::optional<StringRef> GetOnHostMemoryKindIfResult(Value val) {
+  if (IsResultAndOnHostMemory(val, kMemoryKindPinnedHost)) {
+    return kMemoryKindPinnedHost;
+  }
+  if (IsResultAndOnHostMemory(val, kMemoryKindUnpinnedHost)) {
+    return kMemoryKindUnpinnedHost;
+  }
+  return std::nullopt;
 }
 
 // Gets memory kind from user.
@@ -299,20 +309,27 @@ class MarkOffloadedInputOutputPass
   // - Propagating host annotation through ops implicitly computed on host.
   //
   // We don't propagate device memory kinds, because that's the default.
+
   void PropagateHostMemoryKindOnFragments(FragmentOp frag, FuncOp parent) {
     SmallVector<Attribute> arg_attrs = GetArgAttrsOrCreateDefault(frag);
     for (OpOperand& operand : frag->getOpOperands()) {
-      if (auto result = dyn_cast<OpResult>(operand.get());
-          result && isa<FragmentOp>(result.getOwner()) &&
-          IsResultOnHost(result)) {
-        InsertAttr(arg_attrs[operand.getOperandNumber()], kMemoryKindAttr,
-                   StringAttr::get(frag.getContext(), kMemoryKindPinnedHost));
-        continue;
+      if (auto result = mlir::dyn_cast<OpResult>(operand.get());
+          result && mlir::isa<FragmentOp>(result.getOwner())) {
+        if (std::optional<mlir::StringRef> memory_kind =
+          GetMemoryKindIfResultOnHost(result)) {
+          mlir::mpmd::InsertAttr(
+              arg_attrs[operand.getOperandNumber()], kMemoryKindAttr,
+              mlir::StringAttr::get(frag.getContext(), memory_kind.value()));
+          continue;
+        }
       }
-      if (auto block_arg = dyn_cast<BlockArgument>(operand.get());
-          block_arg && IsArgOnHost(parent, block_arg.getArgNumber())) {
-        InsertAttr(arg_attrs[operand.getOperandNumber()], kMemoryKindAttr,
-                   StringAttr::get(frag.getContext(), kMemoryKindPinnedHost));
+      if (auto block_arg = mlir::dyn_cast<BlockArgument>(operand.get())) {
+        if (std::optional<mlir::StringRef> memory_kind =
+          GetMemoryKindIfArgOnHost(parent, block_arg.getArgNumber())) {
+          mlir::mpmd::InsertAttr(
+              arg_attrs[operand.getOperandNumber()], kMemoryKindAttr,
+              mlir::StringAttr::get(frag.getContext(), memory_kind.value()));
+        }
         continue;
       }
     }
@@ -321,9 +338,11 @@ class MarkOffloadedInputOutputPass
     SmallVector<Attribute> res_attrs = GetResAttrsOrCreateDefault(frag);
     for (auto [idx, return_operand] : llvm::enumerate(
              frag.getRegion().front().getTerminator()->getOperands())) {
-      if (IsResultAndOnHostMemory(return_operand)) {
-        InsertAttr(res_attrs[idx], kMemoryKindAttr,
-                   StringAttr::get(frag.getContext(), kMemoryKindPinnedHost));
+      if (std::optional<StringRef> memory_kind =
+              GetOnHostMemoryKindIfResult(return_operand)) {
+        mlir::mpmd::InsertAttr(
+            res_attrs[idx], kMemoryKindAttr,
+            mlir::StringAttr::get(frag.getContext(), memory_kind.value()));
       }
     }
     SetResAttrs(frag, res_attrs);

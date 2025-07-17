@@ -32,6 +32,33 @@ func.func @simple(%func_arg: !m1_16 {mhlo.memory_kind = "pinned_host"}) ->
   func.return %f : !m1_16
 }
 
+// CHECK-LABEL: func @simple_unpinned_host(%arg0: {{.*}} {mhlo.memory_kind = "unpinned_host"}) ->
+// CHECK-SAME:    {mhlo.memory_kind = "unpinned_host"})
+func.func @simple_unpinned_host(%func_arg: !m1_16 {mhlo.memory_kind = "unpinned_host"}) ->
+  (!m1_16 {mhlo.memory_kind = "unpinned_host"})
+  attributes {topology=#topology} {
+
+  // CHECK-NEXT: fragment
+  // CHECK-SAME: {arg_attrs = [{mhlo.memory_kind = "unpinned_host"}], res_attrs = [{mhlo.memory_kind = "unpinned_host"}]}
+  %f = mpmd.fragment<mesh="m1", origin=[]> (%func_arg)
+    (%arg0: tensor<16xf32>) {
+    %7 = stablehlo.custom_call @annotate_device_placement(%arg0) {
+        backend_config = "", has_side_effect = true,
+        mhlo.frontend_attributes = {_xla_buffer_placement = "device"}
+      } : (tensor<16xf32>) -> tensor<16xf32>
+
+    %8 = stablehlo.add %7, %7 : tensor<16xf32>
+
+    %9 = stablehlo.custom_call @annotate_device_placement(%8) {
+        backend_config = "", has_side_effect = true,
+        mhlo.frontend_attributes = {_xla_buffer_placement = "unpinned_host"}
+      } : (tensor<16xf32>) -> tensor<16xf32>
+    mpmd.return %9 : tensor<16xf32>
+  } : (!m1_16) -> !m1_16
+
+  func.return %f : !m1_16
+}
+
 // CHECK-LABEL: func @with_optimization_barrier(%arg0
 // CHECK-SAME:    %arg1: {{.*}} {mhlo.memory_kind = "pinned_host"}) ->
 func.func @with_optimization_barrier(%func_arg0: !m1_16,
@@ -173,9 +200,9 @@ func.func @place_host_with_incompatible_reshape_and_custom_call(%func_arg0: !m1_
   func.return %f#0, %f#1 : !m1_4x4, !m1_16
 }
 
-// CHECK-LABEL: func @func_arg_multiple_matching_users
+// CHECK-LABEL: func @func_arg_multiple_matching_users_pinned_host
 // CHECK-SAME:    (%arg0: {{.*}} {mhlo.memory_kind = "pinned_host"})
-func.func @func_arg_multiple_matching_users(
+func.func @func_arg_multiple_matching_users_pinned_host(
   %func_arg: !m1_16 {mhlo.memory_kind = "pinned_host"}) -> (!m1_16, !m1_16)
   attributes {topology=#topology} {
 
@@ -193,6 +220,38 @@ func.func @func_arg_multiple_matching_users(
 
   // CHECK: fragment{{.*}} origin=["g"]
   // CHECK-SAME: {arg_attrs = [{mhlo.memory_kind = "pinned_host"}]
+  %f2 = mpmd.fragment<mesh="m1", origin=["g"]> (%func_arg)
+    (%arg0: tensor<16xf32>) {
+    %7 = stablehlo.custom_call @annotate_device_placement(%arg0) {
+        backend_config = "", has_side_effect = true,
+        mhlo.frontend_attributes = {_xla_buffer_placement = "device"}
+      } : (tensor<16xf32>) -> tensor<16xf32>
+
+    mpmd.return %7 : tensor<16xf32>
+  } : (!m1_16) -> !m1_16
+  func.return %f1, %f2 : !m1_16, !m1_16
+}
+
+// CHECK-LABEL: func @func_arg_multiple_matching_users_unpinned_host
+// CHECK-SAME:    (%arg0: {{.*}} {mhlo.memory_kind = "unpinned_host"})
+func.func @func_arg_multiple_matching_users_unpinned_host(
+  %func_arg: !m1_16 {mhlo.memory_kind = "unpinned_host"}) -> (!m1_16, !m1_16)
+  attributes {topology=#topology} {
+
+  // CHECK: fragment{{.*}} origin=["f"]
+  // CHECK-SAME: {arg_attrs = [{mhlo.memory_kind = "unpinned_host"}]
+  %f1 = mpmd.fragment<mesh="m1", origin=["f"]> (%func_arg)
+    (%arg0: tensor<16xf32>) {
+    %7 = stablehlo.custom_call @annotate_device_placement(%arg0) {
+        backend_config = "", has_side_effect = true,
+        mhlo.frontend_attributes = {_xla_buffer_placement = "device"}
+      } : (tensor<16xf32>) -> tensor<16xf32>
+
+    mpmd.return %7 : tensor<16xf32>
+  } : (!m1_16) -> !m1_16
+
+  // CHECK: fragment{{.*}} origin=["g"]
+  // CHECK-SAME: {arg_attrs = [{mhlo.memory_kind = "unpinned_host"}]
   %f2 = mpmd.fragment<mesh="m1", origin=["g"]> (%func_arg)
     (%arg0: tensor<16xf32>) {
     %7 = stablehlo.custom_call @annotate_device_placement(%arg0) {

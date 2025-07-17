@@ -10,7 +10,7 @@ func.func @f(%arg0 : !m_device)
 {
   %t1 = mpmd.transfer %arg0 : (!m_device) -> !m_undefined  // No error.
   %t2 = mpmd.transfer %t1 : (!m_undefined) -> !m_host      // No error.
-  // expected-error@+1 {{memory kind must be either 'pinned_host' or 'device'. Found 'qwerty'.}}
+  // expected-error@+1 {{memory kind must be either 'pinned_host' or 'unpinned_host' or 'device'. Found 'qwerty'.}}
   %t3 = mpmd.transfer %t2 : (!m_host) -> !m_invalid
   func.return
 }
