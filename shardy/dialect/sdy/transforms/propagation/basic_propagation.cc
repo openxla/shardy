@@ -701,8 +701,6 @@ void BasicPropagationPassImpl::runOnOperation() {
 
   context.registerActionHandler(nullptr);
   handler.saveOnModule(moduleOp);
-
-  saveModuleOp(moduleOp, dumpDirectory, "sdy_module_after_propagation");
 }
 
 void BasicPropagationPassImpl::setPropagationOptions(

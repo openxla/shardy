@@ -65,6 +65,13 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
 
 // Adds a sequence of export passes needed as a post-processing step for SDY
 // propagation.
+//
+// Takes the current index of the module dump, which will be included as a
+// prefix in the file name, and incremented after each stage (dumped module).
+void addExportPipeline(OpPassManager& pm, int& dumpIndex,
+                       const ExportOptions& options = {});
+
+// Same as above, but initializes a default dump index to 0.
 void addExportPipeline(OpPassManager& pm, const ExportOptions& options = {});
 
 // Register the sdy-export-pipeline.

@@ -39,10 +39,8 @@ GreedyRewriteConfig getCanonicalizerConfig(bool enableRegionSimplification) {
 
 }  // namespace
 
-void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
-                       bool skipInline) {
-  pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
-                                               "sdy_module_before_sdy_import"));
+void addImportPipeline(OpPassManager& pm, int& dumpIndex,
+                       StringRef dumpDirectory, bool skipInline) {
   // We need to apply the inliner pass so we have a single main function,
   // otherwise we would need to propagate shardings between call ops and callee
   // functions.
@@ -56,6 +54,13 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarSplitterPass());
+
+  // We dump the module before propagation at this point, since the import
+  // passes before are cleanup passes that make the module more readable, and
+  // the import passes after are internal implementation details that are part
+  // of the propagation itself.
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      dumpDirectory, "before_propagation", dumpIndex++));
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
   pm.addPass(createManualAxesCleanupPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
@@ -63,8 +68,12 @@ void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
-  pm.addPass(mlir::sdy::createSaveModuleOpPass(dumpDirectory,
-                                               "sdy_module_after_sdy_import"));
+}
+
+void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
+                       bool skipInline) {
+  int dumpIndex = 0;
+  addImportPipeline(pm, dumpIndex, dumpDirectory, skipInline);
 }
 
 void registerImportPipeline() {
@@ -72,7 +81,10 @@ void registerImportPipeline() {
       "sdy-import-pipeline",
       "Run a sequence of import passes needed as a pre-processing step for "
       "Shardy propagation",
-      [](OpPassManager& pm) { return addImportPipeline(pm); });
+      [](OpPassManager& pm) {
+        int dumpIndex = 0;
+        addImportPipeline(pm, dumpIndex);
+      });
 }
 
 }  // namespace sdy

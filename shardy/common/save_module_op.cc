@@ -13,11 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "shardy/common/save_module_op.h"
+#include <string>
 
-#include "llvm/Support/Path.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/Support/LLVM.h"
+#include "shardy/common/save_module_op.h"
 
 namespace mlir {
 namespace sdy {
@@ -29,8 +33,8 @@ static void fileSavingError(StringRef filePath, StringRef message) {
 }
 }  // namespace
 
-void saveModuleOp(ModuleOp moduleOp, StringRef dumpDirectory,
-                  StringRef fileName) {
+void saveModuleOpInternal(ModuleOp moduleOp, StringRef dumpDirectory,
+                          StringRef fileName) {
   if (dumpDirectory.empty()) {
     return;
   }

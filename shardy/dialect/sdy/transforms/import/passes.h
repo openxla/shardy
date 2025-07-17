@@ -37,6 +37,13 @@ namespace sdy {
 
 // Adds a sequence of import passes needed as a pre-processing step for SDY
 // propagation.
+//
+// Takes the current index of the module dump, which will be included as a
+// prefix in the file name, and incremented after each stage (dumped module).
+void addImportPipeline(OpPassManager& pm, int& dumpIndex,
+                       StringRef dumpDirectory = "", bool skipInline = false);
+
+// Same as above, but initializes a default dump index to 0.
 void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
                        bool skipInline = false);
 

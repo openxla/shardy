@@ -41,12 +41,15 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
       ModuleOp moduleOp, const SymbolTable& symbolTable,
       const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
+
+  // Current module dump index.
+  int dumpIndex = 0;
 };
 
 // Runs the user-priority propagation algorithm (see
 // `UserPriorityPropagationPass`).
 std::unique_ptr<Pass> createUserPriorityPropagationPass(
-    const PropagationOptions& options);
+    const PropagationOptions& options, int dumpIndex = 0);
 
 }  // namespace sdy
 }  // namespace mlir

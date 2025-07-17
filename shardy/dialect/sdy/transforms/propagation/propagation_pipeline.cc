@@ -37,17 +37,26 @@ void populateExportOptions(ExportOptions& options,
 
 }  // namespace
 
-void addPropagationPipeline(OpPassManager& pm,
+void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
-  addImportPipeline(pm, options.dumpDirectory, options.skipInline);
+  addImportPipeline(pm, dumpIndex, options.dumpDirectory, options.skipInline);
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
-    pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules));
+    // We intentionally don't increment the dump index here, since this pass
+    // might dump 0 to multiple files, and will use a nested dump index.
+    pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
+                                                 dumpIndex));
   }
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
-  addExportPipeline(pm, exportOptions);
+  addExportPipeline(pm, dumpIndex, exportOptions);
+}
+
+void addPropagationPipeline(OpPassManager& pm,
+                            const PropagationOptions& options) {
+  int dumpIndex = 1;
+  addPropagationPipeline(pm, dumpIndex, options);
 }
 
 void registerPropagationPipeline() {

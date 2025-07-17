@@ -38,7 +38,8 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 }  // namespace
 
-void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
+void addExportPipeline(OpPassManager& pm, int& dumpIndex,
+                       const ExportOptions& options) {
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
   if (!options.avoidExportForPartitioning) {
     pm.addPass(createRemoveShardingGroupsPass());
@@ -47,28 +48,39 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
   pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addPass(createCloseShardingsPass());
+  // / We dump the module after propagation at this point, since the export
+  // passes before are removing internal implementation details of the
+  // propagation itself and make the module more readable.
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      options.dumpDirectory, "after_propagation", dumpIndex++));
   if (!options.enableInsertExplicitCollectives &&
       !options.avoidExportForPartitioning) {
     pm.addNestedPass<func::FuncOp>(
         createTempExplicitReshardsForOptimizationsPass());
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        options.dumpDirectory, "after_post_propagation_optimizations",
+        dumpIndex++));
   }
-  pm.addPass(mlir::sdy::createSaveModuleOpPass(options.dumpDirectory,
-                                               "sdy_module_after_sdy_export"));
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
   if (options.enableInsertExplicitCollectives) {
     pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
     addCanonicalizerPass(pm, kReshardLabel);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "sdy_module_after_insert_explicit_reshards"));
+        options.dumpDirectory, "after_insert_explicit_reshards", dumpIndex++));
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     addCanonicalizerPass(pm, kCollectiveLabel);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "sdy_module_after_reshard_to_collectives"));
+        options.dumpDirectory, "after_reshard_to_collectives", dumpIndex++));
   }
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
+}
+
+void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
+  int dumpIndex = 0;
+  addExportPipeline(pm, dumpIndex, options);
 }
 
 void registerExportPipeline() {
@@ -77,7 +89,8 @@ void registerExportPipeline() {
       "Run a sequence of export passes needed as a post-processing step for "
       "Shardy propagation",
       [](OpPassManager& pm, const ExportOptions& options) {
-        return addExportPipeline(pm, options);
+        int dumpIndex = 0;
+        return addExportPipeline(pm, dumpIndex, options);
       });
 }
 

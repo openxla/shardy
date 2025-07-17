@@ -15,17 +15,11 @@ limitations under the License.
 
 #include "shardy/common/file_utils.h"
 
-// NOLINTBEGIN: silence `is an unapproved C++11 header`.
 #include <memory>
+#include <optional>
 #include <string>
-#include <system_error>
-// NOLINTEND: silence `is an unapproved C++11 header`.
 
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/Path.h"
-#include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
@@ -43,16 +37,18 @@ class SaveModuleOpPass
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SaveModuleOpPass)
 
   // NOLINTNEXTLINE(clang-diagnostic-shadow-field)
-  explicit SaveModuleOpPass(StringRef dumpDirectory, StringRef fileName) {
+  explicit SaveModuleOpPass(StringRef dumpDirectory, StringRef fileName,
+                            std::optional<int> dumpIndex) {
     this->dumpDirectory = dumpDirectory.str();
     this->fileName = fileName.str();
+    this->dumpIndex = dumpIndex;
   }
 
   SaveModuleOpPass(const SaveModuleOpPass& other) : PassWrapper(other) {}
 
  private:
   void runOnOperation() final {
-    saveModuleOp(getOperation(), dumpDirectory, fileName);
+    saveModuleOp(getOperation(), dumpDirectory, fileName, dumpIndex);
   }
 
   StringRef getArgument() const override { return "sdy-save-module"; }
@@ -62,20 +58,31 @@ class SaveModuleOpPass
            "name, saving it as a `.mlir` file.";
   }
 
-  Option<std::string> dumpDirectory{*this, "module-dump-directory",
-                                    llvm::cl::desc("where to save the module"),
-                                    llvm::cl::init("")};
-
-  Option<std::string> fileName{
-      *this, "file-name",
-      llvm::cl::desc("the name of the file without the `.mlir` extension")};
+  // Where to save the module
+  std::string dumpDirectory;
+  // The name of the file without the `.mlir` extension
+  std::string fileName;
+  // The index to be included as a prefix in the file name. If set to 0, will be
+  // ignored.
+  std::optional<int> dumpIndex;
 };
 
 }  // namespace
 
+void saveModuleOp(ModuleOp moduleOp, StringRef dumpDirectory,
+                  StringRef fileName, std::optional<int> dumpIndex) {
+  if (!dumpIndex) {
+    return saveModuleOpInternal(moduleOp, dumpDirectory, fileName);
+  }
+  return saveModuleOpInternal(
+      moduleOp, dumpDirectory,
+      llvm::formatv("{0:02}.{1}", *dumpIndex, fileName).str());
+}
+
 std::unique_ptr<Pass> createSaveModuleOpPass(StringRef dumpDirectory,
-                                             StringRef fileName) {
-  return std::make_unique<SaveModuleOpPass>(dumpDirectory, fileName);
+                                             StringRef fileName,
+                                             std::optional<int> dumpIndex) {
+  return std::make_unique<SaveModuleOpPass>(dumpDirectory, fileName, dumpIndex);
 }
 
 }  // namespace sdy

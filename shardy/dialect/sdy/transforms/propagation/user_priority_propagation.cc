@@ -212,8 +212,10 @@ struct UserPriorityPropagationPass
           UserPriorityPropagationPass> {
   using UserPriorityPropagationPassBase::UserPriorityPropagationPassBase;
 
-  explicit UserPriorityPropagationPass(const PropagationOptions& options) {
+  explicit UserPriorityPropagationPass(const PropagationOptions& options,
+                                       int curDumpIndex) {
     setPropagationOptions(options);
+    this->dumpIndex = curDumpIndex;
   }
 
   void getDependentDialects(mlir::DialectRegistry& registry) const override {
@@ -228,10 +230,19 @@ struct UserPriorityPropagationPass
 };
 
 void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
-                               int64_t priority) {
+                               int64_t priority, int dumpIndex) {
   saveModuleOp(
       moduleOp, dumpDirectory,
-      llvm::formatv("sdy_module_after_user_priority_{0}", priority).str());
+      llvm::formatv("propagation_after_user_priority_{0}", priority).str(),
+      dumpIndex);
+}
+
+bool shouldAutoPartition(ModuleOp moduleOp) {
+  if (auto useAutoSpmdPartitioning = moduleOp->getAttrOfType<BoolAttr>(
+          "mhlo.use_auto_spmd_partitioning")) {
+    return useAutoSpmdPartitioning.getValue();
+  }
+  return false;
 }
 
 }  // namespace
@@ -247,27 +258,26 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
           moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate))) {
     return failure();
   }
-  saveModuleOpAfterPriority(moduleOp, dumpDirectory, 0);
+  int64_t prevPriority = 0;
   // Then we run the remaining iterations (priority >0):
   for (const auto& [priority, shardingReferences] :
        shardingReferencesPerPriority) {
+    saveModuleOpAfterPriority(moduleOp, dumpDirectory, prevPriority, dumpIndex);
     updateReferencedShardingsForPriority(shardingReferences, priority);
     if (failed(OpPriorityPropagationPassImpl::propagate(
             moduleOp, symbolTable, shardingGroupMap,
             getDirectionToPropagate))) {
       return failure();
     }
-    saveModuleOpAfterPriority(moduleOp, dumpDirectory, priority);
+    prevPriority = priority;
   }
 
   // Finally we run automatic partitioning if enabled by the user
-  if (auto useAutoSpmdPartitioning =
-          moduleOp->getAttrOfType<BoolAttr>("mhlo.use_auto_spmd_partitioning");
-      useAutoSpmdPartitioning && useAutoSpmdPartitioning.getValue()) {
+  if (shouldAutoPartition(moduleOp)) {
     PassManager autoPartitionerPm(moduleOp.getContext());
-    AutoPartitionerRegistry::addPasses(autoPartitionerPm);
     autoPartitionerPm.addPass(createSaveModuleOpPass(
-        dumpDirectory, "sdy_module_after_auto_partitioning"));
+        dumpDirectory, "propagation_before_auto_partitioning", dumpIndex));
+    AutoPartitionerRegistry::addPasses(autoPartitionerPm);
     if (failed(runPipeline(autoPartitionerPm, moduleOp))) {
       return failure();
     }
@@ -277,8 +287,10 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
 }
 
 std::unique_ptr<Pass> createUserPriorityPropagationPass(
-    const PropagationOptions& options) {
-  return std::make_unique<UserPriorityPropagationPass>(options);
+    const PropagationOptions& options, int dumpIndex) {
+  // TODO(b/432439766): increment dumpIndex after creating the pass if auto
+  // paritioner is enabled.
+  return std::make_unique<UserPriorityPropagationPass>(options, dumpIndex);
 }
 
 }  // namespace sdy

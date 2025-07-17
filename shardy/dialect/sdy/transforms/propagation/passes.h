@@ -61,6 +61,13 @@ struct PropagationOptions {
 //
 // The added propagation pass is the top-level layer of propagation, which
 // includes all conflict resolution strategies in a hierarchy.
+//
+// Takes the current index of the module dump, which will be included as a
+// prefix in the file name, and incremented after each stage (dumped module).
+void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
+                            const PropagationOptions& options = {});
+
+// Same as above, but initializes a default dump index to 0.
 void addPropagationPipeline(OpPassManager& pm,
                             const PropagationOptions& options = {});
 

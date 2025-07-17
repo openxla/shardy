@@ -17,10 +17,11 @@ limitations under the License.
 #define SHARDY_COMMON_FILE_UTILS_H_
 
 #include <memory>
+#include <optional>
 
-#include "llvm/ADT/StringRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
 
 namespace mlir {
 namespace sdy {
@@ -32,17 +33,21 @@ namespace sdy {
 //   be overwritten.
 // - if `dumpDirectory` is an empty string, nothing will be saved.
 // - if `dumpDirectory` path doesn't exist yet, it will try to create it.
+// - if `dumpIndex` is present, it will be included as a prefix in the filename.
 // - any error will be logged to standard error.
 // - do not include a file extension in `fileName`, `.mlir` will be appended
 //   internally.
 void saveModuleOp(ModuleOp moduleOp, StringRef dumpDirectory,
-                  StringRef fileName);
+                  StringRef fileName,
+                  std::optional<int> dumpIndex = std::nullopt);
 
-// Saves the `moduleOp` to the given `dumpDirectory` with name `fileName`.
+// Saves the `moduleOp` to the given `dumpDirectory` with name `fileName` and
+// `dumpIndex` (if present).
 //
 // NOTE: see `saveModuleOp` for details of the behavior.
-std::unique_ptr<Pass> createSaveModuleOpPass(StringRef dumpDirectory,
-                                             StringRef fileName);
+std::unique_ptr<Pass> createSaveModuleOpPass(
+    StringRef dumpDirectory, StringRef fileName,
+    std::optional<int> dumpIndex = std::nullopt);
 
 }  // namespace sdy
 }  // namespace mlir
