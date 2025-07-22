@@ -67,9 +67,28 @@ class LogMessageFatal : public LogMessage {
             .stream()
 
 #define SDY_CHECK_EQ(val1, val2) \
-  SDY_CHECK(val1 == val2) << "(" << val1 << " vs. " << val2 << ") "
+  SDY_INTERNAL_CHECK_OP(==, val1, val2)
 
 #define SDY_CHECK_NE(val1, val2) \
-  SDY_CHECK(val1 != val2) << "(" << val1 << " vs. " << val2 << ") "
+  SDY_INTERNAL_CHECK_OP(!=, val1, val2)
+
+#define SDY_CHECK_LE(val1, val2) \
+  SDY_INTERNAL_CHECK_OP(<=, val1, val2)
+
+#define SDY_CHECK_LT(val1, val2) \
+  SDY_INTERNAL_CHECK_OP(<, val1, val2)
+
+#define SDY_CHECK_GE(val1, val2) \
+  SDY_INTERNAL_CHECK_OP(>=, val1, val2)
+
+#define SDY_CHECK_GT(val1, val2) \
+  SDY_INTERNAL_CHECK_OP(>, val1, val2)
+
+// =================================================================
+// == Implementation details, do not rely on anything below here. ==
+// =================================================================
+
+#define SDY_INTERNAL_CHECK_OP(op, val1, val2) \
+  SDY_CHECK(val1 op val2) << "(" << val1 << " vs. " << val2 << ") "
 
 #endif  // SHARDY_COMMON_LOGGING_H_
