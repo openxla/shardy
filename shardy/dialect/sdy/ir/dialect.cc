@@ -24,6 +24,7 @@ limitations under the License.
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "llvm/ADT/DenseSet.h"
@@ -47,6 +48,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/bytecode.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/enums.h"
@@ -260,7 +262,7 @@ int64_t MeshAttr::getAxisSize(StringRef axisName) const {
   }
   // Since verification will fail if an axis name doesn't appear in the bound
   // mesh, we can assume we would never get here.
-  llvm::report_fatal_error("unknown axis name");
+  SDY_CHECK(false) << "unknown axis name: " << std::string_view(axisName);
 }
 
 int64_t MeshAttr::getTotalSize() const { return getTotalAxesSize(getAxes()); }

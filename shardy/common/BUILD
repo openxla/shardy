@@ -19,3 +19,17 @@ cc_library(
         "@llvm-project//mlir:Support",
     ],
 )
+
+cc_library(
+    name = "logging",
+    srcs = [
+        "logging.cc",
+    ],
+    hdrs = [
+        "logging.h",
+    ],
+    deps = [
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:Support",
+    ],
+)
