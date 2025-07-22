@@ -155,6 +155,7 @@ cc_library(
         ":enums_inc",
         ":op_interface_inc",
         ":ops_inc",
+        "//shardy/common:logging",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:BytecodeOpInterface",
         "@llvm-project//mlir:FuncDialect",
