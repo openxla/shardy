@@ -83,3 +83,18 @@ func.func @add_manual_axes_to_replicated_applied_constraint(%arg0: tensor<8xf32>
   } : (tensor<8xf32>) -> tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// This test verifies that the manual axes are cleaned up before adding data
+// flow edges.
+func.func @manual_axes_cleanup_before_adding_data_flow_edges(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}]>] out_shardings=[<@mesh, [{?}]>] manual_axes={"a"} (%arg1: tensor<8xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<8xf32>
+    sdy.return %1 : tensor<8xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK: sdy.data_flow_edge %0 sharding=<@mesh, [{?}], replicated={"a"}> : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}

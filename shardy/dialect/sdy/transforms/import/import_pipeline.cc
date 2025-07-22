@@ -54,6 +54,7 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarSplitterPass());
+  pm.addPass(createManualAxesCleanupPass());
 
   // We dump the module before propagation at this point, since the import
   // passes before are cleanup passes that make the module more readable, and
@@ -61,8 +62,8 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // of the propagation itself.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       dumpDirectory, "before_propagation", dumpIndex++));
+
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
-  pm.addPass(createManualAxesCleanupPass());
   pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
   // The sharding group import pass must run after applying sharding
   // constraints. This ensures we can detect sharding conflicts between group

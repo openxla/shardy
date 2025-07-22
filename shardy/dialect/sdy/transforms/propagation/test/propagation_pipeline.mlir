@@ -228,6 +228,27 @@ func.func @manual_computation_with_tokens(
   return %0#0, %0#1 : !stablehlo.token, tensor<4x4xi64>
 }
 
+// CHECK-LABEL: func @do_not_propagate_manual_axes_to_manual_computation(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b"}]>}) {
+func.func @do_not_propagate_manual_axes_to_manual_computation(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[MAN_COMP:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}:   in_shardings=[<@mesh, [{"a"}]>]
+  // CHECK-SAME{LITERAL}:   out_shardings=[<@mesh, [{"a"}]>]
+  // CHECK-SAME{LITERAL}:   manual_axes={"b"} (%arg1: tensor<8xf32>) {
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}]>]>} : tensor<8xf32>
+  // CHECK-NEXT:   sdy.return %[[ADD]] : tensor<8xf32>
+  // CHECK-NEXT: } : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[SINE:.*]] = stablehlo.sine %[[MAN_COMP]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b"}]>]>} : tensor<8xf32>
+  // CHECK-NEXT: return %[[SINE]] : tensor<8xf32>
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}]>] out_shardings=[<@mesh, [{?}]>] manual_axes={"b"} (%arg1: tensor<8xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<8xf32>
+    sdy.return %1 : tensor<8xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  %1 = stablehlo.sine %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b"}]>]>} : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
 sdy.mesh @mesh_a_2 = <["a"=2]>
 
 // TODO(b/412780544): Add another example this time without broadcast.
