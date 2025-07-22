@@ -375,11 +375,8 @@ TensorShardingAttr getOrCreateSharding(Value value, Attribute meshOrRef,
   if (TensorShardingAttr sharding = getSharding(value)) {
     return sharding;
   }
-  return closedIfMissing
-             ? TensorShardingAttr::getFullyClosed(
-                   value.getContext(), getTensorRank(value), meshOrRef)
-             : TensorShardingAttr::getFullyOpen(
-                   value.getContext(), getTensorRank(value), meshOrRef);
+  return TensorShardingAttr::getFullyReplicated(
+      value.getContext(), getTensorRank(value), meshOrRef, closedIfMissing);
 }
 
 TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
