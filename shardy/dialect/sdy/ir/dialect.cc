@@ -262,7 +262,7 @@ int64_t MeshAttr::getAxisSize(StringRef axisName) const {
   }
   // Since verification will fail if an axis name doesn't appear in the bound
   // mesh, we can assume we would never get here.
-  SDY_CHECK(false) << "unknown axis name: " << std::string_view(axisName);
+  SDY_LOG(FATAL) << "unknown axis name: " << std::string_view(axisName);
 }
 
 int64_t MeshAttr::getTotalSize() const { return getTotalAxesSize(getAxes()); }
