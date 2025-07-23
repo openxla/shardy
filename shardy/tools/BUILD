@@ -38,3 +38,18 @@ cc_binary(
         "@llvm-project//mlir:TranslateLib",
     ],
 )
+
+cc_binary(
+    name = "mpmd_opt",
+    srcs = ["mpmd_opt_main.cc"],
+    deps = [
+        "//shardy/dialect/mpmd/ir:register",
+        "//shardy/dialect/mpmd/transforms:passes",
+        "//shardy/dialect/sdy/transforms:passes",
+        "@llvm-project//mlir:AllPassesAndDialects",
+        "@llvm-project//mlir:FuncExtensions",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:MlirOptLib",
+        "@llvm-project//mlir:QuantOps",
+    ],
+)
