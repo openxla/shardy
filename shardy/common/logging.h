@@ -23,48 +23,66 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
-namespace detail {
+namespace log {
 
-// Helper struct to capture file/line info
-struct CheckFailureData {
+// Enum for logging severity levels
+enum LogSeverity {
+  INFO,
+  WARNING,
+  ERROR,
+  FATAL,  // Used by SDY_LOG(FATAL) and SDY_CHECK
+};
+
+// Helper struct to capture file/line/function info for logs/checks
+struct LogMessageData {
+  LogSeverity severity;
   const char* file;
   int line;
-  const char* conditionStr;
+  const char* conditionStr = nullptr;  // Optional: for CHECK messages
 };
 
 // Base class for logging messages. This is where the stream operator overloads
 // will live, allowing us to build the error string.
 class LogMessage {
  public:
-  LogMessage(CheckFailureData data);
+  LogMessage(LogMessageData data);
+
+  // The destructor is where the log message is printed.
+  // This ensures the full message is built before reporting.
+  ~LogMessage();
 
   // Returns the internal string stream. This allows chained '<<' operations.
   llvm::raw_ostream& stream();
 
  protected:
-  CheckFailureData data;
+  LogMessageData data;
   std::string message;
   llvm::raw_string_ostream strStream;
 };
 
 class LogMessageFatal : public LogMessage {
  public:
-  LogMessageFatal(CheckFailureData failureData);
+  LogMessageFatal(LogMessageData failureData);
 
   // The destructor is where the fatal error reporting happens.
   // This ensures the full message is built before reporting.
   [[noreturn]] ~LogMessageFatal();
 };
 
-}  // namespace detail
+}  // namespace log
 }  // namespace sdy
 }  // namespace mlir
 
-#define SDY_CHECK(condition)                                                 \
-  (condition)                                                                \
-      ? mlir::thread_safe_nulls()                                            \
-      : mlir::sdy::detail::LogMessageFatal({__FILE__, __LINE__, #condition}) \
-            .stream()
+#define SDY_LOG(severity) SDY_INTERNAL_CHECK_OR_LOG(severity, nullptr)
+
+// TODO(tomnatan): make the verbose level actually work.
+#define SDY_VLOG(verbose_level) \
+  (verbose_level > 0) ? mlir::thread_safe_nulls() : SDY_LOG(INFO)
+#define SDY_VLOG_IS_ON(verbose_level) false
+
+#define SDY_CHECK(condition)              \
+  (condition) ? mlir::thread_safe_nulls() \
+              : SDY_INTERNAL_CHECK_OR_LOG(FATAL, #condition)
 
 #define SDY_CHECK_EQ(val1, val2) \
   SDY_INTERNAL_CHECK_OP(==, val1, val2)
@@ -85,8 +103,17 @@ class LogMessageFatal : public LogMessage {
   SDY_INTERNAL_CHECK_OP(>, val1, val2)
 
 // =================================================================
-// == Implementation details, do not rely on anything below here. ==
+// == Implementation logs, do not rely on anything below here. ==
 // =================================================================
+
+#define SDY_INTERNAL_CHECK_OR_LOG(severity, condition_str)                  \
+  (mlir::sdy::log::severity == mlir::sdy::log::FATAL                        \
+       ? mlir::sdy::log::LogMessageFatal(                                   \
+             {mlir::sdy::log::FATAL, __FILE__, __LINE__, condition_str})    \
+             .stream()                                                      \
+       : mlir::sdy::log::LogMessage(                                        \
+             {mlir::sdy::log::severity, __FILE__, __LINE__, condition_str}) \
+             .stream())
 
 #define SDY_INTERNAL_CHECK_OP(op, val1, val2) \
   SDY_CHECK(val1 op val2) << "(" << val1 << " vs. " << val2 << ") "
