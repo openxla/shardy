@@ -866,8 +866,7 @@ LogicalResult verifyManualComputationValue(
     SmallVector<int64_t> newDimSizes;
     auto globalShapedType = mlir::dyn_cast<ShapedType>(globalType);
     if (!globalShapedType) {
-      // Skipping verification for non-shaped types. This could for example be
-      // a token type.
+      // Skipping verification for non-shaped types, e.g., the token type.
       continue;
     }
     for (auto [dimensionSize, dimSharding] : llvm::zip_equal(
@@ -967,6 +966,28 @@ LogicalResult ManualComputationOp::verify() {
   for (StringAttr axisName : getManualAxes()) {
     if (mesh && !mesh.hasAxis(axisName)) {
       return emitOpError("unknown manual axis: ") << axisName;
+    }
+  }
+
+  if (mesh) {
+    for (Operation& op : getBody().getOps()) {
+      for (auto [idx, sharding] : llvm::enumerate(getShardings(&op))) {
+        if (!sharding) {
+          continue;
+        }
+        MeshAttr meshForOp = sharding.getMesh(&op);
+        if (meshForOp.isMaximal()) {
+          // We allow different meshes if the sharding is maximal, which is
+          // usually for token types.
+          continue;
+        }
+        if (meshForOp != mesh) {
+          return emitOpError("all shardings must be bound to the same mesh. ")
+                 << op.getName() << " is bound to mesh "
+                 << sharding.getMesh(&op) << ", while the common mesh is "
+                 << mesh;
+        }
+      }
     }
   }
 
