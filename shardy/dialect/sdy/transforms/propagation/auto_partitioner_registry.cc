@@ -21,7 +21,6 @@ limitations under the License.
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
-#include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/PassOptions.h"
 
 namespace mlir {
@@ -32,15 +31,11 @@ namespace {
 // The registered callback.
 static llvm::ManagedStatic<std::optional<AutoPartitionerCallback>>
     registeredCallback;
-static llvm::ManagedStatic<std::optional<RegisterDependantDialectsCallback>>
-    registeredDependenciesCallback;
 static llvm::ManagedStatic<llvm::sys::Mutex> mutex;
 
 }  // namespace
 
-void AutoPartitionerRegistry::setCallback(
-    AutoPartitionerCallback callback,
-    RegisterDependantDialectsCallback dialectsDependenciesCallback) {
+void AutoPartitionerRegistry::setCallback(AutoPartitionerCallback callback) {
   llvm::sys::ScopedLock scopedLock(*mutex);
   // TODO(tomnatan): find a better way to fail in this case, and consider
   // allowing registring multiple callbacks with different keys (that are passed
@@ -50,7 +45,6 @@ void AutoPartitionerRegistry::setCallback(
     llvm::report_fatal_error("auto-partitioner callback already registered");
   }
   *registeredCallback = callback;
-  *registeredDependenciesCallback = dialectsDependenciesCallback;
 }
 
 void AutoPartitionerRegistry::addPasses(OpPassManager& pm) {
@@ -61,21 +55,13 @@ void AutoPartitionerRegistry::addPasses(OpPassManager& pm) {
   registeredCallback->value()(pm);
 }
 
-void AutoPartitionerRegistry::getDependentDialects(DialectRegistry& registry) {
-  if (!isRegistered()) {
-    llvm::report_fatal_error("auto-partitioner callback wasn't registered");
-  }
-  registeredDependenciesCallback->value()(registry);
-}
-
 void AutoPartitionerRegistry::clear() {
   llvm::sys::ScopedLock scopedLock(*mutex);
   registeredCallback->reset();
 }
 
 bool AutoPartitionerRegistry::isRegistered() {
-  return registeredCallback->has_value() &&
-         registeredDependenciesCallback->has_value();
+  return registeredCallback->has_value();
 }
 
 }  // namespace sdy

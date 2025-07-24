@@ -24,8 +24,7 @@ TEST(AutoPartitionerRegistryTest, RegisterAutoPartitioner) {
   AutoPartitionerRegistry registry;
   ASSERT_FALSE(registry.isRegistered());
   // Set NoOp callbacks.
-  registry.setCallback(AutoPartitionerCallback(),
-                       RegisterDependantDialectsCallback());
+  registry.setCallback(AutoPartitionerCallback());
   EXPECT_TRUE(registry.isRegistered());
   registry.clear();
   EXPECT_FALSE(registry.isRegistered());
