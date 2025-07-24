@@ -54,6 +54,9 @@ struct PropagationOptions {
   bool skipInline = false;
   // Whether to enable inserting explicit collectives.
   bool enableInsertExplicitCollectives = false;
+  // Whether automatic partitioning is enabled. If true, an auto-partitioner
+  // callback is expected to be registered in `AutoPartitionerRegistry`.
+  bool enableAutoPartitioning = false;
 };
 
 // Adds the SDY propagation pass, preceded by a sequence of import passes needed

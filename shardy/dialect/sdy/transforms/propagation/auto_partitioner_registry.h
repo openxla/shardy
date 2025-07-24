@@ -48,7 +48,8 @@ class AutoPartitionerRegistry {
   // Assumes no callback has been registered yet.
   static void setCallback(
       AutoPartitionerCallback callback,
-      RegisterDependantDialectsCallback dialectsDependenciesCallback);
+      RegisterDependantDialectsCallback dialectsDependenciesCallback =
+          [](DialectRegistry& registry) {});
 
   // Adds passes to the given `pm` to invoke AutomaticPartitioner.
   //

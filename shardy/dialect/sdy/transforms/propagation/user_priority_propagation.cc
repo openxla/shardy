@@ -216,6 +216,9 @@ struct UserPriorityPropagationPass
                                        int curDumpIndex) {
     setPropagationOptions(options);
     this->dumpIndex = curDumpIndex;
+    // If `enableAutoPartitioning` is true, we will run the auto-partitioner
+    // after the propagation pass.
+    this->disableAutoPartitioning = options.enableAutoPartitioning;
   }
 
   void getDependentDialects(mlir::DialectRegistry& registry) const override {
@@ -237,7 +240,7 @@ void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
       dumpIndex);
 }
 
-bool shouldAutoPartition(ModuleOp moduleOp) {
+bool useAutoSpmdPartitioning(ModuleOp moduleOp) {
   if (auto useAutoSpmdPartitioning = moduleOp->getAttrOfType<BoolAttr>(
           "mhlo.use_auto_spmd_partitioning")) {
     return useAutoSpmdPartitioning.getValue();
@@ -273,7 +276,7 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
   }
 
   // Finally we run automatic partitioning if enabled by the user
-  if (shouldAutoPartition(moduleOp)) {
+  if (!disableAutoPartitioning && useAutoSpmdPartitioning(moduleOp)) {
     PassManager autoPartitionerPm(moduleOp.getContext());
     autoPartitionerPm.addPass(createSaveModuleOpPass(
         dumpDirectory, "propagation_before_auto_partitioning", dumpIndex));
