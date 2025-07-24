@@ -16,8 +16,10 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
+#include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/user_priority_propagation.h"
 
@@ -47,6 +49,12 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     // might dump 0 to multiple files, and will use a nested dump index.
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
+  }
+  if (options.enableAutoPartitioning) {
+    pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
+                                      "propagation_before_auto_partitioning",
+                                      dumpIndex++));
+    AutoPartitionerRegistry::addPasses(pm);
   }
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
