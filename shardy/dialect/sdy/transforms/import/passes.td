@@ -172,6 +172,9 @@ def ManualAxesCleanupPass : Pass<"sdy-manual-axes-cleanup", "ModuleOp"> {
        manual axis to its replicated_axes. This is to ensure manual axes are
        always fully specified.
     2. Sorts the manual axes in mesh axis declaration order.
+
+    In addition, if a manual computation has no inputs or outputs and a
+    non-empty body, this pass will fail.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }

@@ -141,6 +141,19 @@ struct ManualAxesCleanupPass
       ArrayRef<TensorShardingAttr> outShardings =
           op.getOutShardings().getShardings();
       if (inShardings.empty() && outShardings.empty()) {
+        if (!op.getManualAxes().empty() &&
+            !isa<ReturnOp>(&op.getBody().front().front())) {
+          // Fail if the manual computation with manual axes has no inputs or
+          // outputs and a non-empty body.
+          // TODO(b/430894772): if we don't inline functions, this might cause
+          // this error to be emitted. To mitigate we can make sure the body is
+          // recursively empty by jumping into func calls.
+          op.emitError()
+              << "op has manual_axes when there are no in/out shardings and "
+                 "the body is not empty. This isn't allowed at this stage, "
+                 "please contact the Shardy team or file a bug.";
+          signalPassFailure();
+        }
         // Nothing to do.
         return;
       }

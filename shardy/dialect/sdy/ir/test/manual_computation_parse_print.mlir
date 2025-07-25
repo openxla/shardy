@@ -27,6 +27,19 @@ func.func @manual_computation_with_manual_axes_no_inputs_outputs_and_empty_body(
   func.return
 }
 
+// CHECK-LABEL: func @manual_computation_with_manual_axes_no_inputs_outputs_non_empty_body
+func.func @manual_computation_with_manual_axes_no_inputs_outputs_non_empty_body() {
+  // CHECK-NEXT: sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={"x", "y"} () {
+  // CHECK-NEXT:   sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT:   sdy.return
+  // CHECK-NEXT: } : () -> ()
+  sdy.manual_computation() in_shardings=[] out_shardings=[] manual_axes={"x", "y"} () {
+    %0 = sdy.constant dense<1.000000e+00> : tensor<8xf32>
+    sdy.return
+  } : () -> ()
+  func.return
+}
+
 // CHECK-LABEL: func @manual_computation_single_replicated_input_output
 func.func @manual_computation_single_replicated_input_output(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
   // CHECK{LITERAL}: sdy.manual_computation(%arg0) in_shardings=[<@meshA, [{?}, {?}]>] out_shardings=[<@meshA, [{?}, {?}]>] manual_axes={} (%arg1: tensor<16x32xf32>) {

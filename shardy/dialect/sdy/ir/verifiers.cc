@@ -930,14 +930,6 @@ LogicalResult ManualComputationOp::verify() {
     }
   }
 
-  bool noInOutShardings = getInShardings().empty() && getOutShardings().empty();
-  if (noInOutShardings && !isa<ReturnOp>(&getBody().front().front()) &&
-      !getManualAxes().empty()) {
-    return emitOpError(
-        "cannot have manual_axes when there are no in/out shardings and the "
-        "body is not empty.");
-  }
-
   SymbolTable symbolTable(getOperation()->getParentOfType<ModuleOp>());
   llvm::SmallDenseSet<StringRef> manualAxesSet(getManualAxes().begin(),
                                                getManualAxes().end());
@@ -950,7 +942,10 @@ LogicalResult ManualComputationOp::verify() {
     return failure();
   }
 
-  if (noInOutShardings) {
+  // We don't fail verification if a manual computation has no inputs or outputs
+  // and a non-empty body. However, we may require this when running
+  // propagation.
+  if (getInShardings().empty() && getOutShardings().empty()) {
     return success();
   }
 
