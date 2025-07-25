@@ -122,6 +122,9 @@ _Cleans up the use of manual axes in `ManualComputationOp`s_
    always fully specified.
 2. Sorts the manual axes in mesh axis declaration order.
 
+In addition, if a manual computation has no inputs or outputs and a
+non-empty body, this pass will fail.
+
 ### `-sdy-remove-size-one-axes`
 
 _Removes size one axes from shardings._
