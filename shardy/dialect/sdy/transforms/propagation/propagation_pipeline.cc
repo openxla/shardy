@@ -35,6 +35,8 @@ void populateExportOptions(ExportOptions& options,
   options.avoidExportForPartitioning = propOptions.avoidExportForPartitioning;
   options.enableInsertExplicitCollectives =
       propOptions.enableInsertExplicitCollectives;
+  options.dumpShardingOrigins = propOptions.debugShardingOrigins;
+  options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
 }
 
 }  // namespace
