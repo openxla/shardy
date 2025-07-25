@@ -35,6 +35,7 @@ config.environment['FILECHECK_OPTS'] = '-enable-var-scope'
 # Make LLVM and Shardy tools available in RUN directives
 tools = [
     'FileCheck',
+    'mpmd_opt',
     'sdy_opt',
 ]
 tool_dirs = [
