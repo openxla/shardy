@@ -45,9 +45,14 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createRemoveShardingGroupsPass());
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   }
-  pm.addNestedPass<func::FuncOp>(createSinkDataFlowEdgesPass());
+  pm.addNestedPass<func::FuncOp>(
+      createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{
+          /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
+          /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges,
+      }));
   pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addPass(createCloseShardingsPass());
+
   // / We dump the module after propagation at this point, since the export
   // passes before are removing internal implementation details of the
   // propagation itself and make the module more readable.
@@ -73,6 +78,7 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_reshard_to_collectives", dumpIndex++));
   }
+  pm.addPass(createRemovePropagationDebugInfoPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
