@@ -133,7 +133,7 @@ struct FunctionIOShardingSpecsAndMeshes {
 // Describes the origin of a fragment.
 struct FragmentOrigin {
   std::string computation_name;
-  int64_t transpose_count;
+  int64_t transpose_count = 0;
 
   bool operator==(const FragmentOrigin& other) const {
     return computation_name == other.computation_name &&
