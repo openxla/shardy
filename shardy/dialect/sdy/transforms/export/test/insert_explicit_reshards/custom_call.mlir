@@ -300,9 +300,7 @@ func.func @custom_call_partial_reduce_string_backend_config(%arg0: tensor<16x4xf
 
 // CHECK-LABEL: func @unregisterd_custom_call_with_existing_rule
 func.func @unregisterd_custom_call_with_existing_rule(%arg0: tensor<4x2xf32>  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> (tensor<2x4xf32>  {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"y"}]>}){
-  // CHECK: %[[CUSTOM_CALL:.*]] = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([j, i]) {i=4, j=2}, custom>} : (tensor<4x2xf32>) -> tensor<2x4xf32>
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[CUSTOM_CALL]] <@mesh, [{"x":(1)2}, {"y"}]> : tensor<2x4xf32>
-  // CHECK-NEXT: return %[[RESHARD]] : tensor<2x4xf32>
+  // CHECK-NOT: sdy.reshard
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([j, i]) {i=4, j=2}, custom>, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}, {"y"}]>]>} : (tensor<4x2xf32>) -> tensor<2x4xf32>
   return %0 : tensor<2x4xf32>
 }

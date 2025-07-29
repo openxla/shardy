@@ -996,6 +996,16 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
 
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                 const SymbolTable& symbolTable) {
+  // NOTE: Creating a sharding rule requires data flow edges are present.
+  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
+      op, /*conservativePropagation=*/false, /*setShardingRuleOnOp=*/false);
+  // TODO: b/434668939 - enable explicit reshards on custom sharding rules.
+  if (!shardingRule || shardingRule.isCustom()) {
+    // Insert explicit reshards only on operations with sharding rules, since
+    // all the operations of interest got their sharding rules.
+    return;
+  }
+
   SmallVector<int64_t> tensorSizes = getTensorSizes(op);
   SmallVector<TensorShardingAttr> inShardings = getShardings(op->getOperands());
   SmallVector<TensorShardingAttr> outShardings = getShardings(op->getResults());
@@ -1028,15 +1038,6 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
        llvm::zip_equal(op->getOpOperands(), inShardings)) {
     sharding = insertAllReduceIfUnreducedToReplicated(
         operand, sharding, firstOutSharding, defaultMesh.attr(), rewriter);
-  }
-
-  // NOTE: Creating a sharding rule requires data flow edges are present.
-  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
-      op, /*conservativePropagation=*/false, /*setShardingRuleOnOp=*/false);
-  if (!shardingRule) {
-    // Insert explicit reshards only on operations with sharding rules, since
-    // all the operations of interest got their sharding rules.
-    return;
   }
 
   ShardingProjection shardingProjection = ShardingProjection::build(
