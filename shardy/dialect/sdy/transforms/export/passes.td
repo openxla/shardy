@@ -182,3 +182,8 @@ def ConstantOrScalarMergerPass : Pass<"sdy-constant-or-scalar-merger", "func::Fu
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def RemovePropagationDebugInfoPass : Pass<"sdy-remove-propagation-debug-info", "ModuleOp"> {
+  let summary = "Removes propagation debug info (propagation edges and origin shardings) during export.";
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

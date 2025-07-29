@@ -61,6 +61,15 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
   Option<bool> keepShardingRules{
       *this, "keep-sharding-rules",
       llvm::cl::desc("Keep sdy.sharding_rule attrs."), llvm::cl::init(false)};
+
+  Option<bool> dumpShardingOrigins{
+      *this, "dump-sharding-origins",
+      llvm::cl::desc("Sink sdy.sharding_origins attr."), llvm::cl::init(false)};
+
+  Option<bool> dumpPropagationEdges{
+      *this, "dump-propagation-edges",
+      llvm::cl::desc("Sink sdy.propagation_edges attr."),
+      llvm::cl::init(false)};
 };
 
 // Adds a sequence of export passes needed as a post-processing step for SDY

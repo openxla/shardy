@@ -35,6 +35,7 @@ cc_library(
         "drop_sharding_rules.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
+        "remove_propagation_debug_info.cc",
         "remove_sharding_groups.cc",
         "reshard_to_collectives.cc",
         "sharding_constraint_to_reshard.cc",
