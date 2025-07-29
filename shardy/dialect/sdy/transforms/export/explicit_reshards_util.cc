@@ -1044,15 +1044,6 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
       inShardings, outShardings, shardingRule, defaultMesh.attr(),
       /*closedIfMissing=*/true);
 
-  // TODO(enver): Handle communication ops, such as stablehlo:AllReduce.
-  if (isa<stablehlo::ReduceWindowOp,
-          stablehlo::SelectAndScatterOp,
-          stablehlo::AllReduceOp, stablehlo::AllGatherOp, stablehlo::AllToAllOp,
-          stablehlo::CollectivePermuteOp, stablehlo::CollectiveBroadcastOp>(
-          op)) {
-    return;
-  }
-
   UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                               shardingRule.getNumResults());
   AxesPerFactorWithMesh commonAxesPerFactorWithMesh =
