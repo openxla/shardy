@@ -69,6 +69,10 @@ non-contracting dimensions, which is incompatible. The pass inserts an
 explicit reshard on `rhs` before the dot operation, so that the dot
 operation has compatible shardings.
 
+### `-sdy-remove-propagation-debug-info`
+
+_Removes propagation debug info (propagation edges and origin shardings) during export._
+
 ### `-sdy-remove-sharding-groups`
 
 _Removes ShardingGroupOps after propagation._
