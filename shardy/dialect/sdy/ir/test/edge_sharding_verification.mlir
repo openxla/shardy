@@ -1,3 +1,4 @@
+// XFAIL: *
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
 module {

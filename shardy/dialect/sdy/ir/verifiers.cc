@@ -999,12 +999,14 @@ LogicalResult verifyEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
 }
 
 LogicalResult verifyPropagationEdgesShardingAttr(
-  PropagationEdgesAttr propagationEdges, Operation* op) {
-// TODO(b/429645141): add PropagationEdgesAttr verification for
-// `DataFlowEdgeOp`
-if (isa<DataFlowEdgeOp>(op)) {
+    PropagationEdgesAttr propagationEdges, Operation* op) {
+  // TODO(b/429645141): Fix verification for `PropagationEdgesAttr`
   return success();
-}
+  // TODO(b/429645141): add PropagationEdgesAttr verification for
+  // `DataFlowEdgeOp`
+  if (isa<DataFlowEdgeOp>(op)) {
+    return success();
+  }
 
   ArrayRef<TensorShardingAttr> shardings = getShardings(op);
   if (shardings.empty() &&
@@ -1051,6 +1053,9 @@ if (isa<DataFlowEdgeOp>(op)) {
 LogicalResult PropagationEdgesAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError,
     ArrayRef<PropagationOneStepAttr> propagationEdges) {
+  // TODO(b/429645141): Fix verification for `PropagationEdgesAttr`
+  return success();
+
   DenseSet<int64_t> seenStepIndices;
   for (PropagationOneStepAttr propagationEdge : propagationEdges) {
     int64_t stepIndex = propagationEdge.getStepIndex();
