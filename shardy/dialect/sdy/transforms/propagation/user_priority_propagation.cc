@@ -26,7 +26,6 @@ limitations under the License.
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/SymbolTable.h"
@@ -39,7 +38,6 @@ limitations under the License.
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
-#include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_priority_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"
@@ -216,19 +214,6 @@ struct UserPriorityPropagationPass
                                        int curDumpIndex) {
     setPropagationOptions(options);
     this->dumpIndex = curDumpIndex;
-    // If `enableAutoPartitioning` is true, we will run the auto-partitioner
-    // after the propagation pass.
-    this->disableAutoPartitioning = options.enableAutoPartitioning;
-  }
-
-  void getDependentDialects(mlir::DialectRegistry& registry) const override {
-    UserPriorityPropagationPassImpl::getDependentDialects(registry);
-    // If we have a dynamically loaded pipeline, we need to add their dependency
-    // ahead of executing this pass, to avoid multi-threading issues within the
-    // pass.
-    if (AutoPartitionerRegistry::isRegistered()) {
-      AutoPartitionerRegistry::getDependentDialects(registry);
-    }
   }
 };
 
@@ -238,14 +223,6 @@ void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
       moduleOp, dumpDirectory,
       llvm::formatv("propagation_after_user_priority_{0}", priority).str(),
       dumpIndex);
-}
-
-bool useAutoSpmdPartitioning(ModuleOp moduleOp) {
-  if (auto useAutoSpmdPartitioning = moduleOp->getAttrOfType<BoolAttr>(
-          "mhlo.use_auto_spmd_partitioning")) {
-    return useAutoSpmdPartitioning.getValue();
-  }
-  return false;
 }
 
 }  // namespace
@@ -275,24 +252,11 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
     prevPriority = priority;
   }
 
-  // Finally we run automatic partitioning if enabled by the user
-  if (!disableAutoPartitioning && useAutoSpmdPartitioning(moduleOp)) {
-    PassManager autoPartitionerPm(moduleOp.getContext());
-    autoPartitionerPm.addPass(createSaveModuleOpPass(
-        dumpDirectory, "propagation_before_auto_partitioning", dumpIndex));
-    AutoPartitionerRegistry::addPasses(autoPartitionerPm);
-    if (failed(runPipeline(autoPartitionerPm, moduleOp))) {
-      return failure();
-    }
-  }
-
   return success();
 }
 
 std::unique_ptr<Pass> createUserPriorityPropagationPass(
     const PropagationOptions& options, int dumpIndex) {
-  // TODO(b/432439766): increment dumpIndex after creating the pass if auto
-  // paritioner is enabled.
   return std::make_unique<UserPriorityPropagationPass>(options, dumpIndex);
 }
 

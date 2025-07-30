@@ -44,7 +44,6 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
 
   // Current module dump index.
   int dumpIndex = 0;
-  bool disableAutoPartitioning = false;
 };
 
 // Runs the user-priority propagation algorithm (see

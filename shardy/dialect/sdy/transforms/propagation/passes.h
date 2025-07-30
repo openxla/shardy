@@ -55,7 +55,9 @@ struct PropagationOptions {
   // Whether to enable inserting explicit collectives.
   bool enableInsertExplicitCollectives = false;
   // Whether automatic partitioning is enabled. If true, an auto-partitioner
-  // callback is expected to be registered in `AutoPartitionerRegistry`.
+  // callback is expected to be registered in `AutoPartitionerRegistry`. The
+  // auto-partitioner will be invoked after propagation of user-specified
+  // shardings.
   bool enableAutoPartitioning = false;
 };
 
