@@ -32,6 +32,16 @@ func.func @concatenate_concat_dim_is_sharded(%arg0: tensor<8x32x256xf32> {sdy.sh
   return %0 : tensor<8x80x256xf32>
 }
 
+// TODO(b/435070275). A better solution is to use the compatible sharding [{"x", "y"}, {}].
+// CHECK-LABEL: func @concatenate_an_axis_is_used_in_both_batch_and_concat_dims
+func.func @concatenate_an_axis_is_used_in_both_batch_and_concat_dims(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<8x48xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<8x80xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}]>}) {
+  // CHECK: %[[CONCATENATE:.*]] = stablehlo.concatenate %arg0, %arg1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x32xf32>, tensor<8x48xf32>) -> tensor<8x80xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {"x", "y"}]> : tensor<8x80xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<8x80xf32>
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x", "y"}]>]>} : (tensor<8x32xf32>, tensor<8x48xf32>) -> tensor<8x80xf32>
+  return %0 : tensor<8x80xf32>
+}
+
 // CHECK-LABEL: func @concatenate_operands_are_results_of_slices
 func.func @concatenate_operands_are_results_of_slices(%arg0: tensor<4x40x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}, %arg1: tensor<4x60x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}) -> (tensor<4x80x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}]>}) {
   %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}, {}]>]>} : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
