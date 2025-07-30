@@ -243,6 +243,16 @@ void insertAllReduceIfUnreducedToReplicated(OpOperand& opOperand,
       operandSharding.getMesh(symbolTable), rewriter);
 }
 
+bool differentDimensionSharding(stablehlo::ConcatenateOp concatenateOp) {
+  TensorShardingAttr resultSharding = getSharding(concatenateOp.getResult());
+  for (Value operand : concatenateOp.getOperands()) {
+    if (getSharding(operand) != resultSharding) {
+      return true;
+    }
+  }
+  return false;
+}
+
 struct TempExplicitReshardsForOptimizationsPass
     : public impl::TempExplicitReshardsForOptimizationsPassBase<
           TempExplicitReshardsForOptimizationsPass> {
@@ -314,6 +324,13 @@ struct TempExplicitReshardsForOptimizationsPass
           .Case<stablehlo::DotGeneralOp>(
               [&](stablehlo::DotGeneralOp dotGeneralOp) {
                 processDot(dotGeneralOp, rewriter, symbolTable);
+              })
+          .Case<stablehlo::ConcatenateOp>(
+              [&](stablehlo::ConcatenateOp concatenateOp) {
+                if (differentDimensionSharding(concatenateOp)) {
+                  insertExplicitReshardsOnOp(concatenateOp, rewriter,
+                                             symbolTable);
+                }
               });
     });
   }
