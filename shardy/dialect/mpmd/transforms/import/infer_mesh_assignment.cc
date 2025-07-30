@@ -462,8 +462,8 @@ class LowerMpmdReducePattern final : public OpRewritePattern<ReduceOp> {
         if (reduced_val.getType() == user_type) {
           transferred_intermediates.push_back(reduced_val);
         } else {
-          transferred_intermediates.push_back(rewriter.create<TransferOp>(
-              reduced_val.getLoc(), user_type, reduced_val));
+          transferred_intermediates.push_back(TransferOp::create(
+              rewriter, reduced_val.getLoc(), user_type, reduced_val));
         }
       }
 
@@ -1096,7 +1096,8 @@ void AssignInputAndOutputToMesh(FuncOp func, BlockArgument input_arg,
   // Assign the output to the mesh.
   if (!isa<MeshTensorType>(return_operand.get().getType())) {
     rewriter.setInsertionPoint(return_operand.getOwner());
-    return_operand.set(rewriter.create<AssignOp>(
+    return_operand.set(AssignOp::create(
+        rewriter,
         GetResultInfoLoc(func, return_operand.getOperandNumber())
             .value_or(return_operand.get().getLoc()),
         return_operand.get(), mesh_name, mesh_attr, kIoConstraintOutputOrigin));
@@ -1108,8 +1109,8 @@ void AssignInputAndOutputToMesh(FuncOp func, BlockArgument input_arg,
     input_arg.setType(MeshTensorType::getFullyReplicated(
         input_arg.getContext(), mesh_name, mesh_attr,
         cast<RankedTensorType>(input_arg.getType())));
-    auto unassign = rewriter.create<UnassignOp>(input_arg.getLoc(), input_arg,
-                                                kIoConstraintInputOrigin);
+    auto unassign = UnassignOp::create(rewriter, input_arg.getLoc(), input_arg,
+                                       kIoConstraintInputOrigin);
     rewriter.replaceAllUsesExcept(input_arg, unassign, unassign);
   }
 }
@@ -1292,7 +1293,8 @@ class InferMeshAssignMeshForFuncLeavesPass
         }
         mesh_name = first_mesh_name;
       }
-      return_op_operand.set(builder.create<AssignOp>(
+      return_op_operand.set(AssignOp::create(
+          builder,
           GetResultInfoLoc(func, return_op_operand.getOperandNumber())
               .value_or(return_operand.getLoc()),
           return_operand, *mesh_name, GetMeshByName(meshes_by_name, *mesh_name),
@@ -1403,8 +1405,8 @@ class InferMeshAssignMeshForFuncLeavesPass
     rewriter.setInsertionPointAfter(op);
     sdy::MeshAttr mesh = GetMeshByName(meshes_by_name, mesh_name);
     for (Value res : op->getResults()) {
-      rewriter.create<AssignOp>(op->getLoc(), res, mesh_name, mesh,
-                                kInferredUnusedOrigin);
+      AssignOp::create(rewriter, op->getLoc(), res, mesh_name, mesh,
+                       kInferredUnusedOrigin);
     }
 
     ClearUseSet(op);
@@ -1489,10 +1491,10 @@ class InferMeshAssignMeshForFuncLeavesPass
             preferred_meshes.GetPrioritizedMeshName().value_or(first_mesh_name);
       }
       Value operand_val = operand.get();
-      AssignOp assign = builder.create<AssignOp>(
-          operand_val.getLoc(), operand_val, *mesh_name,
+      AssignOp assign = AssignOp::create(
+          builder, operand_val.getLoc(), operand_val, *mesh_name,
           GetMeshByName(meshes_by_name, *mesh_name), TerminalNodesOrigin(op));
-      operand.set(builder.create<UnassignOp>(operand_val.getLoc(), assign));
+      operand.set(UnassignOp::create(builder, operand_val.getLoc(), assign));
     }
   }
 
@@ -1535,8 +1537,8 @@ void ConvertConcatReduceOp(Operation* op, RewriterBase& rewriter) {
   SmallVector<Value> reshaped_operands;
   reshaped_operands.reserve(concat.getOperands().size());
   for (Value operand : concat.getOperands()) {
-    auto reshape = rewriter.create<stablehlo::ReshapeOp>(
-        operand.getLoc(), reduce->getResultTypes().front(), operand);
+    auto reshape = stablehlo::ReshapeOp::create(
+        rewriter, operand.getLoc(), reduce->getResultTypes().front(), operand);
     if (operand.getDefiningOp()) {
       reshape->setDiscardableAttrs(
           operand.getDefiningOp()->getDiscardableAttrDictionary());
@@ -1809,8 +1811,8 @@ void AssignCalleeFuncResultsUsingAnalysis(
     // meshes, we copy it such that each result corresponds to a single mesh.
     for (auto [i, mesh_name] : llvm::enumerate(mesh_names.getArrayRef())) {
       auto assign =
-          rewriter.create<AssignOp>(return_val.getLoc(), return_val, mesh_name,
-                                    GetMeshByName(meshes_by_name, mesh_name));
+          AssignOp::create(rewriter, return_val.getLoc(), return_val, mesh_name,
+                           GetMeshByName(meshes_by_name, mesh_name));
       if (i == 0) {
         new_operands[res_num] = assign;
       } else {
@@ -1889,10 +1891,10 @@ void AssignCalleeFuncArgsToAssignUsers(
       UnassignOp unassign_op;
       if (i == 0) {
         arg.setType(mesh_type);
-        unassign_op = rewriter.create<UnassignOp>(arg.getLoc(), arg);
+        unassign_op = UnassignOp::create(rewriter, arg.getLoc(), arg);
       } else {
-        unassign_op = rewriter.create<UnassignOp>(
-            arg.getLoc(), body.addArgument(mesh_type, arg.getLoc()));
+        unassign_op = UnassignOp::create(
+            rewriter, arg.getLoc(), body.addArgument(mesh_type, arg.getLoc()));
       }
 
       if (auto users_it = assign_users_by_mesh_name.find(mesh_name);
@@ -1926,24 +1928,25 @@ void RewriteAccordingToUpdatedCallee(CallOp call_op, RewriterBase& rewriter) {
       continue;
     }
     SDY_CHECK(isa<MeshTensorType>(call_body.getArgument(arg_num).getType()));
-    new_operands[arg_num] = rewriter.create<AssignOp>(
-        operand.getLoc(), call_body.getArgument(arg_num).getType(), operand);
+    new_operands[arg_num] =
+        AssignOp::create(rewriter, operand.getLoc(),
+                         call_body.getArgument(arg_num).getType(), operand);
 
     if (auto copies =
             callee.getArgAttrOfType<DenseI64ArrayAttr>(arg_num, kMpmdCopied)) {
       for (int64_t cloned_arg_index : copies.asArrayRef()) {
         SDY_CHECK(isa<MeshTensorType>(
             call_body.getArgument(cloned_arg_index).getType()));
-        new_operands[cloned_arg_index] = rewriter.create<AssignOp>(
-            operand.getLoc(), call_body.getArgument(cloned_arg_index).getType(),
-            operand);
+        new_operands[cloned_arg_index] = AssignOp::create(
+            rewriter, operand.getLoc(),
+            call_body.getArgument(cloned_arg_index).getType(), operand);
       }
     }
   }
 
   // Create the new call and copy attrs over.
-  auto new_call_op = rewriter.create<CallOp>(
-      call_op.getLoc(), call_body.getTerminator()->getOperandTypes(),
+  auto new_call_op = CallOp::create(
+      rewriter, call_op.getLoc(), call_body.getTerminator()->getOperandTypes(),
       new_operands, call_op.getCalleeAttr());
   new_call_op->setDiscardableAttrs(call_op->getDiscardableAttrDictionary());
 
@@ -1969,8 +1972,9 @@ void RewriteAccordingToUpdatedCallee(CallOp call_op, RewriterBase& rewriter) {
         SDY_CHECK(arg_num_it != type_to_arg_num.end())
             << "Argument number for type " << debugString(assign_user.getType())
             << " not found";
-        assign_user.setOperand(rewriter.create<UnassignOp>(
-            assign_user.getLoc(), new_call_op.getResult(arg_num_it->second)));
+        assign_user.setOperand(
+            UnassignOp::create(rewriter, assign_user.getLoc(),
+                               new_call_op.getResult(arg_num_it->second)));
       }
     }
   }
@@ -2057,7 +2061,7 @@ bool AssignEntrypointFuncArgsToAssignUsers(FuncOp entrypoint_func,
                                     cast<RankedTensorType>(arg.getType()),
                                     memory_kind));
 
-    UnassignOp unassign_op = rewriter.create<UnassignOp>(arg.getLoc(), arg);
+    UnassignOp unassign_op = UnassignOp::create(rewriter, arg.getLoc(), arg);
     rewriter.replaceAllUsesExcept(arg, unassign_op, unassign_op);
   }
   return true;
@@ -2183,12 +2187,12 @@ void AbsorbMeshlessProducer(FragmentOp consumer, Operation* op,
   }
   rewriter.setInsertionPoint(consumer);
   for (Value operand : op_operands_and_free_vars) {
-    new_consumer_operands.push_back(rewriter.create<AssignOp>(
-        operand.getLoc(),
-        MeshTensorType::getFullyReplicated(
-            operand.getContext(), mesh_name, mesh_attr,
-            cast<RankedTensorType>(operand.getType())),
-        operand));
+    new_consumer_operands.push_back(
+        AssignOp::create(rewriter, operand.getLoc(),
+                         MeshTensorType::getFullyReplicated(
+                             operand.getContext(), mesh_name, mesh_attr,
+                             cast<RankedTensorType>(operand.getType())),
+                         operand));
   }
   consumer->setOperands(new_consumer_operands);
 }
@@ -2312,8 +2316,8 @@ void RewriteForOpTerminator(
     SDY_CHECK_LE(mesh_names.size(), 1)
         << "Multiple mesh names found for return value";
 
-    new_operands.push_back(rewriter.create<AssignOp>(
-        return_val.getLoc(), return_val, mesh_names[0],
+    new_operands.push_back(AssignOp::create(
+        rewriter, return_val.getLoc(), return_val, mesh_names[0],
         GetMeshByName(meshes_by_name, mesh_names[0])));
   }
 
@@ -2378,7 +2382,7 @@ void RewriteForOpArgsAndTypes(
           arg.getContext(), mesh_names[0],
           GetMeshByName(meshes_by_name, mesh_names[0]), local_type);
       arg.setType(mesh_type);
-      UnassignOp unassign_op = rewriter.create<UnassignOp>(arg.getLoc(), arg);
+      UnassignOp unassign_op = UnassignOp::create(rewriter, arg.getLoc(), arg);
 
       if (auto users_it = assign_users_by_mesh_name.find(mesh_names[0]);
           users_it != assign_users_by_mesh_name.end()) {
@@ -2410,8 +2414,9 @@ void RewriteForOpOperands(ForOp for_op, RewriterBase& rewriter) {
       new_operands[arg_num] = operand;
       continue;
     }
-    new_operands[arg_num] = rewriter.create<AssignOp>(
-        operand.getLoc(), for_body.getArgument(arg_num).getType(), operand);
+    new_operands[arg_num] =
+        AssignOp::create(rewriter, operand.getLoc(),
+                         for_body.getArgument(arg_num).getType(), operand);
   }
 
   for_op->setOperands(new_operands);
@@ -2425,7 +2430,7 @@ void RewriteForOpResults(ForOp for_op, RewriterBase& rewriter) {
     for (Operation* user : res.getUsers()) {
       if (auto assign_user = dyn_cast<AssignOp>(user)) {
         assign_user.setOperand(
-            rewriter.create<UnassignOp>(assign_user.getLoc(), res));
+            UnassignOp::create(rewriter, assign_user.getLoc(), res));
       }
     }
   }

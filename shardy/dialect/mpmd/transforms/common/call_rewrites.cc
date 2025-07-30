@@ -277,9 +277,9 @@ class EraseUnusedCalleeBlockArgumentsPass
       // Alas, we cannot directly erase results of an op, so we need to create
       // a new call op, and use it to replace the old one.
       rewriter.setInsertionPoint(call_op);
-      auto new_call_op = rewriter.create<CallOp>(call_op.getLoc(), result_types,
-                                                 call_op->getOperands(),
-                                                 call_op.getCalleeAttr());
+      auto new_call_op =
+          CallOp::create(rewriter, call_op.getLoc(), result_types,
+                         call_op->getOperands(), call_op.getCalleeAttr());
       new_call_op->setDiscardableAttrs(call_op->getDiscardableAttrDictionary());
       for (auto [new_result, old_result_index] :
            llvm::zip_equal(new_call_op.getResults(), kept_results.set_bits())) {

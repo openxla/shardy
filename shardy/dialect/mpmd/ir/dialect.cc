@@ -878,9 +878,9 @@ FragmentOp CreateMeshFragmentWithBody(
   // Only user defined fragments can be assigned to a stage and any fragment
   // created by the compiler is considered to be an inferred fragment.
   // Therefore, the created fragment isn't assigned to a stage.
-  FragmentOp fragment_op = builder.create<FragmentOp>(
-      loc, result_types, tensors, origin_attr, mesh_name,
-      /*stage_id=*/IntegerAttr());
+  FragmentOp fragment_op = FragmentOp::create(builder, loc, result_types,
+                                              tensors, origin_attr, mesh_name,
+                                              /*stage_id=*/IntegerAttr());
   Block& fragment_block = fragment_op.getRegion().emplaceBlock();
   sdy::MeshAttr mesh_attr = GetMeshOrFail(fragment_op, mesh_name);
 
@@ -892,7 +892,8 @@ FragmentOp CreateMeshFragmentWithBody(
                             fragment_block.args_end());
 
   OpBuilder block_builder = OpBuilder::atBlockBegin(&fragment_block);
-  block_builder.create<ReturnOp>(loc, body_populator(arguments, block_builder));
+  ReturnOp::create(block_builder, loc,
+                   body_populator(arguments, block_builder));
   return fragment_op;
 }
 }  // namespace
@@ -1344,8 +1345,8 @@ ForOp ForOp::create(Location loc, ValueRange tensors, uint32_t iterations,
                     OpBuilder& builder, ForOpBodyPopulator body_populator,
                     uint32_t unroll_factor) {
   TypeRange result_types = tensors.getTypes();
-  auto op = builder.create<ForOp>(
-      loc, result_types, tensors, iterations,
+  auto op = ForOp::create(
+      builder, loc, result_types, tensors, iterations,
       unroll_factor == 1 ? nullptr : builder.getUI32IntegerAttr(unroll_factor));
 
   Block& block = op.getRegion().emplaceBlock();
@@ -1359,8 +1360,8 @@ ForOp ForOp::create(Location loc, ValueRange tensors, uint32_t iterations,
   ArrayRef<Value> args(block.args_begin(), block.args_end());
 
   OpBuilder block_builder = OpBuilder::atBlockBegin(&block);
-  block_builder.create<ReturnOp>(
-      loc,
+  ReturnOp::create(
+      block_builder, loc,
       body_populator(args.drop_back(), /*index=*/args.back(), block_builder));
   return op;
 }
