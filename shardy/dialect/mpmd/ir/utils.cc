@@ -712,16 +712,114 @@ std::optional<ReductionType> ComputeReductionType(Block& block) {
 
 }  // namespace mlir::mpmd
 
+namespace {
+
+// Parses a fragment origin string of the form
+// "computation_name(transpose_count)" where "(transpose_count)" is optional.
+bool ParseFragmentOrigin(llvm::cl::Option& opt, llvm::StringRef& arg,
+                         mlir::mpmd::FragmentOrigin& origin) {
+  arg.consume_front("\"");
+  auto [name, rest] = arg.split('"');
+  if (name == arg) {
+    return opt.error("Expected a '\"'");
+  }
+  origin.computation_name = name;
+  origin.transpose_count = 0;
+  arg = rest;
+  if (!arg.consume_front("(")) {
+    return false;
+  }
+  if (!arg.consumeInteger(10, origin.transpose_count)) {
+    return opt.error("Expected a transpose count");
+  }
+  if (!arg.consume_front(")")) {
+    return opt.error("Expected ')'");
+  }
+  return false;
+}
+
+// Parses a fragment info string of the form
+// "FragmentInfo(origins=[<origin>,...],stage=<n>,call_counter=<m>)"
+// where the stage and call_counter fields are optional.
+bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
+                       mlir::mpmd::FragmentInfo& info) {
+  if (!arg.consume_front("FragmentInfo(origins=[")) {
+    return opt.error("Expected 'FragmentInfo(origins=['");
+  }
+  while (!arg.starts_with("]")) {
+    if (ParseFragmentOrigin(opt, arg, info.origins.emplace_back())) {
+      return true;  // opt.error was called inside ParseFragmentOrigin
+    }
+    if (!arg.consume_front(",")) {
+      break;
+    }
+  }
+  if (!arg.consume_front("]")) {
+    return opt.error("Expected ']'");
+  }
+  while (arg.consume_front(",")) {
+    if (arg.consume_front("stage=")) {
+      if (info.stage_id.has_value()) {
+        return opt.error("'stage' specified more than once");
+      }
+      int stage_id;
+      if (arg.consumeInteger(10, stage_id)) {
+        return opt.error("Expected an integer value for 'stage'");
+      }
+      info.stage_id = stage_id;
+    } else if (arg.consume_front("call_counter=")) {
+      if (info.call_counter.has_value()) {
+        return opt.error("'call_counter' specified more than once");
+      }
+      int call_counter;
+      if (arg.consumeInteger(10, call_counter)) {
+        return opt.error("Expected an integer value for 'call_counter'");
+      }
+      info.call_counter = call_counter;
+    } else {
+      return opt.error("Expected 'stage=' or 'call_counter=' after ','");
+    }
+  }
+  if (!arg.consume_front(")")) {
+    return opt.error("Expected ')'");
+  }
+  return false;
+}
+
+}  // namespace
+
 namespace llvm::cl {
 
 using ::mlir::mpmd::FragmentMergeRule;
 
 template class basic_parser<FragmentMergeRule>;
 
+// Parses a fragment merge rule string of the form
+// "FragmentMergeRule(sources=[<source>,...],target=<target>)"
+// <source> and <target> are FragmentInfo strings.
 bool parser<FragmentMergeRule>::parse(Option& opt, StringRef, StringRef arg,
                                       FragmentMergeRule& value) {
-  // TODO(petebu): implement and align FragmentMergeRule::operator<<.
-  return opt.error("unimplemented parser for FragmentMergeRule");
+  if (!arg.consume_front("FragmentMergeRule(sources=[")) {
+    return opt.error("Expected 'FragmentMergeRule(sources=['");
+  }
+  while (!arg.starts_with("]")) {
+    if (ParseFragmentInfo(opt, arg, value.sources.emplace_back())) {
+      return true;  // opt.error was called inside ParseFragmentInfo
+    }
+    if (!arg.consume_front(",")) {
+      break;
+    }
+  }
+  if (!arg.consume_front("],target=")) {
+    return opt.error("Expected ',' or '],target='");
+  }
+  if (ParseFragmentInfo(opt, arg, value.target)) {
+    return true;  // opt.error was called inside ParseFragmentInfo
+  }
+  if (!arg.consume_front(")")) {
+    return opt.error("Expected ')'");
+  }
+  return false;
 }
 
 void parser<FragmentMergeRule>::printOptionDiff(const Option& opt,
