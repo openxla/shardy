@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-insert-explicit-reshards | FileCheck %s
+// RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true' | FileCheck %s
 
 sdy.mesh @mesh_xyzp = <["x"=4, "y"=2, "z"=4, "p"=3]>
 

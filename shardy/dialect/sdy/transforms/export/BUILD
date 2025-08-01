@@ -40,7 +40,6 @@ cc_library(
         "reshard_to_collectives.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
-        "temp_explicit_reshards_for_optimizations.cc",
         "update_non_divisible_input_output_shardings.cc",
     ],
     hdrs = [
