@@ -45,19 +45,6 @@ namespace sdy {
 
 namespace {
 
-bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis) {
-  return llvm::any_of(axes, [&](AxisRefAttr a) { return a.overlaps(axis); });
-}
-
-std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
-    const TensorFactorShardings& factorShardings, int64_t factorIndex) {
-  if (auto it = factorShardings.factorIndexToSharding.find(factorIndex);
-      it != factorShardings.factorIndexToSharding.end()) {
-    return it->second.axisRefs;
-  }
-  return std::nullopt;
-}
-
 // Reshard the result of a dot operation if all the following hold:
 //
 // 1. LHS and RHS have fully compatible shardings.
@@ -218,29 +205,6 @@ void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
   auto reshardOp = rewriter.create<ReshardOp>(op.getLoc(), op.getResult(),
                                               outShardingAttrs.front());
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
-}
-
-void insertAllReduceIfUnreducedToReplicated(OpOperand& opOperand,
-                                           TensorShardingAttr targetSharding,
-                                           IRRewriter& rewriter,
-                                           const SymbolTable& symbolTable,
-                                           const bool insertAfterOperand) {
-  Value operand = opOperand.get();
-  TensorShardingAttr operandSharding = getSharding(operand);
-
-  if (!operandSharding) {
-    return;
-  }
-
-  if (insertAfterOperand) {
-    rewriter.setInsertionPointAfterValue(operand);
-  }
-
-  // If `operandSharding` has unreduced axes, insert an all-reduce if any of the
-  // axes isn't unreduced in the target sharding.
-  operandSharding = insertAllReduceIfUnreducedToReplicated(
-      opOperand, operandSharding, targetSharding,
-      operandSharding.getMesh(symbolTable), rewriter);
 }
 
 struct TempExplicitReshardsForOptimizationsPass
