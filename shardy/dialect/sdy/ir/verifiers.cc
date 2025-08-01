@@ -998,21 +998,63 @@ LogicalResult verifyEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
   return success();
 }
 
+// Returns the Value (operand or result) on `op` referenced by `edgeValueRef`.
+// Returns nullptr if the index is out of bounds.
+Value getValueFromEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
+  if (edgeValueRef.getType() == EdgeNodeType::RESULT &&
+      edgeValueRef.getIndex() < op->getNumResults()) {
+    return op->getResult(edgeValueRef.getIndex());
+  }
+  if (edgeValueRef.getType() == EdgeNodeType::OPERAND &&
+      edgeValueRef.getIndex() < op->getNumOperands()) {
+    return op->getOperand(edgeValueRef.getIndex());
+  }
+  return nullptr;
+}
+
+void addNonEmptySharding(Value value,
+                         SmallVector<TensorShardingAttr>& shardings) {
+  if (!value) {
+    return;
+  }
+  if (TensorShardingAttr sharding = getSharding(value)) {
+    shardings.push_back(sharding);
+  }
+}
+
+// Returns a list of all non-empty TensorShardingAttrs referenced by the
+// source and target values for a `PropagationEdgesAttr` in the context of the
+// given `op`.
+SmallVector<TensorShardingAttr> getShardingsReferenceByPropagationEdge(
+    PropagationEdgesAttr propagationEdges, Operation* op) {
+  SmallVector<TensorShardingAttr> shardings;
+  for (PropagationOneStepAttr propagationEdge : propagationEdges) {
+    for (AxisToPropagationDetailsAttr axisEntry :
+         propagationEdge.getAxisEntries()) {
+      addNonEmptySharding(getValueFromEdgeValueRef(axisEntry.getSource(), op),
+                          shardings);
+      for (EdgeValueRefAttr target : axisEntry.getTargets()) {
+        addNonEmptySharding(getValueFromEdgeValueRef(target, op), shardings);
+      }
+    }
+  }
+  return shardings;
+}
+
 LogicalResult verifyPropagationEdgesShardingAttr(
     PropagationEdgesAttr propagationEdges, Operation* op) {
-  // TODO(b/429645141): Fix verification for `PropagationEdgesAttr`
-  return success();
   // TODO(b/429645141): add PropagationEdgesAttr verification for
   // `DataFlowEdgeOp`
   if (isa<DataFlowEdgeOp>(op)) {
     return success();
   }
 
-  ArrayRef<TensorShardingAttr> shardings = getShardings(op);
-  if (shardings.empty() &&
-      op->getAttrOfType<TensorShardingAttr>(kShardingAttr) == nullptr) {
+  SmallVector<TensorShardingAttr> shardings =
+      getShardingsReferenceByPropagationEdge(propagationEdges, op);
+
+  if (shardings.empty()) {
     return op->emitOpError(
-        "expected sharding attrs for propagation edges attr.");
+        "expected propagation edges attr to reference a sharding.");
   }
 
   MeshAttr mesh =
@@ -1053,9 +1095,6 @@ LogicalResult verifyPropagationEdgesShardingAttr(
 LogicalResult PropagationEdgesAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError,
     ArrayRef<PropagationOneStepAttr> propagationEdges) {
-  // TODO(b/429645141): Fix verification for `PropagationEdgesAttr`
-  return success();
-
   DenseSet<int64_t> seenStepIndices;
   for (PropagationOneStepAttr propagationEdge : propagationEdges) {
     int64_t stepIndex = propagationEdge.getStepIndex();

@@ -1,9 +1,8 @@
-// XFAIL: *
 // RUN: sdy_opt %s -split-input-file -verify-diagnostics
 
 module {
   sdy.mesh @mesh = <["c"=8, "d"=8, "e"=8]>
-  func.func @simple_edge_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>) {
+  func.func @simple_edge_sharding(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"c":(1)4, ?}]>]>}) -> (tensor<8x8xf32>) {
     // expected-error @+1 {{propagation edges have duplicate step index: 1}}
     %0 = stablehlo.add %arg0, %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"c":(1)4 = operand-0 -> [result-0]}, {"e" = operand-0 -> [result-0]}]},{step-1 = [{"d" = operand-1 -> [result-0]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"c":(1)4, ?}]>]>} : tensor<8x8xf32>
     return %0 : tensor<8x8xf32>
@@ -58,9 +57,9 @@ module {
 
 module {
   sdy.mesh @mesh = <["z"=4]>
-  func.func @result_index_out_of_range(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>) {
+  func.func @result_index_out_of_range(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"z"}]>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"z"}]>}) {
     // expected-error @+1 {{'stablehlo.add' op expected a value ref to have a result index in range [0, 1), got: 1}}
-    %0 = stablehlo.add %arg0, %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-22 = [{"z" = operand-1-> [operand-0,result-1]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"z":(1)4, ?}]>]>} : tensor<8x8xf32>
+    %0 = stablehlo.add %arg0, %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-22 = [{"z" = operand-1-> [operand-0,result-1]}]}]>} : tensor<8x8xf32>
     return %0 : tensor<8x8xf32>
   }
 }
@@ -70,8 +69,8 @@ module {
 module {
   sdy.mesh @mesh = <["z"=4]>
   func.func @missing_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>) {
-    // expected-error @+1 {{expected sharding attrs for propagation edges attr}}
-    %0 = stablehlo.add %arg0, %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-93 = [{"z" = operand-1-> [operand-0,result-1]}]}]>} : tensor<8x8xf32>
+    // expected-error @+1 {{expected propagation edges attr to reference a sharding}}
+    %0 = stablehlo.add %arg0, %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-93 = [{"z" = operand-1-> [operand-0,result-0]}]}]>} : tensor<8x8xf32>
     return %0 : tensor<8x8xf32>
   }
 }
@@ -80,7 +79,7 @@ module {
 
 module {
   sdy.mesh @mesh = <["axis"=4]>
-  func.func @axis_not_in_mesh(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>) {
+  func.func @axis_not_in_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"axis"}, {}]>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"axis"}]>}) {
     // expected-error @+1 {{expected axis ref to be in one of the meshes}}
     %0 = stablehlo.add %arg0, %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-93 = [{"z" = operand-1-> [operand-0,result-1]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"z":(1)4, ?}]>]>} : tensor<8x8xf32>
     return %0 : tensor<8x8xf32>
@@ -130,7 +129,6 @@ module {
     return %0 : tensor<8x8xf32>
   }
 }
-
 
 // -----
 
