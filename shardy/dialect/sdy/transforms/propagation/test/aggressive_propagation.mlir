@@ -167,11 +167,11 @@ func.func @multiple_conflicts_across_factors(
 
 // CHECK-LABEL: func @sideways_propagation_if_result_is_closed_empty(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
-// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
-// CHECK-SAME:  -> tensor<8xf32>
+// CHECK-SAME:      %arg1: tensor<8xf32>
+// CHECK-SAME:  ) -> tensor<8xf32>
 func.func @sideways_propagation_if_result_is_closed_empty(
     %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
-    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{?}]>})
+    %arg1: tensor<8xf32>)
     -> tensor<8xf32> {
   // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>]>}
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>]>} : tensor<8xf32>
@@ -193,7 +193,7 @@ func.func @allow_sideways_propagation_if_result_is_open_empty(
 
 // CHECK-LABEL: func @sideways_propagation_if_result_is_closed_sub_axis(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>},
-// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a", ?}]>})
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a":(1)2, ?}]>})
 // CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a":(1)2, ?}]>})
 func.func @sideways_propagation_if_result_is_closed_sub_axis(
     %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>},
@@ -206,7 +206,7 @@ func.func @sideways_propagation_if_result_is_closed_sub_axis(
 
 // CHECK-LABEL: func @allow_partial_sideways_propagation_if_conflicting_with_result(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
-// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b", ?}]>})
+// CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
 // CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
 func.func @allow_partial_sideways_propagation_if_conflicting_with_result(
     %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},

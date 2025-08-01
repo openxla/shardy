@@ -18,6 +18,7 @@ limitations under the License.
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <tuple>
 
 #include "llvm/ADT/STLExtras.h"
@@ -35,15 +36,6 @@ namespace mlir {
 namespace sdy {
 
 namespace {
-
-bool expandTensorSharding(ShardingProjection& projection, int64_t tensorIndex,
-                          int64_t factorIndex, ArrayRef<AxisRefAttr> newAxes) {
-  if (tensorIndex < projection.getNumOperands()) {
-    return projection.expandOperandSharding(tensorIndex, factorIndex, newAxes);
-  }
-  return projection.expandResultSharding(
-      tensorIndex - projection.getNumOperands(), factorIndex, newAxes);
-}
 
 struct TensorIndexSize {
   int64_t index;
@@ -83,6 +75,19 @@ SmallVector<TensorIndexSize> getFactorToSourceTensor(
     }
   }
   return factorToSourceTensor;
+}
+
+// Returns if `factorSharding` has a factor at `factorIndex` which is the
+// strict prefix of `shardingAxes`.
+bool isStrictPrefixOfFactorSharding(const TensorFactorShardings& factorSharding,
+                                    int64_t factorIndex,
+                                    ArrayRef<AxisRefAttr> shardingAxes) {
+  if (auto it = factorSharding.factorIndexToSharding.find(factorIndex);
+      it != factorSharding.factorIndexToSharding.end()) {
+    return isAxisListPrefixOf(it->getSecond().axisRefs, shardingAxes) ==
+           PrefixStatus::STRICT_PREFIX;
+  }
+  return false;
 }
 
 }  // namespace
@@ -180,36 +185,71 @@ UpdateTensorShardings AggressiveFactorPropagation::propagateFactorShardings(
                                  factorToSourceTensor[j].index, j);
   });
 
-  // The propagation on each tensor is independent. This strategy can propagate
-  // different shardings to different tensors along the same factor. Examples
-  // are provided in the docstring of this class.
-  for (const auto& [tensorIndex, tensorFactorShardings] :
-       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
-           projection.getOperands(), projection.getResults()))) {
-    const FactorIndexToSharding& factorIndexToSharding =
-        tensorFactorShardings.factorIndexToSharding;
+  auto propagateFactorIndicesToValues =
+      [&](ArrayRef<TensorFactorShardings> projectionValues,
+          BitVector& updatedValues,
+          std::function<bool(ShardingProjection&, int64_t, int64_t,
+                             SmallVector<AxisRefAttr>& newAxes)>
+              expandTensorSharding) {
+        for (const auto& [tensorIndex, tensorFactorShardings] :
+             llvm::enumerate(projectionValues)) {
+          const FactorIndexToSharding& factorIndexToSharding =
+              tensorFactorShardings.factorIndexToSharding;
 
-    // Propagate the axes got in Step 1, resolving conflicts between factors by
-    // following the order of preference in  `sortedFactorIndices`.
-    bool tensorUpdated = false;
-    for (int64_t factorIndex : sortedFactorIndices) {
-      SmallVector<AxisRefAttr> newAxes = getPropagatedFactorSharding(
-          factorIndex, tensorFactorShardings, factorIndexToSharding,
-          axesPerFactor, mesh, conservativePropagation, factorSizes);
-      if (newAxes.empty()) {
-        continue;
-      }
-      tensorUpdated |=
-          expandTensorSharding(projection, tensorIndex, factorIndex, newAxes);
-    }
+          // Propagate the axes got in Step 1, resolving conflicts between
+          // factors by following the order of preference in
+          // `sortedFactorIndices`.
+          bool tensorUpdated = false;
+          for (int64_t factorIndex : sortedFactorIndices) {
+            SmallVector<AxisRefAttr> newAxes = getPropagatedFactorSharding(
+                factorIndex, tensorFactorShardings, factorIndexToSharding,
+                axesPerFactor, mesh, conservativePropagation, factorSizes);
 
-    if (tensorIndex < projection.getNumOperands()) {
-      result.updateOperands[tensorIndex] = tensorUpdated;
-    } else {
-      result.updateResults[tensorIndex - projection.getNumOperands()] =
-          tensorUpdated;
-    }
-  }
+            if (newAxes.empty()) {
+              continue;
+            }
+
+            tensorUpdated |= expandTensorSharding(projection, tensorIndex,
+                                                  factorIndex, newAxes);
+          }
+
+          updatedValues[tensorIndex] = tensorUpdated;
+        }
+      };
+
+  propagateFactorIndicesToValues(
+      projection.getResults(), result.updateResults,
+      [](ShardingProjection& projection, int64_t tensorIndex,
+         int64_t factorIndex, SmallVector<AxisRefAttr>& newAxes) {
+        return projection.expandResultSharding(tensorIndex, factorIndex,
+                                               newAxes);
+      });
+
+  propagateFactorIndicesToValues(
+      projection.getOperands(), result.updateOperands,
+      [&](ShardingProjection& projection, int64_t tensorIndex,
+          int64_t factorIndex, SmallVector<AxisRefAttr>& newAxes) {
+        // Only propagate sideways through operands the factors that are also
+        // used in at least one result. We want to avoid the following situation
+        // which can happen when a `sharding_constraint` is added onto the
+        // operand during Shardy import:
+        // ```
+        // %arg0: [{"a", ?}]
+        // %arg1: [{?}]
+        // %0 = add %arg0, %arg1 : [{}]
+        // ```
+        // It doesn't make sense to propagate `a` to `%arg1`, if the result has
+        // to be replicated and `%arg1` is currently replicated.
+        if (op && isElementwise(op)) {
+          for (const TensorFactorShardings& result : projection.getResults()) {
+            if (isStrictPrefixOfFactorSharding(result, factorIndex, newAxes)) {
+              newAxes = result.factorIndexToSharding.at(factorIndex).axisRefs;
+            }
+          }
+        }
+        return projection.expandOperandSharding(tensorIndex, factorIndex,
+                                                newAxes);
+      });
 
   return result;
 }
