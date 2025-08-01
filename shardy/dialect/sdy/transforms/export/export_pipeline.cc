@@ -58,26 +58,29 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // propagation itself and make the module more readable.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "after_propagation", dumpIndex++));
-  if (!options.enableInsertExplicitCollectives &&
-      !options.avoidExportForPartitioning) {
-    pm.addNestedPass<func::FuncOp>(
-        createTempExplicitReshardsForOptimizationsPass());
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "after_post_propagation_optimizations",
-        dumpIndex++));
-  }
+
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
-  if (options.enableInsertExplicitCollectives) {
-    pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
-    addCanonicalizerPass(pm, kReshardLabel);
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "after_insert_explicit_reshards", dumpIndex++));
-    pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
-    addCanonicalizerPass(pm, kCollectiveLabel);
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "after_reshard_to_collectives", dumpIndex++));
+  if (!options.avoidExportForPartitioning) {
+    if (!options.enableInsertExplicitCollectives) {
+      pm.addNestedPass<func::FuncOp>(
+          createTempExplicitReshardsForOptimizationsPass());
+      pm.addPass(mlir::sdy::createSaveModuleOpPass(
+          options.dumpDirectory, "after_post_propagation_optimizations",
+          dumpIndex++));
+    } else {
+      pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+      addCanonicalizerPass(pm, kReshardLabel);
+      pm.addPass(mlir::sdy::createSaveModuleOpPass(
+          options.dumpDirectory, "after_insert_explicit_reshards",
+          dumpIndex++));
+      pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+      addCanonicalizerPass(pm, kCollectiveLabel);
+      pm.addPass(mlir::sdy::createSaveModuleOpPass(
+          options.dumpDirectory, "after_reshard_to_collectives", dumpIndex++));
+    }
   }
+
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
