@@ -63,13 +63,13 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     if (!options.enableInsertExplicitCollectives) {
-      pm.addNestedPass<func::FuncOp>(
-          createTempExplicitReshardsForOptimizationsPass());
+      pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
       pm.addPass(mlir::sdy::createSaveModuleOpPass(
           options.dumpDirectory, "after_post_propagation_optimizations",
           dumpIndex++));
     } else {
-      pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+      pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(
+          InsertExplicitReshardsPassOptions{.enableFullVersion = true}));
       addCanonicalizerPass(pm, kReshardLabel);
       pm.addPass(mlir::sdy::createSaveModuleOpPass(
           options.dumpDirectory, "after_insert_explicit_reshards",
