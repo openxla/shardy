@@ -36,6 +36,26 @@ void addCanonicalizerPass(OpPassManager& pm,
                                      /*enabledPatterns=*/enabledPatterns));
 }
 
+void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
+                          const ExportOptions& options) {
+  if (options.avoidExportForPartitioning) {
+    return;
+  }
+
+  if (!options.enableInsertExplicitCollectives) {
+    pm.addNestedPass<func::FuncOp>(
+        createTempExplicitReshardsForOptimizationsPass());
+    return;
+  }
+
+  pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+  addCanonicalizerPass(pm, kReshardLabel);
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
+  pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+  addCanonicalizerPass(pm, kCollectiveLabel);
+}
+
 }  // namespace
 
 void addExportPipeline(OpPassManager& pm, int& dumpIndex,
@@ -61,25 +81,9 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
 
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
-  if (!options.avoidExportForPartitioning) {
-    if (!options.enableInsertExplicitCollectives) {
-      pm.addNestedPass<func::FuncOp>(
-          createTempExplicitReshardsForOptimizationsPass());
-      pm.addPass(mlir::sdy::createSaveModuleOpPass(
-          options.dumpDirectory, "after_post_propagation_optimizations",
-          dumpIndex++));
-    } else {
-      pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
-      addCanonicalizerPass(pm, kReshardLabel);
-      pm.addPass(mlir::sdy::createSaveModuleOpPass(
-          options.dumpDirectory, "after_insert_explicit_reshards",
-          dumpIndex++));
-      pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
-      addCanonicalizerPass(pm, kCollectiveLabel);
-      pm.addPass(mlir::sdy::createSaveModuleOpPass(
-          options.dumpDirectory, "after_reshard_to_collectives", dumpIndex++));
-    }
-  }
+  runShardyPartitioner(pm, dumpIndex, options);
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      options.dumpDirectory, "after_partitioner", dumpIndex++));
 
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
