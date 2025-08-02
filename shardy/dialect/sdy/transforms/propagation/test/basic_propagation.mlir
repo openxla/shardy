@@ -554,18 +554,16 @@ func.func @merge_dim_non_minor_most_factor_non_divisible_multiple_axes(
   return %0 : tensor<24xf32>
 }
 
-// CHECK-LABEL: func @merge_dim_non_minor_most_factor_overflows
-func.func @merge_dim_non_minor_most_factor_overflows(
-    %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4_b_2_c_2, [{"b", "a"}, {}]>}) -> tensor<16xf32> {
-  // CHECK-NEXT: stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4_b_2_c_2, [{"b", ?}]>]>}
+// CHECK-LABEL: func @merge_dim_non_minor_most_factor_propagate_sub_axis
+func.func @merge_dim_non_minor_most_factor_propagate_sub_axis(%arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4_b_2_c_2, [{"b", "a"}, {}]>}) -> tensor<16xf32> {
+  // CHECK-NEXT: stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4_b_2_c_2, [{"b", "a":(1)2, ?}]>]>}
   %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
   return %0 : tensor<16xf32>
 }
 
-// CHECK-LABEL: func @merge_dim_non_minor_most_factor_overflows_minor_most_factor_sharded
-func.func @merge_dim_non_minor_most_factor_overflows_minor_most_factor_sharded(
-    %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4_b_2_c_2, [{"b", "a"}, {"c"}]>}) -> tensor<16xf32> {
-  // CHECK-NEXT: stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4_b_2_c_2, [{"b", ?}]>]>}
+// CHECK-LABEL: func @merge_dim_non_minor_most_factor_propagate_sub_axis_and_concat
+func.func @merge_dim_non_minor_most_factor_propagate_sub_axis_and_concat(%arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4_b_2_c_2, [{"b", "a"}, {"c"}]>}) -> tensor<16xf32> {
+  // CHECK-NEXT: stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4_b_2_c_2, [{"b", "a":(1)2, "c", ?}]>]>}
   %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
   return %0 : tensor<16xf32>
 }
