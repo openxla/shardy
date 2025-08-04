@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -allow-unregistered-dialect  -sdy-temp-explicit-reshards-for-optimizations | FileCheck %s
+// RUN: sdy_opt %s -allow-unregistered-dialect  -sdy-insert-explicit-reshards | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2, "z"=4]>
 sdy.mesh @other_mesh = <["x"=2, "y"=2]>

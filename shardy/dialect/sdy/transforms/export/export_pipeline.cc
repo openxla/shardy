@@ -38,11 +38,9 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
-  // TODO(enver): Unify two passes: temp and non-temp ones.
-  pm.addNestedPass<func::FuncOp>(
-      options.enableInsertExplicitCollectives
-          ? createInsertExplicitReshardsPass()
-          : createTempExplicitReshardsForOptimizationsPass());
+  InsertExplicitReshardsPassOptions passOptions;
+  passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
+  pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enableInsertExplicitCollectives) {
     addCanonicalizerPass(pm, kReshardLabel);
