@@ -69,6 +69,12 @@ non-contracting dimensions, which is incompatible. The pass inserts an
 explicit reshard on `rhs` before the dot operation, so that the dot
 operation has compatible shardings.
 
+#### Options
+
+```
+-enable-full-version : Enable full version.
+```
+
 ### `-sdy-remove-propagation-debug-info`
 
 _Removes propagation debug info (propagation edges and origin shardings) during export._
@@ -126,16 +132,6 @@ the edge), and replaces the op with its input.
 -sink-debug-sharding-origins          : Whether to sink the debug sharding origins info. See `debug-sharding-origins` option in propagation for more info.
 -sink-debug-propagation-edge-sharding : Whether to sink the debug propagation edge sharding info. See `debug-propagation-edge-sharding` option in propagation for more info.
 ```
-
-### `-sdy-temp-explicit-reshards-for-optimizations`
-
-_Inserts explicit reshards for specific optimizations._
-
-This pass is a temporary solution until we can enable the
-`sdy-insert-explicit-reshards` pass by default.
-
-It allows us to insert explicit reshards on specific operations for
-optimizations.
 
 ### `-sdy-update-non-divisible-input-output-shardings`
 
