@@ -81,28 +81,45 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
 
 void insertExplicitReshardsOnFuncReturn(Operation* op, func::FuncOp& funcOp,
                                         IRRewriter& rewriter,
-                                        const SymbolTable& symbolTable) {
+                                        const SymbolTable& symbolTable,
+                                        const bool onFullVersion) {
   rewriter.setInsertionPoint(op);
   for (const auto& [index, opOperand] : llvm::enumerate(op->getOpOperands())) {
-    insertExplicitReshardsToTargetSharding(
-        opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
-        rewriter, symbolTable, /*insertAfterOperand=*/false);
+    if (onFullVersion) {
+      insertExplicitReshardsToTargetSharding(
+          opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
+          rewriter, symbolTable, /*insertAfterOperand=*/false);
+    } else {
+      insertAllReduceIfUnreducedToReplicated(
+          opOperand,
+          /*targetSharding=*/getFuncResultSharding(funcOp, index), rewriter,
+          symbolTable,
+          /*insertAfterOperand=*/false);
+    }
   }
 }
 
 void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
                                         IRRewriter& rewriter,
-                                        const SymbolTable& symbolTable) {
+                                        const SymbolTable& symbolTable,
+                                        const bool onFullVersion) {
   for (Value owner : llvm::concat<Value>(op.getOpResultEdgeOwners(),
                                          op.getBlockArgumentEdgeOwners())) {
     TensorShardingAttr ownerSharding = op.transformTargetSharding(
         owner, op.getEdgeOwnerSharding(owner),
         DataFlowShardingTransformType::kBeforeEdgePropagation);
     for (OpOperand* sourceOpOperand : op.getEdgeSources(owner)) {
-      insertExplicitReshardsToTargetSharding(
-          *sourceOpOperand,
-          /*targetSharding=*/ownerSharding, rewriter, symbolTable,
-          /*insertAfterOperand=*/true);
+      if (onFullVersion) {
+        insertExplicitReshardsToTargetSharding(*sourceOpOperand,
+                                               /*targetSharding=*/ownerSharding,
+                                               rewriter, symbolTable,
+                                               /*insertAfterOperand=*/true);
+      } else {
+        insertAllReduceIfUnreducedToReplicated(*sourceOpOperand,
+                                               /*targetSharding=*/ownerSharding,
+                                               rewriter, symbolTable,
+                                               /*insertAfterOperand=*/true);
+      }
     }
   }
 }
@@ -278,60 +295,27 @@ struct InsertExplicitReshardsPass
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
-    // TODO(enver): Refactor to deduplicate logic between minimal and full.
-    if (enableFullVersion) {
-      funcOp.walk([&](Operation* op) {
-        // TODO(enver): Does not need to be part of the walk on the func,
-        // instead get the terminatior with getBodyTerminator.
-        if (isa<func::ReturnOp>(op)) {
-          insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable);
-          return;
-        }
-
-        // TODO(enver): Prefer resharding the owner when multiple sources are
-        // sharded in the same way.
-        if (auto shardableDataFlowOp =
-                dyn_cast<ShardableDataFlowOpInterface>(op)) {
-          insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
-                                             symbolTable);
-          return;
-        }
-
-        insertExplicitReshardsOnOp(op, rewriter, symbolTable);
-      });
-      return;
-    }
-
     funcOp->walk([&](Operation* op) {
       if (isa<func::ReturnOp>(op)) {
-        rewriter.setInsertionPoint(op);
-        for (const auto& [index, opOperand] :
-             llvm::enumerate(op->getOpOperands())) {
-          insertAllReduceIfUnreducedToReplicated(
-              opOperand,
-              /*targetSharding=*/getFuncResultSharding(funcOp, index), rewriter,
-              symbolTable,
-              /*insertAfterOperand=*/false);
-        }
+        // TODO(enver): Does not need to be part of the walk on the func,
+        // instead get the terminatior with getBodyTerminator.
+        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
+                                           enableFullVersion);
         return;
       }
 
-      if (auto shardableDataFlow = dyn_cast<ShardableDataFlowOpInterface>(op)) {
-        for (Value owner : llvm::concat<Value>(
-                 shardableDataFlow.getOpResultEdgeOwners(),
-                 shardableDataFlow.getBlockArgumentEdgeOwners())) {
-          TensorShardingAttr ownerSharding =
-              shardableDataFlow.transformTargetSharding(
-                  owner, shardableDataFlow.getEdgeOwnerSharding(owner),
-                  DataFlowShardingTransformType::kBeforeEdgePropagation);
-          for (OpOperand* sourceOpOperand :
-               shardableDataFlow.getEdgeSources(owner)) {
-            insertAllReduceIfUnreducedToReplicated(
-                *sourceOpOperand,
-                /*targetSharding=*/ownerSharding, rewriter, symbolTable,
-                /*insertAfterOperand=*/true);
-          }
-        }
+      if (auto shardableDataFlowOp =
+              dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        // TODO(enver): Prefer resharding the owner when multiple sources are
+        // sharded in the same way.
+        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
+                                           symbolTable, enableFullVersion);
+        return;
+      }
+
+      // TODO(enver): Refactor to deduplicate logic between minimal and full.
+      if (enableFullVersion) {
+        insertExplicitReshardsOnOp(op, rewriter, symbolTable);
         return;
       }
 
