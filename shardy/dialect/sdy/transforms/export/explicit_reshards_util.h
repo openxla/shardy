@@ -81,14 +81,6 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
     TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter);
 
-// Same as above, but gets the source sharding from `opOperand` if present, or
-// no-op otherwise.
-void insertAllReduceIfUnreducedToReplicated(OpOperand& opOperand,
-                                            TensorShardingAttr targetSharding,
-                                            IRRewriter& rewriter,
-                                            const SymbolTable& symbolTable,
-                                            const bool insertAfterOperand);
-
 // Returns true if any of `axes` overlaps with `axis`.
 bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis);
 

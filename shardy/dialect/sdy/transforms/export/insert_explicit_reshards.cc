@@ -50,11 +50,12 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
                                             TensorShardingAttr targetSharding,
                                             IRRewriter& rewriter,
                                             const SymbolTable& symbolTable,
-                                            const bool insertAfterOperand) {
+                                            const bool insertAfterOperand,
+                                            const bool onFullVersion) {
   Value operand = opOperand.get();
   TensorShardingAttr operandSharding = getSharding(operand);
 
-  if (insertAfterOperand) {
+  if (insertAfterOperand && (onFullVersion || operandSharding)) {
     rewriter.setInsertionPointAfterValue(operand);
   }
 
@@ -64,10 +65,10 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
     operandSharding = insertAllReduceIfUnreducedToReplicated(
         opOperand, operandSharding, targetSharding,
         operandSharding.getMesh(symbolTable), rewriter);
-    operand = opOperand.get();
   }
 
-  if (shouldReshard(operandSharding, targetSharding)) {
+  if (onFullVersion && shouldReshard(operandSharding, targetSharding)) {
+    operand = opOperand.get();
     auto reshardOp = rewriter.create<ReshardOp>(
         operand.getLoc(), operand,
         targetSharding
@@ -85,17 +86,9 @@ void insertExplicitReshardsOnFuncReturn(Operation* op, func::FuncOp& funcOp,
                                         const bool onFullVersion) {
   rewriter.setInsertionPoint(op);
   for (const auto& [index, opOperand] : llvm::enumerate(op->getOpOperands())) {
-    if (onFullVersion) {
-      insertExplicitReshardsToTargetSharding(
-          opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
-          rewriter, symbolTable, /*insertAfterOperand=*/false);
-    } else {
-      insertAllReduceIfUnreducedToReplicated(
-          opOperand,
-          /*targetSharding=*/getFuncResultSharding(funcOp, index), rewriter,
-          symbolTable,
-          /*insertAfterOperand=*/false);
-    }
+    insertExplicitReshardsToTargetSharding(
+        opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
+        rewriter, symbolTable, /*insertAfterOperand=*/false, onFullVersion);
   }
 }
 
@@ -109,17 +102,10 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
         owner, op.getEdgeOwnerSharding(owner),
         DataFlowShardingTransformType::kBeforeEdgePropagation);
     for (OpOperand* sourceOpOperand : op.getEdgeSources(owner)) {
-      if (onFullVersion) {
-        insertExplicitReshardsToTargetSharding(*sourceOpOperand,
-                                               /*targetSharding=*/ownerSharding,
-                                               rewriter, symbolTable,
-                                               /*insertAfterOperand=*/true);
-      } else {
-        insertAllReduceIfUnreducedToReplicated(*sourceOpOperand,
-                                               /*targetSharding=*/ownerSharding,
-                                               rewriter, symbolTable,
-                                               /*insertAfterOperand=*/true);
-      }
+      insertExplicitReshardsToTargetSharding(
+          *sourceOpOperand,
+          /*targetSharding=*/ownerSharding, rewriter, symbolTable,
+          /*insertAfterOperand=*/true, onFullVersion);
     }
   }
 }

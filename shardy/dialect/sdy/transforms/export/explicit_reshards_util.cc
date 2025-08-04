@@ -994,29 +994,6 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
       mesh, rewriter);
 }
 
-void insertAllReduceIfUnreducedToReplicated(OpOperand& opOperand,
-                                            TensorShardingAttr targetSharding,
-                                            IRRewriter& rewriter,
-                                            const SymbolTable& symbolTable,
-                                            const bool insertAfterOperand) {
-  Value operand = opOperand.get();
-  TensorShardingAttr operandSharding = getSharding(operand);
-
-  if (!operandSharding) {
-    return;
-  }
-
-  if (insertAfterOperand) {
-    rewriter.setInsertionPointAfterValue(operand);
-  }
-
-  // If `operandSharding` has unreduced axes, insert an all-reduce if any of the
-  // axes isn't unreduced in the target sharding.
-  operandSharding = insertAllReduceIfUnreducedToReplicated(
-      opOperand, operandSharding, targetSharding,
-      operandSharding.getMesh(symbolTable), rewriter);
-}
-
 bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis) {
   return llvm::any_of(axes, [&](AxisRefAttr a) { return a.overlaps(axis); });
 }
