@@ -36,6 +36,30 @@ void addCanonicalizerPass(OpPassManager& pm,
                                      /*enabledPatterns=*/enabledPatterns));
 }
 
+void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
+                          const ExportOptions& options) {
+  // TODO(enver): Unify two passes: temp and non-temp ones.
+  pm.addNestedPass<func::FuncOp>(
+      options.enableInsertExplicitCollectives
+          ? createInsertExplicitReshardsPass()
+          : createTempExplicitReshardsForOptimizationsPass());
+
+  if (options.enableInsertExplicitCollectives) {
+    addCanonicalizerPass(pm, kReshardLabel);
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
+    pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+    addCanonicalizerPass(pm, kCollectiveLabel);
+  }
+
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      options.dumpDirectory,
+      options.enableInsertExplicitCollectives
+          ? "after_partitioner_with_global_shapes"
+          : "after_minimal_partitioner_with_global_shapes",
+      dumpIndex++));
+}
+
 }  // namespace
 
 void addExportPipeline(OpPassManager& pm, int& dumpIndex,
@@ -62,23 +86,7 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
-    if (!options.enableInsertExplicitCollectives) {
-      pm.addNestedPass<func::FuncOp>(
-          createTempExplicitReshardsForOptimizationsPass());
-      pm.addPass(mlir::sdy::createSaveModuleOpPass(
-          options.dumpDirectory, "after_post_propagation_optimizations",
-          dumpIndex++));
-    } else {
-      pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
-      addCanonicalizerPass(pm, kReshardLabel);
-      pm.addPass(mlir::sdy::createSaveModuleOpPass(
-          options.dumpDirectory, "after_insert_explicit_reshards",
-          dumpIndex++));
-      pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
-      addCanonicalizerPass(pm, kCollectiveLabel);
-      pm.addPass(mlir::sdy::createSaveModuleOpPass(
-          options.dumpDirectory, "after_reshard_to_collectives", dumpIndex++));
-    }
+    runShardyPartitioner(pm, dumpIndex, options);
   }
 
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
