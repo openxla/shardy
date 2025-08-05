@@ -59,7 +59,8 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
                    TensorShardingAttr targetSharding);
 
 // Inserts an `sdy.all-reduce` on `use` if `sourceSharding` has unreduced axes
-// or sub-axes that aren't in `targetUnreducedAxes`.
+// or sub-axes that aren't in the user's unreduced axes
+// (`userSharding.getUnreducedAxes()` if present , or an empty array otherwise.)
 //
 // The inserted all-reduce will have `sourceSharding.getUnreducedAxes() -
 // targetUnreducedAxes` as the reduction axes.
@@ -70,13 +71,6 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
 //
 // Returns the sharding of the inserted all-reduce, or `sourceSharding` if none
 // was inserted.
-TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
-    OpOperand& use, TensorShardingAttr sourceSharding,
-    ArrayRef<AxisRefAttr> targetUnreducedAxes, MeshAttr mesh,
-    IRRewriter& rewriter);
-
-// Same as above, but gets the target unreduced axes from `userSharding` if
-// present, or an empty array otherwise.
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
     TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter);

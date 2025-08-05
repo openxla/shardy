@@ -962,8 +962,10 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
 
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
-    ArrayRef<AxisRefAttr> targetUnreducedAxes, MeshAttr mesh,
-    IRRewriter& rewriter) {
+    TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter) {
+  ArrayRef<AxisRefAttr> targetUnreducedAxes =
+      userSharding ? userSharding.getUnreducedAxes() : ArrayRef<AxisRefAttr>();
+
   if (!sourceSharding) {
     return nullptr;
   }
@@ -983,15 +985,6 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
       use.get().getLoc(), use.get(), allReduceAxes, allReduceSharding);
   use.set(allReduceOp);
   return allReduceSharding;
-}
-
-TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
-    OpOperand& use, TensorShardingAttr sourceSharding,
-    TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter) {
-  return insertAllReduceIfUnreducedToReplicated(
-      use, sourceSharding,
-      userSharding ? userSharding.getUnreducedAxes() : ArrayRef<AxisRefAttr>(),
-      mesh, rewriter);
 }
 
 bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis) {
@@ -1037,20 +1030,6 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
   // TODO(enver): Support maximal meshes.
   if (defaultMesh.attr().isMaximal()) {
     return;
-  }
-
-  // For each operand that has unreduced axes, insert an all-reduce if any of
-  // the unreduced axes isn't unreduced in the target sharding.
-  //
-  // We assume all results of an op should have the same unreduced axes, so we
-  // look at the first result.
-  TensorShardingAttr firstOutSharding =
-      outShardings.empty() ? nullptr : outShardings.front();
-  rewriter.setInsertionPoint(op);
-  for (auto [operand, sharding] :
-       llvm::zip_equal(op->getOpOperands(), inShardings)) {
-    sharding = insertAllReduceIfUnreducedToReplicated(
-        operand, sharding, firstOutSharding, defaultMesh.attr(), rewriter);
   }
 
   ShardingProjection shardingProjection = ShardingProjection::build(
