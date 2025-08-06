@@ -272,6 +272,13 @@ void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
 }
 
+bool differentDimensionSharding(stablehlo::ConcatenateOp concatenateOp) {
+  TensorShardingAttr resultSharding = getSharding(concatenateOp.getResult());
+  return llvm::any_of(concatenateOp.getOperands(), [&](Value operand) {
+    return getSharding(operand) != resultSharding;
+  });
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -329,6 +336,19 @@ struct InsertExplicitReshardsPass
           .Case<stablehlo::DotGeneralOp>(
               [&](stablehlo::DotGeneralOp dotGeneralOp) {
                 processDot(dotGeneralOp, rewriter, symbolTable);
+              })
+          .Case<stablehlo::ConcatenateOp>(
+              [&](stablehlo::ConcatenateOp concatenateOp) {
+                // There are 3 cases.
+                // 1. Diff sharding -> insert explicit reshards.
+                // 2. Same sharding, concat dim is replicated -> no need to
+                // insert explicit reshards
+                // 3. Same sharding, concat dim is partitioned -> skip explicit
+                // reshard to avoid potential issues like b/393584711#comment3.
+                if (differentDimensionSharding(concatenateOp)) {
+                  insertExplicitReshardsOnOp(concatenateOp, rewriter,
+                                             symbolTable);
+                }
               });
     });
   }
