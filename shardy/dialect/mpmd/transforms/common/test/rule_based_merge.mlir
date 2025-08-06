@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-rule-based-merge='rules=FragmentMergeRule(sources=[FragmentInfo(origins=["f"]),FragmentInfo(origins=["g"])],target=FragmentInfo(origins=["f","g"])),FragmentMergeRule(sources=[FragmentInfo(origins=["i"]),FragmentInfo(origins=["j"]),FragmentInfo(origins=["k"])],target=FragmentInfo(origins=["i","j","k"]))'2>&1 | FileCheck %s
+// RUN: mpmd_opt %s -mpmd-rule-based-merge='rules=FragmentMergeRule(sources=[FragmentInfo(origins=["f"]),FragmentInfo(origins=["g"])],target=FragmentInfo(origins=["f","g"])),FragmentMergeRule(sources=[FragmentInfo(origins=["j"]),FragmentInfo(origins=["i"]),FragmentInfo(origins=["k"])],target=FragmentInfo(origins=["i","j","k"]))'2>&1 | FileCheck %s
 // TODO(b/435182733) Add more lit tests for rule based merge pass.
 
 !mesh_1_tensor_2_2_f32 = !mpmd.mesh_tensor<"m1", tensor<2x2xf32>>
