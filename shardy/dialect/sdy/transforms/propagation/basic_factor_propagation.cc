@@ -98,8 +98,8 @@ BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
   // `factorAxes` with `result`. It is feasible only if the factor:
   // - is open.
   // - does not have overflow axes.
-  // - is minor-most or `result` does not overflow the factor w.r.t.
-  //   `factorSize`.
+  // - is minor-most or the returned prefix of `result` does not overflow the
+  //   factor w.r.t. `factorSize`.
   if (!factorSharding.isClosed && factorSharding.overflowAxes.empty()) {
     if (factorSharding.isMinorMost) {
       return result;
@@ -112,6 +112,10 @@ BasicFactorPropagation::compatiblePrefixNoConflictsWithinFactor(
       const int64_t gcd = std::gcd(factorSize / prevShardedSize, axisSize);
       if (gcd == axisSize) {
         return result;
+      }
+      if (gcd != 1) {
+        return AxisRefAttr::get(result.getContext(), result.getName(),
+                                result.getSubAxisPreSize(), gcd);
       }
     }
   }
