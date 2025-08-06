@@ -55,7 +55,7 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
   Value operand = opOperand.get();
   TensorShardingAttr operandSharding = getSharding(operand);
 
-  if (insertAfterOperand && (onFullVersion || operandSharding)) {
+  if (insertAfterOperand) {
     rewriter.setInsertionPointAfterValue(operand);
   }
 
@@ -322,34 +322,38 @@ struct InsertExplicitReshardsPass
         }
       }
 
-      // TODO(enver): Refactor to deduplicate logic between minimal and full.
-      if (enableFullVersion ||
-          op->getName().getStringRef() == "mhlo.ragged_dot") {
-        insertExplicitReshardsOnOp(op, rewriter, symbolTable);
+      if (!enableFullVersion && isa<stablehlo::DotOp, stablehlo::DotGeneralOp,
+                                    stablehlo::ConcatenateOp>(op)) {
+        TypeSwitch<Operation*>(op)
+            .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
+              processDot(dotOp, rewriter, symbolTable);
+            })
+            .Case<stablehlo::DotGeneralOp>(
+                [&](stablehlo::DotGeneralOp dotGeneralOp) {
+                  processDot(dotGeneralOp, rewriter, symbolTable);
+                })
+            .Case<stablehlo::ConcatenateOp>(
+                [&](stablehlo::ConcatenateOp concatenateOp) {
+                  // There are 3 cases.
+                  // 1. Diff sharding -> insert explicit reshards.
+                  // 2. Same sharding, concat dim is replicated -> no need to
+                  // insert explicit reshards
+                  // 3. Same sharding, concat dim is partitioned -> skip
+                  // explicit reshard to avoid potential issues like
+                  // b/393584711#comment3.
+                  if (differentDimensionSharding(concatenateOp)) {
+                    insertExplicitReshardsOnOp(concatenateOp, rewriter,
+                                               symbolTable,
+                                               /*onFullVersion=*/true);
+                  }
+                });
         return;
       }
 
-      TypeSwitch<Operation*>(op)
-          .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
-            processDot(dotOp, rewriter, symbolTable);
-          })
-          .Case<stablehlo::DotGeneralOp>(
-              [&](stablehlo::DotGeneralOp dotGeneralOp) {
-                processDot(dotGeneralOp, rewriter, symbolTable);
-              })
-          .Case<stablehlo::ConcatenateOp>(
-              [&](stablehlo::ConcatenateOp concatenateOp) {
-                // There are 3 cases.
-                // 1. Diff sharding -> insert explicit reshards.
-                // 2. Same sharding, concat dim is replicated -> no need to
-                // insert explicit reshards
-                // 3. Same sharding, concat dim is partitioned -> skip explicit
-                // reshard to avoid potential issues like b/393584711#comment3.
-                if (differentDimensionSharding(concatenateOp)) {
-                  insertExplicitReshardsOnOp(concatenateOp, rewriter,
-                                             symbolTable);
-                }
-              });
+      insertExplicitReshardsOnOp(
+          op, rewriter, symbolTable,
+          /*onFullVersion=*/enableFullVersion ||
+              op->getName().getStringRef() == "mhlo.ragged_dot");
     });
   }
 };

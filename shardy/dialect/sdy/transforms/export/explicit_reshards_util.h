@@ -88,7 +88,8 @@ std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
 //
 // Refer to the documentation of `InsertExplicitReshardsPass` for more details.
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
-                                const SymbolTable& symbolTable);
+                                const SymbolTable& symbolTable,
+                                bool onFullVersion);
 
 }  // namespace sdy
 }  // namespace mlir

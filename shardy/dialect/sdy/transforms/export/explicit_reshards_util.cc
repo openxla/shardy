@@ -1001,7 +1001,12 @@ std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
 }
 
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
-                                const SymbolTable& symbolTable) {
+                                const SymbolTable& symbolTable,
+                                const bool onFullVersion) {
+  if (!onFullVersion) {
+    return;
+  }
+
   // NOTE: Creating a sharding rule requires data flow edges are present.
   OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
       op, /*conservativePropagation=*/false, /*setShardingRuleOnOp=*/false);
