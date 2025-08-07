@@ -1000,6 +1000,16 @@ std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
   return std::nullopt;
 }
 
+bool differentOperandShardingFromFirstResult(Operation* op) {
+  if (op->getNumResults() == 0) {
+    return false;
+  }
+  TensorShardingAttr resultSharding = getSharding(op->getResult(0));
+  return llvm::any_of(op->getOperands(), [&](Value operand) {
+    return getSharding(operand) != resultSharding;
+  });
+}
+
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
                                 const bool onFullVersion) {

@@ -83,6 +83,10 @@ bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis);
 std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
     const TensorFactorShardings& factorShardings, int64_t factorIndex);
 
+// Returns whether the (first) result sharding is different than any of the
+// operand shardings. If `op` does not have any results, returns false;
+bool differentOperandShardingFromFirstResult(Operation* op);
+
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
