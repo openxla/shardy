@@ -55,7 +55,7 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
   //TODO(b/330339693): update this doc when `getDataFlowEdgeOwners` is removed.
 }
 
-def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "func::FuncOp"> {
+def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "ModuleOp"> {
   let summary = "Applies constraints that dictate the sharding of their input.";
   let description = [{
     Copies the sharding of a `ShardingConstraintOp` to its input if it satisfies

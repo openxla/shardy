@@ -9,6 +9,7 @@ cc_library(
     srcs = ["source_sharding.cc"],
     hdrs = ["source_sharding.h"],
     deps = [
+        "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
         "@llvm-project//llvm:Support",

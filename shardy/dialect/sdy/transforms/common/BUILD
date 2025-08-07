@@ -23,6 +23,14 @@ cc_library(
     hdrs = ["macros.h"],
 )
 
+cc_library(
+    name = "propagation_options",
+    hdrs = ["propagation_options.h"],
+    deps = [
+        "@llvm-project//llvm:Support",
+    ],
+)
+
 cc_test(
     name = "op_properties_test",
     srcs = ["op_properties_test.cc"],
