@@ -40,6 +40,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Types.h"
@@ -399,6 +400,17 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                   getParentManualComputationOps(op));
 }
 
+// Same as the overload above, but takes a `SymbolTableCollection` instead of a
+// `SymbolTable`.
+LogicalResult verifyTensorShardingAttr(
+    TensorShardingAttr shardingAttr, Type type, Operation* op,
+    SymbolTableCollection& symbolTableCollection, EmitErrorFn emitError) {
+  return verifyTensorShardingAttr(
+      shardingAttr, type, op,
+      symbolTableCollection.getSymbolTable(op->getParentOfType<ModuleOp>()),
+      emitError);
+}
+
 // Verifies the following for `shardingPerValueAttr`:
 //
 // - The number of tensor shardings is equal to the number of tensors (size of
@@ -408,7 +420,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
 // op
 LogicalResult verifyTensorShardingPerValueAttr(
     TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
-    Operation* op, EmitErrorFn emitError, const SymbolTable& symbolTable) {
+    Operation* op, const SymbolTable& symbolTable, EmitErrorFn emitError) {
   ArrayRef<TensorShardingAttr> shardingsPerValue =
       shardingPerValueAttr.getShardings();
   if (types.empty() && shardingsPerValue.size() == 1) {
@@ -438,15 +450,6 @@ LogicalResult verifyTensorShardingPerValueAttr(
   }
 
   return success();
-}
-
-// Same as the overload above, but creates a `SymbolTable`.
-LogicalResult verifyTensorShardingPerValueAttr(
-    TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
-    Operation* op, EmitErrorFn emitError) {
-  return verifyTensorShardingPerValueAttr(
-      shardingPerValueAttr, types, op, emitError,
-      SymbolTable(op->getParentOfType<ModuleOp>()));
 }
 
 // Verifies an attribute of either a function argument or result.
@@ -724,17 +727,20 @@ LogicalResult MeshOp::verify() {
   return success();
 }
 
-LogicalResult ShardingConstraintOp::verify() {
+LogicalResult ShardingConstraintOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   return verifyTensorShardingAttr(getSharding(), getType(), *this,
-                                  getEmitErrorFn(*this));
+                                  symbolTableCollection, getEmitErrorFn(*this));
 }
 
-LogicalResult ReshardOp::verify() {
+LogicalResult ReshardOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   return verifyTensorShardingAttr(getSharding(), getType(), *this,
-                                  getEmitErrorFn(*this));
+                                  symbolTableCollection, getEmitErrorFn(*this));
 }
 
-LogicalResult DataFlowEdgeOp::verify() {
+LogicalResult DataFlowEdgeOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   if (!getType().hasStaticShape()) {
     return emitOpError(
                "expected sdy.data_flow_edge to have a static-shaped result. ")
@@ -755,6 +761,7 @@ LogicalResult DataFlowEdgeOp::verify() {
   }
   if (std::optional<TensorShardingAttr> sharding = getSharding();
       sharding && failed(verifyTensorShardingAttr(*sharding, getType(), *this,
+                                                  symbolTableCollection,
                                                   getEmitErrorFn(*this)))) {
     return failure();
   }
@@ -825,11 +832,10 @@ LogicalResult verifyManualComputationValue(
   // 2. Verify the in/out shardings are valid w.r.t the corresponding global
   //    type.
   if (failed(verifyTensorShardingPerValueAttr(
-          shardingPerValueAttr, globalTypes, op,
+          shardingPerValueAttr, globalTypes, op, symbolTable,
           [op, valueKindStr](StringRef msg) {
             return op->emitOpError(valueKindStr) << " " << msg;
-          },
-          symbolTable))) {
+          }))) {
     return failure();
   }
 
@@ -919,18 +925,10 @@ mlir::LogicalResult TensorShardingAttr::verifyForType(
                                   /*alreadyManualAxes=*/ManualAxisToOwner());
 }
 
-LogicalResult ManualComputationOp::verify() {
-  ManualAxisToOwner alreadyManualAxes =
-      getParentManualComputationOps(getOperation());
-  for (StringRef axisName : getManualAxes()) {
-    if (alreadyManualAxes.contains(axisName)) {
-      return emitBoundAxisInManualComputationError(
-          [this](StringRef msg) { return emitOpError(msg); }, axisName,
-          alreadyManualAxes[axisName]->getLoc());
-    }
-  }
-
-  SymbolTable symbolTable(getOperation()->getParentOfType<ModuleOp>());
+LogicalResult ManualComputationOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>());
   llvm::SmallDenseSet<StringRef> manualAxesSet(getManualAxes().begin(),
                                                getManualAxes().end());
   if (failed(verifyManualComputationValue(
@@ -962,6 +960,20 @@ LogicalResult ManualComputationOp::verify() {
   for (StringAttr axisName : getManualAxes()) {
     if (mesh && !mesh.hasAxis(axisName)) {
       return emitOpError("unknown manual axis: ") << axisName;
+    }
+  }
+
+  return success();
+}
+
+LogicalResult ManualComputationOp::verify() {
+  ManualAxisToOwner alreadyManualAxes =
+      getParentManualComputationOps(getOperation());
+  for (StringRef axisName : getManualAxes()) {
+    if (alreadyManualAxes.contains(axisName)) {
+      return emitBoundAxisInManualComputationError(
+          [this](StringRef msg) { return emitOpError(msg); }, axisName,
+          alreadyManualAxes[axisName]->getLoc());
     }
   }
 
@@ -1131,42 +1143,27 @@ LogicalResult PropagationEdgesAttr::verify(
   return success();
 }
 
-namespace {
-
-LogicalResult allInnerAndOuterTypesMatchInNamedComputation(
-    NamedComputationOp op, TypeRange innerTypes, TypeRange outerTypes,
-    StringRef innerName, StringRef outerName) {
-  if (innerTypes.size() != outerTypes.size()) {
-    return op.emitError("number of ")
-           << innerName << "s must match the number of " << outerName
-           << "s: " << innerTypes.size() << " != " << outerTypes.size();
+LogicalResult NamedComputationOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  if (getBody().getNumArguments() != getNumOperands()) {
+    return emitError(
+               "number of block arguments must match the number of operands: ")
+           << getBody().getNumArguments() << " != " << getNumOperands();
   }
 
-  for (auto [i, types] :
-       llvm::enumerate(llvm::zip_equal(innerTypes, outerTypes))) {
+  for (auto [i, types] : llvm::enumerate(
+           llvm::zip_equal(getBody().getArgumentTypes(), getOperandTypes()))) {
     auto [innerType, outerType] = types;
     if (innerType != outerType) {
-      return op.emitError("expected the type of the ")
-             << i << "'th " << innerName
-             << " to match the type of the corresponding " << outerName << ": "
-             << innerType << " vs " << outerType;
+      return emitError("expected the type of the ")
+             << i
+             << "'th block argument to match the type of the corresponding "
+             << "operand: " << innerType << " vs " << outerType;
     }
   }
 
-  return success();
-}
-
-}  // namespace
-
-LogicalResult NamedComputationOp::verify() {
-  if (failed(allInnerAndOuterTypesMatchInNamedComputation(
-          *this, getBody().getArgumentTypes(), getOperandTypes(),
-          "block argument", "operand")) ||
-      failed(allInnerAndOuterTypesMatchInNamedComputation(
-          *this, getBodyTerminatorOpOperandTypes(*this), getResultTypes(),
-          "returned value", "result"))) {
-    return failure();
-  }
+  // No need to check that result types match return value types, since this is
+  // handled by NamedComputationOp::inferReturnTypes.
 
   std::optional<TensorShardingPerValueAttr> inShardings = getInShardings();
   std::optional<TensorShardingPerValueAttr> outShardings = getOutShardings();
@@ -1176,18 +1173,20 @@ LogicalResult NamedComputationOp::verify() {
 
   // TODO(pxy): remove this once the `ShardableDataFlowOpInterface` is verified.
   // Verify the in/out shardings.
-  if (inShardings &&
-      failed(verifyTensorShardingPerValueAttr(
-          *inShardings, getOperandTypes(), *this, [this](StringRef msg) {
-            return emitOpError("in_shardings ") << msg;
-          }))) {
+  const SymbolTable& symbolTable =
+      SymbolTable(getOperation()->getParentOfType<ModuleOp>());
+  if (inShardings && failed(verifyTensorShardingPerValueAttr(
+                         *inShardings, getOperandTypes(), *this, symbolTable,
+                         [this](StringRef msg) {
+                           return emitOpError("in_shardings ") << msg;
+                         }))) {
     return failure();
   }
-  if (outShardings &&
-      failed(verifyTensorShardingPerValueAttr(
-          *outShardings, getResultTypes(), *this, [this](StringRef msg) {
-            return emitOpError("out_shardings ") << msg;
-          }))) {
+  if (outShardings && failed(verifyTensorShardingPerValueAttr(
+                          *outShardings, getResultTypes(), *this, symbolTable,
+                          [this](StringRef msg) {
+                            return emitOpError("out_shardings ") << msg;
+                          }))) {
     return failure();
   }
 
@@ -1202,7 +1201,8 @@ namespace {
 //    `getExpectedResultDimSharding`) gets the output sharding.
 template <typename OpTy>
 LogicalResult verifyCollectiveWithAxesPerDim(
-    OpTy op, ArrayRef<AxisRefListAttr> collectiveAxesPerDim,
+    OpTy op, SymbolTableCollection& symbolTableCollection,
+    ArrayRef<AxisRefListAttr> collectiveAxesPerDim,
     std::function<FailureOr<SmallVector<AxisRefAttr>>(
         DimensionShardingAttr operandDimSharding,
         ArrayRef<AxisRefAttr> dimCollectiveAxes, int64_t dim, MeshAttr mesh)>
@@ -1210,8 +1210,8 @@ LogicalResult verifyCollectiveWithAxesPerDim(
   TensorShardingAttr resultSharding = op.getOutSharding();
   TensorShardingAttr operandSharding =
       getOrCreateSharding(op.getOperand(), resultSharding.getMeshOrRef());
-  MeshAttr mesh = resultSharding.getMesh(op);
-  MeshAttr operandMesh = operandSharding.getMesh(op);
+  MeshAttr mesh = resultSharding.getMesh(symbolTableCollection.getSymbolTable(
+      op->template getParentOfType<ModuleOp>()));
 
   // 1. Verify all collective axes.
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
@@ -1305,9 +1305,10 @@ SmallVector<AxisRefAttr> sliceAxesAlongDim(DimensionShardingAttr dimSharding,
 
 }  // namespace
 
-LogicalResult AllGatherOp::verify() {
+LogicalResult AllGatherOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   return verifyCollectiveWithAxesPerDim(
-      *this, getGatheringAxes(),
+      *this, symbolTableCollection, getGatheringAxes(),
       [this](DimensionShardingAttr operandDimSharding,
              ArrayRef<AxisRefAttr> dimGatheringAxes, int64_t dim,
              MeshAttr mesh) -> FailureOr<SmallVector<AxisRefAttr>> {
@@ -1316,9 +1317,10 @@ LogicalResult AllGatherOp::verify() {
       });
 }
 
-LogicalResult AllSliceOp::verify() {
+LogicalResult AllSliceOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   return verifyCollectiveWithAxesPerDim(
-      *this, getSlicingAxes(),
+      *this, symbolTableCollection, getSlicingAxes(),
       [](DimensionShardingAttr operandDimSharding,
          ArrayRef<AxisRefAttr> dimSlicingAxes, int64_t dim,
          MeshAttr mesh) -> FailureOr<SmallVector<AxisRefAttr>> {
@@ -1326,10 +1328,12 @@ LogicalResult AllSliceOp::verify() {
       });
 }
 
-LogicalResult AllToAllOp::verify() {
+LogicalResult AllToAllOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   TensorShardingAttr operandSharding = getSharding(getOperand());
   TensorShardingAttr resultSharding = getOutSharding();
-  MeshAttr mesh = resultSharding.getMesh(*this);
+  MeshAttr mesh = resultSharding.getMesh(symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>()));
 
   ArrayRef<AllToAllParamAttr> params = getParams();
   // 1. Verify that the parameter list is not empty.
@@ -1439,11 +1443,14 @@ LogicalResult AllToAllOp::verify() {
   return success();
 }
 
-LogicalResult CollectivePermuteOp::verify() {
+LogicalResult CollectivePermuteOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
   TensorShardingAttr operandSharding = getSharding(getOperand());
   TensorShardingAttr resultSharding = getOutSharding();
-  MeshAttr mesh = resultSharding.getMesh(*this);
-  MeshAttr operandMesh = operandSharding.getMesh(*this);
+  const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>());
+  MeshAttr mesh = resultSharding.getMesh(symbolTable);
+  MeshAttr operandMesh = operandSharding.getMesh(symbolTable);
   if (mesh.getAxes() != operandMesh.getAxes()) {
     return emitOpError("result mesh has different axes than operand mesh")
                .attachNote(getTensor().getLoc())
@@ -1480,6 +1487,70 @@ LogicalResult CollectivePermuteOp::verify() {
   }
 
   return success();
+}
+
+LogicalResult AllReduceOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  TensorShardingAttr resultSharding = getOutSharding();
+  TensorShardingAttr operandSharding =
+      getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
+  MeshAttr mesh = resultSharding.getMesh(symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>()));
+  // 1. Verify that the operand and result have equivalent dimension shardings.
+  if (!operandSharding.areDimAxesEqual(resultSharding)) {
+    return emitOpError("operand and result sharding have different axes");
+  }
+
+  // 2. Verify all reduction axes are valid.
+  SmallDenseSet<AxisRefAttr> seenAxisRefs;
+  SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
+  ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
+  SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
+  if (auto res = verifyAxisRefList(reductionAxes, axisNameToSize, seenAxisRefs,
+                                   axisNameToSubAxes, getEmitErrorFn(*this));
+      failed(res)) {
+    return res;
+  }
+
+  for (AxisRefAttr reductionAxisRef : reductionAxes) {
+    auto overlapsWithReductionAxis = [&](AxisRefAttr axisRef) {
+      return axisRef.overlaps(reductionAxisRef);
+    };
+
+    // 3. Verify `reductionAxisRef` does not overlap with the operand dimension
+    // sharding and replicated axes (it can overlap with unreduced axes).
+    if (operandSharding.anyOfDimShardingOrReplicatedAxis(
+            overlapsWithReductionAxis)) {
+      return emitOpError("reduction axis ")
+             << reductionAxisRef.toString()
+             << " overlaps with operand dimension sharding or replicated axes";
+    }
+
+    // TODO(tomnatan): we should eventually require all reduction axes to be
+    // unreduced in the operand sharding.
+
+    // 4. Verify `reductionAxisRef` does not overlap with the result unreduced
+    // axes.
+    if (llvm::any_of(resultSharding.getUnreducedAxes(),
+                     overlapsWithReductionAxis)) {
+      return emitOpError("reduction axis ")
+             << reductionAxisRef.toString()
+             << " overlaps with result unreduced axes";
+    }
+  }
+
+  return success();
+}
+
+LogicalResult ReduceScatterOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  return verifyCollectiveWithAxesPerDim(
+      *this, symbolTableCollection, getReduceScatterAxes(),
+      [](DimensionShardingAttr operandDimSharding,
+         ArrayRef<AxisRefAttr> dimSlicingAxes, int64_t dim,
+         MeshAttr mesh) -> FailureOr<SmallVector<AxisRefAttr>> {
+        return sliceAxesAlongDim(operandDimSharding, dimSlicingAxes, mesh);
+      });
 }
 
 LogicalResult verifyCollectiveOp(Operation* rawOp) {
@@ -1561,6 +1632,7 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
 
     return verifyTensorShardingPerValueAttr(
         shardingPerValue, op->getResultTypes(), op,
+        SymbolTable(op->getParentOfType<ModuleOp>()),
         [op](StringRef msg) { return op->emitOpError("result ") << msg; });
   }
 
@@ -1610,67 +1682,6 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
   }
 
   return success();
-}
-
-LogicalResult AllReduceOp::verify() {
-  TensorShardingAttr resultSharding = getOutSharding();
-  TensorShardingAttr operandSharding =
-      getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
-  MeshAttr mesh = resultSharding.getMesh(*this);
-  // 1. Verify that the operand and result have equivalent dimension shardings.
-  if (!operandSharding.areDimAxesEqual(resultSharding)) {
-    return emitOpError("operand and result sharding have different axes");
-  }
-
-  // 2. Verify all reduction axes are valid.
-  SmallDenseSet<AxisRefAttr> seenAxisRefs;
-  SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
-  ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
-  SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
-  if (auto res = verifyAxisRefList(reductionAxes, axisNameToSize, seenAxisRefs,
-                                   axisNameToSubAxes, getEmitErrorFn(*this));
-      failed(res)) {
-    return res;
-  }
-
-  for (AxisRefAttr reductionAxisRef : reductionAxes) {
-    auto overlapsWithReductionAxis = [&](AxisRefAttr axisRef) {
-      return axisRef.overlaps(reductionAxisRef);
-    };
-
-    // 3. Verify `reductionAxisRef` does not overlap with the operand dimension
-    // sharding and replicated axes (it can overlap with unreduced axes).
-    if (operandSharding.anyOfDimShardingOrReplicatedAxis(
-            overlapsWithReductionAxis)) {
-      return emitOpError("reduction axis ")
-             << reductionAxisRef.toString()
-             << " overlaps with operand dimension sharding or replicated axes";
-    }
-
-    // TODO(tomnatan): we should eventually require all reduction axes to be
-    // unreduced in the operand sharding.
-
-    // 4. Verify `reductionAxisRef` does not overlap with the result unreduced
-    // axes.
-    if (llvm::any_of(resultSharding.getUnreducedAxes(),
-                     overlapsWithReductionAxis)) {
-      return emitOpError("reduction axis ")
-             << reductionAxisRef.toString()
-             << " overlaps with result unreduced axes";
-    }
-  }
-
-  return success();
-}
-
-LogicalResult ReduceScatterOp::verify() {
-  return verifyCollectiveWithAxesPerDim(
-      *this, getReduceScatterAxes(),
-      [](DimensionShardingAttr operandDimSharding,
-         ArrayRef<AxisRefAttr> dimSlicingAxes, int64_t dim,
-         MeshAttr mesh) -> FailureOr<SmallVector<AxisRefAttr>> {
-        return sliceAxesAlongDim(operandDimSharding, dimSlicingAxes, mesh);
-      });
 }
 
 }  // namespace sdy

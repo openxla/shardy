@@ -49,7 +49,8 @@ def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
 }
 
 def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
-  [SameOperandsAndResultType, InferTypeOpInterface]> {
+  [SameOperandsAndResultType, InferTypeOpInterface,
+   DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
   let summary = "Constrains a tensor to the specified sharding";
   let description = [{
     Attaches a sharding to an intermediate tensor (e.g. the result of a matmul)
@@ -75,11 +76,11 @@ def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
   let results = (outs AnyShaped:$result);
 
   let assemblyFormat = "$input $sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
 }
 
 def Sdy_ReshardOp : Sdy_Op<"reshard",
-  [Pure, SameOperandsAndResultType, InferTypeOpInterface]> {
+  [Pure, SameOperandsAndResultType, InferTypeOpInterface,
+   DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
   let summary = "Reshards a tensor to a different sharding";
   let description = [{
     Reshards the input tensor with the specified sharding, which is different
@@ -105,7 +106,6 @@ def Sdy_ReshardOp : Sdy_Op<"reshard",
   let results = (outs AnyShaped:$result);
 
   let assemblyFormat = "$input $sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
@@ -124,7 +124,8 @@ def Sdy_ReturnOp : Sdy_Op<"return", [Pure, Terminator]> {
 
 def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
-   IsolatedFromAbove, DeclareOpInterfaceMethods<
+   IsolatedFromAbove, DeclareOpInterfaceMethods<SymbolUserOpInterface>,
+    DeclareOpInterfaceMethods<
        Sdy_ShardableDataFlowOpInterface,
        /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
                             "setOpResultEdgeOwnerShardings",
@@ -274,7 +275,8 @@ def Sdy_ConstantOp : Sdy_Op<"constant",
 // TODO((b/330339693): update doc based on the interface we define with dialects
 // like stablehlo.
 def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
-  [SameOperandsAndResultType]> {
+  [SameOperandsAndResultType,
+   DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
   let summary = "data flow edge op.";
 
   let description = [{
@@ -339,8 +341,6 @@ def Sdy_DataFlowEdgeOp : Sdy_Op<"data_flow_edge",
   let results = (outs AnyShaped:$result);
 
   let assemblyFormat = "$input (`sharding````=``` $sharding^)? attr-dict `:` type($result)";
-
-  let hasVerifier = 1;
 
   let builders = [
     OpBuilder<(ins "Value":$input),
@@ -411,6 +411,7 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
     [RecursiveMemoryEffects, SingleBlockImplicitTerminator<"ReturnOp">,
      RecursivelySpeculatable, IsolatedFromAbove,
      DeclareOpInterfaceMethods<InferTypeOpInterface>,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
      DeclareOpInterfaceMethods<
          Sdy_ShardableDataFlowOpInterface,
          /*methodOverrides=*/["getOpResultEdgeOwnerShardings",
@@ -456,13 +457,13 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
     attr-dict
     `:` functional-type($operands, results)
   }];
-
-  let hasVerifier = 1;
 }
 
 
 def Sdy_AllGatherOp : Sdy_Op<"all_gather",
-    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     Sdy_CollectiveOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
   let summary = "Performs an all-gather communication along axes";
   let description = [{
     Gathers chunks of a tensor along axes specified in `gathering_axes`.
@@ -498,12 +499,12 @@ def Sdy_AllGatherOp : Sdy_Op<"all_gather",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$gathering_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
 def Sdy_AllSliceOp : Sdy_Op<"all_slice",
     [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
      DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
          /*methodOverrides=*/["allowMissingInputSharding"]>]> {
   let summary = "Performs a dynamic-slice operation along axes";
@@ -542,12 +543,13 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$slicing_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
 def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
-    [SameOperandsAndResultType, InferTypeOpInterface, Sdy_CollectiveOpInterface]> {
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     Sdy_CollectiveOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
   let summary = "Performs an all-to-all communication along axes";
   let description = [{
     For each (axes, src_dim, tgt_dim) tuple in the parameter list, this
@@ -594,7 +596,6 @@ def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$params $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
@@ -603,6 +604,7 @@ def Sdy_AllToAllOp : Sdy_Op<"all_to_all",
 
 def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
     [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
      DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
          /*methodOverrides=*/["allowDifferentMeshes"]>]> {
   let summary = "Performs a collective-permute communication to replace axes";
@@ -642,12 +644,12 @@ def Sdy_CollectivePermuteOp : Sdy_Op<"collective_permute",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
 def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
     [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
      DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
          /*methodOverrides=*/["allowMissingInputSharding"]>]> {
   let summary = "Perform an all-reduce comunication along axes";
@@ -675,12 +677,12 @@ def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
 def Sdy_ReduceScatterOp: Sdy_Op<"reduce_scatter",
     [SameOperandsAndResultType, InferTypeOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
      DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
         /*methodOverrides=*/["allowMissingInputSharding"]>]> {
   let summary = "Performs a reduce-scatter communication along axes";
@@ -705,7 +707,6 @@ def Sdy_ReduceScatterOp: Sdy_Op<"reduce_scatter",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
-  let hasVerifier = 1;
   let hasCanonicalizer = 1;
 }
 
