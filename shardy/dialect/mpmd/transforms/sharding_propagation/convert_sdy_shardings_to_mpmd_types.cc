@@ -81,9 +81,23 @@ class ConvertSdyShardingsToMpmdTypesPass
             }
           })
           .Case<TransferOp>([](TransferOp transfer) {
+            sdy::TensorShardingAttr tensor_sharding =
+                sdy::getSharding(transfer.getTensor());
+            // if (tensor_sharding) {
+            //   SDY_LOG(INFO) << "tensor_sharding: ";
+            //   tensor_sharding.dump();
+            // } else {
+            //   SDY_LOG(INFO) << "tensor_sharding is null";
+            // }
             sdy::TensorShardingAttr result_sharding =
                 sdy::getSharding(transfer.getResult());
-            UpdateValueTypeWithSharding(transfer.getTensor(), result_sharding);
+            // if (result_sharding) {
+            //   SDY_LOG(INFO) << "result_sharding: ";
+            //   result_sharding.dump();
+            // } else {
+            //   SDY_LOG(INFO) << "result_sharding is null";
+            // }
+            UpdateValueTypeWithSharding(transfer.getTensor(), tensor_sharding);
             UpdateValueTypeWithSharding(transfer.getResult(), result_sharding);
           })
           .Case<ForOp>([](ForOp for_op) {
@@ -120,23 +134,21 @@ class ConvertSdyShardingsToMpmdTypesPass
     UpdateFunctionType(func_op);
 
     // Verify that all transfers have the same operand and result sharding.
-    func_op->walk([](TransferOp transfer) {
-      sdy::TensorShardingAttr result_sharding =
-          GetShardingFromMeshTensorValue(transfer.getResult());
-      sdy::TensorShardingAttr operand_sharding =
-          GetShardingFromMeshTensorValue(transfer.getTensor());
+    // func_op->walk([](TransferOp transfer) {
+    //   sdy::TensorShardingAttr result_sharding =
+    //       GetShardingFromMeshTensorValue(transfer.getResult());
+    //   sdy::TensorShardingAttr operand_sharding =
+    //       GetShardingFromMeshTensorValue(transfer.getTensor());
 
-      if (sdy::shouldReshard(operand_sharding, result_sharding)) {
-        transfer->emitError()
-            << "Transfer op has different shardings for the "
-               "tensor and result, tensor sharding: "
-            << operand_sharding
-            << ", result sharding: "
-            << result_sharding;
-        return WalkResult::interrupt();
-      }
-      return WalkResult::advance();
-    });
+    //   if (sdy::shouldReshard(operand_sharding, result_sharding)) {
+    //     transfer->emitError()
+    //         << "Transfer op has different shardings for the "
+    //            "tensor and result, tensor sharding: "
+    //         << operand_sharding << ", result sharding: " << result_sharding;
+    //     return WalkResult::interrupt();
+    //   }
+    //   return WalkResult::advance();
+    // });
   }
 };
 

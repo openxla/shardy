@@ -45,6 +45,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+// #include "shardy/src/shardy/common/logging.h"
 
 namespace mlir {
 namespace sdy {
@@ -336,36 +337,47 @@ TensorShardingAttr getSharding(Value value) {
   if (!value) {
     // This means the value is a scalar block argument, in which case it can't
     // be sharded.
+    // SDY_LOG(INFO) << "value is a scalar block argument";
     return TensorShardingAttr();
   }
   return TypeSwitch<Operation*, TensorShardingAttr>(getOwningOp(value))
       .Case<FuncOp>([value](FuncOp funcOp) {
+        // SDY_LOG(INFO) << "funcOp";
         return funcOp.getArgAttrOfType<TensorShardingAttr>(
             cast<BlockArgument>(value).getArgNumber(), kShardingAttr);
       })
       .Case<DataFlowEdgeOp>([](DataFlowEdgeOp dataFlowEdgeOp) {
+        // SDY_LOG(INFO) << "dataFlowEdgeOp";
         return dataFlowEdgeOp.getShardingAttr();
       })
       .Case<ShardingConstraintOp>([](ShardingConstraintOp shardingConstraint) {
+        // SDY_LOG(INFO) << "shardingConstraint";
         return shardingConstraint.getSharding();
       })
-      .Case<ReshardOp>(
-          [](ReshardOp reshardOp) { return reshardOp.getSharding(); })
+      .Case<ReshardOp>([](ReshardOp reshardOp) {
+        // SDY_LOG(INFO) << "reshardOp";
+        return reshardOp.getSharding();
+      })
       .Case<CollectiveOpInterface>([](CollectiveOpInterface collectiveOp) {
+        // SDY_LOG(INFO) << "collectiveOp";
         return collectiveOp.getOutSharding();
       })
       // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.
       .Case<ShardableDataFlowOpInterface>(
           [value](ShardableDataFlowOpInterface shardableRegionOp) {
+            // SDY_LOG(INFO) << "shardableRegionOp";
             return shardableRegionOp.getEdgeOwnerSharding(value);
           })
       .Default([value](Operation* op) {
+        // SDY_LOG(INFO) << "Operation (default)";
         if (TensorShardingPerValueAttr shardingPerResult =
                 getShardingPerValue(op)) {
+          // SDY_LOG(INFO) << "shardingPerResult";
           return shardingPerResult
               .getShardings()[cast<OpResult>(value).getResultNumber()];
         }
+        // SDY_LOG(INFO) << "TensorShardingAttr()";
         return TensorShardingAttr();
       });
 }
