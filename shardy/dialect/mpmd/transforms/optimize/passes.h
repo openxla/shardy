@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassOptions.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/mpmd/ir/fragment_execution_rules.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/distributed_function_pass.h"
 #include "shardy/dialect/mpmd/transforms/optimize/pipeline_schedule.h"

@@ -53,6 +53,7 @@ cc_library(
         ":utils",
         "//shardy/common:logging",
         "//shardy/dialect/mpmd/ir:dialect",
+        "//shardy/dialect/mpmd/ir:fragment_execution_rules",
         "//shardy/dialect/mpmd/transforms/optimize:utils",
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",

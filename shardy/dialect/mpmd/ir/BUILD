@@ -182,6 +182,35 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "fragment_execution_rules",
+    srcs = ["fragment_execution_rules.cc"],
+    hdrs = ["fragment_execution_rules.h"],
+    deps = [
+        ":dialect",
+        "//shardy/common:logging",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_test(
+    name = "fragment_execution_rules_test",
+    srcs = ["fragment_execution_rules_test.cc"],
+    deps = [
+        ":dialect",
+        ":fragment_execution_rules",
+        ":register",
+        "//shardy/common:logging",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
 cc_test(
     name = "utils_test",
     srcs = ["utils_test.cc"],

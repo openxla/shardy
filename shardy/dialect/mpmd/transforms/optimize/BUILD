@@ -45,6 +45,7 @@ cc_library(
         ":utils",
         "//shardy/common:logging",
         "//shardy/dialect/mpmd/ir:dialect",
+        "//shardy/dialect/mpmd/ir:fragment_execution_rules",
         "//shardy/dialect/mpmd/transforms/common:distributed_function_pass",
         "//shardy/dialect/mpmd/transforms/common:passes",
         "//shardy/dialect/mpmd/transforms/common:utils",

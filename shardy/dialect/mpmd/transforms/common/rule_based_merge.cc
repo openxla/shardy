@@ -30,6 +30,7 @@ limitations under the License.
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
+#include "shardy/dialect/mpmd/ir/fragment_execution_rules.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/mpmd/transforms/common/utils.h"
