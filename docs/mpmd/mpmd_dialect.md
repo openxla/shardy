@@ -102,7 +102,7 @@ operation ::= `mpmd.call` $callee `(` $tensors `)` attr-dict `:` functional-type
 A function call operation. Useful to wrap the body of loops in function
 declarations to reduce code size, for example.
 
-Interfaces: `CallOpInterface`, `SymbolUserOpInterface`
+Interfaces: `ArgAndResultAttrsOpInterface`, `CallOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -251,7 +251,7 @@ Example:
 
 Traits: `HasParent<::mlir::func::FuncOp>`, `MemRefsNormalizable`
 
-Interfaces: `CallOpInterface`, `SymbolUserOpInterface`
+Interfaces: `ArgAndResultAttrsOpInterface`, `CallOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
