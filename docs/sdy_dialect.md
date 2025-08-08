@@ -51,7 +51,7 @@ Example:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -102,7 +102,7 @@ affect the order of the corresponding replica groups.
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -164,7 +164,7 @@ Example:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -236,7 +236,7 @@ Example:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -300,7 +300,7 @@ sdy.mesh @mesh = <["a"=2, "b"=2, "c"=4, "d"=2, "e"=2, "f"=2]>
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -429,7 +429,7 @@ responsible for providing this information.
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`
+Interfaces: `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -489,7 +489,7 @@ i.e. fully replicated.
 
 Traits: `IsolatedFromAbove`, `RecursiveMemoryEffects`, `SingleBlockImplicitTerminator<ReturnOp>`, `SingleBlock`
 
-Interfaces: `ShardableDataFlowOpInterface`
+Interfaces: `ShardableDataFlowOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -579,7 +579,7 @@ Example:
 
 Traits: `IsolatedFromAbove`, `RecursiveMemoryEffects`, `RecursivelySpeculatableImplTrait`, `SingleBlockImplicitTerminator<ReturnOp>`, `SingleBlock`
 
-Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `ShardableDataFlowOpInterface`
+Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `ShardableDataFlowOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -677,7 +677,7 @@ essentially a combination of an `sdy.all_reduce` followed by an
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`
+Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
@@ -728,7 +728,7 @@ operation ::= `sdy.reshard` $input $sharding attr-dict `:` type($result)
 
 Traits: `AlwaysSpeculatableImplTrait`, `SameOperandsAndResultType`
 
-Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
+Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`, `SymbolUserOpInterface`
 
 Effects: `MemoryEffects::Effect{}`
 
@@ -808,7 +808,7 @@ This op can either:
 
 Traits: `SameOperandsAndResultType`
 
-Interfaces: `InferTypeOpInterface`
+Interfaces: `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 #### Attributes:
 
