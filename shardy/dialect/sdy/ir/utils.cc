@@ -208,8 +208,6 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
       continue;
     }
     MeshAttr otherMesh = sharding.getMesh(symbolTable);
-    // TODO(b/409516201): Why do we check mesh.empty(), and what if it ends up
-    // propagating to the sharding with the empty mesh.
     if (!mesh || mesh.empty()) {
       mesh = otherMesh;
       meshOrRef = sharding.getMeshOrRef();
