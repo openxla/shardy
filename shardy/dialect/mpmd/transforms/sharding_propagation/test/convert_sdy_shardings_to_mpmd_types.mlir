@@ -40,7 +40,6 @@ func.func @fragment_with_only_input_sharding(
     return %0 : !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
   }
 
-
 // CHECK-LABEL: func @fragment_with_only_result_shardings
 // CHECK-SAME: %arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
 // CHECK-SAME: %arg1: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) ->
@@ -83,11 +82,12 @@ func.func @transfer_has_no_sharding(
     return %0 : !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
   }
 
-  // CHECK-LABEL: func @single_transfer_has_sharding
+// CHECK-LABEL: func @single_transfer_has_sharding
 // CHECK-SAME: %arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
 // CHECK-SAME: !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>
 func.func @single_transfer_has_sharding(
-  %arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) ->
+  %arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) ->
   (!mpmd.mesh_tensor<"m2", tensor<4x8xf32>>) attributes {topology = #topology} {
     // CHECK: mpmd.transfer %arg0
     // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>
@@ -107,7 +107,7 @@ func.func @fragment_with_transfer_fragment_result_has_multiple_uses(
   (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
    !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
   {sdy.sharding = #sdy.sharding<@mesh, [{"x", ?}, {?}]>}) attributes {topology = #topology} {
-    %0 = mpmd.fragment<mesh="m1", origin=["producer"], in_shardings=[<@mesh, [{"x"}, {}]>]> (%arg0) (%arg2: tensor<4x8xf32>) {
+    %0 = mpmd.fragment<mesh="m1", origin=["producer"], in_shardings=[<@mesh, [{"x"}, {}]>], out_shardings=[<@mesh, [{"x"}, {}]>]> (%arg0) (%arg2: tensor<4x8xf32>) {
       %2 = stablehlo.add %arg2, %arg2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x8xf32>
       mpmd.return %2 : tensor<4x8xf32>
     } : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>

@@ -81,10 +81,10 @@ class ConvertSdyShardingsToMpmdTypesPass
             }
           })
           .Case<TransferOp>([](TransferOp transfer) {
-            sdy::TensorShardingAttr result_sharding =
-                sdy::getSharding(transfer.getResult());
-            UpdateValueTypeWithSharding(transfer.getTensor(), result_sharding);
-            UpdateValueTypeWithSharding(transfer.getResult(), result_sharding);
+            UpdateValueTypeWithSharding(transfer.getTensor(),
+                                        sdy::getSharding(transfer.getTensor()));
+            UpdateValueTypeWithSharding(transfer.getResult(),
+                                        sdy::getSharding(transfer.getResult()));
           })
           .Case<ForOp>([](ForOp for_op) {
             for (OpOperand& operand : for_op->getOpOperands()) {
@@ -130,9 +130,7 @@ class ConvertSdyShardingsToMpmdTypesPass
         transfer->emitError()
             << "Transfer op has different shardings for the "
                "tensor and result, tensor sharding: "
-            << operand_sharding
-            << ", result sharding: "
-            << result_sharding;
+            << operand_sharding << ", result sharding: " << result_sharding;
         return WalkResult::interrupt();
       }
       return WalkResult::advance();
