@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -26,29 +27,42 @@ limitations under the License.
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/register.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-using ::testing::ElementsAre;
+using ::testing::ElementsAreArray;
 using ::testing::Eq;
-using ::testing::FieldsAre;
 
 namespace mlir::mpmd {
 namespace {
+
+void ExpectFragmentInfoEq(FragmentInfo actual, FragmentInfo expected) {
+  // GetFragmentInfo returns a FragmentInfo with sorted origins, so we sort the
+  // origins as well.
+  llvm::sort(expected.origins);
+  EXPECT_THAT(actual.origins, ElementsAreArray(expected.origins));
+  EXPECT_EQ(actual.stage_id, expected.stage_id);
+  EXPECT_EQ(actual.call_counter, expected.call_counter);
+  EXPECT_EQ(actual.mesh_id, expected.mesh_id);
+  EXPECT_EQ(actual.is_weight_gradient, expected.is_weight_gradient);
+  // Compare full struct in case any fields were missed above.
+  EXPECT_EQ(actual, expected);
+}
 
 FragmentOrigin MakeFragmentOrigin(const std::string& computation_name,
                                   int transpose_count) {
   return {computation_name, transpose_count};
 }
 
-FragmentInfo MakeFragmentInfo(const std::vector<FragmentOrigin>& origins,
-                              std::optional<int> stage_id = std::nullopt,
-                              std::optional<int> call_counter = std::nullopt) {
-  return {origins, stage_id, call_counter};
+FragmentInfo MakeFragmentInfo(
+    const std::vector<FragmentOrigin>& origins, int mesh_id,
+    std::optional<int> stage_id = std::nullopt,
+    std::optional<int> call_counter = std::nullopt,
+    std::optional<bool> is_weight_gradient = std::nullopt) {
+  return {origins, stage_id, call_counter, mesh_id, is_weight_gradient};
 }
 
 FragmentMergeRule MakeFragmentMergeRule(
@@ -56,7 +70,16 @@ FragmentMergeRule MakeFragmentMergeRule(
   return {sources, target};
 }
 
-TEST(FragmentInfo, GetFragmentInfo) {
+struct GetFragmentInfoTestParams {
+  bool split_bwd_fragments;
+  std::optional<bool> expected_is_weight_gradient;
+};
+
+class GetFragmentInfoTest
+    : public ::testing::TestWithParam<GetFragmentInfoTestParams> {};
+
+TEST_P(GetFragmentInfoTest, GetFragmentInfo) {
+  const GetFragmentInfoTestParams& params = GetParam();
   const std::string kProgram = R"mlir(
     !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
     func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
@@ -76,14 +99,39 @@ TEST(FragmentInfo, GetFragmentInfo) {
   auto main_func = GetMainFunction(*module);
   ASSERT_TRUE(main_func);
   FragmentOp fragment_op = cast<FragmentOp>(*main_func.getOps().begin());
-  FragmentInfo fragment_info = GetFragmentInfo(fragment_op);
-  EXPECT_THAT(fragment_info.origins,
-              ElementsAre(FieldsAre("f1", 123), FieldsAre("f2", 123)));
-  EXPECT_THAT(fragment_info.stage_id, Eq(std::nullopt));
-  EXPECT_THAT(fragment_info.call_counter, Eq(std::nullopt));
+  FragmentInfo fragment_info =
+      GetFragmentInfo(fragment_op, params.split_bwd_fragments);
+
+  ExpectFragmentInfoEq(
+      fragment_info,
+      MakeFragmentInfo(
+          {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 123)},
+          /*mesh_id=*/0, /*stage_id=*/std::nullopt,
+          /*call_counter=*/std::nullopt, params.expected_is_weight_gradient));
 }
 
-TEST(FragmentInfo, SetFragmentInfo) {
+INSTANTIATE_TEST_SUITE_P(
+    GetFragmentInfo, GetFragmentInfoTest,
+    testing::Values(
+        GetFragmentInfoTestParams{/*split_bwd_fragments=*/false,
+                                  /*expected_is_weight_gradient=*/std::nullopt},
+        GetFragmentInfoTestParams{/*split_bwd_fragments=*/true,
+                                  /*expected_is_weight_gradient=*/false}),
+    [](const testing::TestParamInfo<GetFragmentInfoTest::ParamType>& info) {
+      return info.param.split_bwd_fragments ? "WithSplitBwdFragments"
+                                            : "WithoutSplitBwdFragments";
+    });
+
+struct SetFragmentInfoTestParams {
+  std::string test_name;
+  FragmentInfo info;
+};
+
+class SetFragmentInfoTest
+    : public ::testing::TestWithParam<SetFragmentInfoTestParams> {};
+
+TEST_P(SetFragmentInfoTest, SetAndGetFragmentInfo) {
+  const SetFragmentInfoTestParams& params = GetParam();
   const std::string kProgram = R"mlir(
     !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
     func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
@@ -99,55 +147,171 @@ TEST(FragmentInfo, SetFragmentInfo) {
   loadAllRequiredDialects(&context);
   OwningOpRef<ModuleOp> module =
       parseSourceString<ModuleOp>(kProgram, &context);
-  SDY_CHECK(module);
+  ASSERT_TRUE(module);
   auto main_func = GetMainFunction(*module);
-  SDY_CHECK(main_func);
+  ASSERT_TRUE(main_func);
+  ASSERT_TRUE(main_func->hasAttr("topology"));
+
   FragmentOp fragment_op = cast<FragmentOp>(*main_func.getOps().begin());
 
   IRRewriter rewriter(&context);
-  SetFragmentInfo(fragment_op,
-                  MakeFragmentInfo({MakeFragmentOrigin("f3", 456)},
-                                   /*stage_id=*/1, /*call_counter=*/2),
-                  rewriter);
-  FragmentInfo fragment_info = GetFragmentInfo(fragment_op);
-  EXPECT_THAT(fragment_info.origins, ElementsAre(FieldsAre("f3", 456)));
-  EXPECT_THAT(fragment_info.stage_id, Eq(1));
-  EXPECT_THAT(fragment_info.call_counter, Eq(2));
+  SetFragmentInfo(fragment_op, params.info, rewriter);
+  FragmentInfo fragment_info =
+      GetFragmentInfo(fragment_op, /*split_bwd_fragments=*/true);
 
-  SetFragmentInfo(fragment_op,
-                  MakeFragmentInfo({MakeFragmentOrigin("f4", 789)}), rewriter);
-  fragment_info = GetFragmentInfo(fragment_op);
-  EXPECT_THAT(fragment_info.origins, ElementsAre(FieldsAre("f4", 789)));
-  EXPECT_THAT(fragment_info.stage_id, Eq(std::nullopt));
-  EXPECT_THAT(fragment_info.call_counter, Eq(std::nullopt));
+  ExpectFragmentInfoEq(fragment_info, params.info);
 }
 
-TEST(FragmentInfo, PrintFragmentInfo) {
-  FragmentInfo fragment_info = MakeFragmentInfo(
-      {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 456)},
-      /*stage_id=*/1, /*call_counter=*/2);
+INSTANTIATE_TEST_SUITE_P(
+    SetFragmentInfo, SetFragmentInfoTest,
+    testing::Values(
+        SetFragmentInfoTestParams{
+            "WithStageAndCallCounter",
+            MakeFragmentInfo({MakeFragmentOrigin("f3", 456)}, /*mesh_id=*/0,
+                             /*stage_id=*/1, /*call_counter=*/2,
+                             /*is_weight_gradient=*/false)},
+        SetFragmentInfoTestParams{
+            "WithWeightGradient",
+            MakeFragmentInfo({MakeFragmentOrigin("f4", 789)}, /*mesh_id=*/0,
+                             /*stage_id=*/std::nullopt,
+                             /*call_counter=*/std::nullopt,
+                             /*is_weight_gradient=*/true)}),
+    [](const testing::TestParamInfo<SetFragmentInfoTest::ParamType>& info) {
+      return info.param.test_name;
+    });
+
+struct PrintFragmentInfoTestParams {
+  std::string test_name;
+  FragmentInfo info;
+  std::string expected_output;
+};
+
+class PrintFragmentInfoTest
+    : public ::testing::TestWithParam<PrintFragmentInfoTestParams> {};
+
+TEST_P(PrintFragmentInfoTest, PrintFragmentInfo) {
+  const auto& params = GetParam();
   std::string str;
   llvm::raw_string_ostream os(str);
-  os << fragment_info;
-  EXPECT_THAT(str, Eq("FragmentInfo(origins=[\"f1\"(123),\"f2\"(456)],stage=1,"
-                      "call_counter=2)"));
+  os << params.info;
+  EXPECT_THAT(str, Eq(params.expected_output));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    PrintFragmentInfo, PrintFragmentInfoTest,
+    testing::Values(
+        PrintFragmentInfoTestParams{
+            "AllFields",
+            MakeFragmentInfo({MakeFragmentOrigin("f1", 123),
+                              MakeFragmentOrigin("f2", 456)},
+                             /*mesh_id=*/1, /*stage_id=*/1, /*call_counter=*/2),
+            "FragmentInfo(origins=[\"f1\"(123),\"f2\"(456)],stage=1,"
+            "call_counter=2,mesh_id=1)"},
+        PrintFragmentInfoTestParams{
+            "WithWeightGradientTrue",
+            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                             /*mesh_id=*/1, /*stage_id=*/1, /*call_counter=*/2,
+                             /*is_weight_gradient=*/true),
+            "FragmentInfo(origins=[\"f1\"(123)],stage=1,call_counter=2,mesh_id="
+            "1,is_weight_gradient=true)"},
+        PrintFragmentInfoTestParams{
+            "WithWeightGradientFalse",
+            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                             /*mesh_id=*/1, /*stage_id=*/1, /*call_counter=*/2,
+                             /*is_weight_gradient=*/false),
+            "FragmentInfo(origins=[\"f1\"(123)],stage=1,call_counter=2,mesh_id="
+            "1,is_weight_gradient=false)"},
+        PrintFragmentInfoTestParams{
+            "OnlyRequiredFields",
+            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/1),
+            "FragmentInfo(origins=[\"f1\"(123)],mesh_id=1)"}),
+    [](const testing::TestParamInfo<PrintFragmentInfoTest::ParamType>& info) {
+      return info.param.test_name;
+    });
 
 TEST(FragmentMergeRule, PrintFragmentMergeRule) {
   FragmentMergeRule rule = MakeFragmentMergeRule(
-      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1),
-       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*stage_id=*/1)},
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/1,
+                        /*stage_id=*/1),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_id=*/1,
+                        /*stage_id=*/1)},
       MakeFragmentInfo(
           {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 456)},
-          /*stage_id=*/1));
+          /*mesh_id=*/1, /*stage_id=*/1));
   std::string str;
   llvm::raw_string_ostream os(str);
   os << rule;
   EXPECT_THAT(str, Eq("FragmentMergeRule(sources=["
-                      "FragmentInfo(origins=[\"f1\"(123)],stage=1),"
-                      "FragmentInfo(origins=[\"f2\"(456)],stage=1)],"
+                      "FragmentInfo(origins=[\"f1\"(123)],stage=1,mesh_id=1),"
+                      "FragmentInfo(origins=[\"f2\"(456)],stage=1,mesh_id=1)],"
                       "target=FragmentInfo(origins=["
-                      "\"f1\"(123),\"f2\"(456)],stage=1))"));
+                      "\"f1\"(123),\"f2\"(456)],stage=1,mesh_id=1))"));
+}
+
+TEST(FragmentInfoMapInfoTest, IsEqual) {
+  FragmentInfo info1 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+  FragmentInfo info2 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+  FragmentInfo info3 =
+      MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_id=*/1);
+  FragmentInfo info4 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/1);
+
+  EXPECT_TRUE(FragmentInfoMapInfo::isEqual(info1, info2));
+  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(info1, info3));
+  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(info1, info4));
+}
+
+TEST(FragmentInfoMapInfoTest, GetHashValue) {
+  FragmentInfo info1 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+  FragmentInfo info2 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+  FragmentInfo info3 =
+      MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_id=*/1);
+
+  EXPECT_EQ(FragmentInfoMapInfo::getHashValue(info1),
+            FragmentInfoMapInfo::getHashValue(info2));
+  // It's highly likely they are different, though not guaranteed.
+  EXPECT_NE(FragmentInfoMapInfo::getHashValue(info1),
+            FragmentInfoMapInfo::getHashValue(info3));
+}
+
+TEST(FragmentInfoMapInfoTest, SpecialKeys) {
+  FragmentInfo emptyKey = FragmentInfoMapInfo::getEmptyKey();
+  FragmentInfo tombstoneKey = FragmentInfoMapInfo::getTombstoneKey();
+  FragmentInfo info1 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+
+  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, info1));
+  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(tombstoneKey, info1));
+  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, tombstoneKey));
+}
+
+TEST(FragmentInfoMapInfoTest, DenseMapIntegration) {
+  llvm::DenseMap<FragmentInfo, int, FragmentInfoMapInfo> map;
+
+  FragmentInfo info1 =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+  FragmentInfo info2 =
+      MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_id=*/1);
+
+  map[info1] = 1;
+  map[info2] = 2;
+
+  EXPECT_EQ(map.size(), 2);
+  EXPECT_EQ(map[info1], 1);
+  EXPECT_EQ(map[info2], 2);
+
+  FragmentInfo info1_copy =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_id=*/0);
+  EXPECT_TRUE(map.count(info1_copy));
+  EXPECT_EQ(map[info1_copy], 1);
+
+  map.erase(info1);
+  EXPECT_EQ(map.size(), 1);
+  EXPECT_FALSE(map.count(info1));
 }
 
 }  // namespace

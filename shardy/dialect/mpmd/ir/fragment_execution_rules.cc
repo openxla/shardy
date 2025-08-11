@@ -24,14 +24,18 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
+#include "shardy/dialect/mpmd/transforms/optimize/utils.h"
 
 namespace mlir::mpmd {
 
@@ -111,8 +115,32 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
         return opt.error("Expected an integer value for 'call_counter'");
       }
       info.call_counter = call_counter;
+    } else if (arg.consume_front("mesh_id=")) {
+      if (info.mesh_id != -1) {
+        return opt.error("'mesh_id' specified more than once");
+      }
+      int mesh_id;
+      if (arg.consumeInteger(10, mesh_id)) {
+        return opt.error("Expected an integer value for 'mesh_id'");
+      }
+      info.mesh_id = mesh_id;
+    } else if (arg.consume_front("is_weight_gradient=")) {
+      if (info.is_weight_gradient.has_value()) {
+        return opt.error("'is_weight_gradient' specified more than once");
+      }
+      bool is_weight_gradient_val;
+      if (arg.consume_front("true")) {
+        is_weight_gradient_val = true;
+      } else if (arg.consume_front("false")) {
+        is_weight_gradient_val = false;
+      } else {
+        return opt.error("Expected 'true' or 'false' for 'is_weight_gradient'");
+      }
+      info.is_weight_gradient = is_weight_gradient_val;
     } else {
-      return opt.error("Expected 'stage=' or 'call_counter=' after ','");
+      return opt.error(
+          "Expected 'stage=', 'call_counter=', 'mesh_id=', or "
+          "'is_weight_gradient=' after ','");
     }
   }
   if (!arg.consume_front(")")) {
@@ -123,15 +151,20 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
 
 }  // namespace
 
-FragmentInfo GetFragmentInfo(FragmentOp fragment) {
+FragmentInfo GetFragmentInfo(FragmentOp fragment, bool split_bwd_fragments) {
   std::optional<uint64_t> stage_id;
   if (fragment.getStageIdAttr()) {
     stage_id = fragment.getStageIdAttr().getInt();
   }
   std::optional<int64_t> call_counter = TryToFindCallCounter(fragment);
   std::vector<FragmentOrigin> origins = GetFragmentOrigins(fragment);
-
-  return FragmentInfo{origins, stage_id, call_counter};
+  int mesh_id = GetMeshIndex(fragment);
+  std::optional<bool> is_weight_gradient = std::nullopt;
+  if (split_bwd_fragments) {
+    is_weight_gradient = IsSplitDropTransferred(fragment);
+  }
+  return FragmentInfo{origins, stage_id, call_counter, mesh_id,
+                      is_weight_gradient};
 }
 
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
@@ -154,6 +187,17 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
                       rewriter.getUI32IntegerAttr(*metadata.call_counter));
   } else {
     fragment->removeAttr(kCallCounterAttrName);
+  }
+  SDY_CHECK(metadata.mesh_id >= 0);
+  auto meshes = GetSchedulableMeshes(fragment->getParentOfType<func::FuncOp>());
+  SDY_CHECK(metadata.mesh_id < meshes.size());
+  fragment.setMeshName(meshes[metadata.mesh_id].getName());
+
+  if (metadata.is_weight_gradient.has_value() && *metadata.is_weight_gradient) {
+    fragment->setAttr(kSplitDropTransferredAttrName,
+                      UnitAttr::get(rewriter.getContext()));
+  } else {
+    fragment->removeAttr(kSplitDropTransferredAttrName);
   }
 }
 

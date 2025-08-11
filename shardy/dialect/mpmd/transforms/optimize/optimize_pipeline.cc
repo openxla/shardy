@@ -46,8 +46,8 @@ void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options) {
   // merge passes since those modify the origins of fragments, invalidating the
   // rules.
   if (!options.fragmentMergeRules.empty()) {
-    pm.addNestedPass<FuncOp>(createRuleBasedMergePass(
-        RuleBasedMergePassOptions{std::move(options.fragmentMergeRules)}));
+    pm.addNestedPass<FuncOp>(createRuleBasedMergePass(RuleBasedMergePassOptions{
+        std::move(options.fragmentMergeRules), options.splitBwdFragments}));
   }
 
   // Adds all pipeline scheduling related passes.
