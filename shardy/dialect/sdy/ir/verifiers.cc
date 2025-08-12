@@ -210,6 +210,7 @@ LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
 // If `type` isn't a `ShapedType`, the sharding must have rank 0 and no
 // replicated axes.
 //
+// - `mesh` is present (can only be missing if referenced by name).
 // - The tensor should have a rank.
 // - The number of dimension shardings is equal to the rank of the tensor.
 // - Replicated axes are ordered w.r.t. `mesh` (see
@@ -234,6 +235,10 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        EmitErrorFn emitError,
                                        bool checkDivisibility,
                                        ManualAxisToOwner alreadyManualAxes) {
+  if (!mesh) {
+    // We can assume the sharding has a mesh symbol name.
+    return emitError("unknown mesh: ") << shardingAttr.getMeshSymName();
+  }
   if (mesh.isMaximal() || (!type && shardingAttr.isFullyReplicated())) {
     // A maximal sharding says that this op should be executed on a single
     // device. Skip checking against the type of the op. Just make sure there
@@ -369,35 +374,31 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   return success();
 }
 
-// Same as the overload above, but in addition verifies that if `shardingAttr`
-// references a mesh by name, it's present in the module's symbol table.
+// Same as the overload above, but gets `alreadyManualAxes` from the given `op`.
 LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
-                                       Type type, Operation* op,
+                                       Type type, Operation* op, MeshAttr mesh,
                                        EmitErrorFn emitError) {
-  MeshAttr mesh = shardingAttr.getMesh(op);
-  if (!mesh) {
-    // We can assume the sharding has a mesh symbol name.
-    return emitError("unknown mesh: ") << shardingAttr.getMeshSymName();
-  }
   return verifyTensorShardingAttr(shardingAttr, type, mesh, emitError,
                                   /*checkDivisibility=*/false,
                                   getParentManualComputationOps(op));
 }
 
-// Same as the overload above, but in addition verifies that if `shardingAttr`
-// references a mesh by name, it's present in the given `symbolTable`.
+// Same as the overload above, but looks up the mesh using the given `op`.
+LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
+                                       Type type, Operation* op,
+                                       EmitErrorFn emitError) {
+  return verifyTensorShardingAttr(shardingAttr, type, op,
+                                  shardingAttr.getMesh(op), emitError);
+}
+
+// Same as the overload above, but looks up the mesh using the given
+// `symbolTable`.
 LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        Type type, Operation* op,
                                        const SymbolTable& symbolTable,
                                        EmitErrorFn emitError) {
-  MeshAttr mesh = shardingAttr.getMesh(symbolTable);
-  if (!mesh) {
-    // We can assume the sharding has a mesh symbol name.
-    return emitError("unknown mesh: ") << shardingAttr.getMeshSymName();
-  }
-  return verifyTensorShardingAttr(shardingAttr, type, mesh, emitError,
-                                  /*checkDivisibility=*/false,
-                                  getParentManualComputationOps(op));
+  return verifyTensorShardingAttr(shardingAttr, type, op,
+                                  shardingAttr.getMesh(symbolTable), emitError);
 }
 
 // Same as the overload above, but takes a `SymbolTableCollection` instead of a
@@ -420,15 +421,16 @@ LogicalResult verifyTensorShardingAttr(
 // op
 LogicalResult verifyTensorShardingPerValueAttr(
     TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
-    Operation* op, const SymbolTable& symbolTable, EmitErrorFn emitError) {
+    Operation* op, EmitErrorFn emitError,
+    std::function<MeshAttr(TensorShardingAttr)> getMeshAttr) {
   ArrayRef<TensorShardingAttr> shardingsPerValue =
       shardingPerValueAttr.getShardings();
   if (types.empty() && shardingsPerValue.size() == 1) {
     TensorShardingAttr firstSharding = shardingsPerValue.front();
-    if (firstSharding.getMesh(symbolTable).isMaximal() ||
-        firstSharding.isFullyReplicated()) {
+    MeshAttr mesh = getMeshAttr(firstSharding);
+    if ((mesh && mesh.isMaximal()) || firstSharding.isFullyReplicated()) {
       return verifyTensorShardingAttr(
-          firstSharding, Type(), op, symbolTable,
+          firstSharding, Type(), op, mesh,
           getEmitValueInRangeErrorFn(emitError, types.size(), /*index=*/0));
     }
   }
@@ -444,12 +446,33 @@ LogicalResult verifyTensorShardingPerValueAttr(
         getEmitValueInRangeErrorFn(emitError, types.size(), index);
     auto [shardingAttr, resultType] = entry;
     if (failed(verifyTensorShardingAttr(shardingAttr, resultType, op,
-                                        symbolTable, valueEmitError))) {
+                                        getMeshAttr(shardingAttr),
+                                        valueEmitError))) {
       return failure();
     }
   }
 
   return success();
+}
+
+// Same as overload above, but takes a `SymbolTable` to find meshes.
+LogicalResult verifyTensorShardingPerValueAttr(
+    TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
+    Operation* op, const SymbolTable& symbolTable, EmitErrorFn emitError) {
+  return verifyTensorShardingPerValueAttr(
+      shardingPerValueAttr, types, op, emitError,
+      [&](TensorShardingAttr sharding) {
+        return sharding.getMesh(symbolTable);
+      });
+}
+
+// Same as overload above, but takes an `op` to find meshes.
+LogicalResult verifyTensorShardingPerValueAttr(
+    TensorShardingPerValueAttr shardingPerValueAttr, TypeRange types,
+    Operation* op, EmitErrorFn emitError) {
+  return verifyTensorShardingPerValueAttr(
+      shardingPerValueAttr, types, op, emitError,
+      [&](TensorShardingAttr sharding) { return sharding.getMesh(op); });
 }
 
 // Verifies an attribute of either a function argument or result.
@@ -1632,7 +1655,6 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
 
     return verifyTensorShardingPerValueAttr(
         shardingPerValue, op->getResultTypes(), op,
-        SymbolTable(op->getParentOfType<ModuleOp>()),
         [op](StringRef msg) { return op->emitOpError("result ") << msg; });
   }
 
