@@ -259,8 +259,10 @@ RankedTensorType MeshTensorType::getLocalTensorType(sdy::MeshAttr sdy_mesh) {
 
 RankedTensorType MeshTensorType::getLocalTensorType(Operation* op) {
   // Assumes that the topology is homogeneous so we can just get the first mesh.
-  return MeshTensorType::getLocalTensorType(
-      GetTopologyMeshes(sdy::getEnclosingOfType<FuncOp>(op)).front().getMesh());
+  StringRef mesh_name = getSharding().getMeshName();
+  auto mesh = GetMeshAttr(op, mesh_name);
+  SDY_CHECK(mesh.value()) << "Mesh " << mesh_name << " not found in topology.";
+  return MeshTensorType::getLocalTensorType(mesh.value());
 }
 
 // Functions for the ShapedTypeInterface.
@@ -286,8 +288,7 @@ ShapedType MeshTensorType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
 }
 
 bool MeshTensorType::isOnHost() {
-  return getMemoryKind() &&
-         getMemoryKind().getValue() == kMemoryKindPinnedHost;
+  return getMemoryKind() && getMemoryKind().getValue() == kMemoryKindPinnedHost;
 }
 
 //===----------------------------------------------------------------------===//
@@ -793,8 +794,8 @@ void FragmentOp::setUserSpecifiedResultSharding(
   }
 }
 
-void FragmentOp::setInputSharding(
-    unsigned input_index, sdy::TensorShardingAttr sharding) {
+void FragmentOp::setInputSharding(unsigned input_index,
+                                  sdy::TensorShardingAttr sharding) {
   if (!sharding) {
     return;
   }
@@ -1043,8 +1044,8 @@ LogicalResult TransferOp::verify() {
     if (in_memory_kind.getValue() != kMemoryKindPinnedHost &&
         in_memory_kind.getValue() != kMemoryKindDevice) {
       return emitError("memory kind must be either '")
-             << kMemoryKindPinnedHost << "' or '" << kMemoryKindDevice << "'. Found '"
-             << in_memory_kind.getValue() << "'.";
+             << kMemoryKindPinnedHost << "' or '" << kMemoryKindDevice
+             << "'. Found '" << in_memory_kind.getValue() << "'.";
     }
   }
 
@@ -1052,8 +1053,8 @@ LogicalResult TransferOp::verify() {
     if (out_memory_kind.getValue() != kMemoryKindPinnedHost &&
         out_memory_kind.getValue() != kMemoryKindDevice) {
       return emitError("memory kind must be either '")
-             << kMemoryKindPinnedHost << "' or '" << kMemoryKindDevice << "'. Found '"
-             << out_memory_kind.getValue() << "'.";
+             << kMemoryKindPinnedHost << "' or '" << kMemoryKindDevice
+             << "'. Found '" << out_memory_kind.getValue() << "'.";
     }
   }
 
