@@ -121,15 +121,18 @@ class ConvertSdyShardingsToMpmdTypesPass
 
     // Verify that all transfers have the same operand and result sharding.
     func_op->walk([](TransferOp transfer) {
-      sdy::TensorShardingAttr result_sharding =
-          GetShardingFromMeshTensorValue(transfer.getResult());
       sdy::TensorShardingAttr operand_sharding =
           GetShardingFromMeshTensorValue(transfer.getTensor());
+      sdy::TensorShardingAttr result_sharding =
+          GetShardingFromMeshTensorValue(transfer.getResult());
 
-      if (sdy::shouldReshard(operand_sharding, result_sharding)) {
+      // TODO(petebu): Add check for TransferOp between heterogeneous meshes.
+      if (operand_sharding && result_sharding &&
+          operand_sharding.getMeshName() == result_sharding.getMeshName() &&
+          sdy::shouldReshard(operand_sharding, result_sharding)) {
         transfer->emitError()
-            << "Transfer op has different shardings for the "
-               "tensor and result, tensor sharding: "
+            << "Transfer op has different shardings for the operand and result "
+               "on the same mesh, operand sharding: "
             << operand_sharding << ", result sharding: " << result_sharding;
         return WalkResult::interrupt();
       }
