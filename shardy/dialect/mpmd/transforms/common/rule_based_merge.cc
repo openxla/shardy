@@ -53,13 +53,16 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
  public:
   RuleBasedMergingPattern(MLIRContext* context,
                           const FragmentMergeRules& merging_rules,
-                          const FragmentMergeRuleMap& fragment_merge_rule_map)
+                          const FragmentMergeRuleMap& fragment_merge_rule_map,
+                          bool split_bwd_fragments)
       : OpRewritePattern<FragmentOp>(context),
-        fragment_merge_rule_map_(fragment_merge_rule_map) {}
+        fragment_merge_rule_map_(fragment_merge_rule_map),
+        split_bwd_fragments_(split_bwd_fragments) {}
 
   LogicalResult matchAndRewrite(FragmentOp merge_into_fragment,
                                 PatternRewriter& rewriter) const override {
-    FragmentInfo fragment_info = GetFragmentInfo(merge_into_fragment);
+    FragmentInfo fragment_info =
+        GetFragmentInfo(merge_into_fragment, split_bwd_fragments_);
     // Find the merge rule for the fragment, if there is one.
     auto it = fragment_merge_rule_map_.find(fragment_info);
     if (it == fragment_merge_rule_map_.end()) {
@@ -125,7 +128,8 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
         continue;
       }
 
-      FragmentInfo fragment_info = GetFragmentInfo(fragment);
+      FragmentInfo fragment_info =
+          GetFragmentInfo(fragment, split_bwd_fragments_);
       auto it = fragment_merge_rule_map_.find(fragment_info);
       if (it != fragment_merge_rule_map_.end() && it->second == rule) {
         merge_candidates.push_back(fragment);
@@ -136,6 +140,7 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
   }
 
   const FragmentMergeRuleMap& fragment_merge_rule_map_;
+  const bool split_bwd_fragments_;
 };
 
 class RuleBasedMergePass
@@ -172,8 +177,8 @@ class RuleBasedMergePass
       }
     }
     RewritePatternSet patternsInternal(context);
-    patternsInternal.add<RuleBasedMergingPattern>(context, rules,
-                                                  fragment_merge_rule_map_);
+    patternsInternal.add<RuleBasedMergingPattern>(
+        context, rules, fragment_merge_rule_map_, splitBwdFragments);
     patterns = std::move(patternsInternal);
     return success();
   }

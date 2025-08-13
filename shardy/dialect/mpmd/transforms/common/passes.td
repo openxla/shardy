@@ -345,7 +345,10 @@ def RuleBasedMergePass :
   let options = [
     ListOption<"rules", "rules", "FragmentMergeRule",
                "A list of fragment merge rules, each with a list of source "
-               "fragment infos and a target fragment info.">
+               "fragment infos and a target fragment info.">,
+    Option<"splitBwdFragments", "split-bwd-fragments",
+           "bool", /*default=*/"false",
+           "Whether or not backwards fragments have been split beforehand.">
   ];
 }
 

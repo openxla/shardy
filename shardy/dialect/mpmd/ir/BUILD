@@ -189,7 +189,10 @@ cc_library(
     deps = [
         ":dialect",
         "//shardy/common:logging",
+        "//shardy/dialect/mpmd/transforms/common:utils",
+        "//shardy/dialect/mpmd/transforms/optimize:utils",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
     ],
@@ -202,7 +205,6 @@ cc_test(
         ":dialect",
         ":fragment_execution_rules",
         ":register",
-        "//shardy/common:logging",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
