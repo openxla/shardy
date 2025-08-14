@@ -299,6 +299,8 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      // TODO(enver): Reshard on func return and on data flow op for all cases
+      // of `onFullVersion`.
       const bool onFullVersion =
           enableFullVersion ||
           op->getName().getStringRef() == "mhlo.ragged_dot" ||
