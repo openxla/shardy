@@ -1,3 +1,14 @@
+sdy.mesh @mesh = <["x"=2]>
+
+func.func @foo(%arg0: !stablehlo.token) -> !stablehlo.token {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, []>] out_shardings=[<@mesh, []>] manual_axes={"x"} (%arg1: !stablehlo.token) {
+    sdy.return %arg1 : !stablehlo.token
+  } : (!stablehlo.token) -> !stablehlo.token
+  func.return %0: !stablehlo.token
+}
+
+
+
 // RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-basic-propagate -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
