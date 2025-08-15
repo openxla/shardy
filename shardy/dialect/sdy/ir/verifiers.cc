@@ -79,6 +79,23 @@ EmitErrorFn getEmitValueInRangeErrorFn(EmitErrorFn emitError, int64_t numValues,
   };
 }
 
+// Looks up the `MeshAttr` that `sharding` is associated with, using the given
+// `op`.
+//
+// As opposed to `sharding.getMesh(op)`, this function avoids creating or using
+// a `SymbolTable`, which might cause a tsan race condition.
+MeshAttr getMeshSafe(TensorShardingAttr sharding, Operation* op) {
+  if (auto mesh = dyn_cast<MeshAttr>(sharding.getMeshOrRef())) {
+    return mesh;
+  }
+  for (auto meshOp : op->getParentOfType<ModuleOp>().getOps<MeshOp>()) {
+    if (meshOp.getName() == sharding.getMeshName()) {
+      return meshOp.getMeshAttr();
+    }
+  }
+  return nullptr;
+}
+
 // Verifies the following for `axisRefs`:
 //
 // - All axis names are present in `axisNameToSize`.
@@ -388,7 +405,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
                                        Type type, Operation* op,
                                        EmitErrorFn emitError) {
   return verifyTensorShardingAttr(shardingAttr, type, op,
-                                  shardingAttr.getMesh(op), emitError);
+                                  getMeshSafe(shardingAttr, op), emitError);
 }
 
 // Same as the overload above, but looks up the mesh using the given
@@ -472,7 +489,7 @@ LogicalResult verifyTensorShardingPerValueAttr(
     Operation* op, EmitErrorFn emitError) {
   return verifyTensorShardingPerValueAttr(
       shardingPerValueAttr, types, op, emitError,
-      [&](TensorShardingAttr sharding) { return sharding.getMesh(op); });
+      [&](TensorShardingAttr sharding) { return getMeshSafe(sharding, op); });
 }
 
 // Verifies an attribute of either a function argument or result.
@@ -1590,20 +1607,21 @@ LogicalResult verifyCollectiveOp(Operation* rawOp) {
 
   // 2. Verify result sharding is valid w.r.t the corresponding type.
   TensorShardingAttr resultSharding = collectiveOp.getOutSharding();
-  if (auto res =
-          verifyTensorShardingAttr(resultSharding, collectiveOp.getType(),
-                                   collectiveOp, getEmitErrorFn(collectiveOp));
+  MeshAttr resultMesh = getMeshSafe(resultSharding, collectiveOp);
+  if (auto res = verifyTensorShardingAttr(
+          resultSharding, collectiveOp.getType(), collectiveOp, resultMesh,
+          getEmitErrorFn(collectiveOp));
       failed(res)) {
     return res;
   }
 
   // 3. Verify MeshAttr of result and operand is the same.
   if (!collectiveOp.allowDifferentMeshes()) {
-    MeshAttr mesh = resultSharding.getMesh(collectiveOp);
-    MeshAttr operandMesh = optionalOperandSharding
-                               ? optionalOperandSharding.getMesh(collectiveOp)
-                               : nullptr;
-    if (operandMesh && mesh != operandMesh) {
+    MeshAttr operandMesh =
+        optionalOperandSharding
+            ? getMeshSafe(optionalOperandSharding, collectiveOp)
+            : nullptr;
+    if (operandMesh && resultMesh != operandMesh) {
       return collectiveOp.emitOpError("result mesh does not match operand mesh")
                  .attachNote(collectiveOp.getTensor().getLoc())
              << "operand mesh: " << operandMesh;
