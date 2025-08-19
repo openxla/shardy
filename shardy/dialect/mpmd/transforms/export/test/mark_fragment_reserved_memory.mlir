@@ -213,12 +213,12 @@ func.func @distributed_tensor(%arg0: !mesh_1_tensor)
 // the live buffers.
 // CHECK-LABEL: func.func @unused_fragment_result_is_not_counted
 func.func @unused_fragment_result_is_not_counted(
-    %arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
-    %arg1: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
-    %arg2: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
-    %arg3: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>)
-      -> (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
-          !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>)
+    %arg0: !mesh_1_tensor,
+    %arg1: !mesh_1_tensor,
+    %arg2: !mesh_1_tensor,
+    %arg3: !mesh_1_tensor)
+      -> (!mesh_1_tensor,
+          !mesh_1_tensor)
       attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["x"=2]>>>} {
 
   // CHECK: mpmd.fragment
@@ -227,7 +227,7 @@ func.func @unused_fragment_result_is_not_counted(
     %10 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %11 = stablehlo.abs %arg5 : tensor<4x8xf32>
     mpmd.return %11 : tensor<4x8xf32>
-  } : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
 
   // CHECK: mpmd.fragment
   // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 256
@@ -235,9 +235,9 @@ func.func @unused_fragment_result_is_not_counted(
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>
     mpmd.return %15 : tensor<4x8xf32>
-  } : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
 
-  return %1, %arg3 : !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  return %1, %arg3 : !mesh_1_tensor, !mesh_1_tensor
 }
 
 // Test that verifies a donated program argument is not accounted for after its
@@ -245,12 +245,12 @@ func.func @unused_fragment_result_is_not_counted(
 // attributes.
 // CHECK-LABEL: func.func @donated_program_arg_is_not_counted_after_last_use
 func.func @donated_program_arg_is_not_counted_after_last_use(
-    %arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
-    %arg1: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>> {jax.buffer_donor = true},
-    %arg2: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>> {tf.aliasing_output = 0 : i32},
-    %arg3: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>)
-      -> (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>,
-          !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>)
+    %arg0: !mesh_1_tensor,
+    %arg1: !mesh_1_tensor {jax.buffer_donor = true},
+    %arg2: !mesh_1_tensor {tf.aliasing_output = 0 : i32},
+    %arg3: !mesh_1_tensor)
+      -> (!mesh_1_tensor,
+          !mesh_1_tensor)
       attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["x"=2]>>>} {
 
   // CHECK: mpmd.fragment
@@ -259,7 +259,7 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
     %10 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %11 = stablehlo.abs %arg5 : tensor<4x8xf32>
     mpmd.return %11 : tensor<4x8xf32>
-  } : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
 
   // %arg3 and %arg0 are still alive. %arg1 is donated and not used anymore so
   // it's not accounted for.
@@ -269,7 +269,7 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>
     mpmd.return %15 : tensor<4x8xf32>
-  } : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
 
   // %arg3, %arg0, and %1 are still alive.
   // CHECK: mpmd.fragment
@@ -278,9 +278,9 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>
     mpmd.return %15 : tensor<4x8xf32>
-  } : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
 
-  return %1, %2 : !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  return %1, %2 : !mesh_1_tensor, !mesh_1_tensor
 }
 
 // Test that verifies args on hosts or donated args are not accounted for.
@@ -330,4 +330,3 @@ func.func @unused_input_not_donated(%arg0: !mesh_1_tensor, %unused_arg1: !mesh_1
 
   func.return %0 : !mesh_1_tensor
 }
-
