@@ -4,7 +4,7 @@
 // - mesh_1_tensor and mesh_2_tensor is 128 bytes.
 // - mesh_1_tensor_dist_x is 32 bytes.
 !mesh_1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-!mesh_1_tensor_dist_x = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
+!mesh_1_tensor_dist_x = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@m1, [{"x"}, {?}]>>
 !mesh_2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 
 // CHECK-LABEL: func @single_mesh
@@ -173,7 +173,7 @@ func.func @multiple_meshes(%arg0: !mesh_1_tensor, %arg1: !mesh_2_tensor)
 func.func @distributed_tensor(%arg0: !mesh_1_tensor)
     -> (!mesh_1_tensor) attributes {
     "topology"=#mpmd.topology<
-      <"m1": <["x"=4]>>>} {
+      <"m2": <["y"=2]>>, <"m1": <["x"=4]>>>} {
 
   %0 = mpmd.transfer %arg0 : (!mesh_1_tensor) -> !mesh_1_tensor_dist_x
 
