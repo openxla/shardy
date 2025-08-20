@@ -1070,7 +1070,7 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                          updateTensorShardings, rewriter, shardingRule,
                          symbolTable, commonAxesPerFactorWithMesh.mesh);
 
-  // TODO(b/404166611): insert a reshard from unreduced to replicated axes.
+  // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
   insertAllReduces(op, commonAxesPerFactorWithMesh, shardingRule, rewriter);
 
   // TODO(enver): Remove sharding rules from ops.
