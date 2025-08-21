@@ -421,7 +421,6 @@ class FactorAxesCandidateBag {
   // Updates the source tensor sizes of all candidates.
   // TODO(enver): Optimize updating source tensor sizes.
   void updateSourceTensorSizes(const ShardingProjection& shardingProjection,
-                               OpShardingRuleAttr shardingRule,
                                ArrayRef<int64_t> tensorSizes,
                                const SmallVector<AxisListRef>& factorAxisRefs) {
     // Since the (local) source tensor sizes get smaller at each iteration on
@@ -699,8 +698,8 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
 
     // TODO(enver): Optimize updating source tensor sizes.
     factorAxesCandidates.resetBest();
-    factorAxesCandidates.updateSourceTensorSizes(
-        shardingProjection, shardingRule, tensorSizes, factorAxisRefs);
+    factorAxesCandidates.updateSourceTensorSizes(shardingProjection,
+                                                 tensorSizes, factorAxisRefs);
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until actual
