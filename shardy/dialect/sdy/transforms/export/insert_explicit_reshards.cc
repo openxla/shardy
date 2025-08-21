@@ -282,25 +282,6 @@ struct InsertExplicitReshardsPass
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
     funcOp->walk([&](Operation* op) {
-      if (isa<func::ReturnOp>(op)) {
-        // TODO(enver): Does not need to be part of the walk on the func,
-        // instead get the terminatior with getBodyTerminator.
-        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
-                                           enableFullVersion);
-        return;
-      }
-
-      if (auto shardableDataFlowOp =
-              dyn_cast<ShardableDataFlowOpInterface>(op)) {
-        // TODO(enver): Prefer resharding the owner when multiple sources are
-        // sharded in the same way.
-        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
-                                           symbolTable, enableFullVersion);
-        return;
-      }
-
-      // TODO(enver): Reshard on func return and on data flow op for all cases
-      // of `onFullVersion`.
       const bool onFullVersion =
           enableFullVersion ||
           op->getName().getStringRef() == "mhlo.ragged_dot" ||
@@ -313,6 +294,23 @@ struct InsertExplicitReshardsPass
           // b/393584711#comment3.
           (isa<stablehlo::ConcatenateOp>(op) &&
            differentOperandShardingFromFirstResult(op));
+
+      if (isa<func::ReturnOp>(op)) {
+        // TODO(enver): Does not need to be part of the walk on the func,
+        // instead get the terminatior with getBodyTerminator.
+        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
+                                           onFullVersion);
+        return;
+      }
+
+      if (auto shardableDataFlowOp =
+              dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        // TODO(enver): Prefer resharding the owner when multiple sources are
+        // sharded in the same way.
+        insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
+                                           symbolTable, onFullVersion);
+        return;
+      }
 
       // For each operand that has unreduced axes, insert an all-reduce if
       // any of the unreduced axes isn't unreduced in the target sharding.
