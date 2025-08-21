@@ -188,7 +188,7 @@ cc_library(
     hdrs = ["fragment_execution_rules.h"],
     deps = [
         ":dialect",
-        "//shardy/common:logging",
+        "//shardy/dialect/mpmd/transforms/common:utils",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
@@ -202,7 +202,7 @@ cc_test(
         ":dialect",
         ":fragment_execution_rules",
         ":register",
-        "//shardy/common:logging",
+        "//shardy/dialect/mpmd/transforms/common:utils",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",

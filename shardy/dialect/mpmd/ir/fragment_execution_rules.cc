@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
 
 namespace mlir::mpmd {
 
@@ -92,6 +93,7 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
   if (!arg.consume_front("]")) {
     return opt.error("Expected ']'");
   }
+  bool is_weight_gradient_parsed = false;
   while (arg.consume_front(",")) {
     if (arg.consume_front("stage=")) {
       if (info.stage_id.has_value()) {
@@ -111,8 +113,24 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
         return opt.error("Expected an integer value for 'call_counter'");
       }
       info.call_counter = call_counter;
+    } else if (arg.consume_front("is_weight_gradient=")) {
+      if (is_weight_gradient_parsed) {
+        return opt.error("'is_weight_gradient' specified more than once");
+      }
+      is_weight_gradient_parsed = true;
+      bool is_weight_gradient_val;
+      if (arg.consume_front("true")) {
+        is_weight_gradient_val = true;
+      } else if (arg.consume_front("false")) {
+        is_weight_gradient_val = false;
+      } else {
+        return opt.error("Expected 'true' or 'false' for 'is_weight_gradient'");
+      }
+      info.is_weight_gradient = is_weight_gradient_val;
     } else {
-      return opt.error("Expected 'stage=' or 'call_counter=' after ','");
+      return opt.error(
+          "Expected 'stage=', 'call_counter=', or "
+          "'is_weight_gradient=' after ','");
     }
   }
   if (!arg.consume_front(")")) {
@@ -130,8 +148,8 @@ FragmentInfo GetFragmentInfo(FragmentOp fragment) {
   }
   std::optional<int64_t> call_counter = TryToFindCallCounter(fragment);
   std::vector<FragmentOrigin> origins = GetFragmentOrigins(fragment);
-
-  return FragmentInfo{origins, stage_id, call_counter};
+  bool is_weight_gradient = IsSplitDropTransferred(fragment);
+  return FragmentInfo{origins, stage_id, call_counter, is_weight_gradient};
 }
 
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
@@ -154,6 +172,13 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
                       rewriter.getUI32IntegerAttr(*metadata.call_counter));
   } else {
     fragment->removeAttr(kCallCounterAttrName);
+  }
+
+  if (metadata.is_weight_gradient) {
+    fragment->setAttr(kSplitDropTransferredAttrName,
+                      UnitAttr::get(rewriter.getContext()));
+  } else {
+    fragment->removeAttr(kSplitDropTransferredAttrName);
   }
 }
 
