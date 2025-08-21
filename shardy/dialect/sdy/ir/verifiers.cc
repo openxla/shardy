@@ -633,21 +633,24 @@ LogicalResult indicesSortedUniqueInBound(Operation* op, int64_t numFactors,
 // - All operand/result mappings are valid (see `verifyShardingRuleMapping`).
 LogicalResult verifyOpShardingRuleAttr(OpShardingRuleAttr shardingRule,
                                        Operation* op) {
-  BitVector seenFactorIndices(shardingRule.getNumFactors());
   ArrayRef<int64_t> factorSizes = shardingRule.getFactorSizes();
+  BitVector factorInOperands(shardingRule.getNumFactors());
   if (failed(verifyShardingRuleMapping(
           op, op->getOperandTypes(), shardingRule.getOperandMappings(),
-          factorSizes, seenFactorIndices, "operand"))) {
+          factorSizes, factorInOperands, "operand"))) {
     return failure();
   }
+  BitVector factorInResults(shardingRule.getNumFactors());
   if (failed(verifyShardingRuleMapping(
           op, op->getResultTypes(), shardingRule.getResultMappings(),
-          factorSizes, seenFactorIndices, "result"))) {
+          factorSizes, factorInResults, "result"))) {
     return failure();
   }
 
-  if (!seenFactorIndices.all()) {
-    int unsetIndex = seenFactorIndices.find_first_unset();
+  BitVector factorInTensors = factorInOperands;
+  factorInTensors |= factorInResults;
+  if (!factorInTensors.all()) {
+    int unsetIndex = factorInTensors.find_first_unset();
     return op->emitOpError("has factor ")
            << factorSymbolString(unsetIndex) << "=" << factorSizes[unsetIndex]
            << " that isn't used in operand and result mappings";
@@ -688,6 +691,13 @@ LogicalResult verifyOpShardingRuleAttr(OpShardingRuleAttr shardingRule,
           op, shardingRule.getNumFactors(),
           shardingRule.getBlockedPropagationFactors()))) {
     return failure();
+  }
+
+  // Reduction factors cannot be in results.
+  for (int64_t reductionFactor : reductionFactors) {
+    if (factorInResults.test(reductionFactor)) {
+      return op->emitOpError("reduction factor cannot be in result mappings");
+    }
   }
 
   return success();

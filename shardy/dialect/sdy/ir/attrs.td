@@ -1026,7 +1026,8 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 
     **Factor types:**
     - `reduction_factors` contains the indices of factors requiring reduction,
-      such as the contracting dimensions in a dot operation.
+      such as the contracting dimensions in a dot operation. These factors can
+      be in operands but not in results.
     - `need_replication_factors` contains the indices of factors requiring full
       replication, such as the sorted dimension in a sort operation.
     - `permutation_factors` contains the indices of factors requiring

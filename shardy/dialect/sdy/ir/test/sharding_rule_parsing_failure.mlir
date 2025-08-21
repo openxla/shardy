@@ -213,3 +213,11 @@ func.func @invalid_dimension_symbol(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x5x7x
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction={a}>} : (tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32>
   func.return %0: tensor<2x5x7xf32>
 }
+
+// -----
+
+func.func @reduction_factor_in_result(%arg0: tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32> {
+  // expected-error@+1 {{reduction factor cannot be in result mappings}}
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l])->([i, k, l]) {i=2, j=3, k=5, l=7} reduction={k}>} : (tensor<2x3x5x7xf32>) -> tensor<2x5x7xf32>
+  func.return %0: tensor<2x5x7xf32>
+}
