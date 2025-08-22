@@ -33,6 +33,7 @@ cc_library(
     srcs = [
         "copy_topology_from_main.cc",
         "enforce_equisharding.cc",
+        "generate_sdy_meshes_from_topology_pass.cc",
         "import_pipeline.cc",
         "infer_mesh_assignment.cc",
         "infer_mesh_validation.cc",
@@ -61,6 +62,7 @@ cc_library(
         "//shardy/dialect/mpmd/transforms/common:simplify_region_op_base",
         "//shardy/dialect/mpmd/transforms/common:utils",
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",

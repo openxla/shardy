@@ -417,6 +417,16 @@ def InferMeshValidateNoAdditionalTransfersNeededPass :
   ];
 }
 
+def GenerateSdyMeshesFromTopologyPass :
+    Pass<"mpmd-generate-sdy-meshes-from-topology", "ModuleOp"> {
+  let summary = "Generates shardy meshes based on the MPMD topology.";
+  let description = [{
+    This pass generates removes any existing shardy mesh ops and replaces them
+    with ops based on the MPMD topology. It also updates tensor shardings to
+    refer to the new mesh ops.
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // End of - Infer Mesh assignment passes
 //===----------------------------------------------------------------------===//
