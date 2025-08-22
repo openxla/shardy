@@ -21,6 +21,14 @@ introducing TransferOps when necessary.
 -constraints : A list of constraint, each enforcing that an input and output should be assigned to the same mesh.
 ```
 
+### `-mpmd-generate-sdy-meshes-from-topology`
+
+_Generates shardy meshes based on the MPMD topology._
+
+This pass generates removes any existing shardy mesh ops and replaces them
+with ops based on the MPMD topology. It also updates tensor shardings to
+refer to the new mesh ops.
+
 ### `-mpmd-infer-mesh-assign-mesh-func-leaves`
 
 _Assigns a mesh to each unused computation, function output, and function input using the use_set and src_set analysis._
