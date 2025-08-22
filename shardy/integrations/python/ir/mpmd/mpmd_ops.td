@@ -1,4 +1,4 @@
-/* Copyright 2024 The Shardy Authors.
+/* Copyright 2025 The MPMD Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,11 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "shardy/integrations/c/dialect.h"  // IWYU pragma: keep
+#ifndef SHARDY_INTEGRATIONS_PYTHON_MPMD_OPS
+#define SHARDY_INTEGRATIONS_PYTHON_MPMD_OPS
 
-#include "mlir/CAPI/Registration.h"
-#include "shardy/dialect/mpmd/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/dialect.h"
+include "shardy/dialect/mpmd/ir/ops.td"
 
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Sdy, sdy, mlir::sdy::SdyDialect);
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Mpmd, mpmd, mlir::mpmd::MpmdDialect);
+#endif

@@ -21,6 +21,7 @@ cc_library(
     srcs = SDY_CAPI_SOURCES,
     hdrs = SDY_CAPI_HEADERS,
     deps = [
+        "//shardy/dialect/mpmd/ir:dialect",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms:passes",
         "@llvm-project//llvm:Support",
@@ -46,6 +47,7 @@ cc_library(
     srcs = SDY_CAPI_SOURCES,
     hdrs = SDY_CAPI_HEADERS,
     deps = [
+        "//shardy/dialect/mpmd/ir:dialect",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms:passes",
         "@llvm-project//llvm:Support",
