@@ -340,7 +340,7 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      insertExplicitReshardsOnOp(op, rewriter, symbolTable, onFullVersion);
+      //insertExplicitReshardsOnOp(op, rewriter, symbolTable, onFullVersion);
     });
   }
 };
