@@ -28,10 +28,28 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/dialect.h"  // IWYU pragma: keep
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/import/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 
 namespace mlir::mpmd {
+
+namespace {
+
+sdy::MeshOp GetOrCreateEmptyMesh(ModuleOp module_op) {
+  if (sdy::MeshOp empty_mesh =
+          module_op.lookupSymbol<sdy::MeshOp>(sdy::kEmptyMeshSymbol)) {
+    SDY_CHECK(empty_mesh.getMesh().empty())
+        << "Mesh named '" << sdy::kEmptyMeshSymbol
+        << "' already exists but is not empty.";
+    return empty_mesh;
+  }
+  OpBuilder builder = OpBuilder::atBlockBegin(module_op.getBody());
+  return sdy::MeshOp::create(builder, module_op.getLoc(), sdy::kEmptyMeshSymbol,
+                             sdy::MeshAttr::get(builder.getContext(), {}));
+}
+
+}  // namespace
 
 constexpr char kMeshAxisSeparator = '_';
 
@@ -67,10 +85,13 @@ class GenerateSdyMeshesFromTopologyPass
       if (sharding.isFullyReplicated()) {
         sdy::MeshOp mesh_op =
             symbol_table.lookup<sdy::MeshOp>(sharding.getMeshName());
-        // TODO(b/440359163): Support fully replicated sharding.
         if (mesh_op.getMesh().empty() || mesh_op.getMesh().isMaximal()) {
           return sharding;
         }
+        return sdy::TensorShardingAttr::get(
+            sharding.getContext(), GetOrCreateEmptyMesh(module_op).getName(),
+            sharding.getDimShardings(), sharding.getReplicatedAxes(),
+            sharding.getUnreducedAxes());
       }
       StringRef mesh_name;
       SmallVector<sdy::DimensionShardingAttr> dim_shardings;
@@ -92,7 +113,7 @@ class GenerateSdyMeshesFromTopologyPass
           << "Invalid mesh name: " << mesh_name.str();
       // TODO(b/440336690): Add support for replicated axes and unreduced axes.
       return sdy::TensorShardingAttr::get(
-          module_op.getContext(), mesh_name, dim_shardings,
+          sharding.getContext(), mesh_name, dim_shardings,
           sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
     });
 

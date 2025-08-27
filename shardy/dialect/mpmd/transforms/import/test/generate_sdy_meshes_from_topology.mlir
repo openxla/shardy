@@ -40,6 +40,7 @@ module @multiple_input_meshes {
 module @empty_mesh {
   // CHECK-DAG: sdy.mesh @tpu = <["x"=2]>
   // CHECK-DAG: sdy.mesh @empty_mesh = <[]>
+  // CHECK-NOT: sdy.mesh @mesh
   sdy.mesh @mesh = <["tpu_x"=2]>
   sdy.mesh @empty_mesh = <[]>
 
@@ -64,6 +65,7 @@ module @empty_mesh {
 module @maximal_mesh {
   // CHECK-DAG: sdy.mesh @tpu = <["x"=2]>
   // CHECK-DAG: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+  // CHECK-NOT: sdy.mesh @mesh
   sdy.mesh @mesh = <["tpu_x"=2]>
   sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
@@ -72,6 +74,30 @@ module @maximal_mesh {
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x"}]>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>})
+      -> (tensor<16xf32>) attributes {
+      topology = #mpmd.topology<<"tpu" : <["x"=2]>>>} {
+    %0 = mpmd.named_computation<"stage1"> (%arg0, %arg1) (%arg2: tensor<16xf32>, %arg3: tensor<16xf32>) {
+      %2 = stablehlo.add %arg3, %arg2 : tensor<16xf32>
+      mpmd.return %2 : tensor<16xf32>
+    } : (tensor<16xf32>, tensor<16xf32>) -> tensor<16xf32>
+    return %0 : tensor<16xf32>
+  }
+}
+
+// -----
+
+// CHECK-LABEL: module @fully_replicated_tensor
+module @fully_replicated_tensor {
+  // CHECK-DAG: sdy.mesh @tpu = <["x"=2]>
+  // CHECK-DAG: sdy.mesh @empty_mesh = <[]>
+  // CHECK-NOT: sdy.mesh @mesh
+  sdy.mesh @mesh = <["tpu_x"=2]>
+
+  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}]>}
+  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{?}]>}
+  func.func @main(
+    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>},
+    %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}]>})
       -> (tensor<16xf32>) attributes {
       topology = #mpmd.topology<<"tpu" : <["x"=2]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg1) (%arg2: tensor<16xf32>, %arg3: tensor<16xf32>) {

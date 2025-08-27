@@ -80,6 +80,9 @@ inline constexpr int kStartAtZ = 'z' - 'i';  // 17
 inline const std::string kReshardLabel = "sdy-reshard";
 inline const std::string kCollectiveLabel = "sdy-collective";
 
+// Symbol name for the empty mesh.
+inline const std::string kEmptyMeshSymbol = "empty_mesh";
+
 }  // namespace sdy
 }  // namespace mlir
 

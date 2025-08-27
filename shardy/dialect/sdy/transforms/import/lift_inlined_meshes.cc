@@ -27,6 +27,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
@@ -48,7 +49,7 @@ MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
     return createMesh(meshName);
   }
   if (mesh.empty()) {
-    return createMesh("empty_mesh");
+    return createMesh(sdy::kEmptyMeshSymbol);
   }
   return createMesh("mesh");
 }
