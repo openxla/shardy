@@ -23,6 +23,14 @@ mpmd = sdy.mpmd
 
 class MpmdTest(unittest.TestCase):
 
+  def test_user_origin_attr(self):
+    with ir.Context() as ctx:
+      mpmd.register_dialect(ctx)
+      attr = mpmd.UserOriginAttr.get('test_user', 2)
+      self.assertEqual(attr.user_name, 'test_user')
+      self.assertEqual(attr.transpose_count, 2)
+      self.assertEqual(str(attr), '#mpmd.user_origin<"test_user"(2)>')
+
   def test_named_computation_op(self):
     """Tests the `mpmd.named_computation` op in an MLIR function."""
     with ir.Context() as ctx, ir.Location.unknown() as loc:
@@ -31,8 +39,7 @@ class MpmdTest(unittest.TestCase):
       ctx.allow_unregistered_dialects = True
       module = ir.Module.create()
       f32_tensor_type = ir.RankedTensorType.get((4,), ir.F32Type.get())
-      # TODO: b/436835287 - Expose the origin attribute in the python API.
-      origin = ir.Attribute.parse('#mpmd.user_origin<"f">')
+      origin = mpmd.UserOriginAttr.get('f', 0, ctx)
       with ir.InsertionPoint(module.body):
 
         @func.FuncOp.from_py_func(f32_tensor_type, results=[f32_tensor_type])

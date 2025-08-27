@@ -1,4 +1,4 @@
-/* Copyright 2024 The Shardy Authors.
+/* Copyright 2025 The MPMD Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,9 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "shardy/integrations/c/dialect.h"  // IWYU pragma: keep
+#ifndef SHARDY_INTEGRATIONS_C_MPMD_PASSES_H_
+#define SHARDY_INTEGRATIONS_C_MPMD_PASSES_H_
 
-#include "mlir/CAPI/Registration.h"
-#include "shardy/dialect/sdy/ir/dialect.h"
+#include "mlir-c/Support.h"
 
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Sdy, sdy, mlir::sdy::SdyDialect);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/// Register all compiler passes and pipelines of MPMD.
+MLIR_CAPI_EXPORTED void mlirRegisterAllMpmdPassesAndPipelines();
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // SHARDY_INTEGRATIONS_C_MPMD_PASSES_H_
