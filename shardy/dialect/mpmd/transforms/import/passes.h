@@ -60,6 +60,8 @@ struct ImportOptions {
   bool cloneInferredFragments = false;
   // Infer mesh pipeline options.
   InferMeshOptions inferMeshOptions;
+  // Enable heterogeneous meshes.
+  bool enableHeterogeneousMeshes = false;
 };
 
 // Adds the standard set of passes to import an MPMD program with a fixed mesh

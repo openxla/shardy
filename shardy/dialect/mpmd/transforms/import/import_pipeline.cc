@@ -49,6 +49,10 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
 
   pm.addPass(createCopyTopologyFromMainPass());
 
+  if (options.enableHeterogeneousMeshes) {
+    pm.addPass(createGenerateSdyMeshesFromTopologyPass());
+  }
+
   // Unroll mpmd.for loops as they aren't yet supported by mesh inference.
   // TODO(jupvfranco): postpone unrolling until after SPMD propagation.
   pm.addNestedPass<FuncOp>(createUnrollForLoopsPass());
