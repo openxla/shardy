@@ -95,6 +95,13 @@ func.func @all_to_all_multiple_axes(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sd
   return %0 : tensor<16x8x8xf32>
 }
 
+// CHECK-LABEL: func @all_to_all_move_partial_axes_from_src_dim_to_non_empty_tgt_dim
+func.func @all_to_all_move_partial_axes_from_src_dim_to_non_empty_tgt_dim(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"x", "z"}, {"y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_to_all [{"z"}: 0->1] %arg0 out_sharding=<@mesh3d, [{"x"}, {"y", "z"}]>
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"x"}, {"y", "z"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
 // CHECK-LABEL: func @two_all_to_alls_different_tgt_dims
 func.func @two_all_to_alls_different_tgt_dims(%arg0 : tensor<16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d_4x2x4, [{}, {"y", "x"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"x"}: 1->0] %arg0 out_sharding=<@mesh3d_4x2x4, [{"x"}, {"y"}, {}]>
