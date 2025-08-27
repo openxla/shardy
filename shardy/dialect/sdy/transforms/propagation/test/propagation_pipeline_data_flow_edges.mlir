@@ -546,9 +546,8 @@ func.func @named_computation_inside_out_propagation(%arg0: tensor<8x2xi32>) -> t
   // CHECK-SAME:     in_shardings=[<@mesh_a_2_b_2, [{"a"}, {}]>]
   // CHECK-SAME:     out_shardings=[<@mesh_a_2_b_2, [{"b"}, {}]>]
   // CHECK-SAME      (%arg1: tensor<8x2xi32>) {
-  // CHECK-NEXT:   %[[SC_1:.*]] = sdy.reshard %arg1 <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
-  // CHECK-NEXT:   %[[SC_2:.*]] = sdy.reshard %[[SC_1]] <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
-  // CHECK-NEXT:  sdy.return %[[SC_2]] : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[SC:.*]] = sdy.collective_permute %arg1 out_sharding=<@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:  sdy.return %[[SC]] : tensor<8x2xi32>
   // CHECK-NEXT: } : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT: return %[[NC]] : tensor<8x2xi32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
