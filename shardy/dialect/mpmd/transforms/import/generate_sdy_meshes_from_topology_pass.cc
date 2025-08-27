@@ -20,6 +20,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
@@ -45,8 +46,24 @@ sdy::MeshOp GetOrCreateEmptyMesh(ModuleOp module_op) {
     return empty_mesh;
   }
   OpBuilder builder = OpBuilder::atBlockBegin(module_op.getBody());
-  return sdy::MeshOp::create(builder, module_op.getLoc(), sdy::kEmptyMeshSymbol,
-                             sdy::MeshAttr::get(builder.getContext(), {}));
+  sdy::MeshOp empty_mesh =
+      sdy::MeshOp::create(builder, module_op.getLoc(), sdy::kEmptyMeshSymbol,
+                          sdy::MeshAttr::get(builder.getContext(), {}));
+
+  // TODO(b/441487083): Look up the mesh in the global mesh registry.
+  // Insert empty mesh into the topology attribute.
+  SmallVector<func::FuncOp> mpmd_funcs = GetMpmdFunctions(module_op);
+  SDY_CHECK(!mpmd_funcs.empty());
+  TopologyAttr topology = GetTopology(mpmd_funcs.front());
+  SmallVector<NamedMeshAttr> meshes(topology.getMeshes());
+  meshes.push_back(
+      NamedMeshAttr::get(module_op.getContext(), sdy::kEmptyMeshSymbol,
+                         sdy::MeshAttr::get(module_op.getContext(), {})));
+  mpmd_funcs.front()->removeAttr(kTopologyAttr);
+  mpmd_funcs.front()->setAttr(
+      kTopologyAttr, mpmd::TopologyAttr::get(module_op.getContext(), meshes));
+
+  return empty_mesh;
 }
 
 }  // namespace

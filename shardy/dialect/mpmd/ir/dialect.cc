@@ -268,7 +268,7 @@ RankedTensorType MeshTensorType::getLocalTensorType(Operation* op) {
   if (!sharding) {
     return getGlobalTensorType();
   }
-  // TODO(petebu): Consider looking up the mesh in the global mesh registry.
+  // TODO(b/441487083): Look up the mesh in the global mesh registry.
   return MeshTensorType::getLocalTensorType(
       GetMeshOrFail(op, sharding.getMeshName()));
 }
