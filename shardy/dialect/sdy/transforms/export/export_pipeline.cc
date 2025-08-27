@@ -41,16 +41,20 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-
+  addCanonicalizerPass(pm, kReshardLabel);
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      options.dumpDirectory,
+      options.enableInsertExplicitCollectives
+          ? "after_explicit_reshards_on_partitioner_with_global_shapes"
+          : "after_explicit_reshards_on_minimal_partitioner_with_global_shapes",
+      dumpIndex++));
+  // TODO(enver): Enable ReshardToCollectives pass for default/minimal version.
   if (options.enableInsertExplicitCollectives) {
-    addCanonicalizerPass(pm, kReshardLabel);
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     // NOTE: ReshardToCollectives pass above generates all-slice collectives,
     // which during the canonicalizer below may be converted to reduce scatters
     // by potentially fusing with preceeding all-reduces, which are inserted
-    // during InsertExplicitReshards pass.
+    // during InsertExplicitReshards pass when it is on full version.
     addCanonicalizerPass(pm, kCollectiveLabel);
   }
 
@@ -79,7 +83,7 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
   pm.addPass(createCloseShardingsPass());
 
-  // / We dump the module after propagation at this point, since the export
+  // We dump the module after propagation at this point, since the export
   // passes before are removing internal implementation details of the
   // propagation itself and make the module more readable.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
