@@ -959,22 +959,29 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
   return sourceSharding != targetSharding;
 }
 
-TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
+TensorShardingAttr maybeInsertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
-    TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter) {
-  ArrayRef<AxisRefAttr> targetUnreducedAxes =
-      userSharding ? userSharding.getUnreducedAxes() : ArrayRef<AxisRefAttr>();
-
-  if (!sourceSharding) {
-    return nullptr;
-  }
-  if (sourceSharding.getUnreducedAxes().empty() ||
-      targetUnreducedAxes == sourceSharding.getUnreducedAxes()) {
+    TensorShardingAttr userSharding, const SymbolTable& symbolTable,
+    IRRewriter& rewriter) {
+  if (!sourceSharding || sourceSharding.getUnreducedAxes().empty()) {
     return sourceSharding;
   }
-
-  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-      sourceSharding.getUnreducedAxes(), targetUnreducedAxes, mesh);
+  MeshAttr mesh = sourceSharding.getMesh(symbolTable);
+  ArrayRef<AxisRefAttr> sourceUnreducedAxes = sourceSharding.getUnreducedAxes();
+  ArrayRef<AxisRefAttr> targetUnreducedAxes = ArrayRef<AxisRefAttr>();
+  if (userSharding) {
+    targetUnreducedAxes = userSharding.getUnreducedAxes();
+    // TODO(enver): Support the case the meshes differ only on device orders.
+    assert(
+        targetUnreducedAxes.empty() ||
+        mesh.equals(userSharding.getMesh(symbolTable)) &&
+            "source and user shardings have different meshes for all reduce.");
+    if (targetUnreducedAxes == sourceUnreducedAxes) {
+      return sourceSharding;
+    }
+  }
+  SmallVector<AxisRefAttr> allReduceAxes =
+      getAxisSetDiff(sourceUnreducedAxes, targetUnreducedAxes, mesh);
   if (allReduceAxes.empty()) {
     return sourceSharding;
   }
