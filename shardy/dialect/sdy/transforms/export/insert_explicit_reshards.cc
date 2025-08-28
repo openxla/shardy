@@ -153,7 +153,8 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
 // return %reshard  : tensor<4x8xf32>
 // ```
 template <class OpTy>
-void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
+void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable,
+                OpShardingRuleAttr shardingRule) {
   SmallVector<TensorShardingAttr> inShardingAttrs =
       getShardings(op.getOperands());
   ArrayRef<TensorShardingAttr> outShardingAttrs =
@@ -172,9 +173,6 @@ void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
   }
   MeshAttr mesh = getMeshAttr(symbolTable, meshName.value());
   assert(mesh && "unknown mesh");
-  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
-      op.getOperation(), /*conservativePropagation=*/false,
-      /*setShardingRuleOnOp=*/false);
   ShardingProjection shardingProjection =
       ShardingProjection::build(inShardingAttrs, outShardingAttrs, shardingRule,
                                 mesh, /*closedIfMissing=*/true);
@@ -328,19 +326,34 @@ struct InsertExplicitReshardsPass
         }
       }
 
+      // NOTE: Creating a sharding rule requires data flow edges are present.
+      OpShardingRuleAttr shardingRule =
+          getOrCreateShardingRule(op, /*conservativePropagation=*/false,
+                                  /*setShardingRuleOnOp=*/false);
+
+      // TODO(b/434668939): Enable explicit reshards on custom sharding rules.
+      if (!shardingRule || shardingRule.isCustom()) {
+        // Insert explicit reshards only on operations with sharding rules,
+        // since all the operations of interest got their sharding rules.
+        return;
+      }
+
       if (!onFullVersion) {
         TypeSwitch<Operation*>(op)
             .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
-              processDot(dotOp, rewriter, symbolTable);
+              processDot(dotOp, rewriter, symbolTable, shardingRule);
             })
             .Case<stablehlo::DotGeneralOp>(
                 [&](stablehlo::DotGeneralOp dotGeneralOp) {
-                  processDot(dotGeneralOp, rewriter, symbolTable);
+                  processDot(dotGeneralOp, rewriter, symbolTable, shardingRule);
                 });
         return;
       }
 
-      insertExplicitReshardsOnOp(op, rewriter, symbolTable, onFullVersion);
+      insertExplicitReshardsOnOp(op, rewriter, symbolTable, shardingRule,
+                                 onFullVersion);
+
+      // TODO(enver): Remove sharding rules from ops.
     });
   }
 };

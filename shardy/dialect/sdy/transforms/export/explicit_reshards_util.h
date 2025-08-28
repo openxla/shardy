@@ -93,6 +93,7 @@ bool differentOperandShardingFromFirstResult(Operation* op);
 // Refer to the documentation of `InsertExplicitReshardsPass` for more details.
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
+                                OpShardingRuleAttr shardingRule,
                                 bool onFullVersion);
 
 }  // namespace sdy

@@ -1011,18 +1011,9 @@ bool differentOperandShardingFromFirstResult(Operation* op) {
 
 void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
+                                OpShardingRuleAttr shardingRule,
                                 const bool onFullVersion) {
   if (!onFullVersion) {
-    return;
-  }
-
-  // NOTE: Creating a sharding rule requires data flow edges are present.
-  OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
-      op, /*conservativePropagation=*/false, /*setShardingRuleOnOp=*/false);
-  // TODO: b/434668939 - enable explicit reshards on custom sharding rules.
-  if (!shardingRule || shardingRule.isCustom()) {
-    // Insert explicit reshards only on operations with sharding rules, since
-    // all the operations of interest got their sharding rules.
     return;
   }
 
@@ -1071,8 +1062,6 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
 
   // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
   insertAllReduces(op, commonAxesPerFactorWithMesh, shardingRule, rewriter);
-
-  // TODO(enver): Remove sharding rules from ops.
 }
 
 }  // namespace sdy
