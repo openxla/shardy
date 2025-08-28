@@ -197,8 +197,8 @@ bool shouldReshardToCommonMesh(TensorShardingAttr sharding, const Mesh& mesh,
 // Assumes all tensor shardings have the same mesh as `mesh` on axes but may be
 // different on device order.
 void insertExplicitReshards(Operation* op,
-                            const SmallVector<TensorShardingAttr>& inShardings,
-                            const SmallVector<TensorShardingAttr>& outShardings,
+                            ArrayRef<TensorShardingAttr> inShardings,
+                            ArrayRef<TensorShardingAttr> outShardings,
                             const ShardingProjection& shardingProjection,
                             UpdateTensorShardings updateTensorShardings,
                             IRRewriter& rewriter,
@@ -739,10 +739,8 @@ std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
 }
 
 TensorShardingAttr getShardingOfTensorIndex(
-    const int64_t tensorIndex,
-    const SmallVector<TensorShardingAttr>& inShardings,
-    const SmallVector<TensorShardingAttr>& outShardings,
-    const int64_t numOperands) {
+    const int64_t tensorIndex, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, const int64_t numOperands) {
   return tensorIndex < numOperands ? inShardings[tensorIndex]
                                    : outShardings[tensorIndex - numOperands];
 }
@@ -763,8 +761,8 @@ Mesh getMeshOrDefault(TensorShardingAttr sharding,
 // 2. Both tensors have the same mesh but may have different device orders.
 // 3. The factor shardings are not compatible.
 AxesPerFactorWithMesh findCommonAxesOnUnaryOperation(
-    const SmallVector<TensorShardingAttr>& inShardings,
-    const SmallVector<TensorShardingAttr>& outShardings,
+    ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings,
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const SymbolTable& symbolTable, const Mesh& mesh) {
@@ -858,8 +856,8 @@ void distributeAxisRefsToBatchingFactors(
   }
 }
 
-Mesh getMostCommonMesh(const SmallVector<TensorShardingAttr>& inShardings,
-                       const SmallVector<TensorShardingAttr>& outShardings,
+Mesh getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
+                       ArrayRef<TensorShardingAttr> outShardings,
                        OpShardingRuleAttr shardingRule,
                        const SymbolTable& symbolTable,
                        const Mesh& defaultMesh) {
@@ -882,8 +880,8 @@ Mesh getMostCommonMesh(const SmallVector<TensorShardingAttr>& inShardings,
 }
 
 AxesPerFactorWithMesh findCommonAxes(
-    const SmallVector<TensorShardingAttr>& inShardings,
-    const SmallVector<TensorShardingAttr>& outShardings,
+    ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings,
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const SymbolTable& symbolTable, const Mesh& defaultMesh) {
@@ -1009,31 +1007,12 @@ bool differentOperandShardingFromFirstResult(Operation* op) {
   });
 }
 
-void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
-                                const SymbolTable& symbolTable,
-                                OpShardingRuleAttr shardingRule,
-                                const bool onFullVersion) {
+void insertExplicitReshardsOnOp(
+    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
+    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+    const bool onFullVersion, const Mesh& defaultMesh) {
   if (!onFullVersion) {
-    return;
-  }
-
-  SmallVector<int64_t> tensorSizes = getTensorSizes(op);
-  SmallVector<TensorShardingAttr> inShardings = getShardings(op->getOperands());
-  SmallVector<TensorShardingAttr> outShardings = getShardings(op->getResults());
-  std::optional<StringRef> meshName = getCommonMeshName(
-      inShardings, outShardings, symbolTable, /*ignoreDeviceIds=*/true);
-  if (!meshName.has_value()) {
-    // This means none of the operands or results have a sharding attribute or
-    // the sharding attributes use different meshes. Skip if so.
-    // TODO(enver): Actually, we are moving towards supporting multiple explicit
-    // reshards so operands and results are all bound by the same mesh.
-    return;
-  }
-
-  Mesh defaultMesh(getMeshAttr(symbolTable, *meshName), *meshName);
-  assert(defaultMesh.attr() && "unknown mesh");
-  // TODO(enver): Support maximal meshes.
-  if (defaultMesh.attr().isMaximal()) {
     return;
   }
 
@@ -1043,9 +1022,9 @@ void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
 
   UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                               shardingRule.getNumResults());
-  AxesPerFactorWithMesh commonAxesPerFactorWithMesh =
-      findCommonAxes(inShardings, outShardings, shardingProjection,
-                     shardingRule, tensorSizes, symbolTable, defaultMesh);
+  AxesPerFactorWithMesh commonAxesPerFactorWithMesh = findCommonAxes(
+      inShardings, outShardings, shardingProjection, shardingRule,
+      getTensorSizes(op), symbolTable, defaultMesh);
   if (commonAxesPerFactorWithMesh.empty()) {
     return;
   }
