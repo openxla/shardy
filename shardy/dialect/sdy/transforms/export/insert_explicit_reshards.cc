@@ -310,19 +310,21 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      // For each operand that has unreduced axes, insert an all-reduce if
-      // any of the unreduced axes isn't unreduced in the target sharding.
-      //
-      // We assume all results of an op should have the same unreduced axes,
-      // so we look at the first result.
-      TensorShardingAttr outSharding =
-          op->getResults().empty() ? nullptr : getSharding(op->getResult(0));
-      rewriter.setInsertionPoint(op);
-      for (OpOperand& operand : op->getOpOperands()) {
-        if (TensorShardingAttr inSharding = getSharding(operand.get())) {
-          insertAllReduceIfUnreducedToReplicated(
-              operand, inSharding, outSharding, inSharding.getMesh(symbolTable),
-              rewriter);
+      if (op->getNumResults() == 1) {
+        // For each operand that has unreduced axes, insert an all-reduce if
+        // any of the unreduced axes isn't unreduced in the target sharding.
+        //
+        // We assume all results of an op should have the same unreduced axes,
+        // so we look at the first result.
+        TensorShardingAttr outSharding =
+            op->getResults().empty() ? nullptr : getSharding(op->getResult(0));
+        rewriter.setInsertionPoint(op);
+        for (OpOperand& operand : op->getOpOperands()) {
+          if (TensorShardingAttr inSharding = getSharding(operand.get())) {
+            insertAllReduceIfUnreducedToReplicated(
+                operand, inSharding, outSharding,
+                inSharding.getMesh(symbolTable), rewriter);
+          }
         }
       }
 
