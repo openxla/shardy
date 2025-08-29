@@ -153,29 +153,17 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
 // return %reshard  : tensor<4x8xf32>
 // ```
 template <class OpTy>
-void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable,
-                OpShardingRuleAttr shardingRule) {
-  SmallVector<TensorShardingAttr> inShardingAttrs =
-      getShardings(op.getOperands());
-  ArrayRef<TensorShardingAttr> outShardingAttrs =
-      getShardings(op.getOperation());
-  if (outShardingAttrs.empty()) {
+void processDot(OpTy op, ArrayRef<TensorShardingAttr> inShardings,
+                ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
+                const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+                const Mesh& mesh) {
+  if (outShardings.empty()) {
     // Result doesn't have a sharding.
     return;
   }
-  std::optional<StringRef> meshName =
-      getCommonMeshName(inShardingAttrs, outShardingAttrs, symbolTable,
-                        /*ignoreDeviceIds=*/false);
-  if (!meshName.has_value()) {
-    // This means none of the operands or results have a sharding attribute
-    // or the sharding attributes use different meshes. Skip if so.
-    return;
-  }
-  MeshAttr mesh = getMeshAttr(symbolTable, meshName.value());
-  assert(mesh && "unknown mesh");
   ShardingProjection shardingProjection =
-      ShardingProjection::build(inShardingAttrs, outShardingAttrs, shardingRule,
-                                mesh, /*closedIfMissing=*/true);
+      ShardingProjection::build(inShardings, outShardings, shardingRule,
+                                mesh.attr(), /*closedIfMissing=*/true);
 
   const TensorFactorShardings& lhsSharding = shardingProjection.getOperand(0);
   const TensorFactorShardings& rhsSharding = shardingProjection.getOperand(1);
@@ -263,11 +251,32 @@ void processDot(OpTy op, IRRewriter& rewriter, const SymbolTable& symbolTable,
   setSharding(op.getResult(),
               resultSharding.createTensorShardingAttr(
                   op.getContext(), shardingRule.getResultMapping(0),
-                  shardingRule.getFactorSizes(), meshName.value(), mesh));
+                  shardingRule.getFactorSizes(), mesh.name(), mesh.attr()));
   rewriter.setInsertionPointAfter(op);
   auto reshardOp = rewriter.create<ReshardOp>(op.getLoc(), op.getResult(),
-                                              outShardingAttrs.front());
+                                              outShardings.front());
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
+}
+
+std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
+                            ArrayRef<TensorShardingAttr> outShardings,
+                            const SymbolTable& symbolTable) {
+  std::optional<StringRef> meshName = getCommonMeshName(
+      inShardings, outShardings, symbolTable, /*ignoreDeviceIds=*/true);
+  if (!meshName.has_value()) {
+    // This means none of the operands or results have a sharding attribute or
+    // the sharding attributes use different meshes.
+    // TODO(enver): Actually, we are moving towards supporting multiple
+    // explicit reshards so operands and results are all bound by the same
+    // mesh.
+    return std::nullopt;
+  }
+  MeshAttr meshAttr = getMeshAttr(symbolTable, *meshName);
+  assert(meshAttr && "unknown mesh");
+  if (meshAttr.isMaximal()) {
+    return std::nullopt;
+  }
+  return Mesh(meshAttr, *meshName);
 }
 
 struct InsertExplicitReshardsPass
@@ -338,20 +347,34 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      SmallVector<TensorShardingAttr> inShardings =
+          getShardings(op->getOperands());
+      SmallVector<TensorShardingAttr> outShardings =
+          getShardings(op->getResults());
+
+      std::optional<Mesh> mesh =
+          getMesh(inShardings, outShardings, symbolTable);
+      if (!mesh.has_value()) {
+        return;
+      }
+
       if (!onFullVersion) {
         TypeSwitch<Operation*>(op)
             .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
-              processDot(dotOp, rewriter, symbolTable, shardingRule);
+              processDot(dotOp, inShardings, outShardings, rewriter,
+                         symbolTable, shardingRule, *mesh);
             })
             .Case<stablehlo::DotGeneralOp>(
                 [&](stablehlo::DotGeneralOp dotGeneralOp) {
-                  processDot(dotGeneralOp, rewriter, symbolTable, shardingRule);
+                  processDot(dotGeneralOp, inShardings, outShardings, rewriter,
+                             symbolTable, shardingRule, *mesh);
                 });
         return;
       }
 
-      insertExplicitReshardsOnOp(op, rewriter, symbolTable, shardingRule,
-                                 onFullVersion);
+      insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
+                                 symbolTable, shardingRule, onFullVersion,
+                                 *mesh);
 
       // TODO(enver): Remove sharding rules from ops.
     });
