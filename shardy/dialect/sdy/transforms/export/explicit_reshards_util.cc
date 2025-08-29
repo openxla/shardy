@@ -748,14 +748,12 @@ TensorShardingAttr getShardingOfTensorIndex(
 }
 
 Mesh getMeshOrDefault(TensorShardingAttr sharding,
-                      const SymbolTable& symbolTable, const Mesh& defaultMesh) {
-  if (!sharding) {
+                      const SymbolTable& symbolTable, const Mesh defaultMesh) {
+  if (!sharding || !sharding.getMeshOrRef()) {
     return defaultMesh;
   }
-  StringRef meshName =
-      getCommonMeshName({sharding}, {}, symbolTable, /*ignoreDeviceIds=*/false)
-          .value();
-  return Mesh(getMeshAttr(symbolTable, meshName), meshName);
+  return Mesh(sharding.getMesh(symbolTable),
+              cast<FlatSymbolRefAttr>(sharding.getMeshOrRef()).getValue());
 }
 
 // Assumes that:
