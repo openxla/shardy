@@ -26,6 +26,7 @@ limitations under the License.
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/PatternMatch.h"
@@ -142,6 +143,27 @@ struct FragmentMergeRule {
 
 using FragmentMergeRules = std::vector<FragmentMergeRule>;
 
+// Describes a rule for scheduling fragments. A rule is defined by an ordered
+// sequence of fragments. This ordering dictates the execution order of the
+// fragments on a given mesh.
+struct FragmentScheduleRule {
+  // The sequence of fragments to be scheduled. The order of fragments in this
+  // vector defines their execution order.
+  std::vector<FragmentInfo> ordered_fragments;
+
+  static constexpr llvm::StringRef kFragmentScheduleRulePrefix =
+      "FragmentScheduleRule(ordered_fragments=[";
+
+  friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os,
+                                       const FragmentScheduleRule& rule) {
+    os << kFragmentScheduleRulePrefix;
+    llvm::interleave(rule.ordered_fragments, os, "->");
+    return os << "])";
+  }
+};
+
+using FragmentScheduleRules = std::vector<FragmentScheduleRule>;
+
 // Returns the fragment info of a fragment op.
 FragmentInfo GetFragmentInfo(FragmentOp fragment);
 
@@ -165,6 +187,22 @@ class parser<mlir::mpmd::FragmentMergeRule>
   StringRef getValueName() const override { return "fragment-merge-rule"; }
   void printOptionDiff(const Option& opt,
                        const mlir::mpmd::FragmentMergeRule& value,
+                       const OptVal& defaultValue, size_t globalWidth) const;
+  void anchor() override;
+};
+
+extern template class basic_parser<mlir::mpmd::FragmentScheduleRule>;
+
+template <>
+class parser<mlir::mpmd::FragmentScheduleRule>
+    : public basic_parser<mlir::mpmd::FragmentScheduleRule> {
+ public:
+  parser(Option& opt) : basic_parser(opt) {}
+  bool parse(Option& opt, StringRef argName, StringRef arg,
+             mlir::mpmd::FragmentScheduleRule& value);
+  StringRef getValueName() const override { return "fragment-schedule-rule"; }
+  void printOptionDiff(const Option& opt,
+                       const mlir::mpmd::FragmentScheduleRule& value,
                        const OptVal& defaultValue, size_t globalWidth) const;
   void anchor() override;
 };

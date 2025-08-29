@@ -20,6 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -67,6 +68,11 @@ FragmentInfo MakeFragmentInfo(const std::vector<FragmentOrigin>& origins,
 FragmentMergeRule MakeFragmentMergeRule(
     const std::vector<FragmentInfo>& sources, const FragmentInfo& target) {
   return {sources, target};
+}
+
+FragmentScheduleRule MakeFragmentScheduleRule(
+    const std::vector<FragmentInfo>& ordered_fragments) {
+  return {ordered_fragments};
 }
 
 TEST(GetFragmentInfoTest, GetFragmentInfo) {
@@ -257,6 +263,92 @@ TEST(FragmentMergeRule, PrintFragmentMergeRule) {
          ","
          "target=FragmentInfo(origins=["
          "\"f1\"(123),\"f2\"(456)],stage=1,is_weight_gradient=false))"));
+}
+
+TEST(FragmentMergeRuleParser, ParseRule) {
+  llvm::cl::OptionCategory test_category("Test Options");
+  llvm::cl::opt<FragmentMergeRule> rule_opt("fragment-merge-rule",
+                                            llvm::cl::desc("test"),
+                                            llvm::cl::cat(test_category));
+  FragmentMergeRule expected_rule = MakeFragmentMergeRule(
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/false),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/true)},
+      MakeFragmentInfo(
+          {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 456)},
+          /*stage_id=*/1,
+          /*call_counter=*/std::nullopt,
+          /*is_weight_gradient=*/false));
+  // We first construct the rule and print it to a string. Then we parse that
+  // string to ensure that the printed form of a rule is directly compatible
+  // with the format the parser expects.
+  std::string rule_str;
+  llvm::raw_string_ostream os(rule_str);
+  os << expected_rule;
+
+  FragmentMergeRule rule;
+  llvm::cl::parser<FragmentMergeRule> p(rule_opt);
+  bool result = p.parse(rule_opt, "test-rule", rule_str, rule);
+
+  EXPECT_FALSE(result);
+
+  ASSERT_EQ(rule.sources.size(), 2);
+  ExpectFragmentInfoEq(rule.sources[0], expected_rule.sources[0]);
+  ExpectFragmentInfoEq(rule.sources[1], expected_rule.sources[1]);
+  ExpectFragmentInfoEq(rule.target, expected_rule.target);
+}
+
+TEST(FragmentScheduleRule, PrintFragmentScheduleRule) {
+  FragmentScheduleRule rule = MakeFragmentScheduleRule(
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*stage_id=*/1)});
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  os << rule;
+  EXPECT_THAT(str, Eq("FragmentScheduleRule(ordered_fragments=["
+                      "FragmentInfo(origins=[\"f1\"(123)],stage=1,is_weight_"
+                      "gradient=false)->"
+                      "FragmentInfo(origins=[\"f2\"(456)],stage=1,is_weight_"
+                      "gradient=false)])"));
+}
+
+TEST(FragmentScheduleRuleParser, ParseRule) {
+  llvm::cl::OptionCategory test_category("Test Options");
+  llvm::cl::opt<FragmentScheduleRule> rule_opt("fragment-schedule-rule",
+                                               llvm::cl::desc("test"),
+                                               llvm::cl::cat(test_category));
+  FragmentScheduleRule expected_rule = MakeFragmentScheduleRule(
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/false),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/true)});
+  // We first construct the rule and print it to a string. Then we parse that
+  // string to ensure that the printed form of a rule is directly compatible
+  // with the format the parser expects.
+  std::string rule_str;
+  llvm::raw_string_ostream os(rule_str);
+  os << expected_rule;
+
+  FragmentScheduleRule rule;
+  llvm::cl::parser<FragmentScheduleRule> p(rule_opt);
+  bool result = p.parse(rule_opt, "test-rule", rule_str, rule);
+
+  EXPECT_FALSE(result);
+
+  ASSERT_EQ(rule.ordered_fragments.size(), 2);
+  ExpectFragmentInfoEq(rule.ordered_fragments[0],
+                       expected_rule.ordered_fragments[0]);
+  ExpectFragmentInfoEq(rule.ordered_fragments[1],
+                       expected_rule.ordered_fragments[1]);
 }
 
 TEST(FragmentInfoMapInfoTest, IsEqual) {
