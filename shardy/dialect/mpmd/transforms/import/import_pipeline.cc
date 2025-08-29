@@ -24,6 +24,7 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "shardy/dialect/mpmd/transforms/common/merge_fragments.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"
+#include "shardy/dialect/mpmd/transforms/common/scheduler_preprocess.h"
 #include "shardy/dialect/mpmd/transforms/import/infer_mesh_assignment.h"
 #include "shardy/dialect/mpmd/transforms/import/mesh_assignment_map.h"
 #include "shardy/dialect/mpmd/transforms/import/passes.h"
@@ -143,6 +144,20 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   // Thus, we don't apply canonicalization again.
   pm.addNestedPass<FuncOp>(createFragmentDedupPass());
   pm.addNestedPass<FuncOp>(createFragmentDcePass());
+
+  // Apply optimization passes that modify fragments so fragments are stable
+  // before rule-based merging/scheduling in the partition pipeline.
+  // Apply as many optimizations as possible before inlining.
+  pm.addNestedPass<FuncOp>(createRemoveTransferCyclesPass());
+  AddCallInliningRelatedPasses(pm);
+  // Merge any inferred fragments with user-defined fragments that could not be
+  // merged before because of CallOps.
+  if (!options.mergeAfterScheduling) {
+    pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
+  }
+  // Merge fragments into scheduling units.
+  AddSchedulingPreprocessingPasses(pm, options.splitBwdFragments,
+                                   options.verifyScheduleUnits);
 }
 
 namespace {

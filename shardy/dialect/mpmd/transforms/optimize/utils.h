@@ -61,6 +61,17 @@ bool IsSchedulingUnit(FragmentOp fragment);
 // Precondition: `tgt_op` and `src_op` must be in the same block.
 bool TargetDependsOnSourceOp(Operation* src_op, Operation* tgt_op);
 
+// Adds a control dependency in the graph so that `fragment2` depends on
+// `fragment1`.
+// NOTE: this creates an ill-formed fragment.
+void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2,
+                          DenseMap<FragmentOp, int>& ctrl_dependency_counter);
+
+// Removes all control dependencies added, so that all fragments are well-formed
+// again.
+void RemoveAllControlDependencies(
+    DenseMap<FragmentOp, int>& ctrl_dependency_counter);
+
 }  // namespace mlir::mpmd
 
 #endif  // SHARDY_DIALECT_MPMD_TRANSFORMS_OPTIMIZE_UTILS_H_

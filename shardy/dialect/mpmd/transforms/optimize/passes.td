@@ -36,6 +36,25 @@ def RematFragmentPass : PassBase<"mpmd-remat-fragment", "DistributedFunctionPass
   ];
 }
 
+def RuleBasedSchedulePass :
+    PassBase<"mpmd-rule-based-schedule", "DistributedFunctionPass"> {
+  let summary = "Reorders fragments based on user-defined rules.";
+  let description = [{
+    Reorders fragments by adding control dependencies based on a list of rules.
+    Each rule specifies a sequence of fragments, and control dependencies are
+    added to enforce that sequence. For example, for a rule with fragments [A,
+    B, C], control dependencies are added for A->B and B->C. The pass fails if
+    the rules create a cyclic dependency.
+  }];
+
+  let options = [
+    ListOption<"rules", "rules", "FragmentScheduleRule",
+               "A list of fragment schedule rules. Each rule is a list of "
+               "`FragmentInfo`s that specifies the order in which the fragments "
+               "should be executed.">
+  ];
+}
+
 def PipelineSchedulerPass :
     PassBase<"mpmd-pipeline-scheduler", "DistributedFunctionPass"> {
   let summary = "Reorders the fragments to obtain a given pipeline schedule.";
@@ -66,22 +85,4 @@ def PipelineSchedulerPass :
            "before another. Can be parsed from a built-in `PipelineSchedule` "
            "as follows: `builtin:<schedule-as-string>`.">
   ];
-}
-
-def SchedulingUnitVerifierPass :
-    PassBase<"mpmd-scheduling-units-verifier", "DistributedFunctionPass"> {
-  let summary = "Verifies if the program contains the required scheduling units.";
-}
-
-// TODO: b/378099938 - Remove this pass once we have a better way to handle
-// transfers while merging fragments. We need this now because having a transfer
-// in between two fragments prevents the merge pass from merging them.
-def MoveTransfersToProducerPass :
-    PassBase<"mpmd-move-transfers-to-producer", "DistributedFunctionPass"> {
-  let summary = "Moves transfers next to their producers.";
-  let description = [{
-    Moves transfers next to their producers: if the operand is a block argument,
-    move the transfer to the beginning of the block, otherwise move it after the
-    defining op.
-  }];
 }
