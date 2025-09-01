@@ -91,10 +91,13 @@ bool differentOperandShardingFromFirstResult(Operation* op);
 // sharding of `op` is compatible with its sharding rule.
 //
 // Refer to the documentation of `InsertExplicitReshardsPass` for more details.
-void insertExplicitReshardsOnOp(Operation* op, IRRewriter& rewriter,
+void insertExplicitReshardsOnOp(Operation* op,
+                                ArrayRef<TensorShardingAttr> inShardings,
+                                ArrayRef<TensorShardingAttr> outShardings,
+                                IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
                                 OpShardingRuleAttr shardingRule,
-                                bool onFullVersion);
+                                bool onFullVersion, const Mesh& defaultMesh);
 
 }  // namespace sdy
 }  // namespace mlir
