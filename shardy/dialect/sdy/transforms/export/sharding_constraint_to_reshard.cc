@@ -42,8 +42,11 @@ class ShardingConstraintPattern
   LogicalResult matchAndRewrite(
       ShardingConstraintOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
-    rewriter.replaceOpWithNewOp<ReshardOp>(op, adaptor.getInput())
-        .setShardingAttr(adaptor.getSharding());
+    auto discardableAttrs = op->getDiscardableAttrDictionary();
+    auto reshardOp =
+        rewriter.replaceOpWithNewOp<ReshardOp>(op, adaptor.getInput());
+    reshardOp.setShardingAttr(adaptor.getSharding());
+    reshardOp->setDiscardableAttrs(discardableAttrs);
     return success();
   }
 };
