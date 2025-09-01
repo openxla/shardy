@@ -80,12 +80,12 @@ TEST(ExtractFunctionIOShardingSpecsAndMeshes, FunctionWithSingleTransfer) {
   FunctionIOShardingSpecsAndMeshes specs_and_mesh =
       ExtractFunctionIOShardingSpecsAndMeshes(func_op);
 
-  EXPECT_THAT(
-      specs_and_mesh.input_specs,
-      ElementsAre(FieldsAre("mesh1", SpmdTensorShardingSpec{{}, {1}}, "arg")));
-  EXPECT_THAT(
-      specs_and_mesh.output_specs,
-      ElementsAre(FieldsAre("mesh2", SpmdTensorShardingSpec{{0}, {}}, "res")));
+  EXPECT_THAT(specs_and_mesh.input_specs,
+              ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
+                                    "arg")));
+  EXPECT_THAT(specs_and_mesh.output_specs,
+              ElementsAre(FieldsAre("mesh2", SpmdTensorPartitionSpec{{"x"}, {}},
+                                    "res")));
 }
 
 TEST(ExtractFunctionIOShardingSpecsAndMeshes, MultipleInputMultipleOutput) {
@@ -116,16 +116,16 @@ TEST(ExtractFunctionIOShardingSpecsAndMeshes, MultipleInputMultipleOutput) {
 
   FunctionIOShardingSpecsAndMeshes specs_and_mesh =
       ExtractFunctionIOShardingSpecsAndMeshes(func_op);
-  EXPECT_THAT(
-      specs_and_mesh.input_specs,
-      ElementsAre(
-          FieldsAre("mesh1", SpmdTensorShardingSpec{{}, {1}}, std::nullopt),
-          FieldsAre("mesh1", SpmdTensorShardingSpec{{0}, {}}, std::nullopt)));
-  EXPECT_THAT(
-      specs_and_mesh.output_specs,
-      ElementsAre(
-          FieldsAre("mesh1", SpmdTensorShardingSpec{{}, {1}}, std::nullopt),
-          FieldsAre("mesh1", SpmdTensorShardingSpec{{0}, {}}, std::nullopt)));
+  EXPECT_THAT(specs_and_mesh.input_specs,
+              ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
+                                    std::nullopt),
+                          FieldsAre("mesh1", SpmdTensorPartitionSpec{{"x"}, {}},
+                                    std::nullopt)));
+  EXPECT_THAT(specs_and_mesh.output_specs,
+              ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
+                                    std::nullopt),
+                          FieldsAre("mesh1", SpmdTensorPartitionSpec{{"x"}, {}},
+                                    std::nullopt)));
 }
 
 TEST(ExtractFunctionIOShardingSpecsAndMeshes, IOTypesHaveMemoryKinds) {
@@ -151,11 +151,11 @@ TEST(ExtractFunctionIOShardingSpecsAndMeshes, IOTypesHaveMemoryKinds) {
 
   EXPECT_THAT(
       specs_and_mesh.input_specs,
-      ElementsAre(FieldsAre("mesh1", SpmdTensorShardingSpec{}, "device")));
+      ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{}, "device")));
 
-  EXPECT_THAT(
-      specs_and_mesh.output_specs,
-      ElementsAre(FieldsAre("mesh1", SpmdTensorShardingSpec{}, "pinned_host")));
+  EXPECT_THAT(specs_and_mesh.output_specs,
+              ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{},
+                                    "pinned_host")));
 }
 
 SmallVector<SmallVector<OpResult>> GetCallOpResults(FuncOp func_op) {

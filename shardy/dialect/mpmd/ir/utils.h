@@ -103,24 +103,20 @@ std::string StrCat(Args&&... args) {
   return result;
 }
 
-// TODO(dvytin): define a call count attribute name to be used in fragments.
-
-// Specifies for a distributed tensor how each of its dimensions are sharded.
-//
-// Note that SDY sharding axes are in major-to-minor, but
-// `SpmdTensorShardingSpec` is expected to be minor-to-major.
+// Specifies for a tensor how each of its dimensions are sharded. This is
+// equivalent to "PartitionSpec" in JAX.
 //
 // For example, given
 //   sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
 //   sdy.sharding = <@mesh, [{}, {"x", "z"}]>
 // the corresponding `SpmdTensorShardingSpec` would be
-//   [[], [2, 0]]
-using SpmdTensorShardingSpec = std::vector<std::vector<int>>;
+//   [[], ["x", "z"]]
+using SpmdTensorPartitionSpec = std::vector<std::vector<std::string>>;
 
 // Holds the mesh name, sharding specs, and memory kind of a mesh tensor.
 struct NamedSpmdShardingSpec {
   std::string mesh_name;
-  SpmdTensorShardingSpec tensor_spec;
+  SpmdTensorPartitionSpec tensor_spec;
   std::optional<std::string> memory_kind;
 };
 

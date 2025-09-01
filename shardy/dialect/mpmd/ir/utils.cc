@@ -63,36 +63,27 @@ using ::mlir::func::FuncOp;
 
 inline constexpr StringRef kJaxResultInfoAttr = "jax.result_info";
 
-SpmdTensorShardingSpec ExtractTensorShardingSpec(MeshTensorType type,
-                                                 sdy::MeshAttr mesh_attr) {
+SpmdTensorPartitionSpec ExtractTensorPartitionSpec(MeshTensorType type) {
   if (!type.getSharding()) {
     return {};
   }
-  SpmdTensorShardingSpec spec;
+  SpmdTensorPartitionSpec spec;
   spec.reserve(type.getSharding().getDimShardings().size());
-  llvm::SmallDenseMap<StringRef, int> axis_name_to_index;
-  for (auto [index, axis] : llvm::enumerate(mesh_attr.getAxes())) {
-    axis_name_to_index[axis.getName()] = index;
-  }
-
   for (sdy::DimensionShardingAttr dim_sharding :
        type.getSharding().getDimShardings()) {
-    std::vector<int> indices;
-    indices.reserve(dim_sharding.getAxes().size());
-    // SDY sharding axes are in major-to-minor, but `SpmdTensorShardingSpec` is
-    // expected to be minor-to-major. So we reverse the order.
-    for (sdy::AxisRefAttr axis : llvm::reverse(dim_sharding.getAxes())) {
-      indices.push_back(axis_name_to_index[axis.getName()]);
+    std::vector<std::string> axes;
+    axes.reserve(dim_sharding.getAxes().size());
+    for (sdy::AxisRefAttr axis : dim_sharding.getAxes()) {
+      axes.push_back(axis.getName().str());
     }
-    spec.emplace_back(indices);
+
+    spec.emplace_back(axes);
   }
   return spec;
 }
 
-NamedSpmdShardingSpec GetNamedShardingSpec(MeshTensorType mesh_tensor,
-                                           sdy::MeshAttr mesh_attr) {
-  SpmdTensorShardingSpec spec =
-      ExtractTensorShardingSpec(mesh_tensor, mesh_attr);
+NamedSpmdShardingSpec GetNamedShardingSpec(MeshTensorType mesh_tensor) {
+  SpmdTensorPartitionSpec spec = ExtractTensorPartitionSpec(mesh_tensor);
   std::optional<std::string> memory_kind;
   if (mesh_tensor.getMemoryKind()) {
     memory_kind = mesh_tensor.getMemoryKind().getValue().str();
@@ -109,9 +100,7 @@ FunctionIOShardingSpecsAndMeshes ExtractFunctionIOShardingSpecsAndMeshes(
   io_sharding_and_mesh.input_specs.reserve(func_op.getNumArguments());
   for (BlockArgument arg : func_op.getArguments()) {
     MeshTensorType arg_type = cast<MeshTensorType>(arg.getType());
-    sdy::MeshAttr mesh_attr = GetMeshOrFail(func_op, arg_type.getMeshName());
-    NamedSpmdShardingSpec mesh_and_spec =
-        GetNamedShardingSpec(arg_type, mesh_attr);
+    NamedSpmdShardingSpec mesh_and_spec = GetNamedShardingSpec(arg_type);
     if (auto memory_kind = func_op.getArgAttrOfType<StringAttr>(
             arg.getArgNumber(), kMemoryKindAttr)) {
       if (!mesh_and_spec.memory_kind.has_value()) {
@@ -128,9 +117,7 @@ FunctionIOShardingSpecsAndMeshes ExtractFunctionIOShardingSpecsAndMeshes(
 
   for (auto [index, type] : llvm::enumerate(func_op.getResultTypes())) {
     MeshTensorType result_type = cast<MeshTensorType>(type);
-    sdy::MeshAttr mesh_attr = GetMeshOrFail(func_op, result_type.getMeshName());
-    NamedSpmdShardingSpec mesh_and_spec =
-        GetNamedShardingSpec(result_type, mesh_attr);
+    NamedSpmdShardingSpec mesh_and_spec = GetNamedShardingSpec(result_type);
     if (auto memory_kind =
             func_op.getResultAttrOfType<StringAttr>(index, kMemoryKindAttr)) {
       if (!mesh_and_spec.memory_kind.has_value()) {
