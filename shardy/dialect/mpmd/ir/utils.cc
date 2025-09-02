@@ -61,7 +61,6 @@ namespace {
 
 using ::mlir::func::FuncOp;
 
-inline constexpr StringRef kJaxResultInfoAttr = "jax.result_info";
 
 SpmdTensorPartitionSpec ExtractTensorPartitionSpec(MeshTensorType type) {
   if (!type.getSharding()) {

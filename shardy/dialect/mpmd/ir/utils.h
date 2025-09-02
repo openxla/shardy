@@ -92,6 +92,8 @@ inline constexpr StringRef kIsSdyLowered = "mpmd.sdy_lowered";
 
 inline constexpr StringRef kRematAttributeName = "remat";
 
+inline constexpr StringRef kJaxResultInfoAttr = "jax.result_info";
+
 template <typename... Args>
 std::string StrCat(Args&&... args) {
   std::string result;
