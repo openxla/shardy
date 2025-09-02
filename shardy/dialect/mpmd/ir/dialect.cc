@@ -259,18 +259,17 @@ RankedTensorType MeshTensorType::getLocalTensorType(sdy::MeshAttr sdy_mesh) {
 
 RankedTensorType MeshTensorType::getLocalTensorType(Operation* op) {
   auto func_op = sdy::getEnclosingOfType<FuncOp>(op);
-  if (HasHomogeneousTopology(func_op)) {
-    // TODO(b/439770762): Remove this once we have correct global meshes.
-    return MeshTensorType::getLocalTensorType(
-        GetTopologyMeshes(func_op).front().getMesh());
-  }
   sdy::TensorShardingAttr sharding = getSharding();
   if (!sharding) {
     return getGlobalTensorType();
   }
-  // TODO(b/441487083): Look up the mesh in the global mesh registry.
+  if (HasHomogeneousTopology(func_op)) {
+    // TODO(b/439770762): Remove this once we have correct global meshes.
+    return MeshTensorType::getLocalTensorType(
+        sdy::getMeshOp(func_op, sharding.getMeshName()));
+  }
   return MeshTensorType::getLocalTensorType(
-      GetMeshOrFail(op, sharding.getMeshName()));
+      sdy::getMeshOp(func_op, sharding.getMeshName()));
 }
 
 // Functions for the ShapedTypeInterface.
