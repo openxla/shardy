@@ -858,12 +858,11 @@ void distributeAxisRefsToBatchingFactors(
 
 Mesh getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
                        ArrayRef<TensorShardingAttr> outShardings,
-                       OpShardingRuleAttr shardingRule,
                        const SymbolTable& symbolTable,
                        const Mesh& defaultMesh) {
   int64_t maxMeshCount = 0;
   llvm::SmallDenseMap<StringRef, int64_t> meshCounts;
-  Mesh mostCommonMesh;
+  Mesh mostCommonMesh = defaultMesh;
   for (const TensorShardingAttr sharding :
        llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
     if (!isFullyReplicated(sharding)) {
@@ -892,8 +891,8 @@ AxesPerFactorWithMesh findCommonAxes(
     return AxesPerFactorWithMesh();
   }
 
-  const Mesh mesh = getMostCommonMesh(inShardings, outShardings, shardingRule,
-                                      symbolTable, defaultMesh);
+  const Mesh mesh =
+      getMostCommonMesh(inShardings, outShardings, symbolTable, defaultMesh);
 
   // Checks if factors are sharded the same way across operands and results.
   if (std::optional<AxesPerFactor> commonAxesPerFactor =
