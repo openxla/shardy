@@ -751,10 +751,9 @@ Mesh getMeshOrDefault(TensorShardingAttr sharding,
   if (!sharding) {
     return defaultMesh;
   }
-  StringRef meshName =
-      getCommonMeshName({sharding}, {}, symbolTable, /*ignoreDeviceIds=*/false)
-          .value();
-  return Mesh(getMeshAttr(symbolTable, meshName), meshName);
+  // NOTE: sharding always has a meshOrRef because it is a required parameter.
+  return Mesh(sharding.getMesh(symbolTable),
+              cast<FlatSymbolRefAttr>(sharding.getMeshOrRef()).getValue());
 }
 
 // Assumes that:
