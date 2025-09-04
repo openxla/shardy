@@ -87,10 +87,12 @@ struct FragmentInfo {
   std::optional<int> stage_id;
   std::optional<int> call_counter;
   std::optional<SplitFragmentType> split_type;
+  std::string mesh_name;
 
   bool operator==(const FragmentInfo& other) const {
     return llvm::equal(origins, other.origins) && stage_id == other.stage_id &&
-           call_counter == other.call_counter && split_type == other.split_type;
+           call_counter == other.call_counter &&
+           split_type == other.split_type && mesh_name == other.mesh_name;
   }
 
   bool operator!=(const FragmentInfo& other) const { return !(*this == other); }
@@ -117,6 +119,7 @@ struct FragmentInfo {
           break;
       }
     }
+    os << ",mesh_name=\"" << info.mesh_name << "\"";
     os << ")";
     return os;
   }
@@ -125,8 +128,8 @@ struct FragmentInfo {
 struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
   static unsigned getHashValue(const FragmentInfo& info) {
     return llvm::hash_combine(llvm::hash_combine_range(info.origins),
-                              info.stage_id, info.call_counter,
-                              info.split_type);
+                              info.stage_id, info.call_counter, info.split_type,
+                              info.mesh_name);
   }
   static bool isEqual(const FragmentInfo& lhs, const FragmentInfo& rhs) {
     return lhs == rhs;
@@ -136,14 +139,16 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
     return FragmentInfo{/*origins=*/{},
                         /*stage_id=*/DenseMapInfo<int>::getEmptyKey(),
                         /*call_counter=*/DenseMapInfo<int>::getEmptyKey(),
-                        /*split_type=*/std::nullopt};
+                        /*split_type=*/std::nullopt,
+                        /*mesh_name=*/""};
   }
 
   static inline FragmentInfo getTombstoneKey() {
     return FragmentInfo{/*origins=*/{},
                         /*stage_id=*/DenseMapInfo<int>::getTombstoneKey(),
                         /*call_counter=*/DenseMapInfo<int>::getTombstoneKey(),
-                        /*split_type=*/SplitFragmentType::kDropTransferred};
+                        /*split_type=*/SplitFragmentType::kDropTransferred,
+                        /*mesh_name=*/"__tombstone__"};
   }
 };
 
