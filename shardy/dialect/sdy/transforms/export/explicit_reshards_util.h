@@ -69,11 +69,15 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
 // input and produces an unreduced output, we simply respect the existing
 // shardings and match cases where an unreduced axis becomes sharded/replicated.
 //
+// Hard fails if sourceSharding and userSharding have different meshes.
+// TODO(b/442783457): Support when the meshes differ only on device order.
+//
 // Returns the sharding of the inserted all-reduce, or `sourceSharding` if none
 // was inserted.
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
-    TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter);
+    TensorShardingAttr userSharding, const SymbolTable& symbolTable,
+    IRRewriter& rewriter);
 
 // Returns true if any of `axes` overlaps with `axis`.
 bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis);

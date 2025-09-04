@@ -63,8 +63,7 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
     // If `operandSharding` has unreduced axes, insert an all-reduce if any of
     // the axes isn't unreduced in the target sharding.
     operandSharding = insertAllReduceIfUnreducedToReplicated(
-        opOperand, operandSharding, targetSharding,
-        operandSharding.getMesh(symbolTable), rewriter);
+        opOperand, operandSharding, targetSharding, symbolTable, rewriter);
   }
 
   if (onFullVersion && shouldReshard(operandSharding, targetSharding)) {
@@ -330,8 +329,7 @@ struct InsertExplicitReshardsPass
       for (OpOperand& operand : op->getOpOperands()) {
         if (TensorShardingAttr inSharding = getSharding(operand.get())) {
           insertAllReduceIfUnreducedToReplicated(
-              operand, inSharding, outSharding, inSharding.getMesh(symbolTable),
-              rewriter);
+              operand, inSharding, outSharding, symbolTable, rewriter);
         }
       }
 

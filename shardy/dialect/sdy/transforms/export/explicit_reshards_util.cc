@@ -34,6 +34,7 @@ limitations under the License.
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
@@ -958,20 +959,24 @@ bool shouldReshard(TensorShardingAttr sourceSharding,
 
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
-    TensorShardingAttr userSharding, MeshAttr mesh, IRRewriter& rewriter) {
-  ArrayRef<AxisRefAttr> targetUnreducedAxes =
-      userSharding ? userSharding.getUnreducedAxes() : ArrayRef<AxisRefAttr>();
-
-  if (!sourceSharding) {
-    return nullptr;
-  }
-  if (sourceSharding.getUnreducedAxes().empty() ||
-      targetUnreducedAxes == sourceSharding.getUnreducedAxes()) {
+    TensorShardingAttr userSharding, const SymbolTable& symbolTable,
+    IRRewriter& rewriter) {
+  if (!sourceSharding || sourceSharding.getUnreducedAxes().empty()) {
     return sourceSharding;
   }
-
-  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-      sourceSharding.getUnreducedAxes(), targetUnreducedAxes, mesh);
+  MeshAttr mesh = sourceSharding.getMesh(symbolTable);
+  ArrayRef<AxisRefAttr> sourceUnreducedAxes = sourceSharding.getUnreducedAxes();
+  ArrayRef<AxisRefAttr> targetUnreducedAxes;
+  if (userSharding) {
+    targetUnreducedAxes = userSharding.getUnreducedAxes();
+    // TODO(enver): Support the case the meshes differ only on device orders.
+    SDY_CHECK(targetUnreducedAxes.empty() ||
+              mesh.equals(userSharding.getMesh(symbolTable)))
+        << "source and user shardings have different meshes for unreduced "
+           "axes.";
+  }
+  SmallVector<AxisRefAttr> allReduceAxes =
+      getAxisSetDiff(sourceUnreducedAxes, targetUnreducedAxes, mesh);
   if (allReduceAxes.empty()) {
     return sourceSharding;
   }
