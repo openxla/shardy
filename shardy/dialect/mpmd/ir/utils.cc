@@ -16,7 +16,6 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -28,9 +27,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "mlir/Bytecode/BytecodeWriter.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
@@ -142,6 +139,8 @@ FuncOp GetMainFunction(ModuleOp module) {
 
 bool IsMpmdModule(ModuleOp module) { return !GetMpmdFunctions(module).empty(); }
 
+bool IsMainFunction(FuncOp func_op) { return func_op.getSymName() == "main"; }
+
 bool IsMpmdFunction(FuncOp func_op) { return func_op->hasAttr(kTopologyAttr); }
 
 bool IsSpmdFunction(FuncOp func_op) { return func_op->hasAttr(kMeshShapeAttr); }
@@ -164,6 +163,8 @@ TopologyAttr GetTopology(ModuleOp module_op) {
   SDY_CHECK(!mpmd_funcs.empty());
   return GetTopology(mpmd_funcs.front());
 }
+
+void RemoveMesh(FuncOp func_op) { func_op->removeAttr(kMeshShapeAttr); }
 
 namespace {
 
@@ -489,9 +490,9 @@ bool IsLoweredWithSdy(ModuleOp module) {
   return module->hasAttr(kIsSdyLowered);
 }
 
-bool IsRemat(mlir::Operation* op) { return op->hasAttr(kRematAttributeName); }
+bool IsRemat(Operation* op) { return op->hasAttr(kRematAttributeName); }
 
-void MarkAsRemat(mlir::Operation* op, RewriterBase& rewriter) {
+void MarkAsRemat(Operation* op, RewriterBase& rewriter) {
   op->setAttr(kRematAttributeName, rewriter.getUnitAttr());
 }
 

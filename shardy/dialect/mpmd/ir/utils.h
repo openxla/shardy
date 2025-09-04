@@ -16,19 +16,13 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_MPMD_IR_UTILS_H_
 #define SHARDY_DIALECT_MPMD_IR_UTILS_H_
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "llvm/ADT/DenseMapInfo.h"
-#include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
@@ -153,6 +147,9 @@ func::FuncOp GetMainFunction(ModuleOp module);
 // topology.
 bool IsMpmdModule(ModuleOp module);
 
+// Returns true iff the function is named "main".
+bool IsMainFunction(func::FuncOp func_op);
+
 // Returns true if the function is annotated with a topology.
 bool IsMpmdFunction(func::FuncOp func_op);
 
@@ -176,6 +173,9 @@ TopologyAttr GetTopology(func::FuncOp func_op);
 // Returns the topology attribute of a module.
 // Precondition: `IsMpmdModule(module_op)` must be true.
 TopologyAttr GetTopology(ModuleOp module_op);
+
+// Removes the mesh attribute from the function.
+void RemoveMesh(func::FuncOp func_op);
 
 // A flat mesh is a vector of (axis_name, axis_size) pairs.
 using FlatMesh = std::vector<std::pair<std::string, int>>;
