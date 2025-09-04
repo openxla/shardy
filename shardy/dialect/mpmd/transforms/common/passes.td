@@ -15,6 +15,30 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
+def AddSideEffectToAvoidCSEPass :
+    PassBase<"mpmd-add-side-effect-to-avoid-cse", "OperationPass<func::FuncOp>"> {
+  let summary = "Adds a side effect attribute to custom_call ops with "
+                "{mhlo.no_cse} to avoid CSE.";
+  let description = [{
+    For `stablehlo.custom_call` operations that have the `{mhlo.no_cse}`
+    attribute, this pass adds an `{has_side_effect = true}` attribute.
+    This prevents MLIR's CSE pass from eliminating these operations, because
+    CSE skips operations with side effects.
+  }];
+}
+
+def RemoveSideEffectAfterCSEPass :
+    PassBase<"mpmd-remove-side-effect-after-cse", "OperationPass<func::FuncOp>"> {
+  let summary = "Removes side effect attribute from custom_call ops with "
+                "{mhlo.no_cse}.";
+  let description = [{
+    For `stablehlo.custom_call` operations that have the `{mhlo.no_cse}`
+    attribute, this pass removes the `{has_side_effect = true}` attribute if
+    it exists. This is useful to run after CSE to remove the attribute that
+    is no longer needed.
+  }];
+}
+
 // TODO: b/374694825 - This pass is not complete yet. In particular, we also
 // need to consider: (a) side-ways merging. We need to be careful with this as
 // it may have performance and jitting time implications. (b) relax the
