@@ -29,6 +29,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/import/passes.h"
 #include "stablehlo/transforms/Passes.h"
 #include "stablehlo/transforms/optimization/Passes.h"
+#include "shardy/dialect/mpmd/transforms/common/passes.h"
 
 namespace mlir::mpmd {
 
@@ -39,6 +40,9 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   pm.addNestedPass<FuncOp>(stablehlo::createChloLegalizeToStablehloPass());
 
   pm.addPass(createInlinerPass());
+
+  // Add side effect to custom calls with a no_cse attribute to avoid CSE.
+  pm.addNestedPass<FuncOp>(createAddSideEffectToAvoidCSEPass());
   pm.addNestedPass<FuncOp>(createCSEPass());
 
   // Canonicalization / Target Independent Optimization needed for two things:
