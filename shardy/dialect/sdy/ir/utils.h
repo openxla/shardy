@@ -96,7 +96,7 @@ int64_t getTensorRank(Type type);
 int64_t getTensorRank(Value value);
 
 // Returns true if the value is a tensor with rank 0.
-int64_t isScalar(Value value);
+bool isScalar(Value value);
 
 // Returns the product of the given mesh axis sizes.
 int64_t getTotalAxesSize(ArrayRef<MeshAxisAttr> axes);
@@ -501,12 +501,11 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
 // Returns true if any of `values` is used by any op of the specified types.
 template <class... OpTys>
 bool hasAnyUserOfType(ValueRange values) {
-  for (Value value : values) {
+  return llvm::any_of(values, [](Value value) {
     return llvm::any_of(value.getUsers(), [](Operation* user) {
       return mlir::isa<OpTys...>(user);
     });
-  }
-  return false;
+  });
 }
 
 // Returns true if `op` is only used by ops of the specified types.

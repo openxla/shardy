@@ -124,7 +124,7 @@ int64_t getTensorRank(Type type) {
 
 int64_t getTensorRank(Value value) { return getTensorRank(value.getType()); }
 
-int64_t isScalar(Value value) {
+bool isScalar(Value value) {
   if (auto tensorType = dyn_cast<ShapedType>(value.getType());
       tensorType && tensorType.hasRank()) {
     return tensorType.getRank() == 0;
@@ -635,12 +635,9 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
 }
 
 bool isUsedBy(Value value, Operation* user) {
-  for (OpOperand& use : value.getUses()) {
-    if (use.getOwner() == user) {
-      return true;
-    }
-  }
-  return false;
+  return llvm::any_of(value.getUses(), [user](const OpOperand& use) {
+    return use.getOwner() == user;
+  });
 }
 
 }  // namespace sdy
