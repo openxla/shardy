@@ -607,28 +607,19 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
 
   SmallVector<AxisRefAttr> result;
   result.reserve(axesA.size() - std::min(axesA.size(), axesB.size()));
-  AxisRefAttr curA = axesA.front();
-  axesA = axesA.drop_front();
-  while (curA) {
-    if (auto* bIt = curA.getFirstOverlapping(setB); bIt != setB.end()) {
-      if (auto prefix = curA.getPrefixWithoutOverlap(*bIt)) {
+  for (AxisRefAttr axisA : axesA) {
+    while (axisA) {
+      auto* bIt = axisA.getFirstOverlapping(setB);
+      if (bIt == setB.end()) {
+        result.push_back(axisA);
+        break;
+      }
+
+      if (auto prefix = axisA.getPrefixWithoutOverlap(*bIt)) {
         result.push_back(*prefix);
       }
-      if (auto suffix = curA.getSuffixWithoutOverlap(*bIt, mesh)) {
-        curA = *suffix;
-        continue;
-      }
-      // No suffix without overlap means we are done with `curA`.
-    } else {
-      result.push_back(curA);
-    }
-
-    // We should advance `curA`.
-    if (axesA.empty()) {
-      curA = nullptr;
-    } else {
-      curA = axesA.front();
-      axesA = axesA.drop_front();
+      // Continue with the suffix if it exists.
+      axisA = axisA.getSuffixWithoutOverlap(*bIt, mesh).value_or(nullptr);
     }
   }
   return result;
