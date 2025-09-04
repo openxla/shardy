@@ -43,16 +43,6 @@ struct Mesh {
   StringRef name() const { return meshName; }
 };
 
-// The struct contains an array of axes list, and a mesh.
-struct AxesPerFactorWithMesh {
-  AxesPerFactor axes;
-  Mesh mesh;
-  AxesPerFactorWithMesh() = default;
-  AxesPerFactorWithMesh(AxesPerFactor axes, Mesh mesh)
-      : axes(std::move(axes)), mesh(mesh) {};
-  bool empty() const { return axes.empty(); }
-};
-
 // Returns true if a reshard is needed to go from source sharding to target
 // sharding.
 bool shouldReshard(TensorShardingAttr sourceSharding,
@@ -101,7 +91,7 @@ void insertExplicitReshardsOnOp(Operation* op,
                                 IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
                                 OpShardingRuleAttr shardingRule,
-                                bool onFullVersion, const Mesh& defaultMesh);
+                                bool onFullVersion, const Mesh& mesh);
 
 }  // namespace sdy
 }  // namespace mlir

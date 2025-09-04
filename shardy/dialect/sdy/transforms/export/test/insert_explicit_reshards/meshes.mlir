@@ -101,9 +101,11 @@ func.func @negate_axes_incompatible_different_device_orders(%arg0: tensor<210xf3
 
 // CHECK-LABEL: func @negate_axes_incompatible_different_device_orders_output_sharding_is_larger
 func.func @negate_axes_incompatible_different_device_orders_output_sharding_is_larger(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}]>}) {
-  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh_non_iota, [{"x"}]> : tensor<210xf32>
-  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[RESHARD]]
-  // CHECK-NEXT: return %[[NEGATE]]
+  // TODO(enver): In fact, this can go from <@mesh_non_iota, [{"x"}]> to <@mesh_iota, [{"y"}]> in one reshard, and consequently, in one collective permute.
+  // CHECK: %[[RESHARD_1:.*]] = sdy.reshard %arg0 <@mesh_iota, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[RESHARD_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{"x"}]>]>} : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_2:.*]] = sdy.reshard %[[NEGATE]] <@mesh_non_iota, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: return %[[RESHARD_2]]
   %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{"x"}]>]>} : tensor<210xf32>
   return %0 : tensor<210xf32>
 }

@@ -19,6 +19,7 @@ limitations under the License.
 #include <memory>  // IWYU pragma: keep
 #include <optional>
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -36,6 +37,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -257,6 +259,42 @@ void processDot(OpTy op, ArrayRef<TensorShardingAttr> inShardings,
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
 }
 
+Mesh getMeshOrDefault(TensorShardingAttr sharding,
+                      const SymbolTable& symbolTable, const Mesh& defaultMesh) {
+  if (!sharding) {
+    return defaultMesh;
+  }
+  // NOTE: sharding always has a meshOrRef because it is a required parameter.
+  return Mesh(sharding.getMesh(symbolTable),
+              cast<FlatSymbolRefAttr>(sharding.getMeshOrRef()).getValue());
+}
+
+Mesh getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
+                       ArrayRef<TensorShardingAttr> outShardings,
+                       const SymbolTable& symbolTable,
+                       const Mesh& defaultMesh) {
+  int64_t maxMeshCount = 0;
+  llvm::SmallDenseMap<StringRef, int64_t> meshCounts;
+  Mesh mostCommonMesh = defaultMesh;
+  for (const TensorShardingAttr sharding :
+       llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
+    if (!isFullyReplicated(sharding)) {
+      const Mesh meshOfSharding =
+          getMeshOrDefault(sharding, symbolTable, defaultMesh);
+      const int64_t meshCount = ++meshCounts[meshOfSharding.name()];
+      if (meshCount > maxMeshCount) {
+        maxMeshCount = meshCount;
+        mostCommonMesh = meshOfSharding;
+      }
+    }
+  }
+  return mostCommonMesh;
+}
+
+// Returns the most common mesh. Returns nullopt if any of the following holds:
+//  1. There is no tensor with a sharding attribute.
+//  2. Tensors have different meshes (ignoring device ids)
+//  3. Some tensors have maximal meshes.
 std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
                             ArrayRef<TensorShardingAttr> outShardings,
                             const SymbolTable& symbolTable) {
@@ -275,7 +313,9 @@ std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
   if (meshAttr.isMaximal()) {
     return std::nullopt;
   }
-  return Mesh(meshAttr, *meshName);
+  // Return the mesh with the most common device id.
+  return getMostCommonMesh(inShardings, outShardings, symbolTable,
+                           /*defaultMesh=*/Mesh(meshAttr, *meshName));
 }
 
 struct InsertExplicitReshardsPass
