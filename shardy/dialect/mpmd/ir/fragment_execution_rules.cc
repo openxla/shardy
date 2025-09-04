@@ -65,7 +65,7 @@ bool ParseFragmentOrigin(llvm::cl::Option& opt, llvm::StringRef& arg,
   if (!arg.consume_front("(")) {
     return false;
   }
-  if (!arg.consumeInteger(10, origin.transpose_count)) {
+  if (arg.consumeInteger(10, origin.transpose_count)) {
     return opt.error("Expected a transpose count");
   }
   if (!arg.consume_front(")")) {
@@ -93,7 +93,6 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
   if (!arg.consume_front("]")) {
     return opt.error("Expected ']'");
   }
-  bool is_weight_gradient_parsed = false;
   while (arg.consume_front(",")) {
     if (arg.consume_front("stage=")) {
       if (info.stage_id.has_value()) {
@@ -113,24 +112,36 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
         return opt.error("Expected an integer value for 'call_counter'");
       }
       info.call_counter = call_counter;
-    } else if (arg.consume_front("is_weight_gradient=")) {
-      if (is_weight_gradient_parsed) {
-        return opt.error("'is_weight_gradient' specified more than once");
+    } else if (arg.consume_front("split_type=")) {
+      if (info.split_type.has_value()) {
+        return opt.error("'split_type' specified more than once");
       }
-      is_weight_gradient_parsed = true;
-      bool is_weight_gradient_val;
-      if (arg.consume_front("true")) {
-        is_weight_gradient_val = true;
-      } else if (arg.consume_front("false")) {
-        is_weight_gradient_val = false;
+      if (arg.consume_front("kKeepTransferred")) {
+        info.split_type = SplitFragmentType::kKeepTransferred;
+      } else if (arg.consume_front("kDropTransferred")) {
+        info.split_type = SplitFragmentType::kDropTransferred;
       } else {
-        return opt.error("Expected 'true' or 'false' for 'is_weight_gradient'");
+        return opt.error(
+            "Expected 'kKeepTransferred' or 'kDropTransferred' for "
+            "'split_type'");
       }
-      info.is_weight_gradient = is_weight_gradient_val;
+    } else if (arg.consume_front("mesh_name=")) {
+      if (!info.mesh_name.empty()) {
+        return opt.error("'mesh_name' specified more than once");
+      }
+      if (!arg.consume_front("\"")) {
+        return opt.error("Expected '\"' to start 'mesh_name'");
+      }
+      auto [mesh_name, rest] = arg.split('"');
+      if (mesh_name == arg) {
+        return opt.error("Expected '\"' to end 'mesh_name'");
+      }
+      info.mesh_name = mesh_name.str();
+      arg = rest;
     } else {
       return opt.error(
-          "Expected 'stage=', 'call_counter=', or "
-          "'is_weight_gradient=' after ','");
+          "Expected 'stage=', 'call_counter=', 'split_type=', or "
+          "'mesh_name=' after ','");
     }
   }
   if (!arg.consume_front(")")) {
@@ -148,8 +159,14 @@ FragmentInfo GetFragmentInfo(FragmentOp fragment) {
   }
   std::optional<int64_t> call_counter = TryToFindCallCounter(fragment);
   std::vector<FragmentOrigin> origins = GetFragmentOrigins(fragment);
-  bool is_weight_gradient = IsSplitDropTransferred(fragment);
-  return FragmentInfo{origins, stage_id, call_counter, is_weight_gradient};
+  std::optional<SplitFragmentType> split_type;
+  if (IsSplitKeepTransferred(fragment)) {
+    split_type = SplitFragmentType::kKeepTransferred;
+  } else if (IsSplitDropTransferred(fragment)) {
+    split_type = SplitFragmentType::kDropTransferred;
+  }
+  std::string mesh_name = fragment.getMeshName().str();
+  return FragmentInfo{origins, stage_id, call_counter, split_type, mesh_name};
 }
 
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
@@ -174,12 +191,25 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
     fragment->removeAttr(kCallCounterAttrName);
   }
 
-  if (metadata.is_weight_gradient) {
-    fragment->setAttr(kSplitDropTransferredAttrName,
-                      UnitAttr::get(rewriter.getContext()));
+  // Handle split type attributes
+  if (metadata.split_type.has_value()) {
+    if (*metadata.split_type == SplitFragmentType::kDropTransferred) {
+      fragment->setAttr(kSplitDropTransferredAttrName,
+                        UnitAttr::get(rewriter.getContext()));
+      fragment->removeAttr(kSplitKeepTransferredAttrName);
+    } else if (*metadata.split_type == SplitFragmentType::kKeepTransferred) {
+      fragment->setAttr(kSplitKeepTransferredAttrName,
+                        UnitAttr::get(rewriter.getContext()));
+      fragment->removeAttr(kSplitDropTransferredAttrName);
+    }
   } else {
     fragment->removeAttr(kSplitDropTransferredAttrName);
+    fragment->removeAttr(kSplitKeepTransferredAttrName);
   }
+
+  // Set mesh name
+  fragment.setMeshName(
+      StringAttr::get(rewriter.getContext(), metadata.mesh_name));
 }
 
 }  // namespace mlir::mpmd
@@ -187,6 +217,7 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
 namespace llvm::cl {
 
 using ::mlir::mpmd::FragmentMergeRule;
+using ::mlir::mpmd::FragmentScheduleRule;
 
 template class basic_parser<FragmentMergeRule>;
 
@@ -227,5 +258,40 @@ void parser<FragmentMergeRule>::printOptionDiff(const Option& opt,
 }
 
 void parser<FragmentMergeRule>::anchor() {}
+
+template class basic_parser<FragmentScheduleRule>;
+
+// Parses a fragment schedule rule string of the form
+// "FragmentScheduleRule(ordered_fragments=[<fragment1>-><fragment2>...])"
+// <fragment>s are FragmentInfo strings.
+bool parser<FragmentScheduleRule>::parse(Option& opt, StringRef, StringRef arg,
+                                         FragmentScheduleRule& value) {
+  if (!arg.consume_front(FragmentScheduleRule::kFragmentScheduleRulePrefix)) {
+    return opt.error("Expected '" +
+                     FragmentScheduleRule::kFragmentScheduleRulePrefix + "'");
+  }
+  while (!arg.starts_with("]")) {
+    if (mlir::mpmd::ParseFragmentInfo(opt, arg,
+                                      value.ordered_fragments.emplace_back())) {
+      return true;  // opt.error was called inside ParseFragmentInfo
+    }
+    if (!arg.consume_front("->")) {
+      break;
+    }
+  }
+  if (!arg.consume_front("])")) {
+    return opt.error("Expected '])'");
+  }
+  return false;
+}
+
+void parser<FragmentScheduleRule>::printOptionDiff(
+    const Option& opt, const FragmentScheduleRule& value,
+    const OptVal& defaultValue, size_t globalWidth) const {
+  printOptionName(opt, globalWidth);
+  outs() << "= " << value << "\n";
+}
+
+void parser<FragmentScheduleRule>::anchor() {}
 
 }  // namespace llvm::cl

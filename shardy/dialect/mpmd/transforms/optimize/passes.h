@@ -44,10 +44,6 @@ struct OptimizeOptions {
   SmallVector<FragmentMergeRule> fragmentMergeRules;
   // Whether to merge inferred fragments only after scheduling.
   bool mergeAfterScheduling = false;
-  // Whether to split backward fragments.
-  bool splitBwdFragments = false;
-  // Whether to verify if merging created the right number of scheduling units.
-  bool verifyScheduleUnits = false;
   // Whether to identify matching forward and backward fragments and clone the
   // forward fragment immediately.
   bool applyFragmentRemat = false;
