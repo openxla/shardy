@@ -125,10 +125,23 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
             "Expected 'kKeepTransferred' or 'kDropTransferred' for "
             "'split_type'");
       }
+    } else if (arg.consume_front("mesh_name=")) {
+      if (!info.mesh_name.empty()) {
+        return opt.error("'mesh_name' specified more than once");
+      }
+      if (!arg.consume_front("\"")) {
+        return opt.error("Expected '\"' to start 'mesh_name'");
+      }
+      auto [mesh_name, rest] = arg.split('"');
+      if (mesh_name == arg) {
+        return opt.error("Expected '\"' to end 'mesh_name'");
+      }
+      info.mesh_name = mesh_name.str();
+      arg = rest;
     } else {
       return opt.error(
-          "Expected 'stage=', 'call_counter=', or "
-          "'split_type=' after ','");
+          "Expected 'stage=', 'call_counter=', 'split_type=', or "
+          "'mesh_name=' after ','");
     }
   }
   if (!arg.consume_front(")")) {
@@ -157,7 +170,8 @@ FragmentInfo GetFragmentInfo(FragmentOp fragment) {
   std::optional<int64_t> call_counter = TryToFindCallCounter(fragment);
   std::vector<FragmentOrigin> origins = GetFragmentOrigins(fragment);
   std::optional<SplitFragmentType> split_type = GetSplitFragmentType(fragment);
-  return FragmentInfo{origins, stage_id, call_counter, split_type};
+  return FragmentInfo{origins, stage_id, call_counter, split_type,
+                      fragment.getMeshName().str()};
 }
 
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
@@ -197,6 +211,9 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
     fragment->removeAttr(kSplitDropTransferredAttrName);
     fragment->removeAttr(kSplitKeepTransferredAttrName);
   }
+
+  fragment.setMeshName(
+      StringAttr::get(rewriter.getContext(), metadata.mesh_name));
 }
 
 }  // namespace mlir::mpmd

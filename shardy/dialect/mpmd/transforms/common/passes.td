@@ -486,3 +486,21 @@ def UniquifyFunctionInputsOutputsPass :
 
   let dependentDialects = ["mlir::mpmd::MpmdDialect"];
 }
+
+def SchedulingUnitVerifierPass :
+    PassBase<"mpmd-scheduling-units-verifier", "DistributedFunctionPass"> {
+  let summary = "Verifies if the program contains the required scheduling units.";
+}
+
+// TODO: b/378099938 - Remove this pass once we have a better way to handle
+// transfers while merging fragments. We need this now because having a transfer
+// in between two fragments prevents the merge pass from merging them.
+def MoveTransfersToProducerPass :
+    PassBase<"mpmd-move-transfers-to-producer", "DistributedFunctionPass"> {
+  let summary = "Moves transfers next to their producers.";
+  let description = [{
+    Moves transfers next to their producers: if the operand is a block argument,
+    move the transfer to the beginning of the block, otherwise move it after the
+    defining op.
+  }];
+}

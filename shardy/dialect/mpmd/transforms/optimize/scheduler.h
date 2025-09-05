@@ -30,17 +30,6 @@ void AddSchedulingPass(OpPassManager& pm, PipelineSchedule pipeline_schedule,
                        std::optional<FragmentComparator>
                            override_must_happen_before = std::nullopt);
 
-// Adds all passes needed for pipeline scheduling. This includes merge of
-// fragments into scheduling units and verification of scheduling units.
-//
-// When `split_bwd_fragments` is true, then we split backward fragments into
-// a fragment whose results are transferred, and one that isn't. This is so that
-// we can execute the transfers earlier (e.g. as per Near-Zero Bubble
-// Pipeline).
-void AddSchedulingPreprocessingPasses(mlir::OpPassManager& pm,
-                                      bool split_bwd_fragments,
-                                      bool verify_schedule_units);
-
 }  // namespace mlir::mpmd
 
 #endif  // SHARDY_DIALECT_MPMD_TRANSFORMS_OPTIMIZE_SCHEDULER_H_
