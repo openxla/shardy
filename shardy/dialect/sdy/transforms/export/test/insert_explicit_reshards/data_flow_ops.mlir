@@ -28,6 +28,32 @@ func.func @named_computation_empty_block(%arg0: tensor<210xf32> {sdy.sharding = 
   return %1 : tensor<210xf32>
 }
 
+// CHECK-LABEL: func @named_computation_different_argument_and_input_shardings
+func.func @named_computation_different_argument_and_input_shardings(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}]> : tensor<210xf32>
+  // CHECK-NEXT: sdy.named_computation<"foo">(%[[RESHARD]])
+  %0 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"y"}]>] out_shardings=[<@mesh, [{"y"}]>] (%arg1: tensor<210xf32>) {
+    %2 = stablehlo.abs %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
+    sdy.return %2 : tensor<210xf32>
+  } : (tensor<210xf32>) -> (tensor<210xf32>)
+  %1 = stablehlo.negate %0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
+  return %1 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @named_computation_different_result_and_output_shardings
+func.func @named_computation_different_result_and_output_shardings(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0)
+  %0 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"x"}]>] out_shardings=[<@mesh, [{"x"}]>] (%arg1: tensor<210xf32>) {
+    %2 = stablehlo.abs %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : tensor<210xf32>
+    sdy.return %2 : tensor<210xf32>
+  } : (tensor<210xf32>) -> (tensor<210xf32>)
+  // CHECK: %[[NEGATE:.*]] = stablehlo.negate %[[NC]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[NEGATE]] <@mesh, [{"y"}]> : tensor<210xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<210xf32>
+  %1 = stablehlo.negate %0 {sdy.sharding= #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
+  return %1 : tensor<210xf32>
+}
+
 // CHECK-LABEL: func @case
 func.func @case(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}]>}, %arg1: tensor<i32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
   %0 = "stablehlo.case"(%arg1) ({
