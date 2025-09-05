@@ -73,6 +73,7 @@ class FragmentInfo:
   split_type: SplitFragmentType | None = None
   mesh_name: str = ''
 
+
 @dataclasses.dataclass(frozen=True)
 class FragmentMergeRule:
   """A rule for merging fragments of a computation."""
@@ -82,6 +83,16 @@ class FragmentMergeRule:
 
 
 FragmentMergeRules = Sequence[FragmentMergeRule]
+
+
+@dataclasses.dataclass(frozen=True)
+class FragmentScheduleRule:
+  """A rule for scheduling fragments of a computation."""
+
+  ordered_fragments: Sequence[FragmentInfo]
+
+
+FragmentScheduleRules = Sequence[FragmentScheduleRule]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,6 +131,9 @@ class MpmdConfig:
     fragment_merge_rules: A sequence of fragment merge rules. Each merge rule
       contains a sequence of fragment metadata objects that should be merged
       into a single fragment, together with metadata for the resulting fragment.
+    fragment_schedule_rules: A sequence of fragment schedule rules. Each
+      schedule rule contains a sequence of fragment metadata objects in the
+      order that they should be scheduled.
   """
 
   topology: Topology
@@ -130,6 +144,7 @@ class MpmdConfig:
   partitioning_options: PartitioningOptions | None
   read_input_output_mesh_from_shardings: bool
   fragment_merge_rules: FragmentMergeRules | None
+  fragment_schedule_rules: FragmentScheduleRules | None
 
   @property
   def _spmd_mesh(self) -> jax.sharding.Mesh:
@@ -198,6 +213,7 @@ def make_config(
     partitioning_options: PartitioningOptions | None = None,
     read_input_output_mesh_from_shardings: bool = False,
     fragment_merge_rules: FragmentMergeRules | None = None,
+    fragment_schedule_rules: FragmentScheduleRules | None = None,
 ) -> MpmdConfig:
   """Creates a `MpmdConfig`, inferring the tpu topology if not provided.
 
@@ -213,6 +229,7 @@ def make_config(
     partitioning_options: See `MpmdConfig`.
     read_input_output_mesh_from_shardings: see `MpmdConfig`.
     fragment_merge_rules: See `MpmdConfig`.
+    fragment_schedule_rules: See `MpmdConfig`.
 
   Returns:
     An `MpmdConfig` object.
@@ -243,6 +260,10 @@ def make_config(
     fragment_merge_rules = []
   validate_fragment_merge_rules(fragment_merge_rules)
 
+  if fragment_schedule_rules is None:
+    fragment_schedule_rules = []
+  validate_fragment_schedule_rules(fragment_schedule_rules)
+
   return MpmdConfig(
       topology,
       name_to_mesh_assignment,
@@ -252,6 +273,7 @@ def make_config(
       partitioning_options,
       read_input_output_mesh_from_shardings,
       fragment_merge_rules,
+      fragment_schedule_rules,
   )
 
 
@@ -322,6 +344,30 @@ def validate_input_output_mesh_assignments(
       )
 
 
+def validate_fragment_rule_origins(
+    fragment_sequence: Sequence[FragmentInfo],
+) -> None:
+  for fragment in fragment_sequence:
+    if not fragment.origins:
+      raise ValueError(
+          f'Each fragment must have at least one origin, but got {fragment} in'
+          f' {fragment_sequence}.'
+      )
+
+
+def validate_fragment_rule_meshes(
+    fragment_sequence: Sequence[FragmentInfo],
+) -> None:
+  first_mesh = fragment_sequence[0].mesh_name
+  if not all(
+      fragment.mesh_name == first_mesh for fragment in fragment_sequence
+  ):
+    raise ValueError(
+        'Fragments being merged/scheduled must be on the same mesh, but got'
+        f' {fragment_sequence}.'
+    )
+
+
 def validate_fragment_merge_rules(
     fragment_merge_rules: FragmentMergeRules,
 ) -> None:
@@ -333,17 +379,28 @@ def validate_fragment_merge_rules(
           'Fragment merge rule must contain at least two source fragments, but'
           f' got {rule}.'
       )
-    for fragment in rule.sources:
-      if not fragment.origins:
-        raise ValueError(
-            'Each source fragment must have at least one origin, but got'
-            f' {rule}.'
-        )
+    validate_fragment_rule_origins(rule.sources)
+    validate_fragment_rule_meshes(rule.sources)
 
     if not rule.target.origins:
       raise ValueError(
           f'Target fragment must have at least one origin, but got {rule}.'
       )
+
+
+def validate_fragment_schedule_rules(
+    fragment_schedule_rules: FragmentScheduleRules,
+) -> None:
+  """Validates the fragment schedule rules."""
+  for rule in fragment_schedule_rules:
+    if len(rule.ordered_fragments) < 2:
+      raise ValueError(
+          'Fragment schedule rule must contain at least two fragments, but'
+          f' got {rule}.'
+      )
+
+    validate_fragment_rule_origins(rule.ordered_fragments)
+    validate_fragment_rule_meshes(rule.ordered_fragments)
 
 
 def mesh_names(
