@@ -49,7 +49,6 @@ cc_library(
         ":explicit_reshards_util",
         ":passes_inc",
         "//shardy/common:file_utils",
-        "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:axis_list_ref",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
