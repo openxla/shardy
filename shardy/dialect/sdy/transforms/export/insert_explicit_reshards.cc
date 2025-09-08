@@ -24,6 +24,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
@@ -341,11 +342,13 @@ struct InsertExplicitReshardsPass
           (isa<stablehlo::ConcatenateOp>(op) &&
            differentOperandShardingFromFirstResult(op));
 
-      if (isa<func::ReturnOp>(op)) {
-        // TODO(enver): Does not need to be part of the walk on the func,
-        // instead get the terminatior with getBodyTerminator.
-        insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
-                                           onFullVersion);
+      if (op->hasTrait<OpTrait::IsTerminator>()) {
+        if (isa<func::ReturnOp>(op)) {
+          // TODO(enver): Does not need to be part of the walk on the func,
+          // instead get the terminatior with getBodyTerminator.
+          insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
+                                             onFullVersion);
+        }
         return;
       }
 
