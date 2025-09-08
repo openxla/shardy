@@ -656,3 +656,89 @@ func.func @broadcast_on_scalar_non_constant_does_not_propagate_constant_expansio
   %2 = stablehlo.add %0, %1 : tensor<2x64xf32>
   return %2, %2 : tensor<2x64xf32>, tensor<2x64xf32>
 }
+
+// CHECK-LABEL: func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_not_constant
+func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_not_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<16x16xf32>
+  // CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<16x16xf32>
+  // CHECK-NEXT:   %[[DOT0:.*]] = stablehlo.dot %arg0, %[[CONST2]] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT:   %[[DOT1:.*]] = stablehlo.dot %arg0, %[[CONST3]] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[DOT0]], %[[DOT1]] : tensor<8x16xf32>
+  // CHECK-NEXT:   sdy.return %[[MULTIPLY]] : tensor<8x16xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[NC]] : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[CONST1]], %[[NC]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
+    %2 = stablehlo.constant dense<1.000000e+00> : tensor<16x16xf32>
+    %3 = stablehlo.dot %arg0, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+    %4 = stablehlo.dot %arg0, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+    %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
+    sdy.return %5 : tensor<8x16xf32>
+  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %6 = stablehlo.negate %1: tensor<8x16xf32>
+  return %0, %1, %6 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant
+func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[CONST2]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[CONST3]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[ADD0]], %[[ADD1]] : tensor<8x16xf32>
+  // CHECK-NEXT:   sdy.return %[[MULTIPLY]] : tensor<8x16xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[NC]] : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[CONST1]], %[[NC]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
+  // TODO(enver): The named computation should be splitted as well.
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
+    %2 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+    %3 = stablehlo.add %arg0, %2 : tensor<8x16xf32>
+    %4 = stablehlo.add %arg0, %2 : tensor<8x16xf32>
+    %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
+    sdy.return %5 : tensor<8x16xf32>
+  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %6 = stablehlo.negate %1: tensor<8x16xf32>
+  return %0, %1, %6 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func @constant_to_while
+func.func @constant_to_while(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<0> : tensor<i32>
+  // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1> : tensor<i32>
+  // CHECK-NEXT: %[[CONST2:.*]] = sdy.constant dense<32> : tensor<i32>
+  // CHECK-NEXT: %[[WHILE:.*]]:3 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %arg0, %iterArg_1 = %[[CONST0]]) : tensor<8x16xf32>, tensor<8x16xf32>, tensor<i32>
+  // CHECK-NEXT: cond {
+  // CHECK-NEXT:   %[[COMPARE:.*]] = stablehlo.compare  LT, %iterArg_1, %[[CONST2]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
+  // CHECK-NEXT:   stablehlo.return %[[COMPARE]] : tensor<i1>
+  // CHECK-NEXT: } do {
+  // CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[CONST4:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %iterArg_1, %[[CONST1]] : tensor<i32>
+  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %iterArg, %[[CONST3]] : tensor<8x16xf32>
+  // CHECK-NEXT:   stablehlo.return %[[CONST4]], %[[ADD1]], %[[ADD0]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<i32>
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[WHILE]]#0 : tensor<8x16xf32>
+  %0 = stablehlo.constant dense<0> : tensor<i32>
+  %inc = stablehlo.constant dense<1> : tensor<i32>
+  %comp = stablehlo.constant dense<32> : tensor<i32>
+  %1:3 = stablehlo.while(%iterArg = %arg0, %iterArg_1 = %arg0, %iterArg_2 = %0) : tensor<8x16xf32>, tensor<8x16xf32>, tensor<i32>
+    cond {
+    %3 = stablehlo.compare  LT, %iterArg_2, %comp : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    stablehlo.return %3 : tensor<i1>
+  } do {
+    %3 = stablehlo.constant dense<1.0> : tensor<8x16xf32>
+    %4 = stablehlo.add %iterArg_2, %inc : tensor<i32>
+    %5 = stablehlo.add %iterArg, %3 : tensor<8x16xf32>
+    stablehlo.return %3, %5, %4 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<i32>
+  }
+  return %1#0 : tensor<8x16xf32>
+}
