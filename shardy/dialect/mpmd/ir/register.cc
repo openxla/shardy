@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
@@ -35,6 +36,7 @@ void registerAllDialects(DialectRegistry& registry) {
 
 void loadAllRequiredDialects(MLIRContext* context) {
   DialectRegistry registry;
+  LLVM::registerInlinerInterface(registry);
   func::registerAllExtensions(registry);
   sdy::registerAllDialects(registry);
   registerAllDialects(registry);
