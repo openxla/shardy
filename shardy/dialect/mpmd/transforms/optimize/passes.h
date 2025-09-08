@@ -42,6 +42,8 @@ namespace mlir::mpmd {
 struct OptimizeOptions {
   // A list of fragment merge rules.
   SmallVector<FragmentMergeRule> fragmentMergeRules;
+  // A list of fragment schedule rules.
+  SmallVector<FragmentScheduleRule> fragmentScheduleRules;
   // Whether to merge inferred fragments only after scheduling.
   bool mergeAfterScheduling = false;
   // Whether to identify matching forward and backward fragments and clone the
