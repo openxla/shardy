@@ -31,6 +31,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -319,6 +320,32 @@ std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
                            /*defaultMesh=*/Mesh(meshAttr, *meshName));
 }
 
+void insertAllReduceOnOpIfUnreducedToReplicated(
+    Operation* op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
+  auto operandHasUnreducedAxes = [&](OpOperand& operand) {
+    TensorShardingAttr sharding = getSharding(operand.get());
+    return sharding && !sharding.getUnreducedAxes().empty();
+  };
+  SDY_CHECK(!(llvm::any_of(op->getOpOperands(), operandHasUnreducedAxes) &&
+              op->getResults().empty()))
+      << "Some operands has unreduced axes but the operation has no "
+         "results. ";
+
+  // For each operand that has unreduced axes, insert an all-reduce if
+  // any of the unreduced axes isn't unreduced in the target sharding.
+  //
+  // We assume all results of an op should have the same unreduced axes,
+  // so we look at the first result.
+  rewriter.setInsertionPoint(op);
+  for (OpOperand& operand : op->getOpOperands()) {
+    if (TensorShardingAttr inSharding = getSharding(operand.get())) {
+      insertAllReduceIfUnreducedToReplicated(operand, inSharding,
+                                             getSharding(op->getResult(0)),
+                                             symbolTable, rewriter);
+    }
+  }
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -361,20 +388,7 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      // For each operand that has unreduced axes, insert an all-reduce if
-      // any of the unreduced axes isn't unreduced in the target sharding.
-      //
-      // We assume all results of an op should have the same unreduced axes,
-      // so we look at the first result.
-      TensorShardingAttr outSharding =
-          op->getResults().empty() ? nullptr : getSharding(op->getResult(0));
-      rewriter.setInsertionPoint(op);
-      for (OpOperand& operand : op->getOpOperands()) {
-        if (TensorShardingAttr inSharding = getSharding(operand.get())) {
-          insertAllReduceIfUnreducedToReplicated(
-              operand, inSharding, outSharding, symbolTable, rewriter);
-        }
-      }
+      insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable);
 
       // NOTE: Creating a sharding rule requires data flow edges are present.
       OpShardingRuleAttr shardingRule =
