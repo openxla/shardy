@@ -148,6 +148,16 @@ def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"
   }];
 }
 
+def RemoveAllGatherReduceScatterForCMV1Pass : Pass<"sdy-remove-all-gather-reduce-scatter-for-cmv1", "func::FuncOp"> {
+  let summary = "Removes sdy.all_gather and sdy.reduce_scatter for CMV1.";
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let description = [{
+    Removes all-gather in the pattern all-gather + dot. Removes reduce-scatter
+    in the pattern dot + reduce-scatter. This pass is for compatibility with
+    collective matmul V1 (CMV1). It is a temporary solution for b/432019089.
+  }];
+}
+
 def RemoveShardingGroupsPass : Pass<"sdy-remove-sharding-groups", "ModuleOp"> {
   let summary = "Removes ShardingGroupOps after propagation.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];

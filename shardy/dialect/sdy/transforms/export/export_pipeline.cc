@@ -52,6 +52,8 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
     addCanonicalizerPass(pm, kCollectiveLabel);
+    pm.addNestedPass<func::FuncOp>(
+        createRemoveAllGatherReduceScatterForCMV1Pass());
   }
 
   pm.addPass(mlir::sdy::createSaveModuleOpPass(

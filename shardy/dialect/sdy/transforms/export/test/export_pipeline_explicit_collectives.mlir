@@ -48,9 +48,7 @@ func.func @dot_general_with_unreduced_result(
     -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) {
   // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %arg0, %arg1
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}], unreduced={"y"}>]>}
-  // CHECK-NEXT: %[[REDUCE_SCATTER_0:.*]] = sdy.reduce_scatter [{}, {"y"}] %0 out_sharding=<@mesh, [{"x"}, {"y"}]>
-  // CHECK-NEXT: %[[REDUCE_SCATTER_1:.*]] = sdy.reduce_scatter [{}, {"y"}] %0 out_sharding=<@mesh, [{"x"}, {"y"}]>
-  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[REDUCE_SCATTER_0]], %[[REDUCE_SCATTER_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>}
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[DOT_GENERAL]], %[[DOT_GENERAL]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>}
   // CHECK-NEXT: return %[[ADD]]
   %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}], unreduced={"y"}>]>} :
