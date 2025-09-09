@@ -119,15 +119,19 @@ func.func @constant_to_named_computation_with_only_constant_ops(%arg0: tensor<8x
 
 // CHECK-LABEL: func @constant_multiple_users_within_named_computation_with_no_arguments_and_with_only_constant_ops
 func.func @constant_multiple_users_within_named_computation_with_no_arguments_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">()
-  // CHECK-NEXT:   %[[CONST:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[CONST]]
-  // CHECK-NEXT:   sdy.return %[[NEGATE]]
+  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">()
+  // CHECK-NEXT:   %[[CONST0:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %[[CONST0]]
+  // CHECK-NEXT:   sdy.return %[[NEGATE0]]
   // CHECK-NEXT: } : () -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC]]
-  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC]]
+  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">()
+  // CHECK-NEXT:   %[[CONST1:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %[[CONST1]]
+  // CHECK-NEXT:   sdy.return %[[NEGATE1]]
+  // CHECK-NEXT: } : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
+  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
   // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
-  // TODO(enver): The named computation should be splitted.
   %0 = sdy.named_computation<"foo">() () {
     %1 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
     %2 = stablehlo.negate %1 : tensor<8x16xf32>
@@ -140,16 +144,21 @@ func.func @constant_multiple_users_within_named_computation_with_no_arguments_an
 
 // CHECK-LABEL: func @constant_to_named_computation_with_one_argument_and_with_only_constant_ops
 func.func @constant_to_named_computation_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
-  // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg0, %[[NEGATE]]
-  // CHECK-NEXT:   sdy.return %[[ADD]]
+  // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %arg0
+  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[NEGATE0]]
+  // CHECK-NEXT:   sdy.return %[[ADD0]]
   // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC]]
-  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC]]
+  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST1]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %arg0
+  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[NEGATE1]]
+  // CHECK-NEXT:   sdy.return %[[ADD1]]
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
+  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
   // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
-  // TODO(enver): The named computation should be splitted.
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
   %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
     %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
@@ -165,15 +174,20 @@ func.func @constant_to_named_computation_with_one_argument_and_with_only_constan
 func.func @constant_multiple_users_one_to_named_computation_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
   // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST_0]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg0, %[[NEGATE]]
-  // CHECK-NEXT:   sdy.return %[[ADD]]
+  // CHECK-NEXT: %[[CONST_2:.*]] = sdy.constant dense<1.000000e+00>
+  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST_1]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %arg0
+  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[NEGATE0]]
+  // CHECK-NEXT:   sdy.return %[[ADD0]]
   // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC]]
-  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC]]
-  // CHECK-NEXT: return %[[CONST_1]], %[[ABS_0]], %[[ABS_1]]
-  // TODO(enver): The named computation should be splitted.
+  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST_2]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %arg0
+  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[NEGATE1]]
+  // CHECK-NEXT:   sdy.return %[[ADD1]]
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
+  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
+  // CHECK-NEXT: return %[[CONST_0]], %[[ABS_0]], %[[ABS_1]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
   %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
     %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
@@ -687,17 +701,25 @@ func.func @constant_both_to_named_computation_and_inside_named_computation_and_n
 func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST1]]) (%arg0: tensor<8x16xf32>) {
   // CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[CONST2]] : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[CONST3]] : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[ADD0]], %[[ADD1]] : tensor<8x16xf32>
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[CONST4:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[CONST3]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[CONST4]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[MULTIPLY0:.*]] = stablehlo.multiply %[[ADD0]], %[[ADD1]] : tensor<8x16xf32>
+  // CHECK-NEXT:   sdy.return %[[MULTIPLY0]] : tensor<8x16xf32>
   // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[NC]] : tensor<8x16xf32>
-  // CHECK-NEXT: return %[[CONST1]], %[[NC]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
-  // TODO(enver): The named computation should be splitted as well.
+  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST2]]) (%arg0: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[CONST5:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[CONST6:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD2:.*]] = stablehlo.add %arg0, %[[CONST5]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[ADD3:.*]] = stablehlo.add %arg0, %[[CONST6]] : tensor<8x16xf32>
+  // CHECK-NEXT:   %[[MULTIPLY1:.*]] = stablehlo.multiply %[[ADD2]], %[[ADD3]] : tensor<8x16xf32>
+  // CHECK-NEXT:   sdy.return %[[MULTIPLY1]] : tensor<8x16xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[NC1]] : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[CONST0]], %[[NC0]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
   %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
     %2 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
