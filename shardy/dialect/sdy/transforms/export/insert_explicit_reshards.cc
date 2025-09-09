@@ -345,7 +345,7 @@ struct InsertExplicitReshardsPass
       if (op->hasTrait<OpTrait::IsTerminator>()) {
         if (isa<func::ReturnOp>(op)) {
           // TODO(enver): Does not need to be part of the walk on the func,
-          // instead get the terminatior with getBodyTerminator.
+          // instead get the terminator with getBodyTerminator.
           insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
                                              onFullVersion);
         }
