@@ -22,7 +22,7 @@ limitations under the License.
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
-#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -71,8 +71,8 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
 
   if (onFullVersion && shouldReshard(operandSharding, targetSharding)) {
     operand = opOperand.get();
-    auto reshardOp = rewriter.create<ReshardOp>(
-        operand.getLoc(), operand,
+    auto reshardOp = ReshardOp::create(
+        rewriter, operand.getLoc(), operand,
         targetSharding
             ? targetSharding
             // Since it should reshard and `targetSharding` is empty,
@@ -255,8 +255,8 @@ void processDot(OpTy op, ArrayRef<TensorShardingAttr> inShardings,
                   op.getContext(), shardingRule.getResultMapping(0),
                   shardingRule.getFactorSizes(), mesh.name(), mesh.attr()));
   rewriter.setInsertionPointAfter(op);
-  auto reshardOp = rewriter.create<ReshardOp>(op.getLoc(), op.getResult(),
-                                              outShardings.front());
+  auto reshardOp = ReshardOp::create(rewriter, op.getLoc(), op.getResult(),
+                                     outShardings.front());
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
 }
 

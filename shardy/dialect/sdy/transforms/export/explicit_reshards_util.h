@@ -17,7 +17,8 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARD_UTIL_H_
 
 #include <cassert>
-#include <utility>
+#include <cstdint>
+#include <optional>
 
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"

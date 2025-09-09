@@ -39,10 +39,8 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
-#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -127,7 +125,7 @@ void insertExplicitReshardsOnOperand(
               mesh.getContext(), shardingRule.getOperandMapping(operandIndex),
               shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
   auto reshardOp =
-      rewriter.create<ReshardOp>(operand.getLoc(), operand, newTensorSharding);
+      ReshardOp::create(rewriter, operand.getLoc(), operand, newTensorSharding);
   op->setOperand(operandIndex, reshardOp);
 }
 
@@ -141,8 +139,8 @@ void insertExplicitReshardsOnResult(
           .createTensorShardingAttr(
               mesh.getContext(), shardingRule.getResultMapping(resultIndex),
               shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
-  auto reshardOp = rewriter.create<ReshardOp>(
-      result.getLoc(), result,
+  auto reshardOp = ReshardOp::create(
+      rewriter, result.getLoc(), result,
       getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true));
   rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
   setSharding(result, newTensorSharding);
@@ -248,8 +246,8 @@ void insertAllReduces(Operation* op, const AxesPerFactor& commonAxesPerFactor,
     if (allReduceAxes.empty()) {
       continue;
     }
-    auto allReduceOp = rewriter.create<AllReduceOp>(
-        result.getLoc(), result, allReduceAxes, resultSharding);
+    auto allReduceOp = AllReduceOp::create(rewriter, result.getLoc(), result,
+                                           allReduceAxes, resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }
@@ -439,11 +437,10 @@ class FactorAxesCandidateBag {
       }
       for (const auto& [factorIndex, _] :
            tensorFactorSharding.factorIndexToSharding) {
-        int64_t candidateIndex = 0;
-        while (candidateIndex < size()) {
+        for (int64_t candidateIndex = 0; candidateIndex < size();
+             ++candidateIndex) {
           updateSourceTensorSizeAt(factorIndex, candidateIndex,
                                    localTensorSize);
-          candidateIndex++;
         }
       }
     }
@@ -738,13 +735,6 @@ std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
              : lhs;
 }
 
-TensorShardingAttr getShardingOfTensorIndex(
-    const int64_t tensorIndex, ArrayRef<TensorShardingAttr> inShardings,
-    ArrayRef<TensorShardingAttr> outShardings, const int64_t numOperands) {
-  return tensorIndex < numOperands ? inShardings[tensorIndex]
-                                   : outShardings[tensorIndex - numOperands];
-}
-
 // Assumes that:
 // 1. Either tensor does not have factors that need replication.
 // 2. Both tensors have the same mesh but may have different device orders.
@@ -938,8 +928,9 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   }
   TensorShardingAttr allReduceSharding =
       sourceSharding.replaceUnreducedAxes(targetUnreducedAxes);
-  auto allReduceOp = rewriter.create<AllReduceOp>(
-      use.get().getLoc(), use.get(), allReduceAxes, allReduceSharding);
+  auto allReduceOp =
+      AllReduceOp::create(rewriter, use.get().getLoc(), use.get(),
+                          allReduceAxes, allReduceSharding);
   use.set(allReduceOp);
   return allReduceSharding;
 }
