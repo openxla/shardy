@@ -923,7 +923,7 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   }
   SmallVector<AxisRefAttr> allReduceAxes =
       getAxisSetDiff(sourceUnreducedAxes, targetUnreducedAxes, mesh);
-  if (allReduceAxes.empty()) {
+  if (sourceUnreducedAxes == targetUnreducedAxes) {
     return sourceSharding;
   }
   TensorShardingAttr allReduceSharding =
