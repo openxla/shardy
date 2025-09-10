@@ -26,6 +26,7 @@ limitations under the License.
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/PatternMatch.h"
@@ -66,17 +67,55 @@ struct FragmentOrigin {
   }
 };
 
+// Enum to represent the type of fragment split behavior.
+// These values are determined by the presence of specific MLIR attributes
+// on fragment operations during compilation.
+enum class SplitFragmentType {
+  // Indicates this fragment portion retains transferred data from the original
+  // fragment. Set when the fragment has the kSplitKeepTransferredAttrName
+  // attribute.
+  kKeepTransferred,
+  // Indicates this fragment portion drops transferred data from the original
+  // fragment. Set when the fragment has the kSplitDropTransferredAttrName
+  // attribute.
+  kDropTransferred
+};
+
+template <typename OS>
+inline OS& operator<<(OS& os, const SplitFragmentType& type) {
+  switch (type) {
+    case SplitFragmentType::kKeepTransferred:
+      os << "kKeepTransferred";
+      break;
+    case SplitFragmentType::kDropTransferred:
+      os << "kDropTransferred";
+      break;
+  }
+  return os;
+}
+
+template <typename OS>
+inline OS& operator<<(OS& os, const std::optional<SplitFragmentType>& type) {
+  if (type.has_value()) {
+    os << *type;
+  } else {
+    os << "nullopt";
+  }
+  return os;
+}
+
 // Holds the metadata of a fragment.
 struct FragmentInfo {
   std::vector<FragmentOrigin> origins;
   std::optional<int> stage_id;
   std::optional<int> call_counter;
-  bool is_weight_gradient = false;
+  std::optional<SplitFragmentType> split_type;
+  std::string mesh_name;
 
   bool operator==(const FragmentInfo& other) const {
     return llvm::equal(origins, other.origins) && stage_id == other.stage_id &&
            call_counter == other.call_counter &&
-           is_weight_gradient == other.is_weight_gradient;
+           split_type == other.split_type && mesh_name == other.mesh_name;
   }
 
   bool operator!=(const FragmentInfo& other) const { return !(*this == other); }
@@ -87,13 +126,16 @@ struct FragmentInfo {
     llvm::interleave(info.origins, os, ",");
     os << "]";
     if (info.stage_id.has_value()) {
-      os << ",stage=" << info.stage_id.value();
+      os << ",stage=" << *info.stage_id;
     }
     if (info.call_counter.has_value()) {
-      os << ",call_counter=" << info.call_counter.value();
+      os << ",call_counter=" << *info.call_counter;
     }
-    os << ",is_weight_gradient="
-       << (info.is_weight_gradient ? "true" : "false");
+    // Intentionally do not print split_type if it is nullopt
+    if (info.split_type.has_value()) {
+      os << ",split_type=" << *info.split_type;
+    }
+    os << ",mesh_name=\"" << info.mesh_name << "\"";
     os << ")";
     return os;
   }
@@ -102,8 +144,8 @@ struct FragmentInfo {
 struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
   static unsigned getHashValue(const FragmentInfo& info) {
     return llvm::hash_combine(llvm::hash_combine_range(info.origins),
-                              info.stage_id, info.call_counter,
-                              info.is_weight_gradient);
+                              info.stage_id, info.call_counter, info.split_type,
+                              info.mesh_name);
   }
   static bool isEqual(const FragmentInfo& lhs, const FragmentInfo& rhs) {
     return lhs == rhs;
@@ -113,14 +155,16 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
     return FragmentInfo{/*origins=*/{},
                         /*stage_id=*/DenseMapInfo<int>::getEmptyKey(),
                         /*call_counter=*/DenseMapInfo<int>::getEmptyKey(),
-                        /*is_weight_gradient=*/false};
+                        /*split_type=*/std::nullopt,
+                        /*mesh_name=*/""};
   }
 
   static inline FragmentInfo getTombstoneKey() {
     return FragmentInfo{/*origins=*/{},
                         /*stage_id=*/DenseMapInfo<int>::getTombstoneKey(),
                         /*call_counter=*/DenseMapInfo<int>::getTombstoneKey(),
-                        /*is_weight_gradient=*/true};
+                        /*split_type=*/SplitFragmentType::kDropTransferred,
+                        /*mesh_name=*/"__tombstone__"};
   }
 };
 
@@ -142,12 +186,37 @@ struct FragmentMergeRule {
 
 using FragmentMergeRules = std::vector<FragmentMergeRule>;
 
+// Describes a rule for scheduling fragments. A rule is defined by an ordered
+// sequence of fragments. This ordering dictates the execution order of the
+// fragments on a given mesh.
+struct FragmentScheduleRule {
+  // The sequence of fragments to be scheduled. The order of fragments in this
+  // vector defines their execution order.
+  std::vector<FragmentInfo> ordered_fragments;
+
+  static constexpr llvm::StringRef kFragmentScheduleRulePrefix =
+      "FragmentScheduleRule(ordered_fragments=[";
+
+  friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os,
+                                       const FragmentScheduleRule& rule) {
+    os << kFragmentScheduleRulePrefix;
+    llvm::interleave(rule.ordered_fragments, os, "->");
+    return os << "])";
+  }
+};
+
+using FragmentScheduleRules = std::vector<FragmentScheduleRule>;
+
 // Returns the fragment info of a fragment op.
 FragmentInfo GetFragmentInfo(FragmentOp fragment);
 
 // Sets the fragment info of a fragment op. Overwrites any existing info.
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
                      RewriterBase& rewriter);
+
+// Returns the split fragment type of a fragment op. If the fragment op is not
+// split, returns std::nullopt.
+std::optional<SplitFragmentType> GetSplitFragmentType(FragmentOp fragment);
 
 }  // namespace mlir::mpmd
 
@@ -165,6 +234,22 @@ class parser<mlir::mpmd::FragmentMergeRule>
   StringRef getValueName() const override { return "fragment-merge-rule"; }
   void printOptionDiff(const Option& opt,
                        const mlir::mpmd::FragmentMergeRule& value,
+                       const OptVal& defaultValue, size_t globalWidth) const;
+  void anchor() override;
+};
+
+extern template class basic_parser<mlir::mpmd::FragmentScheduleRule>;
+
+template <>
+class parser<mlir::mpmd::FragmentScheduleRule>
+    : public basic_parser<mlir::mpmd::FragmentScheduleRule> {
+ public:
+  parser(Option& opt) : basic_parser(opt) {}
+  bool parse(Option& opt, StringRef argName, StringRef arg,
+             mlir::mpmd::FragmentScheduleRule& value);
+  StringRef getValueName() const override { return "fragment-schedule-rule"; }
+  void printOptionDiff(const Option& opt,
+                       const mlir::mpmd::FragmentScheduleRule& value,
                        const OptVal& defaultValue, size_t globalWidth) const;
   void anchor() override;
 };
