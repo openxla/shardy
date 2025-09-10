@@ -16,6 +16,7 @@ limitations under the License.
 #include <cassert>
 #include <utility>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
@@ -66,8 +67,15 @@ void eraseShardingGroupUsers(Operation* op) {
 
 // A constant preserving op is an op that is considered a constant expression if
 // it is pure and all its results can be considered as constant expressions
-// given all its operands are constant expressions.
-bool isConstantPreserving(Operation* op) {
+// given all its operands are constant expressions, for which it holds if the
+// given op is either:
+// - A broadcast, reshape or slice op.
+// - An elementwise op.
+// - A named computation all operations are constant preserving.
+// Assumes the op is not constant or iota.
+bool isConstantPreserving(
+    Operation* op,
+    const llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps) {
   if (isa<stablehlo::BroadcastInDimOp, stablehlo::ReshapeOp,
           stablehlo::SliceOp>(op)) {
     return isPure(op);
@@ -75,19 +83,25 @@ bool isConstantPreserving(Operation* op) {
   if (isElementwise(op)) {
     return isPure(op);
   }
+  if (auto namedComputationOp = dyn_cast<NamedComputationOp>(op)) {
+    return !nonConstantNamedComputationOps.contains(
+               namedComputationOp.getName()) &&
+           isPure(op);
+  }
   return false;
 }
 
 // Returns true if the given op is either:
 // - A constant or iota op.
-// - A constant preserving op. (see isConstantPreserving)
-// - All operands are constants, that is, exist in `constantOps`.
-bool isConstantExpression(Operation* op,
-                          const llvm::SetVector<Operation*>& constantOps) {
+// - A constant preserving op. (see isConstantPreserving) and all operands are
+// constants, that is, exist in `constantOps`.
+bool isConstantExpression(
+    Operation* op, const llvm::SetVector<Operation*>& constantOps,
+    const llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
-  return isConstantPreserving(op) &&
+  return isConstantPreserving(op, nonConstantNamedComputationOps) &&
          llvm::all_of(op->getOperands(), [&](Value operand) {
            return operand.getDefiningOp() &&
                   constantOps.contains(operand.getDefiningOp());
@@ -156,13 +170,26 @@ void cloneSubComputationOnOperands(
 }
 
 void processOp(Operation* op, llvm::SetVector<Operation*>& constantOps,
-               llvm::SetVector<Operation*>& scalarExpansionOps) {
+               llvm::SetVector<Operation*>& scalarExpansionOps,
+               llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps) {
   if (isa<ShardingGroupOp>(op)) {
     return;
   }
-  if (isConstantExpression(op, constantOps)) {
+  if (isConstantExpression(op, constantOps, nonConstantNamedComputationOps)) {
     constantOps.insert(op);
     return;
+  }
+  // NOTE: There are cases that op is an constant expression but may not pass
+  // the following check such as constant and iota ops. That is fine because if
+  // the op is a constant expression it is a stronger condition than being just
+  // constant preserving and it does not make the parent named computation
+  // non-const, and at this point, it is guaranteed that the op is not constant
+  // expression.
+  if (!isConstantPreserving(op, nonConstantNamedComputationOps) &&
+      !op->hasTrait<OpTrait::IsTerminator>()) {
+    if (auto namedCompuationOp = op->getParentOfType<NamedComputationOp>()) {
+      nonConstantNamedComputationOps.insert(namedCompuationOp.getName());
+    }
   }
   if (isScalarExpansion(op)) {
     scalarExpansionOps.insert(op);
@@ -213,9 +240,31 @@ struct ConstantOrScalarSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    llvm::SetVector<Operation*> constantOps, scalarExpansionOps;
-    funcOp.walk(
-        [&](Operation* op) { processOp(op, constantOps, scalarExpansionOps); });
+    llvm::SmallVector<llvm::SetVector<Operation*>> constantOps;
+    llvm::SetVector<Operation*> scalarExpansionOps;
+    llvm::SmallDenseSet<StringRef> nonConstantNamedComputationOps;
+    constantOps.push_back(llvm::SetVector<Operation*>());
+    funcOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
+      if (isa<NamedComputationOp>(op)) {
+        constantOps.push_back(llvm::SetVector<Operation*>());
+        return;
+      }
+      processOp(op, constantOps.back(), scalarExpansionOps,
+                nonConstantNamedComputationOps);
+      if (op->hasTrait<OpTrait::IsTerminator>() &&
+          isa<NamedComputationOp>(op->getParentOp())) {
+        for (Operation* op : llvm::reverse(constantOps.back())) {
+          if (hasOnlyUsersOfType<ShardingGroupOp>(op)) {
+            eraseShardingGroupUsers(op);
+            op->erase();
+          }
+        }
+        constantOps.pop_back();
+        processOp(op->getParentOp(), constantOps.back(), scalarExpansionOps,
+                  nonConstantNamedComputationOps);
+        return;
+      }
+    });
 
     // Since for every op in `constantOps` that has a use that isn't in
     // `constantOps`, we replaced the use with a clone of the entire
@@ -223,12 +272,13 @@ struct ConstantOrScalarSplitterPass
     // iterate in reverse order. Note that we did not clone scalars so we keep
     // the original.
     for (Operation* op : llvm::concat<Operation* const>(
-             scalarExpansionOps, llvm::reverse(constantOps))) {
+             scalarExpansionOps, llvm::reverse(constantOps.back()))) {
       if (hasOnlyUsersOfType<ShardingGroupOp>(op)) {
         eraseShardingGroupUsers(op);
         op->erase();
       }
     }
+    constantOps.pop_back();
   }
 
  private:
