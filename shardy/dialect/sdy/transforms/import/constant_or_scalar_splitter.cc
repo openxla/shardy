@@ -64,19 +64,31 @@ void eraseShardingGroupUsers(Operation* op) {
   }
 }
 
+// A constant preserving op is an op that is considered a constant expression if
+// it is pure and all its results can be considered as constant expressions
+// given all its operands are constant expressions.
+bool isConstantPreserving(Operation* op) {
+  if (isa<stablehlo::BroadcastInDimOp, stablehlo::ReshapeOp,
+          stablehlo::SliceOp>(op)) {
+    return isPure(op);
+  }
+  if (isElementwise(op)) {
+    return isPure(op);
+  }
+  return false;
+}
+
 // Returns true if the given op is either:
 // - A constant or iota op.
-// - A broadcast, reshape, slice, or pure element-wise op whose operands are all
-//   constants (exist in `constantOps`).
+// - A constant preserving op. (see isConstantPreserving)
+// - All operands are constants, that is, exist in `constantOps`.
 bool isConstantExpression(Operation* op,
                           const llvm::SetVector<Operation*>& constantOps) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
-  return (isa<stablehlo::BroadcastInDimOp, stablehlo::ReshapeOp,
-              stablehlo::SliceOp>(op) ||
-          isElementwise(op)) &&
-         isPure(op) && llvm::all_of(op->getOperands(), [&](Value operand) {
+  return isConstantPreserving(op) &&
+         llvm::all_of(op->getOperands(), [&](Value operand) {
            return operand.getDefiningOp() &&
                   constantOps.contains(operand.getDefiningOp());
          });
