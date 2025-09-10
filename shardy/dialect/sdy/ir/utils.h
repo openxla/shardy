@@ -508,6 +508,12 @@ bool hasAnyUserOfType(ValueRange values) {
   });
 }
 
+// Returns true if `op` is used by any op of the specified types.
+template <class... OpTys>
+bool hasAnyUserOfType(Operation* op) {
+  return hasAnyUserOfType<OpTys...>(op->getResults());
+}
+
 // Returns true if `op` is only used by ops of the specified types.
 template <class... OpTys>
 bool hasOnlyUsersOfType(Operation* op) {
@@ -552,12 +558,6 @@ class AddAxisOrMergeInserter {
   SmallVector<AxisRefAttr>* axisRefs;
   const MeshAttr* mesh;
 };
-
-// Returns true if `op` is used by any op of the specified types.
-template <class... OpTys>
-bool hasAnyUserOfType(Operation* op) {
-  return hasAnyUserOfType(op->getResults());
-}
 
 // Returns true if `value` is used by `user`.
 bool isUsedBy(Value value, Operation* user);
