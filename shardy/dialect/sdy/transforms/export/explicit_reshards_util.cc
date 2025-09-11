@@ -916,8 +916,9 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   if (userSharding) {
     targetUnreducedAxes = userSharding.getUnreducedAxes();
     // TODO(enver): Support the case the meshes differ only on device orders.
-    SDY_CHECK(targetUnreducedAxes.empty() ||
-              mesh.equals(userSharding.getMesh(symbolTable)))
+    // NOTE: At this point, it is guaranteed that source unreduced axes is
+    // non-empty.
+    SDY_CHECK(mesh.equals(userSharding.getMesh(symbolTable)))
         << "source and user shardings have different meshes for unreduced "
            "axes.";
   }
