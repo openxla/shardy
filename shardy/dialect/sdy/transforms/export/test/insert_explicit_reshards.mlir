@@ -1,12 +1,91 @@
 // RUN: sdy_opt %s -allow-unregistered-dialect  -sdy-insert-explicit-reshards | FileCheck %s
 
-sdy.mesh @mesh = <["x"=2, "y"=2, "z"=4]>
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+sdy.mesh @mesh_z4 = <["x"=2, "y"=2, "z"=4]>
 sdy.mesh @other_mesh = <["x"=2, "y"=2]>
 sdy.mesh @mesh_abcd = <["a"=2, "b"=2, "c"=2, "d"=2]>
 
 //===----------------------------------------------------------------------===//
 // Unreduced tests
 //===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: func @all_reduce_source_has_unreduced_and_target_no_sharding
+func.func @all_reduce_source_has_unreduced_and_target_no_sharding(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>})
+      -> tensor<4x8xf32> {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_has_unreduced_and_target_has_sharding_no_unreduced
+func.func @all_reduce_source_has_unreduced_and_target_has_sharding_no_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_no_sharding_and_target_has_unreduced
+func.func @all_reduce_source_no_sharding_and_target_has_unreduced(
+  %arg0: tensor<4x8xf32>)
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: return %arg0
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_has_sharding_no_unreduced_and_target_has_unreduced
+func.func @all_reduce_source_has_sharding_no_unreduced_and_target_has_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: return %arg0
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_both_source_and_target_has_same_unreduced
+func.func @all_reduce_both_source_and_target_has_same_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: return %arg0
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_unreduced_is_strict_subset_of_target_unreduced
+func.func @all_reduce_source_unreduced_is_strict_subset_of_target_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x", "z"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x", "z"}>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_target_unreduced_is_strict_subset_of_source_unreduced
+func.func @all_reduce_target_unreduced_is_strict_subset_of_source_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x", "y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_unreduced_and_target_unreduced_have_no_overlap
+func.func @all_reduce_source_unreduced_and_target_unreduced_have_no_overlap(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"y"}>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_unreduced_and_target_unreduced_has_overlap
+func.func @all_reduce_source_unreduced_and_target_unreduced_has_overlap(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x", "y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x", "z"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x", "z"}>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
 
 // CHECK-LABEL: func @all_reduce_on_func_input
 func.func @all_reduce_on_func_input(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32> {
@@ -274,13 +353,13 @@ func.func @dot_lhs_and_rhs_conflicting_non_contracting_dim(
 
 // CHECK-LABEL: func @dot_lhs_and_rhs_conflicting_non_contracting_dim_sub_axis
 func.func @dot_lhs_and_rhs_conflicting_non_contracting_dim_sub_axis(
-    %arg0: tensor<4x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"z"}, {"x"}]>},
-    %arg1: tensor<32x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"z":(2)2}]>}) -> tensor<4x8xf32> {
+    %arg0: tensor<4x32xf32> {sdy.sharding=#sdy.sharding<@mesh_z4, [{"z"}, {"x"}]>},
+    %arg1: tensor<32x8xf32> {sdy.sharding=#sdy.sharding<@mesh_z4, [{"x"}, {"z":(2)2}]>}) -> tensor<4x8xf32> {
   // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %arg0, %arg1
-  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"z"}, {}]>]>}
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh_z4, [{"z"}, {}]>]>}
   // CHECK-NEXT: return %[[DOT_GENERAL]]
   %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0], precision = [DEFAULT, DEFAULT]
-      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"z"}, {}]>]>} :
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh_z4, [{"z"}, {}]>]>} :
       (tensor<4x32xf32>, tensor<32x8xf32>) -> tensor<4x8xf32>
   return %0 : tensor<4x8xf32>
 }
