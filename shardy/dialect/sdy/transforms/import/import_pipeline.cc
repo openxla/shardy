@@ -20,6 +20,8 @@ limitations under the License.
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
+#include "shardy/dialect/sdy/transforms/import/apply_sharding_constraints.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
 
 namespace mlir {
@@ -40,11 +42,11 @@ GreedyRewriteConfig getCanonicalizerConfig(bool enableRegionSimplification) {
 }  // namespace
 
 void addImportPipeline(OpPassManager& pm, int& dumpIndex,
-                       StringRef dumpDirectory, bool skipInline) {
+                       const PropagationOptions& options) {
   // We need to apply the inliner pass so we have a single main function,
   // otherwise we would need to propagate shardings between call ops and callee
   // functions.
-  if (!skipInline) {
+  if (!options.skipInline) {
     pm.addPass(createInlinerPass({}, [&](OpPassManager& pm) {
       pm.addPass(createCanonicalizerPass(
           getCanonicalizerConfig(/*enableRegionSimplification=*/true)));
@@ -61,20 +63,19 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // the import passes after are internal implementation details that are part
   // of the propagation itself.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
-      dumpDirectory, "before_propagation", dumpIndex++));
+      options.dumpDirectory, "before_propagation", dumpIndex++));
 
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
-  pm.addNestedPass<func::FuncOp>(createApplyShardingConstraintsPass());
+  pm.addPass(createApplyShardingConstraintsPass(options));
   // The sharding group import pass must run after applying sharding
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
 }
 
-void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory,
-                       bool skipInline) {
+void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
   int dumpIndex = 0;
-  addImportPipeline(pm, dumpIndex, dumpDirectory, skipInline);
+  addImportPipeline(pm, dumpIndex, options);
 }
 
 void registerImportPipeline() {
@@ -84,7 +85,7 @@ void registerImportPipeline() {
       "Shardy propagation",
       [](OpPassManager& pm) {
         int dumpIndex = 0;
-        addImportPipeline(pm, dumpIndex);
+        addImportPipeline(pm, dumpIndex, PropagationOptions());
       });
 }
 

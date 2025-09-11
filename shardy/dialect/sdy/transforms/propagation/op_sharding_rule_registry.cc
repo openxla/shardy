@@ -1271,7 +1271,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             stablehlo::InfeedOp, stablehlo::IotaOp, stablehlo::OutfeedOp,
             stablehlo::OptimizationBarrierOp, stablehlo::PartitionIdOp,
             stablehlo::RecvOp, stablehlo::SendOp, stablehlo::WhileOp>(
-          [](Operation*) { return OpShardingRuleAttr(); })
+          [](Operation* op) { return OpShardingRuleAttr(); })
       .Case<ShardingRuleOpInterface>(
           [](ShardingRuleOpInterface shardingRuleOp) {
             return shardingRuleOp.getShardingRule();
