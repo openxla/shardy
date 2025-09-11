@@ -97,3 +97,30 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
 
   func.return %1 : !mesh_1_tensor_4_8_f32
 }
+
+// -----
+
+// The merged remat fragments have more than one origin, and their user origins
+// can have different transpose_count. The transpose count of the merged
+// fragment is the maximum value of the transpose count of the user origins.
+// This is a valid program.
+
+!mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
+  -> (!mesh_1_tensor_4_8_f32) attributes {
+    "topology"=#mpmd.topology<<"m1": <["x"=2]>>>}
+{
+  %0 = mpmd.fragment<mesh="m1", origin=["f"(0)], stage=0> (%arg0)
+    (%arg1: tensor<4x8xf32>) {
+    mpmd.return %arg1 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  %1 = mpmd.fragment<mesh="m1", origin=["f"(0), "g"(1)], stage=0> (%0) {remat}
+    (%arg1: tensor<4x8xf32>) {
+    mpmd.return %arg1 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  func.return %1 : !mesh_1_tensor_4_8_f32
+}

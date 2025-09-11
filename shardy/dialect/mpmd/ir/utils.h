@@ -283,6 +283,16 @@ std::vector<int64_t> GetTransposeCounts(FragmentOp fragment);
 // Otherwise, returns `nullopt`.
 std::optional<int64_t> TryToFindSingleTransposeCount(FragmentOp fragment);
 
+// If the fragment has at least one transpose count, returns the maximum value.
+// Otherwise, returns `nullopt`.
+//
+// A merged fragment may have multiple transpose counts. We take the max
+// transpose count to ensure that we are reflecting the highest order of
+// differentiation the fragment is involved in, e.g., when merging a
+// rematerialized forward fragment (transpose_count=0) with a backward fragment
+// (transpose_count=1).
+std::optional<int64_t> TryToFindMaxTransposeCount(FragmentOp fragment);
+
 constexpr StringRef kCallCounterAttrName = "call_counter";
 
 // Returns the call counter of a fragment if defined. Otherwise, returns
