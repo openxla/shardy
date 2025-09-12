@@ -65,7 +65,7 @@ bool ParseFragmentOrigin(llvm::cl::Option& opt, llvm::StringRef& arg,
   if (!arg.consume_front("(")) {
     return false;
   }
-  if (!arg.consumeInteger(10, origin.transpose_count)) {
+  if (arg.consumeInteger(10, origin.transpose_count)) {
     return opt.error("Expected a transpose count");
   }
   if (!arg.consume_front(")")) {
@@ -187,6 +187,7 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
 namespace llvm::cl {
 
 using ::mlir::mpmd::FragmentMergeRule;
+using ::mlir::mpmd::FragmentScheduleRule;
 
 template class basic_parser<FragmentMergeRule>;
 
@@ -227,5 +228,40 @@ void parser<FragmentMergeRule>::printOptionDiff(const Option& opt,
 }
 
 void parser<FragmentMergeRule>::anchor() {}
+
+template class basic_parser<FragmentScheduleRule>;
+
+// Parses a fragment schedule rule string of the form
+// "FragmentScheduleRule(ordered_fragments=[<fragment1>-><fragment2>...])"
+// <fragment>s are FragmentInfo strings.
+bool parser<FragmentScheduleRule>::parse(Option& opt, StringRef, StringRef arg,
+                                         FragmentScheduleRule& value) {
+  if (!arg.consume_front(FragmentScheduleRule::kFragmentScheduleRulePrefix)) {
+    return opt.error("Expected '" +
+                     FragmentScheduleRule::kFragmentScheduleRulePrefix + "'");
+  }
+  while (!arg.starts_with("]")) {
+    if (mlir::mpmd::ParseFragmentInfo(opt, arg,
+                                      value.ordered_fragments.emplace_back())) {
+      return true;  // opt.error was called inside ParseFragmentInfo
+    }
+    if (!arg.consume_front("->")) {
+      break;
+    }
+  }
+  if (!arg.consume_front("])")) {
+    return opt.error("Expected '])'");
+  }
+  return false;
+}
+
+void parser<FragmentScheduleRule>::printOptionDiff(
+    const Option& opt, const FragmentScheduleRule& value,
+    const OptVal& defaultValue, size_t globalWidth) const {
+  printOptionName(opt, globalWidth);
+  outs() << "= " << value << "\n";
+}
+
+void parser<FragmentScheduleRule>::anchor() {}
 
 }  // namespace llvm::cl

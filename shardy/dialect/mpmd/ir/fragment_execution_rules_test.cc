@@ -20,6 +20,7 @@ limitations under the License.
 #include <vector>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -67,6 +68,48 @@ FragmentInfo MakeFragmentInfo(const std::vector<FragmentOrigin>& origins,
 FragmentMergeRule MakeFragmentMergeRule(
     const std::vector<FragmentInfo>& sources, const FragmentInfo& target) {
   return {sources, target};
+}
+
+FragmentScheduleRule MakeFragmentScheduleRule(
+    const std::vector<FragmentInfo>& ordered_fragments) {
+  return {ordered_fragments};
+}
+
+// LLVM's command line classes (OptionCategory, opt) store StringRef arguments
+// directly without copying the underlying string data. When these objects are
+// created with temporary string literals in test functions, the backing strings
+// go out of scope after the test completes, leaving dangling pointers in the
+// static GlobalParser->RegisteredOptionCategories.
+//
+// The functions below use static storage to ensure string literals have static
+// storage duration, avoiding the need for manual cleanup. The parser helper
+// functions encapsulate opt/parser creation and provide a clean interface for
+// tests without exposing StringRef lifetime concerns.
+
+llvm::cl::OptionCategory& getTestOptionCategory() {
+  static llvm::cl::OptionCategory category("Test Options");
+  return category;
+}
+
+bool parseFragmentMergeRule(llvm::StringRef rule_str, FragmentMergeRule& rule) {
+  static llvm::cl::opt<FragmentMergeRule> rule_opt(
+      "fragment-merge-rule",
+      llvm::cl::desc("Fragment merge rule for testing parser functionality"),
+      llvm::cl::cat(getTestOptionCategory()));
+  static llvm::cl::parser<FragmentMergeRule> parser(rule_opt);
+
+  return parser.parse(rule_opt, "test-rule", rule_str, rule);
+}
+
+bool parseFragmentScheduleRule(llvm::StringRef rule_str,
+                               FragmentScheduleRule& rule) {
+  static llvm::cl::opt<FragmentScheduleRule> rule_opt(
+      "fragment-schedule-rule",
+      llvm::cl::desc("Fragment schedule rule for testing parser functionality"),
+      llvm::cl::cat(getTestOptionCategory()));
+  static llvm::cl::parser<FragmentScheduleRule> parser(rule_opt);
+
+  return parser.parse(rule_opt, "test-rule", rule_str, rule);
 }
 
 TEST(GetFragmentInfoTest, GetFragmentInfo) {
@@ -258,6 +301,144 @@ TEST(FragmentMergeRule, PrintFragmentMergeRule) {
          "target=FragmentInfo(origins=["
          "\"f1\"(123),\"f2\"(456)],stage=1,is_weight_gradient=false))"));
 }
+
+TEST(FragmentMergeRuleParser, ParseValidRule) {
+  FragmentMergeRule expected_rule = MakeFragmentMergeRule(
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/false),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/true)},
+      MakeFragmentInfo(
+          {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 456)},
+          /*stage_id=*/1,
+          /*call_counter=*/std::nullopt,
+          /*is_weight_gradient=*/false));
+  // We first construct the rule and print it to a string. Then we parse that
+  // string to ensure that the printed form of a rule is directly compatible
+  // with the format the parser expects.
+  std::string rule_str;
+  llvm::raw_string_ostream os(rule_str);
+  os << expected_rule;
+
+  FragmentMergeRule rule;
+  bool result = parseFragmentMergeRule(rule_str, rule);
+
+  EXPECT_FALSE(result);
+
+  ASSERT_EQ(rule.sources.size(), 2);
+  ExpectFragmentInfoEq(rule.sources[0], expected_rule.sources[0]);
+  ExpectFragmentInfoEq(rule.sources[1], expected_rule.sources[1]);
+  ExpectFragmentInfoEq(rule.target, expected_rule.target);
+}
+
+struct InvalidRuleTestParams {
+  std::string test_name;
+  std::string invalid_rule_str;
+};
+
+class FragmentMergeRuleParserInvalidSyntaxTest
+    : public ::testing::TestWithParam<InvalidRuleTestParams> {};
+
+TEST_P(FragmentMergeRuleParserInvalidSyntaxTest, ParseInvalidRule) {
+  const auto& params = GetParam();
+  FragmentMergeRule rule;
+  bool result = parseFragmentMergeRule(params.invalid_rule_str, rule);
+
+  EXPECT_TRUE(result);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FragmentMergeRuleParser, FragmentMergeRuleParserInvalidSyntaxTest,
+    testing::Values(
+        InvalidRuleTestParams{"MissingPrefix",
+                              "sources=[FragmentInfo(origins=[\"f1\"(123)])]"},
+        InvalidRuleTestParams{
+            "MissingSources",
+            "FragmentMergeRule(target=FragmentInfo(origins=[\"f1\"(123)]))"},
+        InvalidRuleTestParams{"MissingTarget",
+                              "FragmentMergeRule(sources=[FragmentInfo(origins="
+                              "[\"f1\"(123)])])"}),
+    [](const testing::TestParamInfo<
+        FragmentMergeRuleParserInvalidSyntaxTest::ParamType>& info) {
+      return info.param.test_name;
+    });
+
+TEST(FragmentScheduleRule, PrintFragmentScheduleRule) {
+  FragmentScheduleRule rule = MakeFragmentScheduleRule(
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*stage_id=*/1)});
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  os << rule;
+  EXPECT_THAT(str, Eq("FragmentScheduleRule(ordered_fragments=["
+                      "FragmentInfo(origins=[\"f1\"(123)],stage=1,is_weight_"
+                      "gradient=false)->"
+                      "FragmentInfo(origins=[\"f2\"(456)],stage=1,is_weight_"
+                      "gradient=false)])"));
+}
+
+TEST(FragmentScheduleRuleParser, ParseValidRule) {
+  FragmentScheduleRule expected_rule = MakeFragmentScheduleRule(
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/false),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)},
+                        /*stage_id=*/1,
+                        /*call_counter=*/std::nullopt,
+                        /*is_weight_gradient=*/true)});
+  // We first construct the rule and print it to a string. Then we parse that
+  // string to ensure that the printed form of a rule is directly compatible
+  // with the format the parser expects.
+  std::string rule_str;
+  llvm::raw_string_ostream os(rule_str);
+  os << expected_rule;
+
+  FragmentScheduleRule rule;
+  bool result = parseFragmentScheduleRule(rule_str, rule);
+
+  EXPECT_FALSE(result);
+
+  ASSERT_EQ(rule.ordered_fragments.size(), 2);
+  ExpectFragmentInfoEq(rule.ordered_fragments[0],
+                       expected_rule.ordered_fragments[0]);
+  ExpectFragmentInfoEq(rule.ordered_fragments[1],
+                       expected_rule.ordered_fragments[1]);
+}
+
+class FragmentScheduleRuleParserInvalidSyntaxTest
+    : public ::testing::TestWithParam<InvalidRuleTestParams> {};
+
+TEST_P(FragmentScheduleRuleParserInvalidSyntaxTest, ParseInvalidRule) {
+  const auto& params = GetParam();
+  FragmentScheduleRule rule;
+  bool result = parseFragmentScheduleRule(params.invalid_rule_str, rule);
+
+  EXPECT_TRUE(result);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FragmentScheduleRuleParser, FragmentScheduleRuleParserInvalidSyntaxTest,
+    testing::Values(
+        InvalidRuleTestParams{"MissingPrefix",
+                              "[FragmentInfo(origins=[\"f1\"(123)])->"
+                              "FragmentInfo(origins=[\"f2\"(456)])])"},
+        InvalidRuleTestParams{
+            "MissingArrow",
+            "FragmentScheduleRule(ordered_fragments=[FragmentInfo(origins=["
+            "\"f1\"(123)]) FragmentInfo(origins=[\"f2\"(456)])])"},
+        InvalidRuleTestParams{
+            "MissingClosingBrackets",
+            "FragmentScheduleRule(ordered_fragments=[FragmentInfo(origins=["
+            "\"f1\"(123)])->FragmentInfo(origins=[\"f2\"(456)])"}),
+    [](const testing::TestParamInfo<
+        FragmentScheduleRuleParserInvalidSyntaxTest::ParamType>& info) {
+      return info.param.test_name;
+    });
 
 TEST(FragmentInfoMapInfoTest, IsEqual) {
   FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
