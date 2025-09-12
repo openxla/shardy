@@ -139,6 +139,16 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
 
 }  // namespace
 
+std::optional<SplitFragmentType> GetSplitFragmentType(FragmentOp fragment) {
+  if (IsSplitKeepTransferred(fragment)) {
+    return SplitFragmentType::kKeepTransferred;
+  }
+  if (IsSplitDropTransferred(fragment)) {
+    return SplitFragmentType::kDropTransferred;
+  }
+  return std::nullopt;
+}
+
 FragmentInfo GetFragmentInfo(FragmentOp fragment) {
   std::optional<uint64_t> stage_id;
   if (fragment.getStageIdAttr()) {
@@ -146,12 +156,7 @@ FragmentInfo GetFragmentInfo(FragmentOp fragment) {
   }
   std::optional<int64_t> call_counter = TryToFindCallCounter(fragment);
   std::vector<FragmentOrigin> origins = GetFragmentOrigins(fragment);
-  std::optional<SplitFragmentType> split_type;
-  if (IsSplitKeepTransferred(fragment)) {
-    split_type = SplitFragmentType::kKeepTransferred;
-  } else if (IsSplitDropTransferred(fragment)) {
-    split_type = SplitFragmentType::kDropTransferred;
-  }
+  std::optional<SplitFragmentType> split_type = GetSplitFragmentType(fragment);
   return FragmentInfo{origins, stage_id, call_counter, split_type};
 }
 

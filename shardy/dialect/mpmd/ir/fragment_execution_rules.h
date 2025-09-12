@@ -81,6 +81,29 @@ enum class SplitFragmentType {
   kDropTransferred
 };
 
+template <typename OS>
+inline OS& operator<<(OS& os, const SplitFragmentType& type) {
+  switch (type) {
+    case SplitFragmentType::kKeepTransferred:
+      os << "kKeepTransferred";
+      break;
+    case SplitFragmentType::kDropTransferred:
+      os << "kDropTransferred";
+      break;
+  }
+  return os;
+}
+
+template <typename OS>
+inline OS& operator<<(OS& os, const std::optional<SplitFragmentType>& type) {
+  if (type.has_value()) {
+    os << *type;
+  } else {
+    os << "nullopt";
+  }
+  return os;
+}
+
 // Holds the metadata of a fragment.
 struct FragmentInfo {
   std::vector<FragmentOrigin> origins;
@@ -101,21 +124,14 @@ struct FragmentInfo {
     llvm::interleave(info.origins, os, ",");
     os << "]";
     if (info.stage_id.has_value()) {
-      os << ",stage=" << info.stage_id.value();
+      os << ",stage=" << *info.stage_id;
     }
     if (info.call_counter.has_value()) {
-      os << ",call_counter=" << info.call_counter.value();
+      os << ",call_counter=" << *info.call_counter;
     }
+    // Intentionally do not print split_type if it is nullopt
     if (info.split_type.has_value()) {
-      os << ",split_type=";
-      switch (info.split_type.value()) {
-        case SplitFragmentType::kKeepTransferred:
-          os << "kKeepTransferred";
-          break;
-        case SplitFragmentType::kDropTransferred:
-          os << "kDropTransferred";
-          break;
-      }
+      os << ",split_type=" << *info.split_type;
     }
     os << ")";
     return os;
@@ -192,6 +208,10 @@ FragmentInfo GetFragmentInfo(FragmentOp fragment);
 // Sets the fragment info of a fragment op. Overwrites any existing info.
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
                      RewriterBase& rewriter);
+
+// Returns the split fragment type of a fragment op. If the fragment op is not
+// split, returns std::nullopt.
+std::optional<SplitFragmentType> GetSplitFragmentType(FragmentOp fragment);
 
 }  // namespace mlir::mpmd
 

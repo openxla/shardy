@@ -21,6 +21,7 @@ limitations under the License.
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -41,6 +42,7 @@ limitations under the License.
 #include "mlir/Support/WalkResult.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
+#include "shardy/dialect/mpmd/ir/fragment_execution_rules.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/mpmd/transforms/common/utils.h"
@@ -589,24 +591,30 @@ class MergeUserDefinedFragmentsIntoSchedulingUnitsPass
   bool AllowMergingWithAnyConsumer() const final { return false; }
 };
 
-// Holds data found in the attributes of a fragment, needed to check if stage
-// assignment is consistent.
-struct FragmentData {
+// Attributes which should uniquely identify each fragment if stages have been
+// assigned, needed to check if stage assignment is consistent.
+struct FragmentSignature {
   StringRef mesh;
   int64_t stage_id;
   int64_t transpose_count;
   std::optional<int64_t> call_count;
+  std::optional<SplitFragmentType> split_type;
+  bool is_remat;
 };
 
 // Two fragments match _iff_ they have the same mesh assignment, same stage
-// assignment, same transpose_count, and the call_counts are consistent, i.e.,
-// they are the same or one of them is undefined. This property is not
-// transitive and therefore we don't define it as an equality operator.
-bool FragmentDatasMatch(FragmentData data, FragmentData other) {
-  return data.mesh == other.mesh && data.stage_id == other.stage_id &&
-         data.transpose_count == other.transpose_count &&
-         (!data.call_count.has_value() || !other.call_count.has_value() ||
-          *data.call_count == *other.call_count);
+// assignment, same transpose_count, same split fragment type, same remat
+// flag, and the call_counts are consistent, i.e., they are the same or one of
+// them is undefined. This property is not transitive and therefore we don't
+// define it as an equality operator.
+bool FragmentSignaturesMatch(FragmentSignature signature,
+                             FragmentSignature other) {
+  return signature.mesh == other.mesh && signature.stage_id == other.stage_id &&
+         signature.transpose_count == other.transpose_count &&
+         (!signature.call_count.has_value() || !other.call_count.has_value() ||
+          *signature.call_count == *other.call_count) &&
+         (signature.split_type == other.split_type) &&
+         (signature.is_remat == other.is_remat);
 }
 
 class VerifyStageMergingPass
@@ -615,10 +623,10 @@ class VerifyStageMergingPass
 
  private:
   void runOnFunc(FuncOp func_op) override {
-    // We keep track of the mesh, stage, transpose count, and potentially call
-    // count, of every fragment in the module. If we find any two equivalent
-    // fragments (see `FragmentData` above), then we emit an error.
-    std::vector<FragmentData> visited_fragments;
+    // We keep track of various attributes relevant to stage merging for every
+    // fragment in the module. If we find any two equivalent fragments (see
+    // `FragmentSignature` above), then we emit an error.
+    std::vector<FragmentSignature> visited_fragments;
     bool has_error = false;
     func_op.walk([&](FragmentOp fragment) {
       if (IntegerAttr stage_id_attr = fragment.getStageIdAttr()) {
@@ -629,24 +637,32 @@ class VerifyStageMergingPass
         // which means it has a transpose count.
         SDY_CHECK(transpose_count.has_value());
 
-        FragmentData fragment_data = {mesh, stage_id_attr.getInt(),
-                                      *transpose_count,
-                                      TryToFindCallCounter(fragment)};
+        FragmentSignature fragment_signature = {mesh,
+                                                stage_id_attr.getInt(),
+                                                *transpose_count,
+                                                TryToFindCallCounter(fragment),
+                                                GetSplitFragmentType(fragment),
+                                                IsRemat(fragment)};
         if (llvm::any_of(visited_fragments,
-                         [&fragment_data](const FragmentData& other) {
-                           return FragmentDatasMatch(fragment_data, other);
+                         [&fragment_signature](const FragmentSignature& other) {
+                           return FragmentSignaturesMatch(fragment_signature,
+                                                          other);
                          })) {
           emitError(fragment.getLoc())
               << "A valid program cannot have more than one fragment with the "
-                 "same mesh, stage, transpose and call counts but found "
-                 "multiple fragments with the same attributes: [mesh="
-              << fragment_data.mesh << ", stage_id=" << fragment_data.stage_id
-              << ", transpose_count=" << fragment_data.transpose_count
-              << ", call_count=" << fragment_data.call_count.value_or(-1)
+                 "same mesh, stage, transpose, call counts, split type, and "
+                 "remat flag but found multiple fragments with the same "
+                 "attributes: [mesh="
+              << fragment_signature.mesh
+              << ", stage_id=" << fragment_signature.stage_id
+              << ", transpose_count=" << fragment_signature.transpose_count
+              << ", call_count=" << fragment_signature.call_count.value_or(-1)
+              << ", split_type=" << fragment_signature.split_type
+              << ", is_remat=" << fragment_signature.is_remat
               << "] for current fragment with origin: " << fragment.getOrigin();
           has_error = true;
         } else {
-          visited_fragments.push_back(fragment_data);
+          visited_fragments.push_back(fragment_signature);
         }
       }
     });
@@ -660,8 +676,8 @@ class VerifyStageMergingPass
 }  // namespace
 
 void AddMergeInferredFragmentsPasses(OpPassManager& pm,
-                              bool absorb_on_entry_point_function,
-                              bool clone_inferred_fragments) {
+                                     bool absorb_on_entry_point_function,
+                                     bool clone_inferred_fragments) {
   // Absorb inferred fragments into user defined fragments to guarantee that
   // the shape of the program in the body of a call-op or microbatching loop
   // resembles the shape the user defined, via named computations + stage/mesh

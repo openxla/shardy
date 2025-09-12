@@ -15,7 +15,7 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
 
-  // expected-error@+1 {{A valid program cannot have more than one fragment with the same mesh, stage, transpose and call counts but found multiple fragments with the same attributes: [mesh=m1, stage_id=0, transpose_count=0, call_count=1] for current fragment with origin: [#mpmd.user_origin<"f">]}}
+  // expected-error@+1 {{A valid program cannot have more than one fragment with the same mesh, stage, transpose, call counts, split type, and remat flag but found multiple fragments with the same attributes: [mesh=m1, stage_id=0, transpose_count=0, call_count=1, split_type=nullopt, is_remat=0] for current fragment with origin: [#mpmd.user_origin<"f">]}}
   %1 = mpmd.fragment<mesh="m1", origin=["f"], stage=0> (%0) {call_counter = 1 : ui32}
     (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
@@ -40,7 +40,7 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
 
-  // expected-error@+1 {{A valid program cannot have more than one fragment with the same mesh, stage, transpose and call counts but found multiple fragments with the same attributes: [mesh=m1, stage_id=0, transpose_count=0, call_count=1] for current fragment with origin: [#mpmd.user_origin<"f">]}}
+  // expected-error@+1 {{A valid program cannot have more than one fragment with the same mesh, stage, transpose, call counts, split type, and remat flag but found multiple fragments with the same attributes: [mesh=m1, stage_id=0, transpose_count=0, call_count=1, split_type=nullopt, is_remat=0] for current fragment with origin: [#mpmd.user_origin<"f">]}}
   %1 = mpmd.fragment<mesh="m1", origin=["f"], stage=0> (%0) {call_counter = 1 : ui32}
     (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
@@ -66,7 +66,7 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
 
-  // expected-error@+1 {{A valid program cannot have more than one fragment with the same mesh, stage, transpose and call counts but found multiple fragments with the same attributes: [mesh=m1, stage_id=0, transpose_count=0, call_count=-1] for current fragment with origin: [#mpmd.user_origin<"f">]}}
+  // expected-error@+1 {{A valid program cannot have more than one fragment with the same mesh, stage, transpose, call counts, split type, and remat flag but found multiple fragments with the same attributes: [mesh=m1, stage_id=0, transpose_count=0, call_count=-1, split_type=nullopt, is_remat=0] for current fragment with origin: [#mpmd.user_origin<"f">]}}
   %1 = mpmd.fragment<mesh="m1", origin=["f"], stage=0> (%0)
     (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
