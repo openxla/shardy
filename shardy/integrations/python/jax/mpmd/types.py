@@ -71,7 +71,7 @@ class FragmentInfo:
   stage_id: int | None = None
   call_counter: int | None = None
   split_type: SplitFragmentType | None = None
-
+  mesh_name: str = ''
 
 @dataclasses.dataclass(frozen=True)
 class FragmentMergeRule:
