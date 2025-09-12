@@ -138,7 +138,9 @@ void ErrorDiagnosticHandler::ConsumeStatus(mlir::LogicalResult result) {
   if (mlir::failed(result) && error_str_.empty()) {
     return ThrowError("Unknown MLIR failure");
   }
-  return ThrowError(error_str_);
+  if (!error_str_.empty()) {
+    return ThrowError(error_str_);
+  }
 }
 
 mlir::LogicalResult ErrorDiagnosticHandler::HandleDiagnostic(
@@ -195,8 +197,6 @@ PartitioningResult MpmdProgram::ApplyPartitioning(PartitioningPhase phases) {
 
   return PartitioningResult(module);
 }
-
-#undef RETURN_IF_ERROR
 
 void MpmdProgram::Import(ModuleOp module) {
   PassManager pm(module->getName());
