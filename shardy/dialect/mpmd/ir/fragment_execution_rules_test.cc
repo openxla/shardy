@@ -48,7 +48,7 @@ void ExpectFragmentInfoEq(FragmentInfo actual, FragmentInfo expected) {
   EXPECT_THAT(actual.origins, ElementsAreArray(expected.origins));
   EXPECT_EQ(actual.stage_id, expected.stage_id);
   EXPECT_EQ(actual.call_counter, expected.call_counter);
-  EXPECT_EQ(actual.is_weight_gradient, expected.is_weight_gradient);
+  EXPECT_EQ(actual.split_type, expected.split_type);
   // Compare full struct in case any fields were missed above.
   EXPECT_EQ(actual, expected);
 }
@@ -58,11 +58,12 @@ FragmentOrigin MakeFragmentOrigin(const std::string& computation_name,
   return {computation_name, transpose_count};
 }
 
-FragmentInfo MakeFragmentInfo(const std::vector<FragmentOrigin>& origins,
-                              std::optional<int> stage_id = std::nullopt,
-                              std::optional<int> call_counter = std::nullopt,
-                              bool is_weight_gradient = false) {
-  return {origins, stage_id, call_counter, is_weight_gradient};
+FragmentInfo MakeFragmentInfo(
+    const std::vector<FragmentOrigin>& origins, const std::string& mesh_name,
+    std::optional<int> stage_id = std::nullopt,
+    std::optional<int> call_counter = std::nullopt,
+    std::optional<SplitFragmentType> split_type = std::nullopt) {
+  return {origins, stage_id, call_counter, split_type, mesh_name};
 }
 
 FragmentMergeRule MakeFragmentMergeRule(
@@ -138,8 +139,9 @@ TEST(GetFragmentInfoTest, GetFragmentInfo) {
       fragment_info,
       MakeFragmentInfo(
           {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 123)},
+          /*mesh_name=*/"m1",
           /*stage_id=*/std::nullopt,
-          /*call_counter=*/std::nullopt, /*is_weight_gradient=*/false));
+          /*call_counter=*/std::nullopt, /*split_type=*/std::nullopt));
 }
 
 struct SetFragmentInfoTestParams {
@@ -186,14 +188,17 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(
         SetFragmentInfoTestParams{
             "WithStageAndCallCounter",
-            MakeFragmentInfo({MakeFragmentOrigin("f3", 456)}, /*stage_id=*/1,
-                             /*call_counter=*/2, /*is_weight_gradient=*/false)},
+            MakeFragmentInfo({MakeFragmentOrigin("f3", 456)},
+                             /*mesh_name=*/"m1",
+                             /*stage_id=*/1, /*call_counter=*/2,
+                             /*split_type=*/std::nullopt)},
         SetFragmentInfoTestParams{
             "WithWeightGradient",
-            MakeFragmentInfo({MakeFragmentOrigin("f4", 789)},
-                             /*stage_id=*/std::nullopt,
-                             /*call_counter=*/std::nullopt,
-                             /*is_weight_gradient=*/true)}),
+            MakeFragmentInfo(
+                {MakeFragmentOrigin("f4", 789)}, /*mesh_name=*/"m1",
+                /*stage_id=*/std::nullopt,
+                /*call_counter=*/std::nullopt,
+                /*split_type=*/SplitFragmentType::kDropTransferred)}),
     [](const testing::TestParamInfo<SetFragmentInfoTest::ParamType>& info) {
       return info.param.test_name;
     });
@@ -222,9 +227,10 @@ TEST(SetFragmentInfoTest, RemovesSplitDropTransferred) {
 
   IRRewriter rewriter(&context);
   FragmentInfo info = MakeFragmentInfo({MakeFragmentOrigin("f1", 0)},
+                                       /*mesh_name=*/"m1",
                                        /*stage_id=*/std::nullopt,
                                        /*call_counter=*/std::nullopt,
-                                       /*is_weight_gradient=*/false);
+                                       /*split_type=*/std::nullopt);
   SetFragmentInfo(fragment_op, info, rewriter);
 
   EXPECT_FALSE(fragment_op->hasAttr(kSplitDropTransferredAttrName));
@@ -253,70 +259,71 @@ INSTANTIATE_TEST_SUITE_P(
     PrintFragmentInfo, PrintFragmentInfoTest,
     testing::Values(
         PrintFragmentInfoTestParams{
-            "AllFields",
+            "NoSplitType",
             MakeFragmentInfo({MakeFragmentOrigin("f1", 123),
                               MakeFragmentOrigin("f2", 456)},
-                             /*stage_id=*/1, /*call_counter=*/2),
-            "FragmentInfo(origins=[\"f1\"(123),\"f2\"(456)],stage=1,"
-            "call_counter=2,is_weight_gradient=false)"},
+                             /*mesh_name=*/"m1", /*stage_id=*/1,
+                             /*call_counter=*/2, /*split_type=*/std::nullopt),
+            "FragmentInfo(origins=[\"f1\"(123),\"f2\"(456)],stage=1,call_"
+            "counter=2,mesh_name=\"m1\")"},
         PrintFragmentInfoTestParams{
-            "WithWeightGradientTrue",
-            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1,
-                             /*call_counter=*/2,
-                             /*is_weight_gradient=*/true),
+            "WithSplitTypeDropTransferred",
+            MakeFragmentInfo(
+                {MakeFragmentOrigin("f1", 123)}, /*mesh_name=*/"m1",
+                /*stage_id=*/1, /*call_counter=*/2,
+                /*split_type=*/SplitFragmentType::kDropTransferred),
             "FragmentInfo(origins=[\"f1\"(123)],stage=1,call_counter=2,"
-            "is_weight_gradient=true)"},
+            "split_type=kDropTransferred,mesh_name=\"m1\")"},
         PrintFragmentInfoTestParams{
-            "WithWeightGradientFalse",
-            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1,
-                             /*call_counter=*/2,
-                             /*is_weight_gradient=*/false),
+            "WithSplitTypeKeepTransferred",
+            MakeFragmentInfo(
+                {MakeFragmentOrigin("f1", 123)}, /*mesh_name=*/"m1",
+                /*stage_id=*/1, /*call_counter=*/2,
+                /*split_type=*/SplitFragmentType::kKeepTransferred),
             "FragmentInfo(origins=[\"f1\"(123)],stage=1,call_counter=2,"
-            "is_weight_gradient=false)"},
+            "split_type=kKeepTransferred,mesh_name=\"m1\")"},
         PrintFragmentInfoTestParams{
             "OnlyRequiredFields",
-            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}),
-            "FragmentInfo(origins=[\"f1\"(123)],is_weight_gradient=false)"}),
+            MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
+                             /*mesh_name=*/"m1"),
+            "FragmentInfo(origins=[\"f1\"(123)],mesh_name=\"m1\")"}),
     [](const testing::TestParamInfo<PrintFragmentInfoTest::ParamType>& info) {
       return info.param.test_name;
     });
 
 TEST(FragmentMergeRule, PrintFragmentMergeRule) {
   FragmentMergeRule rule = MakeFragmentMergeRule(
-      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1),
-       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*stage_id=*/1)},
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1)},
       MakeFragmentInfo(
           {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 456)},
-          /*stage_id=*/1, /*call_counter=*/std::nullopt,
-          /*is_weight_gradient=*/false));
+          /*mesh_name=*/"m1", /*stage_id=*/1, /*call_counter=*/std::nullopt,
+          /*split_type=*/std::nullopt));
   std::string str;
   llvm::raw_string_ostream os(str);
   os << rule;
   EXPECT_THAT(
-      str,
-      Eq("FragmentMergeRule(sources=["
-         "FragmentInfo(origins=[\"f1\"(123)],stage=1,is_weight_gradient=false),"
-         "FragmentInfo(origins=[\"f2\"(456)],stage=1,is_weight_gradient=false)]"
-         ","
-         "target=FragmentInfo(origins=["
-         "\"f1\"(123),\"f2\"(456)],stage=1,is_weight_gradient=false))"));
+      str, Eq("FragmentMergeRule(sources=["
+              "FragmentInfo(origins=[\"f1\"(123)],stage=1,mesh_name=\"m1\"),"
+              "FragmentInfo(origins=[\"f2\"(456)],stage=1,mesh_name=\"m1\")],"
+              "target=FragmentInfo(origins=["
+              "\"f1\"(123),\"f2\"(456)],stage=1,mesh_name=\"m1\"))"));
 }
 
 TEST(FragmentMergeRuleParser, ParseValidRule) {
   FragmentMergeRule expected_rule = MakeFragmentMergeRule(
-      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
-                        /*stage_id=*/1,
-                        /*call_counter=*/std::nullopt,
-                        /*is_weight_gradient=*/false),
-       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)},
-                        /*stage_id=*/1,
-                        /*call_counter=*/std::nullopt,
-                        /*is_weight_gradient=*/true)},
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1, /*call_counter=*/std::nullopt,
+                        /*split_type=*/std::nullopt),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1, /*call_counter=*/std::nullopt,
+                        /*split_type=*/SplitFragmentType::kDropTransferred)},
       MakeFragmentInfo(
           {MakeFragmentOrigin("f1", 123), MakeFragmentOrigin("f2", 456)},
-          /*stage_id=*/1,
-          /*call_counter=*/std::nullopt,
-          /*is_weight_gradient=*/false));
+          /*mesh_name=*/"m1", /*stage_id=*/1,
+          /*call_counter=*/std::nullopt, /*split_type=*/std::nullopt));
   // We first construct the rule and print it to a string. Then we parse that
   // string to ensure that the printed form of a rule is directly compatible
   // with the format the parser expects.
@@ -369,28 +376,28 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(FragmentScheduleRule, PrintFragmentScheduleRule) {
   FragmentScheduleRule rule = MakeFragmentScheduleRule(
-      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*stage_id=*/1),
-       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*stage_id=*/1)});
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/2)});
   std::string str;
   llvm::raw_string_ostream os(str);
   os << rule;
-  EXPECT_THAT(str, Eq("FragmentScheduleRule(ordered_fragments=["
-                      "FragmentInfo(origins=[\"f1\"(123)],stage=1,is_weight_"
-                      "gradient=false)->"
-                      "FragmentInfo(origins=[\"f2\"(456)],stage=1,is_weight_"
-                      "gradient=false)])"));
+  EXPECT_THAT(
+      str,
+      Eq("FragmentScheduleRule(ordered_fragments=["
+         "FragmentInfo(origins=[\"f1\"(123)],stage=1,mesh_name=\"m1\")->"
+         "FragmentInfo(origins=[\"f2\"(456)],stage=2,mesh_name=\"m1\")])"));
 }
 
 TEST(FragmentScheduleRuleParser, ParseValidRule) {
   FragmentScheduleRule expected_rule = MakeFragmentScheduleRule(
-      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)},
-                        /*stage_id=*/1,
-                        /*call_counter=*/std::nullopt,
-                        /*is_weight_gradient=*/false),
-       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)},
-                        /*stage_id=*/1,
-                        /*call_counter=*/std::nullopt,
-                        /*is_weight_gradient=*/true)});
+      {MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1, /*call_counter=*/std::nullopt,
+                        /*split_type=*/std::nullopt),
+       MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, /*mesh_name=*/"m1",
+                        /*stage_id=*/1, /*call_counter=*/std::nullopt,
+                        /*split_type=*/SplitFragmentType::kDropTransferred)});
   // We first construct the rule and print it to a string. Then we parse that
   // string to ensure that the printed form of a rule is directly compatible
   // with the format the parser expects.
@@ -441,18 +448,18 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 TEST(FragmentInfoMapInfoTest, IsEqual) {
-  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
-  FragmentInfo info2 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
-  FragmentInfo info3 = MakeFragmentInfo({MakeFragmentOrigin("f2", 456)});
+  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
+  FragmentInfo info2 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
+  FragmentInfo info3 = MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, "m1");
 
   EXPECT_TRUE(FragmentInfoMapInfo::isEqual(info1, info2));
   EXPECT_FALSE(FragmentInfoMapInfo::isEqual(info1, info3));
 }
 
 TEST(FragmentInfoMapInfoTest, GetHashValue) {
-  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
-  FragmentInfo info2 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
-  FragmentInfo info3 = MakeFragmentInfo({MakeFragmentOrigin("f2", 456)});
+  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
+  FragmentInfo info2 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
+  FragmentInfo info3 = MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, "m1");
 
   EXPECT_EQ(FragmentInfoMapInfo::getHashValue(info1),
             FragmentInfoMapInfo::getHashValue(info2));
@@ -464,7 +471,7 @@ TEST(FragmentInfoMapInfoTest, GetHashValue) {
 TEST(FragmentInfoMapInfoTest, SpecialKeys) {
   FragmentInfo emptyKey = FragmentInfoMapInfo::getEmptyKey();
   FragmentInfo tombstoneKey = FragmentInfoMapInfo::getTombstoneKey();
-  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
+  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
 
   EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, info1));
   EXPECT_FALSE(FragmentInfoMapInfo::isEqual(tombstoneKey, info1));
@@ -474,8 +481,8 @@ TEST(FragmentInfoMapInfoTest, SpecialKeys) {
 TEST(FragmentInfoMapInfoTest, DenseMapIntegration) {
   llvm::DenseMap<FragmentInfo, int, FragmentInfoMapInfo> map;
 
-  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
-  FragmentInfo info2 = MakeFragmentInfo({MakeFragmentOrigin("f2", 456)});
+  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
+  FragmentInfo info2 = MakeFragmentInfo({MakeFragmentOrigin("f2", 456)}, "m1");
 
   map[info1] = 1;
   map[info2] = 2;
@@ -484,7 +491,8 @@ TEST(FragmentInfoMapInfoTest, DenseMapIntegration) {
   EXPECT_EQ(map[info1], 1);
   EXPECT_EQ(map[info2], 2);
 
-  FragmentInfo info1_copy = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)});
+  FragmentInfo info1_copy =
+      MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
   EXPECT_TRUE(map.contains(info1_copy));
   EXPECT_EQ(map[info1_copy], 1);
 

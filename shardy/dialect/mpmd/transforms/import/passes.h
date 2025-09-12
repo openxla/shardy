@@ -62,6 +62,10 @@ struct ImportOptions {
   InferMeshOptions inferMeshOptions;
   // Enable heterogeneous meshes.
   bool enableHeterogeneousMeshes = false;
+  // Whether to split backward fragments.
+  bool splitBwdFragments = false;
+  // Whether to verify if merging created the right number of scheduling units.
+  bool verifyScheduleUnits = false;
 };
 
 // Adds the standard set of passes to import an MPMD program with a fixed mesh
