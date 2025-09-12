@@ -129,6 +129,18 @@ func.func @reduce_single_result_unreduced_resharded(%arg0: tensor<2x64x13xf32> {
   return %1 : tensor<2x13xf32>
 }
 
+// CHECK-LABEL: func @reduce_single_result_func_result_and_return_mismatch_unreduced
+func.func @reduce_single_result_func_result_and_return_mismatch_unreduced(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y", "x"}, {}]>})
+    -> (tensor<2x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
+  // CHECK-NEXT: %[[ALL_REDUCE0:.*]] = sdy.all_reduce {"y"} %0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: %[[ALL_REDUCE1:.*]] = sdy.all_reduce {"x"} %1 out_sharding=<@mesh, [{}, {}], unreduced={"y"}>
+  // CHECK-NEXT: return %[[ALL_REDUCE1]]
+  %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>} : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<2x13xf32>
+  return %1 : tensor<2x13xf32>
+}
+
 // CHECK-LABEL: func @reduce_multiple_results_unreduced
 func.func @reduce_multiple_results_unreduced(
     %arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}, {}, {}]>},
