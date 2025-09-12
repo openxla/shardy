@@ -17,6 +17,7 @@
 
 from collections.abc import Mapping, Sequence
 import dataclasses
+import enum
 from typing import Any
 
 import jax
@@ -48,6 +49,20 @@ class FragmentOrigin:
   transpose_count: int = 0
 
 
+@enum.unique
+class SplitFragmentType(enum.Enum):
+  """Fragment split behavior for transferred data.
+
+  These values indicate how fragment portions handle transferred data from
+  the original fragment if the fragment is split during compilation:
+  - KEEP_TRANSFERRED: Fragment portion retains transferred data
+  - DROP_TRANSFERRED: Fragment portion drops transferred data
+  """
+
+  KEEP_TRANSFERRED = enum.auto()
+  DROP_TRANSFERRED = enum.auto()
+
+
 @dataclasses.dataclass(frozen=True)
 class FragmentInfo:
   """A fragment of a computation."""
@@ -55,7 +70,7 @@ class FragmentInfo:
   origins: Sequence[FragmentOrigin]
   stage_id: int | None = None
   call_counter: int | None = None
-  is_weight_gradient: bool = False
+  split_type: SplitFragmentType | None = None
 
 
 @dataclasses.dataclass(frozen=True)

@@ -93,7 +93,6 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
   if (!arg.consume_front("]")) {
     return opt.error("Expected ']'");
   }
-  bool is_weight_gradient_parsed = false;
   while (arg.consume_front(",")) {
     if (arg.consume_front("stage=")) {
       if (info.stage_id.has_value()) {
@@ -113,24 +112,23 @@ bool ParseFragmentInfo(llvm::cl::Option& opt, llvm::StringRef& arg,
         return opt.error("Expected an integer value for 'call_counter'");
       }
       info.call_counter = call_counter;
-    } else if (arg.consume_front("is_weight_gradient=")) {
-      if (is_weight_gradient_parsed) {
-        return opt.error("'is_weight_gradient' specified more than once");
+    } else if (arg.consume_front("split_type=")) {
+      if (info.split_type.has_value()) {
+        return opt.error("'split_type' specified more than once");
       }
-      is_weight_gradient_parsed = true;
-      bool is_weight_gradient_val;
-      if (arg.consume_front("true")) {
-        is_weight_gradient_val = true;
-      } else if (arg.consume_front("false")) {
-        is_weight_gradient_val = false;
+      if (arg.consume_front("kKeepTransferred")) {
+        info.split_type = SplitFragmentType::kKeepTransferred;
+      } else if (arg.consume_front("kDropTransferred")) {
+        info.split_type = SplitFragmentType::kDropTransferred;
       } else {
-        return opt.error("Expected 'true' or 'false' for 'is_weight_gradient'");
+        return opt.error(
+            "Expected 'kKeepTransferred' or 'kDropTransferred' for "
+            "'split_type'");
       }
-      info.is_weight_gradient = is_weight_gradient_val;
     } else {
       return opt.error(
           "Expected 'stage=', 'call_counter=', or "
-          "'is_weight_gradient=' after ','");
+          "'split_type=' after ','");
     }
   }
   if (!arg.consume_front(")")) {
@@ -148,8 +146,13 @@ FragmentInfo GetFragmentInfo(FragmentOp fragment) {
   }
   std::optional<int64_t> call_counter = TryToFindCallCounter(fragment);
   std::vector<FragmentOrigin> origins = GetFragmentOrigins(fragment);
-  bool is_weight_gradient = IsSplitDropTransferred(fragment);
-  return FragmentInfo{origins, stage_id, call_counter, is_weight_gradient};
+  std::optional<SplitFragmentType> split_type;
+  if (IsSplitKeepTransferred(fragment)) {
+    split_type = SplitFragmentType::kKeepTransferred;
+  } else if (IsSplitDropTransferred(fragment)) {
+    split_type = SplitFragmentType::kDropTransferred;
+  }
+  return FragmentInfo{origins, stage_id, call_counter, split_type};
 }
 
 void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
@@ -174,11 +177,20 @@ void SetFragmentInfo(FragmentOp fragment, const FragmentInfo& metadata,
     fragment->removeAttr(kCallCounterAttrName);
   }
 
-  if (metadata.is_weight_gradient) {
-    fragment->setAttr(kSplitDropTransferredAttrName,
-                      UnitAttr::get(rewriter.getContext()));
+  // Handle split type attributes
+  if (metadata.split_type.has_value()) {
+    if (*metadata.split_type == SplitFragmentType::kDropTransferred) {
+      fragment->setAttr(kSplitDropTransferredAttrName,
+                        UnitAttr::get(rewriter.getContext()));
+      fragment->removeAttr(kSplitKeepTransferredAttrName);
+    } else if (*metadata.split_type == SplitFragmentType::kKeepTransferred) {
+      fragment->setAttr(kSplitKeepTransferredAttrName,
+                        UnitAttr::get(rewriter.getContext()));
+      fragment->removeAttr(kSplitDropTransferredAttrName);
+    }
   } else {
     fragment->removeAttr(kSplitDropTransferredAttrName);
+    fragment->removeAttr(kSplitKeepTransferredAttrName);
   }
 }
 

@@ -67,17 +67,30 @@ struct FragmentOrigin {
   }
 };
 
+// Enum to represent the type of fragment split behavior.
+// These values are determined by the presence of specific MLIR attributes
+// on fragment operations during compilation.
+enum class SplitFragmentType {
+  // Indicates this fragment portion retains transferred data from the original
+  // fragment. Set when the fragment has the kSplitKeepTransferredAttrName
+  // attribute.
+  kKeepTransferred,
+  // Indicates this fragment portion drops transferred data from the original
+  // fragment. Set when the fragment has the kSplitDropTransferredAttrName
+  // attribute.
+  kDropTransferred
+};
+
 // Holds the metadata of a fragment.
 struct FragmentInfo {
   std::vector<FragmentOrigin> origins;
   std::optional<int> stage_id;
   std::optional<int> call_counter;
-  bool is_weight_gradient = false;
+  std::optional<SplitFragmentType> split_type;
 
   bool operator==(const FragmentInfo& other) const {
     return llvm::equal(origins, other.origins) && stage_id == other.stage_id &&
-           call_counter == other.call_counter &&
-           is_weight_gradient == other.is_weight_gradient;
+           call_counter == other.call_counter && split_type == other.split_type;
   }
 
   bool operator!=(const FragmentInfo& other) const { return !(*this == other); }
@@ -93,8 +106,17 @@ struct FragmentInfo {
     if (info.call_counter.has_value()) {
       os << ",call_counter=" << info.call_counter.value();
     }
-    os << ",is_weight_gradient="
-       << (info.is_weight_gradient ? "true" : "false");
+    if (info.split_type.has_value()) {
+      os << ",split_type=";
+      switch (info.split_type.value()) {
+        case SplitFragmentType::kKeepTransferred:
+          os << "kKeepTransferred";
+          break;
+        case SplitFragmentType::kDropTransferred:
+          os << "kDropTransferred";
+          break;
+      }
+    }
     os << ")";
     return os;
   }
@@ -104,7 +126,7 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
   static unsigned getHashValue(const FragmentInfo& info) {
     return llvm::hash_combine(llvm::hash_combine_range(info.origins),
                               info.stage_id, info.call_counter,
-                              info.is_weight_gradient);
+                              info.split_type);
   }
   static bool isEqual(const FragmentInfo& lhs, const FragmentInfo& rhs) {
     return lhs == rhs;
@@ -114,14 +136,14 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
     return FragmentInfo{/*origins=*/{},
                         /*stage_id=*/DenseMapInfo<int>::getEmptyKey(),
                         /*call_counter=*/DenseMapInfo<int>::getEmptyKey(),
-                        /*is_weight_gradient=*/false};
+                        /*split_type=*/std::nullopt};
   }
 
   static inline FragmentInfo getTombstoneKey() {
     return FragmentInfo{/*origins=*/{},
                         /*stage_id=*/DenseMapInfo<int>::getTombstoneKey(),
                         /*call_counter=*/DenseMapInfo<int>::getTombstoneKey(),
-                        /*is_weight_gradient=*/true};
+                        /*split_type=*/SplitFragmentType::kDropTransferred};
   }
 };
 
