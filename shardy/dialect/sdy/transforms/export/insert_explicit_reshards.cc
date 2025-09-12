@@ -348,6 +348,23 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
   }
 }
 
+bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
+  return (enableFullVersion ||
+          op->getName().getStringRef() == "mhlo.ragged_dot" ||
+          // There are 3 cases.
+          // 1. Diff sharding -> insert explicit reshards.
+          // 2. Same sharding, concat dim is replicated -> no need to
+          // insert explicit reshards
+          // 3. Same sharding, concat dim is partitioned -> skip
+          // explicit reshard to avoid potential issues like
+          // b/393584711#comment3.
+          (isa<stablehlo::ConcatenateOp>(op) &&
+           differentOperandShardingFromFirstResult(op)) ||
+          // To avoid copies of the same functions with mismatching shardings
+          // on the arguments onto multiple callsites.
+          isa<NamedComputationOp>(op));
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -358,18 +375,7 @@ struct InsertExplicitReshardsPass
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
     funcOp->walk([&](Operation* op) {
-      const bool onFullVersion =
-          enableFullVersion ||
-          op->getName().getStringRef() == "mhlo.ragged_dot" ||
-          // There are 3 cases.
-          // 1. Diff sharding -> insert explicit reshards.
-          // 2. Same sharding, concat dim is replicated -> no need to
-          // insert explicit reshards
-          // 3. Same sharding, concat dim is partitioned -> skip
-          // explicit reshard to avoid potential issues like
-          // b/393584711#comment3.
-          (isa<stablehlo::ConcatenateOp>(op) &&
-           differentOperandShardingFromFirstResult(op));
+      const bool onFullVersion = isOnFullVersion(op, enableFullVersion);
 
       if (op->hasTrait<OpTrait::IsTerminator>()) {
         if (isa<func::ReturnOp>(op)) {
