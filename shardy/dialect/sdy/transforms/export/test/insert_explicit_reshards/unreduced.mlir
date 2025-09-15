@@ -197,3 +197,47 @@ func.func @manual_computation_all_reduce_free_axis_on_block_arg(%arg0: tensor<20
   } : (tensor<208xf32>) -> tensor<208xf32>
   return %0 : tensor<208xf32>
 }
+
+// CHECK-LABEL: func @all_reduce_source_has_unreduced_and_target_no_sharding
+func.func @all_reduce_source_has_unreduced_and_target_no_sharding(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>})
+      -> tensor<4x8xf32> {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_has_unreduced_and_target_has_sharding_no_unreduced
+func.func @all_reduce_source_has_unreduced_and_target_has_sharding_no_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_source_no_sharding_and_target_has_unreduced
+func.func @all_reduce_source_no_sharding_and_target_has_unreduced(
+  %arg0: tensor<4x8xf32>)
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: return %arg0
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_both_source_and_target_has_same_unreduced
+func.func @all_reduce_both_source_and_target_has_same_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: return %arg0
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_target_unreduced_is_strict_subset_of_source_unreduced
+func.func @all_reduce_target_unreduced_is_strict_subset_of_source_unreduced(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x", "y"}>})
+     -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<4x8xf32>
+}
+
