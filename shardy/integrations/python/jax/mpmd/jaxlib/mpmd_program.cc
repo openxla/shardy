@@ -55,15 +55,13 @@ namespace {
 // to mark `jax.buffer_donor` attributes. It is expected that every array
 // corresponding to an index in `donate_argnums` is safe to donate as these
 // have been marked as donatable by users.
-void SetArgDonationAttributes(mlir::func::FuncOp func_op,
+void SetArgDonationAttributes(func::FuncOp func_op,
                               const std::vector<int64_t>& donate_argnums) {
   for (int64_t arg_num : donate_argnums) {
-    if (!func_op.getArgAttrOfType<mlir::BoolAttr>(arg_num,
-                                                  kBufferDonationAttrName) &&
-        !func_op.getArgAttrOfType<mlir::IntegerAttr>(arg_num,
-                                                     kAliasingAttrName)) {
+    if (!func_op.getArgAttrOfType<BoolAttr>(arg_num, kBufferDonationAttrName) &&
+        !func_op.getArgAttrOfType<IntegerAttr>(arg_num, kAliasingAttrName)) {
       func_op.setArgAttr(arg_num, kBufferDonationAttrName,
-                         mlir::BoolAttr::get(func_op.getContext(), true));
+                         BoolAttr::get(func_op.getContext(), true));
     }
   }
 }
@@ -71,15 +69,14 @@ void SetArgDonationAttributes(mlir::func::FuncOp func_op,
 // Verifies that only donated arguments have `jax.buffer_donor` or
 // `tf.aliasing_output` attributes set.
 void VerifyOnlyDonatedArgsHaveDonationAttributes(
-    mlir::func::FuncOp func_op, const std::vector<int64_t>& donate_argnums) {
+    func::FuncOp func_op, const std::vector<int64_t>& donate_argnums) {
   std::set<int64_t> donated_argnum_set(donate_argnums.begin(),
                                        donate_argnums.end());
   for (int64_t arg_num = 0; arg_num < func_op.getNumArguments(); ++arg_num) {
     if (donated_argnum_set.count(arg_num) == 0) {
-      if (func_op.getArgAttrOfType<mlir::BoolAttr>(
-              arg_num, mlir::mpmd::kBufferDonationAttrName) ||
-          func_op.getArgAttrOfType<mlir::IntegerAttr>(
-              arg_num, mlir::mpmd::kAliasingAttrName)) {
+      if (func_op.getArgAttrOfType<BoolAttr>(arg_num,
+                                             kBufferDonationAttrName) ||
+          func_op.getArgAttrOfType<IntegerAttr>(arg_num, kAliasingAttrName)) {
         ThrowError("Argument " + std::to_string(arg_num) +
                    " that is not donated cannot have `jax.buffer_donor` "
                    "nor `tf.aliasing_output` attributes set");
@@ -120,10 +117,10 @@ PartitioningOptions ParsePartitioningOptions(
   return parsed_options;
 }
 
-ErrorDiagnosticHandler::ErrorDiagnosticHandler(mlir::MLIRContext* context)
-    : mlir::SourceMgrDiagnosticHandler(source_mgr_, context, diag_stream_),
+ErrorDiagnosticHandler::ErrorDiagnosticHandler(MLIRContext* context)
+    : SourceMgrDiagnosticHandler(source_mgr_, context, diag_stream_),
       diag_stream_(diag_str_) {
-  setHandler([&](mlir::Diagnostic& diag) { return HandleDiagnostic(diag); });
+  setHandler([&](Diagnostic& diag) { return HandleDiagnostic(diag); });
   // Set it to a large number to avoid truncation of the call stack.
   // We don't currently have a use-case where we'd prefer to truncate it.
   setCallStackLimit(100);
@@ -133,31 +130,36 @@ ErrorDiagnosticHandler::~ErrorDiagnosticHandler() {
   SDY_CHECK(consumed_) << "Error must be thrown before destruction";
 }
 
-void ErrorDiagnosticHandler::ConsumeStatus(mlir::LogicalResult result) {
+void ErrorDiagnosticHandler::ConsumeStatus(LogicalResult result) {
   consumed_ = true;
-  if (mlir::failed(result) && error_str_.empty()) {
+  if (failed(result) && error_str_.empty()) {
     return ThrowError("Unknown MLIR failure");
   }
-  return ThrowError(error_str_);
+  if (!error_str_.empty()) {
+    if (!failed(result)) {
+      SDY_LOG(WARNING) << "MLIR error: " << error_str_
+                       << " but MLIR returned success";
+    }
+    return ThrowError(error_str_);
+  }
 }
 
-mlir::LogicalResult ErrorDiagnosticHandler::HandleDiagnostic(
-    mlir::Diagnostic& diag) {
+LogicalResult ErrorDiagnosticHandler::HandleDiagnostic(Diagnostic& diag) {
   // Emit the diagnostic and flush the stream.
   diag_str_.clear();
   emitDiagnostic(diag);
   diag_stream_.flush();
 
-  // Emit non-errors to VLOG instead of the internal status.
-  if (diag.getSeverity() != mlir::DiagnosticSeverity::Error) {
+  // Emit non-errors to INFO instead of the internal status.
+  if (diag.getSeverity() != DiagnosticSeverity::Error) {
     SDY_LOG(INFO) << diag_str_;
-    return mlir::success();
+    return success();
   }
 
   error_str_ = diag_str_;
 
   // Return success to show that we consumed the diagnostic.
-  return mlir::success();
+  return success();
 }
 
 PartitioningResult MpmdProgram::ApplyPartitioning(PartitioningPhase phases) {
@@ -167,7 +169,7 @@ PartitioningResult MpmdProgram::ApplyPartitioning(PartitioningPhase phases) {
   }
   loadAllRequiredDialects(module->getContext());
 
-  mlir::func::FuncOp main_func = GetMainFunction(module);
+  func::FuncOp main_func = GetMainFunction(module);
   SetTopology(named_meshes, main_func);
   SetArgDonationAttributes(main_func, donate_argnums);
 
@@ -195,8 +197,6 @@ PartitioningResult MpmdProgram::ApplyPartitioning(PartitioningPhase phases) {
 
   return PartitioningResult(module);
 }
-
-#undef RETURN_IF_ERROR
 
 void MpmdProgram::Import(ModuleOp module) {
   PassManager pm(module->getName());

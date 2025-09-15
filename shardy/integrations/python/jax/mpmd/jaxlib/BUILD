@@ -6,6 +6,8 @@ cc_library(
     name = "mpmd_program",
     srcs = ["mpmd_program.cc"],
     hdrs = ["mpmd_program.h"],
+    copts = ["-fexceptions"],
+    features = ["-use_header_modules"],
     deps = [
         ":throw_error",
         "//shardy/common:logging",
