@@ -55,18 +55,13 @@ void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
     }
   }
 }
-
-void eraseShardingGroupUsers(Operation* op) {
-  for (Operation* user : llvm::make_early_inc_range(op->getUsers())) {
-    if (isa<ShardingGroupOp>(user)) {
-      user->erase();
-    }
-  }
-}
-
 // A constant preserving op is an op that is considered a constant expression if
 // it is pure and all its results can be considered as constant expressions
-// given all its operands are constant expressions.
+// given all its operands are constant expressions, for which it holds if the
+// given op is either:
+// - A broadcast, reshape or slice op.
+// - An elementwise op.
+// Assumes the op is not constant or iota.
 bool isConstantPreserving(Operation* op) {
   if (isa<stablehlo::BroadcastInDimOp, stablehlo::ReshapeOp,
           stablehlo::SliceOp>(op)) {
@@ -80,8 +75,8 @@ bool isConstantPreserving(Operation* op) {
 
 // Returns true if the given op is either:
 // - A constant or iota op.
-// - A constant preserving op. (see isConstantPreserving)
-// - All operands are constants, that is, exist in `constantOps`.
+// - A constant preserving op. (see isConstantPreserving) and all operands are
+// constants, that is, exist in `constantOps`.
 bool isConstantExpression(Operation* op,
                           const llvm::SetVector<Operation*>& constantOps) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
@@ -203,6 +198,20 @@ struct ConstantOrScalarSplitterPass
     return success();
   }
 
+  template <typename RangeT>
+  void eraseUnusedOpsAlongWithItsShardingGroupUsers(RangeT&& ops) {
+    for (Operation* op : ops) {
+      if (!hasOnlyUsersOfType<ShardingGroupOp>(op)) {
+        continue;
+      }
+      // All users are ShardingGroupOps. Erase them first.
+      for (Operation* user : llvm::make_early_inc_range(op->getUsers())) {
+        user->erase();
+      }
+      op->erase();
+    }
+  }
+
   void runOnOperation() final {
     FuncOp funcOp = getOperation();
 
@@ -213,22 +222,39 @@ struct ConstantOrScalarSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    llvm::SetVector<Operation*> constantOps, scalarExpansionOps;
-    funcOp.walk(
-        [&](Operation* op) { processOp(op, constantOps, scalarExpansionOps); });
+    SmallVector<llvm::SetVector<Operation*>> constantOps;
+    llvm::SetVector<Operation*> scalarExpansionOps;
+    constantOps.emplace_back();
+    funcOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
+      // Becuase it is a preorder walk, it visits the NamedComputationOp before
+      // its operations inside. The set created on top of `constantOps` stack is
+      // used for the top-level operations within the NamedComputationOp. This
+      // way, after it visits all operations inside the NamedComputationOp, it
+      // can identify the ops within the NamedComputationOp that has redundant
+      // copies and hence need to be erased.
+      if (isa<NamedComputationOp>(op)) {
+        constantOps.emplace_back();
+        return;
+      }
+      processOp(op, constantOps.back(), scalarExpansionOps);
+      if (isa<sdy::ReturnOp>(op) &&
+          isa<NamedComputationOp>(op->getParentOp())) {
+        eraseUnusedOpsAlongWithItsShardingGroupUsers(
+            llvm::reverse(constantOps.back()));
+        constantOps.pop_back();
+        processOp(op->getParentOp(), constantOps.back(), scalarExpansionOps);
+        return;
+      }
+    });
 
     // Since for every op in `constantOps` that has a use that isn't in
     // `constantOps`, we replaced the use with a clone of the entire
     // sub-computation, we can now erase all ops in `constantOps` as long as we
     // iterate in reverse order. Note that we did not clone scalars so we keep
     // the original.
-    for (Operation* op : llvm::concat<Operation* const>(
-             scalarExpansionOps, llvm::reverse(constantOps))) {
-      if (hasOnlyUsersOfType<ShardingGroupOp>(op)) {
-        eraseShardingGroupUsers(op);
-        op->erase();
-      }
-    }
+    eraseUnusedOpsAlongWithItsShardingGroupUsers(llvm::concat<Operation* const>(
+        scalarExpansionOps, llvm::reverse(constantOps.back())));
+    constantOps.pop_back();
   }
 
  private:
