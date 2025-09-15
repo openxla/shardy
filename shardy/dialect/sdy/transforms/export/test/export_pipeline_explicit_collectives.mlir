@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-export-pipeline='enable-insert-explicit-collectives=true' 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -sdy-export-pipeline='enable-insert-explicit-collectives=true remove-all-gather-reduce-scatter-for-cmv1=true' 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
 

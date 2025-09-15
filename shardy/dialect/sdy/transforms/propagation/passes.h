@@ -54,6 +54,9 @@ struct PropagationOptions {
   bool skipInline = false;
   // Whether to enable inserting explicit collectives.
   bool enableInsertExplicitCollectives = false;
+  // Whether to remove all-gather and reduce-scatter ops for CMV1.
+  // TODO(b/432019089): remove this option once CMV1 is completely deprecated.
+  bool removeAllGatherReduceScatterForCMV1 = false;
   // Whether automatic partitioning is enabled. If true, an auto-partitioner
   // callback is expected to be registered in `AutoPartitionerRegistry`. The
   // auto-partitioner will be invoked after propagation of user-specified

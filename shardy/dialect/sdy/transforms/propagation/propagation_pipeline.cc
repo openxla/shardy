@@ -35,6 +35,8 @@ void populateExportOptions(ExportOptions& options,
   options.avoidExportForPartitioning = propOptions.avoidExportForPartitioning;
   options.enableInsertExplicitCollectives =
       propOptions.enableInsertExplicitCollectives;
+  options.removeAllGatherReduceScatterForCMV1 =
+      propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
 }

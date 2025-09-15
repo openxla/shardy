@@ -58,6 +58,11 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       llvm::cl::desc("Enable inserting explicit collective ops during export."),
       llvm::cl::init(false)};
 
+  Option<bool> removeAllGatherReduceScatterForCMV1{
+      *this, "remove-all-gather-reduce-scatter-for-cmv1",
+      llvm::cl::desc("Remove all-gather and reduce-scatter ops for CMV1."),
+      llvm::cl::init(false)};
+
   Option<bool> keepShardingRules{
       *this, "keep-sharding-rules",
       llvm::cl::desc("Keep sdy.sharding_rule attrs."), llvm::cl::init(false)};
