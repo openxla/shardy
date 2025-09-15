@@ -927,6 +927,10 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   if (allReduceAxes.empty()) {
     return sourceSharding;
   }
+  // TODO(enver): Get this info from a single `getAxisSetDiff` call.
+  SDY_CHECK(
+      getAxisSetDiff(targetUnreducedAxes, sourceUnreducedAxes, mesh).empty())
+      << "Both source and target have axes that does not appear in the other.";
   TensorShardingAttr allReduceSharding =
       sourceSharding.replaceUnreducedAxes(targetUnreducedAxes);
   auto allReduceOp =
