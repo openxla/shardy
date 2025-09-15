@@ -922,6 +922,11 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
         << "source and user shardings have different meshes for unreduced "
            "axes.";
   }
+  // TODO(enver): Get both sides of the diffs from a single `getAxisSetDiff`.
+  SDY_CHECK(
+      getAxisSetDiff(targetUnreducedAxes, sourceUnreducedAxes, mesh).empty())
+      << "Target has unreduced axes that does not appear in the source "
+         "unreduced axes.";
   SmallVector<AxisRefAttr> allReduceAxes =
       getAxisSetDiff(sourceUnreducedAxes, targetUnreducedAxes, mesh);
   if (allReduceAxes.empty()) {
