@@ -384,7 +384,7 @@ SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
 // insertion point is modified.
 template <typename TerminatorOpTy>
 void inlineRegionAndConvertTerminatorOp(Region& src, Region& dst,
-                                        PatternRewriter& rewriter) {
+                                        IRRewriter& rewriter) {
   rewriter.inlineRegionBefore(src, dst, dst.begin());
 
   for (Block& block : dst.getBlocks()) {
