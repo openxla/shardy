@@ -75,6 +75,14 @@ operation has compatible shardings.
 -enable-full-version : Enable full version.
 ```
 
+### `-sdy-remove-all-gather-reduce-scatter-for-cmv1`
+
+_Removes sdy.all_gather and sdy.reduce_scatter for CMV1._
+
+Removes all-gather in the pattern all-gather + dot. Removes reduce-scatter
+in the pattern dot + reduce-scatter. This pass is for compatibility with
+collective matmul V1 (CMV1). It is a temporary solution for b/432019089.
+
 ### `-sdy-remove-propagation-debug-info`
 
 _Removes propagation debug info (propagation edges and origin shardings) during export._
