@@ -86,10 +86,19 @@ bool differentOperandShardingFromFirstResult(Operation* op);
 // empty axes.
 ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding);
 
+// Returns unreduced axes of given `value`. If its sharding is null, returns
+// empty axes.
+ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
+
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
 // Refer to the documentation of `InsertExplicitReshardsPass` for more details.
+//
+// Assume the followings:
+// - All op results have the same unreduced axes.
+// - If the op has no results, none of the operands has unreduced axes.
+// - Operand and result meshes are the same ignoring device id order.
 void insertExplicitReshardsOnOp(Operation* op,
                                 ArrayRef<TensorShardingAttr> inShardings,
                                 ArrayRef<TensorShardingAttr> outShardings,

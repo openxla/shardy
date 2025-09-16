@@ -225,27 +225,34 @@ void insertExplicitReshards(Operation* op,
 
 // Inserts an `sdy.all-reduce` for each result of `op` if any of its reduction
 // factors is sharded in `commonAxesPerFactor`.
+// Assume the followings:
+// - All op results have the same unreduced axes.
+// - All op results have the same mesh as `mesh` ignoring device id orders.
 void insertAllReduces(Operation* op, const AxesPerFactor& commonAxesPerFactor,
                       const Mesh& mesh, OpShardingRuleAttr shardingRule,
                       IRRewriter& rewriter) {
-  rewriter.setInsertionPointAfter(op);
-  SmallVector<AxisRefAttr> reductionAxes;
-  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    reductionAxes.append(commonAxesPerFactor[reductionFactor]);
-  }
-  if (reductionAxes.empty()) {
+  if (op->getResults().empty()) {
     return;
   }
+
+  rewriter.setInsertionPointAfter(op);
+  SmallVector<AxisRefAttr> commonReductionAxes;
+  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
+    commonReductionAxes.append(commonAxesPerFactor[reductionFactor]);
+  }
+
+  // The first result unreduced axes is also the common one.
+  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
+      commonReductionAxes, getUnreducedAxes(op->getResult(0)), mesh.attr());
+  if (allReduceAxes.empty()) {
+    return;
+  }
+
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   for (Value result : op->getResults()) {
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, mesh.name(),
                             /*closedIfMissing=*/true);
-    SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-        reductionAxes, resultSharding.getUnreducedAxes(), mesh.attr());
-    if (allReduceAxes.empty()) {
-      continue;
-    }
     auto allReduceOp = AllReduceOp::create(rewriter, result.getLoc(), result,
                                            allReduceAxes, resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
@@ -965,6 +972,10 @@ bool differentOperandShardingFromFirstResult(Operation* op) {
 
 ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding) {
   return sharding ? sharding.getUnreducedAxes() : ArrayRef<AxisRefAttr>();
+}
+
+ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
+  return getUnreducedAxes(getSharding(value));
 }
 
 void insertExplicitReshardsOnOp(Operation* op,

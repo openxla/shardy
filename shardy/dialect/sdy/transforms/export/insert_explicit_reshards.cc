@@ -338,8 +338,7 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
     ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
         getUnreducedAxes(firstResultSharding);
     for (OpResult result : op->getResults().drop_front()) {
-      SDY_CHECK(firstResultUnreducedAxes ==
-                getUnreducedAxes(getSharding(result)))
+      SDY_CHECK(firstResultUnreducedAxes == getUnreducedAxes(result))
           << "Unreduced axes mismatch between results for multi-result op.";
     }
   }
