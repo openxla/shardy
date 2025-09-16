@@ -1123,10 +1123,6 @@ def Sdy_OpShardingRule : AttrDef<Sdy_Dialect, "OpShardingRule"> {
 
     bool isCustom() const { return getIsCustomRule(); }
 
-    // Returns a vector of the sizes of all operand and result tensors, the
-    // operands come before the results.
-    SmallVector<int64_t> getTensorSizes() const;
-
     // Returns the type of the given `factorIndex`.
     FactorType getFactorType(int64_t factorIndex) const;
 
