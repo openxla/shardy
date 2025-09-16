@@ -134,6 +134,36 @@ class RedundantManualComputationPattern
   }
 };
 
+// Pattern to:
+// - Erase a ReshardOp that has equivalent input and output.
+class RedundantReshardPattern : public OpRewritePattern<ReshardOp> {
+ public:
+  using OpRewritePattern<ReshardOp>::OpRewritePattern;
+
+ private:
+  bool isRedundant(ReshardOp reshardOp) const {
+    TensorShardingAttr inSharding = getSharding(reshardOp.getOperand());
+    TensorShardingAttr outSharding = reshardOp.getSharding();
+    if ((!inSharding || inSharding.isFullyReplicated()) &&
+        outSharding.isFullyReplicated()) {
+      return true;
+    }
+    if (inSharding == outSharding) {
+      return true;
+    }
+    return false;
+  }
+
+  LogicalResult matchAndRewrite(ReshardOp reshardOp,
+                                PatternRewriter& rewriter) const override {
+    if (isRedundant(reshardOp)) {
+      rewriter.replaceAllUsesWith(reshardOp, reshardOp.getOperand());
+      rewriter.eraseOp(reshardOp);
+    }
+    return mlir::success();
+  }
+};
+
 // Struct to hold the results of the reduce scatter fusion computation.
 struct ReduceScatterFusionInfo {
   SmallVector<AxisRefListAttr> reduceScatterAxes;
@@ -335,6 +365,8 @@ void ManualComputationOp::getCanonicalizationPatterns(
 void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                             MLIRContext* context) {
   results.addWithLabel<ReshardOfReshardPattern>(StringRef(kReshardLabel),
+                                                context);
+  results.addWithLabel<RedundantReshardPattern>(StringRef(kReshardLabel),
                                                 context);
 }
 
