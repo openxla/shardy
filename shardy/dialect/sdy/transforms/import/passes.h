@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 
 // IWYU pragma: end_keep
 
@@ -41,11 +42,10 @@ namespace sdy {
 // Takes the current index of the module dump, which will be included as a
 // prefix in the file name, and incremented after each stage (dumped module).
 void addImportPipeline(OpPassManager& pm, int& dumpIndex,
-                       StringRef dumpDirectory = "", bool skipInline = false);
+                       const PropagationOptions& options);
 
 // Same as above, but initializes a default dump index to 0.
-void addImportPipeline(OpPassManager& pm, StringRef dumpDirectory = "",
-                       bool skipInline = false);
+void addImportPipeline(OpPassManager& pm, const PropagationOptions& options);
 
 // Register the sdy-import-pipeline.
 void registerImportPipeline();

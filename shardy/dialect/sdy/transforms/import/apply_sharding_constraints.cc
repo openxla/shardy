@@ -13,18 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "shardy/dialect/sdy/transforms/import/apply_sharding_constraints.h"
+
 #include <cassert>
 #include <functional>
+#include <memory>
 
 #include "llvm/ADT/STLExtras.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "llvm/Support/CommandLine.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
+#include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 
 namespace mlir {
 namespace sdy {
@@ -106,7 +117,7 @@ bool shouldApply(Value input, TensorShardingAttr sharding) {
 // `getConstraintAfterValue`. This is to avoid restricting the sharding of all
 // targets of the edge and to match GSPMD.
 void applyConstraint(
-    Value input, TensorShardingAttr sharding,
+    Operation* op, Value input, TensorShardingAttr sharding,
     std::function<ShardingConstraintOp()> getConstraintAfterValue) {
   if (!shouldApply(input, sharding)) {
     return;
@@ -116,7 +127,37 @@ void applyConstraint(
     ShardingConstraintOp shardingConstraintOp = getConstraintAfterValue();
     input.replaceAllUsesExcept(shardingConstraintOp, shardingConstraintOp);
   } else {
-    setSharding(input, sharding);
+    MLIRContext* context = op->getContext();
+    OpShardingRuleAttr shardingRule =
+        getOrCreateShardingRule(op, /*conservativePropagation=*/false,
+                                /*set_sharding_rule_attr=*/true);
+
+    if (context->hasActionHandler() && shardingRule) {
+      ValueRange operands = op->getOperands();
+      ValueRange results = op->getResults();
+      SmallVector<TensorShardingAttr> operandShardings = getShardings(operands);
+      SmallVector<TensorShardingAttr> resultShardings = getShardings(results);
+      MeshAttr mesh = getCommonMesh(operandShardings, resultShardings, op);
+      ShardingProjection shardingProjection = ShardingProjection::build(
+          operandShardings, resultShardings, shardingRule, mesh);
+
+      bool anyUpdated = false;
+      auto updateShardings = [&]() {
+        setSharding(input, sharding);
+        ShardingProjection newShardingProjection = ShardingProjection::build(
+            getShardings(operands), getShardings(results), shardingRule, mesh);
+        anyUpdated = newShardingProjection != shardingProjection;
+        shardingProjection = newShardingProjection;
+      };
+
+      context->executeAction<SourceShardingAction>(
+          updateShardings,
+          /*IRUnits=*/{op}, op, operands, results, mesh, shardingRule,
+          shardingProjection,
+          /*anyUpdated=*/anyUpdated);
+    } else {
+      setSharding(input, sharding);
+    }
   }
 }
 
@@ -185,9 +226,35 @@ struct ApplyShardingConstraintsPass
           ApplyShardingConstraintsPass> {
   using ApplyShardingConstraintsPassBase::ApplyShardingConstraintsPassBase;
 
+  ApplyShardingConstraintsPass() = default;
+
+  // Copy constructor to handle Option members
+  ApplyShardingConstraintsPass(const ApplyShardingConstraintsPass& other)
+      : ApplyShardingConstraintsPassBase<ApplyShardingConstraintsPass>(other) {
+    debugShardingOrigins = other.debugShardingOrigins;
+    debugPropagationEdgeSharding = other.debugPropagationEdgeSharding;
+  }
+
+  // Constructor to be used when creating the pass programmatically with
+  // options.
+  explicit ApplyShardingConstraintsPass(const PropagationOptions& options) {
+    debugShardingOrigins = options.debugShardingOrigins;
+    debugPropagationEdgeSharding = options.debugPropagationEdgeSharding;
+  }
+
   void runOnOperation() final {
-    OpBuilder builder(&getContext());
-    getOperation().walk([&](Operation* op) {
+    ModuleOp moduleOp = getOperation();
+    MLIRContext& context = getContext();
+
+    // Prepare debugging handler for sharding origins and edge sources.
+    ShardingDebugMappings mappings(debugShardingOrigins,
+                                   debugPropagationEdgeSharding);
+    SourceShardingHandler handler(&mappings);
+    // Prepare the handler and register it to the context.
+    handler.prepareHandler(moduleOp);
+
+    OpBuilder builder(&context);
+    moduleOp.walk([&](Operation* op) {
       TypeSwitch<Operation*>(op)
           .Case<ShardingConstraintOp>(
               [](ShardingConstraintOp shardingConstraintOp) {
@@ -212,7 +279,7 @@ struct ApplyShardingConstraintsPass
                 Value input = shardingConstraintOp.getInput();
                 TensorShardingAttr sharding =
                     shardingConstraintOp.getSharding();
-                applyConstraint(input, sharding,
+                applyConstraint(shardingConstraintOp, input, sharding,
                                 /*getConstraintAfterValue=*/[&]() {
                                   moveAfterValue(shardingConstraintOp, input);
                                   return shardingConstraintOp;
@@ -224,7 +291,7 @@ struct ApplyShardingConstraintsPass
                          manualComputationOp.getOperands(),
                          manualComputationOp.getInShardings().getShardings())) {
                   applyConstraint(
-                      operand, sharding,
+                      manualComputationOp, operand, sharding,
                       /*getConstraintAfterValue=*/
                       [&, operand = operand, sharding = sharding]() {
                         // We can't move the `ManualComputationOp`, so we create
@@ -236,10 +303,31 @@ struct ApplyShardingConstraintsPass
                 }
               });
     });
+
+    // Unregister the handler and save the sharding origins on the module.
+    context.registerActionHandler(nullptr);
+    handler.saveOnModule(moduleOp);
   }
+
+  Option<bool> debugShardingOrigins{
+      *this, "debug-sharding-origins",
+      llvm::cl::desc("whether to save sharding origin information"),
+      llvm::cl::init(false)};
+
+  Option<bool> debugPropagationEdgeSharding{
+      *this, "debug-propagation-edge-sharding",
+      llvm::cl::desc("whether to save propagation edge information"),
+      llvm::cl::init(false)};
 };
 
 }  // namespace
+
+// This function can be used to create the pass with specific options
+// programmatically.
+std::unique_ptr<Pass> createApplyShardingConstraintsPass(
+    const PropagationOptions& options) {
+  return std::make_unique<ApplyShardingConstraintsPass>(options);
+}
 
 }  // namespace sdy
 }  // namespace mlir

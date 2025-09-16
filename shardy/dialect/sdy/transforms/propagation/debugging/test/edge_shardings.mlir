@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-apply-sharding-constraints -sdy-aggressive-propagate=debug-propagation-edge-sharding=true -sdy-sink-data-flow-edges="sink-debug-propagation-edge-sharding=true" 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-apply-sharding-constraints=debug-propagation-edge-sharding=true -sdy-aggressive-propagate=debug-propagation-edge-sharding=true -sdy-sink-data-flow-edges="sink-debug-propagation-edge-sharding=true" 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
@@ -167,8 +167,7 @@ sdy.mesh @mesh = <["a"=2, "b"=2]>
 // CHECK-LABEL: manual_computation_multiple_results
 // CHECK-SAME:    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {"a", ?}]>})
 // CHECK-SAME:    -> (tensor<16x32xf32> {sdy.propagation_edges = #sdy.propagation_edges<[
-// CHECK-SAME:                               {step-0 = [{"a" = operand-0 -> [result-0]}, {"b" = operand-0 -> [result-0]}]},
-// CHECK-SAME:                               {step-6 = [{"a" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME:                               {step-0 = [{"a" = operand-0 -> [result-0]}, {"b" = operand-0 -> [result-0]}]}]>,
 // CHECK-SAME:                           sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>},
 // CHECK-SAME:        tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {"a", ?}]>}) {
 func.func @manual_computation_multiple_results(%arg0: tensor<32x32xf32>) -> (tensor<16x32xf32>, tensor<32x32xf32>) {
@@ -250,20 +249,18 @@ func.func @sub_axes_merging_reshape(
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
-// TODO(b/434949739): Describe how the propagation edge is created due to the
-// apply-sharding-constraints pass.
-// CHECK-LABEL: two_sharding_constraint
+// CHECK-LABEL: two_open_sharding_constraint
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = operand-0 -> [result-0]}]}, {step-6 = [{"a" = operand-0 -> [result-0]}]}]>,
 // CHECK-SAME:                         sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
-func.func @two_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func @two_open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {"b", ?}]> {
   // CHECK-SAME:   sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = result-0 -> [operand-0]}]}, {step-5 = [{"b" = result-0 -> [operand-0]}]}]>} : tensor<8x8xf32>
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SC_1]], %[[SC_1]] {
-  // CHECK-SAME:   sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"a" = operand-0 -> [result-0]}]}, {step-4 = [{"b" = result-0 -> [operand-0, operand-1]}]}]>,
+  // CHECK-SAME:   sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"a" = operand-0 -> [result-0]}]}, {step-4 = [{"b" = result-0 -> [operand-0, operand-1]}]}]>
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC_2:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a", ?}, {"b"}]> {
-  // CHECK-SAME:   sdy.propagation_edges = #sdy.propagation_edges<[{step-3 = [{"a" = operand-0 -> [result-0]}, {"b" = result-0 -> [operand-0]}]}]>} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.propagation_edges = #sdy.propagation_edges<[{step-3 = [{"a" = operand-0 -> [result-0]}, {"b" = result-0 -> [operand-0]}]}]>
   // CHECK-NEXT: return %[[SC_2]]
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {?}]> : tensor<8x8xf32>
   %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
@@ -275,18 +272,131 @@ func.func @two_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
-// TODO(b/434949739): Describe how the propagation edge is created due to the
-// apply-sharding-constraints pass.
 // CHECK-LABEL: push_sharding_constraints_to_func_results
-// CHECK-SAME:   %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
-// CHECK-SAME:   %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
-// CHECK-SAME:   -> (tensor<8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"a" = operand-0 -> [result-0]}]}, {step-1 = [{"a" = operand-0 -> [result-0]}]}]>,
-// CHECK-SAME:                      sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>},
-// CHECK-SAME:       tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>}) {
+// CHECK-SAME: %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
+// CHECK-SAME: %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+// CHECK-SAME: -> (tensor<8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"a" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME: sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>},
+// CHECK-SAME: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>})
 func.func @push_sharding_constraints_to_func_results(
   %arg0: tensor<8xf32>, %arg1: tensor<8xf32>
   ) -> (tensor<8xf32>, tensor<8xf32>) {
+  // CHECK-NEXT: %[[C1:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"a" = result-0 -> [operand-0]}]}]>} : tensor<8xf32>
+  // CHECK-NEXT: %[[C2:.*]] = sdy.sharding_constraint %arg1 <@mesh, [{"a"}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = result-0 -> [operand-0]}]}]>} : tensor<8xf32>
   %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}]> : tensor<8xf32>
   %2 = sdy.sharding_constraint %arg1 <@mesh, [{"a"}]> : tensor<8xf32>
   return %1, %2 : tensor<8xf32>, tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
+// CHECK-LABEL: func.func @input_already_has_sharding(
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
+// CHECK-SAME: -> (tensor<8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME: sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+func.func @input_already_has_sharding(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = result-0 -> [operand-0, operand-1]}]}, {step-3 = [{"b" = result-0 -> [operand-0, operand-1]}]}]>,
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>} : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"b" = result-0 -> [operand-0]}]}]>} : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
+// CHECK-LABEL: func.func @open_sharding_constraint(
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+// CHECK-SAME: -> (tensor<8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME: sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"b" = result-0 -> [operand-0, operand-1]}]}]>,
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b", ?}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"b" = result-0 -> [operand-0]}]}]>}
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b", ?}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
+// CHECK-LABEL: func.func @has_other_identical_sharding_constraint_user(
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+// CHECK-SAME: -> (tensor<8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"b" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME: sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+func.func @has_other_identical_sharding_constraint_user(%arg0: tensor<8x8xf32>)
+  -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-4 = [{"b" = result-0 -> [operand-0, operand-1]}]}]>,
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = result-0 -> [operand-0]}]}]>}
+  // CHECK-NEXT: sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
+// CHECK-LABEL: func.func @has_different_sharding_constraint_user(
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
+// CHECK-SAME: -> (tensor<8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = operand-0 -> [result-0]}]}, {step-1 = [{"a" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME: sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
+// CHECK-SAME: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
+func.func @has_different_sharding_constraint_user(%arg0: tensor<8x8xf32>)
+  -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-3 = [{"b" = result-0 -> [operand-0, operand-1]}]}, {step-5 = [{"a" = result-0 -> [operand-0, operand-1]}]}]>,
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"b" = result-0 -> [operand-0]}]}]>}
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-4 = [{"a" = result-0 -> [operand-0]}]}]>}
+  %2 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
+// CHECK-LABEL: func.func @chain_on_block_arg_after_other_user(
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %arg1: tensor<8x8xf32>)
+// CHECK-SAME: -> (tensor<8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-2 = [{"a" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME: sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}, tensor<8x8xf32>, tensor<8x8xf32>)
+func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[C0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"a" = result-0 -> [operand-0]}]}]>}
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-SAME: {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = operand-0 -> [result-0]}]}]>,
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>}
+  %1 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[C2:.*]] = sdy.sharding_constraint %[[C0]] <@mesh, [{}, {"b"}]>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  // CHECK: %[[C3:.*]] = sdy.sharding_constraint %[[C2]] <@mesh, [{}, {}]>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {}]> : tensor<8x8xf32>
+  %4 = stablehlo.multiply %3, %3 : tensor<8x8xf32>
+  return %1, %3, %4 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }

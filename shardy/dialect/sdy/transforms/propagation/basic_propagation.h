@@ -31,6 +31,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"

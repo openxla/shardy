@@ -59,6 +59,7 @@ cc_library(
         "//shardy/common:file_utils",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
+        "//shardy/dialect/sdy/transforms/common:propagation_options",
         "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "//shardy/dialect/sdy/transforms/export:passes",
         "//shardy/dialect/sdy/transforms/import:passes",

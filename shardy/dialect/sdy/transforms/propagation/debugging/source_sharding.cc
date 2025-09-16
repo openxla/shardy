@@ -54,6 +54,14 @@ using AxisToPropagationEdgeMap =
 using StepToAxisPropagationDetailsMap =
     DenseMap<int64_t, AxisToPropagationEdgeMap>;
 
+using TargetToPropagationEdgeMap =
+    llvm::DenseMap<EdgeValueRefAttr, PropagationEdge>;
+using SourceToTargetToPropagationEdgeMap =
+    llvm::DenseMap<EdgeValueRefAttr,
+                   llvm::DenseMap<EdgeValueRefAttr, PropagationEdge>>;
+using AxisToPairPropagationEdgeMap =
+    llvm::DenseMap<AxisRefAttr, SourceToTargetToPropagationEdgeMap>;
+
 namespace {
 
 // The map from factor to edge source for operands and results.
@@ -361,46 +369,67 @@ PropagationEdgesAttr createPropagationEdges(Operation* op,
                                             MLIRContext* context) {
   Builder builder(context);
   StepToAxisPropagationDetailsMap perStepEdgesForAxis;
+
+  // Build a temporary map to keep track of the edge with the minimum step
+  // index for each source/target/axis combination. Due to sharding constraints
+  // we have logic to specifically add edges outside of propagation. If similar
+  // edges are then re-included during propagation, we need to filter them out.
+  AxisToPairPropagationEdgeMap minStepEdges;
   for (const auto& [axisRef, edges] : axisToEdges) {
     for (const PropagationEdge& edge : edges) {
-      auto source =
+      auto sourceAttr =
           EdgeValueRefAttr::get(context, edge.source.type, edge.source.index);
-      auto target =
+      auto targetAttr =
           EdgeValueRefAttr::get(context, edge.target.type, edge.target.index);
-      perStepEdgesForAxis[edge.propagationStep][axisRef][source].insert(target);
+      SourceToTargetToPropagationEdgeMap& sourceMap = minStepEdges[axisRef];
+      TargetToPropagationEdgeMap& targetMap = sourceMap[sourceAttr];
+      auto [it, inserted] = targetMap.try_emplace(targetAttr, edge);
+      if (!inserted) {
+        if (edge.propagationStep < it->second.propagationStep) {
+          it->second = edge;
+        }
+      }
+    }
+  }
+
+  // Regroup the edges (with the minimum step index per Axis) by step index.
+  for (const auto& [axisRef, sourceMap] : minStepEdges) {
+    for (const auto& [sourceAttr, targetMap] : sourceMap) {
+      for (const auto& [targetAttr, edge] : targetMap) {
+        perStepEdgesForAxis[edge.propagationStep][axisRef][sourceAttr].insert(
+            targetAttr);
+      }
     }
   }
 
   SmallVector<PropagationOneStepAttr> perStepEdges;
   for (const auto& [step, edgesForAxis] : perStepEdgesForAxis) {
-    SmallVector<AxisToPropagationDetailsAttr> axis_entries;
+    SmallVector<AxisToPropagationDetailsAttr> axisEntries;
     for (const auto& [axisRef, edges] : edgesForAxis) {
-      // There should only be one source in the edge map.
-      assert(edges.size() == 1);
-      EdgeValueRefAttr source = edges.begin()->first;
-      DenseSet<EdgeValueRefAttr> targets = edges.begin()->second;
-      // Sort the targets for deterministic ordering in the output attr.
-      SmallVector<EdgeValueRefAttr> targetsArray(targets.begin(),
-                                                 targets.end());
-      llvm::stable_sort(targetsArray,
-                        [](EdgeValueRefAttr a, EdgeValueRefAttr b) {
-                          if (a.getType() == b.getType()) {
-                            return a.getIndex() < b.getIndex();
-                          }
-                          return a.getType() < b.getType();
-                        });
-      AxisToPropagationDetailsAttr axisToPropagationDetails =
-          AxisToPropagationDetailsAttr::get(context, axisRef, source,
-                                            targetsArray);
-      axis_entries.push_back(axisToPropagationDetails);
+      for (const auto& [source, targets] : edges) {
+        // Sort the targets for deterministic ordering in the output attr.
+        SmallVector<EdgeValueRefAttr> targetsArray(targets.begin(),
+                                                   targets.end());
+        llvm::stable_sort(targetsArray,
+                          [](EdgeValueRefAttr a, EdgeValueRefAttr b) {
+                            if (a.getType() == b.getType()) {
+                              return a.getIndex() < b.getIndex();
+                            }
+                            return a.getType() < b.getType();
+                          });
+        AxisToPropagationDetailsAttr axisToPropagationDetails =
+            AxisToPropagationDetailsAttr::get(context, axisRef, source,
+                                              targetsArray);
+        axisEntries.push_back(axisToPropagationDetails);
+      }
     }
     // Sort the axes by name for deterministic ordering in the output attr.
-    llvm::stable_sort(axis_entries, [](AxisToPropagationDetailsAttr a,
-                                       AxisToPropagationDetailsAttr b) {
+    llvm::stable_sort(axisEntries, [](AxisToPropagationDetailsAttr a,
+                                      AxisToPropagationDetailsAttr b) {
       return a.getAxisName() < b.getAxisName();
     });
     perStepEdges.push_back(
-        PropagationOneStepAttr::get(context, step, axis_entries));
+        PropagationOneStepAttr::get(context, step, axisEntries));
   }
 
   // Sort the edges by step index.
@@ -563,6 +592,19 @@ void overrideOriginsToSelf(ModuleOp moduleOp) {
   });
 }
 
+int64_t maximumPropagationStep(ModuleOp moduleOp) {
+  int64_t maxStep = -1;
+  moduleOp.walk([&](Operation* op) {
+    if (auto propagationEdges =
+            op->getAttrOfType<PropagationEdgesAttr>(kPropagationEdgesAttr)) {
+      for (auto propagationEdge : propagationEdges) {
+        maxStep = std::max(maxStep, propagationEdge.getStepIndex());
+      }
+    }
+  });
+  return maxStep;
+}
+
 // Sets up `valueToOriginShardingMap` with the initial sharding origin
 // information on the `moduleOp`.
 //
@@ -632,6 +674,7 @@ void prepareShardingOriginsHandler(
         StringAttr::get(context, llvm::formatv("mc_{0}", sourceId)));
     ++sourceId;
   });
+
   // NOTE(bartchr): This assumes that we do not propagate across different
   // functions. As all func inputs/outputs have the same source name. Update
   // this if we do propagate across `FuncOp`s.
@@ -714,6 +757,7 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
   if (!sourceShardingAction.anyUpdated) {
     return;
   }
+
   FactorsToEdgeMap factorsToEdges =
       createSourceMap(sourceShardingAction.oldShardingProjection,
                       sourceShardingAction.newShardingProjection,
@@ -767,6 +811,7 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
 }
 
 void SourceShardingHandler::prepareHandler(ModuleOp moduleOp) {
+  propagationStep = maximumPropagationStep(moduleOp) + 1;
   if (mappings->debugShardingOrigins) {
     prepareShardingOriginsHandler(moduleOp, mappings->valueToOriginShardingMap);
   }

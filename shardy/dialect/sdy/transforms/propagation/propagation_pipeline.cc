@@ -17,6 +17,7 @@ limitations under the License.
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/file_utils.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/auto_partitioner_registry.h"
@@ -45,7 +46,7 @@ void populateExportOptions(ExportOptions& options,
 
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
-  addImportPipeline(pm, dumpIndex, options.dumpDirectory, options.skipInline);
+  addImportPipeline(pm, dumpIndex, options);
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;

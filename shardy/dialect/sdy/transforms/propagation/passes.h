@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 
 // IWYU pragma: end_keep
 
@@ -34,35 +35,6 @@ namespace sdy {
 #define GEN_PASS_DECL
 #define GEN_PASS_REGISTRATION
 #include "shardy/dialect/sdy/transforms/propagation/passes.h.inc"
-
-struct PropagationOptions {
-  // Whether to keep existing and created `sdy::OpShardingRuleAttr` on ops.
-  bool keepShardingRules = false;
-  // The system directory to dump various rewritten modules for debugging.
-  StringRef dumpDirectory = "";
-  // Whether to avoid shardings that may cause values to be non-divisible by its
-  // dimension sharding.
-  bool conservativePropagation = false;
-  // Whether to save debug information about the sharding origins on the module.
-  bool debugShardingOrigins = false;
-  // Whether to save debug information about the edge shardings on the module.
-  bool debugPropagationEdgeSharding = false;
-  // Whether to avoid exporting the module for partitioning so that the module
-  // will be compatible for another round of propagation.
-  bool avoidExportForPartitioning = false;
-  // Whether to skip inlining in the module.
-  bool skipInline = false;
-  // Whether to enable inserting explicit collectives.
-  bool enableInsertExplicitCollectives = false;
-  // Whether to remove all-gather and reduce-scatter ops for CMV1.
-  // TODO(b/432019089): remove this option once CMV1 is completely deprecated.
-  bool removeAllGatherReduceScatterForCMV1 = false;
-  // Whether automatic partitioning is enabled. If true, an auto-partitioner
-  // callback is expected to be registered in `AutoPartitionerRegistry`. The
-  // auto-partitioner will be invoked after propagation of user-specified
-  // shardings.
-  bool enableAutoPartitioning = false;
-};
 
 // Adds the SDY propagation pass, preceded by a sequence of import passes needed
 // as a pre-processing step for propagation.
