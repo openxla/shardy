@@ -134,16 +134,17 @@ func.func @reduce_multiple_results_unreduced(
     %arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}, {}, {}]>},
     %arg1: tensor<2x64x13xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}, {}, {}]>})
     -> (tensor<64xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x"}>},
-        tensor<64xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"y"}>}) {
+        tensor<64xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x":(1)2}>}) {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1 = stablehlo.constant dense<0> : tensor<i32>
   // CHECK:      %[[REDUCE:.*]]:2 = stablehlo.reduce(%arg0 init: %cst), (%arg1 init: %c) across dimensions = [0, 2]
-  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>, <@mesh, [{}], unreduced={"y"}>]>}
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>, <@mesh, [{}], unreduced={"x"}>]>}
   // CHECK:      %[[ALL_REDUCE1:.*]] = sdy.all_reduce {"y"} %[[REDUCE]]#0 out_sharding=<@mesh, [{}], unreduced={"x"}> : tensor<64xf32>
-  // CHECK-NEXT: %[[ALL_REDUCE2:.*]] = sdy.all_reduce {"x"} %[[REDUCE]]#1 out_sharding=<@mesh, [{}], unreduced={"y"}> : tensor<64xi32>
-  // CHECK-NEXT: return %[[ALL_REDUCE1]], %[[ALL_REDUCE2]] : tensor<64xf32>, tensor<64xi32>
+  // CHECK-NEXT: %[[ALL_REDUCE2:.*]] = sdy.all_reduce {"y"} %[[REDUCE]]#1 out_sharding=<@mesh, [{}], unreduced={"x"}> : tensor<64xi32>
+  // CHECK-NEXT: %[[ALL_REDUCE3:.*]] = sdy.all_reduce {"x":(2)2} %[[ALL_REDUCE2]] out_sharding=<@mesh, [{}], unreduced={"x":(1)2}> : tensor<64xi32>
+  // CHECK-NEXT: return %[[ALL_REDUCE1]], %[[ALL_REDUCE3]] : tensor<64xf32>, tensor<64xi32>
   %2:2 = stablehlo.reduce(%arg0 init: %0), (%arg1 init: %1) across dimensions = [0, 2]
-    {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>, <@mesh, [{}], unreduced={"y"}>]>} :
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>, <@mesh, [{}], unreduced={"x"}>]>} :
     (tensor<2x64x13xf32>, tensor<2x64x13xi32>, tensor<f32>, tensor<i32>) -> (tensor<64xf32>, tensor<64xi32>)
     reducer(%arg2: tensor<f32>, %arg4: tensor<f32>) (%arg3: tensor<i32>, %arg5: tensor<i32>)  {
       %3 = stablehlo.add %arg2, %arg4 : tensor<f32>

@@ -963,6 +963,10 @@ bool differentOperandShardingFromFirstResult(Operation* op) {
   });
 }
 
+ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding) {
+  return sharding ? sharding.getUnreducedAxes() : ArrayRef<AxisRefAttr>();
+}
+
 void insertExplicitReshardsOnOp(Operation* op,
                                 ArrayRef<TensorShardingAttr> inShardings,
                                 ArrayRef<TensorShardingAttr> outShardings,

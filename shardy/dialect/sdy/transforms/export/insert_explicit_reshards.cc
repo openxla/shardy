@@ -333,6 +333,17 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
     return;
   }
 
+  TensorShardingAttr firstResultSharding = getSharding(op->getResult(0));
+  if (op->getNumResults() > 1) {
+    ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
+        getUnreducedAxes(firstResultSharding);
+    for (OpResult result : op->getResults().drop_front()) {
+      SDY_CHECK(firstResultUnreducedAxes ==
+                getUnreducedAxes(getSharding(result)))
+          << "Unreduced axes mismatch between results for multi-result op.";
+    }
+  }
+
   // For each operand that has unreduced axes, insert an all-reduce if
   // any of the unreduced axes isn't unreduced in the target sharding.
   //
@@ -341,9 +352,8 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
   rewriter.setInsertionPoint(op);
   for (OpOperand& operand : op->getOpOperands()) {
     if (TensorShardingAttr inSharding = getSharding(operand.get())) {
-      insertAllReduceIfUnreducedToReplicated(operand, inSharding,
-                                             getSharding(op->getResult(0)),
-                                             symbolTable, rewriter);
+      insertAllReduceIfUnreducedToReplicated(
+          operand, inSharding, firstResultSharding, symbolTable, rewriter);
     }
   }
 }

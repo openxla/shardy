@@ -82,6 +82,10 @@ std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
 // operand shardings. If `op` does not have any results, returns false;
 bool differentOperandShardingFromFirstResult(Operation* op);
 
+// Returns unreduced axes of given `sharding`. If `sharding` is null, returns
+// empty axes.
+ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding);
+
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
