@@ -31,17 +31,6 @@ namespace mlir::mpmd {
 using ::mlir::func::FuncOp;
 
 void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options) {
-  // Apply as many optimizations as possible before inlining.
-  pm.addNestedPass<FuncOp>(createRemoveTransferCyclesPass());
-
-  // TODO(jupvfranco): consider moving inlining to import.
-  AddCallInliningRelatedPasses(pm);
-  // Merge any inferred fragments with user-defined fragments that could not be
-  // merged before because of CallOps.
-  if (!options.mergeAfterScheduling) {
-    pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
-  }
-
   // Merge fragments according to the user-specified rules. Do this before other
   // merge passes since those modify the origins of fragments, invalidating the
   // rules.
@@ -50,11 +39,14 @@ void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options) {
         RuleBasedMergePassOptions{std::move(options.fragmentMergeRules)}));
   }
 
-  // Adds all pipeline scheduling related passes.
-  // Merge fragments into scheduling units.
-  AddSchedulingPreprocessingPasses(pm, options.splitBwdFragments,
-                                   options.verifyScheduleUnits);
-  AddSchedulingPass(pm, options.pipelineSchedule);
+  // Adds pipeline scheduling pass.
+  if (!options.fragmentScheduleRules.empty()) {
+    pm.addNestedPass<FuncOp>(
+        createRuleBasedSchedulePass(RuleBasedSchedulePassOptions{
+            std::move(options.fragmentScheduleRules)}));
+  } else {
+    AddSchedulingPass(pm, options.pipelineSchedule);
+  }
 
   // The remat passes will run after inlining the call ops and scheduling.
   // The reason why we choose to remat after scheduling is so that we don't need
