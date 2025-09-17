@@ -1105,12 +1105,6 @@ SmallVector<TensorShardingAttr> getShardingsReferenceByPropagationEdge(
 
 LogicalResult verifyPropagationEdgesShardingAttr(
     PropagationEdgesAttr propagationEdges, Operation* op) {
-  // TODO(b/429645141): add PropagationEdgesAttr verification for
-  // `DataFlowEdgeOp`
-  if (isa<DataFlowEdgeOp>(op)) {
-    return success();
-  }
-
   SmallVector<TensorShardingAttr> shardings =
       getShardingsReferenceByPropagationEdge(propagationEdges, op);
 

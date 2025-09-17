@@ -140,3 +140,15 @@ module {
     return %0 : tensor<8x8xf32>
   }
 }
+
+// -----
+
+module {
+  sdy.mesh @mesh = <["dfe"=4]>
+  func.func @sdy_propagation_edges_works_for_dfe(%arg0: tensor<32x96xf32>, %arg1: tensor<?x?xf32>) -> (tensor<32x96xf32>, tensor<?x?xf32>) {
+    %0:2 = stablehlo.optimization_barrier %arg0, %arg1 : tensor<32x96xf32>, tensor<?x?xf32>
+    // expected-error @+1 {{should have a propagation edges attribute of type PropagationEdgesAttr for attr named 'sdy.propagation_edges'}}
+    %1 = sdy.data_flow_edge %0#0  {sdy.propagation_edges = 64} : tensor<32x96xf32>
+    return %1, %0#1 : tensor<32x96xf32>, tensor<?x?xf32>
+  }
+}
