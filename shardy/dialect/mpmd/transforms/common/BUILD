@@ -39,6 +39,7 @@ cc_library(
         "merge_transfers.cc",
         "remove_transfer_cycles.cc",
         "rule_based_merge.cc",
+        "scheduler_preprocess.cc",
         "split_bwd_fragments.cc",
         "uniquify_function_inputs_outputs.cc",
         "unroll_for_loops.cc",
@@ -46,6 +47,7 @@ cc_library(
     hdrs = [
         "merge_fragments.h",
         "passes.h",
+        "scheduler_preprocess.h",
     ],
     deps = [
         ":distributed_function_pass",

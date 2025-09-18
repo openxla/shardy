@@ -217,6 +217,7 @@ void MpmdProgram::Import(ModuleOp module) {
       options.mpmd_infer_transfers,
       options.mpmd_infer_cross_mesh_reductions,
   };
+  import_options.splitBwdFragments = options.mpmd_split_bwd_fragments;
   addImportPipeline(pm, import_options);
   ErrorDiagnosticHandler diagnostic_handler(module.getContext());
   return diagnostic_handler.ConsumeStatus(pm.run(module));
@@ -229,7 +230,6 @@ void MpmdProgram::Optimize(ModuleOp module) {
   OptimizeOptions optimize_options;
   optimize_options.fragmentMergeRules = llvm::to_vector(fragment_merge_rules);
   optimize_options.mergeAfterScheduling = options.mpmd_merge_after_scheduling;
-  optimize_options.splitBwdFragments = options.mpmd_split_bwd_fragments;
   optimize_options.applyFragmentRemat = options.mpmd_fragment_remat;
   optimize_options.mergeRematFragments = options.mpmd_merge_remat_fragments;
   optimize_options.absorbInferredFragmentsOnEntryPointFunction =
