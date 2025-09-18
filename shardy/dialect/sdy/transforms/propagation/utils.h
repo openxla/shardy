@@ -45,6 +45,10 @@ PropagationDirection intersectionOfPropagationDirections(
 // Returns whether all dimensions are fully replicated.
 bool isFullyReplicated(TensorShardingAttr sharding);
 
+// Returns whether `sharding` and `anotherSharding` are equivalent.
+bool isEquivalent(TensorShardingAttr sharding,
+                  TensorShardingAttr anotherSharding);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -65,5 +65,13 @@ bool isFullyReplicated(TensorShardingAttr sharding) {
   return !sharding || sharding.isFullyReplicated();
 }
 
+bool isEquivalent(TensorShardingAttr sharding,
+                  TensorShardingAttr anotherSharding) {
+  if (!sharding) {
+    return isFullyReplicated(anotherSharding);
+  }
+  return sharding.isEquivalent(anotherSharding);
+}
+
 }  // namespace sdy
 }  // namespace mlir
