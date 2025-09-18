@@ -215,6 +215,14 @@ one transpose count, meaning we cannot apply it after
 `-mpmd-transfer-aware-merge`, which can result in fragments with multiple
 transpose counts per fragment.
 
+### `-mpmd-move-transfers-to-producer`
+
+_Moves transfers next to their producers._
+
+Moves transfers next to their producers: if the operand is a block argument,
+move the transfer to the beginning of the block, otherwise move it after the
+defining op.
+
 ### `-mpmd-remove-transfer-cycles`
 
 _Removes device-only transfer cycles from the program, avoiding unnecessary transfers._
@@ -262,6 +270,10 @@ label the merged fragment.
 ```
 -rules : A list of fragment merge rules, each with a list of source fragment infos and a target fragment info.
 ```
+
+### `-mpmd-scheduling-units-verifier`
+
+_Verifies if the program contains the required scheduling units._
 
 ### `-mpmd-sink-negligible-ops-into-call-op`
 
