@@ -18,7 +18,7 @@
 from collections.abc import Mapping, Sequence
 import dataclasses
 import enum
-from typing import Any
+from typing import Callable
 
 import jax
 import jaxtyping
@@ -96,6 +96,36 @@ FragmentScheduleRules = Sequence[FragmentScheduleRule]
 
 
 @dataclasses.dataclass(frozen=True)
+class PipelineContext:
+  """Context for pipeline scheduling and merging predicates."""
+
+  num_meshes: int
+
+
+RuleGeneratorPredicate = Callable[
+    [FragmentInfo, FragmentInfo, PipelineContext], bool
+]
+
+
+@dataclasses.dataclass(frozen=True)
+class PipelineSchedule:
+  """A set of rules and options which define an MPMD pipeline.
+
+  Attributes:
+    merge_predicates: A sequence of binary predicates that define merge rules.
+    schedule_predicates: A sequence of binary predicates that define schedule
+      rules.
+    required_mpmd_options: A mapping of PartitioningEnvironment flags that are
+      required for this schedule to function correctly. See
+      partitioning_options.py for available options.
+  """
+
+  merge_predicates: Sequence[RuleGeneratorPredicate] | None
+  schedule_predicates: Sequence[RuleGeneratorPredicate] | None
+  required_mpmd_options: Mapping[str, bool | str] | None
+
+
+@dataclasses.dataclass(frozen=True)
 class MpmdConfig:
   """Config for constructing an MPMD program with PartIR.
 
@@ -128,12 +158,10 @@ class MpmdConfig:
       reading from arg shardings is not supported. TODO: b/377706756 - Read from
       arg shardings too, and migrate users to this and remove this option once
       stabilized.
-    fragment_merge_rules: A sequence of fragment merge rules. Each merge rule
-      contains a sequence of fragment metadata objects that should be merged
-      into a single fragment, together with metadata for the resulting fragment.
-    fragment_schedule_rules: A sequence of fragment schedule rules. Each
-      schedule rule contains a sequence of fragment metadata objects in the
-      order that they should be scheduled.
+    pipeline_schedule: A PipelineSchedule object that defines the merge and
+      schedule predicates for fragment processing. Contains binary predicates
+      that determine how fragments should be merged and scheduled, along with
+      any required MPMD options for the pipeline.
   """
 
   topology: Topology
@@ -143,8 +171,7 @@ class MpmdConfig:
   output_mesh_assignment: PyTree[str | None]
   partitioning_options: PartitioningOptions | None
   read_input_output_mesh_from_shardings: bool
-  fragment_merge_rules: FragmentMergeRules | None
-  fragment_schedule_rules: FragmentScheduleRules | None
+  pipeline_schedule: PipelineSchedule | None
 
   @property
   def _spmd_mesh(self) -> jax.sharding.Mesh:
@@ -212,8 +239,7 @@ def make_config(
     output_mesh_assignment: PyTree[str | None] = (),
     partitioning_options: PartitioningOptions | None = None,
     read_input_output_mesh_from_shardings: bool = False,
-    fragment_merge_rules: FragmentMergeRules | None = None,
-    fragment_schedule_rules: FragmentScheduleRules | None = None,
+    pipeline_schedule: PipelineSchedule | None = None,
 ) -> MpmdConfig:
   """Creates a `MpmdConfig`, inferring the tpu topology if not provided.
 
@@ -228,8 +254,7 @@ def make_config(
     output_mesh_assignment: See `MpmdConfig`.
     partitioning_options: See `MpmdConfig`.
     read_input_output_mesh_from_shardings: see `MpmdConfig`.
-    fragment_merge_rules: See `MpmdConfig`.
-    fragment_schedule_rules: See `MpmdConfig`.
+    pipeline_schedule: See `MpmdConfig`.
 
   Returns:
     An `MpmdConfig` object.
@@ -256,13 +281,6 @@ def make_config(
       input_mesh_assignment,
       output_mesh_assignment,
   )
-  if fragment_merge_rules is None:
-    fragment_merge_rules = []
-  validate_fragment_merge_rules(fragment_merge_rules)
-
-  if fragment_schedule_rules is None:
-    fragment_schedule_rules = []
-  validate_fragment_schedule_rules(fragment_schedule_rules)
 
   return MpmdConfig(
       topology,
@@ -272,8 +290,7 @@ def make_config(
       output_mesh_assignment,
       partitioning_options,
       read_input_output_mesh_from_shardings,
-      fragment_merge_rules,
-      fragment_schedule_rules,
+      pipeline_schedule,
   )
 
 
