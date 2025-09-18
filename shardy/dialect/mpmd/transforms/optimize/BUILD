@@ -35,6 +35,7 @@ cc_library(
         "remat_fragment.cc",
         "rule_based_schedule.cc",
         "scheduler.cc",
+        "scheduling_and_rule_based_merge.cc",
     ],
     hdrs = [
         "passes.h",
@@ -101,6 +102,7 @@ cc_test(
         "//shardy/dialect/mpmd/ir:dialect",
         "//shardy/dialect/mpmd/ir:register",
         "//shardy/dialect/mpmd/transforms/common:testing_utils",
+        "//shardy/dialect/mpmd/transforms/common:utils",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",

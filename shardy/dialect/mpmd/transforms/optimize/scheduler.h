@@ -27,6 +27,7 @@ namespace mlir::mpmd {
 // is passed in then we ignore any flag-based schedule and use this comparator
 // instead.
 void AddSchedulingPass(OpPassManager& pm, PipelineSchedule pipeline_schedule,
+                       bool removeControlDependencies = true,
                        std::optional<FragmentComparator>
                            override_must_happen_before = std::nullopt);
 

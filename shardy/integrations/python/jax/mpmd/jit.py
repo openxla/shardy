@@ -29,6 +29,7 @@ import numpy as np
 import typing_extensions
 
 from shardy.integrations.python.jax.mpmd import ops
+from shardy.integrations.python.jax.mpmd import pipeline
 from shardy.integrations.python.jax.mpmd import stages
 from shardy.integrations.python.jax.mpmd import types
 from shardy.integrations.python.jax.mpmd import utils
@@ -38,7 +39,7 @@ PyTree = jaxtyping.PyTree
 
 @dataclasses.dataclass(frozen=True)
 class _MpmdPartitioningArgs:
-  """Arguments for mpmd_py.apply_mpmd_partitioning.
+  """Arguments for jaxlib_mpmd.apply_mpmd_partitioning.
 
   This is essentially a processed version of a MpmdConfig dataclass, but in a
   format that is more convenient for the C++ function. Note that users should
@@ -72,8 +73,12 @@ class _MpmdPartitioningArgs:
     tpu_topology_args_proto: See `types.MpmdConfig.tpu_info`. This is required
       for TPUs when using GSPMD partitioning.
     partitioning_options: See `types.MpmdConfig.partitioning_options`.
-    fragment_merge_rules: See `types.MpmdConfig.fragment_merge_rules`.
-    fragment_schedule_rules: See `types.MpmdConfig.fragment_schedule_rules`.
+    fragment_merge_rules: A sequence of fragment merge rules. Each merge rule
+      contains a sequence of fragment metadata objects that should be merged
+      into a single fragment, together with metadata for the resulting fragment.
+    fragment_schedule_rules: A sequence of fragment schedule rules. Each
+      schedule rule contains a sequence of fragment metadata objects in the
+      order that they should be scheduled.
   """
 
   func_name: str
@@ -97,6 +102,14 @@ class MpmdLoweredArgs:
   topology: types.Topology
   name_to_mesh_map: types.NameToMeshAssignment
   flat_input_mesh_assignment: Sequence[str] | None = None
+
+
+def _get_fragment_info(mlir_module: mlir.ir.Module) -> list[types.FragmentInfo]:
+  """Returns the fragment info for the given MLIR module."""
+  return [
+      types.convert_pybind_fragment_info_to_types(info)
+      for info in jaxlib_mpmd.get_fragment_info(mlir_module)
+  ]
 
 
 def _apply_partitioning(
@@ -281,11 +294,6 @@ class MpmdGspmdTraced(jax.stages.Traced):
         if arg_info.donated
     ]
 
-    assert not self._mpmd_config.fragment_merge_rules
-    fragment_merge_rules = []
-    assert not self._mpmd_config.fragment_schedule_rules
-    fragment_schedule_rules = []
-
     partitioning_args = _MpmdPartitioningArgs(
         func_name=func_name,
         named_meshes=topology_shape,
@@ -294,8 +302,10 @@ class MpmdGspmdTraced(jax.stages.Traced):
         output_meshes=flat_output_mesh_assignment,
         donate_argnums=donate_argnums,
         partitioning_options=self._mpmd_config.partitioning_options,
-        fragment_merge_rules=fragment_merge_rules,
-        fragment_schedule_rules=fragment_schedule_rules,
+        # These must be generated after import, once the program has been
+        # lowered to fragments
+        fragment_merge_rules=[],
+        fragment_schedule_rules=[],
     )
     lowered_args = MpmdLoweredArgs(
         stablehlo_mlir_module=stablehlo_mlir_module,
@@ -306,6 +316,71 @@ class MpmdGspmdTraced(jax.stages.Traced):
         flat_input_mesh_assignment=flat_input_mesh_assignment,
     )
     return mlir_module, partitioning_args, lowered_args
+
+  def _import_and_generate_rules(
+      self,
+      mlir_module: mlir.ir.Module,
+      partitioning_args: _MpmdPartitioningArgs,
+  ) -> tuple[jaxlib_mpmd.PartitioningResult, _MpmdPartitioningArgs]:
+    if self._mpmd_config.pipeline_schedule is None:
+      raise ValueError('Pipeline schedule is not defined')
+
+    # Override partitioning options with options required by the pipeline
+    # schedule
+    partitioning_args_with_pipeline_options = dataclasses.replace(
+        partitioning_args,
+        partitioning_options=types.override_partitioning_options(
+            mpmd_options=self._mpmd_config.pipeline_schedule.required_mpmd_options,
+            base_options_to_override=partitioning_args.partitioning_options,
+        ),
+    )
+
+    imported_result = _apply_partitioning(
+        mlir_module,
+        partitioning_args_with_pipeline_options,
+        jaxlib_mpmd.PartitioningPhase.IMPORT,
+    )
+    context = types.PipelineContext(
+        num_meshes=len(types.get_schedulable_meshes(self._mpmd_config.topology))
+    )
+    schedule_rules, merge_rules = pipeline.build_rules_from_pipeline(
+        _get_fragment_info(imported_result.partir_mpmd_module),
+        self._mpmd_config.pipeline_schedule,
+        context,
+    )
+
+    types.validate_fragment_schedule_rules(schedule_rules)
+    types.validate_fragment_merge_rules(merge_rules)
+    # Populate the partitioning args with the generated rules
+    partitioning_args_with_rules = dataclasses.replace(
+        partitioning_args_with_pipeline_options,
+        fragment_schedule_rules=types.convert_fragment_schedule_rules_to_pybind(
+            schedule_rules
+        ),
+        fragment_merge_rules=types.convert_fragment_merge_rules_to_pybind(
+            merge_rules
+        ),
+    )
+
+    return imported_result.partir_mpmd_module, partitioning_args_with_rules
+
+  def _partition_with_pipeline_schedule(
+      self,
+      mlir_module: mlir.ir.Module,
+      partitioning_args: _MpmdPartitioningArgs,
+  ) -> jaxlib_mpmd.PartitioningResult:
+
+    imported_module, partitioning_args_with_rules = (
+        self._import_and_generate_rules(mlir_module, partitioning_args)
+    )
+    partitioning_result = _apply_partitioning(
+        imported_module,
+        partitioning_args_with_rules,
+        jaxlib_mpmd.PartitioningPhase.OPTIMIZE
+        | jaxlib_mpmd.PartitioningPhase.PARTITION,
+    )
+
+    return partitioning_result
 
   @typing_extensions.override
   def lower(
@@ -327,9 +402,14 @@ class MpmdGspmdTraced(jax.stages.Traced):
         self._prepare_partitioning_args(_private_parameters)
     )
 
-    partitioning_result = _apply_partitioning(
-        mlir_module, partitioning_args, jaxlib_mpmd.PartitioningPhase.ALL
-    )
+    if self._mpmd_config.pipeline_schedule:
+      partitioning_result = self._partition_with_pipeline_schedule(
+          mlir_module, partitioning_args
+      )
+    else:
+      partitioning_result = _apply_partitioning(
+          mlir_module, partitioning_args, jaxlib_mpmd.PartitioningPhase.ALL
+      )
     ifrt_ir_module = jaxlib_mpmd.clone_mlir_module(
         partitioning_result.mpmd_module
     )
@@ -514,9 +594,11 @@ class MpmdWrapped(jax.stages.Wrapped):
     """Initializes an MpmdGspmdWrapped object."""
 
     if override_func_name:
+
       @functools.wraps(func)
       def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
+
       wrapper.__name__ = override_func_name
       self.func = wrapper
     else:
@@ -627,8 +709,8 @@ def jit(
     out_shardings: See `jax.jit`.
     donate_argnums: See `jax.jit`.
     keep_unused: See `jax.jit`.
-    override_func_name: If provided, the function name will be overridden to
-      the provided value.
+    override_func_name: If provided, the function name will be overridden to the
+      provided value.
 
   Returns:
     An MpmdGspmdWrapped object.

@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
@@ -228,6 +229,28 @@ bool IsSplitKeepTransferred(FragmentOp fragment) {
 namespace detail {
 namespace {
 
+// Verifies that the kControlOperandStartIdxAttrName attribute, if present,
+// correctly identifies where control operands begin in the operand list. This
+// is to prevent accidentally processing control operands when merging.
+void VerifyControlOperandIndex(Operation* op,
+                               ArrayRef<BlockArgument> dynamic_args,
+                               int num_static_args,
+                               const std::string& op_type) {
+  auto control_start_attr =
+      op->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  if (control_start_attr) {
+    int control_start = control_start_attr.getInt();
+    int num_dynamic_args = dynamic_args.size();
+    SDY_CHECK_EQ(control_start, num_dynamic_args)
+        << "Control operands should come directly after dynamic arguments "
+           "operands. Found control_operand_start_idx = "
+        << control_start << ", num static arguments = " << num_static_args
+        << ", num dynamic arguments = " << dynamic_args.size() << "for "
+        << op_type << " " << llvm::to_string(op->getName())
+        << ". Contact MPMD team for support.";
+  }
+}
+
 // Add all unique operands of the producer op to `new_operands` and map them
 // to the corresponding block argument. Erase all arguments whose
 // corresponding operand is already mapped to another argument, and replace
@@ -238,6 +261,9 @@ void ProcessProducerOperands(Operation* producer_op, Block& producer_block,
                              IRMapping& mapping) {
   ArrayRef<BlockArgument> dynamic_producer_args =
       producer_block.getArguments().drop_front(num_static_args);
+
+  VerifyControlOperandIndex(producer_op, dynamic_producer_args, num_static_args,
+                            "producer_op");
 
   llvm::BitVector erase_args(producer_block.getNumArguments());
   for (auto [operand, arg] :
@@ -272,11 +298,14 @@ SmallVector<Value> ProcessConsumerOperands(
 
   // Add all static arguments from the producer op to `new_consumer_args`.
   llvm::copy(producer_block.getArguments().take_front(num_static_args),
-               std::back_inserter(new_consumer_args));
+             std::back_inserter(new_consumer_args));
 
   Operation* return_op = producer_block.getTerminator();
   ArrayRef<BlockArgument> dynamic_consumer_args =
       consumer_block.getArguments().drop_front(num_static_args);
+
+  VerifyControlOperandIndex(consumer_op, dynamic_consumer_args, num_static_args,
+                            "consumer_op");
 
   for (auto [operand, arg] :
        llvm::zip(consumer_op->getOperands(), dynamic_consumer_args)) {
@@ -332,6 +361,57 @@ SmallVector<Value> ProcessProducerResults(
   }
 
   return producer_results_to_replace;
+}
+
+// Collects control operands from both producer and consumer fragments when
+// merging them.
+//
+// Control operands are identified by the kControlOperandStartIdxAttrName
+// attribute. This function filters out control operands that reference the
+// other fragment being merged, as those dependencies will no longer be valid
+// after the merge.
+//
+// The collected control operands are preserved on the merged fragment to
+// maintain scheduling constraints across the merge operation.
+SmallVector<Value> CollectControlOperands(Operation* producer_op,
+                                          Operation* consumer_op) {
+  SmallVector<Value> control_operands;
+
+  if (!producer_op || !consumer_op) {
+    return control_operands;
+  }
+
+  // Collect control operands from producer
+  auto producer_attr =
+      producer_op->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  if (producer_attr) {
+    int control_start = producer_attr.getInt();
+    for (int i = control_start; i < producer_op->getNumOperands(); ++i) {
+      Value operand = producer_op->getOperand(i);
+      // Don't add control operands that come from the consumer_op since they
+      // will no longer be valid after the merge.
+      if (operand.getDefiningOp() != consumer_op) {
+        control_operands.push_back(operand);
+      }
+    }
+  }
+
+  // Collect control operands from consumer
+  auto consumer_attr =
+      consumer_op->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  if (consumer_attr) {
+    int control_start = consumer_attr.getInt();
+    for (int i = control_start; i < consumer_op->getNumOperands(); ++i) {
+      Value operand = consumer_op->getOperand(i);
+      // Don't add control operands that come from the producer_op since they
+      // will no longer be valid after the merge.
+      if (operand.getDefiningOp() != producer_op) {
+        control_operands.push_back(operand);
+      }
+    }
+  }
+
+  return control_operands;
 }
 
 }  // namespace
@@ -404,6 +484,15 @@ Operation* MergeRegionOps(
       consumer_op, consumer_block, producer_op, producer_block, num_static_args,
       new_operands, mapping);
 
+  // Collect control operands from both fragments to preserve scheduling
+  // constraints across the merge. Control operands that reference the other
+  // fragment being merged are filtered out since they'll be invalid.
+  SmallVector<Value> control_operands =
+      CollectControlOperands(producer_op, consumer_op);
+
+  int control_operand_start_index = new_operands.size();
+  llvm::append_range(new_operands, control_operands);
+
   // We take the producer return op before merging the blocks.
   Operation* producer_return_op = producer_block.getTerminator();
 
@@ -428,14 +517,13 @@ Operation* MergeRegionOps(
 
   // Add all result types of the consumer op to `new_result_types`.
   llvm::copy(consumer_op->getResultTypes(),
-               std::back_inserter(new_result_types));
+             std::back_inserter(new_result_types));
 
   // Add all return operands of the consumer op to `new_return_operands`. Note
   // that this needs to be done after the call to `mergeBlocks` because the
   // block arguments have been replaced for the consumer block.
   Operation* return_op = producer_block.getTerminator();
-  llvm::copy(return_op->getOperands(),
-               std::back_inserter(new_return_operands));
+  llvm::copy(return_op->getOperands(), std::back_inserter(new_return_operands));
 
   // Set the operands of the return op to those of the merged block.
   return_op->setOperands(new_return_operands);
@@ -449,6 +537,15 @@ Operation* MergeRegionOps(
       rewriter.getFusedLoc({producer_op->getLoc(), consumer_op->getLoc()});
   Operation* new_op =
       create_merged_op(fused_loc, new_result_types, new_operands);
+
+  // Place the new control operand start index attribute on the merged operation
+  // so that control dependencies persist across merges until they are
+  // explicitly removed by RemoveAllControlDependencies().
+  if (!control_operands.empty()) {
+    new_op->setAttr(kControlOperandStartIdxAttrName,
+                    IntegerAttr::get(IntegerType::get(new_op->getContext(), 64),
+                                     control_operand_start_index));
+  }
 
   new_op->getRegion(0).takeBody(producer_op->getRegion(0));
 
