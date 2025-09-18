@@ -39,10 +39,10 @@ void addCanonicalizerPass(OpPassManager& pm,
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
   InsertExplicitReshardsPassOptions passOptions;
-  passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
+  passOptions.enableFullVersion = true;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
-  if (options.enableInsertExplicitCollectives) {
+  if (true) {
     addCanonicalizerPass(pm, kReshardLabel);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
