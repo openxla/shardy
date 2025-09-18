@@ -26,7 +26,7 @@ MPMD_BOOLEAN_OPTIONS = frozenset({
     'mpmd_absorb_inferred_fragments_on_entry_point_function',
     'mpmd_copy_constant_creation_from_producer_to_consumer',
     'mpmd_apply_merge_transfers_pass',
-    'mpmd_merge_after_scheduling',
+    'mpmd_merge_inferred_after_scheduling',
 })
 
 MPMD_PIPELINE_SCHEDULE_OPTION = 'mpmd_pipeline_schedule'
