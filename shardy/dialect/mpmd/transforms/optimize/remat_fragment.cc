@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 #include "llvm/ADT/SmallVector.h"
@@ -58,6 +60,8 @@ void RematFragment(IRRewriter& rewriter, FragmentOp forward_fragment,
       forward_fragment.getResults(), remat_fragment.getResults(),
       [&](OpOperand& use) { return use.getOwner() == backward_fragment; });
   if (merge_remat_fragments) {
+    std::optional<uint32_t> backward_fragment_call_counter =
+        TryToFindCallCounter(backward_fragment);
     FragmentOp merged_fragment = MergeRegionOps(
         remat_fragment, backward_fragment, rewriter,
         /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
@@ -67,6 +71,14 @@ void RematFragment(IRRewriter& rewriter, FragmentOp forward_fragment,
         GetFragmentOriginUnion(remat_fragment, backward_fragment, rewriter),
         backward_fragment.getMeshNameAttr(),
         backward_fragment.getStageIdAttr());
+    // Set the call counter of the merged fragment to the call counter of the
+    // backward fragment.
+    if (backward_fragment_call_counter.has_value()) {
+      merged_fragment->setAttr(
+          kCallCounterAttrName,
+          rewriter.getUI32IntegerAttr(backward_fragment_call_counter.value()));
+    }
+
     MarkAsRemat(merged_fragment, rewriter);
   } else {
     MarkAsRemat(remat_fragment, rewriter);

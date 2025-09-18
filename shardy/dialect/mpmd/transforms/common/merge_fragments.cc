@@ -631,18 +631,28 @@ class VerifyStageMergingPass
     func_op.walk([&](FragmentOp fragment) {
       if (IntegerAttr stage_id_attr = fragment.getStageIdAttr()) {
         StringRef mesh = fragment.getMeshName();
-        std::optional<int64_t> transpose_count =
-            TryToFindSingleTransposeCount(fragment);
+        bool is_remat = IsRemat(fragment);
         // If the fragment has a stage, then it is a user-defined fragment,
         // which means it has a transpose count.
-        SDY_CHECK(transpose_count.has_value());
+        std::optional<int64_t> single_transpose_count =
+            TryToFindSingleTransposeCount(fragment);
+        // If the fragment is a merged remat fragment, its transpose count is
+        // determined by the maximum transpose count of the remat and backward
+        // fragments that were merged.
+        std::optional<int64_t> merged_transpose_count =
+            TryToFindMaxTransposeCount(fragment);
+        SDY_CHECK(single_transpose_count.has_value() ||
+                  (merged_transpose_count.has_value() && is_remat));
+        int64_t transpose_count = single_transpose_count.has_value()
+                                      ? *single_transpose_count
+                                      : *merged_transpose_count;
 
         FragmentSignature fragment_signature = {mesh,
                                                 stage_id_attr.getInt(),
-                                                *transpose_count,
+                                                transpose_count,
                                                 TryToFindCallCounter(fragment),
                                                 GetSplitFragmentType(fragment),
-                                                IsRemat(fragment)};
+                                                is_remat};
         if (llvm::any_of(visited_fragments,
                          [&fragment_signature](const FragmentSignature& other) {
                            return FragmentSignaturesMatch(fragment_signature,
