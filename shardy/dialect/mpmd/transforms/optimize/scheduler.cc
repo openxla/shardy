@@ -39,27 +39,6 @@ namespace {
 
 using ::mlir::func::FuncOp;
 
-// Adds a control dependency in the graph so that `fragment2` depends on
-// `fragment1`.
-// NOTE: this creates an ill-formed fragment.
-void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2,
-                          DenseMap<FragmentOp, int>& ctrl_dependency_counter) {
-  // We add a new operand at the end.
-  int operand_index = fragment2.getNumOperands();
-  fragment2->insertOperands(operand_index, {fragment1->getResult(0)});
-  ctrl_dependency_counter[fragment2] += 1;
-}
-
-// Removes all control dependencies added, so that all fragments are well-formed
-// again.
-void RemoveAllControlDependencies(
-    DenseMap<FragmentOp, int>& ctrl_dependency_counter) {
-  for (auto& [fragment, counter] : ctrl_dependency_counter) {
-    const int start_index = fragment->getNumOperands() - counter;
-    fragment->eraseOperands(start_index, counter);
-  }
-}
-
 class PipelineSchedulerPass
     : public impl::PipelineSchedulerPassBase<PipelineSchedulerPass> {
   using PipelineSchedulerPassBase::PipelineSchedulerPassBase;
