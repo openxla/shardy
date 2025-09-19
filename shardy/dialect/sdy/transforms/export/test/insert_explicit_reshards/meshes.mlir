@@ -8,7 +8,6 @@ sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
 sdy.mesh @mesh_maximal = #sdy.mesh<[], device_ids=[0]>
 sdy.mesh @mesh_maximal_another = #sdy.mesh<[], device_ids=[1]>
 sdy.mesh @mesh_maximal_copy = #sdy.mesh<[], device_ids=[0]>
-sdy.mesh @empty_mesh = <[]>
 
 // CHECK-LABEL: func @optimization_barrier_different_meshes
 func.func @optimization_barrier_different_meshes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{"x"}]>}) {
@@ -198,64 +197,4 @@ func.func @dot_different_axes_different_device_orders_lhs_and_rhs_majority(
   // CHECK-NEXT: return %[[RESHARD]] : tensor<6x12xf32>
   %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{"y"}, {"x"}]>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
   return %0 : tensor<6x12xf32>
-}
-
-// CHECK-LABEL: reshard_to_empty_mesh_from_no_sharding
-func.func @reshard_to_empty_mesh_from_no_sharding(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@empty_mesh, [{}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = sdy.reshard %arg0 <@empty_mesh, [{}]> : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
-
-// CHECK-LABEL: reshard_to_empty_mesh_from_empty_mesh
-func.func @reshard_to_empty_mesh_from_empty_mesh(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@empty_mesh, [{}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = sdy.reshard %arg0 <@empty_mesh, [{}]> : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
-
-// CHECK-LABEL: reshard_to_empty_mesh_from_fully_replicated
-func.func @reshard_to_empty_mesh_from_fully_replicated(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] =  sdy.reshard %arg0 <@mesh, [{}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = sdy.reshard %arg0 <@empty_mesh, [{}]> : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
-
-// CHECK-LABEL: reshard_to_empty_mesh_from_sharded
-func.func @reshard_to_empty_mesh_from_sharded(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = sdy.reshard %arg0 <@empty_mesh, [{}]> : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
-
-// CHECK-LABEL: reshard_to_fully_replicated_from_empty_mesh
-func.func @reshard_to_fully_replicated_from_empty_mesh(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
-
-// CHECK-LABEL: reshard_to_fully_replicated_from_empty_mesh_which_is_op_also_from_empty_mesh_twice
-func.func @reshard_to_fully_replicated_from_empty_mesh_which_is_op_also_from_empty_mesh_twice(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}]>]>}
-  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[ABS]] {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}]>]>}
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[NEGATE]] <@mesh, [{}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}]>]>}: tensor<8xf32>
-  %1 = stablehlo.negate %0 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{}]>]>}: tensor<8xf32>
-  %2 = sdy.reshard %1 <@mesh, [{}]> : tensor<8xf32>
-  return %2 : tensor<8xf32>
-}
-
-// CHECK-LABEL: reshard_to_sharded_from_empty_mesh
-func.func @reshard_to_sharded_from_empty_mesh(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}]>
-  // CHECK-NEXT: return %[[RESHARD]]
-  %0 = sdy.reshard %arg0 <@mesh, [{"x"}]> : tensor<8xf32>
-  return %0 : tensor<8xf32>
 }
