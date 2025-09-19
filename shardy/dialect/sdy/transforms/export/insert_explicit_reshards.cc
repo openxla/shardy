@@ -405,6 +405,18 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      if (auto reshardOp = dyn_cast<sdy::ReshardOp>(op)) {
+        TensorShardingAttr inSharding = getSharding(reshardOp.getOperand());
+        // TODO(enver): Change the mesh in the other way as well, that is, when
+        // the input has the empty mesh and the output has a non-empty mesh.
+        if (inSharding && !inSharding.getMesh(symbolTable).empty() &&
+            reshardOp.getSharding().getMesh(symbolTable).empty()) {
+          reshardOp.setShardingAttr(
+              TensorShardingAttr::getFullyClosedLike(inSharding));
+        }
+        return;
+      }
+
       insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable);
 
       // NOTE: Creating a sharding rule requires data flow edges are present.
