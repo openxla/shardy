@@ -41,9 +41,10 @@ func.func @all_reduce_fully_delayed_until_return(%arg0: tensor<2x64x13xf32> {sdy
 // CHECK-LABEL: func @all_reduce_partially_delayed_until_return
 func.func @all_reduce_partially_delayed_until_return(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>}) -> tensor<2x13xf32> {
   // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
-  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[REDUCE]], %[[REDUCE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[ADD]] out_sharding=<@mesh, [{}, {}]>
-  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  // CHECK-NEXT: %[[ALL_REDUCE_0:.*]] = sdy.all_reduce {"y"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"x"}> : tensor<2x13xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[ALL_REDUCE_0]], %[[ALL_REDUCE_0]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
+  // CHECK-NEXT: %[[ALL_REDUCE_1:.*]] = sdy.all_reduce {"x"} %[[ADD]] out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE_1]]
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>} : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<2x13xf32>
   %2 = stablehlo.add %1, %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>} : tensor<2x13xf32>

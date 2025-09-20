@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -389,6 +390,72 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
+void processOpInMinimalVersion(Operation* op,
+                               ArrayRef<TensorShardingAttr> inShardings,
+                               ArrayRef<TensorShardingAttr> outShardings,
+                               IRRewriter& rewriter,
+                               const SymbolTable& symbolTable,
+                               OpShardingRuleAttr shardingRule,
+                               const Mesh& mesh) {
+  TypeSwitch<Operation*>(op)
+      .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
+        processDot(dotOp, inShardings, outShardings, rewriter, symbolTable,
+                   shardingRule, mesh);
+      })
+      .Case<stablehlo::DotGeneralOp>([&](stablehlo::DotGeneralOp dotGeneralOp) {
+        processDot(dotGeneralOp, inShardings, outShardings, rewriter,
+                   symbolTable, shardingRule, mesh);
+      });
+
+  // Collect unreduced axes from all results.
+  ArrayRef<AxisRefAttr> resultUnreducedAxes;
+  for (TensorShardingAttr outSharding : outShardings) {
+    if (outSharding && !outSharding.getUnreducedAxes().empty()) {
+      if (resultUnreducedAxes.empty()) {
+        resultUnreducedAxes = outSharding.getUnreducedAxes();
+      } else {
+        SDY_CHECK(resultUnreducedAxes == outSharding.getUnreducedAxes())
+            << "Unreduced axes mismatch between results for multi-result "
+               "op.";
+      }
+    }
+  }
+
+  if (resultUnreducedAxes.empty()) {
+    return;
+  }
+
+  ShardingProjection shardingProjection = ShardingProjection::build(
+      inShardings, outShardings, shardingRule, mesh.attr(),
+      /*closedIfMissing=*/true);
+  AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
+  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
+    // We only iterate operands since reduction factors are not in results.
+    bool seen = false;
+    SmallVector<AxisRefAttr>& commonAxes = commonAxesPerFactor[reductionFactor];
+    for (const TensorFactorShardings& tensorFactorSharding :
+         shardingProjection.getOperands()) {
+      if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
+              getFactorSharding(tensorFactorSharding, reductionFactor)) {
+        SmallVector<AxisRefAttr> factorShardingVector =
+            llvm::to_vector(*factorSharding);
+        if (seen) {
+          SDY_CHECK(factorShardingVector == commonAxes)
+              << "For the operation " << op
+              << ", the result has unreduced axes while the operand has "
+                 "incompatible sharding along reduction factors.";
+        } else {
+          commonAxes = factorShardingVector;
+          seen = true;
+        }
+      }
+    }
+  }
+
+  insertAllReducesForRedcutionFactors(op, commonAxesPerFactor, mesh,
+                                      shardingRule, rewriter);
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -449,16 +516,8 @@ struct InsertExplicitReshardsPass
         insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
                                    symbolTable, shardingRule, *mesh);
       } else {
-        TypeSwitch<Operation*>(op)
-            .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
-              processDot(dotOp, inShardings, outShardings, rewriter,
-                         symbolTable, shardingRule, *mesh);
-            })
-            .Case<stablehlo::DotGeneralOp>(
-                [&](stablehlo::DotGeneralOp dotGeneralOp) {
-                  processDot(dotGeneralOp, inShardings, outShardings, rewriter,
-                             symbolTable, shardingRule, *mesh);
-                });
+        processOpInMinimalVersion(op, inShardings, outShardings, rewriter,
+                                  symbolTable, shardingRule, *mesh);
       }
 
       // TODO(enver): Remove sharding rules from ops.
