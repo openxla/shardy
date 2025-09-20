@@ -124,6 +124,44 @@ func.func @input_non_owner_target_of_data_flow_edge(%arg0: tensor<32x96xf32>, %a
   return %1 : tensor<32x96xf32>
 }
 
+// CHECK-LABEL: func @unreduced_sharding_input_produced_by_data_flow_edge
+func.func @unreduced_sharding_input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
+    -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE:.*]] = sdy.data_flow_edge %arg0 sharding=<@mesh, [{?}, {?}], unreduced={"a"}> : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[SHARDING_CONSTRAINT:.*]] = sdy.sharding_constraint %[[DATA_FLOW_EDGE]] <@mesh, [{}, {"b"}], unreduced={"a"}>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]]
+  // CHECK-NEXT: return %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]], %[[ADD]]
+  %0 = sdy.data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}], unreduced={"a"}> :  tensor<8x8xf32>
+  %2 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @unreduced_sharding_input_non_owner_target_of_data_flow_edge
+func.func @unreduced_sharding_input_non_owner_target_of_data_flow_edge(%arg0: tensor<32x96xf32>, %arg1: tensor<i32>)
+    -> tensor<32x96xf32> {
+  // CHECK-NEXT: %[[WHILE:.*]]:2 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %arg1)
+  // CHECK:      } do {
+  // CHECK-NEXT:   %[[SHARDING_CONSTRAINT:.*]] = sdy.sharding_constraint %iterArg <@mesh, [{}, {"b"}], unreduced={"a"}>
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[SHARDING_CONSTRAINT]], %[[SHARDING_CONSTRAINT]]
+  // CHECK-NEXT:   stablehlo.return %[[ADD]], %iterArg_0
+  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE:.*]] = sdy.data_flow_edge %[[WHILE]]#0 sharding=<@mesh, [{?}, {?}], unreduced={"a"}> : tensor<32x96xf32>
+  // CHECK-NOT: sdy.sharding
+  %0:2 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %arg1) : tensor<32x96xf32>, tensor<i32>
+    cond {
+    %2 = stablehlo.compare  LT, %iterArg_0, %iterArg_0 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    stablehlo.return %2 : tensor<i1>
+  } do {
+    %2 = sdy.sharding_constraint %iterArg <@mesh, [{}, {"b"}], unreduced={"a"}> : tensor<32x96xf32>
+    %3 = stablehlo.add %iterArg, %iterArg : tensor<32x96xf32>
+    stablehlo.return %3, %iterArg_0 : tensor<32x96xf32>, tensor<i32>
+  }
+  %1 = sdy.data_flow_edge %0#0 : tensor<32x96xf32>
+  return %1 : tensor<32x96xf32>
+}
+
 // CHECK-LABEL: func @has_different_sharding_constraint_user
 func.func @has_different_sharding_constraint_user(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {

@@ -126,6 +126,13 @@ void applyConstraint(
   if (input.getDefiningOp<DataFlowEdgeOp>() || DataFlowEdgeOp::lookup(input)) {
     ShardingConstraintOp shardingConstraintOp = getConstraintAfterValue();
     input.replaceAllUsesExcept(shardingConstraintOp, shardingConstraintOp);
+    // If `sharding` has unreduced axes, we need to set then on the sharding of
+    // `input` directly, as unreduced axes don't propagate.
+    if (!sharding.getUnreducedAxes().empty()) {
+      setSharding(input,
+                  getOrCreateSharding(input, sharding.getMeshOrRef())
+                      .replaceUnreducedAxes(sharding.getUnreducedAxes()));
+    }
   } else {
     MLIRContext* context = op->getContext();
     OpShardingRuleAttr shardingRule =
