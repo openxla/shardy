@@ -70,17 +70,10 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     TensorShardingAttr userSharding, const SymbolTable& symbolTable,
     IRRewriter& rewriter);
 
-// Returns true if any of `axes` overlaps with `axis`.
-bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis);
-
 // Returns the factor sharding of `factorIndex` if present, or std::nullopt
 // otherwise.
 std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
     const TensorFactorShardings& factorShardings, int64_t factorIndex);
-
-// Returns whether the (first) result sharding is different than any of the
-// operand shardings. If `op` does not have any results, returns false;
-bool differentOperandShardingFromFirstResult(Operation* op);
 
 // Returns unreduced axes of given `sharding`. If `sharding` is null, returns
 // empty axes.

@@ -62,15 +62,15 @@ bool hasOverflowAxes(const ShardingProjection& shardingProjection) {
   return false;
 }
 
-bool hasShardedPermutationFactorsPerTensor(
+bool hasShardedPermutationFactors(
     const TensorFactorShardings& tensorFactorSharding,
     OpShardingRuleAttr shardingRule) {
   return llvm::any_of(tensorFactorSharding.factorIndexToSharding,
                       [&](const auto& factorIndexAndSharding) {
                         const auto& [factorIndex, factorSharding] =
                             factorIndexAndSharding;
-                        return !factorSharding.axisRefs.empty() &&
-                               shardingRule.isPermutationFactor(factorIndex);
+                        return shardingRule.isPermutationFactor(factorIndex) &&
+                               !factorSharding.axisRefs.empty();
                       });
 }
 
@@ -684,12 +684,10 @@ std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
   const int64_t lhs = tensorIndices[0];
   const int64_t rhs = tensorIndices[1];
 
-  const bool lhsHasShardedPermutationFactor =
-      hasShardedPermutationFactorsPerTensor(shardingProjection.getTensor(lhs),
-                                            shardingRule);
-  const bool rhsHasShardedPermutationFactor =
-      hasShardedPermutationFactorsPerTensor(shardingProjection.getTensor(rhs),
-                                            shardingRule);
+  const bool lhsHasShardedPermutationFactor = hasShardedPermutationFactors(
+      shardingProjection.getTensor(lhs), shardingRule);
+  const bool rhsHasShardedPermutationFactor = hasShardedPermutationFactors(
+      shardingProjection.getTensor(rhs), shardingRule);
   if (lhsHasShardedPermutationFactor != rhsHasShardedPermutationFactor) {
     return lhsHasShardedPermutationFactor ? rhs : lhs;
   }
@@ -911,10 +909,6 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   return allReduceSharding;
 }
 
-bool hasOverlappingAxis(ArrayRef<AxisRefAttr> axes, AxisRefAttr axis) {
-  return llvm::any_of(axes, [&](AxisRefAttr a) { return a.overlaps(axis); });
-}
-
 std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
     const TensorFactorShardings& factorShardings, int64_t factorIndex) {
   if (auto it = factorShardings.factorIndexToSharding.find(factorIndex);
@@ -922,16 +916,6 @@ std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
     return it->second.axisRefs;
   }
   return std::nullopt;
-}
-
-bool differentOperandShardingFromFirstResult(Operation* op) {
-  if (op->getNumResults() == 0) {
-    return false;
-  }
-  TensorShardingAttr resultSharding = getSharding(op->getResult(0));
-  return llvm::any_of(op->getOperands(), [&](Value operand) {
-    return getSharding(operand) != resultSharding;
-  });
 }
 
 ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding) {

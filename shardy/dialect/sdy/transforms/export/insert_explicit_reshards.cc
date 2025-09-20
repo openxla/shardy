@@ -208,7 +208,8 @@ void processDot(OpTy op, ArrayRef<TensorShardingAttr> inShardings,
       operandAxes = lhsAxes ? *lhsAxes : *rhsAxes;
       maxOperandSize = lhsAxes ? lhsSize : rhsSize;
       for (AxisRefAttr axis : operandAxes) {
-        if (hasOverlappingAxis(seenAxesAlongNonContractingDim, axis)) {
+        if (llvm::any_of(seenAxesAlongNonContractingDim,
+                         [&](AxisRefAttr a) { return a.overlaps(axis); })) {
           // Conflict between lhs and rhs non-contracting.
           return;
         }
@@ -358,20 +359,34 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
 }
 
 bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
-  return (enableFullVersion ||
-          op->getName().getStringRef() == "mhlo.ragged_dot" ||
-          // There are 3 cases.
-          // 1. Diff sharding -> insert explicit reshards.
-          // 2. Same sharding, concat dim is replicated -> no need to
-          // insert explicit reshards
-          // 3. Same sharding, concat dim is partitioned -> skip
-          // explicit reshard to avoid potential issues like
-          // b/393584711#comment3.
-          (isa<stablehlo::ConcatenateOp>(op) &&
-           differentOperandShardingFromFirstResult(op)) ||
-          // To avoid copies of the same functions with mismatching shardings
-          // on the arguments onto multiple callsites.
-          isa<NamedComputationOp>(op));
+  if (enableFullVersion) {
+    return true;
+  }
+
+  // The full version is disabled globally. We enable it for the following ops.
+  if (op->getName().getStringRef() == "mhlo.ragged_dot") {
+    return true;
+  }
+  // To avoid copies of the same functions with mismatching shardings on the
+  // arguments onto multiple callsites.
+  if (isa<NamedComputationOp>(op)) {
+    return true;
+  }
+
+  // For a concatenate op, we only insert explicit reshards if any of the
+  // operands has a different sharding from the result.
+  //
+  // We still need to insert explicit reshards if the operands and results share
+  // the same sharding if concat dim is partitioned. We do not insert explicit
+  // reshards in this case to avoid potential issues like b/393584711#comment3.
+  if (isa<stablehlo::ConcatenateOp>(op) &&
+      llvm::any_of(op->getOperands(), [&](Value operand) {
+        return getSharding(operand) != getSharding(op->getResult(0));
+      })) {
+    return true;
+  }
+
+  return false;
 }
 
 struct InsertExplicitReshardsPass
