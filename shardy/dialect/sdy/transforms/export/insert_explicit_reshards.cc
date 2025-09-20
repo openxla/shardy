@@ -430,7 +430,10 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      if (!onFullVersion) {
+      if (onFullVersion) {
+        insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
+                                   symbolTable, shardingRule, *mesh);
+      } else {
         TypeSwitch<Operation*>(op)
             .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
               processDot(dotOp, inShardings, outShardings, rewriter,
@@ -441,12 +444,7 @@ struct InsertExplicitReshardsPass
                   processDot(dotGeneralOp, inShardings, outShardings, rewriter,
                              symbolTable, shardingRule, *mesh);
                 });
-        return;
       }
-
-      insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
-                                 symbolTable, shardingRule, onFullVersion,
-                                 *mesh);
 
       // TODO(enver): Remove sharding rules from ops.
     });

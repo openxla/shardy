@@ -90,6 +90,15 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding);
 // empty axes.
 ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
 
+// Inserts an `sdy.all-reduce` for each result of `op` if any of its reduction
+// factors is sharded in `commonAxesPerFactor`.
+// Assume the followings:
+// - All op results have the same unreduced axes.
+// - All op results have the same mesh as `mesh` ignoring device id orders.
+void insertAllReducesForRedcutionFactors(
+    Operation* op, const AxesPerFactor& commonAxesPerFactor, const Mesh& mesh,
+    OpShardingRuleAttr shardingRule, IRRewriter& rewriter);
+
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
@@ -105,7 +114,7 @@ void insertExplicitReshardsOnOp(Operation* op,
                                 IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
                                 OpShardingRuleAttr shardingRule,
-                                bool onFullVersion, const Mesh& mesh);
+                                const Mesh& mesh);
 
 }  // namespace sdy
 }  // namespace mlir

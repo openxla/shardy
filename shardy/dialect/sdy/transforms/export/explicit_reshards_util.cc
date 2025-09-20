@@ -223,42 +223,6 @@ void insertExplicitReshards(Operation* op,
   }
 }
 
-// Inserts an `sdy.all-reduce` for each result of `op` if any of its reduction
-// factors is sharded in `commonAxesPerFactor`.
-// Assume the followings:
-// - All op results have the same unreduced axes.
-// - All op results have the same mesh as `mesh` ignoring device id orders.
-void insertAllReduces(Operation* op, const AxesPerFactor& commonAxesPerFactor,
-                      const Mesh& mesh, OpShardingRuleAttr shardingRule,
-                      IRRewriter& rewriter) {
-  if (op->getResults().empty()) {
-    return;
-  }
-
-  rewriter.setInsertionPointAfter(op);
-  SmallVector<AxisRefAttr> commonReductionAxes;
-  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    commonReductionAxes.append(commonAxesPerFactor[reductionFactor]);
-  }
-
-  // The first result unreduced axes is also the common one.
-  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-      commonReductionAxes, getUnreducedAxes(op->getResult(0)), mesh.attr());
-  if (allReduceAxes.empty()) {
-    return;
-  }
-
-  // TODO(tomnatan): consider supporting multi-input all-reduce op.
-  for (Value result : op->getResults()) {
-    TensorShardingAttr resultSharding =
-        getOrCreateSharding(result, mesh.name(),
-                            /*closedIfMissing=*/true);
-    auto allReduceOp = AllReduceOp::create(rewriter, result.getLoc(), result,
-                                           allReduceAxes, resultSharding);
-    rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
-  }
-}
-
 struct FactorAxesPair {
   constexpr static int64_t kEmptyFactorIndex = -1;
   constexpr static int64_t kTombstoneFactorIndex = -2;
@@ -978,17 +942,44 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
   return getUnreducedAxes(getSharding(value));
 }
 
+void insertAllReducesForRedcutionFactors(
+    Operation* op, const AxesPerFactor& commonAxesPerFactor, const Mesh& mesh,
+    OpShardingRuleAttr shardingRule, IRRewriter& rewriter) {
+  if (op->getResults().empty()) {
+    return;
+  }
+
+  rewriter.setInsertionPointAfter(op);
+  SmallVector<AxisRefAttr> commonReductionAxes;
+  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
+    commonReductionAxes.append(commonAxesPerFactor[reductionFactor]);
+  }
+
+  // The first result unreduced axes is also the common one.
+  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
+      commonReductionAxes, getUnreducedAxes(op->getResult(0)), mesh.attr());
+  if (allReduceAxes.empty()) {
+    return;
+  }
+
+  // TODO(tomnatan): consider supporting multi-input all-reduce op.
+  for (Value result : op->getResults()) {
+    TensorShardingAttr resultSharding =
+        getOrCreateSharding(result, mesh.name(),
+                            /*closedIfMissing=*/true);
+    auto allReduceOp = AllReduceOp::create(rewriter, result.getLoc(), result,
+                                           allReduceAxes, resultSharding);
+    rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
+  }
+}
+
 void insertExplicitReshardsOnOp(Operation* op,
                                 ArrayRef<TensorShardingAttr> inShardings,
                                 ArrayRef<TensorShardingAttr> outShardings,
                                 IRRewriter& rewriter,
                                 const SymbolTable& symbolTable,
                                 OpShardingRuleAttr shardingRule,
-                                const bool onFullVersion, const Mesh& mesh) {
-  if (!onFullVersion) {
-    return;
-  }
-
+                                const Mesh& mesh) {
   ShardingProjection shardingProjection = ShardingProjection::build(
       inShardings, outShardings, shardingRule, mesh.attr(),
       /*closedIfMissing=*/true);
@@ -1012,7 +1003,8 @@ void insertExplicitReshardsOnOp(Operation* op,
                          symbolTable, mesh);
 
   // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
-  insertAllReduces(op, commonAxesPerFactor, mesh, shardingRule, rewriter);
+  insertAllReducesForRedcutionFactors(op, commonAxesPerFactor, mesh,
+                                      shardingRule, rewriter);
 }
 
 }  // namespace sdy
