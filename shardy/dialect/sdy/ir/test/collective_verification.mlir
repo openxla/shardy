@@ -523,7 +523,7 @@ func.func @collective_permute_sharded_size_mismatch_across_dims(%arg0 : tensor<1
 sdy.mesh @mesh= <["x"=2, "y"=2]>
 
 func.func @all_reduce_mismatch_output_sharding(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"x", "y"}]>}) -> tensor<16x2xf32> {
-  // expected-error@+1 {{'sdy.all_reduce' op operand and result sharding have different axes}}
+  // expected-error@+1 {{'sdy.all_reduce' op operand and result shardings are not equivalent}}
   %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh, [{}, {"y"}]> :  tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
 }

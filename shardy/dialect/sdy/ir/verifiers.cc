@@ -1540,9 +1540,9 @@ LogicalResult AllReduceOp::verifySymbolUses(
       getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
   MeshAttr mesh = resultSharding.getMesh(symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>()));
-  // 1. Verify that the operand and result have equivalent dimension shardings.
-  if (!operandSharding.areDimAxesEqual(resultSharding)) {
-    return emitOpError("operand and result sharding have different axes");
+  // 1. Verify that the operand and result have equivalent shardings.
+  if (!operandSharding.isEquivalent(resultSharding)) {
+    return emitOpError("operand and result shardings are not equivalent");
   }
 
   // 2. Verify all reduction axes are valid.

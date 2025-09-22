@@ -22,7 +22,7 @@ include "mlir/IR/PatternBase.td"
 def HasOneUse: Constraint<CPred<"$_self.hasOneUse()">, "has one use">;
 
 def TensorShardingEquivalent : Constraint<CPred<
-    "getSharding($0).areDimAxesEqual($1) && getSharding($0).getMeshOrRef() == $1.getMeshOrRef()">,
+    "getSharding($0).isEquivalent($1)">,
     "tensor sharding equivalent">;
 
 def ReshardOfReshardPattern :

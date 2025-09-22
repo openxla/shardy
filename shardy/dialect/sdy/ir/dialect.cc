@@ -965,10 +965,18 @@ RankedTensorType TensorShardingAttr::getGlobalTensorType(
                                localTensorType.getElementType());
 }
 
-bool TensorShardingAttr::areDimAxesEqual(
-    TensorShardingAttr otherSharding) const {
+bool TensorShardingAttr::isEquivalent(TensorShardingAttr otherSharding) const {
+  if (isFullyReplicated()) {
+    return !otherSharding || otherSharding.isFullyReplicated();
+  }
+  if (!otherSharding) {
+    return false;
+  }
   ArrayRef<DimensionShardingAttr> left = getDimShardings();
   ArrayRef<DimensionShardingAttr> right = otherSharding.getDimShardings();
+  if (getMeshOrRef() != otherSharding.getMeshOrRef()) {
+    return false;
+  }
   return left.size() == right.size() &&
          llvm::all_of(llvm::zip_equal(left, right), [](auto&& pair) {
            return std::get<0>(pair).getAxes() == std::get<1>(pair).getAxes();

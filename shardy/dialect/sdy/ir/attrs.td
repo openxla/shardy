@@ -875,8 +875,9 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     RankedTensorType getGlobalTensorType(RankedTensorType localTensorType,
                                          MeshAttr mesh) const;
 
-    // Returns true if all dimensions are sharded in the same way.
-    bool areDimAxesEqual(TensorShardingAttr otherSharding) const;
+    // Returns true if all dimensions are sharded in the same way and with
+    // equal meshes.
+    bool isEquivalent(TensorShardingAttr otherSharding) const;
     }];
 }
 
