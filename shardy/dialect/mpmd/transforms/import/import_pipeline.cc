@@ -176,6 +176,11 @@ struct ImportPipelineOptions
       llvm::cl::desc(
           "Whether to merge inferred fragments only after scheduling."),
       llvm::cl::init(false)};
+
+  Option<bool> enableHeterogeneousMeshes{
+      *this, "enable-heterogeneous-meshes",
+      llvm::cl::desc("Whether to enable heterogeneous meshes."),
+      llvm::cl::init(false)};
 };
 
 }  // namespace
@@ -189,6 +194,8 @@ void registerImportPipeline() {
         ImportOptions options;
         options.nameToMeshAssignment = pipelineOptions.nameToMeshAssignment;
         options.mergeAfterScheduling = pipelineOptions.mergeAfterScheduling;
+        options.enableHeterogeneousMeshes =
+            pipelineOptions.enableHeterogeneousMeshes;
         addImportPipeline(pm, std::move(options));
       });
 }

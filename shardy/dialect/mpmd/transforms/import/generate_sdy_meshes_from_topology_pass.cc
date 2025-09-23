@@ -111,27 +111,35 @@ class GenerateSdyMeshesFromTopologyPass
             sharding.getUnreducedAxes());
       }
       StringRef mesh_name;
-      SmallVector<sdy::DimensionShardingAttr> dim_shardings;
-      for (auto dim_sharding : sharding.getDimShardings()) {
-        SmallVector<sdy::AxisRefAttr> axes;
-        for (sdy::AxisRefAttr axis : dim_sharding.getAxes()) {
+      auto rename_axes = [&mesh_name](ArrayRef<sdy::AxisRefAttr> axes) {
+        SmallVector<sdy::AxisRefAttr> new_axes;
+        for (sdy::AxisRefAttr axis : axes) {
           auto [prefix, axis_name] = axis.getName().split(kMeshAxisSeparator);
           SDY_CHECK(!axis_name.empty())
               << "Axis name does not contain '" << kMeshAxisSeparator << "'";
+          if (!mesh_name.empty() && mesh_name != prefix) {
+            SDY_CHECK(mesh_name == prefix)
+                << "Mesh name mismatch: " << mesh_name.str() << " vs "
+                << prefix.str();
+          }
           mesh_name = prefix;
-          axes.push_back(sdy::AxisRefAttr::get(
-              module_op.getContext(), axis_name, axis.getSubAxisInfo()));
+          new_axes.push_back(sdy::AxisRefAttr::get(axis.getContext(), axis_name,
+                                                   axis.getSubAxisInfo()));
         }
+        return new_axes;
+      };
+      SmallVector<sdy::DimensionShardingAttr> dim_shardings;
+      for (auto dim_sharding : sharding.getDimShardings()) {
         dim_shardings.push_back(sdy::DimensionShardingAttr::get(
-            module_op.getContext(), axes, dim_sharding.getIsClosed(),
-            dim_sharding.getPriority()));
+            module_op.getContext(), rename_axes(dim_sharding.getAxes()),
+            dim_sharding.getIsClosed(), dim_sharding.getPriority()));
       }
       SDY_CHECK(!llvm::is_contained(old_meshes, mesh_name))
           << "Invalid mesh name: " << mesh_name.str();
-      // TODO(b/440336690): Add support for replicated axes and unreduced axes.
       return sdy::TensorShardingAttr::get(
           sharding.getContext(), mesh_name, dim_shardings,
-          sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+          rename_axes(sharding.getReplicatedAxes()),
+          rename_axes(sharding.getUnreducedAxes()));
     });
 
     for (StringRef mesh_name : old_meshes) {
