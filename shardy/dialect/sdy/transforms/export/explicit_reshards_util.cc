@@ -926,7 +926,7 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
   return getUnreducedAxes(getSharding(value));
 }
 
-void insertAllReducesForRedcutionFactors(
+void insertAllReducesForReductionFactors(
     Operation* op, const AxesPerFactor& commonAxesPerFactor, const Mesh& mesh,
     OpShardingRuleAttr shardingRule, IRRewriter& rewriter) {
   if (op->getResults().empty()) {
@@ -957,13 +957,11 @@ void insertAllReducesForRedcutionFactors(
   }
 }
 
-void insertExplicitReshardsOnOp(Operation* op,
-                                ArrayRef<TensorShardingAttr> inShardings,
-                                ArrayRef<TensorShardingAttr> outShardings,
-                                IRRewriter& rewriter,
-                                const SymbolTable& symbolTable,
-                                OpShardingRuleAttr shardingRule,
-                                const Mesh& mesh) {
+std::optional<AxesPerFactor> insertExplicitReshardsOnOp(
+    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
+    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+    const Mesh& mesh) {
   ShardingProjection shardingProjection = ShardingProjection::build(
       inShardings, outShardings, shardingRule, mesh.attr(),
       /*closedIfMissing=*/true);
@@ -973,8 +971,10 @@ void insertExplicitReshardsOnOp(Operation* op,
   AxesPerFactor commonAxesPerFactor =
       findCommonAxes(inShardings, outShardings, shardingProjection,
                      shardingRule, getTensorSizes(op), symbolTable, mesh);
+  // TODO(b/446833985): Return common axes factors also when the sharding
+  // projection have overflow axes.
   if (commonAxesPerFactor.empty()) {
-    return;
+    return std::nullopt;
   }
   for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
     // TODO(enver): Add unit tests to test overflow axes are cleared after
@@ -986,9 +986,7 @@ void insertExplicitReshardsOnOp(Operation* op,
                          updateTensorShardings, rewriter, shardingRule,
                          symbolTable, mesh);
 
-  // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
-  insertAllReducesForRedcutionFactors(op, commonAxesPerFactor, mesh,
-                                      shardingRule, rewriter);
+  return commonAxesPerFactor;
 }
 
 }  // namespace sdy

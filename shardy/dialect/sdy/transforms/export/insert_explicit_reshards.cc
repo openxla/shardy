@@ -391,13 +391,16 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
-void processOpInMinimalVersion(Operation* op,
-                               ArrayRef<TensorShardingAttr> inShardings,
-                               ArrayRef<TensorShardingAttr> outShardings,
-                               IRRewriter& rewriter,
-                               const SymbolTable& symbolTable,
-                               OpShardingRuleAttr shardingRule,
-                               const Mesh& mesh) {
+std::optional<AxesPerFactor> processOp(
+    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
+    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+    const Mesh& mesh, const bool onFullVersion) {
+  if (onFullVersion) {
+    return insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
+                                      symbolTable, shardingRule, mesh);
+  }
+
   TypeSwitch<Operation*>(op)
       .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
         processDot(dotOp, inShardings, outShardings, rewriter, symbolTable,
@@ -409,6 +412,7 @@ void processOpInMinimalVersion(Operation* op,
       });
 
   // Collect unreduced axes from all results.
+  // TODO(enver): Factor out the check. It is also used in another method.
   ArrayRef<AxisRefAttr> resultUnreducedAxes;
   for (TensorShardingAttr outSharding : outShardings) {
     if (outSharding && !outSharding.getUnreducedAxes().empty()) {
@@ -421,14 +425,15 @@ void processOpInMinimalVersion(Operation* op,
       }
     }
   }
-
   if (resultUnreducedAxes.empty()) {
-    return;
+    return std::nullopt;
   }
 
   ShardingProjection shardingProjection = ShardingProjection::build(
       inShardings, outShardings, shardingRule, mesh.attr(),
       /*closedIfMissing=*/true);
+  // TODO(enver): Factor out finding common axes per factor. Share logic with
+  // getCompatibleFactorShardings.
   AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
   for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
     // We only iterate operands since reduction factors are not in results.
@@ -453,8 +458,7 @@ void processOpInMinimalVersion(Operation* op,
     }
   }
 
-  insertAllReducesForRedcutionFactors(op, commonAxesPerFactor, mesh,
-                                      shardingRule, rewriter);
+  return commonAxesPerFactor;
 }
 
 struct InsertExplicitReshardsPass
@@ -513,12 +517,13 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      if (onFullVersion) {
-        insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
-                                   symbolTable, shardingRule, *mesh);
-      } else {
-        processOpInMinimalVersion(op, inShardings, outShardings, rewriter,
-                                  symbolTable, shardingRule, *mesh);
+      if (std::optional<AxesPerFactor> commonAxesPerFactor =
+              processOp(op, inShardings, outShardings, rewriter, symbolTable,
+                        shardingRule, *mesh, onFullVersion)) {
+        // TODO(b/440055868): Insert a reshard from unreduced to replicated
+        // axes.
+        insertAllReducesForReductionFactors(op, *commonAxesPerFactor, *mesh,
+                                            shardingRule, rewriter);
       }
 
       // TODO(enver): Remove sharding rules from ops.

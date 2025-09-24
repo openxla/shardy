@@ -88,7 +88,9 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
 // Assume the followings:
 // - All op results have the same unreduced axes.
 // - All op results have the same mesh as `mesh` ignoring device id orders.
-void insertAllReducesForRedcutionFactors(
+// - Only the reduction factors are properly set in `commonAxesPerFactor`.
+// TODO(enver): Change to take axes only for reduction factors.
+void insertAllReducesForReductionFactors(
     Operation* op, const AxesPerFactor& commonAxesPerFactor, const Mesh& mesh,
     OpShardingRuleAttr shardingRule, IRRewriter& rewriter);
 
@@ -101,13 +103,13 @@ void insertAllReducesForRedcutionFactors(
 // - All op results have the same unreduced axes.
 // - If the op has no results, none of the operands has unreduced axes.
 // - Operand and result meshes are the same ignoring device id order.
-void insertExplicitReshardsOnOp(Operation* op,
-                                ArrayRef<TensorShardingAttr> inShardings,
-                                ArrayRef<TensorShardingAttr> outShardings,
-                                IRRewriter& rewriter,
-                                const SymbolTable& symbolTable,
-                                OpShardingRuleAttr shardingRule,
-                                const Mesh& mesh);
+//
+// Returns the common axes per factor.
+std::optional<AxesPerFactor> insertExplicitReshardsOnOp(
+    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
+    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+    const Mesh& mesh);
 
 }  // namespace sdy
 }  // namespace mlir
