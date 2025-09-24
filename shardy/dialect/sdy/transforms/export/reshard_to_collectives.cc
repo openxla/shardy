@@ -1328,6 +1328,10 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
       return rewriter.notifyMatchFailure(
           op, [](Diagnostic& diag) { diag << "Incompatible shardings"; });
     }
+    if (inSharding.isFullyReplicated() && outSharding.isFullyReplicated()) {
+      rewriter.replaceOp(op, adaptor.getInput());
+      return success();
+    }
     MeshAttr inMesh = inSharding.getMesh(op);
     if (inSharding.getMeshName() != outSharding.getMeshName()) {
        MeshAttr outMesh = outSharding.getMesh(op);
