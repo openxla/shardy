@@ -71,14 +71,15 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
         opOperand, operandSharding, targetSharding, symbolTable, rewriter);
   }
 
-  if (onFullVersion && shouldReshard(operandSharding, targetSharding)) {
+  if (onFullVersion && !isEquivalent(operandSharding, targetSharding)) {
     operand = opOperand.get();
     auto reshardOp = ReshardOp::create(
         rewriter, operand.getLoc(), operand,
         targetSharding
             ? targetSharding
-            // Since it should reshard and `targetSharding` is empty,
-            // `operandSharding` is guaranteed to be nonempty.
+            // Since opearand and target shardings are not equivalent and
+            // `targetSharding` is empty, `operandSharding` is guaranteed to be
+            // nonempty.
             : TensorShardingAttr::getFullyClosedLike(operandSharding));
     opOperand.set(reshardOp);
   }
