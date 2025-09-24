@@ -118,6 +118,11 @@ class GenerateSdyMeshesFromTopologyPass
           auto [prefix, axis_name] = axis.getName().split(kMeshAxisSeparator);
           SDY_CHECK(!axis_name.empty())
               << "Axis name does not contain '" << kMeshAxisSeparator << "'";
+          if (!mesh_name.empty() && mesh_name != prefix) {
+            SDY_CHECK(mesh_name == prefix)
+                << "Mesh name mismatch: " << mesh_name.str() << " vs "
+                << prefix.str();
+          }
           mesh_name = prefix;
           axes.push_back(sdy::AxisRefAttr::get(
               module_op.getContext(), axis_name, axis.getSubAxisInfo()));
