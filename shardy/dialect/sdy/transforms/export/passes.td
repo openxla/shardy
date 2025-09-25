@@ -119,9 +119,13 @@ def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"
   let dependentDialects = ["mlir::sdy::SdyDialect"];
   let description = [{
     Matches reshard ops and rewrites them into various Shardy collective
-    ops. After this pass, no reshard ops remain in the module. This pass assumes
-    that explicit reshards have already been inserted
-    (`sdy-insert-explicit-reshards`).
+    ops. After this pass, no reshard ops remain in the module.
+
+    Optionally if `keepRedundantReshards` is true, the only reshard ops that
+    remain are the redundant ones. By default it assumes that explicit reshards
+    have already been inserted (`sdy-insert-explicit-reshards`) and does not
+    keep redundant reshards. It should keep redundant reshards if explicit
+    reshards may have not been already inserted.
 
     Example:
 
@@ -146,6 +150,14 @@ def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"
     second dimension is not changed.
 
   }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let options = [
+      // TODO(enver): Drop keepRedundantReshard option once shardy partitioner
+      // migration is complete.
+      Option<"keepRedundantReshards", "keep-redundant-reshards",
+            "bool", /*default=*/"false",
+            "Whether it keeps redundant reshards or removes.">
+    ];
 }
 
 def RemoveAllGatherReduceScatterForCMV1Pass : Pass<"sdy-remove-all-gather-reduce-scatter-for-cmv1", "func::FuncOp"> {

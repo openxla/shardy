@@ -42,6 +42,8 @@ limitations under the License.
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -1366,9 +1368,15 @@ struct ReshardToCollectivesPass
 
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
-    target->addIllegalOp<ReshardOp>();
     target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,
                        CollectivePermuteOp>();
+    if (keepRedundantReshards) {
+      target->addDynamicallyLegalOp<ReshardOp>([](ReshardOp op) {
+        return isEquivalent(getSharding(op.getInput()), op.getSharding());
+      });
+    } else {
+      target->addIllegalOp<ReshardOp>();
+    }
 
     RewritePatternSet patternsInternal(context);
     patternsInternal.add<ReshardPattern>(context);
