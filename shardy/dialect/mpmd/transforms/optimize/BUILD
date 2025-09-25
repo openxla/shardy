@@ -33,6 +33,7 @@ cc_library(
     srcs = [
         "optimize_pipeline.cc",
         "remat_fragment.cc",
+        "rule_based_schedule.cc",
         "scheduler.cc",
     ],
     hdrs = [
