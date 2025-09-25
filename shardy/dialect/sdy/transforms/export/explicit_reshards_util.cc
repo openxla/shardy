@@ -47,21 +47,6 @@ namespace sdy {
 
 namespace {
 
-// Returns true iff any tensor factor sharding has non-empty overflow axes.
-bool hasOverflowAxes(const ShardingProjection& shardingProjection) {
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    for (const auto& [_, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      if (!factorSharding.overflowAxes.empty()) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 bool hasShardedPermutationFactors(
     const TensorFactorShardings& tensorFactorSharding,
     OpShardingRuleAttr shardingRule) {
@@ -72,46 +57,6 @@ bool hasShardedPermutationFactors(
                         return shardingRule.isPermutationFactor(factorIndex) &&
                                !factorSharding.axisRefs.empty();
                       });
-}
-
-// Checks if factor sharding is compatible, that is, it satisfies:
-// 1. Factors are sharded the same way across operands and results.
-// 2. Factors that need replication are unsharded.
-//
-// Returns the common axes per factor if the factor sharding is compatible.
-// Otherwise, returns std::nullopt.
-//
-// Assumes factor shardings do not have overflow axes.
-// TODO(enver): Handle the case when some factor shardings have overflow axes.
-std::optional<AxesPerFactor> getCompatibleFactorShardings(
-    const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule) {
-  AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
-  BitVector seenFactors(shardingRule.getNumFactors());
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    // Detects conflicts within the same factor.
-    for (const auto& [factorIndex, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      // Factors that need replication should be unsharded across all operands
-      // and results in order for it to have a compatible sharding.
-      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
-        if (!factorSharding.axisRefs.empty()) {
-          return std::nullopt;
-        }
-        continue;
-      }
-      if (!seenFactors.test(factorIndex)) {
-        commonAxesPerFactor[factorIndex] = factorSharding.axisRefs;
-        seenFactors.set(factorIndex);
-      } else if (factorSharding.axisRefs != commonAxesPerFactor[factorIndex]) {
-        return std::nullopt;
-      }
-    }
-  }
-
-  return commonAxesPerFactor;
 }
 
 void insertExplicitReshardsOnOperand(
@@ -156,71 +101,6 @@ bool shouldReshardToCommonMesh(TensorShardingAttr sharding, const Mesh& mesh,
   return !isFullyReplicated(sharding) &&
          sharding.getMesh(symbolTable).getDeviceIds() !=
              mesh.attr().getDeviceIds();
-}
-
-// Insert explicit reshards for operands and results that change by
-// the given `shardingProjection` for a given `op`. The reshards are inserted
-// only to make the given operation compatible.
-//
-// For example,
-//
-// ```mlir
-//   %arg0: tensor<8x32xf32> { sdy.sharding = @mesh, [{}, {"y"}]>}
-//   %arg1: tensor<32x16xf32> { sdy.sharding = <@mesh, [{"y"}, {"x"}]>}
-//   %0 = stablehlo.dot %arg0, %arg1 { sdy.sharding = <@mesh, [{"x"}, {}]>,
-//     sdy.sharding_rule = <([i, k], [k, j])->([i, j])> }
-//   %1 = stablehlo.negate %0 {sdy.sharding = <@mesh, [{"x"}, {}]>
-//   return %1
-// ```
-//
-// after a call on the stablehlo.dot operation, by the sharding projection,
-// i: {}, j: {}, k: {"y"}, the module becomes:
-//
-// ```mlir
-//   %arg0: tensor<8x32xf32> { sdy.sharding = @mesh, [{}, {"y"}]>}
-//   %arg1: tensor<32x16xf32> { sdy.sharding = <@mesh, [{"y"}, {"x"}]>}
-//   %0 = stablehlo.reshard %arg1 {sdy.sharding = <@mesh, [{"y"}, {}]>}
-//   %1 = stablehlo.dot %arg0, %0 { sdy.sharding = <@mesh, [{}, {}]>,
-//     sdy.sharding_rule = <([i, k], [k, j])->([i, j])> }
-//   %2 = stablehlo.reshard %1 {sdy.sharding = <@mesh, [{"x"}, {}]>}
-//   %3 = stablehlo.negate %2 {sdy.sharding = <@mesh, [{"x"}, {}]>
-//   return %3
-// ```
-//
-// In the above example, note that the operand and result shardings for
-// stablehlo.negate op remained unchanged.
-//
-// Assumes factor shardings do not have overflow axes.
-// TODO(enver): Handle the case when some factor shardings have overflow axes.
-//
-// Assumes all tensor shardings have the same mesh as `mesh` on axes but may be
-// different on device order.
-void insertExplicitReshards(Operation* op,
-                            ArrayRef<TensorShardingAttr> inShardings,
-                            ArrayRef<TensorShardingAttr> outShardings,
-                            const ShardingProjection& shardingProjection,
-                            UpdateTensorShardings updateTensorShardings,
-                            IRRewriter& rewriter,
-                            OpShardingRuleAttr shardingRule,
-                            const SymbolTable& symbolTable, const Mesh& mesh) {
-  rewriter.setInsertionPoint(op);
-  for (const auto& [operandIndex, operandSharding] :
-       llvm::enumerate(inShardings)) {
-    if (updateTensorShardings.updateOperands.test(operandIndex) ||
-        shouldReshardToCommonMesh(operandSharding, mesh, symbolTable)) {
-      insertExplicitReshardsOnOperand(op, operandIndex, shardingProjection,
-                                      shardingRule, mesh, rewriter);
-    }
-  }
-  rewriter.setInsertionPointAfter(op);
-  for (const auto& [resultIndex, resultSharding] :
-       llvm::enumerate(outShardings)) {
-    if (updateTensorShardings.updateResults.test(resultIndex) ||
-        shouldReshardToCommonMesh(resultSharding, mesh, symbolTable)) {
-      insertExplicitReshardsOnResult(op, resultIndex, shardingProjection,
-                                     shardingRule, mesh, rewriter);
-    }
-  }
 }
 
 struct FactorAxesPair {
@@ -796,6 +676,53 @@ void distributeAxisRefsToBatchingFactors(
     }
   }
 }
+}  // namespace
+
+bool hasOverflowAxes(const ShardingProjection& shardingProjection) {
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(), shardingProjection.getResults())) {
+    for (const auto& [_, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      if (!factorSharding.overflowAxes.empty()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// TODO(enver): Handle the case when some factor shardings have overflow axes.
+AxesPerFactor getCompatibleFactorShardings(
+    const ShardingProjection& shardingProjection,
+    OpShardingRuleAttr shardingRule) {
+  AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
+  BitVector seenFactors(shardingRule.getNumFactors());
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(), shardingProjection.getResults())) {
+    // Detects conflicts within the same factor.
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      // Factors that need replication should be unsharded across all operands
+      // and results in order for it to have a compatible sharding.
+      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
+        if (!factorSharding.axisRefs.empty()) {
+          return AxesPerFactor();
+        }
+        continue;
+      }
+      if (!seenFactors.test(factorIndex)) {
+        commonAxesPerFactor[factorIndex] = factorSharding.axisRefs;
+        seenFactors.set(factorIndex);
+      } else if (factorSharding.axisRefs != commonAxesPerFactor[factorIndex]) {
+        return AxesPerFactor();
+      }
+    }
+  }
+
+  return commonAxesPerFactor;
+}
 
 AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
                              ArrayRef<TensorShardingAttr> outShardings,
@@ -803,19 +730,6 @@ AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes,
                              const SymbolTable& symbolTable, const Mesh& mesh) {
-  // Return without inserting reshards if any factor sharding has overflow
-  // axes. This case is not handled yet.
-  // TODO(enver): Handle the case when factor shardings have overflow axes.
-  if (hasOverflowAxes(shardingProjection)) {
-    return AxesPerFactor();
-  }
-
-  // Checks if factors are sharded the same way across operands and results.
-  if (std::optional<AxesPerFactor> commonAxesPerFactor =
-          getCompatibleFactorShardings(shardingProjection, shardingRule)) {
-    return std::move(commonAxesPerFactor.value());
-  }
-
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
@@ -861,8 +775,6 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
   return tensorSizes;
 }
 
-// Returns reduction axes that are the union of all axes on reduction factors.
-// The result axes are not necessarilly canonicalized.
 SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
                                           OpShardingRuleAttr shardingRule) {
   SmallVector<AxisRefAttr> reductionAxes;
@@ -871,7 +783,6 @@ SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
   }
   return reductionAxes;
 }
-}  // namespace
 
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
@@ -958,36 +869,32 @@ void insertAllReducesForReductionFactors(Operation* op,
   }
 }
 
-SmallVector<AxisRefAttr> insertExplicitReshardsOnOp(
-    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
-    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
-    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh) {
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      inShardings, outShardings, shardingRule, mesh.attr(),
-      /*closedIfMissing=*/true);
-
-  UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
-                                              shardingRule.getNumResults());
-  AxesPerFactor commonAxesPerFactor =
-      findCommonAxes(inShardings, outShardings, shardingProjection,
-                     shardingRule, getTensorSizes(op), symbolTable, mesh);
-  // TODO(b/446833985): Return common axes factors also when the sharding
-  // projection have overflow axes.
-  if (commonAxesPerFactor.empty()) {
-    return {};
+void insertExplicitReshards(Operation* op,
+                            ArrayRef<TensorShardingAttr> inShardings,
+                            ArrayRef<TensorShardingAttr> outShardings,
+                            const ShardingProjection& shardingProjection,
+                            UpdateTensorShardings updateTensorShardings,
+                            IRRewriter& rewriter,
+                            OpShardingRuleAttr shardingRule,
+                            const SymbolTable& symbolTable, const Mesh& mesh) {
+  rewriter.setInsertionPoint(op);
+  for (const auto& [operandIndex, operandSharding] :
+       llvm::enumerate(inShardings)) {
+    if (updateTensorShardings.updateOperands.test(operandIndex) ||
+        shouldReshardToCommonMesh(operandSharding, mesh, symbolTable)) {
+      insertExplicitReshardsOnOperand(op, operandIndex, shardingProjection,
+                                      shardingRule, mesh, rewriter);
+    }
   }
-  for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
-    // TODO(enver): Add unit tests to test overflow axes are cleared after
-    // handling the case that some factors have overflow axes.
-    updateTensorShardings |=
-        shardingProjection.updateSharding(index, axes, /*overflowAxes=*/{});
+  rewriter.setInsertionPointAfter(op);
+  for (const auto& [resultIndex, resultSharding] :
+       llvm::enumerate(outShardings)) {
+    if (updateTensorShardings.updateResults.test(resultIndex) ||
+        shouldReshardToCommonMesh(resultSharding, mesh, symbolTable)) {
+      insertExplicitReshardsOnResult(op, resultIndex, shardingProjection,
+                                     shardingRule, mesh, rewriter);
+    }
   }
-  insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
-                         updateTensorShardings, rewriter, shardingRule,
-                         symbolTable, mesh);
-
-  return getReductionAxes(commonAxesPerFactor, shardingRule);
 }
 
 }  // namespace sdy
