@@ -32,6 +32,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir::mpmd {
 
@@ -129,7 +130,7 @@ class ConvertSdyShardingsToMpmdTypesPass
       // TODO(petebu): Add check for TransferOp between heterogeneous meshes.
       if (operand_sharding && result_sharding &&
           operand_sharding.getMeshName() == result_sharding.getMeshName() &&
-          sdy::shouldReshard(operand_sharding, result_sharding)) {
+          !sdy::isEquivalent(operand_sharding, result_sharding)) {
         transfer->emitError()
             << "Transfer op has different shardings for the operand and result "
                "on the same mesh, operand sharding: "

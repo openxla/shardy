@@ -862,16 +862,6 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
 }
 }  // namespace
 
-bool shouldReshard(TensorShardingAttr sourceSharding,
-                   TensorShardingAttr targetSharding) {
-  if (isFullyReplicated(sourceSharding) && isFullyReplicated(targetSharding)) {
-    return false;
-  }
-  // At this point we assume a difference between source and target unreduced
-  // axes has been resolved by inserting an all-reduce.
-  return sourceSharding != targetSharding;
-}
-
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
     TensorShardingAttr userSharding, const SymbolTable& symbolTable,

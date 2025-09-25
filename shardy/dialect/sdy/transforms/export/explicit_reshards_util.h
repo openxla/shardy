@@ -44,11 +44,6 @@ struct Mesh {
   StringRef name() const { return meshName; }
 };
 
-// Returns true if a reshard is needed to go from source sharding to target
-// sharding.
-bool shouldReshard(TensorShardingAttr sourceSharding,
-                   TensorShardingAttr targetSharding);
-
 // Inserts an `sdy.all-reduce` on `use` if `sourceSharding` has unreduced axes
 // or sub-axes that aren't in the user's unreduced axes
 // (`userSharding.getUnreducedAxes()` if present , or an empty array otherwise.)

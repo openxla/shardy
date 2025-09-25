@@ -50,6 +50,7 @@ cc_library(
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/export:explicit_reshards_util",
         "//shardy/dialect/sdy/transforms/propagation:passes",
+        "//shardy/dialect/sdy/transforms/propagation:utils",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
