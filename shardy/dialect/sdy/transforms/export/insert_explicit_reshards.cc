@@ -391,7 +391,18 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
-// Returns the union of common reducation axes which may not be canonicalized.
+// Inserts explicit reshards on the operands and results of `op` such that the
+// sharding of `op` is compatible with its sharding rule.
+//
+// Refer to the documentation of `InsertExplicitReshardsPass` for more details.
+//
+// Assume the followings:
+// - All op results have the same unreduced axes.
+// - If the op has no results, none of the operands has unreduced axes.
+// - Operand and result meshes are the same ignoring device id order.
+//
+// Returns the union of axes along all the reduction factors which may not be
+// canonicalized.
 SmallVector<AxisRefAttr> processOp(Operation* op,
                                    ArrayRef<TensorShardingAttr> inShardings,
                                    ArrayRef<TensorShardingAttr> outShardings,
@@ -399,9 +410,49 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
                                    const SymbolTable& symbolTable,
                                    OpShardingRuleAttr shardingRule,
                                    const Mesh& mesh, const bool onFullVersion) {
+  ShardingProjection shardingProjection = ShardingProjection::build(
+      inShardings, outShardings, shardingRule, mesh.attr(),
+      /*closedIfMissing=*/true);
+
+  // Return without inserting reshards if any factor sharding has overflow
+  // axes. This case is not handled yet.
+  // TODO(enver): Handle the case when factor shardings have overflow axes.
+  if (hasOverflowAxes(shardingProjection)) {
+    return {};
+  }
+
+  // Checks if factors are sharded the same way across operands and results.
+  AxesPerFactor commonAxesPerFactor =
+      getCompatibleFactorShardings(shardingProjection, shardingRule);
+
+  // TODO(b/446833985): Return common axes factors also when the sharding
+  // projection have overflow axes.
   if (onFullVersion) {
-    return insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
-                                      symbolTable, shardingRule, mesh);
+    // Find compatible shardings if it is not already compatible.
+    if (commonAxesPerFactor.empty()) {
+      commonAxesPerFactor =
+          findCommonAxes(inShardings, outShardings, shardingProjection,
+                         shardingRule, getTensorSizes(op), symbolTable, mesh);
+    }
+    // TODO(b/446833985): Return common axes factors also when the sharding
+    // projection have overflow axes.
+    if (commonAxesPerFactor.empty()) {
+      return {};
+    }
+
+    UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
+                                                shardingRule.getNumResults());
+    for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
+      // TODO(enver): Add unit tests to test overflow axes are cleared after
+      // handling the case that some factors have overflow axes.
+      updateTensorShardings |=
+          shardingProjection.updateSharding(index, axes, /*overflowAxes=*/{});
+    }
+    insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
+                           updateTensorShardings, rewriter, shardingRule,
+                           symbolTable, mesh);
+
+    return getReductionAxes(commonAxesPerFactor, shardingRule);
   }
 
   TypeSwitch<Operation*>(op)
@@ -432,13 +483,14 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
     return {};
   }
 
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      inShardings, outShardings, shardingRule, mesh.attr(),
-      /*closedIfMissing=*/true);
-  // TODO(enver): Factor out finding common axes per factor. Share logic with
-  // getCompatibleFactorShardings.
+  if (!commonAxesPerFactor.empty()) {
+    return getReductionAxes(commonAxesPerFactor, shardingRule);
+  }
+
+  // TODO(enver): Repurpose getCompatibleFactorShardings to return compatible
+  // factors, and simplify the following logic.
   SmallVector<AxisRefAttr> reductionAxes;
-  AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
+  commonAxesPerFactor = AxesPerFactor(shardingRule.getNumFactors());
   for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
     // We only iterate operands since reduction factors are not in results.
     bool seen = false;
