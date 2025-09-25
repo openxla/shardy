@@ -78,16 +78,14 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding);
 // empty axes.
 ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
 
-// Inserts an `sdy.all-reduce` for each result of `op` if any of its reduction
-// factors is sharded in `commonAxesPerFactor`.
-// Assume the followings:
+// Inserts an `sdy.all-reduce` for each result of `op` if `reductionAxes`
+// is non-empty. Assume the followings:
 // - All op results have the same unreduced axes.
 // - All op results have the same mesh as `mesh` ignoring device id orders.
-// - Only the reduction factors are properly set in `commonAxesPerFactor`.
-// TODO(enver): Change to take axes only for reduction factors.
-void insertAllReducesForReductionFactors(
-    Operation* op, const AxesPerFactor& commonAxesPerFactor, const Mesh& mesh,
-    OpShardingRuleAttr shardingRule, IRRewriter& rewriter);
+void insertAllReducesForReductionFactors(Operation* op,
+                                         ArrayRef<AxisRefAttr> reductionAxes,
+                                         const Mesh& mesh,
+                                         IRRewriter& rewriter);
 
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
@@ -99,8 +97,9 @@ void insertAllReducesForReductionFactors(
 // - If the op has no results, none of the operands has unreduced axes.
 // - Operand and result meshes are the same ignoring device id order.
 //
-// Returns the common axes per factor.
-std::optional<AxesPerFactor> insertExplicitReshardsOnOp(
+// Returns the union of axes along all the reduction factors which may not be
+// canonicalized.
+SmallVector<AxisRefAttr> insertExplicitReshardsOnOp(
     Operation* op, ArrayRef<TensorShardingAttr> inShardings,
     ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
     const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,

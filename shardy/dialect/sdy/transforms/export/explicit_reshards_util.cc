@@ -860,6 +860,17 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
   }
   return tensorSizes;
 }
+
+// Returns reduction axes that are the union of all axes on reduction factors.
+// The result axes are not necessarilly canonicalized.
+SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
+                                          OpShardingRuleAttr shardingRule) {
+  SmallVector<AxisRefAttr> reductionAxes;
+  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
+    reductionAxes.append(axesPerFactor[reductionFactor]);
+  }
+  return reductionAxes;
+}
 }  // namespace
 
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
@@ -918,22 +929,17 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
   return getUnreducedAxes(getSharding(value));
 }
 
-void insertAllReducesForReductionFactors(
-    Operation* op, const AxesPerFactor& commonAxesPerFactor, const Mesh& mesh,
-    OpShardingRuleAttr shardingRule, IRRewriter& rewriter) {
-  if (op->getResults().empty()) {
+void insertAllReducesForReductionFactors(Operation* op,
+                                         ArrayRef<AxisRefAttr> reductionAxes,
+                                         const Mesh& mesh,
+                                         IRRewriter& rewriter) {
+  if (reductionAxes.empty() || op->getResults().empty()) {
     return;
-  }
-
-  rewriter.setInsertionPointAfter(op);
-  SmallVector<AxisRefAttr> commonReductionAxes;
-  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    commonReductionAxes.append(commonAxesPerFactor[reductionFactor]);
   }
 
   // The first result unreduced axes is also the common one.
   SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-      commonReductionAxes, getUnreducedAxes(op->getResult(0)), mesh.attr());
+      reductionAxes, getUnreducedAxes(op->getResult(0)), mesh.attr());
   if (allReduceAxes.empty()) {
     return;
   }
@@ -941,6 +947,7 @@ void insertAllReducesForReductionFactors(
   sortAndMergeAxes(allReduceAxes, mesh.attr());
 
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
+  rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, mesh.name(),
@@ -951,7 +958,7 @@ void insertAllReducesForReductionFactors(
   }
 }
 
-std::optional<AxesPerFactor> insertExplicitReshardsOnOp(
+SmallVector<AxisRefAttr> insertExplicitReshardsOnOp(
     Operation* op, ArrayRef<TensorShardingAttr> inShardings,
     ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
     const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
@@ -968,7 +975,7 @@ std::optional<AxesPerFactor> insertExplicitReshardsOnOp(
   // TODO(b/446833985): Return common axes factors also when the sharding
   // projection have overflow axes.
   if (commonAxesPerFactor.empty()) {
-    return std::nullopt;
+    return {};
   }
   for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
     // TODO(enver): Add unit tests to test overflow axes are cleared after
@@ -980,7 +987,7 @@ std::optional<AxesPerFactor> insertExplicitReshardsOnOp(
                          updateTensorShardings, rewriter, shardingRule,
                          symbolTable, mesh);
 
-  return commonAxesPerFactor;
+  return getReductionAxes(commonAxesPerFactor, shardingRule);
 }
 
 }  // namespace sdy
