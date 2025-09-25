@@ -44,3 +44,21 @@ their consumer fragments.
 ```
 -merge-remat-fragments : Whether to merge the remat fragments into their consumer fragments.
 ```
+
+### `-mpmd-rule-based-schedule`
+
+_Reorders fragments based on user-defined rules._
+
+Reorders fragments by adding control dependencies based on a list of rules.
+Each rule specifies a sequence of fragments in the desired order of
+execution, and control dependencies are added to enforce that sequence.
+For example, for a rule with fragments [A, B, C], control dependencies are
+added for A->B and B->C. The pass fails if the rules create a cyclic
+dependency. If a specified fragment in a pair of fragments within a rule is
+not found, that pair is not scheduled.
+
+#### Options
+
+```
+-rules : A list of fragment schedule rules. Each rule is a list of `FragmentInfo`s that specifies the order in which the fragments should be executed.
+```
