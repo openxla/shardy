@@ -27,7 +27,7 @@ func.func @reduce_single_result_reduction_dim_sharded(%arg0: tensor<2x64x13xf32>
 func.func @reduce_single_result_multiple_reduction_dims_sharded(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}, {}]>}) -> tensor<13xf32> {
   // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [0, 1]
   // CHECK-NOT:  sdy.sharding
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y", "x"} %[[REDUCE]] out_sharding=<@mesh, [{}]>
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x", "y"} %[[REDUCE]] out_sharding=<@mesh, [{}]>
   // CHECK-NEXT: return %[[ALL_REDUCE]]
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [0, 1] : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<13xf32>
@@ -38,9 +38,7 @@ func.func @reduce_single_result_multiple_reduction_dims_sharded(%arg0: tensor<2x
 func.func @reduce_single_result_multiple_reduction_dims_sharded_sub_axis(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(2)2}, {"y", "x":(1)2}, {}]>}) -> tensor<13xf32> {
   // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [0, 1]
   // CHECK-NOT:  sdy.sharding
-  // TODO(enver, zixuanjiang): Axes should be canonicalized: merged and sorted.
-  // So that it becomes sdy.all_reduce {"x", "y"}
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x":(2)2, "y", "x":(1)2} %[[REDUCE]] out_sharding=<@mesh, [{}]>
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x", "y"} %[[REDUCE]] out_sharding=<@mesh, [{}]>
   // CHECK-NEXT: return %[[ALL_REDUCE]]
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [0, 1] : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<13xf32>

@@ -136,6 +136,21 @@ LogicalResult verifyAxisRefList(
   return success();
 }
 
+// Same as `verifyAxisRefList`, but also verifies that the axis-refs are sorted
+// w.r.t. `mesh`.
+LogicalResult verifySortedAxisRefList(
+    ArrayRef<AxisRefAttr> axisRefs,
+    const SmallDenseMap<StringRef, int64_t>& axisNameToSize,
+    SmallDenseSet<AxisRefAttr>& seenAxisRefs,
+    SmallDenseMap<StringRef, SmallVector<AxisRefAttr>>& axisNameToSubAxes,
+    EmitErrorFn emitError, MeshAttr mesh, StringRef axisRefsName) {
+  if (!llvm::is_sorted(axisRefs, AxisRefAttr::getMeshComparator(mesh))) {
+    return emitError(axisRefsName) << " axes are not ordered w.r.t. mesh";
+  }
+  return verifyAxisRefList(axisRefs, axisNameToSize, seenAxisRefs,
+                           axisNameToSubAxes, emitError);
+}
+
 // Verifies the following for each sub-axis in `subAxes`:
 //
 // - Its pre-size is at least 1.
@@ -338,25 +353,17 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
     }
   }
 
-  auto axisRefComparator = AxisRefAttr::getMeshComparator(mesh);
-  auto verifySortedAxisRefList = [&](ArrayRef<AxisRefAttr> axisRefList,
-                                     StringRef name) -> LogicalResult {
-    if (!llvm::is_sorted(axisRefList, axisRefComparator)) {
-      return emitError(name) << " axes are not ordered w.r.t. mesh";
-    }
-    return verifyAxisRefList(axisRefList, axisNameToSize, seenAxisRefs,
-                             axisNameToSubAxes, emitError);
-  };
-
   // Verify replicated axes
-  if (failed(verifySortedAxisRefList(shardingAttr.getReplicatedAxes(),
-                                     "replicated"))) {
+  if (failed(verifySortedAxisRefList(
+          shardingAttr.getReplicatedAxes(), axisNameToSize, seenAxisRefs,
+          axisNameToSubAxes, emitError, mesh, "replicated"))) {
     return failure();
   }
 
   // Verify unreduced axes
-  if (failed(verifySortedAxisRefList(shardingAttr.getUnreducedAxes(),
-                                     "unreduced"))) {
+  if (failed(verifySortedAxisRefList(
+          shardingAttr.getUnreducedAxes(), axisNameToSize, seenAxisRefs,
+          axisNameToSubAxes, emitError, mesh, "unreduced"))) {
     return failure();
   }
 
@@ -364,7 +371,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   for (auto& [axisName, subAxes] : axisNameToSubAxes) {
     int64_t axisSize = axisNameToSize[axisName];
     // We need to sort the sub-axes since this is assumed by `verifySubAxes`.
-    llvm::sort(subAxes, axisRefComparator);
+    llvm::sort(subAxes, AxisRefAttr::getMeshComparator(mesh));
     if (failed(verifySubAxes(subAxes, axisName, axisSize, mesh, seenAxisRefs,
                              emitError))) {
       return failure();
@@ -1550,8 +1557,9 @@ LogicalResult AllReduceOp::verifySymbolUses(
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
   SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
-  if (auto res = verifyAxisRefList(reductionAxes, axisNameToSize, seenAxisRefs,
-                                   axisNameToSubAxes, getEmitErrorFn(*this));
+  if (auto res = verifySortedAxisRefList(
+          reductionAxes, axisNameToSize, seenAxisRefs, axisNameToSubAxes,
+          getEmitErrorFn(*this), mesh, "reduction");
       failed(res)) {
     return res;
   }

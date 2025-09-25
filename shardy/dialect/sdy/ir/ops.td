@@ -661,6 +661,7 @@ def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
     **Constraints:**
     - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
     - `reduction_axes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - `reduction_axes` must be sorted w.r.t. the mesh.
     - The operand sharding and `out_sharding` must have equivalent dimension
       shardings.
     - `reduction_axes` must not overlap with the operand dimension sharding and

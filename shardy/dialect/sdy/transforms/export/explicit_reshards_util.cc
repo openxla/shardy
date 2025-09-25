@@ -896,6 +896,8 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   if (allReduceAxes.empty()) {
     return sourceSharding;
   }
+  SDY_CHECK(
+      llvm::is_sorted(allReduceAxes, AxisRefAttr::getMeshComparator(mesh)));
   // TODO(enver): Get this info from a single `getAxisSetDiff` call.
   SDY_CHECK(
       getAxisSetDiff(targetUnreducedAxes, sourceUnreducedAxes, mesh).empty())
@@ -945,6 +947,8 @@ void insertAllReducesForReductionFactors(
   if (allReduceAxes.empty()) {
     return;
   }
+
+  sortAndMergeAxes(allReduceAxes, mesh.attr());
 
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   for (Value result : op->getResults()) {

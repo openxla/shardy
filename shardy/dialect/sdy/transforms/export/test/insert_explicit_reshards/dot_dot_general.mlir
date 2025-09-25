@@ -453,7 +453,7 @@ func.func @dot_genaral_multiple_contracting_dims_sharded(
     %arg1: tensor<8x32x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"y"}, {"x", "z"}, {}]>})
     -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {}]>}) {
   // CHECK-NEXT: %[[DOTGENERAL:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1, 2] x [0, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {}]>]>} : (tensor<4x8x32xf32>, tensor<8x32x16xf32>) -> tensor<4x16xf32>
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y", "x", "z"} %[[DOTGENERAL]] out_sharding=<@mesh_xyz, [{}, {}]> : tensor<4x16xf32>
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x", "y", "z"} %[[DOTGENERAL]] out_sharding=<@mesh_xyz, [{}, {}]> : tensor<4x16xf32>
   // CHECK-NEXT: return %[[ALL_REDUCE]] : tensor<4x16xf32>
   %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1, 2] x [0, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {}]>]>} : (tensor<4x8x32xf32>, tensor<8x32x16xf32>) -> tensor<4x16xf32>
   return %0 : tensor<4x16xf32>

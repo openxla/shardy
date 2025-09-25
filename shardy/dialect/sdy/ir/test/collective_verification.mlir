@@ -615,6 +615,16 @@ func.func @all_reduce_reduction_axes_can_be_merged(%arg0 : tensor<16x2xf32> {sdy
 
 // -----
 
+sdy.mesh @mesh = <["x"=4, "y"=2]>
+
+func.func @all_reduce_unordered_reduction_axes(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<16x2xf32> {
+  // expected-error @+1 {{'sdy.all_reduce' op reduction axes are not ordered w.r.t. mesh}}
+  %0 = sdy.all_reduce {"y", "x"} %arg0 out_sharding=<@mesh, [{}, {}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_reduce_duplicate_reduction_axes_across_dims(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {

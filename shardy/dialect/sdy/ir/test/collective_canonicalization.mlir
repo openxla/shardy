@@ -142,7 +142,7 @@ func.func @reduce_scatter_fusion_merge_subaxis(%arg0 : tensor<16x16xf32> {sdy.sh
   // CHECK-NEXT: %0 = sdy.reduce_scatter [{"r":(2)2, "y"}, {"q":(4)2}] %arg0 out_sharding=<@mesh2, [{"r":(1)4, "y"}, {"q"}]> : tensor<16x16xf32>
   // CHECK-NEXT: %1 = sdy.all_slice [{"z"}, {"x"}] %0 out_sharding=<@mesh2, [{"r":(1)4, "y", "z"}, {"q", "x"}]> :  tensor<16x16xf32>
   // CHECK-NEXT: return %1 : tensor<16x16xf32>
-  %0 = sdy.all_reduce {"r":(2)2, "q":(4)2, "y"} %arg0 out_sharding=<@mesh2, [{"r":(1)2}, {"q":(1)4}]> : tensor<16x16xf32>
+  %0 = sdy.all_reduce {"y", "q":(4)2, "r":(2)2} %arg0 out_sharding=<@mesh2, [{"r":(1)2}, {"q":(1)4}]> : tensor<16x16xf32>
   %1 = sdy.all_slice [{"r":(2)2, "y", "z"}, {"q":(4)2, "x"}] %0 out_sharding=<@mesh2, [{"r":(1)4, "y", "z"}, {"q", "x"}]> : tensor<16x16xf32>
   return %1 : tensor<16x16xf32>
 }
@@ -152,7 +152,7 @@ func.func @reduce_scatter_fusion_not_merge_subaxis(%arg0 : tensor<16x8xf32> {sdy
   // CHECK-NEXT: %0 = sdy.reduce_scatter [{"r":(1)2, "y"}, {}] %arg0 out_sharding=<@mesh2, [{"r":(2)2, "r":(1)2, "y"}, {}]> : tensor<16x8xf32>
   // CHECK-NEXT: %1 = sdy.all_slice [{"z"}, {"x"}] %0 out_sharding=<@mesh2, [{"r":(2)2, "r":(1)2, "y", "z"}, {"x"}]> :  tensor<16x8xf32>
   // CHECK-NEXT: return %1 : tensor<16x8xf32>
-  %0 = sdy.all_reduce {"r":(1)2, "y"} %arg0 out_sharding=<@mesh2, [{"r":(2)2}, {}]> : tensor<16x8xf32>
+  %0 = sdy.all_reduce {"y", "r":(1)2} %arg0 out_sharding=<@mesh2, [{"r":(2)2}, {}]> : tensor<16x8xf32>
   %1 = sdy.all_slice [{"r":(1)2, "y", "z"}, {"x"}] %0 out_sharding=<@mesh2, [{"r":(2)2, "r":(1)2, "y", "z"}, {"x"}]> : tensor<16x8xf32>
   return %1 : tensor<16x8xf32>
 }
@@ -215,10 +215,10 @@ func.func @reduce_scatter_fusion_reduction_axes_not_matched2(%arg0 : tensor<64x1
 
 // CHECK-LABEL: func @reduce_scatter_fusion_no_subaxis_prefix_match
 func.func @reduce_scatter_fusion_no_subaxis_prefix_match(%arg0 : tensor<64x16xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<64x16xf32> {
-  // CHECK-NEXT: %0 = sdy.all_reduce {"r":(1)2, "x", "y"} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x16xf32>
+  // CHECK-NEXT: %0 = sdy.all_reduce {"x", "y", "r":(1)2} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x16xf32>
   // CHECK-NEXT: %1 = sdy.all_slice [{"r", "x", "z"}, {"y", "q"}] %0 out_sharding=<@mesh2, [{"r", "x", "z"}, {"y", "q"}]> : tensor<64x16xf32>
   // CHECK-NEXT: return %1 : tensor<64x16xf32>
-  %0 = sdy.all_reduce {"r":(1)2, "x", "y"} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x16xf32>
+  %0 = sdy.all_reduce {"x", "y", "r":(1)2} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x16xf32>
   %1 = sdy.all_slice [{"r", "x", "z"}, {"y", "q"}] %0 out_sharding=<@mesh2, [{"r", "x", "z"}, {"y", "q"}]> : tensor<64x16xf32>
   return %1 : tensor<64x16xf32>
 }
