@@ -391,6 +391,10 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
+// Assume the followings:
+// - All op results have the same unreduced axes.
+// - If the op has no results, none of the operands has unreduced axes.
+//
 // Returns the union of common reducation axes which may not be canonicalized.
 SmallVector<AxisRefAttr> processOp(Operation* op,
                                    ArrayRef<TensorShardingAttr> inShardings,
@@ -414,21 +418,7 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
                    symbolTable, shardingRule, mesh);
       });
 
-  // Collect unreduced axes from all results.
-  // TODO(enver): Factor out the check. It is also used in another method.
-  ArrayRef<AxisRefAttr> resultUnreducedAxes;
-  for (TensorShardingAttr outSharding : outShardings) {
-    if (outSharding && !outSharding.getUnreducedAxes().empty()) {
-      if (resultUnreducedAxes.empty()) {
-        resultUnreducedAxes = outSharding.getUnreducedAxes();
-      } else {
-        SDY_CHECK(resultUnreducedAxes == outSharding.getUnreducedAxes())
-            << "Unreduced axes mismatch between results for multi-result "
-               "op.";
-      }
-    }
-  }
-  if (resultUnreducedAxes.empty()) {
+  if (outShardings.empty() || getUnreducedAxes(outShardings[0]).empty()) {
     return {};
   }
 
