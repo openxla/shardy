@@ -445,6 +445,28 @@ std::optional<int64_t> TryToFindSingleTransposeCount(FragmentOp fragment) {
   return std::nullopt;
 }
 
+std::optional<int64_t> TryToFindMaxTransposeCount(FragmentOp fragment) {
+  std::vector<int64_t> transpose_counts = GetTransposeCounts(fragment);
+  if (!transpose_counts.empty()) {
+    return *std::max_element(transpose_counts.begin(), transpose_counts.end());
+  }
+  return std::nullopt;
+}
+
+std::optional<int64_t> TryToFindFragmentTransposeCount(FragmentOp fragment) {
+  std::optional<int64_t> single_transpose_count =
+      TryToFindSingleTransposeCount(fragment);
+  if (single_transpose_count.has_value()) {
+    return single_transpose_count;
+  }
+  std::optional<int64_t> merged_transpose_count =
+      TryToFindMaxTransposeCount(fragment);
+  if (IsRemat(fragment) && merged_transpose_count.has_value()) {
+    return merged_transpose_count;
+  }
+  return std::nullopt;
+}
+
 std::optional<uint32_t> TryToFindCallCounter(FragmentOp fragment) {
   if (auto count = fragment->getAttrOfType<IntegerAttr>(kCallCounterAttrName)) {
     SDY_CHECK(count.getType().isUnsignedInteger(32));

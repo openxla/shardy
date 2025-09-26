@@ -560,6 +560,30 @@ TEST(TryToFindSingleTransposeCount,
   EXPECT_THAT(TryToFindSingleTransposeCount(fragment_op), Eq(std::nullopt));
 }
 
+TEST(TryToFindMaxTransposeCount,
+     MergedRematFragmentShouldReturnMaxTransposeCount) {
+  const std::string kProgram = R"mlir(
+    !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
+      -> (!mesh_1_tensor_4_8_f32) attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(123), "f2"(321)]> (%arg0) {remat} (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+      return %0 : !mesh_1_tensor_4_8_f32
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  SDY_CHECK(module);
+  auto main_func = GetMainFunction(*module);
+  SDY_CHECK(main_func);
+  FragmentOp fragment_op = cast<FragmentOp>(*main_func.getOps().begin());
+  EXPECT_THAT(TryToFindMaxTransposeCount(fragment_op), Eq(321));
+}
+
 TEST(IsExecutedImmediatelyAfter,
      ShouldReturnTrueIfBackwardIsImmediatelyAfterForwardFragmentInSameMesh) {
   const char kProgram[] = R"mlir(

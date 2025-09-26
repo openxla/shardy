@@ -632,9 +632,7 @@ class VerifyStageMergingPass
       if (IntegerAttr stage_id_attr = fragment.getStageIdAttr()) {
         StringRef mesh = fragment.getMeshName();
         std::optional<int64_t> transpose_count =
-            TryToFindSingleTransposeCount(fragment);
-        // If the fragment has a stage, then it is a user-defined fragment,
-        // which means it has a transpose count.
+            TryToFindFragmentTransposeCount(fragment);
         SDY_CHECK(transpose_count.has_value());
 
         FragmentSignature fragment_signature = {mesh,

@@ -26,7 +26,7 @@ func.func @merge_remat_into_bwd_consumers(%arg0: !mesh_1_tensor_4_8_f32)
   } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
 
   // The forward fragment is rematted and merged into its first backward user.
-  // CHECK-NEXT: %[[BACKWARD:.*]] = mpmd.fragment<mesh="m1", origin=["f1", "f1"(1)]> (%arg0) {remat} (%arg1: tensor<4x8xf32>)
+  // CHECK-NEXT: %[[BACKWARD:.*]] = mpmd.fragment<mesh="m1", origin=["f1", "f1"(1)]> (%arg0) {call_counter = 1 : ui32, remat} (%arg1: tensor<4x8xf32>)
   // CHECK-NEXT:   add
   // CHECK-NEXT:   subtract
   // CHECK-NEXT:   return
@@ -37,7 +37,7 @@ func.func @merge_remat_into_bwd_consumers(%arg0: !mesh_1_tensor_4_8_f32)
   } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
 
   // The forward fragment is rematted and merged into its second backward user.
-  // CHECK-NEXT: %[[ANOTHER_BACKWARD:.*]] = mpmd.fragment<mesh="m1", origin=["f1", "f1"(1)]> (%arg0) {remat} (%arg1: tensor<4x8xf32>)
+  // CHECK-NEXT: %[[ANOTHER_BACKWARD:.*]] = mpmd.fragment<mesh="m1", origin=["f1", "f1"(1)]> (%arg0) {call_counter = 1 : ui32, remat} (%arg1: tensor<4x8xf32>)
   // CHECK-NEXT:   add
   // CHECK-NEXT:   multiply
   // CHECK-NEXT:   return
