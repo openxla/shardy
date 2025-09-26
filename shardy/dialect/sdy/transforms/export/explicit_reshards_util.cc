@@ -79,11 +79,11 @@ bool hasShardedPermutationFactors(
 // 2. Factors that need replication are unsharded.
 //
 // Returns the common axes per factor if the factor sharding is compatible.
-// Otherwise, returns std::nullopt.
+// Otherwise, returns empty AxesPerFactor.
 //
 // Assumes factor shardings do not have overflow axes.
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
-std::optional<AxesPerFactor> getCompatibleFactorShardings(
+AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule) {
   AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
@@ -98,7 +98,7 @@ std::optional<AxesPerFactor> getCompatibleFactorShardings(
       // and results in order for it to have a compatible sharding.
       if (shardingRule.isNeedReplicationFactor(factorIndex)) {
         if (!factorSharding.axisRefs.empty()) {
-          return std::nullopt;
+          return {};
         }
         continue;
       }
@@ -106,7 +106,7 @@ std::optional<AxesPerFactor> getCompatibleFactorShardings(
         commonAxesPerFactor[factorIndex] = factorSharding.axisRefs;
         seenFactors.set(factorIndex);
       } else if (factorSharding.axisRefs != commonAxesPerFactor[factorIndex]) {
-        return std::nullopt;
+        return {};
       }
     }
   }
@@ -590,6 +590,8 @@ AxesPerFactor toAxesPerFactor(const SmallVector<AxisListRef>& factorAxisRefs) {
 // delete all the pairs from the list that is either with the picked factor,
 // or with an axis that overlaps with the picked axis. Continue iterating
 // until the list is empty.
+//
+// Guarantees to return a non-empty AxesPerFactor.
 AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
@@ -675,7 +677,7 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   return toAxesPerFactor(factorAxisRefs);
 }
 
-std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
+int64_t findTensorIndexToPreferOnUnaryOperation(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const Mesh& mesh) {
@@ -708,21 +710,16 @@ std::optional<int64_t> findTensorIndexToPreferOnUnaryOperation(
 // 1. Either tensor does not have factors that need replication.
 // 2. Both tensors have the same mesh but may have different device orders.
 // 3. The factor shardings are not compatible.
+//
+// Guarantees to return a non-empty AxesPerFactor.
 AxesPerFactor findCommonAxesOnUnaryOperation(
     ArrayRef<TensorShardingAttr> inShardings,
     ArrayRef<TensorShardingAttr> outShardings,
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const SymbolTable& symbolTable, const Mesh& mesh) {
-  std::optional<int64_t> tensorIndexToPrefer =
-      findTensorIndexToPreferOnUnaryOperation(shardingProjection, shardingRule,
-                                              tensorSizes, mesh);
-
-  // If one tensor can not be chosen to be common axes, return empty so it skips
-  // inserting explicit reshards for the operation.
-  if (tensorIndexToPrefer == std::nullopt) {
-    return AxesPerFactor();
-  }
+  int64_t tensorIndexToPrefer = findTensorIndexToPreferOnUnaryOperation(
+      shardingProjection, shardingRule, tensorSizes, mesh);
 
   // Set factor shardings to make sure factors that do not appear in the
   // preferred tensor are sharded on the other tensor.
@@ -743,7 +740,7 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
 
   // Override with the factor shardings on the preferred tensor.
   for (const auto& [factorIndex, factorSharding] :
-       shardingProjection.getTensor(*tensorIndexToPrefer)
+       shardingProjection.getTensor(tensorIndexToPrefer)
            .factorIndexToSharding) {
     factorAxisRefs[factorIndex] = factorSharding.axisRefs;
   }
@@ -797,23 +794,20 @@ void distributeAxisRefsToBatchingFactors(
   }
 }
 
+// Assumes there are no overflow axes.
+//
+// Guarantees to return a non-empty AxesPerFactor.
 AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
                              ArrayRef<TensorShardingAttr> outShardings,
                              const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes,
                              const SymbolTable& symbolTable, const Mesh& mesh) {
-  // Return without inserting reshards if any factor sharding has overflow
-  // axes. This case is not handled yet.
-  // TODO(enver): Handle the case when factor shardings have overflow axes.
-  if (hasOverflowAxes(shardingProjection)) {
-    return AxesPerFactor();
-  }
-
   // Checks if factors are sharded the same way across operands and results.
-  if (std::optional<AxesPerFactor> commonAxesPerFactor =
-          getCompatibleFactorShardings(shardingProjection, shardingRule)) {
-    return std::move(commonAxesPerFactor.value());
+  if (AxesPerFactor commonAxesPerFactor =
+          getCompatibleFactorShardings(shardingProjection, shardingRule);
+      !commonAxesPerFactor.empty()) {
+    return commonAxesPerFactor;
   }
 
   // Handle the special case of unary operations without factors that need
@@ -969,14 +963,18 @@ SmallVector<AxisRefAttr> insertExplicitReshardsOnOp(
 
   UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                               shardingRule.getNumResults());
+
+  // Return without inserting reshards if any factor sharding has overflow
+  // axes. This case is not handled yet.
+  // TODO(b/446833985): Handle the case when factor shardings have overflow
+  // axes.
+  if (hasOverflowAxes(shardingProjection)) {
+    return {};
+  }
+
   AxesPerFactor commonAxesPerFactor =
       findCommonAxes(inShardings, outShardings, shardingProjection,
                      shardingRule, getTensorSizes(op), symbolTable, mesh);
-  // TODO(b/446833985): Return common axes factors also when the sharding
-  // projection have overflow axes.
-  if (commonAxesPerFactor.empty()) {
-    return {};
-  }
   for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
     // TODO(enver): Add unit tests to test overflow axes are cleared after
     // handling the case that some factors have overflow axes.
