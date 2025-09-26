@@ -21,7 +21,6 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
-#include "shardy/dialect/sdy/transforms/import/apply_sharding_constraints.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"
 
 namespace mlir {
@@ -66,7 +65,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
-  pm.addPass(createApplyShardingConstraintsPass(options));
+  pm.addPass(
+      createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
+          options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
   // The sharding group import pass must run after applying sharding
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.

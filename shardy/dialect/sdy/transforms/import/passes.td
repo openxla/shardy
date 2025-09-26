@@ -105,6 +105,19 @@ def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "Modul
     dangling case).
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+
+  let options = [
+    Option<"debugShardingOrigins", "debug-sharding-origins", "bool",
+           /*default=*/"false",
+           "Whether to compute the debug origin shardings for constraints. See "
+           "`debug-sharding-origins` option in propagation for more info.">,
+    Option<"debugPropagationEdges",
+           "debug-propagation-edge-sharding", "bool",
+           /*default=*/"false",
+           "Whether to sink the debug propagation edge sharding info. See "
+           "`debug-propagation-edge-sharding` option in propagation for more "
+           "info.">
+  ];
 }
 
 def ConstantOrScalarSplitterPass : Pass<"sdy-constant-or-scalar-splitter", "func::FuncOp"> {

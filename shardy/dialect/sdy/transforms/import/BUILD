@@ -44,7 +44,6 @@ cc_library(
         "sharding_group_import.cc",
     ],
     hdrs = [
-        "apply_sharding_constraints.h",
         "passes.h",
     ],
     deps = [
