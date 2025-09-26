@@ -111,8 +111,7 @@ class GenerateSdyMeshesFromTopologyPass
             sharding.getUnreducedAxes());
       }
       StringRef mesh_name;
-      auto rename_axes = [&mesh_name](ArrayRef<sdy::AxisRefAttr> axes) {
-        SmallVector<sdy::AxisRefAttr> new_axes;
+      auto check_axes = [&mesh_name](ArrayRef<sdy::AxisRefAttr> axes) {
         for (sdy::AxisRefAttr axis : axes) {
           auto [prefix, axis_name] = axis.getName().split(kMeshAxisSeparator);
           SDY_CHECK(!axis_name.empty())
@@ -123,23 +122,18 @@ class GenerateSdyMeshesFromTopologyPass
                 << prefix.str();
           }
           mesh_name = prefix;
-          new_axes.push_back(sdy::AxisRefAttr::get(axis.getContext(), axis_name,
-                                                   axis.getSubAxisInfo()));
         }
-        return new_axes;
       };
-      SmallVector<sdy::DimensionShardingAttr> dim_shardings;
       for (auto dim_sharding : sharding.getDimShardings()) {
-        dim_shardings.push_back(sdy::DimensionShardingAttr::get(
-            module_op.getContext(), rename_axes(dim_sharding.getAxes()),
-            dim_sharding.getIsClosed(), dim_sharding.getPriority()));
+        check_axes(dim_sharding.getAxes());
       }
+      check_axes(sharding.getReplicatedAxes());
+      check_axes(sharding.getUnreducedAxes());
       SDY_CHECK(!llvm::is_contained(old_meshes, mesh_name))
           << "Invalid mesh name: " << mesh_name.str();
       return sdy::TensorShardingAttr::get(
-          sharding.getContext(), mesh_name, dim_shardings,
-          rename_axes(sharding.getReplicatedAxes()),
-          rename_axes(sharding.getUnreducedAxes()));
+          sharding.getContext(), mesh_name, sharding.getDimShardings(),
+          sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
     });
 
     for (StringRef mesh_name : old_meshes) {
