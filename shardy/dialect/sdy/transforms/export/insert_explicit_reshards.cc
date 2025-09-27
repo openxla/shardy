@@ -395,7 +395,7 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
 // - All op results have the same unreduced axes.
 // - If the op has no results, none of the operands has unreduced axes.
 //
-// Returns the union of common reducation axes which may not be canonicalized.
+// Returns the union of common reduction axes which may not be canonicalized.
 SmallVector<AxisRefAttr> processOp(Operation* op,
                                    ArrayRef<TensorShardingAttr> inShardings,
                                    ArrayRef<TensorShardingAttr> outShardings,
@@ -427,32 +427,29 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
       /*closedIfMissing=*/true);
   // TODO(enver): Factor out finding common axes per factor. Share logic with
   // getCompatibleFactorShardings.
-  SmallVector<AxisRefAttr> reductionAxes;
-  AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
+  SmallVector<AxisRefAttr> axesAlongAllReductionFactors;
   for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
     // We only iterate operands since reduction factors are not in results.
     bool seen = false;
-    SmallVector<AxisRefAttr>& commonAxes = commonAxesPerFactor[reductionFactor];
+    SmallVector<AxisRefAttr> axesAlongCurrentReductionFactor;
     for (const TensorFactorShardings& tensorFactorSharding :
          shardingProjection.getOperands()) {
       if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
               getFactorSharding(tensorFactorSharding, reductionFactor)) {
-        SmallVector<AxisRefAttr> factorShardingVector =
-            llvm::to_vector(*factorSharding);
         if (seen) {
-          SDY_CHECK(factorShardingVector == commonAxes)
+          SDY_CHECK(axesAlongCurrentReductionFactor == *factorSharding)
               << "For the operation " << op
               << ", the result has unreduced axes while the operand has "
                  "incompatible sharding along reduction factors.";
         } else {
-          commonAxes = factorShardingVector;
+          axesAlongCurrentReductionFactor = llvm::to_vector(*factorSharding);
           seen = true;
         }
-        reductionAxes.append(commonAxes);
       }
     }
+    axesAlongAllReductionFactors.append(axesAlongCurrentReductionFactor);
   }
-  return reductionAxes;
+  return axesAlongAllReductionFactors;
 }
 
 struct InsertExplicitReshardsPass
