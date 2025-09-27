@@ -61,6 +61,13 @@ constraints on the corresponding operands, so this pass will also apply
 their sharding if the above conditions are satisfied (except for the
 dangling case).
 
+#### Options
+
+```
+-debug-sharding-origins          : Whether to compute the debug origin shardings for constraints. See `debug-sharding-origins` option in propagation for more info.
+-debug-propagation-edge-sharding : Whether to sink the debug propagation edge sharding info. See `debug-propagation-edge-sharding` option in propagation for more info.
+```
+
 ### `-sdy-constant-or-scalar-splitter`
 
 _Splits constant and scalar expansions so each has a single use._
