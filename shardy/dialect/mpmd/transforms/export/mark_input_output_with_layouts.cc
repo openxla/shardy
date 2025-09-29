@@ -22,7 +22,6 @@ limitations under the License.
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/fragment_arg_res_attrs.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
@@ -37,26 +36,36 @@ namespace {
 
 using ::mlir::func::FuncOp;
 
-bool IsAutoLayout(StringAttr layout) {
+bool isAutoLayout(StringAttr layout) {
   return layout && layout == kLayoutModeAuto;
 }
 
 // A layout attribute denotes a default layout if it is empty or if it is a
 // `default` string.
-bool IsDefaultLayout(StringAttr layout) {
+bool isDefaultLayout(StringAttr layout) {
   return !layout || layout == kLayoutModeDefault;
 }
 
 // Two layouts are compatible if: 1) they are both default layouts, 2) they are
 // identical custom layouts, or 3) one or both are auto layouts.
-bool AreLayoutsCompatible(StringAttr layout1, StringAttr layout2) {
-  if (IsDefaultLayout(layout1) && IsDefaultLayout(layout2)) {
+bool areLayoutsCompatible(StringAttr layout1, StringAttr layout2) {
+  if (isDefaultLayout(layout1) && isDefaultLayout(layout2)) {
     return true;
   }
-  if (IsAutoLayout(layout1) || IsAutoLayout(layout2)) {
+  if (isAutoLayout(layout1) || isAutoLayout(layout2)) {
     return true;
   }
   return layout1 == layout2;
+}
+
+void setFragmentLayout(SmallVector<Attribute>& attrs, int idx,
+                       StringAttr layout) {
+  if (isDefaultLayout(layout)) {
+    RemoveAttr(attrs[idx], kLayoutModeAttr);
+  } else {
+    InsertAttr(attrs[idx], kLayoutModeAttr, layout,
+               /*insert_if_not_present=*/true);
+  }
 }
 
 class MarkInputOutputWithLayoutsPass
@@ -69,187 +78,176 @@ class MarkInputOutputWithLayoutsPass
     if (!IsEntryPointFunction(func)) {
       return;
     }
-
-    // Propagate layouts for func args that are returned from the func.
-    // It is necessary to do this before propagating layouts from func args or
-    // results to fragment arg or results because this function might refine
-    // func arg/result layouts (e.g., an auto arg layout is converted to a
-    // custom layout if the arg's corresponding result has a custom layout).
-    if (!PropagateLayoutsForReturnedFuncArgs(func)) {
-      signalPassFailure();
-      return;
-    }
-
-    // Propagate layouts from func args/results to fragment arg/results.
-    for (FragmentOp frag : func.getOps<FragmentOp>()) {
-      if (!PropagateFuncLayoutsToFragments(frag, func)) {
+    for (BlockArgument programArg : func.getArguments()) {
+      if (!propagateInputsToEverything(programArg, func)) {
         signalPassFailure();
         return;
       }
     }
+    for (FragmentOp frag : func.getOps<FragmentOp>()) {
+      SmallVector<Attribute> fragResAttrs = GetResAttrsOrCreateDefault(frag);
+      for (OpResult fragRes : frag->getOpResults()) {
+        if (!propagateFragmentResultsToEverything(fragRes, func,
+                                                  fragResAttrs)) {
+          signalPassFailure();
+          return;
+        }
+      }
+      SetResAttrs(frag, fragResAttrs);
+    }
   }
 
-  // Propagates layouts from func args/results to fragment arg/results.
-  // Returns false if a fragment result is returned multiple times with
-  // incompatible layouts. See `AreLayoutsCompatible` for the definition of when
-  // layouts are considered compatible.
-  bool PropagateFuncLayoutsToFragments(FragmentOp frag, FuncOp parent) {
-    SmallVector<Attribute> arg_attrs = GetArgAttrsOrCreateDefault(frag);
-    for (OpOperand& operand : frag->getOpOperands()) {
-      if (auto block_arg = dyn_cast<BlockArgument>(operand.get())) {
-        SDY_CHECK_EQ(block_arg.getOwner()->getParentOp(), parent);
-        if (auto layout_attr = parent.getArgAttrOfType<StringAttr>(
-                block_arg.getArgNumber(), kLayoutModeAttr)) {
-          if (IsDefaultLayout(layout_attr)) {
-            // Remove the layout attribute because the default layout is
-            // implicit.
-            parent.removeArgAttr(
-                block_arg.getArgNumber(),
-                StringAttr::get(parent.getContext(), kLayoutModeAttr));
-          } else {
-            InsertAttr(arg_attrs[operand.getOperandNumber()], kLayoutModeAttr,
-                       layout_attr);
-          }
-        }
-      }
+  // Choose layout for FragmentOp result based on its uses {TransferOp,
+  // ReturnOp, another FragmentOp} and then propagate to all these uses.
+  //
+  // *Important*: If the chosen layout is AUTO, but there are uses in any
+  // fragment, enforce DEFAULT layout, since we don't support cross-fragment
+  // layout propagation.
+  bool propagateFragmentResultsToEverything(
+      OpResult fragRes, FuncOp& programFunc,
+      SmallVector<Attribute>& fragResAttrs) {
+    // the fragment result layouts are not set by default - meaning they are
+    // auto
+    StringAttr fragResLayoutAttr =
+        StringAttr::get(programFunc.getContext(), kLayoutModeAuto);
+    if (fragRes.use_empty()) {
+      setFragmentLayout(fragResAttrs, fragRes.getResultNumber(),
+                        fragResLayoutAttr);
+      return true;
     }
-    SetArgAttrs(frag, arg_attrs);
-
-    SmallVector<Attribute> res_attrs = GetResAttrsOrCreateDefault(frag);
-    for (const OpResult& res : frag->getOpResults()) {
-      StringAttr frag_result_layout_attr;
-      int propagated_from_result_idx = -1;
-      for (OpOperand& operand : res.getUses()) {
-        // Only propagate result layouts from the func op to the fragment op.
-        if (operand.getOwner() != parent.front().getTerminator()) {
-          continue;
-        }
-        auto func_result_layout_attr = parent.getResultAttrOfType<StringAttr>(
-            operand.getOperandNumber(), kLayoutModeAttr);
-        if (propagated_from_result_idx == -1 ||
-            IsAutoLayout(frag_result_layout_attr)) {
-          // Propagate from the func result if no layout has been propagated
-          // yet or the propagated layout is auto. It is always safe to
-          // propagate to auto layouts because in the worst case we'll get
-          // another auto layout.
-          propagated_from_result_idx = operand.getOperandNumber();
-          frag_result_layout_attr = func_result_layout_attr;
-        } else if (!AreLayoutsCompatible(func_result_layout_attr,
-                                         frag_result_layout_attr)) {
-          emitError(operand.getOwner()->getLoc())
-              << "Result #" << operand.getOperandNumber()
-              << " is also returned as result #" << propagated_from_result_idx
-              << ", but with incompatible layouts: " << func_result_layout_attr
-              << " vs. " << frag_result_layout_attr;
-          return false;
-        }
+    int numUsesInFragments = 0;
+    int propagatedFromProgramResIdx = -1;
+    for (OpOperand& use : fragRes.getUses()) {
+      if (isa<TransferOp>(use.getOwner())) {
+        // if used in a transfer op, we *MUST* stick to default layout, since
+        // ifrt transfers only support default layouts
+        fragResLayoutAttr =
+            StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
+        break;
       }
-
-      if (propagated_from_result_idx > -1 && frag_result_layout_attr) {
-        if (!IsDefaultLayout(frag_result_layout_attr)) {
-          InsertAttr(res_attrs[res.getResultNumber()], kLayoutModeAttr,
-                     frag_result_layout_attr);
-        }
-        // Update the parent result layout in case the fragment result is
-        // returned multiple times, and this has helped refined the result
-        // layouts further.
-        for (OpOperand& operand : res.getUses()) {
-          if (operand.getOwner() != parent.front().getTerminator()) {
-            continue;
-          }
-          if (IsDefaultLayout(frag_result_layout_attr)) {
-            parent.removeResultAttr(
-                operand.getOperandNumber(),
-                StringAttr::get(parent.getContext(), kLayoutModeAttr));
-          } else {
-            parent.setResultAttr(operand.getOperandNumber(), kLayoutModeAttr,
-                                 frag_result_layout_attr);
-          }
-        }
-      }
-    }
-    SetResAttrs(frag, res_attrs);
-    return true;
-  }
-
-  // Propagates layouts for func args that are returned from the func. Emits
-  // an error and returns false if a func arg and its corresponding results have
-  // incompatible layouts. Otherwise, it finds the layout that is compatible and
-  // possibly specified (i.e., device and custom layouts) from the func arg and
-  // its corresponding results layouts, and updates their attributes to this
-  // layout.
-  bool PropagateLayoutsForReturnedFuncArgs(FuncOp func) {
-    for (BlockArgument arg : func.getArguments()) {
-      if (arg.use_empty()) {
+      if (use.getOwner() != programFunc.front().getTerminator()) {
+        numUsesInFragments++;
         continue;
       }
-
-      // Find the possibly specified and compatible layout from the results
-      // corresponding to the arg.
-      StringAttr res_layout_attr;
-      int propagated_from_result_idx = -1;
-      for (OpOperand& use : arg.getUses()) {
-        if (!isa<func::ReturnOp>(use.getOwner())) {
-          continue;
-        }
-        auto func_res_layout_attr = func.getResultAttrOfType<StringAttr>(
-            use.getOperandNumber(), kLayoutModeAttr);
-        if (propagated_from_result_idx == -1 || IsAutoLayout(res_layout_attr)) {
-          res_layout_attr = func_res_layout_attr;
-          propagated_from_result_idx = use.getOperandNumber();
-        } else if (!AreLayoutsCompatible(res_layout_attr,
-                                         func_res_layout_attr)) {
-          emitError(func->getLoc())
-              << "Arg #" << arg.getArgNumber() << " is returned as result #"
-              << propagated_from_result_idx << " and result #"
-              << use.getOperandNumber()
-              << ", but with incompatible layouts: " << res_layout_attr
-              << " vs. " << func_res_layout_attr;
-          return false;
-        }
+      StringAttr programResLayoutAttr =
+          programFunc.getResultAttrOfType<StringAttr>(use.getOperandNumber(),
+                                                      kLayoutModeAttr);
+      if (!areLayoutsCompatible(fragResLayoutAttr, programResLayoutAttr)) {
+        emitError(use.getOwner()->getLoc())
+            << "Result #" << propagatedFromProgramResIdx
+            << " is also returned as result #" << use.getOperandNumber()
+            << ", but with incompatible layouts: " << fragResLayoutAttr
+            << " vs. " << programResLayoutAttr;
+        return false;
       }
-
-      // No propagation is required because the arg is not returned.
-      if (propagated_from_result_idx == -1) {
-        continue;
+      if (!isAutoLayout(programResLayoutAttr) &&
+          isAutoLayout(fragResLayoutAttr)) {
+        fragResLayoutAttr = programResLayoutAttr;
+        propagatedFromProgramResIdx = use.getOperandNumber();
       }
-      if (auto arg_layout_attr = func.getArgAttrOfType<StringAttr>(
-              arg.getArgNumber(), kLayoutModeAttr);
-          AreLayoutsCompatible(res_layout_attr, arg_layout_attr)) {
-        if (IsAutoLayout(arg_layout_attr)) {
-          arg_layout_attr = res_layout_attr;
-        }
-        // Update the arg layout and the corresponding result layouts to the
-        // compatible layout. If the compatible layout is device default then
-        // we remove the layout attribute because the default layout is
-        // implicit.
-        if (IsDefaultLayout(arg_layout_attr)) {
-          func.removeArgAttr(arg.getArgNumber(), kLayoutModeAttr);
+    }
+    if (isAutoLayout(fragResLayoutAttr) && (numUsesInFragments > 0)) {
+      fragResLayoutAttr =
+          StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
+    }
+    setFragmentLayout(fragResAttrs, fragRes.getResultNumber(),
+                      fragResLayoutAttr);
+    for (OpOperand& use : fragRes.getUses()) {
+      if (FragmentOp fragOp = dyn_cast<FragmentOp>(use.getOwner())) {
+        SmallVector<Attribute> fragAttrs = GetArgAttrsOrCreateDefault(fragOp);
+        setFragmentLayout(fragAttrs, use.getOperandNumber(), fragResLayoutAttr);
+        SetArgAttrs(fragOp, fragAttrs);
+      } else if (use.getOwner() == programFunc.front().getTerminator()) {
+        if (isDefaultLayout(fragResLayoutAttr)) {
+          programFunc.removeResultAttr(use.getOperandNumber(), kLayoutModeAttr);
         } else {
-          func.setArgAttr(arg.getArgNumber(), kLayoutModeAttr, arg_layout_attr);
+          programFunc.setResultAttr(use.getOperandNumber(), kLayoutModeAttr,
+                                    fragResLayoutAttr);
         }
-        for (OpOperand& use : arg.getUses()) {
-          if (isa<func::ReturnOp>(use.getOwner())) {
-            if (IsDefaultLayout(arg_layout_attr)) {
-              func.removeResultAttr(
-                  use.getOperandNumber(),
-                  StringAttr::get(func.getContext(), kLayoutModeAttr));
-            } else {
-              func.setResultAttr(use.getOperandNumber(), kLayoutModeAttr,
-                                 arg_layout_attr);
-            }
-          }
-        }
-      } else {
-        emitError(func->getLoc())
-            << "Arg #" << arg.getArgNumber() << " is returned as result #"
-            << propagated_from_result_idx
-            << ", but with incompatible layouts: " << arg_layout_attr << " vs. "
-            << res_layout_attr;
       }
     }
     return true;
   }
+
+  // Choose a common layout for program arg based on its initial value and uses
+  // {TransferOp(always DEFAULT), ReturnOp, another FragmentOp}, and then
+  // propagate to all these uses.
+  //
+  // *Important*: If the chosen layout is AUTO, but there are *MORE THAN ONE*
+  // use in a fragment, enforce DEFAULT layout, since we don't support
+  // cross-fragment layout propagation yet.
+  bool propagateInputsToEverything(BlockArgument arg, FuncOp& programFunc) {
+    StringAttr argLayout = programFunc.getArgAttrOfType<StringAttr>(
+        arg.getArgNumber(), kLayoutModeAttr);
+    if (arg.use_empty()) {
+      if (isDefaultLayout(argLayout)) {
+        programFunc.removeArgAttr(arg.getArgNumber(), kLayoutModeAttr);
+      }
+      return true;
+    }
+
+    int numUsesInFragments = 0;
+    int propagatedFromResultIdx = -1;
+    for (OpOperand& use : arg.getUses()) {
+      if (isa<TransferOp>(use.getOwner())) {
+        // if used in a transfer op, we *MUST* stick to default layout, since
+        // ifrt transfers only support default layouts
+        argLayout =
+            StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
+        break;
+      }
+      if (use.getOwner() != programFunc.front().getTerminator()) {
+        numUsesInFragments++;
+        continue;
+      }
+      StringAttr resultLayoutAttr = programFunc.getResultAttrOfType<StringAttr>(
+          use.getOperandNumber(), kLayoutModeAttr);
+      if (!areLayoutsCompatible(argLayout, resultLayoutAttr)) {
+        if (propagatedFromResultIdx == -1) {
+          emitError(programFunc->getLoc())
+              << "Arg #" << arg.getArgNumber() << " is returned as result #"
+              << use.getOperandNumber()
+              << ", but with incompatible layouts: " << argLayout << " vs. "
+              << resultLayoutAttr;
+          return false;
+        }
+        emitError(programFunc->getLoc())
+            << "Arg #" << arg.getArgNumber() << " is returned as result #"
+            << propagatedFromResultIdx << " and result #"
+            << use.getOperandNumber()
+            << ", but with incompatible layouts: " << argLayout << " vs. "
+            << resultLayoutAttr;
+        return false;
+      }
+      if (!isAutoLayout(resultLayoutAttr) && isAutoLayout(argLayout)) {
+        propagatedFromResultIdx = use.getOperandNumber();
+        argLayout = resultLayoutAttr;
+      }
+    }
+    if (isAutoLayout(argLayout) && (numUsesInFragments > 1)) {
+      argLayout = StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
+    }
+    if (isDefaultLayout(argLayout)) {
+      programFunc.removeArgAttr(arg.getArgNumber(), kLayoutModeAttr);
+    } else {
+      programFunc.setArgAttr(arg.getArgNumber(), kLayoutModeAttr, argLayout);
+    }
+    for (OpOperand& use : arg.getUses()) {
+      if (FragmentOp fragOp = dyn_cast<FragmentOp>(use.getOwner())) {
+        SmallVector<Attribute> fragAttrs = GetArgAttrsOrCreateDefault(fragOp);
+        setFragmentLayout(fragAttrs, use.getOperandNumber(), argLayout);
+        SetArgAttrs(fragOp, fragAttrs);
+      } else if (use.getOwner() == programFunc.front().getTerminator()) {
+        if (isDefaultLayout(argLayout)) {
+          programFunc.removeResultAttr(use.getOperandNumber(), kLayoutModeAttr);
+        } else {
+          programFunc.setResultAttr(use.getOperandNumber(), kLayoutModeAttr,
+                                    argLayout);
+        }
+      }
+    }
+    return true;
+  };
 };
 
 }  // namespace
