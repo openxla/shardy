@@ -71,15 +71,8 @@ bool hasShardedPermutationFactors(
                                !factorSharding.axisRefs.empty();
                       });
 }
+}  // namespace
 
-// Checks if factor sharding is compatible, that is, it satisfies:
-// 1. Factors are sharded the same way across operands and results.
-// 2. Factors that need replication are unsharded.
-//
-// Returns the common axes per factor if the factor sharding is compatible.
-// Otherwise, returns empty AxesPerFactor.
-//
-// Assumes factor shardings do not have overflow axes.
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
 AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
@@ -111,6 +104,8 @@ AxesPerFactor getCompatibleFactorShardings(
 
   return commonAxesPerFactor;
 }
+
+namespace {
 
 void insertExplicitReshardsOnOperand(
     Operation* op, const int64_t operandIndex,
@@ -758,22 +753,12 @@ void distributeAxisRefsToBatchingFactors(
 }
 }  // namespace
 
-// Assumes there are no overflow axes.
-//
-// Guarantees to return a non-empty AxesPerFactor.
 AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
                              ArrayRef<TensorShardingAttr> outShardings,
                              const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes,
                              const SymbolTable& symbolTable, const Mesh& mesh) {
-  // Checks if factors are sharded the same way across operands and results.
-  if (AxesPerFactor commonAxesPerFactor =
-          getCompatibleFactorShardings(shardingProjection, shardingRule);
-      !commonAxesPerFactor.empty()) {
-    return commonAxesPerFactor;
-  }
-
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
