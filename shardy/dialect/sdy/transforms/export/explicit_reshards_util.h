@@ -81,11 +81,6 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
 // Returns a concatenated array of operand and result tensor sizes.
 SmallVector<int64_t> getTensorSizes(Operation* op);
 
-// Returns reduction axes that are the union of all axes on reduction factors.
-// The result axes are not necessarilly canonicalized.
-SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
-                                          OpShardingRuleAttr shardingRule);
-
 // Returns true iff any tensor factor sharding has non-empty overflow axes.
 bool hasOverflowAxes(const ShardingProjection& shardingProjection);
 
@@ -147,19 +142,28 @@ void insertExplicitReshards(Operation* op,
                             OpShardingRuleAttr shardingRule,
                             const SymbolTable& symbolTable, const Mesh& mesh);
 
-// Inserts an `sdy.all-reduce` for each result of `op` if `reductionAxes`
-// is non-empty. Assume the followings:
+// Inserts an `sdy.all-reduce` for each result of `op`.
+//
+// Assumes the followings:
 // - All op results have the same unreduced axes.
 // - All op results have the same mesh as `mesh` ignoring device id orders.
-void insertAllReducesForReductionFactors(Operation* op,
-                                         ArrayRef<AxisRefAttr> reductionAxes,
-                                         const Mesh& mesh,
-                                         IRRewriter& rewriter);
+// - If `commonAxesPerFactor` is nonempty, op has compatible shardings.
+//
+// In case `onFullVersion` is false, it inserts all reduces only if op results
+// have some unreduced axes.
+//
+// Hard fails if the reduction factors do not have compatible shardings, and op
+// results have unreduced axes.
+void insertAllReducesForReductionFactors(
+    Operation* op, const ShardingProjection& shardingProjection,
+    AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
+    const Mesh& mesh, IRRewriter& rewriter, bool onFullVersion);
 
 // Finds common factor axes on the operands and results of `op` so that the
 // sharding of `op` is compatible with its sharding rule.
 //
-// Refer to the documentation of `InsertExplicitReshardsPass` for more details.
+// Refer to the documentation of `InsertExplicitReshardsPass` for more
+// details.
 //
 // Assume the followings:
 // - All op results have the same unreduced axes.
