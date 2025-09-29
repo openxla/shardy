@@ -391,9 +391,15 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
+// Inserts explicit reshards on the operands and results of `op` such that the
+// sharding of `op` is compatible with its sharding rule.
+//
+// Refer to the documentation of `InsertExplicitReshardsPass` for more details.
+//
 // Assume the followings:
 // - All op results have the same unreduced axes.
 // - If the op has no results, none of the operands has unreduced axes.
+// - Operand and result meshes are the same ignoring device id order.
 //
 // Returns the union of common reduction axes which may not be canonicalized.
 SmallVector<AxisRefAttr> processOp(Operation* op,
@@ -403,9 +409,34 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
                                    const SymbolTable& symbolTable,
                                    OpShardingRuleAttr shardingRule,
                                    const Mesh& mesh, const bool onFullVersion) {
+  ShardingProjection shardingProjection = ShardingProjection::build(
+      inShardings, outShardings, shardingRule, mesh.attr(),
+      /*closedIfMissing=*/true);
+
   if (onFullVersion) {
-    return insertExplicitReshardsOnOp(op, inShardings, outShardings, rewriter,
-                                      symbolTable, shardingRule, mesh);
+    // Return without inserting reshards if any factor sharding has overflow
+    // axes. This case is not handled yet.
+    // TODO(b/446833985): Handle the case when factor shardings have overflow
+    // axes.
+    if (hasOverflowAxes(shardingProjection)) {
+      return {};
+    }
+    AxesPerFactor commonAxesPerFactor =
+        findCommonAxes(inShardings, outShardings, shardingProjection,
+                       shardingRule, getTensorSizes(op), symbolTable, mesh);
+    UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
+                                                shardingRule.getNumResults());
+    for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
+      // TODO(enver): Add unit tests to test overflow axes are cleared after
+      // handling the case that some factors have overflow axes.
+      updateTensorShardings |=
+          shardingProjection.updateSharding(index, axes, /*overflowAxes=*/{});
+    }
+    insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
+                           updateTensorShardings, rewriter, shardingRule,
+                           symbolTable, mesh);
+
+    return getReductionAxes(commonAxesPerFactor, shardingRule);
   }
 
   TypeSwitch<Operation*>(op)
@@ -422,9 +453,6 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
     return {};
   }
 
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      inShardings, outShardings, shardingRule, mesh.attr(),
-      /*closedIfMissing=*/true);
   // TODO(enver): Factor out finding common axes per factor. Share logic with
   // getCompatibleFactorShardings.
   SmallVector<AxisRefAttr> axesAlongAllReductionFactors;

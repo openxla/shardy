@@ -45,9 +45,6 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-namespace {
-
-// Returns true iff any tensor factor sharding has non-empty overflow axes.
 bool hasOverflowAxes(const ShardingProjection& shardingProjection) {
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(
@@ -62,6 +59,7 @@ bool hasOverflowAxes(const ShardingProjection& shardingProjection) {
   return false;
 }
 
+namespace {
 bool hasShardedPermutationFactors(
     const TensorFactorShardings& tensorFactorSharding,
     OpShardingRuleAttr shardingRule) {
@@ -157,44 +155,8 @@ bool shouldReshardToCommonMesh(TensorShardingAttr sharding, const Mesh& mesh,
          sharding.getMesh(symbolTable).getDeviceIds() !=
              mesh.attr().getDeviceIds();
 }
+}  // namespace
 
-// Insert explicit reshards for operands and results that change by
-// the given `shardingProjection` for a given `op`. The reshards are inserted
-// only to make the given operation compatible.
-//
-// For example,
-//
-// ```mlir
-//   %arg0: tensor<8x32xf32> { sdy.sharding = @mesh, [{}, {"y"}]>}
-//   %arg1: tensor<32x16xf32> { sdy.sharding = <@mesh, [{"y"}, {"x"}]>}
-//   %0 = stablehlo.dot %arg0, %arg1 { sdy.sharding = <@mesh, [{"x"}, {}]>,
-//     sdy.sharding_rule = <([i, k], [k, j])->([i, j])> }
-//   %1 = stablehlo.negate %0 {sdy.sharding = <@mesh, [{"x"}, {}]>
-//   return %1
-// ```
-//
-// after a call on the stablehlo.dot operation, by the sharding projection,
-// i: {}, j: {}, k: {"y"}, the module becomes:
-//
-// ```mlir
-//   %arg0: tensor<8x32xf32> { sdy.sharding = @mesh, [{}, {"y"}]>}
-//   %arg1: tensor<32x16xf32> { sdy.sharding = <@mesh, [{"y"}, {"x"}]>}
-//   %0 = stablehlo.reshard %arg1 {sdy.sharding = <@mesh, [{"y"}, {}]>}
-//   %1 = stablehlo.dot %arg0, %0 { sdy.sharding = <@mesh, [{}, {}]>,
-//     sdy.sharding_rule = <([i, k], [k, j])->([i, j])> }
-//   %2 = stablehlo.reshard %1 {sdy.sharding = <@mesh, [{"x"}, {}]>}
-//   %3 = stablehlo.negate %2 {sdy.sharding = <@mesh, [{"x"}, {}]>
-//   return %3
-// ```
-//
-// In the above example, note that the operand and result shardings for
-// stablehlo.negate op remained unchanged.
-//
-// Assumes factor shardings do not have overflow axes.
-// TODO(enver): Handle the case when some factor shardings have overflow axes.
-//
-// Assumes all tensor shardings have the same mesh as `mesh` on axes but may be
-// different on device order.
 void insertExplicitReshards(Operation* op,
                             ArrayRef<TensorShardingAttr> inShardings,
                             ArrayRef<TensorShardingAttr> outShardings,
@@ -223,6 +185,7 @@ void insertExplicitReshards(Operation* op,
   }
 }
 
+namespace {
 struct FactorAxesPair {
   constexpr static int64_t kEmptyFactorIndex = -1;
   constexpr static int64_t kTombstoneFactorIndex = -2;
@@ -793,6 +756,7 @@ void distributeAxisRefsToBatchingFactors(
     }
   }
 }
+}  // namespace
 
 // Assumes there are no overflow axes.
 //
@@ -855,8 +819,6 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
   return tensorSizes;
 }
 
-// Returns reduction axes that are the union of all axes on reduction factors.
-// The result axes are not necessarilly canonicalized.
 SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
                                           OpShardingRuleAttr shardingRule) {
   SmallVector<AxisRefAttr> reductionAxes;
@@ -865,7 +827,6 @@ SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
   }
   return reductionAxes;
 }
-}  // namespace
 
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
@@ -950,42 +911,6 @@ void insertAllReducesForReductionFactors(Operation* op,
                                            allReduceAxes, resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
-}
-
-SmallVector<AxisRefAttr> insertExplicitReshardsOnOp(
-    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
-    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
-    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh) {
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      inShardings, outShardings, shardingRule, mesh.attr(),
-      /*closedIfMissing=*/true);
-
-  UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
-                                              shardingRule.getNumResults());
-
-  // Return without inserting reshards if any factor sharding has overflow
-  // axes. This case is not handled yet.
-  // TODO(b/446833985): Handle the case when factor shardings have overflow
-  // axes.
-  if (hasOverflowAxes(shardingProjection)) {
-    return {};
-  }
-
-  AxesPerFactor commonAxesPerFactor =
-      findCommonAxes(inShardings, outShardings, shardingProjection,
-                     shardingRule, getTensorSizes(op), symbolTable, mesh);
-  for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
-    // TODO(enver): Add unit tests to test overflow axes are cleared after
-    // handling the case that some factors have overflow axes.
-    updateTensorShardings |=
-        shardingProjection.updateSharding(index, axes, /*overflowAxes=*/{});
-  }
-  insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
-                         updateTensorShardings, rewriter, shardingRule,
-                         symbolTable, mesh);
-
-  return getReductionAxes(commonAxesPerFactor, shardingRule);
 }
 
 }  // namespace sdy
