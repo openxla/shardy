@@ -873,7 +873,7 @@ void insertAllReducesForReductionFactors(Operation* op,
                                          ArrayRef<AxisRefAttr> reductionAxes,
                                          const Mesh& mesh,
                                          IRRewriter& rewriter) {
-  if (reductionAxes.empty() || op->getResults().empty()) {
+  if (reductionAxes.empty()) {
     return;
   }
 

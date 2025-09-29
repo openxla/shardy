@@ -149,6 +149,7 @@ void insertExplicitReshards(Operation* op,
 
 // Inserts an `sdy.all-reduce` for each result of `op` if `reductionAxes`
 // is non-empty. Assume the followings:
+// - Op has some results.
 // - All op results have the same unreduced axes.
 // - All op results have the same mesh as `mesh` ignoring device id orders.
 void insertAllReducesForReductionFactors(Operation* op,
