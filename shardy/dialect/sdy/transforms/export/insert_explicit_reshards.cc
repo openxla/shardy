@@ -51,6 +51,20 @@ namespace sdy {
 
 namespace {
 
+bool isSane(TensorShardingAttr sharding, const SymbolTable& symbolTable) {
+  if (!sharding) {
+    return true;
+  }
+  MeshAttr mesh = sharding.getMesh(symbolTable);
+  if (!mesh || mesh.empty() || mesh.isMaximal()) {
+    return false;
+  }
+  if (!getUnreducedAxes(sharding).empty()) {
+    return false;
+  }
+  return true;
+}
+
 void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
                                             TensorShardingAttr targetSharding,
                                             IRRewriter& rewriter,
@@ -303,8 +317,9 @@ Mesh getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
 std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
                             ArrayRef<TensorShardingAttr> outShardings,
                             const SymbolTable& symbolTable) {
-  std::optional<StringRef> meshName = getCommonMeshName(
-      inShardings, outShardings, symbolTable, /*ignoreDeviceIds=*/true);
+  std::optional<StringRef> meshName =
+      getCommonMeshName(inShardings, outShardings, symbolTable,
+                        /*ignoreDeviceIds=*/false);
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or
     // the sharding attributes use different meshes.
@@ -538,6 +553,13 @@ struct InsertExplicitReshardsPass
       SmallVector<TensorShardingAttr> outShardings =
           getShardings(op->getResults());
 
+      for (TensorShardingAttr sharding :
+           llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
+        if (!isSane(sharding, symbolTable)) {
+          return;
+        }
+      }
+
       std::optional<Mesh> mesh =
           getMesh(inShardings, outShardings, symbolTable);
       if (!mesh.has_value()) {
@@ -547,8 +569,6 @@ struct InsertExplicitReshardsPass
       SmallVector<AxisRefAttr> reductionAxes =
           processOp(op, inShardings, outShardings, rewriter, symbolTable,
                     shardingRule, *mesh, onFullVersion);
-      // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
-      insertAllReducesForReductionFactors(op, reductionAxes, *mesh, rewriter);
 
       // TODO(enver): Remove sharding rules from ops.
     });
