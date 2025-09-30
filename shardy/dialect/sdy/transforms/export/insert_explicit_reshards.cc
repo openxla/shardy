@@ -421,6 +421,8 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
     return {};
   }
 
+
+
   if (onFullVersion) {
     // Checks if factors are sharded the same way across operands and results.
     AxesPerFactor commonAxesPerFactor =

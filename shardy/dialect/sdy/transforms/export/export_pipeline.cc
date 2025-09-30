@@ -29,6 +29,7 @@ namespace sdy {
 
 namespace {
 
+
 void addCanonicalizerPass(OpPassManager& pm,
                           ArrayRef<std::string> enabledPatterns) {
   pm.addPass(createCanonicalizerPass(GreedyRewriteConfig(),
