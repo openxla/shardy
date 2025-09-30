@@ -48,8 +48,9 @@ namespace mlir::mpmd {
 enum PartitioningPhase : int32_t {
   kNone = 0,
   kImport = 1 << 0,
-  kPartition = 1 << 1,
-  kAll = kImport | kPartition,
+  kOptimize = 1 << 1,
+  kPartition = 1 << 2,
+  kAll = kImport | kOptimize | kPartition,
 };
 
 struct PartitioningResult {
