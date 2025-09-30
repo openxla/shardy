@@ -572,3 +572,15 @@ func.func @dot_genaral_overlaps_and_trimmable_on_subaxis_multiple_axes(%arg0: te
   %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"x","y","z"}, {}]>]>} : (tensor<64x8x32xf32>, tensor<64x32x16xf32>) -> tensor<64x8x16xf32>
   return %0 : tensor<64x8x16xf32>
 }
+
+// CHECK-LABEL: func @dot_only_contracting_dims_sharded_and_has_same_shardings
+func.func @dot_only_contracting_dims_sharded_and_has_same_shardings(
+    %arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>},
+    %arg1: tensor<32x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>})
+    -> tensor<8x16xf32> {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %arg1
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %[[DOT]] out_sharding=<@mesh, [{}, {}]>
+  // CHECK: return %[[ALL_REDUCE]]
+  %0 = stablehlo.dot %arg0, %arg1 : (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
