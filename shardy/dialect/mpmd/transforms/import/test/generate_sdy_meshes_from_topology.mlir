@@ -2,8 +2,8 @@
 
 // CHECK-LABEL: module @multiple_input_meshes
 module @multiple_input_meshes {
-  // CHECK-DAG: sdy.mesh @tpu = <["x"=2, "y"=4]>
-  // CHECK-DAG: sdy.mesh @cpu = <["z"=8]>
+  // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2, "tpu_y"=4]>
+  // CHECK-DAG: sdy.mesh @cpu = <["cpu_z"=8]>
   // CHECK-DAG: sdy.mesh @empty_mesh = <[]>
   // CHECK-DAG: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
   // CHECK-NOT: sdy.mesh @mesh
@@ -13,16 +13,16 @@ module @multiple_input_meshes {
   sdy.mesh @empty_mesh = <[]>
   sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
-  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"x", "y"}]>}
-  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"z":(1)2}]>}
-  // CHECK: %arg2: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"x", "y"}]>}
+  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x", "tpu_y"}]>}
+  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"cpu_z":(1)2}]>}
+  // CHECK: %arg2: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x", "tpu_y"}]>}
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x", "tpu_y"}]>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{"cpu_z":(1)2}]>},
     %arg2: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x", "tpu_y"}]>})
       -> (tensor<16xf32>) attributes {
-      // CHECK: topology = #mpmd.topology<<"tpu" : <["x"=2, "y"=4]>>, <"cpu" : <["z"=8]>>>
-      topology = #mpmd.topology<<"tpu" : <["x"=2, "y"=4]>>, <"cpu" : <["z"=8]>>>} {
+      // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>
+      topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg2) (%arg3: tensor<16xf32>, %arg4: tensor<16xf32>) {
       %2 = stablehlo.add %arg4, %arg3 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
@@ -39,20 +39,20 @@ module @multiple_input_meshes {
 
 // CHECK-LABEL: module @empty_mesh
 module @empty_mesh {
-  // CHECK-DAG: sdy.mesh @tpu = <["x"=2]>
+  // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2]>
   // CHECK-DAG: sdy.mesh @empty_mesh = <[]>
   // CHECK-NOT: sdy.mesh @mesh
   sdy.mesh @mesh = <["tpu_x"=2]>
   sdy.mesh @empty_mesh = <[]>
 
-  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"x"}]>}
+  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x"}]>}
   // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}]>}
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x"}]>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}]>})
       -> (tensor<16xf32>) attributes {
-      // CHECK: topology = #mpmd.topology<<"tpu" : <["x"=2]>>>
-      topology = #mpmd.topology<<"tpu" : <["x"=2]>>>} {
+      // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>
+      topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg1) (%arg2: tensor<16xf32>, %arg3: tensor<16xf32>) {
       %2 = stablehlo.add %arg3, %arg2 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
@@ -65,20 +65,20 @@ module @empty_mesh {
 
 // CHECK-LABEL: module @maximal_mesh
 module @maximal_mesh {
-  // CHECK-DAG: sdy.mesh @tpu = <["x"=2]>
+  // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2]>
   // CHECK-DAG: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
   // CHECK-NOT: sdy.mesh @mesh
   sdy.mesh @mesh = <["tpu_x"=2]>
   sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
-  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"x"}]>}
+  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x"}]>}
   // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>}
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x"}]>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>})
       -> (tensor<16xf32>) attributes {
-      // CHECK: topology = #mpmd.topology<<"tpu" : <["x"=2]>>>
-      topology = #mpmd.topology<<"tpu" : <["x"=2]>>>} {
+      // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>
+      topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg1) (%arg2: tensor<16xf32>, %arg3: tensor<16xf32>) {
       %2 = stablehlo.add %arg3, %arg2 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
@@ -91,7 +91,7 @@ module @maximal_mesh {
 
 // CHECK-LABEL: module @fully_replicated_tensor
 module @fully_replicated_tensor {
-  // CHECK-DAG: sdy.mesh @tpu = <["x"=2]>
+  // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2]>
   // CHECK-DAG: sdy.mesh @empty_mesh = <[]>
   // CHECK-NOT: sdy.mesh @mesh
   sdy.mesh @mesh = <["tpu_x"=2]>
@@ -102,8 +102,8 @@ module @fully_replicated_tensor {
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}]>})
       -> (tensor<16xf32>) attributes {
-      // CHECK: topology = #mpmd.topology<<"tpu" : <["x"=2]>>, <"empty_mesh" : <[]>>>
-      topology = #mpmd.topology<<"tpu" : <["x"=2]>>>} {
+      // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>, <"empty_mesh" : <[]>>>
+      topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg1) (%arg2: tensor<16xf32>, %arg3: tensor<16xf32>) {
       %2 = stablehlo.add %arg3, %arg2 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
@@ -116,21 +116,21 @@ module @fully_replicated_tensor {
 
 // CHECK-LABEL: module @replicated_axes
 module @replicated_axes {
-  // CHECK-DAG: sdy.mesh @tpu = <["x"=2, "y"=4]>
-  // CHECK-DAG: sdy.mesh @cpu = <["z"=8]>
+  // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2, "tpu_y"=4]>
+  // CHECK-DAG: sdy.mesh @cpu = <["cpu_z"=8]>
   // CHECK-NOT: sdy.mesh @mesh
   // CHECK-NOT: sdy.mesh @mesh_0
   sdy.mesh @mesh = <["tpu_x"=8, "tpu_y"=8]>
   sdy.mesh @mesh_0 = <["cpu_z"=8]>
 
-  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"x"}], replicated={"y"}>}
-  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"z":(1)2}]>}
+  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x"}], replicated={"tpu_y"}>}
+  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"cpu_z":(1)2}]>}
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x"}], replicated={"tpu_y"}>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{"cpu_z":(1)2}]>})
       -> (tensor<16xf32>) attributes {
-      // CHECK: topology = #mpmd.topology<<"tpu" : <["x"=2, "y"=4]>>, <"cpu" : <["z"=8]>>>
-      topology = #mpmd.topology<<"tpu" : <["x"=2, "y"=4]>>, <"cpu" : <["z"=8]>>>} {
+      // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>
+      topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg0) (%arg3: tensor<16xf32>, %arg4: tensor<16xf32>) {
       %2 = stablehlo.add %arg4, %arg3 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
@@ -147,21 +147,21 @@ module @replicated_axes {
 
 // CHECK-LABEL: module @unreduced_axes
 module @unreduced_axes {
-  // CHECK-DAG: sdy.mesh @tpu = <["x"=2, "y"=4]>
-  // CHECK-DAG: sdy.mesh @cpu = <["z"=8]>
+  // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2, "tpu_y"=4]>
+  // CHECK-DAG: sdy.mesh @cpu = <["cpu_z"=8]>
   // CHECK-NOT: sdy.mesh @mesh
   // CHECK-NOT: sdy.mesh @mesh_0
   sdy.mesh @mesh = <["tpu_x"=8, "tpu_y"=8]>
   sdy.mesh @mesh_0 = <["cpu_z"=8]>
 
-  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"x"}], unreduced={"y"}>}
-  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"z":(1)2}]>}
+  // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x"}], unreduced={"tpu_y"}>}
+  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"cpu_z":(1)2}]>}
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x"}], unreduced={"tpu_y"}>},
     %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{"cpu_z":(1)2}]>})
       -> (tensor<16xf32>) attributes {
-      // CHECK: topology = #mpmd.topology<<"tpu" : <["x"=2, "y"=4]>>, <"cpu" : <["z"=8]>>>
-      topology = #mpmd.topology<<"tpu" : <["x"=2, "y"=4]>>, <"cpu" : <["z"=8]>>>} {
+      // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>
+      topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>} {
     %0 = mpmd.named_computation<"stage1"> (%arg0, %arg0) (%arg3: tensor<16xf32>, %arg4: tensor<16xf32>) {
       %2 = stablehlo.add %arg4, %arg3 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
