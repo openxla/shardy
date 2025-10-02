@@ -58,7 +58,6 @@ namespace {
 
 using ::mlir::func::FuncOp;
 
-
 SpmdTensorPartitionSpec ExtractTensorPartitionSpec(MeshTensorType type) {
   if (!type.getSharding()) {
     return {};
@@ -487,13 +486,60 @@ bool IsExecutedImmediatelyAfter(FragmentOp fragment1, FragmentOp fragment2) {
   return false;
 }
 
+namespace {
+
+// Returns true if two meshes are equal, ignoring axes of size 1.
+bool IsEquivalentMesh(sdy::MeshAttr mesh1, sdy::MeshAttr mesh2) {
+  if (mesh1.getDeviceIds() != mesh2.getDeviceIds()) {
+    return false;
+  }
+
+  const auto* it1 = mesh1.getAxes().begin();
+  const auto* end1 = mesh1.getAxes().end();
+  const auto* it2 = mesh2.getAxes().begin();
+  const auto* end2 = mesh2.getAxes().end();
+
+  while (it1 != end1 && it2 != end2) {
+    if (it1->getSize() == 1) {
+      ++it1;
+      continue;
+    }
+    if (it2->getSize() == 1) {
+      ++it2;
+      continue;
+    }
+    if (*it1 != *it2) {
+      return false;
+    }
+    ++it1;
+    ++it2;
+  }
+
+  while (it1 != end1) {
+    if (it1->getSize() != 1) {
+      return false;
+    }
+    ++it1;
+  }
+
+  while (it2 != end2) {
+    if (it2->getSize() != 1) {
+      return false;
+    }
+    ++it2;
+  }
+
+  return true;
+}
+
+}  // namespace
+
 bool HasHomogeneousTopology(FuncOp func) {
   ArrayRef<NamedMeshAttr> named_meshes = GetTopologyMeshes(func);
-  DenseSet<sdy::MeshAttr> meshes;
-  for (NamedMeshAttr named_mesh : named_meshes) {
-    meshes.insert(named_mesh.getMesh());
-  }
-  return meshes.size() == 1;
+  return llvm::all_of(named_meshes, [&](NamedMeshAttr named_mesh) {
+    return IsEquivalentMesh(named_mesh.getMesh(),
+                            named_meshes.front().getMesh());
+  });
 }
 
 ArrayAttr GetFragmentOriginUnion(FragmentOp fragment1, FragmentOp fragment2,
@@ -674,4 +720,3 @@ std::optional<ReductionType> ComputeReductionType(Block& block) {
 }
 
 }  // namespace mlir::mpmd
-
