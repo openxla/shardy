@@ -70,6 +70,22 @@ func.func @redundant_reshard(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.shardin
   return %0 : tensor<16x8xf32>
 }
 
+// CHECK-LABEL: func @reshard_from_sharded_to_fully_replicated_same_meshes
+func.func @reshard_from_sharded_to_fully_replicated_same_meshes(%arg0 : tensor<24x8xf32> {sdy.sharding=#sdy.sharding<@mesh1d_6, [{"x"}, {}]>}) -> tensor<24x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %arg0 out_sharding=<@mesh1d_6, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh1d_6, [{}, {}]> : tensor<24x8xf32>
+  return %0 : tensor<24x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_from_sharded_to_fully_replicated_different_meshes
+func.func @reshard_from_sharded_to_fully_replicated_different_meshes(%arg0 : tensor<24x8xf32> {sdy.sharding=#sdy.sharding<@mesh1d_6, [{"x"}, {}]>}) -> tensor<24x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %arg0 out_sharding=<@mesh1d_6, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh2d_2x3, [{}, {}]> : tensor<24x8xf32>
+  return %0 : tensor<24x8xf32>
+}
+
 // CHECK-LABEL: func @all_gather_single_axis
 func.func @all_gather_single_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
   // CHECK-NEXT: sdy.all_gather [{}, {"x"}] %arg0 out_sharding=<@mesh2d, [{"y"}, {}]>

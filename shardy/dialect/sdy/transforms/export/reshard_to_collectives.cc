@@ -1334,20 +1334,27 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
       rewriter.replaceOp(op, adaptor.getInput());
       return success();
     }
-    MeshAttr inMesh = inSharding.getMesh(op);
     if (inSharding.getMeshName() != outSharding.getMeshName()) {
-       MeshAttr outMesh = outSharding.getMesh(op);
-       // TODO(enver): Use MeshAttr::equals method instead.
-       if (outMesh.getAxes() != inMesh.getAxes() ||
-           inMesh.getDeviceIds() == outMesh.getDeviceIds() ||
-           (inSharding.isFullyReplicated() &&
-            outSharding.isFullyReplicated())) {
-         // We currently only support a reshard between different meshes if
-         // they have the same axes and different device ids, and at least one
-         // of the sharding isn't fully replicated.
-         return rewriter.notifyMatchFailure(
-             op, [](Diagnostic& diag) { diag << "Incompatible meshes"; });
-       }
+      if (outSharding.isFullyReplicated()) {
+        // TODO(enver): Hard fail if output sharding has a different unreduced
+        // axes than the input sharding. Note that the out sharding may be fully
+        // replicated and still have different unreduced axes than the input
+        // sharding.
+        outSharding = TensorShardingAttr::getFullyClosedLike(inSharding);
+        // TODO(enver): Also check for input sharding is fully replicated.
+      } else {
+        MeshAttr inMesh = inSharding.getMesh(op);
+        MeshAttr outMesh = outSharding.getMesh(op);
+        // TODO(enver): Use MeshAttr::equals method instead.
+        if (outMesh.getAxes() != inMesh.getAxes() ||
+            inMesh.getDeviceIds() == outMesh.getDeviceIds()) {
+          // We currently only support a reshard between different meshes if
+          // they have the same axes and different device ids, and at least one
+          // of the sharding isn't fully replicated.
+          return rewriter.notifyMatchFailure(
+              op, [](Diagnostic& diag) { diag << "Incompatible meshes"; });
+        }
+      }
     }
 
     // TODO(tomnatan): we should verify that the operand of ReshardOp has a
