@@ -24,6 +24,20 @@ func.func @all_gather_dot(
   return %1 : tensor<8x32xf32>
 }
 
+// CHECK-LABEL: func @all_gather_multiple_uses
+func.func @all_gather_multiple_uses(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+        tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK: %0 = sdy.all_gather [{"x"}, {}] %arg1 out_sharding=<@mesh, [{}, {}]> : tensor<16x32xf32>
+  // CHECK: %1 = stablehlo.dot %arg0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
+  // CHECK-NEXT: return %0, %1
+  %0 = sdy.all_gather [{"x"}, {}] %arg1 out_sharding=<@mesh, [{}, {}]> : tensor<16x32xf32>
+  %1 = stablehlo.dot %arg0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>, tensor<16x32xf32>) -> tensor<8x32xf32>
+  return %0, %1 : tensor<16x32xf32>, tensor<8x32xf32>
+}
+
 // CHECK-LABEL: func @single_reduce_scatter
 func.func @single_reduce_scatter(
     %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})

@@ -669,21 +669,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           return builder.build();
         }
         if (callTargetName == "X64Combine") {
-          // If any of the users of `X64Combine` is a `RngBitGeneratorOp`, then
-          // we don't want to propagate shardings from the operands of
-          // `X64Combine` to its result, since the operands of the
-          // `RngBitGeneratorOp` (initial state) must be replicated and there
-          // can't be a reshard on the result of the `X64Combine`.
-          bool usedByRngBitGenerator =
-              llvm::any_of(customCall->getUsers(), [](Operation* user) {
+          // If an `X64Combine` is used by a `RngBitGeneratorOp`, we replicate
+          // the operand and result of the `X64Combine` and do not propagate
+          // shardings along the `X64Combine` for two reasons.
+          // 1. The operand of the `RngBitGeneratorOp` (initial state,
+          //    1-dimensional tensor of type ui64) must be replicated.
+          // 2. We cannot have reshard on the tensor of type ui64.
+          if (llvm::any_of(customCall->getUsers(), [](Operation* user) {
                 return isa<stablehlo::RngBitGeneratorOp>(user);
-              });
-          return OpShardingRuleBuilder(customCall)
-              .addPointwise(
-                  getTensorShape(customCall.getResult(0)),
-                  [](int64_t) { return FactorType::kPassThrough; },
-                  /*isBlocked=*/usedByRngBitGenerator)
-              .build();
+              })) {
+            OpShardingRuleBuilder builder(customCall);
+            ArrayRef<int64_t> shape = getTensorShape(customCall.getResult(0));
+            assert(shape.size() == 1);
+            builder.addFactor(0, shape.front(), FactorType::kNeedReplication,
+                              /*isBlocked=*/true);
+            return builder.build();
+          }
+          return OpShardingRuleBuilder::buildPointwise(customCall);
         }
         // TODO(b/327191011): output unregistered op stats instead.
         static llvm::once_flag onceFlag;
