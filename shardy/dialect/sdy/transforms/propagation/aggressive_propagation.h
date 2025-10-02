@@ -24,9 +24,9 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/propagation/aggressive_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
-#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {

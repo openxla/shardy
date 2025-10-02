@@ -972,11 +972,11 @@ bool TensorShardingAttr::isEquivalent(TensorShardingAttr otherSharding) const {
   if (!otherSharding) {
     return false;
   }
-  ArrayRef<DimensionShardingAttr> left = getDimShardings();
-  ArrayRef<DimensionShardingAttr> right = otherSharding.getDimShardings();
   if (getMeshOrRef() != otherSharding.getMeshOrRef()) {
     return false;
   }
+  ArrayRef<DimensionShardingAttr> left = getDimShardings();
+  ArrayRef<DimensionShardingAttr> right = otherSharding.getDimShardings();
   return left.size() == right.size() &&
          llvm::all_of(llvm::zip_equal(left, right), [](auto&& pair) {
            return std::get<0>(pair).getAxes() == std::get<1>(pair).getAxes();

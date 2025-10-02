@@ -37,10 +37,10 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_priority_propagation.h"
-#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {

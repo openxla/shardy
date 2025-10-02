@@ -34,7 +34,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
-#include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
 namespace mlir {

@@ -469,8 +469,8 @@ class CollectiveInserter {
       collectiveAxes = AxisRefListAttr::get(getContext(), gatheringAxes);
     }
     if (hasGatheringAxes) {
-      result = rewriter.create<AllGatherOp>(loc, result, collectiveAxesPerDim,
-                                            getCurrentSharding());
+      result = AllGatherOp::create(rewriter, loc, result, collectiveAxesPerDim,
+                                   getCurrentSharding());
     }
   }
 
@@ -484,7 +484,7 @@ class CollectiveInserter {
   // - Splits A into two sub-axes A1 and A2, such that
   //   `size(A1) == capacityPerDim[d]`, adds A1 to `inAxesPerDim[d]`, and adds
   //   A2 back to the front of `getAvailableAxes(d)`.
-  // - Skips A if it isn't divisible by `capacityPerDim[d]` or visa versa, and
+  // - Skips A if it isn't divisible by `capacityPerDim[d]` or vice versa, and
   //   adds it back to the front of `getAvailableAxes(d)`.
   //
   // For each axis A that is added to `inAxesPerDim[d]`, calls
@@ -861,8 +861,8 @@ class CollectiveInserter {
            llvm::zip_equal(collectiveAxesPerDim, *slicingAxesPerDim)) {
         collectiveAxes = AxisRefListAttr::get(getContext(), slicingAxes);
       }
-      result = rewriter.create<AllSliceOp>(loc, result, collectiveAxesPerDim,
-                                           getCurrentSharding());
+      result = AllSliceOp::create(rewriter, loc, result, collectiveAxesPerDim,
+                                  getCurrentSharding());
     }
   }
 
@@ -1148,8 +1148,8 @@ class CollectiveInserter {
     // TODO(b/392797233): if the order of device ids changes, but the input or
     // output sharding is fully replicated, we can skip the collective permute.
 
-    result =
-        rewriter.create<CollectivePermuteOp>(loc, result, getCurrentSharding());
+    result = CollectivePermuteOp::create(rewriter, loc, result,
+                                         getCurrentSharding());
   }
 
   // TODO(b/392952931): currently we are greedily all-to-all-ing axes even if
@@ -1291,8 +1291,8 @@ class CollectiveInserter {
   void tryAllToAlls(bool allowOutOfOrderTarget) {
     for (int64_t srcDim = 0; srcDim < getRank(); ++srcDim) {
       while (auto info = getAllToAllInfo(srcDim, allowOutOfOrderTarget)) {
-        result = rewriter.create<AllToAllOp>(
-            loc, result,
+        result = AllToAllOp::create(
+            rewriter, loc, result,
             AllToAllParamAttr::get(rewriter.getContext(), info->axes, srcDim,
                                    info->tgtDim),
             getCurrentSharding());
