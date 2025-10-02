@@ -59,7 +59,7 @@ struct OptimizeOptions {
   // Whether to clone inferred fragments when merging.
   bool cloneInferredFragments = false;
   // The pipeline schedule to use.
-  PipelineSchedule pipelineSchedule = PipelineSchedule::k1F1B;
+  PipelineSchedule pipelineSchedule = PipelineSchedule::kGPipe;
 };
 
 // Adds the standard set of passes to optimize an MPMD program.
