@@ -76,9 +76,9 @@ SmallVector<mpmd::NamedMeshAttr> GetSchedulableMeshes(func::FuncOp func) {
   auto all_meshes = mpmd::GetTopologyMeshes(func);
   SmallVector<mpmd::NamedMeshAttr> hbm_meshes;
   llvm::copy_if(all_meshes, std::back_inserter(hbm_meshes),
-                  [](const mpmd::NamedMeshAttr& mesh) {
-                    return !mesh.getName().ends_with("#cpu");
-                  });
+                [](const mpmd::NamedMeshAttr& mesh) {
+                  return !mesh.getName().ends_with(mpmd::kCpuMeshSuffix);
+                });
   return hbm_meshes;
 }
 
