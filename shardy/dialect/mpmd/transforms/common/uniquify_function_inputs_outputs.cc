@@ -16,6 +16,7 @@ limitations under the License.
 #include <cstdint>
 #include <utility>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -29,6 +30,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "mlir/IR/PatternMatch.h"
 
 namespace mlir::mpmd {
 
@@ -39,64 +41,6 @@ namespace {
 
 using ValueToReturnIndices = llvm::MapVector<Value, SmallVector<int64_t>>;
 
-void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
-                                 ValueToReturnIndices& value_to_return_indices,
-                                 OpBuilder& builder) {
-  // We remove any entries that require no work, in order to avoid too many
-  // checks.
-  value_to_return_indices.remove_if([](const auto& it) {
-    if (it.second.size() == 1) {
-      Value v = it.first;
-      return !isa<BlockArgument>(v);
-    }
-    return it.second.empty();
-  });
-
-  builder.setInsertionPoint(return_op);
-  SmallVector<Value> fragment_operands;
-  fragment_operands.reserve(value_to_return_indices.size());
-  SmallVector<Type> fragment_return_types;
-  for (const auto& [value, return_indices] : value_to_return_indices) {
-    fragment_operands.push_back(value);
-    fragment_return_types.insert(fragment_return_types.end(),
-                                 return_indices.size(),
-                                 cast<MeshTensorType>(value.getType()));
-  }
-
-  if (fragment_operands.empty()) {
-    return;
-  }
-
-  auto loc = return_op->getLoc();
-  auto fragment_op = FragmentOp::create(
-      builder, loc, fragment_return_types, fragment_operands,
-      /*user_origin=*/ArrayAttr::get(builder.getContext(), {}),
-      /*mesh_name=*/mesh_name, /*stage_id=*/IntegerAttr());
-  Block& fragment_block = fragment_op.getRegion().emplaceBlock();
-
-  SmallVector<Value> returned_values;
-  returned_values.reserve(fragment_return_types.size());
-  // The index of the fragment result that we should use to replace the
-  // function return op operand.
-  int fragment_result_index = 0;
-  sdy::MeshAttr mesh_attr = GetMeshOrFail(fragment_op, mesh_name);
-  for (const auto& [value, return_indices] : value_to_return_indices) {
-    // Add a single block argument for this value and return it as many times
-    // as it's used.
-    returned_values.insert(
-        returned_values.end(), return_indices.size(),
-        fragment_block.addArgument(
-            GetGlobalTensorTypeFromMeshType(value, mesh_attr),
-            value.getLoc()));
-
-    for (int64_t index : return_indices) {
-      return_op->setOperand(index,
-                            fragment_op->getResult(fragment_result_index++));
-    }
-  }
-  auto block_builder = OpBuilder::atBlockEnd(&fragment_block);
-  ReturnOp::create(block_builder, loc, returned_values);
-}
 
 class UniquifyFunctionInputOutputsPass
     : public impl::UniquifyFunctionInputsOutputsPassBase<
@@ -112,25 +56,23 @@ class UniquifyFunctionInputOutputsPass
     }
 
     Operation* return_op = func_op.getBody().front().getTerminator();
-    // value_to_return_indices_per_mesh[mesh_name] = value_to_return_indices
-    // where value_to_return_indices[v] contains a sequence of the indices in
-    // return op where v is used.
-    llvm::MapVector<StringRef, ValueToReturnIndices>
-        value_to_return_indices_per_mesh;
+    llvm::SmallDenseSet<Value> seen_values;
+    mlir::IRRewriter rewriter(&getContext());
+    OpBuilder builder(&getContext());
+    builder.setInsertionPoint(return_op);
     for (OpOperand& operand : return_op->getOpOperands()) {
-      auto mesh_type = dyn_cast<MeshTensorType>(operand.get().getType());
-      SDY_CHECK(mesh_type);
-      StringRef mesh_name = mesh_type.getMeshName();
-      value_to_return_indices_per_mesh[mesh_name][operand.get()].push_back(
-          operand.getOperandNumber());
+      if (!seen_values.contains(operand.get())) {
+        seen_values.insert(operand.get());
+        if (!mlir::isa<BlockArgument>(operand.get())) {
+          continue;
+        }
+      }
+      auto transfer_op = TransferOp::create(builder, return_op->getLoc(), cast<MeshTensorType>(operand.get().getType()),
+          operand.get());
+      operand.set(transfer_op->getResult(0));
     }
 
-    OpBuilder builder(&getContext());
-    for (auto& [mesh_name, value_to_return_indices] :
-         value_to_return_indices_per_mesh) {
-      CreateReturnFragmentForMesh(mesh_name, return_op, value_to_return_indices,
-                                  builder);
-    }
+    // func_op.dump();
   }
 };
 
