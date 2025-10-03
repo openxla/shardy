@@ -45,6 +45,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/macros.h"
 
 namespace mlir {
 namespace sdy {
@@ -629,6 +630,34 @@ bool isUsedBy(Value value, Operation* user) {
   return llvm::any_of(value.getUses(), [user](const OpOperand& use) {
     return use.getOwner() == user;
   });
+}
+
+// TODO(enver): Use it in AxisListRef methods.
+std::optional<AxisRefAttr> getPrefixWithoutOverlap(
+    AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs) {
+  AxisRefAttr result = axisRef;
+  for (AxisRefAttr otherAxisRef : otherAxisRefs) {
+    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+        result, result.getPrefixWithoutOverlap(otherAxisRef));
+  }
+  return result;
+}
+
+void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
+                                    ArrayRef<AxisRefAttr> otherAxisRefs) {
+  for (const auto [axisIndex, curAxis] : llvm::enumerate(axes)) {
+    std::optional<AxisRefAttr> newAxis =
+        getPrefixWithoutOverlap(curAxis, otherAxisRefs);
+    if (!newAxis) {
+      axes.truncate(axisIndex);
+      return;
+    }
+    if (axes[axisIndex] != *newAxis) {
+      axes[axisIndex] = *newAxis;
+      axes.truncate(axisIndex + 1);
+      return;
+    }
+  }
 }
 
 }  // namespace sdy
