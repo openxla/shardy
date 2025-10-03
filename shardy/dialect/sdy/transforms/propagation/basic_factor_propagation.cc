@@ -27,8 +27,6 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/Threading.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -40,23 +38,6 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
-
-namespace {
-
-// Returns the largest prefix of `axisRef` that does not overlap with any axes
-// in `otherAxisRefs`.
-// TODO(enver): Move to ir/utils and use in AxisListRef methods.
-std::optional<AxisRefAttr> getPrefixWithoutOverlap(
-    AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs) {
-  AxisRefAttr result = axisRef;
-  for (AxisRefAttr otherAxisRef : otherAxisRefs) {
-    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
-        result, result.getPrefixWithoutOverlap(otherAxisRef));
-  }
-  return result;
-}
-
-}  // namespace
 
 std::optional<AxisRefAttr>
 BasicFactorPropagation::compatiblePrefixNoConflictsAcrossFactors(
