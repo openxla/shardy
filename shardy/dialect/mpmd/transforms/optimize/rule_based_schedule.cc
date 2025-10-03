@@ -12,12 +12,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include <optional>
+
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/fragment_execution_rules.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
@@ -70,8 +73,8 @@ class RuleBasedSchedulePass
     // Iterate over the rules and add control dependencies.
     for (const FragmentScheduleRule& rule : rules) {
       if (rule.ordered_fragments.size() < 2) {
-        func_op.emitWarning()
-            << "Fragment schedule rule must have at least two fragments.";
+        SDY_LOG(WARNING) << "Fragment schedule rule must have at least two "
+                            "fragments.\n";
         continue;
       }
 
@@ -90,9 +93,8 @@ class RuleBasedSchedulePass
 
         auto pred_it = info_to_op_map.find(*predecessor_info);
         if (pred_it == info_to_op_map.end()) {
-          func_op.emitWarning()
-              << "Fragment " << llvm::to_string(*predecessor_info)
-              << " doesn't exist. Skipping this rule.";
+          SDY_LOG(WARNING) << "Fragment " << llvm::to_string(*predecessor_info)
+                           << " doesn't exist. Skipping this rule.\n";
           continue;
         }
 
@@ -101,9 +103,8 @@ class RuleBasedSchedulePass
           // In this case, we don't want to update the predecessor to the
           // successor since the successor doesn't exist.
           should_update_predecessor_info = false;
-          func_op.emitWarning()
-              << "Fragment " << llvm::to_string(successor_info)
-              << " doesn't exist. Skipping this rule.";
+          SDY_LOG(WARNING) << "Fragment " << llvm::to_string(successor_info)
+                           << " doesn't exist. Skipping this rule.\n";
           continue;
         }
 
@@ -114,25 +115,21 @@ class RuleBasedSchedulePass
         }
         if (predecessor_fragment.getMeshName() !=
             successor_fragment.getMeshName()) {
-          func_op.emitWarning()
-              << "Fragment " << llvm::to_string(*predecessor_info) << " and "
-              << llvm::to_string(successor_info)
-              << " are on different meshes. Skipping this rule.";
+          SDY_LOG(WARNING) << "Fragment " << llvm::to_string(*predecessor_info)
+                           << " and " << llvm::to_string(successor_info)
+                           << " are on different meshes. Skipping this rule.\n";
           continue;
         }
 
         // Check if any dataflow dependency already exists.
-        if (TargetDependsOnSourceOp(predecessor_fragment, successor_fragment)) {
+        if (GetDependencyPath(predecessor_fragment, successor_fragment)) {
           continue;
         }
 
-        if (TargetDependsOnSourceOp(successor_fragment, predecessor_fragment)) {
-          func_op.emitWarning()
-              << "Scheduling rule conflicts with existing dataflow dependency. "
-              << "The rule specifies that fragment "
-              << llvm::to_string(*predecessor_info) << " must run before "
-              << llvm::to_string(successor_info)
-              << ", but the program already requires the opposite.";
+        if (std::optional<SmallVector<Operation*>> conflict_path =
+                GetDependencyPath(successor_fragment, predecessor_fragment)) {
+          SDY_LOG(WARNING) << FormatConflictWarning(
+              *predecessor_info, successor_info, *conflict_path);
           continue;
         }
 
@@ -145,8 +142,8 @@ class RuleBasedSchedulePass
     // Topologically sort the operations to respect the new dependencies. This
     // will also detect any cycles.
     if (!sortTopologically(&func_op.getBody().front())) {
-      func_op.emitWarning() << "Cycle detected in the program, not all "
-                               "fragments could be properly scheduled.";
+      SDY_LOG(WARNING) << "Cycle detected in the program, not all "
+                          "fragments could be properly scheduled.\n";
     }
 
     // Remove all control dependencies added.

@@ -153,7 +153,8 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   // Merge any inferred fragments with user-defined fragments that could not be
   // merged before because of CallOps.
   if (!options.mergeAfterScheduling) {
-    pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
+    pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass(
+        MergeInferredFragmentsPassOptions{options.cloneInferredFragments}));
   }
   // Merge fragments into scheduling units.
   AddSchedulingPreprocessingPasses(pm, options.splitBwdFragments,
