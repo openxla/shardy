@@ -158,7 +158,7 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
 // return %reshard  : tensor<4x8xf32>
 // ```
 template <class OpTy>
-void processDot(OpTy op, ArrayRef<TensorShardingAttr> inShardings,
+void processDot(OpTy op, ShardingProjection& shardingProjection,
                 ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
                 const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
                 const Mesh& mesh) {
@@ -166,10 +166,6 @@ void processDot(OpTy op, ArrayRef<TensorShardingAttr> inShardings,
     // Result doesn't have a sharding.
     return;
   }
-  ShardingProjection shardingProjection =
-      ShardingProjection::build(inShardings, outShardings, shardingRule,
-                                mesh.attr(), /*closedIfMissing=*/true);
-
   const TensorFactorShardings& lhsSharding = shardingProjection.getOperand(0);
   const TensorFactorShardings& rhsSharding = shardingProjection.getOperand(1);
   TensorFactorShardings& resultSharding =
@@ -449,11 +445,11 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
 
   TypeSwitch<Operation*>(op)
       .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
-        processDot(dotOp, inShardings, outShardings, rewriter, symbolTable,
-                   shardingRule, mesh);
+        processDot(dotOp, shardingProjection, outShardings, rewriter,
+                   symbolTable, shardingRule, mesh);
       })
       .Case<stablehlo::DotGeneralOp>([&](stablehlo::DotGeneralOp dotGeneralOp) {
-        processDot(dotGeneralOp, inShardings, outShardings, rewriter,
+        processDot(dotGeneralOp, shardingProjection, outShardings, rewriter,
                    symbolTable, shardingRule, mesh);
       });
 
