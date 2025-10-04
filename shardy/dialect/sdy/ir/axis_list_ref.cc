@@ -24,7 +24,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
-#include "shardy/dialect/sdy/transforms/common/macros.h"
+#include "shardy/dialect/sdy/ir/macros.h"
 
 namespace mlir {
 namespace sdy {

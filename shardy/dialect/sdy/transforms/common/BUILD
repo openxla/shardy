@@ -19,11 +19,6 @@ cc_library(
 )
 
 cc_library(
-    name = "macros",
-    hdrs = ["macros.h"],
-)
-
-cc_library(
     name = "propagation_options",
     hdrs = ["propagation_options.h"],
     deps = [

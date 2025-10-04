@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_MACROS_H_
-#define SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_MACROS_H_
+#ifndef SHARDY_DIALECT_SDY_IR_MACROS_H_
+#define SHARDY_DIALECT_SDY_IR_MACROS_H_
 
 // Macro to assign value from std::optional<T> or return std::nullopt.
 #define SDY_ASSIGN_OR_RETURN_IF_NULLOPT(lhs, expr)                           \
@@ -35,4 +35,4 @@ limitations under the License.
   }                                                             \
   lhs = std::move(result).value();
 
-#endif  // SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_MACROS_H_
+#endif  // SHARDY_DIALECT_SDY_IR_MACROS_H_

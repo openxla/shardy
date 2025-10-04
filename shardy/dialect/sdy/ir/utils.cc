@@ -45,7 +45,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/transforms/common/macros.h"
+#include "shardy/dialect/sdy/ir/macros.h"
 
 namespace mlir {
 namespace sdy {

@@ -6,6 +6,11 @@ load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "gentbl_filegroup", 
 
 package(default_visibility = ["//visibility:public"])
 
+cc_library(
+    name = "macros",
+    hdrs = ["macros.h"],
+)
+
 td_library(
     name = "sdy_td_files",
     srcs = [
@@ -155,10 +160,10 @@ cc_library(
         ":canonicalization_inc",
         ":dialect_inc",
         ":enums_inc",
+        ":macros",
         ":op_interface_inc",
         ":ops_inc",
         "//shardy/common:logging",
-        "//shardy/dialect/sdy/transforms/common:macros",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:BytecodeOpInterface",
         "@llvm-project//mlir:FuncDialect",
@@ -207,7 +212,7 @@ cc_library(
     hdrs = ["axis_list_ref.h"],
     deps = [
         ":dialect",
-        "//shardy/dialect/sdy/transforms/common:macros",
+        ":macros",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Support",
     ],
