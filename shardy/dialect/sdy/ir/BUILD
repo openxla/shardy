@@ -158,6 +158,7 @@ cc_library(
         ":op_interface_inc",
         ":ops_inc",
         "//shardy/common:logging",
+        "//shardy/dialect/sdy/transforms/common:macros",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:BytecodeOpInterface",
         "@llvm-project//mlir:FuncDialect",

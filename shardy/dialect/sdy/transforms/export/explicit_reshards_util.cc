@@ -671,11 +671,9 @@ int64_t findTensorIndexToPreferOnUnaryOperation(
 //
 // Guarantees to return a non-empty AxesPerFactor.
 AxesPerFactor findCommonAxesOnUnaryOperation(
-    ArrayRef<TensorShardingAttr> inShardings,
-    ArrayRef<TensorShardingAttr> outShardings,
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
-    const SymbolTable& symbolTable, const Mesh& mesh) {
+    const Mesh& mesh) {
   int64_t tensorIndexToPrefer = findTensorIndexToPreferOnUnaryOperation(
       shardingProjection, shardingRule, tensorSizes, mesh);
 
@@ -683,10 +681,9 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
   // preferred tensor are sharded on the other tensor.
   AxesPerFactor factorAxisRefs(shardingRule.getNumFactors());
   // TODO(enver): Add and use forEachFactorSharding helper method.
-  for (const auto& [tensorIndex, tensorFactorSharding] :
-       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(),
-           shardingProjection.getResults()))) {
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(), shardingProjection.getResults())) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
       if (!factorSharding.axisRefs.empty()) {
@@ -764,9 +761,8 @@ AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
       shardingRule.getNeedReplicationFactors().empty() &&
       !shardingRule.hasDimensionsWithMultipleFactors()) {
-    return findCommonAxesOnUnaryOperation(inShardings, outShardings,
-                                          shardingProjection, shardingRule,
-                                          tensorSizes, symbolTable, mesh);
+    return findCommonAxesOnUnaryOperation(shardingProjection, shardingRule,
+                                          tensorSizes, mesh);
   }
 
   AxesPerFactor factorCommonAxes = findCommonAxesUsingMajorityVoteHeuristic(

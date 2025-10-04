@@ -82,7 +82,7 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
 SmallVector<int64_t> getTensorSizes(Operation* op);
 
 // Returns reduction axes that are the union of all axes on reduction factors.
-// The result axes are not necessarilly canonicalized.
+// The result axes are not necessarily canonicalized.
 SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
                                           OpShardingRuleAttr shardingRule);
 

@@ -170,9 +170,8 @@ class AxisListRef {
   // TODO(enver): Move this method to utilities.
   // TODO(enver): Instead make this a method of AxisRefAttr, after moving
   // AxesWithTail to a general data structure in Shardy.
-  // TODO(enver): Reuse getPrefixOfInputWithout method on
-  // shardy/dialect/sdy/transforms/propagation/basic_factor_propagation.cc,
-  // instead, after an iterater is added.
+  // TODO(enver): Reuse getPrefixWithoutOverlap method in
+  // shardy/dialect/sdy/ir/utils.h, after an iterator is added.
   std::optional<AxisRefAttr> getPrefixOfInputWithoutOverlap(
       AxisRefAttr axisRef) const;
 
