@@ -643,5 +643,22 @@ std::optional<AxisRefAttr> getPrefixWithoutOverlap(
   return result;
 }
 
+void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
+                                    ArrayRef<AxisRefAttr> otherAxisRefs) {
+  for (const auto [axisIndex, curAxis] : llvm::enumerate(axes)) {
+    std::optional<AxisRefAttr> newAxis =
+        getPrefixWithoutOverlap(curAxis, otherAxisRefs);
+    if (!newAxis) {
+      axes.truncate(axisIndex);
+      return;
+    }
+    if (axes[axisIndex] != *newAxis) {
+      axes[axisIndex] = *newAxis;
+      axes.truncate(axisIndex + 1);
+      return;
+    }
+  }
+}
+
 }  // namespace sdy
 }  // namespace mlir

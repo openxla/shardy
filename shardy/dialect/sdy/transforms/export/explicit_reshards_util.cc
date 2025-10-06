@@ -19,6 +19,7 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 #include "llvm/ADT/BitVector.h"
@@ -635,33 +636,32 @@ AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
   return toAxesPerFactor(factorAxisRefs);
 }
 
-int64_t findTensorIndexToPreferOnUnaryOperation(
+// Returns a pair of tensor indices sorted by preference for a unary operation.
+// The first element is the preferred tensor index. The preference is determined
+// by the following criteria in order:
+// 1. The tensor without sharded permutation factors.
+// 2. The tensor with a larger size.
+// 3. The tensor with a larger sharding size.
+std::pair<int64_t, int64_t> sortedTensorIndicesOnUnaryOperation(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const Mesh& mesh) {
-  // Find common axes on the larger tensor, hence reshard the smaller tensor.
   SmallVector<int64_t> tensorIndices = shardingRule.getNonScalarTensorIndices();
   const int64_t lhs = tensorIndices[0];
   const int64_t rhs = tensorIndices[1];
 
-  const bool lhsHasShardedPermutationFactor = hasShardedPermutationFactors(
-      shardingProjection.getTensor(lhs), shardingRule);
-  const bool rhsHasShardedPermutationFactor = hasShardedPermutationFactors(
-      shardingProjection.getTensor(rhs), shardingRule);
-  if (lhsHasShardedPermutationFactor != rhsHasShardedPermutationFactor) {
-    return lhsHasShardedPermutationFactor ? rhs : lhs;
-  }
+  auto getPreferenceTuple =
+      [&](int64_t tensorIndex) -> std::tuple<bool, int64_t, int64_t> {
+    const TensorFactorShardings& tensor =
+        shardingProjection.getTensor(tensorIndex);
+    return {!hasShardedPermutationFactors(tensor, shardingRule),
+            tensorSizes[tensorIndex], tensor.getShardingSize(mesh.attr())};
+  };
 
-  if (tensorSizes[lhs] != tensorSizes[rhs]) {
-    return tensorSizes[lhs] < tensorSizes[rhs] ? rhs : lhs;
+  if (getPreferenceTuple(lhs) >= getPreferenceTuple(rhs)) {
+    return {lhs, rhs};
   }
-
-  // Find common axes on the tensor that is more sharded, hence perform the
-  // operation on smaller tensor per device.
-  return shardingProjection.getTensor(lhs).getShardingSize(mesh.attr()) <
-                 shardingProjection.getTensor(rhs).getShardingSize(mesh.attr())
-             ? rhs
-             : lhs;
+  return {rhs, lhs};
 }
 
 // Assumes that:
@@ -674,31 +674,30 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const Mesh& mesh) {
-  int64_t tensorIndexToPrefer = findTensorIndexToPreferOnUnaryOperation(
-      shardingProjection, shardingRule, tensorSizes, mesh);
+  const auto [preferredTensor, otherTensor] =
+      sortedTensorIndicesOnUnaryOperation(shardingProjection, shardingRule,
+                                          tensorSizes, mesh);
+  const FactorIndexToSharding& preferredFactorSharding =
+      shardingProjection.getTensor(preferredTensor).factorIndexToSharding;
+  const FactorIndexToSharding& otherFactorSharding =
+      shardingProjection.getTensor(otherTensor).factorIndexToSharding;
 
-  // Set factor shardings to make sure factors that do not appear in the
-  // preferred tensor are sharded on the other tensor.
   AxesPerFactor factorAxisRefs(shardingRule.getNumFactors());
-  // TODO(enver): Add and use forEachFactorSharding helper method.
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    for (const auto& [factorIndex, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      if (!factorSharding.axisRefs.empty()) {
-        // TODO(enver): Drop the need for explicit AxisListRef casting.
-        factorAxisRefs[factorIndex] = factorSharding.axisRefs;
-      }
+  SmallVector<AxisRefAttr> axesInPreferredTensor;
+  for (const auto& [factorIndex, factorSharding] : preferredFactorSharding) {
+    factorAxisRefs[factorIndex] = factorSharding.axisRefs;
+    axesInPreferredTensor.append(factorSharding.axisRefs.begin(),
+                                 factorSharding.axisRefs.end());
+  }
+
+  for (const auto& [factorIndex, factorSharding] : otherFactorSharding) {
+    if (!preferredFactorSharding.contains(factorIndex)) {
+      factorAxisRefs[factorIndex] = factorSharding.axisRefs;
+      truncateAxesByRemovingOverlaps(factorAxisRefs[factorIndex],
+                                     axesInPreferredTensor);
     }
   }
 
-  // Override with the factor shardings on the preferred tensor.
-  for (const auto& [factorIndex, factorSharding] :
-       shardingProjection.getTensor(tensorIndexToPrefer)
-           .factorIndexToSharding) {
-    factorAxisRefs[factorIndex] = factorSharding.axisRefs;
-  }
   return factorAxisRefs;
 }
 

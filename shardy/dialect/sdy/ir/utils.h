@@ -567,6 +567,11 @@ bool isUsedBy(Value value, Operation* user);
 std::optional<AxisRefAttr> getPrefixWithoutOverlap(
     AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs);
 
+// For each axis in `axes`, remove the axis and the following ones if they
+// overlap with any axes in `otherAxisRefs`.
+void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
+                                    ArrayRef<AxisRefAttr> otherAxisRefs);
+
 }  // namespace sdy
 }  // namespace mlir
 
