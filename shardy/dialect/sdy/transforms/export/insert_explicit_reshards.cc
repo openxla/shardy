@@ -432,27 +432,18 @@ AxesPerFactor getCommonAxesPerReductionFactor(
 // - All op results have the same unreduced axes.
 // - If the op has no results, none of the operands has unreduced axes.
 // - Operand and result meshes are the same ignoring device id order.
+// - There are no overflow axes.
 //
 // Returns the union of axes along all the reduction factors which may not be
 // canonicalized.
-SmallVector<AxisRefAttr> processOp(Operation* op,
-                                   ArrayRef<TensorShardingAttr> inShardings,
-                                   ArrayRef<TensorShardingAttr> outShardings,
-                                   IRRewriter& rewriter,
-                                   const SymbolTable& symbolTable,
-                                   OpShardingRuleAttr shardingRule,
-                                   const Mesh& mesh, const bool onFullVersion) {
-  ShardingProjection shardingProjection = ShardingProjection::build(
-      inShardings, outShardings, shardingRule, mesh.attr(),
-      /*closedIfMissing=*/true);
-
-  // Return without inserting reshards if any factor sharding has overflow
-  // axes. This case is not handled yet.
-  // TODO(enver): Handle the case when factor shardings have overflow axes.
-  if (hasOverflowAxes(shardingProjection)) {
-    return {};
-  }
-
+//
+// Guarantees to return non-empty `AxesPerFactor` if `onFullVersion` is true.
+AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
+                        ArrayRef<TensorShardingAttr> inShardings,
+                        ArrayRef<TensorShardingAttr> outShardings,
+                        IRRewriter& rewriter, const SymbolTable& symbolTable,
+                        OpShardingRuleAttr shardingRule, const Mesh& mesh,
+                        const bool onFullVersion) {
   // Checks if factors are sharded the same way across operands and results.
   AxesPerFactor commonAxesPerFactor =
       getCompatibleFactorShardings(shardingProjection, shardingRule);
@@ -490,23 +481,7 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
                          rewriter, symbolTable, shardingRule, mesh);
             });
   }
-
-  if (op->getResults().empty()) {
-    return {};
-  }
-
-  if (!onFullVersion) {
-    if (getUnreducedAxes(op->getResult(0)).empty()) {
-      return {};
-    }
-    if (commonAxesPerFactor.empty()) {
-      // At this point, there are unreduced axes on results.
-      commonAxesPerFactor =
-          getCommonAxesPerReductionFactor(op, shardingProjection, shardingRule);
-    }
-  }
-
-  return getReductionAxes(commonAxesPerFactor, shardingRule);
+  return commonAxesPerFactor;
 }
 
 struct InsertExplicitReshardsPass
@@ -565,11 +540,35 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      SmallVector<AxisRefAttr> reductionAxes =
-          processOp(op, inShardings, outShardings, rewriter, symbolTable,
-                    shardingRule, *mesh, onFullVersion);
+      ShardingProjection shardingProjection = ShardingProjection::build(
+          inShardings, outShardings, shardingRule, mesh->attr(),
+          /*closedIfMissing=*/true);
+      // Return without inserting reshards if any factor sharding has overflow
+      // axes. This case is not handled yet.
+      // TODO(enver): Handle the case when factor shardings have overflow axes.
+      if (hasOverflowAxes(shardingProjection)) {
+        return;
+      }
+      AxesPerFactor commonAxesPerFactor =
+          processOp(op, shardingProjection, inShardings, outShardings, rewriter,
+                    symbolTable, shardingRule, *mesh, onFullVersion);
+      if (op->getResults().empty()) {
+        return;
+      }
+      if (!onFullVersion) {
+        if (getUnreducedAxes(op->getResult(0)).empty()) {
+          return;
+        }
+        if (commonAxesPerFactor.empty()) {
+          // At this point, there are unreduced axes on results.
+          commonAxesPerFactor = getCommonAxesPerReductionFactor(
+              op, shardingProjection, shardingRule);
+        }
+      }
       // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
-      insertAllReducesForReductionFactors(op, reductionAxes, *mesh, rewriter);
+      insertAllReducesForReductionFactors(
+          op, getReductionAxes(commonAxesPerFactor, shardingRule), *mesh,
+          rewriter);
 
       // TODO(enver): Remove sharding rules from ops.
     });
