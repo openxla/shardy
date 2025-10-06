@@ -489,11 +489,16 @@ SmallVector<AxisRefAttr> processOp(Operation* op,
               processDot(dotGeneralOp, shardingProjection, outShardings,
                          rewriter, symbolTable, shardingRule, mesh);
             });
+  }
 
-    if (outShardings.empty() || getUnreducedAxes(outShardings[0]).empty()) {
+  if (op->getResults().empty()) {
+    return {};
+  }
+
+  if (!onFullVersion) {
+    if (getUnreducedAxes(op->getResult(0)).empty()) {
       return {};
     }
-
     if (commonAxesPerFactor.empty()) {
       // At this point, there are unreduced axes on results.
       commonAxesPerFactor =
