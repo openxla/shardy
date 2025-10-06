@@ -1314,6 +1314,17 @@ class CollectiveInserter {
   AxisToDimAndIndex outAxisToDimAndIndex;
 };
 
+// Assumes both `inSharding` and `outSharding` are non-null.
+bool isEquivalentOnMesh(TensorShardingAttr inSharding,
+                        TensorShardingAttr outSharding, ReshardOp reshardOp) {
+  if (inSharding.getMeshName() == outSharding.getMeshName()) {
+    return true;
+  }
+  MeshAttr inMesh = inSharding.getMesh(reshardOp);
+  MeshAttr outMesh = outSharding.getMesh(reshardOp);
+  return inMesh.equals(outMesh, /*ignoreDeviceOrder=*/true);
+}
+
 class ReshardPattern : public OpConversionPattern<ReshardOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
@@ -1330,31 +1341,26 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
       return rewriter.notifyMatchFailure(
           op, [](Diagnostic& diag) { diag << "Incompatible shardings"; });
     }
-    if (inSharding.isFullyReplicated() && outSharding.isFullyReplicated()) {
-      rewriter.replaceOp(op, adaptor.getInput());
-      return success();
-    }
-    if (inSharding.getMeshName() != outSharding.getMeshName()) {
-      if (outSharding.isFullyReplicated()) {
-        // TODO(enver): Hard fail if output sharding has a different unreduced
-        // axes than the input sharding. Note that the out sharding may be fully
-        // replicated and still have different unreduced axes than the input
-        // sharding.
-        outSharding = TensorShardingAttr::getFullyClosedLike(inSharding);
-        // TODO(enver): Also check for input sharding is fully replicated.
-      } else {
-        MeshAttr inMesh = inSharding.getMesh(op);
-        MeshAttr outMesh = outSharding.getMesh(op);
-        // TODO(enver): Use MeshAttr::equals method instead.
-        if (outMesh.getAxes() != inMesh.getAxes() ||
-            inMesh.getDeviceIds() == outMesh.getDeviceIds()) {
-          // We currently only support a reshard between different meshes if
-          // they have the same axes and different device ids, and at least one
-          // of the sharding isn't fully replicated.
-          return rewriter.notifyMatchFailure(
-              op, [](Diagnostic& diag) { diag << "Incompatible meshes"; });
-        }
+    if (outSharding.isFullyReplicated()) {
+      if (inSharding.isFullyReplicated()) {
+        rewriter.replaceOp(op, adaptor.getInput());
+        return success();
       }
+      // TODO(enver): Hard fail if output sharding has a different unreduced
+      // axes than the input sharding. Note that the out sharding may be fully
+      // replicated and still have different unreduced axes than the input
+      // sharding.
+      outSharding = TensorShardingAttr::getFullyClosedLike(inSharding);
+    }
+    // TODO(enver): Set input mesh to output mesh if input sharding is fully
+    // replicated. It requires sdy.all_slice can handle that input and output
+    // has a different meshes.
+    if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
+      // We currently only support a reshard between different meshes if
+      // they have the same axes and different device ids, and at least one
+      // of the sharding isn't fully replicated.
+      return rewriter.notifyMatchFailure(
+          op, [](Diagnostic& diag) { diag << "Incompatible meshes"; });
     }
 
     // TODO(tomnatan): we should verify that the operand of ReshardOp has a
@@ -1377,13 +1383,24 @@ struct ReshardToCollectivesPass
     target = std::make_shared<ConversionTarget>(*context);
     target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,
                        CollectivePermuteOp>();
-    if (keepRedundantReshards) {
-      target->addDynamicallyLegalOp<ReshardOp>([](ReshardOp op) {
-        return isEquivalent(getSharding(op.getInput()), op.getSharding());
-      });
-    } else {
-      target->addIllegalOp<ReshardOp>();
-    }
+    target->addDynamicallyLegalOp<ReshardOp>([&](ReshardOp op) {
+      TensorShardingAttr inSharding = getSharding(op.getInput());
+      TensorShardingAttr outSharding = op.getSharding();
+      if (keepRedundantReshards && isEquivalent(inSharding, outSharding)) {
+        return true;
+      }
+      // In case out sharding is fully replicated, the reshard is either erased
+      // (if input sharding is fully replicated too) or it adds an all gather
+      // (if input sharding is sharded), either way it is handled and it should
+      // be marked as illegal.
+      if (outSharding.isFullyReplicated()) {
+        return false;
+      }
+      if (inSharding && !isEquivalentOnMesh(inSharding, outSharding, op)) {
+        return true;
+      }
+      return false;
+    });
 
     RewritePatternSet patternsInternal(context);
     patternsInternal.add<ReshardPattern>(context);
