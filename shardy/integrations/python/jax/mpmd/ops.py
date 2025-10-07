@@ -17,6 +17,7 @@
 
 from collections.abc import Callable, Sequence
 import functools
+import inspect
 from typing import Any, TypeVar
 
 import jax
@@ -51,6 +52,29 @@ X = TypeVar('X')
 Y = TypeVar('Y')
 
 
+def _infer_argnums(
+    fun: Callable[..., Any],
+    argnames: Sequence[str] | None,
+) -> tuple[int, ...]:
+  """Infer static argnums from static argnames."""
+  if argnames is None:
+    return ()
+
+  try:
+    sig = inspect.signature(fun)
+  except (ValueError, TypeError):
+    return ()
+
+  parameters = sig.parameters
+  argnums = tuple(
+      i
+      for i, (k, param) in enumerate(parameters.items())
+      if param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k in argnames
+  )
+
+  return argnums
+
+
 # ===----------------------------------------------------------------------=== #
 # mpmd.named_computation
 # ===----------------------------------------------------------------------=== #
@@ -61,18 +85,55 @@ def _named_computation(
     *,
     name: str,
     transpose_count: int,
+    static_argnames: Sequence[str],
 ) -> Callable[..., X]:
   """Wraps a function with a named_computation primitive. See also API docs."""
 
   @functools.wraps(fn)
   def wrapped_fn(*args, **kwargs):
+    if static_argnames:
+      static_argnums = _infer_argnums(fn, static_argnames)
+      static_args_dict = {i: args[i] for i in static_argnums}
+      dyn_args = tuple(
+          args[i] for i in range(len(args)) if i not in static_argnums
+      )
+      static_kwargs = {k: v for k, v in kwargs.items() if k in static_argnames}
+      dyn_kwargs = {k: v for k, v in kwargs.items() if k not in static_argnames}
+
+      def partial_fn_with_dynamic_args(*dyn_args_inner, **dyn_kwargs_inner):
+        full_args = []
+        dyn_idx = 0
+        for i in range(len(args)):
+          if i in static_args_dict:
+            full_args.append(static_args_dict[i])
+          else:
+            full_args.append(dyn_args_inner[dyn_idx])
+            dyn_idx += 1
+        if len(full_args) != len(args):
+          raise ValueError(
+              f'Expected {len(args)} arguments, but got {len(full_args)} after'
+              f' inserting {static_args_dict}'
+          )
+        return fn(*full_args, **static_kwargs, **dyn_kwargs_inner)
+
+    else:
+      dyn_args = args
+      dyn_kwargs = kwargs
+      static_argnums = ()
+      partial_fn_with_dynamic_args = fn
+
     fun = lu.wrap_init(
-        fn,
+        partial_fn_with_dynamic_args,
         debug_info=api_util.debug_info(
-            'mpmd.named_computation', fn, args, kwargs
+            'mpmd.named_computation',
+            partial_fn_with_dynamic_args,
+            dyn_args,
+            dyn_kwargs,
+            static_argnums=static_argnums,
+            static_argnames=static_argnames,
         ),
     )
-    flat_args, in_tree = tree_util.tree_flatten((args, kwargs))
+    flat_args, in_tree = tree_util.tree_flatten((dyn_args, dyn_kwargs))
     flat_fun, out_tree = api_util.flatten_fun(fun, in_tree)
     out_flat = named_computation_p.bind(
         flat_fun, *flat_args, name=name, transpose_count=transpose_count
@@ -86,6 +147,7 @@ def named_computation(
     fn: Callable[..., X] | None = None,
     *,
     name: str,
+    static_argnames: Sequence[str] | str | None = None,
 ) -> Callable[..., X]:
   """Returns a callable which has been given a name.
 
@@ -116,6 +178,8 @@ def named_computation(
     fn: the computation executed when the named_computation is scheduled.
     name: the name of the named_computation, which can be used to assign it to
       an SPMD mesh.
+    static_argnames: the names of the arguments that are not to be traced. See
+      jax.jit for more details. We'll infer static_argnums from this.
 
   Returns:
     A callable that returns the results of executing `fn`.
@@ -134,9 +198,18 @@ def named_computation(
     )
 
   if fn is None:
-    return lambda fn: named_computation(fn, name=name)
+    return lambda fn: named_computation(
+        fn, name=name, static_argnames=static_argnames
+    )
 
-  return _named_computation(fn, name=name, transpose_count=0)
+  if static_argnames is None:
+    static_argnames = ()
+  elif isinstance(static_argnames, str):
+    static_argnames = (static_argnames,)
+
+  return _named_computation(
+      fn, name=name, transpose_count=0, static_argnames=static_argnames
+  )
 
 
 def named_computation_partir_lowering(

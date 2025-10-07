@@ -46,6 +46,55 @@ class NamedComputationTest(absltest.TestCase):
     ones = np.ones((3, 5), dtype=jnp.int32)
     np.testing.assert_equal(f(ones), ones)
 
+  def test_named_computation_static_argnames_on_kwargs(self):
+    x = jnp.ones(10)
+
+    @ops.named_computation(name='x')
+    def non_static_f(x, *, config):
+      return x * config
+
+    non_static_l = jax.jit(non_static_f, static_argnames='config').lower(
+        x, config=10
+    )
+
+    # named_comp has two args.
+    self.assertRegex(non_static_l.as_text(), r'func.*named_computation.*arg0')
+    self.assertRegex(non_static_l.as_text(), r'func.*named_computation.*arg1')
+
+    @ops.named_computation(name='x', static_argnames='config')
+    def static_f(x, *, config):
+      return x * config
+
+    static_l = jax.jit(static_f, static_argnames='config').lower(x, config=10)
+
+    # named_comp has only one arg, because second arg is static
+    self.assertRegex(static_l.as_text(), r'func.*named_computation.*arg0')
+    self.assertNotRegex(static_l.as_text(), r'func.*named_computation.*arg1')
+
+  def test_named_computation_static_argnames_on_args(self):
+    x = jnp.ones(10)
+
+    @ops.named_computation(name='x')
+    def non_static_f(x, config):
+      return x * config
+
+    non_static_l = jax.jit(non_static_f, static_argnames='config').lower(x, 10)
+
+    # named_comp has two args.
+    self.assertRegex(non_static_l.as_text(), r'func.*named_computation.*arg0')
+    self.assertRegex(non_static_l.as_text(), r'func.*named_computation.*arg1')
+
+    @ops.named_computation(name='x', static_argnames='config')
+    def static_f(x, config):
+      return x * config
+
+    static_l = jax.jit(static_f, static_argnames='config').lower(x, 10)
+
+    print(static_l.as_text())
+    # named_comp has only one arg, because second arg is static
+    self.assertRegex(static_l.as_text(), r'func.*named_computation.*arg0')
+    self.assertNotRegex(static_l.as_text(), r'func.*named_computation.*arg1')
+
 
 class NamedTensorTest(absltest.TestCase):
 
