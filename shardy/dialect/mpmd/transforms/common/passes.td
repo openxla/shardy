@@ -484,6 +484,12 @@ def UniquifyFunctionInputsOutputsPass :
     passed by value to the function, not by reference.
   }];
 
+  let options = [
+    Option<"useTransferInsteadOfFragment", "use-transfer-instead-of-fragment",
+           "bool", /*default=*/"false",
+           "Whether to use mpmd.transfer or mpmd.fragment for uniquification">
+  ];
+
   let dependentDialects = ["mlir::mpmd::MpmdDialect"];
 }
 

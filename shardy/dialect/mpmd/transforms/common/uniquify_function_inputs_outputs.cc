@@ -16,6 +16,7 @@ limitations under the License.
 #include <cstdint>
 #include <utility>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -29,6 +30,8 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/MLIRContext.h"
 
 namespace mlir::mpmd {
 
@@ -98,6 +101,50 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   ReturnOp::create(block_builder, loc, returned_values);
 }
 
+// Replaces the return values of the function with transfer ops.
+// If we have
+// func.func @func(%arg0: !mesh_1_tensor) ->
+// (!mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor) {
+//  return %arg0, %arg0, %arg0 : !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor
+// }
+// Then we would introduce 3 transfers:
+// func.func @func(%arg0: !mesh_1_tensor) -> (!mesh_1_tensor, !mesh_1_tensor,
+// !mesh_1_tensor) {
+//  %0 = transfer(%arg0) : !mesh_1_tensor -> !mesh_1_tensor
+//  %1 = transfer(%arg0) : !mesh_1_tensor -> !mesh_1_tensor
+//  %2 = transfer(%arg0) : !mesh_1_tensor -> !mesh_1_tensor
+//  return %0, %1, %2 : !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor
+// }
+// This is needed to ensure that each returned value can hold a different
+// sharding. If the same value is returned multiple times, each result position
+// could have a different sharding requirement. By inserting a TransferOp, we
+// create a new SSA value for each result position, allowing different
+// shardings to be applied.
+// We always insert a TransferOp for block arguments to ensure that sharding
+// constraints can be applied to an op result rather than a block argument.
+// For other values, if they are used in more than one return position, as an
+// optimization, we only insert a TransferOp for all but the first return
+// position.
+void uniquifyReturnsWithTransferOps(func::FuncOp func_op,
+                                    MLIRContext* context) {
+  Operation* return_op = func_op.getBody().front().getTerminator();
+  llvm::SmallDenseSet<Value> seen_values;
+  OpBuilder builder(context);
+  builder.setInsertionPoint(return_op);
+  for (OpOperand& operand : return_op->getOpOperands()) {
+    if (!seen_values.contains(operand.get())) {
+      seen_values.insert(operand.get());
+      if (!mlir::isa<BlockArgument>(operand.get())) {
+        continue;
+      }
+    }
+    auto transfer_op = TransferOp::create(
+        builder, return_op->getLoc(),
+        cast<MeshTensorType>(operand.get().getType()), operand.get());
+    operand.set(transfer_op->getResult(0));
+  }
+}
+
 class UniquifyFunctionInputOutputsPass
     : public impl::UniquifyFunctionInputsOutputsPassBase<
           UniquifyFunctionInputOutputsPass> {
@@ -108,6 +155,11 @@ class UniquifyFunctionInputOutputsPass
   void runOnFunc(func::FuncOp func_op) override {
     if (!IsMpmdFunction(func_op)) {
       // This is not the main function. Do nothing.
+      return;
+    }
+
+    if (this->useTransferInsteadOfFragment) {
+      uniquifyReturnsWithTransferOps(func_op, &getContext());
       return;
     }
 

@@ -27,7 +27,10 @@ void addShardingPropagationPipeline(OpPassManager& pm,
                                     llvm::StringRef sdyDumpDir) {
   // Uniquify function inputs and outputs, in case the same fragment result or
   // function input is returned multiple times with different shardings.
-  pm.addNestedPass<func::FuncOp>(createUniquifyFunctionInputsOutputsPass());
+  UniquifyFunctionInputsOutputsPassOptions uniquifyOptions;
+  uniquifyOptions.useTransferInsteadOfFragment = true;
+  pm.addNestedPass<func::FuncOp>(
+      createUniquifyFunctionInputsOutputsPass(uniquifyOptions));
 
   // Run sdy propagation.
   sdy::PropagationOptions options;

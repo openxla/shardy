@@ -145,7 +145,7 @@ sdy.mesh @mesh = <["x"=8]>
 // CHECK-LABEL: func @identify_function_with_arg_sharding
 // CHECK: (%arg0: !mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>,
 // CHECK:  %arg1: !mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
-// CHECK: (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>,
+// CHECK: (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>>,
 // CHECK:  !mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>)
 func.func @identify_function_with_arg_sharding(
   %arg0: !mesh_1_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}], replicated = {"x"}>},

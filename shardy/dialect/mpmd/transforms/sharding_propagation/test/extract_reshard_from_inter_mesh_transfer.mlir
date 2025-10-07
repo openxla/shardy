@@ -59,12 +59,15 @@ func.func @topology_isnt_homogeneous(%arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xu
   func.return %0 : !mpmd.mesh_tensor<"m2", tensor<4x8xui32>>
 }
 
-// CHECK-LABEL: func @intra_mesh_transfer_does_not_introduce_reshard
-func.func @intra_mesh_transfer_does_not_introduce_reshard(%arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xui32>> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>})
+// CHECK-LABEL: func @intra_mesh_transfer_introduces_reshard
+func.func @intra_mesh_transfer_introduces_reshard(%arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xui32>> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>})
   -> !mpmd.mesh_tensor<"m1", tensor<4x8xui32>>
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>}
 {
-  // CHECK-NEXT: mpmd.transfer {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"x"}]>]>} %arg0 : (!mpmd.mesh_tensor<"m1", tensor<4x8xui32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xui32>>
+  // CHECK-NEXT: %[[TRANSFER_RESULT:.*]] = mpmd.transfer {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {?}]>]>} %arg0 : (!mpmd.mesh_tensor<"m1", tensor<4x8xui32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xui32>>
+  // CHECK-NEXT: %[[RESHARD_RESULT:.*]] = mpmd.fragment<mesh="m1", origin=[], out_shardings=[<@mesh, [{?}, {"x"}]>]> (%[[TRANSFER_RESULT]]) (%arg1: tensor<4x8xui32>) {
+  // CHECK-NEXT:    mpmd.return %arg1 : tensor<4x8xui32>
+  // CHECK-NEXT:  } : (!mpmd.mesh_tensor<"m1", tensor<4x8xui32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xui32>>
   %0 = mpmd.transfer {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"x"}]>]>} %arg0 : (!mpmd.mesh_tensor<"m1", tensor<4x8xui32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xui32>>
   func.return %0 : !mpmd.mesh_tensor<"m1", tensor<4x8xui32>>
 }

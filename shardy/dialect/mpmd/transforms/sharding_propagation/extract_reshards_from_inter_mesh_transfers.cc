@@ -95,10 +95,6 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
       cast<mpmd::MeshTensorType>(transfer.getTensor().getType());
   auto dst_mesh_type = cast<mpmd::MeshTensorType>(transfer.getType());
 
-  if (transfer.isIntraMesh()) {
-    return;
-  }
-
   // TODO: jupvfranco - We need a better way to handle resharding on host.
   if (src_mesh_type.isOnHost() && dst_mesh_type.isOnHost()) {
     transfer->emitError()
