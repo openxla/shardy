@@ -83,6 +83,7 @@ cc_library(
     deps = [
         "//shardy/common:logging",
         "//shardy/dialect/mpmd/ir:dialect",
+        "//shardy/dialect/mpmd/ir:fragment_execution_rules",
         "//shardy/dialect/mpmd/transforms/common:utils",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",

@@ -16,10 +16,14 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_MPMD_TRANSFORMS_OPTIMIZE_UTILS_H_
 #define SHARDY_DIALECT_MPMD_TRANSFORMS_OPTIMIZE_UTILS_H_
 
+#include <optional>
+#include <string>
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
+#include "shardy/dialect/mpmd/ir/fragment_execution_rules.h"
 
 namespace mlir::mpmd {
 
@@ -59,7 +63,18 @@ bool IsSchedulingUnit(FragmentOp fragment);
 
 // Does `tgt_op` have (conservatively) any dataflow dependency on `src_op`?
 // Precondition: `tgt_op` and `src_op` must be in the same block.
-bool TargetDependsOnSourceOp(Operation* src_op, Operation* tgt_op);
+
+// Gets the dataflow dependency path from `src_op` to `tgt_op` if it exists.
+//
+// A dependency exists if `tgt_op` is in the use-def chain of `src_op` and does
+// not appear before `src_op` within the same block.
+//
+// Returns the dependency path as a vector of operations from `src_op` to
+// `tgt_op` if a dependency exists, otherwise returns `std::nullopt`.
+//
+// Precondition: `src_op` and `tgt_op` must be in the same block.
+std::optional<SmallVector<Operation*>> GetDependencyPath(Operation* src_op,
+                                                         Operation* tgt_op);
 
 // Adds a control dependency in the graph so that `fragment2` depends on
 // `fragment1`.
@@ -71,6 +86,11 @@ void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2,
 // again.
 void RemoveAllControlDependencies(
     DenseMap<FragmentOp, int>& ctrl_dependency_counter);
+
+// Formats a detailed warning message for a scheduling conflict.
+std::string FormatConflictWarning(const FragmentInfo& predecessor_info,
+                                  const FragmentInfo& successor_info,
+                                  const SmallVector<Operation*>& conflict_path);
 
 }  // namespace mlir::mpmd
 

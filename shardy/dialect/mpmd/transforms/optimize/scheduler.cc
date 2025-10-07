@@ -76,8 +76,8 @@ class PipelineSchedulerPass
         // Alternatively, consider removing this check completely and define a
         // post-reorder check to verify that for any control-dependency added,
         // the source appears before the destination of the dependency.
-        if (TargetDependsOnSourceOp(fragment1, fragment2) ||
-            TargetDependsOnSourceOp(fragment2, fragment1)) {
+        if (GetDependencyPath(fragment1, fragment2).has_value() ||
+            GetDependencyPath(fragment2, fragment1).has_value()) {
           continue;
         }
 
