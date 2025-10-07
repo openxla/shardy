@@ -352,6 +352,12 @@ Similarly, if a function returns a block argument, this pass creates an
 identity fragment for that block argument, guaranteeing that values are
 passed by value to the function, not by reference.
 
+#### Options
+
+```
+-use-transfer-instead-of-fragment : Whether to use mpmd.transfer or mpmd.fragment for uniquification
+```
+
 ### `-mpmd-unroll-for-loops`
 
 _Fully unrolls `mpmd.for` loops._
