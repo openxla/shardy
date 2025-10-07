@@ -387,41 +387,6 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
-// Assume the results have unreduced axes.
-//
-// Returns `AxesPerFactor` with only its reduction factors are populated to have
-// common axes.
-//
-// Hard fails if some reduction factors do not have compatible shardings.
-AxesPerFactor getCommonAxesPerReductionFactor(
-    Operation* op, const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule) {
-  // TODO(enver): Repurpose getCompatibleFactorShardings to return compatible
-  // factors, and simplify the following logic.
-  AxesPerFactor commonAxesPerFactor =
-      AxesPerFactor(shardingRule.getNumFactors());
-  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    // We only iterate operands since reduction factors are not in results.
-    bool seen = false;
-    SmallVector<AxisRefAttr>& commonAxes = commonAxesPerFactor[reductionFactor];
-    for (const TensorFactorShardings& tensorFactorSharding :
-         shardingProjection.getOperands()) {
-      if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
-              getFactorSharding(tensorFactorSharding, reductionFactor)) {
-        if (seen) {
-          SDY_CHECK(factorSharding->equals(commonAxes))
-              << "For the operation " << op
-              << ", the result has unreduced axes while the operand has "
-                 "incompatible sharding along reduction factors.";
-        } else {
-          commonAxes = llvm::to_vector(*factorSharding);
-          seen = true;
-        }
-      }
-    }
-  }
-  return commonAxesPerFactor;
-}
 
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
@@ -552,23 +517,10 @@ struct InsertExplicitReshardsPass
       AxesPerFactor commonAxesPerFactor =
           processOp(op, shardingProjection, inShardings, outShardings, rewriter,
                     symbolTable, shardingRule, *mesh, onFullVersion);
-      if (op->getResults().empty()) {
-        return;
-      }
-      if (!onFullVersion) {
-        if (getUnreducedAxes(op->getResult(0)).empty()) {
-          return;
-        }
-        if (commonAxesPerFactor.empty()) {
-          // At this point, there are unreduced axes on results.
-          commonAxesPerFactor = getCommonAxesPerReductionFactor(
-              op, shardingProjection, shardingRule);
-        }
-      }
       // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
-      insertAllReducesForReductionFactors(
-          op, getReductionAxes(commonAxesPerFactor, shardingRule), *mesh,
-          rewriter);
+      insertAllReducesForReductionFactors(op, shardingProjection,
+                                          commonAxesPerFactor, shardingRule,
+                                          *mesh, rewriter, onFullVersion);
 
       // TODO(enver): Remove sharding rules from ops.
     });

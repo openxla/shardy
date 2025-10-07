@@ -799,14 +799,60 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
   return tensorSizes;
 }
 
-SmallVector<AxisRefAttr> getReductionAxes(const AxesPerFactor& axesPerFactor,
-                                          OpShardingRuleAttr shardingRule) {
-  SmallVector<AxisRefAttr> reductionAxes;
-  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    reductionAxes.append(axesPerFactor[reductionFactor]);
+namespace {
+
+// Returns reduction axes that are the union of all axes on reduction factors.
+// The result axes are not necessarilly canonicalized.
+//
+// Returns empty axes if not `onFullVersion` and op results do not have
+// unreduced axes.
+//
+// Assumes `commonAxesPerFactor` is non-empty if `onFullVersion` is true.
+//
+// Hard fails if some reduction factors do not have compatible shardings.
+SmallVector<AxisRefAttr> getReductionAxes(
+    Operation* op, const ShardingProjection& shardingProjection,
+    const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
+    const bool onFullVersion) {
+  if (onFullVersion) {
+    SmallVector<AxisRefAttr> reductionAxes;
+    for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
+      reductionAxes.append(commonAxesPerFactor[reductionFactor]);
+    }
+    return reductionAxes;
   }
-  return reductionAxes;
+
+  if (getUnreducedAxes(op->getResult(0)).empty()) {
+    return {};
+  }
+
+  // TODO(enver): Repurpose getCompatibleFactorShardings to return compatible
+  // factors, and simplify the following logic.
+  SmallVector<AxisRefAttr> axesAlongAllReductionFactors;
+  for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
+    // We only iterate operands since reduction factors are not in results.
+    bool seen = false;
+    SmallVector<AxisRefAttr> axesAlongCurrentReductionFactor;
+    for (const TensorFactorShardings& tensorFactorSharding :
+         shardingProjection.getOperands()) {
+      if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
+              getFactorSharding(tensorFactorSharding, reductionFactor)) {
+        if (seen) {
+          SDY_CHECK(axesAlongCurrentReductionFactor == *factorSharding)
+              << "For the operation " << op
+              << ", the result has unreduced axes while the operand has "
+                 "incompatible sharding along reduction factors.";
+        } else {
+          axesAlongCurrentReductionFactor = llvm::to_vector(*factorSharding);
+          seen = true;
+        }
+      }
+    }
+    axesAlongAllReductionFactors.append(axesAlongCurrentReductionFactor);
+  }
+  return axesAlongAllReductionFactors;
 }
+}  // namespace
 
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
@@ -864,11 +910,16 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
   return getUnreducedAxes(getSharding(value));
 }
 
-void insertAllReducesForReductionFactors(Operation* op,
-                                         ArrayRef<AxisRefAttr> reductionAxes,
-                                         const Mesh& mesh,
-                                         IRRewriter& rewriter) {
-  if (reductionAxes.empty() || op->getResults().empty()) {
+void insertAllReducesForReductionFactors(
+    Operation* op, const ShardingProjection& shardingProjection,
+    AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
+    const Mesh& mesh, IRRewriter& rewriter, const bool onFullVersion) {
+  if (op->getResults().empty()) {
+    return;
+  }
+  SmallVector<AxisRefAttr> reductionAxes = getReductionAxes(
+      op, shardingProjection, commonAxesPerFactor, shardingRule, onFullVersion);
+  if (reductionAxes.empty()) {
     return;
   }
 
