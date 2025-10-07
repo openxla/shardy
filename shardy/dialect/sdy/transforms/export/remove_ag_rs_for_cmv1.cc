@@ -60,6 +60,7 @@ struct RemoveAllGatherReduceScatterForCMV1Pass
                 getSharding(operandDefOp->getResult(0))
                     .getUnreducedAxes()
                     .empty()) {
+              setShardings(operandDefOp, {reduceScatterOp.getOutSharding()});
               rewriter.replaceOp(reduceScatterOp, reduceScatterOp.getTensor());
             }
           });
