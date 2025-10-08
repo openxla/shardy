@@ -169,9 +169,9 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
 
       // The following assertion holds because we wouldn't have propagated the
       // non-divisible axis otherwise.
-      assert(dimMapping.isMinorMost(factorIndex) ||
-             factorSize % shardedSize == 0 &&
-                 "non-minor-most factor must be divisible by axis sizes");
+      assert((dimMapping.isMinorMost(factorIndex) ||
+              factorSize % shardedSize == 0) &&
+             "non-minor-most factor must be divisible by axis sizes");
       if (shardedSize < factorSize) {
         // Any subsequent factor will require strided view, add the axes up to
         // this factor (including) to this dimension sharding and move to the
