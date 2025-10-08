@@ -749,12 +749,9 @@ void distributeAxisRefsToBatchingFactors(
 }
 }  // namespace
 
-AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
-                             ArrayRef<TensorShardingAttr> outShardings,
-                             const ShardingProjection& shardingProjection,
+AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes,
-                             const SymbolTable& symbolTable, const Mesh& mesh) {
+                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
@@ -802,7 +799,7 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
 namespace {
 
 // Returns reduction axes that are the union of all axes on reduction factors.
-// The result axes are not necessarilly canonicalized.
+// The result axes are not necessarily canonicalized.
 //
 // Returns empty axes if not `onFullVersion` and op results do not have
 // unreduced axes.
@@ -912,7 +909,7 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
 
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
-    AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
+    const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
     const Mesh& mesh, IRRewriter& rewriter, const bool onFullVersion) {
   if (op->getResults().empty()) {
     return;

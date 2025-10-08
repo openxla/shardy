@@ -156,7 +156,7 @@ void insertExplicitReshards(Operation* op,
 // results have unreduced axes.
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
-    AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
+    const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
     const Mesh& mesh, IRRewriter& rewriter, bool onFullVersion);
 
 // Finds common factor axes on the operands and results of `op` so that the
@@ -172,12 +172,9 @@ void insertAllReducesForReductionFactors(
 // - Some shardings are not compatible.
 //
 // Guarantees to return a non-empty AxesPerFactor.
-AxesPerFactor findCommonAxes(ArrayRef<TensorShardingAttr> inShardings,
-                             ArrayRef<TensorShardingAttr> outShardings,
-                             const ShardingProjection& shardingProjection,
+AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes,
-                             const SymbolTable& symbolTable, const Mesh& mesh);
+                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh);
 
 }  // namespace sdy
 }  // namespace mlir

@@ -410,17 +410,16 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
                         OpShardingRuleAttr shardingRule, const Mesh& mesh,
                         const bool onFullVersion) {
   // Checks if factors are sharded the same way across operands and results.
-  AxesPerFactor commonAxesPerFactor =
-      getCompatibleFactorShardings(shardingProjection, shardingRule);
 
   // TODO(b/446833985): Return common axes per factor also when the sharding
   // projection have overflow axes.
   if (onFullVersion) {
+    AxesPerFactor commonAxesPerFactor =
+        getCompatibleFactorShardings(shardingProjection, shardingRule);
     // Find compatible shardings if it is not already compatible.
     if (commonAxesPerFactor.empty()) {
-      commonAxesPerFactor =
-          findCommonAxes(inShardings, outShardings, shardingProjection,
-                         shardingRule, getTensorSizes(op), symbolTable, mesh);
+      commonAxesPerFactor = findCommonAxes(shardingProjection, shardingRule,
+                                           getTensorSizes(op), mesh);
     }
 
     UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
@@ -434,19 +433,19 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
     insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
                            updateTensorShardings, rewriter, shardingRule,
                            symbolTable, mesh);
-  } else {
-    TypeSwitch<Operation*>(op)
-        .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
-          processDot(dotOp, shardingProjection, outShardings, rewriter,
-                     symbolTable, shardingRule, mesh);
-        })
-        .Case<stablehlo::DotGeneralOp>(
-            [&](stablehlo::DotGeneralOp dotGeneralOp) {
-              processDot(dotGeneralOp, shardingProjection, outShardings,
-                         rewriter, symbolTable, shardingRule, mesh);
-            });
+    return commonAxesPerFactor;
   }
-  return commonAxesPerFactor;
+
+  TypeSwitch<Operation*>(op)
+      .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
+        processDot(dotOp, shardingProjection, outShardings, rewriter,
+                   symbolTable, shardingRule, mesh);
+      })
+      .Case<stablehlo::DotGeneralOp>([&](stablehlo::DotGeneralOp dotGeneralOp) {
+        processDot(dotGeneralOp, shardingProjection, outShardings, rewriter,
+                   symbolTable, shardingRule, mesh);
+      });
+  return AxesPerFactor();
 }
 
 struct InsertExplicitReshardsPass
