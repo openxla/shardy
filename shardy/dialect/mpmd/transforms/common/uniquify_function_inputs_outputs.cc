@@ -30,7 +30,6 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/MLIRContext.h"
 
 namespace mlir::mpmd {
