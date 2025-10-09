@@ -414,8 +414,8 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   // TODO(b/446833985): Return common axes per factor also when the sharding
   // projection have overflow axes.
   if (onFullVersion) {
-    AxesPerFactor commonAxesPerFactor =
-        getCompatibleFactorShardings(shardingProjection, shardingRule);
+    AxesPerFactor commonAxesPerFactor = getCompatibleFactorShardings(
+        shardingProjection, shardingRule, outShardings);
     // Find compatible shardings if it is not already compatible.
     if (commonAxesPerFactor.empty()) {
       commonAxesPerFactor = findCommonAxes(shardingProjection, shardingRule,

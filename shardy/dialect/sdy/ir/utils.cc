@@ -660,5 +660,17 @@ void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
   }
 }
 
+bool overlaps(ArrayRef<AxisRefAttr> axisRefs,
+              ArrayRef<AxisRefAttr> otherAxisRefs) {
+  for (AxisRefAttr axisRef : axisRefs) {
+    for (AxisRefAttr otherAxisRef : otherAxisRefs) {
+      if (axisRef.overlaps(otherAxisRef)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 }  // namespace sdy
 }  // namespace mlir

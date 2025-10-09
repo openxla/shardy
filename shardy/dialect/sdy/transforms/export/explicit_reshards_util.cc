@@ -77,7 +77,8 @@ bool hasShardedPermutationFactors(
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
 AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule) {
+    OpShardingRuleAttr shardingRule,
+    ArrayRef<TensorShardingAttr> outShardings) {
   AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
   BitVector seenFactors(shardingRule.getNumFactors());
   for (const TensorFactorShardings& tensorFactorSharding :
@@ -103,6 +104,19 @@ AxesPerFactor getCompatibleFactorShardings(
     }
   }
 
+  // Detect conflict between reduction factors and output shardings.
+  // TODO(enver): Improve the compile-time performance.
+  for (const int64_t factorIndex : shardingRule.getReductionFactors()) {
+    ArrayRef<AxisRefAttr> reductionSharding = commonAxesPerFactor[factorIndex];
+    for (TensorShardingAttr outSharding : outShardings) {
+      for (DimensionShardingAttr outDimSharding :
+           outSharding.getDimShardings()) {
+        if (overlaps(reductionSharding, outDimSharding.getAxes())) {
+          return {};
+        }
+      }
+    }
+  }
   return commonAxesPerFactor;
 }
 
