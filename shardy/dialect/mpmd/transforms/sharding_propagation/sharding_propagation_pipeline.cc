@@ -61,6 +61,7 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   // mpmd-fragment-dce can remove unnecessary ops.
   pm.addNestedPass<func::FuncOp>(
       stablehlo::createStablehloTargetIndependentOptimizationPass());
+  pm.addNestedPass<func::FuncOp>(createSimplifyProgramPass());
 }
 
 void registerShardingPropagationPipeline() {

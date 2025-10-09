@@ -461,8 +461,7 @@ func.func @for_loop_with_fragment_nested(
         %arg2: !mesh_1_tensor_4_8_f32, %arg3: !mesh_1_tensor_4_8_f32, %index: tensor<ui32>) {
         // CHECK: mpmd.fragment<mesh="m1", origin=["producer"]>
         // CHECK: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
-        // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>,
-        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>)
+        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>
         %fragment_result:2 = mpmd.fragment<mesh="m1", origin=["producer"]> (%arg2)
         (%arg4: tensor<4x8xf32>) {
           %3 = stablehlo.add %arg4, %arg4 : tensor<4x8xf32>
@@ -502,8 +501,7 @@ func.func @for_loop_sharding_from_op_within_loop(
         %arg2: !mesh_1_tensor_4_8_f32, %arg3: !mesh_1_tensor_4_8_f32, %index: tensor<ui32>) {
         // CHECK: mpmd.fragment<mesh="m1", origin=["producer"]>
         // CHECK: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
-        // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>,
-        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>)
+        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>
         %fragment_result:2 = mpmd.fragment<mesh="m1", origin=["producer"]> (%arg2)
         (%arg4: tensor<4x8xf32>) {
           %3 = stablehlo.add %arg4, %arg4 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x8xf32>
