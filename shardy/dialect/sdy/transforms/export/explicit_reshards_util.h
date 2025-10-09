@@ -94,7 +94,7 @@ bool hasOverflowAxes(const ShardingProjection& shardingProjection);
 // Assumes factor shardings do not have overflow axes.
 AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule);
+    OpShardingRuleAttr shardingRule, ArrayRef<TensorShardingAttr> outShardings);
 
 // Insert explicit reshards for operands and results that change by
 // the given `shardingProjection` for a given `op`. The reshards are inserted
