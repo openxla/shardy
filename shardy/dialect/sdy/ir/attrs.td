@@ -567,6 +567,9 @@ def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
 
     // Builds a closed `DimensionShardingAttr` matching `dimSharding` in axes and priority.
     static DimensionShardingAttr getClosedLike(DimensionShardingAttr sharding);
+
+    // Builds an open `DimensionShardingAttr` matching `dimSharding` in axes and priority.
+    static DimensionShardingAttr getOpenLike(DimensionShardingAttr sharding);
   }];
 }
 
@@ -816,6 +819,10 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     // Builds a `TensorShardingAttr` with all dim shardings being marked closed
     // and matching `sharding` in dim sharding axes, `mesh_or_ref` and rank.
     static TensorShardingAttr getClosedLike(TensorShardingAttr sharding);
+
+    // Builds a `TensorShardingAttr` with all dim shardings being marked open
+    // and matching `sharding` in dim sharding axes, `mesh_or_ref` and rank.
+    static TensorShardingAttr getOpenLike(TensorShardingAttr sharding);
 
     // Builds a `TensorShardingAttr` with a closed dim sharding for each axis
     // list in `axesPerDim`.

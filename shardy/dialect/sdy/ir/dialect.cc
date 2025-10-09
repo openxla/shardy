@@ -694,6 +694,13 @@ DimensionShardingAttr DimensionShardingAttr::getClosedLike(
                                     /*priority=*/dimSharding.getPriority());
 }
 
+DimensionShardingAttr DimensionShardingAttr::getOpenLike(
+    DimensionShardingAttr dimSharding) {
+  return DimensionShardingAttr::get(dimSharding.getContext(),
+                                    dimSharding.getAxes(), /*isClosed=*/false,
+                                    /*priority=*/dimSharding.getPriority());
+}
+
 //===----------------------------------------------------------------------===//
 // TensorShardingAttr
 //===----------------------------------------------------------------------===//
@@ -780,8 +787,7 @@ TensorShardingAttr TensorShardingAttr::closeShardingDims(
   SmallVector<DimensionShardingAttr> dimShardings(getDimShardings().begin(),
                                                   getDimShardings().end());
   for (int64_t dim : dimIndices) {
-    dimShardings[dim] = DimensionShardingAttr::get(
-        getContext(), dimShardings[dim].getAxes(), /*isClosed=*/true);
+    dimShardings[dim] = DimensionShardingAttr::getClosedLike(dimShardings[dim]);
   }
   return TensorShardingAttr::get(getContext(), getMeshOrRef(), dimShardings,
                                  getReplicatedAxes(), getUnreducedAxes());
@@ -792,8 +798,7 @@ TensorShardingAttr TensorShardingAttr::openShardingDims(
   SmallVector<DimensionShardingAttr> dimShardings(getDimShardings().begin(),
                                                   getDimShardings().end());
   for (int64_t dim : dimIndices) {
-    dimShardings[dim] = DimensionShardingAttr::get(
-        getContext(), dimShardings[dim].getAxes(), /*isClosed=*/false);
+    dimShardings[dim] = DimensionShardingAttr::getOpenLike(dimShardings[dim]);
   }
   return TensorShardingAttr::get(getContext(), getMeshOrRef(), dimShardings,
                                  getReplicatedAxes(), getUnreducedAxes());
@@ -873,6 +878,20 @@ TensorShardingAttr TensorShardingAttr::getClosedLike(
                                  /*dimShardings=*/closedDimShardings,
                                  /*replicatedAxes=*/{},
                                  sharding.getUnreducedAxes());
+}
+
+TensorShardingAttr TensorShardingAttr::getOpenLike(
+    TensorShardingAttr sharding) {
+  SmallVector<DimensionShardingAttr> openDimShardings(sharding.getRank());
+  for (int index = 0; index < sharding.getRank(); index++) {
+    openDimShardings[index] =
+        DimensionShardingAttr::getOpenLike(sharding.getDimSharding(index));
+  }
+  return TensorShardingAttr::get(
+      sharding.getContext(), sharding.getMeshOrRef(),
+      /*dimShardings=*/openDimShardings,
+      /*replicatedAxes=*/sharding.getReplicatedAxes(),
+      sharding.getUnreducedAxes());
 }
 
 TensorShardingAttr TensorShardingAttr::getClosed(
