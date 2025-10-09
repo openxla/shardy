@@ -35,6 +35,7 @@ def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
 }
 
+// LINT.IfChange
 def Sdy_MeshAxis : AttrDef<Sdy_Dialect, "MeshAxis"> {
   let mnemonic = "mesh_axis";
   let summary = "Named axis in a mesh";
@@ -887,6 +888,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     bool isEquivalent(TensorShardingAttr otherSharding) const;
     }];
 }
+// LINT.ThenChange()
 
 def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> {
   let mnemonic = "sharding_per_value";
