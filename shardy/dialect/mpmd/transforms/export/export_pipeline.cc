@@ -82,7 +82,10 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // Must be applied after the last -mpmd-fragment-dedup, as it may add
   // duplicated fragment results and after -canonicalize, as it may add
   // identity fragments, which would be canonicalized away.
-  pm.addNestedPass<FuncOp>(createUniquifyFunctionInputsOutputsPass());
+  UniquifyFunctionInputsOutputsPassOptions uniquifyOptions;
+  uniquifyOptions.useTransferInsteadOfFragment = true;
+  pm.addNestedPass<FuncOp>(
+      createUniquifyFunctionInputsOutputsPass(uniquifyOptions));
 
   // The fragments created by the pass above maybe slowdown compilation (more
   // fragments to compile) and may cause performance regressions. Thus, we merge
