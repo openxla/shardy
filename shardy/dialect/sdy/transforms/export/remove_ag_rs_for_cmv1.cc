@@ -46,8 +46,9 @@ struct RemoveAllGatherReduceScatterForCMV1Pass
     getOperation()->walk([&](Operation* op) {
       llvm::TypeSwitch<Operation*>(op)
           .Case<sdy::AllGatherOp>([&](sdy::AllGatherOp allGatherOp) {
-            if (hasAnyUserOfType<stablehlo::DotOp, stablehlo::DotGeneralOp>(
-                    allGatherOp)) {
+            if (allGatherOp->hasOneUse() &&
+                mlir::isa<stablehlo::DotOp, stablehlo::DotGeneralOp>(
+                    *allGatherOp->user_begin())) {
               rewriter.replaceOp(allGatherOp, allGatherOp.getTensor());
             }
           })
