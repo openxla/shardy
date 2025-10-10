@@ -334,7 +334,7 @@ func.func @custom_call_x64_combine(%arg0: tensor<8x2xui32>, %arg1: tensor<8x2xui
 
 // CHECK-LABEL: func @custom_call_x64_combine_used_by_rng_bit_generator
 func.func @custom_call_x64_combine_used_by_rng_bit_generator(%arg0: tensor<2xui32>, %arg1: tensor<2xui32>) -> (tensor<4x1000xui32>, tensor<2xui64>) {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i], [i])->([i]) {i=2} blocked_propagation={i}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i], [i])->([i]) {i=2} need_replication={i} blocked_propagation={i}>
   %0 = stablehlo.custom_call @X64Combine(%arg0, %arg1) : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
   %output_state, %output = stablehlo.rng_bit_generator %0, algorithm =  DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<4x1000xui32>)
   return %output, %0 : tensor<4x1000xui32>, tensor<2xui64>
