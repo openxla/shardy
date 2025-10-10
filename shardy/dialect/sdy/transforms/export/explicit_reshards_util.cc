@@ -246,10 +246,11 @@ struct FactorAxesCandidate {
   int64_t shardingSize = 0;
   int64_t factorTypePrecedence = 0;
 
-  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t sourceTensorSize,
-                      int64_t shardingSize, FactorType factorType)
+  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t totalSourceTensorSize,
+                      int64_t sourceTensorSize, int64_t shardingSize,
+                      FactorType factorType)
       : factorAxes(factorAxes),
-        totalSourceTensorSize(sourceTensorSize),
+        totalSourceTensorSize(totalSourceTensorSize),
         largestSourceTensorSize(sourceTensorSize),
         shardingSize(shardingSize),
         factorTypePrecedence(precedence(factorType)) {}
@@ -299,19 +300,20 @@ using FactorAxesCandidatesMap =
 // to keep the largest.
 void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
                                const FactorAxesPair& factorAxes,
+                               int64_t totalSourceTensorSize,
                                int64_t sourceTensorSize, const Mesh& mesh,
                                const FactorType factorType) {
   if (auto factorAxesCountIt = factorAxesCounts.find(factorAxes);
       factorAxesCountIt != factorAxesCounts.end()) {
     FactorAxesCandidate& candidate = factorAxesCountIt->second;
-    candidate.totalSourceTensorSize += sourceTensorSize;
+    candidate.totalSourceTensorSize = totalSourceTensorSize;
     candidate.largestSourceTensorSize =
         std::max(candidate.largestSourceTensorSize, sourceTensorSize);
     return;
   }
-  factorAxesCounts.try_emplace(factorAxes, factorAxes, sourceTensorSize,
-                               factorAxes.axes.getShardingSize(mesh.attr()),
-                               factorType);
+  factorAxesCounts.try_emplace(
+      factorAxes, factorAxes, totalSourceTensorSize, sourceTensorSize,
+      factorAxes.axes.getShardingSize(mesh.attr()), factorType);
 }
 
 // A container for FactorAxesCandidates where the order of iteration does not
@@ -476,6 +478,17 @@ FactorAxesCandidateBag findFactorAxesCandidates(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const Mesh& mesh) {
+  SmallVector<int64_t> totalSourceTensorSizes(shardingRule.getNumFactors(), 0);
+  for (const auto& [tensorIndex, tensorFactorSharding] :
+       llvm::enumerate(llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(),
+           shardingProjection.getResults()))) {
+    for (const auto& [factorIndex, _] :
+         tensorFactorSharding.factorIndexToSharding) {
+      totalSourceTensorSizes[factorIndex] += tensorSizes[tensorIndex];
+    }
+  }
+
   // Find sets of candidate axes per factor.
   SmallVector<DenseSet<AxisListRef, AxisListRefInfo>> axesSets(
       shardingRule.getNumFactors());
@@ -513,15 +526,16 @@ FactorAxesCandidateBag findFactorAxesCandidates(
       FactorAxesPair factorAxes(factorIndex,
                                 AxisListRef(factorSharding.axisRefs));
       updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxes,
+                                totalSourceTensorSizes[factorIndex],
                                 tensorSizes[tensorIndex], mesh,
                                 shardingRule.getFactorType(factorIndex));
       // Increment counts for all its strict prefixes.
       for (const AxisListRef& axes : axesSets[factorIndex]) {
         if (axes.strictPrefixOf(factorAxes.axes)) {
-          updateFactorAxesCandidate(factorAxesCandidatesMap,
-                                    FactorAxesPair(factorIndex, axes),
-                                    tensorSizes[tensorIndex], mesh,
-                                    shardingRule.getFactorType(factorIndex));
+          updateFactorAxesCandidate(
+              factorAxesCandidatesMap, FactorAxesPair(factorIndex, axes),
+              totalSourceTensorSizes[factorIndex], tensorSizes[tensorIndex],
+              mesh, shardingRule.getFactorType(factorIndex));
         }
       }
     }
