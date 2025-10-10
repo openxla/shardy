@@ -64,12 +64,12 @@ func.func @concatenate_operands_are_from_slices_of_the_same_tensor(%arg0: tensor
 func.func @concatenate_operands_are_results_of_slices_different_shardings_on_permutation_dim_with_equal_counts(%arg0: tensor<4x40x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}, %arg1: tensor<4x60x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) -> (tensor<4x80x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) {
   %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}, {}]>]>} : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
   %1 = stablehlo.slice %arg1 [0:4, 0:48, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x60x256xf32>) -> tensor<4x48x256xf32>
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %0 <@mesh, [{}, {"x"}, {}]> : tensor<4x32x256xf32>
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %1 <@mesh, [{}, {"x"}, {}]> : tensor<4x48x256xf32>
-  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD1]], %[[RESHARD2]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
-  // CHECK-NEXT: return %[[CONCATENATE]] : tensor<4x80x256xf32>
-  %2 = stablehlo.concatenate %0, %1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [
-{}, {"x"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %0 <@mesh, [{"x"}, {"y"}, {}]> : tensor<4x32x256xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %1 <@mesh, [{"x"}, {"y"}, {}]> : tensor<4x48x256xf32>
+  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD1]], %[[RESHARD2]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {"x"}, {}]> : tensor<4x80x256xf32>
+  // CHECK-NEXT: return %[[RESHARD3]] : tensor<4x80x256xf32>
+  %2 = stablehlo.concatenate %0, %1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
   return %2 : tensor<4x80x256xf32>
 }
 
@@ -77,10 +77,11 @@ func.func @concatenate_operands_are_results_of_slices_different_shardings_on_per
 func.func @concatenate_operands_are_results_of_slices_different_shardings_on_permutation_dim_with_equal_counts_but_conflicting_on_batching_dim(%arg0: tensor<4x40x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(2)2}, {}, {}]>}, %arg1: tensor<4x60x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) -> (tensor<4x80x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) {
   %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(2)2}, {}, {}]>]>} : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
   %1 = stablehlo.slice %arg1 [0:4, 0:48, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x60x256xf32>) -> tensor<4x48x256xf32>
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %0 <@mesh, [{}, {"x"}, {}]> : tensor<4x32x256xf32>
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %1 <@mesh, [{}, {"x"}, {}]> : tensor<4x48x256xf32>
-  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD1]], %[[RESHARD2]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
-  // CHECK-NEXT: return %[[CONCATENATE]] : tensor<4x80x256xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %0 <@mesh, [{"x":(2)2}, {"y"}, {}]> : tensor<4x32x256xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %1 <@mesh, [{"x":(2)2}, {"y"}, {}]> : tensor<4x48x256xf32>
+  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD1]], %[[RESHARD2]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(2)2}, {"y"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {"x"}, {}]> : tensor<4x80x256xf32>
+  // CHECK-NEXT: return %[[RESHARD3]] : tensor<4x80x256xf32>
   %2 = stablehlo.concatenate %0, %1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
   return %2 : tensor<4x80x256xf32>
 }
@@ -89,9 +90,10 @@ func.func @concatenate_operands_are_results_of_slices_different_shardings_on_per
 func.func @concatenate_operands_are_results_of_slices_conflicting_shardings(%arg0: tensor<4x40x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}, %arg1: tensor<4x60x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}, {}]>}) -> (tensor<4x80x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}) {
   %0 = stablehlo.slice %arg0 [0:4, 0:32, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x40x256xf32>) -> tensor<4x32x256xf32>
   %1 = stablehlo.slice %arg1 [0:4, 0:48, 0:256] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}, {}]>]>} : (tensor<4x60x256xf32>) -> tensor<4x48x256xf32>
-  // CHECK: %[[RESHARD:.*]] = sdy.reshard %1 <@mesh, [{}, {"y"}, {}]> : tensor<4x48x256xf32>
-  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %0, %[[RESHARD]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
-  // CHECK-NEXT: return %[[CONCATENATE]] : tensor<4x80x256xf32>
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %0 <@mesh, [{"y"}, {"x"}, {}]> : tensor<4x32x256xf32>
+  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD]], %1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{}, {"y"}, {}]> : tensor<4x80x256xf32>
+  // CHECK-NEXT: return %[[RESHARD2]] : tensor<4x80x256xf32>
   %2 = stablehlo.concatenate %0, %1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x32x256xf32>, tensor<4x48x256xf32>) -> tensor<4x80x256xf32>
   return %2 : tensor<4x80x256xf32>
 }

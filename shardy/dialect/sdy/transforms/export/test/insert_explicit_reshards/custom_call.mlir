@@ -223,9 +223,9 @@ func.func @custom_call_top2_of_2d_all_same_sharding(%arg0: tensor<16x8xf32> {sdy
 // CHECK-LABEL: func @custom_call_approx_topk
 func.func @custom_call_approx_topk(%arg0: tensor<16x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}, %arg1: tensor<16x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x":(2)2}]>}, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"y"}]>}, tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x":(1)2}]>}) {
   // NOTE: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, k], [i, k]) {i=16, j=4, k=2} need_replication={k} blocked_propagation={k}>}
-  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}, {"x":(2)2}]>
-  // CHECK-NEXT: %[[APPROX_TOPK:.*]]:2 = stablehlo.custom_call @ApproxTopK(%[[RESHARD1]], %arg1, %arg2, %arg3)
-  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}]>, <@mesh, [{"y"}, {}]>]>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[APPROX_TOPK:.*]]:2 = stablehlo.custom_call @ApproxTopK(%arg0, %[[RESHARD1]], %arg2, %arg3)
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>, <@mesh, [{"x"}, {}]>]>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[APPROX_TOPK]]#0 <@mesh, [{"x":(1)2}, {"y"}]>
   // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[APPROX_TOPK]]#1 <@mesh, [{"y"}, {"x":(1)2}]>
   // CHECK-NEXT: return %[[RESHARD2]], %[[RESHARD3]]
@@ -264,9 +264,9 @@ func.func @custom_call_approx_topk_majority_does_not_fit_all_factors(%arg0: tens
 // CHECK-LABEL: func @custom_call_partial_reduce
 func.func @custom_call_partial_reduce(%arg0: tensor<16x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}, %arg1: tensor<16x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x":(2)2}]>}, %arg2: tensor<f32>, %arg3: tensor<i32>) -> (tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"y"}]>}, tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x":(1)2}]>}) {
   // NOTE: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [], [])->([i, k], [i, k]) {i=16, j=4, k=2} need_replication={k} blocked_propagation={k}>}
-  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}, {"x":(2)2}]>
-  // CHECK-NEXT: %[[PARTIAL_REDUCE:.*]]:2 = stablehlo.custom_call @PartialReduce(%[[RESHARD1]], %arg1, %arg2, %arg3)
-  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}]>, <@mesh, [{"y"}, {}]>]>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[PARTIAL_REDUCE:.*]]:2 = stablehlo.custom_call @PartialReduce(%arg0, %[[RESHARD1]], %arg2, %arg3)
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>, <@mesh, [{"x"}, {}]>]>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[PARTIAL_REDUCE]]#0 <@mesh, [{"x":(1)2}, {"y"}]>
   // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[PARTIAL_REDUCE]]#1 <@mesh, [{"y"}, {"x":(1)2}]>
   // CHECK-NEXT: return %[[RESHARD2]], %[[RESHARD3]]
