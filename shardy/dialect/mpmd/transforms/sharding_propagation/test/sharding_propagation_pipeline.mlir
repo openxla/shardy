@@ -32,6 +32,38 @@ func.func public @simple_propagation_within_fragment(
 }
 
 // -----
+module {
+sdy.mesh @mesh = <["x"=4]>
+
+// CHECK-LABEL: @simple_propagation_within_fragment_simplified
+func.func public @simple_propagation_within_fragment_simplified(
+  %arg0: !mpmd.mesh_tensor<"mesh1", tensor<16x3x5xf32>>
+  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>},
+  %arg1: !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>
+  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>})
+  -> (!mpmd.mesh_tensor<"mesh1", tensor<16x10x5xf32>>)
+  attributes {topology = #mpmd.topology<<"mesh1" : <["x"=4]>>, <"mesh2" : <["x"=4]>>>} {
+  // CHECK-NEXT: %[[FRAG1:.*]] = mpmd.fragment<mesh="mesh1", origin=["stage1"]> (%arg0, %arg1) (%arg2: tensor<16x3x5xf32>, %arg3: tensor<16x10x3xf32>) {
+  // CHECK-NEXT:   %[[DOT:.*]] = stablehlo.dot_general %arg3, %arg2, batching_dims = [0] x [0]
+  // CHECK-NEXT:   mpmd.return %[[DOT]] : tensor<16x10x5xf32>
+  // CHECK-NEXT: }
+  // CHECK-SAME: (!mpmd.mesh_tensor<"mesh1", tensor<16x3x5xf32>, sharding=<@mesh, [{"x"}, {}, {}]>>,
+  // CHECK-SAME: !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>, sharding=<@mesh, [{"x"}, {}, {}]>>) ->
+  // CHECK-SAME: !mpmd.mesh_tensor<"mesh1", tensor<16x10x5xf32>, sharding=<@mesh, [{"x"}, {}, {}]>>
+  %0 = mpmd.fragment<mesh="mesh1", origin=["stage1"]> (%arg0, %arg1) (%arg2: tensor<16x3x5xf32>, %arg3: tensor<16x10x3xf32>) {
+    %cst = stablehlo.constant dense<0.0> : tensor<16x3x5xf32>
+    %cst_false = stablehlo.constant dense<false> : tensor<i1>
+    %extra_select = stablehlo.select %cst_false, %arg2, %cst : tensor<i1>, tensor<16x3x5xf32>
+    %1 = stablehlo.add %arg2, %extra_select : tensor<16x3x5xf32>
+    %4 = stablehlo.dot_general %arg3, %1, batching_dims = [0] x [0], contracting_dims = [2] x [1], precision = [DEFAULT, DEFAULT] : (tensor<16x10x3xf32>, tensor<16x3x5xf32>) -> tensor<16x10x5xf32>
+    mpmd.return %4 : tensor<16x10x5xf32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<16x3x5xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<16x10x5xf32>>
+  return %0 : !mpmd.mesh_tensor<"mesh1", tensor<16x10x5xf32>>
+}
+
+}
+
+// -----
 !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 
 module {

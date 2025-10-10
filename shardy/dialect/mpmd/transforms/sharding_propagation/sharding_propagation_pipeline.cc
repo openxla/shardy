@@ -20,6 +20,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/common/passes.h"
 #include "shardy/dialect/mpmd/transforms/sharding_propagation/passes.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"
+#include "stablehlo/transforms/optimization/Passes.h"
 
 namespace mlir::mpmd {
 
@@ -54,6 +55,12 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   // stripping shardings away from constants in
   // `mpmd-convert-sdy-shardings-to-mpmd-types`.
   pm.addNestedPass<func::FuncOp>(createConvertSdyConstantsPass());
+
+  // Try folding/optimizing to minimize the number of tensors passed across
+  // fragments. This is applied here so that later passes like
+  // mpmd-fragment-dce can remove unnecessary ops.
+  pm.addNestedPass<func::FuncOp>(
+      stablehlo::createStablehloTargetIndependentOptimizationPass());
 }
 
 void registerShardingPropagationPipeline() {

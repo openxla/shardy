@@ -59,6 +59,7 @@ cc_library(
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
         "@stablehlo//:stablehlo_ops",
+        "@stablehlo//:stablehlo_passes_optimization",
     ],
 )
 
