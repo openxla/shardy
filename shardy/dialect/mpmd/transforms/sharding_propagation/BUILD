@@ -35,6 +35,7 @@ cc_library(
         "enforce_user_shardings.cc",
         "extract_reshards_from_inter_mesh_transfers.cc",
         "sharding_propagation_pipeline.cc",
+        "simplify_program.cc",
     ],
     hdrs = [
         "passes.h",
@@ -46,6 +47,7 @@ cc_library(
         "//shardy/dialect/mpmd/ir:dialect",
         "//shardy/dialect/mpmd/transforms/common:distributed_function_pass",
         "//shardy/dialect/mpmd/transforms/common:passes",
+        "//shardy/dialect/mpmd/transforms/common:simplify_region_op_base",
         "//shardy/dialect/mpmd/transforms/common:utils",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/export:explicit_reshards_util",
