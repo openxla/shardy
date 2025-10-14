@@ -259,6 +259,7 @@ struct FactorAxesCandidate {
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
   int64_t shardingSize = 0;
   int64_t factorTypePrecedence = 0;
+  bool isReductionFactor = false;
 
   FactorAxesCandidate(FactorAxesPair factorAxes, int64_t sourceTensorSize,
                       int64_t shardingSize, FactorType factorType)
@@ -266,7 +267,8 @@ struct FactorAxesCandidate {
         totalSourceTensorSize(sourceTensorSize),
         largestSourceTensorSize(sourceTensorSize),
         shardingSize(shardingSize),
-        factorTypePrecedence(precedence(factorType)) {}
+        factorTypePrecedence(precedence(factorType)),
+        isReductionFactor(factorType == FactorType::kReduction) {}
 
   FactorAxesCandidate() = default;
 
@@ -304,6 +306,10 @@ struct FactorAxesCandidate {
   }
 
   bool empty() const { return factorAxes.empty(); }
+
+  bool isValid(const int64_t totalOutputTensorSizes) const {
+    return !isReductionFactor || totalOutputTensorSizes < totalSourceTensorSize;
+  }
 };
 
 using FactorAxesCandidatesMap =
@@ -333,9 +339,16 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCounts,
 // while maintaining the best through explicit calls on its touchAt method.
 class FactorAxesCandidateBag {
  public:
-  FactorAxesCandidateBag(MeshAttr mesh, OpShardingRuleAttr shardingRule)
+  FactorAxesCandidateBag(MeshAttr mesh, OpShardingRuleAttr shardingRule,
+                         ArrayRef<int64_t> tensorSizes)
       : mesh(mesh) {
     initFactorDependencies(shardingRule);
+    for (int64_t tensorIndex = shardingRule.getNumOperands();
+         tensorIndex <
+         shardingRule.getNumOperands() + shardingRule.getNumResults();
+         tensorIndex++) {
+      totalOutputTensorSizes = tensorSizes[tensorIndex];
+    }
   }
 
   // Returns whether the bag is empty.
@@ -452,9 +465,14 @@ class FactorAxesCandidateBag {
     }
   }
 
-  bool isValid(const FactorAxesCandidate& candidate) {
+  bool isValidOnFactorDependencies(const FactorAxesCandidate& candidate) {
     auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
     return it == factorDependenciesMap.end() || it->second.none();
+  }
+
+  bool isValid(const FactorAxesCandidate& candidate) {
+    return isValidOnFactorDependencies(candidate) &&
+           candidate.isValid(totalOutputTensorSizes);
   }
 
   void updateSourceTensorSizeAt(const int64_t factorIndex, const int64_t index,
@@ -484,6 +502,7 @@ class FactorAxesCandidateBag {
   FactorAxesCandidate bestCandidate;
   // Used for recalculating sharding size of a candidate.
   MeshAttr mesh;
+  int64_t totalOutputTensorSizes;
 };
 
 FactorAxesCandidateBag findFactorAxesCandidates(
@@ -541,7 +560,8 @@ FactorAxesCandidateBag findFactorAxesCandidates(
     }
   }
 
-  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule);
+  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule,
+                                              tensorSizes);
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
     factorAxesCandidates.insert(candidate);
   }
