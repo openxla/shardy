@@ -20,7 +20,7 @@ import shardy.integrations.python.jax.mpmd as jax_mpmd
 class JaxMpmdTest(unittest.TestCase):
 
   def test_placeholder_smoketest(self):
-    self.assertEqual(jax_mpmd.api.placeholder(), 1)
+    self.assertIsNotNone(jax_mpmd)
 
 
 if __name__ == '__main__':

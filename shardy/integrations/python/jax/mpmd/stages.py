@@ -550,7 +550,7 @@ class MpmdLowered(stages.Lowered):
       )  # for pytype.
       for mesh_name, env_option_overrides in compiler_options.items():
         option_overrides[mesh_name] = list(env_option_overrides.items())
-    return ifrt_mpmd_py.get_compile_options(
+    return jaxlib_mpmd.get_compile_options(
         self.partitioning_result.ifrt_ir_module, option_overrides
     )
 
