@@ -11,12 +11,12 @@ func.func @gather(
 ) -> (tensor<1x6x22x12x26x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"x":(1)2}, {"x":(2)2}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]>}) {
   // COM: sharding_rule<([i, k, p, n, l], [q, l, m, n, o])->([j, k, l, m, n, o]) {i=2, j=1, k=6, l=22, m=12, n=26, o=14, p=4, q=2} reduction={i, p} need_replication={j, q}>
 
-  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyzt, [{}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
-  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%arg0, %[[RESHARD1]])
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"x":(2)2}, {}, {"y":(2)2}, {"z":(1)2}]> : tensor
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg1 <@mesh_xyzt, [{}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
+  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[RESHARD1]], %[[RESHARD2]])
   // CHECK-SAME: #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"x":(2)2}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]>
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x":(1)2, "y":(1)2} %1 out_sharding=<@mesh_xyzt, [{}, {"x":(2)2}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh_xyzt, [{"x":(1)2}, {"x":(2)2}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
-  // CHECK-NEXT: return %[[RESHARD2]] : tensor
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %[[GATHER]] <@mesh_xyzt, [{"x":(1)2}, {"x":(2)2}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
+  // CHECK-NEXT: return %[[RESHARD3]] : tensor
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [0, 1],
@@ -39,11 +39,10 @@ func.func @gather_implicit_dimension(
 ) -> (tensor<1x2x22x12x26x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]>}) {
   // COM: op_sharding_rule<([i, k, p, n, l], [l, m, n, o])->([j, k, l, m, n, o]) {i=2, j=1, k=6, l=22, m=12, n=26, o=14, p=4} reduction={i, p} need_replication={j, k} blocked_propagation={k}>
 
-  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{"x":(1)2}, {}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {}, {}, {"y":(2)2}, {"z":(1)2}]>
   // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[RESHARD1]], %arg1)
   // CHECK-SAME: #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]>
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x":(1)2, "y":(1)2} %[[GATHER]] out_sharding=<@mesh_xyzt, [{}, {}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
-  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  // CHECK-NEXT: return %[[GATHER]]
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [0, 1],
