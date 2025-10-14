@@ -321,6 +321,11 @@ TensorShardingAttr getFuncResultSharding(func::FuncOp funcOp, int64_t resNum);
 void setFuncResultSharding(func::FuncOp funcOp, int64_t resNum,
                            TensorShardingAttr sharding);
 
+// Returns the func result shardings of `funcOp`, with fully-replicated
+// shardings for empty shardings on `funcOp`, by using the ranks from `callOp`.
+TensorShardingPerValueAttr getFuncResultShardings(
+    func::CallOp callOp, func::FuncOp funcOp, const SymbolTable& symbolTable);
+
 // Returns the sharding of each value in `values`. Returns an empty array if the
 // op has no sharding attributes.
 SmallVector<TensorShardingAttr> getShardings(ValueRange values);

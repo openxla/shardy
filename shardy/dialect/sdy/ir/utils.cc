@@ -423,6 +423,45 @@ void setFuncResultSharding(FuncOp funcOp, int64_t resNum,
   funcOp.setResultAttr(resNum, kShardingAttr, sharding);
 }
 
+namespace {
+// Returns the first non-maximal mesh on the result shardings, if there is
+// one. Otherwise returns `std::nullopt`.
+// TODO(enver): Use a common helper that takes an std::function to get the
+// sharding given an index.
+std::optional<Attribute> getMeshOrRefOnResults(func::FuncOp funcOp,
+                                               const SymbolTable& symbolTable) {
+  for (int64_t resultNum = 0; resultNum < funcOp.getNumResults(); ++resultNum) {
+    if (TensorShardingAttr sdySharding =
+            getFuncResultSharding(funcOp, resultNum);
+        sdySharding && !sdySharding.getMesh(symbolTable).isMaximal()) {
+      return std::make_optional(sdySharding.getMeshOrRef());
+    }
+  }
+  return std::nullopt;
+}
+}  // namespace
+
+TensorShardingPerValueAttr getFuncResultShardings(
+    func::CallOp callOp, func::FuncOp funcOp, const SymbolTable& symbolTable) {
+  std::optional<Attribute> meshOrRef =
+      getMeshOrRefOnResults(funcOp, symbolTable);
+  if (!meshOrRef) {
+    return nullptr;
+  }
+  SmallVector<TensorShardingAttr> resultShardings;
+  resultShardings.reserve(funcOp.getNumResults());
+  for (int64_t resultNum = 0; resultNum < funcOp.getNumResults(); ++resultNum) {
+    TensorShardingAttr sdySharding = getFuncResultSharding(funcOp, resultNum);
+    resultShardings.push_back(
+        sdySharding
+            ? sdySharding
+            : TensorShardingAttr::getFullyOpen(
+                  funcOp.getContext(),
+                  getTensorRank(callOp.getResult(resultNum)), *meshOrRef));
+  }
+  return TensorShardingPerValueAttr::get(funcOp.getContext(), resultShardings);
+}
+
 SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,
                                                  ArrayRef<AxisRefAttr> second) {
   SmallVector<AxisRefAttr> result;
