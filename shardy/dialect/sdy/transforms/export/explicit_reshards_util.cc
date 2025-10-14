@@ -103,6 +103,20 @@ AxesPerFactor getCompatibleFactorShardings(
     }
   }
 
+  // Detect conflict between reduction factors and output shardings.
+  // TODO(enver): Improve the compile-time performance.
+  for (const int64_t factorIndex : shardingRule.getReductionFactors()) {
+    ArrayRef<AxisRefAttr> reductionSharding = commonAxesPerFactor[factorIndex];
+    for (const TensorFactorShardings& outTensorFactorSharding :
+         shardingProjection.getResults()) {
+      for (const auto& [outFactorIndex, outFactorSharding] :
+           outTensorFactorSharding.factorIndexToSharding) {
+        if (overlaps(reductionSharding, outFactorSharding.axisRefs)) {
+          return {};
+        }
+      }
+    }
+  }
   return commonAxesPerFactor;
 }
 

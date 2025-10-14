@@ -190,3 +190,17 @@ func.func @scatter_no_reduction(
   } : (tensor<6x4x10x12x14xf32>, tensor<12x4x2xi64>, tensor<12x2x4x10xf32>) -> tensor<6x4x10x12x14xf32>
   return %0 : tensor<6x4x10x12x14xf32>
 }
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+// CHECK-LABEL: @gather_reduction_factor_sharding_overlaps_with_output_sharding
+func.func @gather_reduction_factor_sharding_overlaps_with_output_sharding(%arg0: tensor<4x2x3xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}]>}, %arg1: tensor<4x2x2x1xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}, {}]>}) -> (tensor<4x2x2x3xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {}, {}]>}) {
+  // COM: sdy.sharding_rule = #sdy.op_sharding_rule<([i, m, l], [i, j, k, n])->([i, j, k, l]) {i=4, j=2, k=2, l=3, m=2, n=1} reduction={m} need_replication={n}>
+
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}, {}]>
+  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[RESHARD]], %arg1)
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}, {}]>]>}
+  // CHECK-NEXT: return %[[GATHER]]
+  %0 = "stablehlo.gather"(%arg0, %arg1) <{dimension_numbers = #stablehlo.gather<offset_dims = [3], collapsed_slice_dims = [1], operand_batching_dims = [0], start_indices_batching_dims = [0], start_index_map = [1], index_vector_dim = 3>, indices_are_sorted = false, slice_sizes = array<i64: 1, 1, 3>}> {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}, {}]>]>} : (tensor<4x2x3xf32>, tensor<4x2x2x1xi32>) -> tensor<4x2x2x3xf32>
+  return %0 : tensor<4x2x2x3xf32>
+}
+

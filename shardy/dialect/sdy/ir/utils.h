@@ -572,6 +572,10 @@ std::optional<AxisRefAttr> getPrefixWithoutOverlap(
 void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
                                     ArrayRef<AxisRefAttr> otherAxisRefs);
 
+// Returns whether `axisRefs` overlaps with `otherAxisRefs`.
+bool overlaps(ArrayRef<AxisRefAttr> axisRefs,
+              ArrayRef<AxisRefAttr> otherAxisRefs);
+
 }  // namespace sdy
 }  // namespace mlir
 
