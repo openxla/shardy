@@ -248,6 +248,8 @@ struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
   // The total size of the source tensors.
   int64_t totalSourceTensorSize = 0;
+  // The total number of the source tensors.
+  int64_t sourceTensorCount = 0;
   // The size of the source tensor. In case the factor-axes pair has multiple
   // source tensors, the size of the largest one. A tensor is a source for a
   // factor-axes pair if the axes is a prefix of the factor sharding on the
@@ -259,16 +261,19 @@ struct FactorAxesCandidate {
   int64_t shardingSize = 0;
   int64_t factorTypePrecedence = 0;
   int64_t communicationCost = INT64_MAX;
+  bool isReductionFactor = false;
 
   FactorAxesCandidate(FactorAxesPair factorAxes, int64_t sourceTensorSize,
                       int64_t shardingSize, FactorType factorType,
                       int64_t communicationCost)
       : factorAxes(factorAxes),
         totalSourceTensorSize(sourceTensorSize),
+        sourceTensorCount(1),
         largestSourceTensorSize(sourceTensorSize),
         shardingSize(shardingSize),
         factorTypePrecedence(precedence(factorType)),
-        communicationCost(communicationCost) {}
+        communicationCost(communicationCost),
+        isReductionFactor(factorType == FactorType::kReduction) {}
 
   FactorAxesCandidate() = default;
 
@@ -307,6 +312,17 @@ struct FactorAxesCandidate {
   }
 
   bool empty() const { return factorAxes.empty(); }
+
+  bool isValid(const int64_t totalOutputTensorSizes,
+               const int64_t outputTensorCount) const {
+    if (!isReductionFactor) {
+      return true;
+    }
+    if (outputTensorCount < sourceTensorCount) {
+      return true;
+    }
+    return totalOutputTensorSizes < totalSourceTensorSize;
+  }
 };
 
 using FactorAxesCandidatesMap =
@@ -323,6 +339,7 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
       it != factorAxesCandidatesMap.end()) {
     FactorAxesCandidate& candidate = it->second;
     candidate.totalSourceTensorSize += sourceTensorSize;
+    candidate.sourceTensorCount++;
     candidate.largestSourceTensorSize =
         std::max(candidate.largestSourceTensorSize, sourceTensorSize);
     return;
@@ -338,9 +355,17 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
 // while maintaining the best candidate.
 class FactorAxesCandidateBag {
  public:
-  FactorAxesCandidateBag(MeshAttr mesh, OpShardingRuleAttr shardingRule)
+  FactorAxesCandidateBag(MeshAttr mesh, OpShardingRuleAttr shardingRule,
+                         ArrayRef<int64_t> tensorSizes)
       : mesh(mesh) {
     initFactorDependencies(shardingRule);
+    for (int64_t tensorIndex = shardingRule.getNumOperands();
+         tensorIndex <
+         shardingRule.getNumOperands() + shardingRule.getNumResults();
+         tensorIndex++) {
+      totalOutputTensorSizes += tensorSizes[tensorIndex];
+    }
+    outputTensorCount = shardingRule.getNumResults();
   }
 
   // Returns whether the bag is empty.
@@ -455,9 +480,14 @@ class FactorAxesCandidateBag {
     }
   }
 
-  bool isValid(const FactorAxesCandidate& candidate) {
+  bool isValidOnFactorDependencies(const FactorAxesCandidate& candidate) {
     auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
     return it == factorDependenciesMap.end() || it->second.none();
+  }
+
+  bool isValid(const FactorAxesCandidate& candidate) {
+    return isValidOnFactorDependencies(candidate) &&
+           candidate.isValid(totalOutputTensorSizes, outputTensorCount);
   }
 
   // A factor is non-full if its sharding size is smaller than the size of the
@@ -477,6 +507,8 @@ class FactorAxesCandidateBag {
   FactorAxesCandidate bestCandidate;
   // Used for recalculating sharding size of a candidate.
   MeshAttr mesh;
+  int64_t totalOutputTensorSizes;
+  int64_t outputTensorCount;
 };
 
 int64_t getShardingSize(ArrayRef<AxisRefAttr> axisRefs, MeshAttr mesh) {
@@ -656,7 +688,8 @@ FactorAxesCandidateBag findFactorAxesCandidates(
     }
   }
 
-  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule);
+  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule,
+                                              tensorSizes);
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
     factorAxesCandidates.insert(candidate);
   }
