@@ -93,3 +93,14 @@ def ExtractReshardsFromInterMeshTransfersPass :
 
   let dependentDialects = ["mlir::mpmd::MpmdDialect", "mlir::sdy::SdyDialect"];
 }
+
+def SimplifyProgramPass :
+    Pass<"mpmd-simplify-program", "func::FuncOp"> {
+  let summary = "Removes redundant arg/results from fragments.";
+  let description = [{
+    Simplifies a fragment or loop, its operands and results, and their
+    corresponding block arguments and return values.
+  }];
+
+  let dependentDialects = ["mlir::stablehlo::StablehloDialect"];
+}

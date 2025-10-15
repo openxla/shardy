@@ -461,8 +461,7 @@ func.func @for_loop_with_fragment_nested(
         %arg2: !mesh_1_tensor_4_8_f32, %arg3: !mesh_1_tensor_4_8_f32, %index: tensor<ui32>) {
         // CHECK: mpmd.fragment<mesh="m1", origin=["producer"]>
         // CHECK: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
-        // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>,
-        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>)
+        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>
         %fragment_result:2 = mpmd.fragment<mesh="m1", origin=["producer"]> (%arg2)
         (%arg4: tensor<4x8xf32>) {
           %3 = stablehlo.add %arg4, %arg4 : tensor<4x8xf32>
@@ -502,8 +501,7 @@ func.func @for_loop_sharding_from_op_within_loop(
         %arg2: !mesh_1_tensor_4_8_f32, %arg3: !mesh_1_tensor_4_8_f32, %index: tensor<ui32>) {
         // CHECK: mpmd.fragment<mesh="m1", origin=["producer"]>
         // CHECK: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
-        // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>,
-        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>)
+        // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {}]>>
         %fragment_result:2 = mpmd.fragment<mesh="m1", origin=["producer"]> (%arg2)
         (%arg4: tensor<4x8xf32>) {
           %3 = stablehlo.add %arg4, %arg4 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<4x8xf32>
@@ -796,4 +794,32 @@ func.func @fragment_result_used_in_fragment_and_returned_with_user_specified_sha
     // CHECK-SAME: {{.*}}sharding=<@mesh, [{"y"}, {}]>>, {{.*}}sharding=<@mesh, [{"x"}, {}]>>
     return %0, %1 : !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
     }
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4]>
+
+// CHECK-LABEL: @simple_propagation_within_fragment_inputs_simplified
+func.func public @simple_propagation_within_fragment_inputs_simplified(
+  %arg0: !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>
+  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>},
+  %arg1: !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>
+  {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>})
+  -> (!mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>)
+  attributes {topology = #mpmd.topology<<"mesh1" : <["x"=4]>>, <"mesh2" : <["x"=4]>>>} {
+  // CHECK: %[[FRAGMENT_RESULT:.*]] = mpmd.fragment<mesh="mesh1", origin=["stage1"]>
+  // CHECK-NEXT: %[[RESULT:.*]] = stablehlo.multiply %arg2, %arg2
+  // CHECK-NEXT: mpmd.return %[[RESULT]] : tensor<16x10x3xf32>
+  // CHECK-NEXT: } :
+  // CHECK-NEXT: return %[[FRAGMENT_RESULT]], %arg0 :
+  %0:2 = mpmd.fragment<mesh="mesh1", origin=["stage1"]> (%arg0, %arg1) (%arg2: tensor<16x10x3xf32>, %arg3: tensor<16x10x3xf32>) {
+    %cst = stablehlo.constant dense<0.0> : tensor<16x10x3xf32>
+    %cst_false = stablehlo.constant dense<false> : tensor<i1>
+    %extra_select = stablehlo.select %cst_false, %arg2, %cst : tensor<i1>, tensor<16x10x3xf32>
+    %1 = stablehlo.add %arg3, %extra_select : tensor<16x10x3xf32>
+    %4 = stablehlo.multiply %arg3, %1 : (tensor<16x10x3xf32>, tensor<16x10x3xf32>) -> tensor<16x10x3xf32>
+    mpmd.return %4, %arg2 : tensor<16x10x3xf32>, tensor<16x10x3xf32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>) -> (!mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>)
+  return %0#0, %0#1 : !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>
 }

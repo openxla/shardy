@@ -58,9 +58,10 @@ void addShardingPropagationPipeline(OpPassManager& pm,
 
   // Try folding/optimizing to minimize the number of tensors passed across
   // fragments. This is applied here so that later passes like
-  // mpmd-fragment-dce can remove unnecessary ops.
+  // mpmd-fragment-dce and mpmd-simplify-program can remove unnecessary ops.
   pm.addNestedPass<func::FuncOp>(
       stablehlo::createStablehloTargetIndependentOptimizationPass());
+  pm.addNestedPass<func::FuncOp>(createSimplifyProgramPass());
 }
 
 void registerShardingPropagationPipeline() {
