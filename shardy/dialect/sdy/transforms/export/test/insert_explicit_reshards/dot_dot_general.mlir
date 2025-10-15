@@ -563,7 +563,7 @@ func.func @dot_genaral_overlaps_and_trimmable_on_subaxis(%arg0: tensor<64x8x32xf
   return %0 : tensor<64x8x16xf32>
 }
 
-// CHECK-LABEL: func @dot_genaral_overlaps_and_trimmable_on_subaxis
+// CHECK-LABEL: func @dot_genaral_overlaps_and_trimmable_on_subaxis_multiple_axes
 func.func @dot_genaral_overlaps_and_trimmable_on_subaxis_multiple_axes(%arg0: tensor<64x8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y":(2)2}, {}, {}]>}, %arg1: tensor<64x32x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y":(2)2}, {}, {}]>}) ->(tensor<64x8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {"x","y","z"}, {}]>}) {
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{"y":(2)2}, {"x", "y":(1)2}, {}]> : tensor<64x8x32xf32>
   // CHECK-NEXT: %[[DOTGENERAL:.*]] = stablehlo.dot_general %[[RESHARD1]], %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y":(2)2}, {"x", "y":(1)2}, {}]>]>} : (tensor<64x8x32xf32>, tensor<64x32x16xf32>) -> tensor<64x8x16xf32>
