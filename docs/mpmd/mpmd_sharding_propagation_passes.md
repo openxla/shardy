@@ -57,3 +57,10 @@ This pass is only applied to MPMD functions in global view and with a
 homogeneous topology.
 
 Precondition: all shardings are specified as op attributes and not in types.
+
+### `-mpmd-simplify-program`
+
+_Removes redundant arg/results from fragments._
+
+Simplifies a fragment or loop, its operands and results, and their
+corresponding block arguments and return values.
