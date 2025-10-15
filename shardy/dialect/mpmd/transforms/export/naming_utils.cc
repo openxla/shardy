@@ -248,7 +248,8 @@ void GetPhasesFromUserOrigins(ArrayRef<Attribute> origins,
 
 // Note: unique id and function name aren't included.
 std::string GetFullNameFromMetadata(ArrayRef<Attribute> origins,
-                                    std::optional<int64_t> stage_id) {
+                                    std::optional<int64_t> stage_id,
+                                    bool is_all_forward) {
   std::vector<std::string> constructed;
 
   // Step 0. Find a name for the fragment.
@@ -261,7 +262,9 @@ std::string GetFullNameFromMetadata(ArrayRef<Attribute> origins,
   }
 
   // Step 1. Find the phases.
-  GetPhasesFromUserOrigins(origins, constructed);
+  if (!is_all_forward) {
+    GetPhasesFromUserOrigins(origins, constructed);
+  }
 
   std::string result;
   llvm::raw_string_ostream stream(result);

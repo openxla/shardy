@@ -59,7 +59,8 @@ std::string Truncate(StringRef str, int64_t max_length);
 // Note we don't include `call_counter` as part of the metadata used to generate
 // the name, as fragments are often reused across different calls.
 std::string GetFullNameFromMetadata(ArrayRef<Attribute> origins,
-                                    std::optional<int64_t> stage_id);
+                                    std::optional<int64_t> stage_id,
+                                    bool all_forward = false);
 
 // A call site is a pair of fragment name and optional call counter.
 using CallSite = std::pair<std::string, std::optional<uint32_t>>;

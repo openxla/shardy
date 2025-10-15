@@ -46,6 +46,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "mlir/Support/WalkResult.h"
 
 namespace mlir::mpmd {
 
@@ -197,19 +198,36 @@ StringRef GetModuleName(ModuleOp module_op) {
   return module_op.getName().value_or("main");
 }
 
-std::string PrettyPrintUserOrigin(ArrayRef<Attribute> origins) {
+bool IsAllForward(ModuleOp module_op) {
+  bool is_all_forward = true;
+  module_op.walk([&](FragmentOp fragment) {
+    for (Attribute attr : fragment.getOrigin().getValue()) {
+      if (cast<UserOriginAttr>(attr).getTransposeCount() != 0) {
+        is_all_forward = false;
+        return WalkResult::interrupt();
+      }
+    }
+    return WalkResult::advance();
+  });
+  return is_all_forward;
+}
+
+std::string PrettyPrintUserOrigin(ArrayRef<Attribute> origins, bool all_forward) {
   std::string result;
   llvm::raw_string_ostream stream(result);
-  auto concat_origin = [&stream](UserOriginAttr origin) -> void {
-    stream << origin.getUserName().getValue() << "(";
-    if (origin.getTransposeCount() == 0) {
-      stream << "fwd";
-    } else if (origin.getTransposeCount() == 1) {
-      stream << "bwd";
-    } else {
-      stream << "TransposeCount=" << origin.getTransposeCount();
+  auto concat_origin = [&](UserOriginAttr origin) -> void {
+    stream << origin.getUserName().getValue();
+    if (!all_forward) {
+      stream << "(";
+      if (origin.getTransposeCount() == 0) {
+        stream << "fwd";
+      } else if (origin.getTransposeCount() == 1) {
+        stream << "bwd";
+      } else {
+        stream << "TransposeCount=" << origin.getTransposeCount();
+      }
+      stream << ")";
     }
-    stream << ")";
   };
 
   stream << "[";
@@ -235,7 +253,7 @@ std::string PrettyPrintUserOrigin(ArrayRef<Attribute> origins) {
 // Returns all fragments in the module.
 template <typename FragmentEquivalenceInfo>
 std::vector<FragmentOp> GroupFragmentsAndMarkWithGroupName(
-    ModuleOp module_op, IRRewriter& rewriter) {
+    ModuleOp module_op, IRRewriter& rewriter, bool is_all_forward) {
   DenseMap<FragmentOp, FragmentGroupInfo, FragmentEquivalenceInfo> fragment_map;
 
   // Step 1: Group all fragments by body and mesh shape equivalence, and give
@@ -261,8 +279,9 @@ std::vector<FragmentOp> GroupFragmentsAndMarkWithGroupName(
     fragment_group.hbm_bytes =
         std::max(fragment_group.hbm_bytes, hbm_reserved_bytes);
 
-    std::string name = GetFullNameFromMetadata(fragment.getOrigin().getValue(),
-                                               fragment.getStageId());
+    std::string name =
+        GetFullNameFromMetadata(fragment.getOrigin().getValue(),
+                                fragment.getStageId(), is_all_forward);
     std::optional<uint32_t> call_counter = TryToFindCallCounter(fragment);
     fragment_group.mesh_call_sites[fragment.getMeshName()].emplace_back(
         std::move(name), call_counter);
@@ -311,16 +330,20 @@ class LowerToFragmentCallsPass
     ModuleOp module_op = getOperation();
     MLIRContext& ctx = getContext();
     bool is_sdy_partitioned = mpmd::IsLoweredWithSdy(module_op);
+    bool is_all_forward = IsAllForward(module_op);
 
     IRRewriter rewriter(&ctx);
 
+
     std::vector<FragmentOp> all_fragments =
-        groupAcrossMeshes ? GroupFragmentsAndMarkWithGroupName<
-                                FragmentBodyEquivalenceCrossMeshGroupingInfo>(
-                                module_op, rewriter)
-                          : GroupFragmentsAndMarkWithGroupName<
-                                FragmentBodyEquivalenceSameMeshGroupingInfo>(
-                                module_op, rewriter);
+        groupAcrossMeshes
+            ? GroupFragmentsAndMarkWithGroupName<
+                  FragmentBodyEquivalenceCrossMeshGroupingInfo>(
+                  module_op, rewriter, is_all_forward)
+            : GroupFragmentsAndMarkWithGroupName<
+                  FragmentBodyEquivalenceSameMeshGroupingInfo>(
+                  module_op, rewriter, is_all_forward);
+
 
     // Step 3: Log the fragment naming per mesh, for debugging purposes.
     if (auto func = dyn_cast_or_null<FuncOp>(module_op.lookupSymbol("main"))) {
@@ -351,7 +374,8 @@ class LowerToFragmentCallsPass
             SDY_LOG(INFO) << "\t- " << group_name.str()
                           << " from program with origins "
                           << PrettyPrintUserOrigin(
-                                 fragment.getOrigin().getValue())
+                                 fragment.getOrigin().getValue(),
+                                 is_all_forward)
                           << stage_and_call_counter << ".";
           }
         }

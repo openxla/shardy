@@ -21,13 +21,13 @@ module @multiple_input_meshes {
     %arg2: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x", "tpu_y"}]>})
       -> (tensor<16xf32>) attributes {
       topology = #mpmd.topology<<"tpu" : <["tpu_x"=2, "tpu_y"=4]>>, <"cpu" : <["cpu_z"=8]>>>} {
-    // CHECK: %[[FRAGMENT_CALL1:.*]] = mpmd.fragment_call<mesh="tpu", origin=["f1"]> @p0_f1_fwd.multiple_input_meshes(%arg0, %arg2)
+    // CHECK: %[[FRAGMENT_CALL1:.*]] = mpmd.fragment_call<mesh="tpu", origin=["f1"]> @p0_f1.multiple_input_meshes(%arg0, %arg2)
     %0 = mpmd.named_computation<"f1"> (%arg0, %arg2) (%arg3: tensor<16xf32>, %arg4: tensor<16xf32>) {
       %2 = stablehlo.add %arg4, %arg3 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
     } : (tensor<16xf32>, tensor<16xf32>) -> tensor<16xf32>
     // CHECK: %[[TRANSFER:.*]] = mpmd.transfer %[[FRAGMENT_CALL1]]
-    // CHECK: %[[FRAGMENT_CALL2:.*]] = mpmd.fragment_call<mesh="cpu", origin=["f2"]> @p1_f2_fwd.multiple_input_meshes(%arg1, %[[TRANSFER]])
+    // CHECK: %[[FRAGMENT_CALL2:.*]] = mpmd.fragment_call<mesh="cpu", origin=["f2"]> @p1_f2.multiple_input_meshes(%arg1, %[[TRANSFER]])
     %1 = mpmd.named_computation<"f2"> (%arg1, %0) (%arg3: tensor<16xf32>, %arg4: tensor<16xf32>) {
       %2 = stablehlo.add %arg4, %arg3 : tensor<16xf32>
       mpmd.return %2 : tensor<16xf32>
@@ -35,5 +35,5 @@ module @multiple_input_meshes {
     return %1 : tensor<16xf32>
   }
 }
-// CHECK-LABEL: func.func @p0_f1_fwd.multiple_input_meshes
-// CHECK-LABEL: func.func @p1_f2_fwd.multiple_input_meshes
+// CHECK-LABEL: func.func @p0_f1.multiple_input_meshes
+// CHECK-LABEL: func.func @p1_f2.multiple_input_meshes
