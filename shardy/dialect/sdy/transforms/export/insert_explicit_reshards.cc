@@ -77,7 +77,7 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
         rewriter, operand.getLoc(), operand,
         targetSharding
             ? targetSharding
-            // Since opearand and target shardings are not equivalent and
+            // Since operand and target shardings are not equivalent and
             // `targetSharding` is empty, `operandSharding` is guaranteed to be
             // nonempty.
             : TensorShardingAttr::getFullyClosedLike(operandSharding));
@@ -327,7 +327,7 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
       return sharding && !sharding.getUnreducedAxes().empty();
     };
     SDY_CHECK(!llvm::any_of(op->getOpOperands(), operandHasUnreducedAxes))
-        << "Some operands has unreduced axes but the operation has no "
+        << "Some operands have unreduced axes but the operation has no "
           "results. ";
     return;
   }

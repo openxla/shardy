@@ -433,11 +433,9 @@ class FactorAxesCandidateBag {
         for (int64_t index = 1; index < factorIndices.size(); index++) {
           int64_t factorIndex = factorIndices[index];
           int64_t dependsOn = factorIndices[index - 1];
-          if (!factorDependenciesMap.contains(factorIndex)) {
-            factorDependenciesMap.try_emplace(factorIndex,
-                                              shardingRule.getNumFactors());
-          }
-          factorDependenciesMap[factorIndex].set(dependsOn);
+          factorDependenciesMap
+              .try_emplace(factorIndex, shardingRule.getNumFactors())
+              .first->second.set(dependsOn);
         }
       }
     }
