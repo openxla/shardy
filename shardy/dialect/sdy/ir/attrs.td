@@ -35,6 +35,7 @@ def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
   let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
 }
 
+// LINT.IfChange
 def Sdy_MeshAxis : AttrDef<Sdy_Dialect, "MeshAxis"> {
   let mnemonic = "mesh_axis";
   let summary = "Named axis in a mesh";
@@ -490,7 +491,9 @@ def Sdy_AxisRef : AttrDef<Sdy_Dialect, "AxisRef"> {
 }
 
 def Sdy_AxisRefs : OptionalArrayRefParameter<"AxisRefAttr", "axis refs">;
+// LINT.ThenChange(https://github.com/openxla/xla/blob/main/xla/hlo/ir/mesh_and_axis.h)
 
+// LINT.IfChange
 def Sdy_DimensionSharding : AttrDef<Sdy_Dialect, "DimensionSharding"> {
   let mnemonic = "dimension_sharding";
   let summary = "Dimension sharding";
@@ -887,6 +890,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     bool isEquivalent(TensorShardingAttr otherSharding) const;
     }];
 }
+// LINT.ThenChange(https://github.com/openxla/xla/blob/main/xla/hlo/ir/named_sharding.h)
 
 def Sdy_TensorShardingPerValue : AttrDef<Sdy_Dialect, "TensorShardingPerValue"> {
   let mnemonic = "sharding_per_value";
