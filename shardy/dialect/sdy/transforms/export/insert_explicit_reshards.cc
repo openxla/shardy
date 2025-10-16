@@ -18,6 +18,8 @@ limitations under the License.
 #include <cstdint>
 #include <memory>  // IWYU pragma: keep
 #include <optional>
+#include <tuple>
+#include <utility>
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -448,6 +450,8 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   return AxesPerFactor();
 }
 
+using ComputationKey = std::tuple<StringRef, ManualAxesAttr>;
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -456,6 +460,26 @@ struct InsertExplicitReshardsPass
     func::FuncOp funcOp = getOperation();
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
+
+    llvm::SmallDenseMap<ComputationKey, std::pair<TensorShardingPerValueAttr,
+                                                  TensorShardingPerValueAttr>>
+        funcCache;
+    funcOp->walk([&](NamedComputationOp namedComputationOp) {
+      ManualAxesAttr manualAxesAttr =
+          namedComputationOp->getAttrOfType<ManualAxesAttr>(
+              "xla.sdy.manual_axes");
+      auto key = std::make_tuple(namedComputationOp.getName(), manualAxesAttr);
+      if (auto it = funcCache.find(key); it != funcCache.end()) {
+        namedComputationOp.setInShardingsAttr(it->second.first);
+        namedComputationOp.setOutShardingsAttr(it->second.second);
+        return;
+      }
+      funcCache.try_emplace(
+          key, std::make_pair(namedComputationOp.getInShardings().value_or(
+                                  TensorShardingPerValueAttr()),
+                              namedComputationOp.getOutShardings().value_or(
+                                  TensorShardingPerValueAttr())));
+    });
 
     funcOp->walk([&](Operation* op) {
       const bool onFullVersion = isOnFullVersion(op, enableFullVersion);

@@ -482,7 +482,7 @@ func.func @named_computation(%arg0: tensor<210xf32> {sdy.sharding = #sdy.shardin
 
 // CHECK-LABEL: func @one_argument_to_multiple_named_computations
 func.func @one_argument_to_multiple_named_computations(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"z"}]>}) {
-  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh, [{"z"}]> : tensor<210xf32>
+  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}]> : tensor<210xf32>
   // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}]> : tensor<210xf32>
   // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[RESHARD1]])
   %0 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"y"}]>] out_shardings=[<@mesh, [{"y"}]>] (%arg1: tensor<210xf32>) {
@@ -490,7 +490,7 @@ func.func @one_argument_to_multiple_named_computations(%arg0: tensor<210xf32> {s
     sdy.return %2 : tensor<210xf32>
   } : (tensor<210xf32>) -> (tensor<210xf32>)
   // CHECK: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[RESHARD0]])
-  %1 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"z"}]>] out_shardings=[<@mesh, [{"z"}]>] (%arg1: tensor<210xf32>) {
+  %1 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"y"}]>] out_shardings=[<@mesh, [{"y"}]>] (%arg1: tensor<210xf32>) {
     %2 = stablehlo.abs %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"z"}]>]>} : tensor<210xf32>
     sdy.return %2 : tensor<210xf32>
   } : (tensor<210xf32>) -> (tensor<210xf32>)
