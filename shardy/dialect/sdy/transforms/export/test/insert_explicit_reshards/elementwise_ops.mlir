@@ -1,6 +1,6 @@
 // RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true' | FileCheck %s
 
-sdy.mesh @mesh = <["x"=4, "y"=2]>
+sdy.mesh @mesh = <["x"=4, "y"=2, "z"=4]>
 
 // CHECK-LABEL: func @negate
 func.func @negate(%arg0: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
@@ -83,4 +83,13 @@ func.func @add_inputs_are_sharded_the_same_way_output_is_unsharded(%arg0: tensor
   // CHECK-NEXT: return %[[RESHARD]] : tensor<4x32xf32>
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : tensor<4x32xf32>
   return %0 : tensor<4x32xf32>
+}
+
+// CHECK-LABEL: func @transpose
+func.func @transpose(%arg0: tensor<256x32x64x100xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {"y"}, {}]>}) -> (tensor<100x32x256x64xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {"z"}, {}]>}) {
+  // CHECK: %[[TRANSPOSE:.*]] = stablehlo.transpose %arg0, dims = [3, 1, 0, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {}, {"y"}]>]>} : (tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[TRANSPOSE]] <@mesh, [{}, {"y"}, {"z"}, {}]> : tensor<100x32x256x64xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<100x32x256x64xf32>
+  %0 = stablehlo.transpose %arg0, dims = [3, 1, 0, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {"z"}, {}]>]>} : (tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf32>
+  return %0 : tensor<100x32x256x64xf32>
 }

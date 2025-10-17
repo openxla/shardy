@@ -79,7 +79,7 @@ func.func @sort_input_and_output_shardings_are_different_on_sorting_dimension(%a
 }
 
 // CHECK-LABEL: func @sort_sorting_dim_shardings_has_common_prefix
-func.func @sort_sorting_dim_shardings_has_common_prefix(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y","z"}, {"x"}, {}]>}) -> (tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y","t"}, {"z"}, {}]>}) {
+func.func @sort_sorting_dim_shardings_has_common_prefix(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "z"}, {"x"}, {}]>}) -> (tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>}) {
   // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"z", "y"}, {}]> : tensor<4x32x8xi32>
   // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD1]])
   // CHECK: %[[RESHARD2:.*]] = sdy.reshard %[[SORT]] <@mesh_xyzt, [{"y", "t"}, {"z"}, {}]> : tensor<4x32x8xi32>
@@ -87,13 +87,12 @@ func.func @sort_sorting_dim_shardings_has_common_prefix(%arg0: tensor<4x32x8xi32
     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
       %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
       stablehlo.return %1 : tensor<i1>
-  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y","t"}, {"z"}, {}]>]>} : (tensor<4x32x8xi32>) -> (tensor<4x32x8xi32>)
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>]>} : (tensor<4x32x8xi32>) -> (tensor<4x32x8xi32>)
   return %0 : tensor<4x32x8xi32>
 }
 
-
 // CHECK-LABEL: func @sort_sorting_dim_shardings_has_common_prefix_and_large
-func.func @sort_sorting_dim_shardings_has_common_prefix_and_large(%arg0: tensor<64x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y","t","z"}, {"x"}, {}]>}) -> (tensor<64x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y","t"}, {"z"}, {}]>}) {
+func.func @sort_sorting_dim_shardings_has_common_prefix_and_large(%arg0: tensor<64x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "t", "z"}, {"x"}, {}]>}) -> (tensor<64x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>}) {
   // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"z", "y"}, {"t"}]> : tensor<64x32x8xi32>
   // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD1]])
   // CHECK: %[[RESHARD2:.*]] = sdy.reshard %[[SORT]] <@mesh_xyzt, [{"y", "t"}, {"z"}, {}]> : tensor<64x32x8xi32>
@@ -101,7 +100,7 @@ func.func @sort_sorting_dim_shardings_has_common_prefix_and_large(%arg0: tensor<
     ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
       %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
       stablehlo.return %1 : tensor<i1>
-  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y","t"}, {"z"}, {}]>]>} : (tensor<64x32x8xi32>) -> (tensor<64x32x8xi32>)
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>]>} : (tensor<64x32x8xi32>) -> (tensor<64x32x8xi32>)
   return %0 : tensor<64x32x8xi32>
 }
 
@@ -126,13 +125,4 @@ func.func @sort_compatible_on_nonsort_dimension(%arg0: tensor<4x32x8xi32> {sdy.s
       stablehlo.return %1 : tensor<i1>
   }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x32x8xi32>) -> (tensor<4x32x8xi32>)
   return %0 : tensor<4x32x8xi32>
-}
-
-// CHECK-LABEL: func @transpose
-func.func @transpose(%arg0: tensor<256x32x64x100xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x"}, {"y"}, {}]>}) -> (tensor<100x32x256x64xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"y"}, {"z"}, {}]>}) {
-  // CHECK: %[[TRANSPOSE:.*]] = stablehlo.transpose %arg0, dims = [3, 1, 0, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {"x"}, {}, {"y"}]>]>} : (tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf32>
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[TRANSPOSE]] <@mesh_xyz, [{}, {"y"}, {"z"}, {}]> : tensor<100x32x256x64xf32>
-  // CHECK-NEXT: return %[[RESHARD]] : tensor<100x32x256x64xf32>
-  %0 = stablehlo.transpose %arg0, dims = [3, 1, 0, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {"y"}, {"z"}, {}]>]>} : (tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf32>
-  return %0 : tensor<100x32x256x64xf32>
 }
