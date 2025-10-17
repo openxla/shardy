@@ -285,12 +285,14 @@ struct FactorAxesCandidate {
     return makeComparisonTuple(*this) < makeComparisonTuple(rhs);
   }
 
-  // A candidate with a higher precedence will always be preferable to a
-  // candidate with a lower precedence when finding the best candidate to extend
-  // the factor sharding assignment during the majority vote heuristic.
+  // A candidate with a higher precedence will be preferable (given their source
+  // tensor sizes are the same) to a candidate with a lower precedence when
+  // finding the best candidate to extend the factor sharding assignment during
+  // the majority vote heuristic.
   int64_t precedence(FactorType factorType) {
     switch (factorType) {
       case FactorType::kPassThrough:
+        return 3;
       case FactorType::kReduction:
         return 2;
       case FactorType::kPermutation:
