@@ -86,8 +86,17 @@ def MarkInputOutputWithLayoutsPass :
     that are consumers of program input, and propagate `mhlo.layout_mode`
     attributes from program outputs to fragments that are output producers.
     If a program argument is returned then `mhlo.layout_mode` is propagated
-    to/from program results. See `PropagateLayoutsForReturnedFuncArgs`'s
-    comment for a detailed description of the propagation logic.
+    to/from program results. Inputs, outputs and fragment arguments/results
+    that are connected with a transfer op are always overwritten with the
+    DEFAULT layout, because transfers only support default layouts.
+
+    If a program argument is set to AUTO layout and is used in multiple
+    fragments, then we set it to be the DEFAULT layout to setup consistent
+    layout across fragments.
+
+    If program output, and also is a fragment result, is set to AUTO layout
+    and used in other fragments as an input, we also set it to be the DEFAULT
+    layout to setup consistent layout across fragments.
   }];
 }
 
