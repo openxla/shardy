@@ -39,7 +39,9 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   options.avoidExportForPartitioning = true;
   options.skipInline = true;
   sdy::addPropagationPipeline(pm, options);
+  sdy::addPropagationPipeline(pm, options);
 
+  // print something
   // Enforce user specified shardings.
   pm.addNestedPass<func::FuncOp>(createEnforceUserShardingsPass());
 
