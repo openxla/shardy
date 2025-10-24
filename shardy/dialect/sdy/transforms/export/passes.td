@@ -110,7 +110,11 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
   let options = [
       Option<"enableFullVersion", "enable-full-version",
             "bool", /*default=*/"false",
-            "Enable full version.">
+            "Enable full version.">,
+      Option<"avoidReshardsOnNamedComputations",
+            "avoid-reshards-on-named-computations",
+            "bool", /*default=*/"false",
+            "Avoid explicit reshards/collectives on named computations.">
     ];
 }
 

@@ -75,6 +75,12 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       *this, "dump-propagation-edges",
       llvm::cl::desc("Sink sdy.propagation_edges attr."),
       llvm::cl::init(false)};
+
+  Option<bool> avoidReshardsOnNamedComputations{
+      *this, "avoid-reshards-on-named-computations",
+      llvm::cl::desc("Avoid inserting explicit reshards/collectives for named "
+                     "computations."),
+      llvm::cl::init(false)};
 };
 
 // Adds a sequence of export passes needed as a post-processing step for SDY

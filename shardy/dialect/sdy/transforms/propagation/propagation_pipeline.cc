@@ -40,6 +40,8 @@ void populateExportOptions(ExportOptions& options,
       propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
+  options.avoidReshardsOnNamedComputations =
+      propOptions.avoidReshardsOnNamedComputations;
 }
 
 }  // namespace

@@ -97,10 +97,22 @@ void insertExplicitReshardsOnFuncReturn(Operation* op, func::FuncOp& funcOp,
   }
 }
 
-void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
-                                        IRRewriter& rewriter,
-                                        const SymbolTable& symbolTable,
-                                        const bool onFullVersion) {
+void insertExplicitReshardsOnDataFlowOp(
+    ShardableDataFlowOpInterface& op, IRRewriter& rewriter,
+    const SymbolTable& symbolTable, const bool onFullVersion,
+    const bool avoidReshardsOnNamedComputations) {
+  if (isa<NamedComputationOp>(op) && avoidReshardsOnNamedComputations) {
+    for (Value owner : op.getOpResultEdgeOwners()) {
+      for (OpOperand* sourceOpOperand : op.getEdgeSources(owner)) {
+        insertExplicitReshardsToTargetSharding(
+            *sourceOpOperand,
+            /*targetSharding=*/op.getEdgeOwnerSharding(owner), rewriter,
+            symbolTable,
+            /*insertAfterOperand=*/true, onFullVersion);
+      }
+    }
+    return;
+  }
   for (Value owner : llvm::concat<Value>(op.getOpResultEdgeOwners(),
                                          op.getBlockArgumentEdgeOwners())) {
     TensorShardingAttr ownerSharding = op.transformTargetSharding(
@@ -475,7 +487,8 @@ struct InsertExplicitReshardsPass
         // TODO(enver): Prefer resharding the owner when multiple sources are
         // sharded in the same way.
         insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
-                                           symbolTable, onFullVersion);
+                                           symbolTable, onFullVersion,
+                                           avoidReshardsOnNamedComputations);
         return;
       }
 

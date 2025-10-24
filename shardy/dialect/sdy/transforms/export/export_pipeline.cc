@@ -40,6 +40,8 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
+  passOptions.avoidReshardsOnNamedComputations =
+      options.avoidReshardsOnNamedComputations;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enableInsertExplicitCollectives) {

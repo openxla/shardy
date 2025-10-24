@@ -50,6 +50,8 @@ struct PropagationOptions {
   // auto-partitioner will be invoked after propagation of user-specified
   // shardings.
   bool enableAutoPartitioning = false;
+  // Whether to avoid explicit reshards/collectives on named computations.
+  bool avoidReshardsOnNamedComputations = false;
 };
 
 }  // namespace sdy
