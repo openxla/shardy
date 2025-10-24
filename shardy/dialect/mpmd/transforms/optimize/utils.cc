@@ -16,17 +16,20 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/optimize/utils.h"
 
 #include <cstdint>
-#include <functional>
 #include <iterator>
 #include <optional>
+#include <string>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/ScopedPrinter.h"
+#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
+#include "shardy/dialect/mpmd/ir/fragment_execution_rules.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/utils.h"
 
@@ -139,42 +142,82 @@ void RemoveAllControlDependencies(
 
 namespace {
 
-// Callback type for `VisitOpUseTree`.
-using PostActionCallBack = std::function<bool(Operation*)>;
-
-// Visits all users in a depth-first way, starting from current, with the
-// constraint that the traversal remains within the same block as the
-// `barrier_op` and never visits a node _after_ the `barrier_op`. After all the
-// users have been recursively visited it invokes the `action` callback. The
-// traversal terminates early if one of these callbacks returns `false`.
-bool VisitOpUseTree(Operation* current, Operation* barrier_op,
-                    DenseSet<Operation*>& visited, PostActionCallBack action) {
+// Visits all users in a depth-first, pre-order way, starting from current,
+// with the constraint that the traversal remains within the same block as the
+// `target` and never visits a node after the `target`. Pre-order is used to
+// exit faster and so that each operation is added to the path before exploring
+// its children, building the dependency path incrementally. Returns true if the
+// target is found, false otherwise. When target is found, the path parameter
+// contains the complete dependency path.
+bool TraverseToTarget(Operation* current, Operation* target,
+                      DenseSet<Operation*>& visited,
+                      SmallVector<Operation*>& path) {
   // Invariant: we will always have started with a `current` op at the same
-  // block as `barrier` op; hence it is always possible to trace all recursive
-  // users of `current` to ancestors in the same block as `barrier_op`.
-  current = GetAncestorInBlock(barrier_op->getBlock(), current);
-  // Done traversing if we are already visited or are beyond the barrier.
-  if (barrier_op->isBeforeInBlock(current) || visited.contains(current)) {
+  // block as `target`; hence it is always possible to trace all recursive
+  // users of `current` to ancestors in the same block as `target`.
+  current = GetAncestorInBlock(target->getBlock(), current);
+  auto [_, was_inserted] = visited.insert(current);
+  // Done traversing if we have already visited or are beyond the target.
+  if (target->isBeforeInBlock(current) || !was_inserted) {
+    return false;
+  }
+
+  path.push_back(current);
+
+  // Check if we found the target.
+  if (current == target) {
     return true;
   }
 
+  // Explore all children
   for (Value result : current->getResults()) {
-    bool any_failure = llvm::any_of(result.getUsers(), [&](Operation* user) {
-      return !VisitOpUseTree(user, barrier_op, visited, action);
-    });
-    if (any_failure) return false;
+    for (Operation* user : result.getUsers()) {
+      if (TraverseToTarget(user, target, visited, path)) {
+        return true;
+      }
+    }
   }
-  visited.insert(current);
-  return action(current);
+
+  // Target not found in any subtree, so remove current from path
+  path.pop_back();
+  return false;
 }
 
 }  // namespace
 
-bool TargetDependsOnSourceOp(Operation* src_op, Operation* tgt_op) {
+std::optional<SmallVector<Operation*>> GetDependencyPath(Operation* src_op,
+                                                         Operation* tgt_op) {
   SDY_CHECK(src_op->getBlock() == tgt_op->getBlock());
   DenseSet<Operation*> visited;
-  return !VisitOpUseTree(src_op, tgt_op, visited,
-                         [&](Operation* op) { return op != tgt_op; });
+  SmallVector<Operation*> path;
+
+  if (TraverseToTarget(src_op, tgt_op, visited, path)) {
+    return path;
+  }
+  return std::nullopt;
+}
+
+std::string FormatConflictWarning(
+    const FragmentInfo& predecessor_info, const FragmentInfo& successor_info,
+    const SmallVector<Operation*>& conflict_path) {
+  std::string message;
+  llvm::raw_string_ostream os(message);
+  os << "Scheduling rule conflict: rule specifies that\n"
+     << "  " << llvm::to_string(predecessor_info) << "\n"
+     << "must be scheduled before\n"
+     << "  " << llvm::to_string(successor_info) << "\n"
+     << "but a dataflow dependency requires the opposite order.\n"
+     << "Conflicting dependency path:\n";
+  for (auto [i, op] : llvm::enumerate(conflict_path)) {
+    os << "  [" << i << "] ";
+    if (auto fragment = dyn_cast<FragmentOp>(op)) {
+      os << llvm::to_string(GetFragmentInfo(fragment));
+    } else {
+      os << op->getName().getStringRef();
+    }
+    os << "\n";
+  }
+  return message;
 }
 
 }  // namespace mlir::mpmd

@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/mpmd/transforms/optimize/utils.h"
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -277,18 +278,30 @@ TEST(CanRemat, ShouldReturnFalseIfStagesDontMatch) {
   EXPECT_FALSE(CanRemat(fwd_fragment, bwd_fragment));
 }
 
-bool TargetDependsOnSourceOpHelper(std::string_view program) {
-  MLIRContext context;
-  loadAllRequiredDialects(&context);
-  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
-  SDY_CHECK(module);
-  auto main_fn = GetMainFunction(*module);
-  Operation* src_op = GetOpWithAttribute<Operation*>(main_fn, "source");
-  Operation* tgt_op = GetOpWithAttribute<Operation*>(main_fn, "target");
-  return TargetDependsOnSourceOp(src_op, tgt_op);
-}
+// Test fixture for `GetDependencyPath` tests. It parses an MLIR program
+// and provides access to the operations marked with "source" and "target"
+// attributes, which correspond to the source and target operations in the
+// dependency path query.
+class GetDependencyPathTesting : public ::testing::Test {
+ protected:
+  void ParseAndGetOps(std::string_view program) {
+    loadAllRequiredDialects(&context_);
+    module_ = parseSourceString<ModuleOp>(program, &context_);
+    SDY_CHECK(module_);
+    FuncOp main_fn = GetMainFunction(*module_);
+    src_op_ = GetOpWithAttribute<Operation*>(main_fn, "source");
+    tgt_op_ = GetOpWithAttribute<Operation*>(main_fn, "target");
+    ASSERT_NE(src_op_, nullptr);
+    ASSERT_NE(tgt_op_, nullptr);
+  }
 
-TEST(TargetDependsOnSourceOpTesting, ImmediateDependency) {
+  MLIRContext context_;
+  OwningOpRef<ModuleOp> module_;
+  Operation* src_op_ = nullptr;
+  Operation* tgt_op_ = nullptr;
+};
+
+TEST_F(GetDependencyPathTesting, ImmediateDependency) {
   const std::string program = R"mlir(
     func.func @main(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
       %0 = mpmd.named_computation<"f"> (%arg0) {source} (%arg1: tensor<16x32xf32>) {
@@ -298,10 +311,16 @@ TEST(TargetDependsOnSourceOpTesting, ImmediateDependency) {
       %2 = stablehlo.add %0, %0 {target} : tensor<16x32xf32>
       func.return %2 : tensor<16x32xf32>
     })mlir";
-  EXPECT_TRUE(TargetDependsOnSourceOpHelper(program));
+  ParseAndGetOps(program);
+  std::optional<SmallVector<Operation*>> path =
+      GetDependencyPath(src_op_, tgt_op_);
+  ASSERT_TRUE(path.has_value());
+  ASSERT_EQ(path->size(), 2);
+  EXPECT_EQ((*path)[0], src_op_);
+  EXPECT_EQ((*path)[1], tgt_op_);
 }
 
-TEST(TargetDependsOnSourceOpTesting, InternalDependency) {
+TEST_F(GetDependencyPathTesting, InternalDependency) {
   const std::string program = R"mlir(
     func.func @main(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
       %0 = mpmd.named_computation<"f"> (%arg0) (%arg1: tensor<16x32xf32>) {
@@ -311,10 +330,16 @@ TEST(TargetDependsOnSourceOpTesting, InternalDependency) {
       } : (tensor<16x32xf32>) -> tensor<16x32xf32>
       func.return %0 : tensor<16x32xf32>
     })mlir";
-  EXPECT_TRUE(TargetDependsOnSourceOpHelper(program));
+  ParseAndGetOps(program);
+  std::optional<SmallVector<Operation*>> path =
+      GetDependencyPath(src_op_, tgt_op_);
+  ASSERT_TRUE(path.has_value());
+  ASSERT_EQ(path->size(), 2);
+  EXPECT_EQ((*path)[0], src_op_);
+  EXPECT_EQ((*path)[1], tgt_op_);
 }
 
-TEST(TargetDependsOnSourceOpTesting, NoDependencyTargetBeforeSource) {
+TEST_F(GetDependencyPathTesting, NoDependencyTargetBeforeSource) {
   const std::string program = R"mlir(
     func.func @main(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
       %0 = mpmd.named_computation<"f"> (%arg0) {target} (%arg1: tensor<16x32xf32>) {
@@ -324,10 +349,11 @@ TEST(TargetDependsOnSourceOpTesting, NoDependencyTargetBeforeSource) {
       %2 = stablehlo.add %0, %0 {source} : tensor<16x32xf32>
       func.return %2 : tensor<16x32xf32>
     })mlir";
-  EXPECT_FALSE(TargetDependsOnSourceOpHelper(program));
+  ParseAndGetOps(program);
+  EXPECT_FALSE(GetDependencyPath(src_op_, tgt_op_).has_value());
 }
 
-TEST(TargetDependsOnSourceOpTesting, NoDependency) {
+TEST_F(GetDependencyPathTesting, NoDependency) {
   const std::string program = R"mlir(
     func.func @main(%arg0: tensor<256xf32>) -> tensor<f32> {
       %0 = stablehlo.add %arg0, %arg0 {source} : (tensor<256xf32>, tensor<256xf32>) -> tensor<256xf32>
@@ -338,11 +364,11 @@ TEST(TargetDependsOnSourceOpTesting, NoDependency) {
       %3 = stablehlo.dot %1, %0 : (tensor<256xf32>, tensor<256xf32>) -> tensor<f32>
       func.return %3 : tensor<f32>
     })mlir";
-
-  EXPECT_FALSE(TargetDependsOnSourceOpHelper(program));
+  ParseAndGetOps(program);
+  EXPECT_FALSE(GetDependencyPath(src_op_, tgt_op_).has_value());
 }
 
-TEST(TargetDependsOnSourceOpTesting, DependencyWithInternalOp) {
+TEST_F(GetDependencyPathTesting, DependencyWithInternalOp) {
   const std::string program = R"mlir(
     func.func @main(%arg0: tensor<256xf32>) -> tensor<f32> {
       %0 = stablehlo.add %arg0, %arg0 {source} : (tensor<256xf32>, tensor<256xf32>) -> tensor<256xf32>
@@ -353,27 +379,39 @@ TEST(TargetDependsOnSourceOpTesting, DependencyWithInternalOp) {
       %3 = stablehlo.dot %1, %0 : (tensor<256xf32>, tensor<256xf32>) -> tensor<f32>
       func.return %3 : tensor<f32>
     })mlir";
-
-  EXPECT_TRUE(TargetDependsOnSourceOpHelper(program));
+  ParseAndGetOps(program);
+  std::optional<SmallVector<Operation*>> path =
+      GetDependencyPath(src_op_, tgt_op_);
+  ASSERT_TRUE(path.has_value());
+  ASSERT_EQ(path->size(), 2);
+  EXPECT_EQ((*path)[0], src_op_);
+  EXPECT_EQ((*path)[1], tgt_op_);
 }
 
-TEST(TargetDependsOnSourceOpTesting, RecursiveDependencyWithInternalOps) {
+TEST_F(GetDependencyPathTesting, RecursiveDependencyWithInternalOps) {
   const std::string program = R"mlir(
     func.func @main(%arg0: tensor<256xf32>) -> tensor<f32> {
       %0 = stablehlo.add %arg0, %arg0 {source} : (tensor<256xf32>, tensor<256xf32>) -> tensor<256xf32>
-      %1 = mpmd.named_computation<"f"> (%0) {target} (%arg1: tensor<256xf32>) {
+      %1 = mpmd.named_computation<"f"> (%0) (%arg1: tensor<256xf32>) {
         %2 = stablehlo.multiply %arg1, %arg1 : tensor<256xf32>
         mpmd.return %2 : tensor<256xf32>
       } : (tensor<256xf32>) -> tensor<256xf32>
-      %3 = mpmd.named_computation<"f"> (%1) {target} (%arg1: tensor<256xf32>) {
+      %3 = mpmd.named_computation<"g"> (%1) (%arg1: tensor<256xf32>) {
         %2 = stablehlo.multiply %arg1, %arg1 : tensor<256xf32>
         mpmd.return %2 : tensor<256xf32>
       } : (tensor<256xf32>) -> tensor<256xf32>
       %4 = stablehlo.dot %3, %3 {target} : (tensor<256xf32>, tensor<256xf32>) -> tensor<f32>
       func.return %4 : tensor<f32>
     })mlir";
-
-  EXPECT_TRUE(TargetDependsOnSourceOpHelper(program));
+  ParseAndGetOps(program);
+  std::optional<SmallVector<Operation*>> path =
+      GetDependencyPath(src_op_, tgt_op_);
+  ASSERT_TRUE(path.has_value());
+  ASSERT_EQ(path->size(), 4);
+  EXPECT_EQ((*path)[0], src_op_);
+  EXPECT_EQ(mlir::cast<NamedComputationOp>((*path)[1]).getName(), "f");
+  EXPECT_EQ(mlir::cast<NamedComputationOp>((*path)[2]).getName(), "g");
+  EXPECT_EQ((*path)[3], tgt_op_);
 }
 
 }  // namespace

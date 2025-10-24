@@ -6,7 +6,6 @@
 !mesh_1_tensor_2_2_f32 = !mpmd.mesh_tensor<"m1", tensor<2x2xf32>>
 
 // CHECK-LABEL: func @schedule_with_missing_fragment
-// expected-warning@+1 {{Fragment FragmentInfo(origins=["y"],call_counter=0,mesh_name="m1") doesn't exist. Skipping this rule.}}
 func.func @schedule_with_missing_fragment
 (%arg0: !mesh_1_tensor_2_2_f32, %arg1: !mesh_1_tensor_2_2_f32)
  -> (!mesh_1_tensor_2_2_f32, !mesh_1_tensor_2_2_f32)

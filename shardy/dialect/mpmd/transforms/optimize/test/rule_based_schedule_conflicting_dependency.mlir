@@ -6,7 +6,6 @@
 !mesh_1_tensor_2_2_f32 = !mpmd.mesh_tensor<"m1", tensor<2x2xf32>>
 
 // CHECK-LABEL: func @conflicting_dependency
-// expected-warning@+1 {{Scheduling rule conflicts with existing dataflow dependency}}
 func.func @conflicting_dependency
 (%arg0: !mesh_1_tensor_2_2_f32)
  -> (!mesh_1_tensor_2_2_f32)
