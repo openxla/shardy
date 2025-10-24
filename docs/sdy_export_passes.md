@@ -72,7 +72,8 @@ operation has compatible shardings.
 #### Options
 
 ```
--enable-full-version : Enable full version.
+-enable-full-version                  : Enable full version.
+-avoid-reshards-on-named-computations : Avoid explicit reshards/collectives on named computations.
 ```
 
 ### `-sdy-remove-all-gather-reduce-scatter-for-cmv1`
