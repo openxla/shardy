@@ -14,7 +14,7 @@ sdy.mesh @mesh = <["a"=2, "b"=2, "a"=4]>
 sdy.mesh @mesh = <[], device_ids=[-1]>
 
 // -----
-// expected-error @+1 {{total product of axis sizes must match total number of device ids, got: 1 != 2}}
+// expected-error @+1 {{axes is empty and device_ids has more than one element}}
 sdy.mesh @mesh = <[], device_ids=[1, 0]>
 
 // -----

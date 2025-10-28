@@ -724,6 +724,22 @@ LogicalResult MeshAxisAttr::verify(
 LogicalResult MeshAttr::verify(
     llvm::function_ref<InFlightDiagnostic()> emitError,
     ArrayRef<MeshAxisAttr> axes, ArrayRef<int64_t> deviceIds) {
+  for (int64_t deviceId : deviceIds) {
+    if (deviceId < 0) {
+      return emitError() << "device id must be non-negative, got: " << deviceId;
+    }
+  }
+
+  if (axes.empty()) {
+    if (deviceIds.size() > 1) {
+      return emitError()
+             << "axes is empty and device_ids has more than one element";
+    }
+    // If `deviceIds.size()` is 0, this is an empty mesh.
+    // If `deviceIds.size()` is 1, this is a maximal mesh.
+    return success();
+  }
+
   SmallDenseSet<StringRef> seenAxisNames;
   for (MeshAxisAttr axis : axes) {
     if (!seenAxisNames.insert(axis.getName()).second) {
@@ -734,12 +750,6 @@ LogicalResult MeshAttr::verify(
   if (deviceIds.empty()) {
     // The default device ids are iota(product(axes)).
     return success();
-  }
-
-  for (int64_t deviceId : deviceIds) {
-    if (deviceId < 0) {
-      return emitError() << "device id must be non-negative, got: " << deviceId;
-    }
   }
 
   // Verify that the product of axis sizes matches the number of explicit device
@@ -753,10 +763,6 @@ LogicalResult MeshAttr::verify(
     return emitError() << "total product of axis sizes must match total number "
                           "of device ids, got: "
                        << totalProductOfAxes << " != " << totalDeviceIds;
-  }
-
-  if (axes.empty()) {
-    return success();
   }
 
   std::vector<int64_t> sortedDeviceIds(deviceIds.begin(), deviceIds.end());
