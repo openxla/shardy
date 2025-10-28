@@ -1114,7 +1114,7 @@ class SdyPropagationTest(parameterized.TestCase):
     self.assertEqual(
         lowered.function_mesh_assignment.output_meshes, ('mesh1', 'mesh2')
     )
-    self.assertEqual(lowered.as_text('mpmd').count('transfer'), 2)
+    self.assertEqual(lowered.as_text('mpmd').count('transfer'), 1)
 
   def test_removed_input_assigned_to_placeholder_mesh_when_no_user_assignment(
       self,
