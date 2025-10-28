@@ -79,14 +79,13 @@ AxesPerFactor getCompatibleFactorShardings(
     OpShardingRuleAttr shardingRule) {
   AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
   BitVector seenFactors(shardingRule.getNumFactors());
+  SmallVector<AxisRefAttr> seenAxisRefs;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(
            shardingProjection.getOperands(), shardingProjection.getResults())) {
-    // Detects conflicts within the same factor.
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      // Factors that need replication should be unsharded across all operands
-      // and results in order for it to have a compatible sharding.
+      // Factors that need replication should be unsharded to be compatible.
       if (shardingRule.isNeedReplicationFactor(factorIndex)) {
         if (!factorSharding.axisRefs.empty()) {
           return {};
@@ -94,7 +93,11 @@ AxesPerFactor getCompatibleFactorShardings(
         continue;
       }
       if (!seenFactors.test(factorIndex)) {
+        if (overlaps(factorSharding.axisRefs, seenAxisRefs)) {
+          return {};
+        }
         commonAxesPerFactor[factorIndex] = factorSharding.axisRefs;
+        seenAxisRefs.append(factorSharding.axisRefs);
         seenFactors.set(factorIndex);
       } else if (factorSharding.axisRefs != commonAxesPerFactor[factorIndex]) {
         return {};
@@ -102,20 +105,6 @@ AxesPerFactor getCompatibleFactorShardings(
     }
   }
 
-  // Detect conflict between reduction factors and output shardings.
-  // TODO(enver): Improve the compile-time performance.
-  for (const int64_t factorIndex : shardingRule.getReductionFactors()) {
-    ArrayRef<AxisRefAttr> reductionSharding = commonAxesPerFactor[factorIndex];
-    for (const TensorFactorShardings& outTensorFactorSharding :
-         shardingProjection.getResults()) {
-      for (const auto& [outFactorIndex, outFactorSharding] :
-           outTensorFactorSharding.factorIndexToSharding) {
-        if (overlaps(reductionSharding, outFactorSharding.axisRefs)) {
-          return {};
-        }
-      }
-    }
-  }
   return commonAxesPerFactor;
 }
 

@@ -87,6 +87,7 @@ bool hasOverflowAxes(const ShardingProjection& shardingProjection);
 // Checks if factor sharding is compatible, that is, it satisfies:
 // 1. Factors are sharded the same way across operands and results.
 // 2. Factors that need replication are unsharded.
+// 3. There is no overlap between the sharding axes across different factors.
 //
 // Returns the common axes per factor if the factor sharding is compatible.
 // Otherwise, returns empty AxesPerFactor.
