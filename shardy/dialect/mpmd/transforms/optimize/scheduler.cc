@@ -56,12 +56,6 @@ class PipelineSchedulerPass
       }
     }
 
-    // A map to keep track of all control dependencies added to fragments.
-    // For each fragment, we keep track of number of control-dependencies added.
-    // Once we have reordered all the fragments, we can then use this
-    // information to remove any control-dependencies from the program.
-    DenseMap<FragmentOp, int> ctrl_dependencies;
-
     // 2. Add control dependencies between some pairs of fragments.
     int count_control_dependencies = 0;
     for (FragmentOp fragment1 : all_fragments) {
@@ -82,7 +76,11 @@ class PipelineSchedulerPass
         }
 
         if (mustHappenBefore.value(fragment1, fragment2)) {
-          AddControlDependency(fragment1, fragment2, ctrl_dependencies);
+          // For each fragment, we keep track of number of control-dependencies
+          // added using an attribute added to the fragment. Once we have
+          // reordered all the fragments, we can then use this information to
+          // remove any control-dependencies from the program.
+          AddControlDependency(fragment1, fragment2);
           count_control_dependencies++;
         }
       }
@@ -94,8 +92,10 @@ class PipelineSchedulerPass
     // respected.
     sortTopologically(&func_op.getBody().front());
 
-    // 4. Remove the inserted control-dependencies.
-    RemoveAllControlDependencies(ctrl_dependencies);
+    // 4. Remove control dependencies if requested.
+    if (removeControlDependencies) {
+      RemoveAllControlDependencies(func_op);
+    }
   }
 };
 
@@ -103,8 +103,10 @@ class PipelineSchedulerPass
 
 void AddSchedulingPass(
     OpPassManager& pm, PipelineSchedule pipeline_schedule,
+    bool removeControlDependencies,
     std::optional<FragmentComparator> override_must_happen_before) {
   PipelineSchedulerPassOptions options;
+  options.removeControlDependencies = removeControlDependencies;
   options.mustHappenBefore.value = override_must_happen_before.value_or(
       BuiltinFragmentComparator(pipeline_schedule));
   if (!override_must_happen_before) {
