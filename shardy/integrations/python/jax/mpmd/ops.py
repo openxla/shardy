@@ -29,11 +29,13 @@ from jax._src import util
 from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
 from jax._src.interpreters import partial_eval as internal_pe
-import jax._src.lib.mlir.dialects as jax_mlir_dialects
 import jax.extend as jex
 from jax.extend import linear_util as lu
 from jax.extend import source_info_util as siu
 from jax.extend.core import primitives
+from jax.extend.mlir import ir
+from jax.extend.mlir.dialects import func as func_dialect
+from jax.extend.mlir.dialects import mpmd
 from jax.interpreters import ad
 from jax.interpreters import batching
 from jax.interpreters import mlir as jax_mlir
@@ -42,10 +44,6 @@ import jaxtyping
 
 from shardy.integrations.python.jax.mpmd import utils
 
-
-ir = jax_mlir.ir
-mpmd = jax_mlir_dialects.mpmd
-func_dialect = jax_mlir_dialects.func
 
 PyTree = jaxtyping.PyTree
 X = TypeVar('X')
