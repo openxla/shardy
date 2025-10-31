@@ -31,22 +31,12 @@ namespace mlir::mpmd {
 using ::mlir::func::FuncOp;
 
 void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options) {
-  // Adds pipeline scheduling pass.
-  if (!options.fragmentScheduleRules.empty()) {
-    pm.addNestedPass<FuncOp>(
-        createRuleBasedSchedulePass(RuleBasedSchedulePassOptions{
-            std::move(options.fragmentScheduleRules)}));
-  } else {
-    AddSchedulingPass(pm, options.pipelineSchedule);
-  }
-
-  // Merge fragments according to the user-specified rules. Do this before other
-  // merge passes since those modify the origins of fragments, invalidating the
-  // rules.
-  if (!options.fragmentMergeRules.empty()) {
-    pm.addNestedPass<FuncOp>(createRuleBasedMergePass(
-        RuleBasedMergePassOptions{std::move(options.fragmentMergeRules)}));
-  }
+  // Adds scheduling and rule-based merging. Rule-based merging must run before
+  // other merge passes since those modify the origins of fragments,
+  // invalidating the rules.
+  AddSchedulingAndRuleBasedMerge(pm, options.pipelineSchedule,
+                                 options.fragmentScheduleRules,
+                                 options.fragmentMergeRules);
 
   // The remat passes will run after inlining the call ops and scheduling.
   // The reason why we choose to remat after scheduling is so that we don't need
