@@ -84,19 +84,6 @@ SmallVector<int64_t> getTensorSizes(Operation* op);
 // Returns true iff any tensor factor sharding has non-empty overflow axes.
 bool hasOverflowAxes(const ShardingProjection& shardingProjection);
 
-// Checks if factor sharding is compatible, that is, it satisfies:
-// 1. Factors are sharded the same way across operands and results.
-// 2. Factors that need replication are unsharded.
-// 3. There is no overlap between the sharding axes across different factors.
-//
-// Returns the common axes per factor if the factor sharding is compatible.
-// Otherwise, returns empty AxesPerFactor.
-//
-// Assumes factor shardings do not have overflow axes.
-AxesPerFactor getCompatibleFactorShardings(
-    const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule);
-
 // Insert explicit reshards for operands and results that change by
 // the given `shardingProjection` for a given `op`. The reshards are inserted
 // only to make the given operation compatible.

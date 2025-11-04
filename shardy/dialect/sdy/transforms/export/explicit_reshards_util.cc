@@ -71,8 +71,16 @@ bool hasShardedPermutationFactors(
                                !factorSharding.axisRefs.empty();
                       });
 }
-}  // namespace
 
+// Returns the common axes per factor if the factor sharding is compatible.
+// Otherwise, returns empty AxesPerFactor.
+//
+// The factor sharding is compatible if it satisfies:
+// 1. Factors are sharded the same way across operands and results.
+// 2. Factors that need replication are unsharded.
+// 3. There is no overlap between the sharding axes across different factors.
+//
+// Assumes factor shardings do not have overflow axes.
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
 AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
@@ -107,8 +115,6 @@ AxesPerFactor getCompatibleFactorShardings(
 
   return commonAxesPerFactor;
 }
-
-namespace {
 
 void insertExplicitReshardsOnOperand(
     Operation* op, const int64_t operandIndex,
@@ -212,7 +218,7 @@ struct FactorAxesPair {
 
   bool empty() const { return factorIndex == kEmptyFactorIndex; }
 
-  bool isFullySharded(OpShardingRuleAttr shardingRule, MeshAttr mesh) {
+  bool isFullySharded(OpShardingRuleAttr shardingRule, MeshAttr mesh) const {
     return axes.getShardingSize(mesh) ==
            shardingRule.getFactorSizes()[factorIndex];
   }
@@ -282,7 +288,7 @@ struct FactorAxesCandidate {
   // tensor sizes are the same) to a candidate with a lower precedence when
   // finding the best candidate to extend the factor sharding assignment during
   // the majority vote heuristic.
-  int64_t precedence(FactorType factorType) {
+  int64_t precedence(FactorType factorType) const {
     switch (factorType) {
       case FactorType::kPassThrough:
         return 3;
@@ -308,18 +314,16 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
                                int64_t sourceTensorSize, const Mesh& mesh,
                                const FactorType factorType,
                                int64_t communicationCost) {
-  if (auto it = factorAxesCandidatesMap.find(factorAxes);
-      it != factorAxesCandidatesMap.end()) {
+  auto [it, inserted] = factorAxesCandidatesMap.try_emplace(
+      factorAxes, factorAxes, sourceTensorSize,
+      factorAxes.axes.getShardingSize(mesh.attr()), factorType,
+      communicationCost);
+  if (!inserted) {
     FactorAxesCandidate& candidate = it->second;
     candidate.totalSourceTensorSize += sourceTensorSize;
     candidate.largestSourceTensorSize =
         std::max(candidate.largestSourceTensorSize, sourceTensorSize);
-    return;
   }
-  factorAxesCandidatesMap.try_emplace(
-      factorAxes, factorAxes, sourceTensorSize,
-      factorAxes.axes.getShardingSize(mesh.attr()), factorType,
-      communicationCost);
 }
 
 // A container for FactorAxesCandidates where the order of iteration does not
@@ -499,11 +503,11 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
                              ArrayRef<int64_t> tensorSizes, const Mesh& mesh,
                              const FactorAxesPair& factorAxesPair) {
   // The relative cost of collective operations.
-  const int64_t allToAllCost = 1;
-  const int64_t collectivePermuteCost = 2;
-  const int64_t allGatherCost = 4;
-  const int64_t reduceScatterCost = 4;
-  const int64_t allReduceCost = 8;
+  constexpr int64_t allToAllCost = 1;
+  constexpr int64_t collectivePermuteCost = 2;
+  constexpr int64_t allGatherCost = 4;
+  constexpr int64_t reduceScatterCost = 4;
+  constexpr int64_t allReduceCost = 8;
 
   int64_t communicationCost = 0;
 
@@ -870,6 +874,12 @@ void distributeAxisRefsToBatchingFactors(
 AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
+  if (AxesPerFactor compatibleFactorShardings =
+          getCompatibleFactorShardings(shardingProjection, shardingRule);
+      !compatibleFactorShardings.empty()) {
+    return compatibleFactorShardings;
+  }
+
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
