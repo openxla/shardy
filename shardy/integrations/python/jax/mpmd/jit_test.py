@@ -54,6 +54,13 @@ def get_2_stage_mpmd_config(
   )
 
 
+def setUpModule():
+  chex.set_n_cpu_devices(8)
+  # We need `jax_legacy_prng_key='allow'`` because we create a PRNG key with
+  # integer seed.
+  jax.config.update('jax_legacy_prng_key', 'allow')
+  jax.config.update('jax_numpy_dtype_promotion', 'standard')
+
 class SdyPropagationTest(parameterized.TestCase):
 
   def test_mpmd_hello_world(self):
@@ -1498,9 +1505,4 @@ class SdyPropagationTest(parameterized.TestCase):
 
 
 if __name__ == '__main__':
-  chex.set_n_cpu_devices(8)
-  # We need `jax_legacy_prng_key='allow'`` because we create a PRNG key with
-  # integer seed.
-  jax.config.update('jax_legacy_prng_key', 'allow')
-  jax.config.update('jax_numpy_dtype_promotion', 'standard')
   absltest.main()

@@ -23,6 +23,10 @@ import numpy as np
 from shardy.integrations.python.jax.mpmd import utils
 
 
+def setUpModule():
+  chex.set_n_cpu_devices(8)
+
+
 class UtilsTest(parameterized.TestCase):
 
   def test_meshes_and_sdy_specs_to_named_shardings(self):
@@ -120,5 +124,4 @@ class UtilsTest(parameterized.TestCase):
 
 
 if __name__ == '__main__':
-  chex.set_n_cpu_devices(8)
   absltest.main()
