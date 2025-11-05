@@ -316,9 +316,8 @@ std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
   if (!meshName.has_value()) {
     // This means none of the operands or results have a sharding attribute or
     // the sharding attributes use different meshes.
-    // TODO(enver): Actually, we are moving towards supporting multiple
-    // explicit reshards so operands and results are all bound by the same
-    // mesh.
+    // TODO(enver): Actually, we are moving towards supporting multiple explicit
+    // reshards so operands and results are all bound by the same mesh.
     return std::nullopt;
   }
   MeshAttr meshAttr = getMeshAttr(symbolTable, *meshName);

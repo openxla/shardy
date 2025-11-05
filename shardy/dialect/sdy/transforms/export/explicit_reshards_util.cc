@@ -284,10 +284,9 @@ struct FactorAxesCandidate {
     return makeComparisonTuple(*this) < makeComparisonTuple(rhs);
   }
 
-  // A candidate with a higher precedence will be preferable (given their source
+  // A candidate with a higher precedence will be preferred (given their source
   // tensor sizes are the same) to a candidate with a lower precedence when
-  // finding the best candidate to extend the factor sharding assignment during
-  // the majority vote heuristic.
+  // finding the best candidate to extend the factor sharding assignment.
   int64_t precedence(FactorType factorType) const {
     switch (factorType) {
       case FactorType::kPassThrough:
@@ -324,6 +323,150 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
     candidate.largestSourceTensorSize =
         std::max(candidate.largestSourceTensorSize, sourceTensorSize);
   }
+}
+
+int64_t getShardingSize(ArrayRef<AxisRefAttr> axisRefs, MeshAttr mesh) {
+  int64_t shardingSize = 1;
+  for (AxisRefAttr axisRef : axisRefs) {
+    shardingSize *= axisRef.getSize(mesh);
+  }
+  return shardingSize;
+}
+
+std::pair<SmallVector<AxisRefAttr>, SmallVector<AxisRefAttr>>
+getShardingAxesInOtherAndThisFactor(
+    const TensorFactorShardings& tensorFactorSharding,
+    const int64_t factorIndex) {
+  SmallVector<AxisRefAttr> axesInOtherFactor;
+  SmallVector<AxisRefAttr> axesInThisFactor;
+  for (const auto& [i, factorSharding] :
+       tensorFactorSharding.factorIndexToSharding) {
+    if (i == factorIndex) {
+      axesInThisFactor = factorSharding.axisRefs;
+    } else {
+      axesInOtherFactor.append(factorSharding.axisRefs.begin(),
+                               factorSharding.axisRefs.end());
+    }
+  }
+  return {axesInOtherFactor, axesInThisFactor};
+}
+
+int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
+                             OpShardingRuleAttr shardingRule,
+                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh,
+                             const FactorAxesPair& factorAxesPair) {
+  // The relative cost of collective operations.
+  constexpr int64_t allToAllCost = 1;
+  constexpr int64_t collectivePermuteCost = 2;
+  constexpr int64_t allGatherCost = 4;
+  constexpr int64_t reduceScatterCost = 4;
+  constexpr int64_t allReduceCost = 8;
+
+  int64_t communicationCost = 0;
+
+  // For each tensor (operand or result), we use the following notations.
+  //
+  // `factorAxesPair` is the candidate factor-axes pair.
+  // * X = factorAxesPair.axes.
+  // * A = sharding axes in other factors in the original sharding.
+  // * B = sharding axes in this factor in the original sharding.
+  // * AX = the intersection (overlap) of A and X.
+  // * B-X = the difference of B and X.
+
+  SmallVector<AxisRefAttr> axesX = factorAxesPair.axes.toVector();
+  int64_t axesXSize = factorAxesPair.axes.getShardingSize(mesh.attr());
+
+  // For each operand, estimate the cost of reshard from original sharding to
+  // the candidate sharding axes.
+  //
+  // If the operand does not contain this factor, we need an all-gather on AX.
+  //
+  // If the operand contains this factor, we need
+  // 1. all-to-all to move AX from other factors to this factor.
+  // 2. collective-permute to handle B-X.
+  // 3. all-gather to shrink the sharding size if needed.
+  for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
+           tensorSizes.drop_back(shardingProjection.getNumResults()),
+           shardingProjection.getOperands())) {
+    bool operandContainsFactor =
+        tensorFactorSharding.factorIndexToSharding.contains(
+            factorAxesPair.factorIndex);
+    int64_t shardedTensorSize =
+        tensorSize / tensorFactorSharding.getShardingSize(mesh.attr());
+    auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
+        tensorFactorSharding, factorAxesPair.factorIndex);
+
+    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh.attr());
+    int64_t diffXASize = getShardingSize(diffXA, mesh.attr());
+
+    if (axesXSize > diffXASize) {
+      // all-to-all on AX.
+      communicationCost +=
+          (operandContainsFactor ? allToAllCost : allGatherCost) *
+          shardedTensorSize;
+    }
+
+    if (operandContainsFactor) {
+      if (!getAxisSetDiff(axesB, axesX, mesh.attr()).empty()) {
+        communicationCost += collectivePermuteCost * shardedTensorSize;
+      }
+      if (getShardingSize(axesB, mesh.attr()) > diffXASize) {
+        // The operand is over-sharded than the candidate. We need all-gather to
+        // shrink the sharding size.
+        communicationCost += allGatherCost * shardedTensorSize;
+      }
+    }
+  }
+
+  // For each result, estimate the cost of reshard from the candidate sharding
+  // axes to original sharding.
+  //
+  // We use the same notations as above.
+  //
+  // If the candidate factor is a reduction factor, we need all-reduce or
+  // reduce-scatter on the result.
+  //
+  // If the result does not contain this factor, there is no additional cost.
+  //
+  // If the result contains this factor, we need
+  // 1. all-to-all to move AX from this factor to other factors.
+  // 2. all-gather to shrink the sharding size after the all-to-all above.
+  for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
+           tensorSizes.drop_front(shardingProjection.getNumOperands()),
+           shardingProjection.getResults())) {
+    int64_t shardedTensorSize = tensorSize / axesXSize;
+    auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
+        tensorFactorSharding, factorAxesPair.factorIndex);
+
+    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh.attr());
+    int64_t diffXASize = getShardingSize(diffXA, mesh.attr());
+
+    if (shardingRule.isReductionFactor(factorAxesPair.factorIndex)) {
+      communicationCost +=
+          (diffXASize > 1 ? allReduceCost : reduceScatterCost) *
+          shardedTensorSize;
+    }
+
+    if (!tensorFactorSharding.factorIndexToSharding.contains(
+            factorAxesPair.factorIndex)) {
+      continue;
+    }
+    if (axesXSize > diffXASize) {
+      // all-to-all on AX.
+      communicationCost += allToAllCost * shardedTensorSize;
+    }
+
+    if (!getAxisSetDiff(axesB, axesX, mesh.attr()).empty()) {
+      communicationCost += collectivePermuteCost * shardedTensorSize;
+    }
+    if (getShardingSize(axesB, mesh.attr()) < diffXASize) {
+      // The result is less-sharded than the candidate. We need all-gather to
+      // shrink the sharding size.
+      communicationCost += allGatherCost * shardedTensorSize;
+    }
+  }
+
+  return communicationCost;
 }
 
 // A container for FactorAxesCandidates where the order of iteration does not
@@ -472,150 +615,6 @@ class FactorAxesCandidateBag {
   MeshAttr mesh;
 };
 
-int64_t getShardingSize(ArrayRef<AxisRefAttr> axisRefs, MeshAttr mesh) {
-  int64_t shardingSize = 1;
-  for (AxisRefAttr axisRef : axisRefs) {
-    shardingSize *= axisRef.getSize(mesh);
-  }
-  return shardingSize;
-}
-
-std::pair<SmallVector<AxisRefAttr>, SmallVector<AxisRefAttr>>
-getShardingAxesInOtherAndThisFactor(
-    const TensorFactorShardings& tensorFactorSharding,
-    const int64_t factorIndex) {
-  SmallVector<AxisRefAttr> axesInOtherFactor;
-  SmallVector<AxisRefAttr> axesInThisFactor;
-  for (const auto& [i, factorSharding] :
-       tensorFactorSharding.factorIndexToSharding) {
-    if (i == factorIndex) {
-      axesInThisFactor = factorSharding.axisRefs;
-    } else {
-      axesInOtherFactor.append(factorSharding.axisRefs.begin(),
-                               factorSharding.axisRefs.end());
-    }
-  }
-  return {axesInOtherFactor, axesInThisFactor};
-}
-
-int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
-                             OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh,
-                             const FactorAxesPair& factorAxesPair) {
-  // The relative cost of collective operations.
-  constexpr int64_t allToAllCost = 1;
-  constexpr int64_t collectivePermuteCost = 2;
-  constexpr int64_t allGatherCost = 4;
-  constexpr int64_t reduceScatterCost = 4;
-  constexpr int64_t allReduceCost = 8;
-
-  int64_t communicationCost = 0;
-
-  // For each tensor (operand or result), we use the following notations.
-  //
-  // `factorAxesPair` is the candidate factor-axes pair.
-  // * X = factorAxesPair.axes.
-  // * A = sharding axes in other factors in the original sharding.
-  // * B = sharding axes in this factor in the original sharding.
-  // * AX = the intersection (overlap) of A and X.
-  // * B-X = the difference of B and X.
-
-  SmallVector<AxisRefAttr> axesX = factorAxesPair.axes.toVector();
-  int64_t axesXSize = factorAxesPair.axes.getShardingSize(mesh.attr());
-
-  // For each operand, estimate the cost of reshard from original sharding to
-  // the candidate sharding axes.
-  //
-  // If the operand does not contain this factor, we need an all-gather on AX.
-  //
-  // If the operand contains this factor, we need
-  // 1. all-to-all to move AX from other factors to this factor.
-  // 2. collective-permute to handle B-X.
-  // 3. all-gather to shrink the sharding size if needed.
-  for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
-           tensorSizes.drop_back(shardingProjection.getNumResults()),
-           shardingProjection.getOperands())) {
-    bool operandContainsFactor =
-        tensorFactorSharding.factorIndexToSharding.contains(
-            factorAxesPair.factorIndex);
-    int64_t shardedTensorSize =
-        tensorSize / tensorFactorSharding.getShardingSize(mesh.attr());
-    auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
-        tensorFactorSharding, factorAxesPair.factorIndex);
-
-    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh.attr());
-    int64_t diffXASize = getShardingSize(diffXA, mesh.attr());
-
-    if (axesXSize > diffXASize) {
-      // all-to-all on AX.
-      communicationCost +=
-          (operandContainsFactor ? allToAllCost : allGatherCost) *
-          shardedTensorSize;
-    }
-
-    if (operandContainsFactor) {
-      if (!getAxisSetDiff(axesB, axesX, mesh.attr()).empty()) {
-        communicationCost += collectivePermuteCost * shardedTensorSize;
-      }
-      if (getShardingSize(axesB, mesh.attr()) > diffXASize) {
-        // The operand is over-sharded than the candidate. We need all-gather to
-        // shrink the sharding size.
-        communicationCost += allGatherCost * shardedTensorSize;
-      }
-    }
-  }
-
-  // For each result, estimate the cost of reshard from the candidate sharding
-  // axes to original sharding.
-  //
-  // We use the same notations as above.
-  //
-  // If the candidate factor is a reduction factor, we need all-reduce or
-  // reduce-scatter on the result.
-  //
-  // If the result does not contain this factor, there is no additional cost.
-  //
-  // If the result contains this factor, we need
-  // 1. all-to-all to move AX from this factor to other factors.
-  // 2. all-gather to shrink the sharding size after the all-to-all above.
-  for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
-           tensorSizes.drop_front(shardingProjection.getNumOperands()),
-           shardingProjection.getResults())) {
-    int64_t shardedTensorSize = tensorSize / axesXSize;
-    auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
-        tensorFactorSharding, factorAxesPair.factorIndex);
-
-    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh.attr());
-    int64_t diffXASize = getShardingSize(diffXA, mesh.attr());
-
-    if (shardingRule.isReductionFactor(factorAxesPair.factorIndex)) {
-      communicationCost +=
-          (diffXASize > 1 ? allReduceCost : reduceScatterCost) *
-          shardedTensorSize;
-    }
-
-    if (!tensorFactorSharding.factorIndexToSharding.contains(
-            factorAxesPair.factorIndex)) {
-      continue;
-    }
-    if (axesXSize > diffXASize) {
-      // all-to-all on AX.
-      communicationCost += allToAllCost * shardedTensorSize;
-    }
-
-    if (!getAxisSetDiff(axesB, axesX, mesh.attr()).empty()) {
-      communicationCost += collectivePermuteCost * shardedTensorSize;
-    }
-    if (getShardingSize(axesB, mesh.attr()) < diffXASize) {
-      // The result is less-sharded than the candidate. We need all-gather to
-      // shrink the sharding size.
-      communicationCost += allGatherCost * shardedTensorSize;
-    }
-  }
-
-  return communicationCost;
-}
-
 FactorAxesCandidateBag findFactorAxesCandidates(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
@@ -673,15 +672,14 @@ AxesPerFactor toAxesPerFactor(const SmallVector<AxisListRef>& factorAxisRefs) {
 // until the list is empty.
 //
 // Guarantees to return a non-empty AxesPerFactor.
-AxesPerFactor findCommonAxesUsingMajorityVoteHeuristic(
+AxesPerFactor findCommonAxesHeuristic(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const Mesh& mesh) {
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates = findFactorAxesCandidates(
       shardingProjection, shardingRule, tensorSizes, mesh);
-  // TODO(enver): Assign an axis to a factor immediately if the count is more
-  // than floor(n/2) where n is the number of tensors.
+
   while (!factorAxesCandidates.best().empty()) {
     FactorAxesPair bestFactorAxes = factorAxesCandidates.best().factorAxes;
     factorAxesCandidates.resetBest();
@@ -889,7 +887,7 @@ AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                                           tensorSizes, mesh);
   }
 
-  AxesPerFactor factorCommonAxes = findCommonAxesUsingMajorityVoteHeuristic(
+  AxesPerFactor factorCommonAxes = findCommonAxesHeuristic(
       shardingProjection, shardingRule, tensorSizes, mesh);
 
   // Distribute the greatest common prefix of shardings of factors that need
