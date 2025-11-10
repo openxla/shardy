@@ -64,12 +64,6 @@ class RuleBasedSchedulePass
       }
     });
 
-    // A map to keep track of all control dependencies added to fragments.
-    // For each fragment, we keep track of number of control-dependencies added.
-    // Once we have reordered all the fragments, we can then use this
-    // information to remove any control-dependencies from the program.
-    DenseMap<FragmentOp, int> ctrl_dependencies;
-
     // Iterate over the rules and add control dependencies.
     for (const FragmentScheduleRule& rule : rules) {
       if (rule.ordered_fragments.size() < 2) {
@@ -133,9 +127,11 @@ class RuleBasedSchedulePass
           continue;
         }
 
-        // Add control dependency.
-        AddControlDependency(predecessor_fragment, successor_fragment,
-                             ctrl_dependencies);
+        // For each fragment, we keep track of number of control-dependencies
+        // added using an attribute added to the fragment. Once we have
+        // reordered all the fragments, we can then use this information to
+        // remove any control-dependencies from the program.
+        AddControlDependency(predecessor_fragment, successor_fragment);
       }
     }
 
@@ -146,8 +142,12 @@ class RuleBasedSchedulePass
                           "fragments could be properly scheduled.\n";
     }
 
-    // Remove all control dependencies added.
-    RemoveAllControlDependencies(ctrl_dependencies);
+    // Remove control dependencies if requested. We would want control
+    // dependencies to persist if we expect subsequent passes (like
+    // RuleBasedMergePass) to use them during topological sorting.
+    if (removeControlDependencies) {
+      RemoveAllControlDependencies(func_op);
+    }
   }
 };
 

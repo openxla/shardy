@@ -15,12 +15,14 @@ limitations under the License.
 
 #include "shardy/dialect/mpmd/transforms/optimize/utils.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 
 #include "llvm/ADT/StringRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -32,6 +34,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/register.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/testing_utils.h"
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
 #include <gtest/gtest.h>
 
 using ::mlir::func::FuncOp;
@@ -412,6 +415,314 @@ TEST_F(GetDependencyPathTesting, RecursiveDependencyWithInternalOps) {
   EXPECT_EQ(mlir::cast<NamedComputationOp>((*path)[1]).getName(), "f");
   EXPECT_EQ(mlir::cast<NamedComputationOp>((*path)[2]).getName(), "g");
   EXPECT_EQ((*path)[3], tgt_op_);
+}
+
+TEST(AddControlDependency, FirstDependency) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %1 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp frag0 = cast<FragmentOp>(*it++);
+  FragmentOp frag1 = cast<FragmentOp>(*it);
+
+  int64_t original_operand_count = frag1.getNumOperands();
+
+  AddControlDependency(frag0, frag1);
+
+  // Verify attribute was set
+  ASSERT_TRUE(frag1->hasAttr(kControlOperandStartIdxAttrName));
+  auto attr =
+      frag1->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  EXPECT_EQ(attr.getInt(), original_operand_count);
+
+  // Verify operand was added
+  EXPECT_EQ(frag1.getNumOperands(), original_operand_count + 1);
+  EXPECT_EQ(frag1->getOperand(original_operand_count), frag0->getResult(0));
+}
+
+TEST(AddControlDependency, SecondDependency) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %2 = mpmd.fragment<mesh="m1", origin=["f3"(0)]> (%arg0)
+           (%arg3: tensor<4x8xf32>) {
+        mpmd.return %arg3 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %2 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp frag0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag1 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag2 = mlir::cast<FragmentOp>(*it);
+
+  int64_t original_operand_count = frag2.getNumOperands();
+
+  // Add first dependency
+  AddControlDependency(frag0, frag2);
+  auto attr_after_first =
+      frag2->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  int64_t control_start_index = attr_after_first.getInt();
+
+  // Add second dependency
+  AddControlDependency(frag1, frag2);
+
+  // Verify attribute value didn't change
+  auto attr_after_second =
+      frag2->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  EXPECT_EQ(attr_after_second.getInt(), control_start_index);
+
+  // Verify both operands were added
+  EXPECT_EQ(frag2.getNumOperands(), original_operand_count + 2);
+  EXPECT_EQ(frag2->getOperand(original_operand_count), frag0->getResult(0));
+  EXPECT_EQ(frag2->getOperand(original_operand_count + 1), frag1->getResult(0));
+}
+
+TEST(AddControlDependency, WithExistingDataOperands) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor, %arg1: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%arg0, %arg1)
+           (%arg3: tensor<4x8xf32>, %arg4: tensor<4x8xf32>) {
+        mpmd.return %arg3 : tensor<4x8xf32>
+      } : (!mesh_tensor, !mesh_tensor) -> !mesh_tensor
+
+      return %1 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp frag0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag1 = mlir::cast<FragmentOp>(*it);
+
+  // frag1 has 2 data operands
+  ASSERT_EQ(frag1.getNumOperands(), 2);
+  Value data_operand0 = frag1->getOperand(0);
+  Value data_operand1 = frag1->getOperand(1);
+
+  AddControlDependency(frag0, frag1);
+
+  // Verify attribute set to 2 (original operand count)
+  auto attr =
+      frag1->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName);
+  EXPECT_EQ(attr.getInt(), 2);
+
+  // Verify total operands = 3 (2 data + 1 control)
+  EXPECT_EQ(frag1.getNumOperands(), 3);
+
+  // Verify data operands unchanged
+  EXPECT_EQ(frag1->getOperand(0), data_operand0);
+  EXPECT_EQ(frag1->getOperand(1), data_operand1);
+
+  // Verify control operand at end
+  EXPECT_EQ(frag1->getOperand(2), frag0->getResult(0));
+}
+
+TEST(RemoveAllControlDependencies, SingleFragment) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %2 = mpmd.fragment<mesh="m1", origin=["f3"(0)]> (%arg0)
+           (%arg3: tensor<4x8xf32>) {
+        mpmd.return %arg3 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %2 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp frag0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag1 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag2 = mlir::cast<FragmentOp>(*it);
+
+  // Add 2 control dependencies to frag2
+  AddControlDependency(frag0, frag2);
+  AddControlDependency(frag1, frag2);
+
+  int64_t original_operand_count = 1;    // frag2 originally had 1 operand
+  ASSERT_EQ(frag2.getNumOperands(), 3);  // Now has 1 data + 2 control
+
+  RemoveAllControlDependencies(func_op);
+
+  // Verify operand count restored
+  EXPECT_EQ(frag2.getNumOperands(), original_operand_count);
+
+  // Verify attribute removed
+  EXPECT_FALSE(frag2->hasAttr(kControlOperandStartIdxAttrName));
+}
+
+TEST(RemoveAllControlDependencies, MultipleFragments) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %2 = mpmd.fragment<mesh="m1", origin=["f3"(0)]> (%arg0)
+           (%arg3: tensor<4x8xf32>) {
+        mpmd.return %arg3 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %2 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp frag0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag1 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag2 = mlir::cast<FragmentOp>(*it);
+
+  // frag1: add 2 control dependencies
+  AddControlDependency(frag0, frag1);
+  AddControlDependency(frag0, frag1);
+
+  // frag2: add 1 control dependency
+  AddControlDependency(frag1, frag2);
+
+  // frag0: no control dependencies
+
+  ASSERT_EQ(frag0.getNumOperands(), 1);
+  ASSERT_EQ(frag1.getNumOperands(), 3);  // 1 data + 2 control
+  ASSERT_EQ(frag2.getNumOperands(), 2);  // 1 data + 1 control
+
+  RemoveAllControlDependencies(func_op);
+
+  // Verify all fragments restored
+  EXPECT_EQ(frag0.getNumOperands(), 1);
+  EXPECT_EQ(frag1.getNumOperands(), 1);
+  EXPECT_EQ(frag2.getNumOperands(), 1);
+
+  // Verify all attributes removed
+  EXPECT_FALSE(frag0->hasAttr(kControlOperandStartIdxAttrName));
+  EXPECT_FALSE(frag1->hasAttr(kControlOperandStartIdxAttrName));
+  EXPECT_FALSE(frag2->hasAttr(kControlOperandStartIdxAttrName));
+}
+
+TEST(RemoveAllControlDependencies, NoControlDependencies) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %1 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp frag0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp frag1 = mlir::cast<FragmentOp>(*it);
+
+  // Record original state (no control dependencies)
+  int64_t original_frag0_operands = frag0.getNumOperands();
+  int64_t original_frag1_operands = frag1.getNumOperands();
+
+  // Call RemoveAllControlDependencies on function with no control deps
+  RemoveAllControlDependencies(func_op);
+
+  // Verify no changes
+  EXPECT_EQ(frag0.getNumOperands(), original_frag0_operands);
+  EXPECT_EQ(frag1.getNumOperands(), original_frag1_operands);
+  EXPECT_FALSE(frag0->hasAttr(kControlOperandStartIdxAttrName));
+  EXPECT_FALSE(frag1->hasAttr(kControlOperandStartIdxAttrName));
 }
 
 }  // namespace

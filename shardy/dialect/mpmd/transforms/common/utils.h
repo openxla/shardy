@@ -48,6 +48,12 @@ constexpr StringRef kSplitKeepTransferredAttrName = "split_keep_transferred";
 // results of the original, i.e. its results are never transferred.
 constexpr StringRef kSplitDropTransferredAttrName = "split_drop_transferred";
 
+// Attribute to mark the start index of control operands of an operation. It can
+// be assumed that all operands including and after this index are control
+// operands.
+constexpr StringRef kControlOperandStartIdxAttrName =
+    "mpmd.control_operand_start_idx";
+
 // Returns true if `value` is used by any op that isn't `user` or nested in a
 // region of `user`.
 bool HasOtherUsersExcept(Value value, Operation* user);

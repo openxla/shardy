@@ -1,6 +1,7 @@
 # The MPMD common library and passes.
 
 # load("@rules_cc//cc:cc_library.bzl", "cc_library")
+# load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -126,5 +127,23 @@ cc_library(
         "//shardy/common:logging",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_test(
+    name = "utils_test",
+    srcs = ["utils_test.cc"],
+    deps = [
+        ":utils",
+        "//shardy/common:logging",
+        "//shardy/dialect/mpmd/ir:dialect",
+        "//shardy/dialect/mpmd/ir:register",
+        "//shardy/dialect/mpmd/transforms/optimize:utils",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:Transforms",
     ],
 )

@@ -34,6 +34,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/mpmd/transforms/common/utils.h"
+#include "shardy/dialect/mpmd/transforms/optimize/utils.h"
 
 namespace mlir::mpmd {
 
@@ -81,7 +82,10 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
     for (auto& merge_candidate : merge_candidates) {
       sorted_merge_candidates.push_back(merge_candidate);
     }
-    computeTopologicalSorting(sorted_merge_candidates);
+    if (!computeTopologicalSorting(sorted_merge_candidates)) {
+      SDY_LOG(ERROR) << "Cycle detected in sorted_merge_candidates";
+      return failure();
+    }
 
     // Merge the fragments.
     Operation* new_fragment_dest = sorted_merge_candidates[0]->getNextNode();
@@ -98,12 +102,14 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
           [](OpOperand&, Value) {
             SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
           },
-          new_fragment.getOrigin(), new_fragment.getMeshNameAttr(),
+          GetFragmentOriginUnion(new_fragment, merge_candidate, rewriter),
+          new_fragment.getMeshNameAttr(),
           /*stage_id=*/new_fragment.getStageIdAttr());
     }
     SetFragmentInfo(new_fragment, rule->target, rewriter);
     // TODO(petebu): Consider making the position of the new fragment a
     // parameter of the rule.
+    SDY_CHECK(new_fragment_dest != nullptr);
     rewriter.moveOpBefore(new_fragment, new_fragment_dest);
     return success();
   }
@@ -159,7 +165,18 @@ class RuleBasedMergePass
       return signalPassFailure();
     }
 
-    sortTopologically(&func.getBody().front());
+    if (!sortTopologically(&func.getBody().front())) {
+      func.emitError() << "Cycle detected in the program, not all fragments "
+                          "could be properly merged.";
+      return signalPassFailure();
+    }
+
+    // Remove control dependencies if requested. This is typically done when
+    // RuleBasedSchedulePass ran before this pass and added control
+    // dependencies.
+    if (removeControlDependencies) {
+      RemoveAllControlDependencies(func);
+    }
   }
 
   LogicalResult initialize(MLIRContext* context) final {

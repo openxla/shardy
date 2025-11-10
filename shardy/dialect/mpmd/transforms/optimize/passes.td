@@ -53,7 +53,10 @@ def RuleBasedSchedulePass :
     ListOption<"rules", "rules", "FragmentScheduleRule",
                "A list of fragment schedule rules. Each rule is a list of "
                "`FragmentInfo`s that specifies the order in which the fragments "
-               "should be executed.">
+               "should be executed.">,
+    Option<"removeControlDependencies", "remove-control-dependencies", "bool",
+           /*default=*/"true",
+           "Whether to remove control dependencies at the end of the pass.">
   ];
 }
 
@@ -85,6 +88,9 @@ def PipelineSchedulerPass :
            "FragmentComparatorOption::GetBuiltIn(PipelineSchedule::k1F1B)",
            "A comparator that determines whether a fragment must be scheduled "
            "before another. Can be parsed from a built-in `PipelineSchedule` "
-           "as follows: `builtin:<schedule-as-string>`.">
+           "as follows: `builtin:<schedule-as-string>`.">,
+    Option<"removeControlDependencies", "remove-control-dependencies", "bool",
+           /*default=*/"true",
+           "Whether to remove control dependencies at the end of the pass.">
   ];
 }

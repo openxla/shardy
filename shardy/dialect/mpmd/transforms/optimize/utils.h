@@ -77,15 +77,30 @@ std::optional<SmallVector<Operation*>> GetDependencyPath(Operation* src_op,
                                                          Operation* tgt_op);
 
 // Adds a control dependency in the graph so that `fragment2` depends on
-// `fragment1`.
-// NOTE: this creates an ill-formed fragment.
-void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2,
-                          DenseMap<FragmentOp, int>& ctrl_dependency_counter);
+// `fragment1`. This is done by inserting fragment1's result as a operand of
+// fragment2. We call these temporary operands "control operands".
+//
+// Control operands are tracked via the kControlOperandStartIdxAttrName
+// attribute, which marks the index where control operands begin. This allows
+// control dependencies to persist across multiple passes until explicitly
+// removed by RemoveAllControlDependencies().
+//
+// NOTE: This creates a temporarily ill-formed FragmentOp since control operands
+// are not actual data dependencies. The fragment must not be verified or used
+// in operations that expect well-formed fragments until the control
+// dependencies are removed.
+void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2);
 
-// Removes all control dependencies added, so that all fragments are well-formed
-// again.
-void RemoveAllControlDependencies(
-    DenseMap<FragmentOp, int>& ctrl_dependency_counter);
+// Removes all control dependencies from fragments in the function, restoring
+// them to a well-formed state.
+//
+// Control dependencies are identified by the kControlOperandStartIdxAttrName
+// attribute. All operands from that index onwards are removed, and the
+// attribute itself is deleted.
+//
+// This should be called after all passes use topological sorting have completed
+// (after which the control dependencies no longer have any use).
+void RemoveAllControlDependencies(func::FuncOp func_op);
 
 // Formats a detailed warning message for a scheduling conflict.
 std::string FormatConflictWarning(const FragmentInfo& predecessor_info,

@@ -62,6 +62,17 @@ struct OptimizeOptions {
   PipelineSchedule pipelineSchedule = PipelineSchedule::kGPipe;
 };
 
+// Adds scheduling and rule-based merging passes.
+//
+// If rule-based schedule rules are provided, uses rule-based scheduling.
+// Otherwise, falls back to pipeline scheduling. If rule-based merge rules
+// are provided, adds rule-based merging (which removes control dependencies
+// added by scheduling). Ensures scheduling always runs before merging.
+void AddSchedulingAndRuleBasedMerge(
+    OpPassManager& pm, PipelineSchedule pipeline_schedule,
+    const SmallVector<FragmentScheduleRule>& schedule_rules,
+    const SmallVector<FragmentMergeRule>& merge_rules);
+
 // Adds the standard set of passes to optimize an MPMD program.
 void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options);
 

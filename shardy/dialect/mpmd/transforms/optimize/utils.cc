@@ -24,6 +24,9 @@ limitations under the License.
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -124,20 +127,45 @@ bool IsSchedulingUnit(FragmentOp fragment) {
   return false;
 }
 
-void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2,
-                          DenseMap<FragmentOp, int>& ctrl_dependency_counter) {
-  // We add a new operand at the end.
+void AddControlDependency(FragmentOp fragment1, FragmentOp fragment2) {
+  // Store control operand start index (only if not already stored)
+  if (!fragment2->hasAttr(kControlOperandStartIdxAttrName)) {
+    MLIRContext* context = fragment2->getContext();
+    int64_t control_operand_start_index = fragment2.getNumOperands();
+    fragment2->setAttr(kControlOperandStartIdxAttrName,
+                       IntegerAttr::get(IntegerType::get(context, 64),
+                                        control_operand_start_index));
+  }
+
+  // Add control operand at the end
   int operand_index = fragment2.getNumOperands();
   fragment2->insertOperands(operand_index, {fragment1->getResult(0)});
-  ctrl_dependency_counter[fragment2] += 1;
 }
 
-void RemoveAllControlDependencies(
-    DenseMap<FragmentOp, int>& ctrl_dependency_counter) {
-  for (auto& [fragment, counter] : ctrl_dependency_counter) {
-    const int start_index = fragment->getNumOperands() - counter;
-    fragment->eraseOperands(start_index, counter);
-  }
+void RemoveAllControlDependencies(func::FuncOp func_op) {
+  func_op.walk([](FragmentOp fragment) {
+    if (auto attr = fragment->getAttrOfType<IntegerAttr>(
+            kControlOperandStartIdxAttrName)) {
+      int64_t control_operand_start_index = attr.getInt();
+      int64_t current_operand_count = fragment->getNumOperands();
+      int64_t control_operand_count =
+          current_operand_count - control_operand_start_index;
+
+      SDY_CHECK(control_operand_count > 0)
+          << "kControlOperandStartIdxAttrName present but no control operands "
+             "found. This should not happen, contact MPMD team for support. "
+             "current_operand_count: "
+          << current_operand_count
+          << ", control_operand_start_index: " << control_operand_start_index;
+
+      // Remove all control operands (from control_operand_start_index to end)
+      fragment->eraseOperands(control_operand_start_index,
+                              control_operand_count);
+
+      // Remove the attribute after cleanup
+      fragment->removeAttr(kControlOperandStartIdxAttrName);
+    }
+  });
 }
 
 namespace {
