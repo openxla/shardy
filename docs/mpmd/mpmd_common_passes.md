@@ -268,7 +268,8 @@ label the merged fragment.
 #### Options
 
 ```
--rules : A list of fragment merge rules, each with a list of source fragment infos and a target fragment info.
+-rules                       : A list of fragment merge rules, each with a list of source fragment infos and a target fragment info.
+-remove-control-dependencies : Whether to remove control dependencies at the end of the pass.
 ```
 
 ### `-mpmd-scheduling-units-verifier`

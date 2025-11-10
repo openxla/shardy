@@ -23,7 +23,8 @@ removes from the graph any control-dependency introduced.
 #### Options
 
 ```
--must-happen-before : A comparator that determines whether a fragment must be scheduled before another. Can be parsed from a built-in `PipelineSchedule` as follows: `builtin:<schedule-as-string>`.
+-must-happen-before          : A comparator that determines whether a fragment must be scheduled before another. Can be parsed from a built-in `PipelineSchedule` as follows: `builtin:<schedule-as-string>`.
+-remove-control-dependencies : Whether to remove control dependencies at the end of the pass.
 ```
 
 ### `-mpmd-remat-fragment`
@@ -60,5 +61,6 @@ not found, that pair is not scheduled.
 #### Options
 
 ```
--rules : A list of fragment schedule rules. Each rule is a list of `FragmentInfo`s that specifies the order in which the fragments should be executed.
+-rules                       : A list of fragment schedule rules. Each rule is a list of `FragmentInfo`s that specifies the order in which the fragments should be executed.
+-remove-control-dependencies : Whether to remove control dependencies at the end of the pass.
 ```
