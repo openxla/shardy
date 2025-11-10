@@ -49,7 +49,7 @@ class RuleBasedSchedulePass
     // Build a map from FragmentInfo to FragmentOp for efficient lookup.
     DenseMap<FragmentInfo, FragmentOp, FragmentInfoMapInfo> info_to_op_map;
     func_op.walk([&](FragmentOp fragment) {
-      if (IsSchedulingUnit(fragment)) {
+      if (fragment.isUserFragment()) {
         FragmentInfo fragment_info = GetFragmentInfo(fragment);
         auto [unused_iter, was_inserted] =
             info_to_op_map.insert({fragment_info, fragment});
