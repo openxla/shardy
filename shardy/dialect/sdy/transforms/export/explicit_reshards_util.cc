@@ -353,7 +353,9 @@ getShardingAxesInOtherAndThisFactor(
 
 int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh,
+                             ArrayRef<int64_t> tensorSizes,
+                             ArrayRef<int64_t> localTensorSizes,
+                             const Mesh& mesh,
                              const FactorAxesPair& factorAxesPair) {
   // The relative cost of collective operations.
   constexpr int64_t allToAllCost = 1;
@@ -432,7 +434,7 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
   // 1. all-to-all to move AX from this factor to other factors.
   // 2. all-gather to shrink the sharding size after the all-to-all above.
   for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
-           tensorSizes.drop_front(shardingProjection.getNumOperands()),
+           localTensorSizes.drop_front(shardingProjection.getNumOperands()),
            shardingProjection.getResults())) {
     int64_t shardedTensorSize = tensorSize / axesXSize;
     auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
@@ -505,16 +507,19 @@ class FactorAxesCandidateBag {
   // TODO(enver): Optimize updating source tensor sizes.
   void updateSourceTensorSizes(const ShardingProjection& shardingProjection,
                                ArrayRef<int64_t> tensorSizes,
-                               const SmallVector<AxisListRef>& factorAxisRefs) {
+                               const SmallVector<AxisListRef>& factorAxisRefs,
+                               OpShardingRuleAttr shardingRule,
+                               const Mesh& meshA) {
     // Since the (local) source tensor sizes get smaller at each iteration on
     // which we extend sharding of a factor, in order to recompute largest
     // source tensor sizes, we first need to reset them to zero.
     resetLargestSourceTensorSizes();
+    SmallVector<int64_t> localTensorSizes = llvm::to_vector(tensorSizes);
     for (const auto& [tensorIndex, tensorFactorSharding] :
          llvm::enumerate(llvm::concat<const TensorFactorShardings>(
              shardingProjection.getOperands(),
              shardingProjection.getResults()))) {
-      int64_t localTensorSize = tensorSizes[tensorIndex];
+      int64_t& localTensorSize = localTensorSizes[tensorIndex];
       for (const auto& [factorIndex, _] :
            tensorFactorSharding.factorIndexToSharding) {
         // TODO(enver): Consider cases tensor size may not be divisible.
@@ -528,6 +533,13 @@ class FactorAxesCandidateBag {
           updateBestCandidateIfValid(candidate);
         }
       }
+    }
+
+    for (FactorAxesCandidate& candidate : candidates) {
+      candidate.communicationCost =
+          getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
+                               localTensorSizes, meshA, candidate.factorAxes);
+      updateBestCandidateIfValid(candidate);
     }
   }
 
@@ -639,7 +651,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
         FactorAxesPair factorAxesPair(factorIndex, AxisListRef(axisRefs));
         int64_t communicationCost =
             getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
-                                 mesh, factorAxesPair);
+                                 tensorSizes, mesh, factorAxesPair);
         updateFactorAxesCandidate(
             factorAxesCandidatesMap, factorAxesPair, tensorSize, mesh,
             shardingRule.getFactorType(factorIndex), communicationCost);
@@ -747,8 +759,8 @@ AxesPerFactor findCommonAxesHeuristic(
 
     // TODO(enver): Optimize updating source tensor sizes.
     factorAxesCandidates.resetBest();
-    factorAxesCandidates.updateSourceTensorSizes(shardingProjection,
-                                                 tensorSizes, factorAxisRefs);
+    factorAxesCandidates.updateSourceTensorSizes(
+        shardingProjection, tensorSizes, factorAxisRefs, shardingRule, mesh);
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until actual

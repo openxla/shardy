@@ -707,3 +707,17 @@ func.func @dot_on_rectangular_inputs_square_output_large_contracting_dim_lhs_2nd
   %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}]>]>} : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// CHECK-LABEL: func @dot_result_is_smaller_than_rhs_due_to_other_axes
+func.func @dot_result_is_smaller_than_rhs_due_to_other_axes(
+    %arg0: tensor<8x32x64xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x"}, {"z"}, {"y"}]>},
+    %arg1: tensor<64x256xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"y"}, {}]>})
+    -> (tensor<8x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x", "y"}, {"z"}, {}]>}) {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x"}, {"z"}, {}]>]>}
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %[[DOT]] out_sharding=<@mesh_xyz, [{"x"}, {"z"}, {}]>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh_xyz, [{"x", "y"}, {"z"}, {}]>
+  // CHECK-NEXT: return %[[RESHARD]]
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [2] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "y"}, {"z"}, {}]>]>} : (tensor<8x32x64xf32>, tensor<64x256xf32>) -> tensor<8x32x256xf32>
+  return %0 : tensor<8x32x256xf32>
+}
