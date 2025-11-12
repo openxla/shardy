@@ -241,6 +241,8 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
 
 struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
+  // The total count of the source tensors.
+  int64_t totalSourceTensorCount = 0;
   // The total size of the source tensors.
   int64_t totalSourceTensorSize = 0;
   // The size of the source tensor. In case the factor-axes pair has multiple
@@ -259,6 +261,7 @@ struct FactorAxesCandidate {
                       int64_t shardingSize, FactorType factorType,
                       int64_t communicationCost)
       : factorAxes(factorAxes),
+        totalSourceTensorCount(1),
         totalSourceTensorSize(sourceTensorSize),
         largestSourceTensorSize(sourceTensorSize),
         shardingSize(shardingSize),
@@ -268,18 +271,20 @@ struct FactorAxesCandidate {
   FactorAxesCandidate() = default;
 
   // Multi-level comparison.
-  // 0. communicationCost
-  // 1. totalSourceTensorSize
-  // 2. factorTypePrecedence
-  // 3. largestSourceTensorSize
-  // 4. shardingSize
-  // 5. factorAxes: If A is a strict prefix of B, then A is smaller than B.
+  // 0. totalSourceTensorCount
+  // 1. communicationCost
+  // 2. totalSourceTensorSize
+  // 3. factorTypePrecedence
+  // 4. largestSourceTensorSize
+  // 5. shardingSize
+  // 6. factorAxes: If A is a strict prefix of B, then A is smaller than B.
   bool operator<(const FactorAxesCandidate& rhs) const {
     auto makeComparisonTuple = [](const FactorAxesCandidate& candidate) {
       return std::make_tuple(
-          -candidate.communicationCost, candidate.totalSourceTensorSize,
-          candidate.factorTypePrecedence, candidate.largestSourceTensorSize,
-          candidate.shardingSize, candidate.factorAxes);
+          candidate.totalSourceTensorCount, candidate.totalSourceTensorSize,
+          -candidate.communicationCost, candidate.factorTypePrecedence,
+          candidate.largestSourceTensorSize, candidate.shardingSize,
+          candidate.factorAxes);
     };
     return makeComparisonTuple(*this) < makeComparisonTuple(rhs);
   }
@@ -319,6 +324,7 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
       communicationCost);
   if (!inserted) {
     FactorAxesCandidate& candidate = it->second;
+    candidate.totalSourceTensorCount++;
     candidate.totalSourceTensorSize += sourceTensorSize;
     candidate.largestSourceTensorSize =
         std::max(candidate.largestSourceTensorSize, sourceTensorSize);
