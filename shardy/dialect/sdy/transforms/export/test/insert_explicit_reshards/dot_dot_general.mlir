@@ -721,3 +721,29 @@ func.func @dot_result_is_smaller_than_rhs_due_to_other_axes(
   %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [2] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "y"}, {"z"}, {}]>]>} : (tensor<8x32x64xf32>, tensor<64x256xf32>) -> tensor<8x32x256xf32>
   return %0 : tensor<8x32x256xf32>
 }
+
+// CHECK-LABEL: func @dot_all_factors_have_the_same_sharding_one_non_contracting_dim_is_largest_the_other_smallest_result_tensor_is_sharded_on_larger_factor
+func.func @dot_all_factors_have_the_same_sharding_one_non_contracting_dim_is_largest_the_other_smallest_result_tensor_is_sharded_on_larger_factor(
+    %arg0: tensor<128x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
+    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
+    -> (tensor<128x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD0]], %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
+  // CHECK-NEXT: return %[[DOT]]
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<128x8xf32>, tensor<8x4xf32>) -> tensor<128x4xf32>
+  return %0 : tensor<128x4xf32>
+}
+
+// CHECK-LABEL: func @dot_all_factors_have_the_same_sharding_one_non_contracting_dim_is_largest_the_other_smallest_result_tensor_is_sharded_on_smaller_factor
+func.func @dot_all_factors_have_the_same_sharding_one_non_contracting_dim_is_largest_the_other_smallest_result_tensor_is_sharded_on_smaller_factor(
+    %arg0: tensor<128x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<128x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg1 <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %[[RESHARD0]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[DOT]] <@mesh, [{}, {"x"}]>
+  // CHECK-NEXT: return %[[RESHARD1]]
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<128x8xf32>, tensor<8x4xf32>) -> tensor<128x4xf32>
+  return %0 : tensor<128x4xf32>
+}
