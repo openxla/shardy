@@ -487,12 +487,10 @@ class FactorAxesCandidateBag {
   // Inserts a new candidate to the bag. Performs in constant-time.
   void insert(const FactorAxesCandidate& candidate) {
     candidates.push_back(candidate);
-    updateBestCandidateIfValid(candidate);
   }
 
   // Updates the sharding size of the one at index as the  product of the
-  // sharding sizes of all individual axes excluding the `prefix`, also update
-  // the best.
+  // sharding sizes of all individual axes excluding the `prefix`.
   //
   // Assumes `prefix` is a prefix of the axes of the candidate at index.
   void updateShardingSizeAt(const int64_t index,
@@ -500,16 +498,15 @@ class FactorAxesCandidateBag {
     FactorAxesCandidate& candidate = candidates[index];
     candidate.shardingSize =
         candidate.factorAxes.axes.getExpandedShardingSize(mesh, prefix);
-    updateBestCandidateIfValid(candidate);
   }
 
-  // Updates the source tensor sizes of all candidates.
+  // Updates the source tensor sizes of all candidates and sets the new best.
   // TODO(enver): Optimize updating source tensor sizes.
-  void updateSourceTensorSizes(const ShardingProjection& shardingProjection,
-                               ArrayRef<int64_t> tensorSizes,
-                               const SmallVector<AxisListRef>& factorAxisRefs,
-                               OpShardingRuleAttr shardingRule,
-                               const Mesh& meshA) {
+  FactorAxesCandidate updateSourceTensorSizesAndGetBest(
+      const ShardingProjection& shardingProjection,
+      ArrayRef<int64_t> tensorSizes,
+      const SmallVector<AxisListRef>& factorAxisRefs,
+      OpShardingRuleAttr shardingRule, const Mesh& meshA) {
     // Since the (local) source tensor sizes get smaller at each iteration on
     // which we extend sharding of a factor, in order to recompute largest
     // source tensor sizes, we first need to reset them to zero.
@@ -530,17 +527,20 @@ class FactorAxesCandidateBag {
                 candidate.factorAxes.factorIndex)) {
           candidate.largestSourceTensorSize =
               std::max(candidate.largestSourceTensorSize, localTensorSize);
-          updateBestCandidateIfValid(candidate);
         }
       }
     }
 
+    FactorAxesCandidate bestCandidate;
     for (FactorAxesCandidate& candidate : candidates) {
       candidate.communicationCost =
           getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
                                localTensorSizes, meshA, candidate.factorAxes);
-      updateBestCandidateIfValid(candidate);
+      if (isValid(candidate)) {
+        bestCandidate = std::max(bestCandidate, candidate);
+      }
     }
+    return bestCandidate;
   }
 
   void dropFactorDependencies(const int64_t factorIndex) {
@@ -548,9 +548,6 @@ class FactorAxesCandidateBag {
       factorDependencies.reset(factorIndex);
     }
   }
-
-  // Resets best. Performs in constant-time.
-  void resetBest() { bestCandidate = FactorAxesCandidate(); }
 
   // Removes candidate at index. Performs in constant-time. After the
   // operation, the candidates before the index keep being before the index, and
@@ -565,12 +562,14 @@ class FactorAxesCandidateBag {
     candidates.pop_back();
   }
 
-  // Returns the best. Performs in constant-time.
-  FactorAxesCandidate best() const { return bestCandidate; }
   // Returns the candidate at index. Performs in constant-time.
   FactorAxesCandidate& at(const int64_t index) { return candidates[index]; }
   // Returns the number of candidates in the bag.
   int64_t size() const { return candidates.size(); }
+  bool isValid(const FactorAxesCandidate& candidate) {
+    auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
+    return it == factorDependenciesMap.end() || it->second.none();
+  }
 
  private:
   void resetLargestSourceTensorSizes() {
@@ -597,17 +596,6 @@ class FactorAxesCandidateBag {
     }
   }
 
-  void updateBestCandidateIfValid(const FactorAxesCandidate& candidate) {
-    if (isValid(candidate)) {
-      bestCandidate = std::max(bestCandidate, candidate);
-    }
-  }
-
-  bool isValid(const FactorAxesCandidate& candidate) {
-    auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
-    return it == factorDependenciesMap.end() || it->second.none();
-  }
-
   // A factor is non-full if its sharding size is smaller than the size of the
   // factor. `factorDependenciesMap` is a map from factor indices to bitvectors,
   // each bitvector is associated with a factor f, and represents the set of
@@ -622,15 +610,15 @@ class FactorAxesCandidateBag {
   // hence it may depend on multiple factors.
   llvm::SmallDenseMap<int64_t, BitVector> factorDependenciesMap;
   SmallVector<FactorAxesCandidate> candidates;
-  FactorAxesCandidate bestCandidate;
   // Used for recalculating sharding size of a candidate.
   MeshAttr mesh;
 };
 
-FactorAxesCandidateBag findFactorAxesCandidates(
-    const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
-    const Mesh& mesh) {
+std::pair<FactorAxesCandidateBag, FactorAxesCandidate>
+findFactorAxesCandidatesAndGetBest(const ShardingProjection& shardingProjection,
+                                   OpShardingRuleAttr shardingRule,
+                                   ArrayRef<int64_t> tensorSizes,
+                                   const Mesh& mesh) {
   // TODO(enver): For two factor-axes pairs, if both have the same factor and
   // the same count, and one is the prefix of the other, drop the prefix one.
 
@@ -661,10 +649,14 @@ FactorAxesCandidateBag findFactorAxesCandidates(
   }
 
   FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule);
+  FactorAxesCandidate bestCandidate;
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
     factorAxesCandidates.insert(candidate);
+    if (factorAxesCandidates.isValid(candidate)) {
+      bestCandidate = std::max(bestCandidate, candidate);
+    }
   }
-  return factorAxesCandidates;
+  return std::make_pair(factorAxesCandidates, bestCandidate);
 }
 
 AxesPerFactor toAxesPerFactor(const SmallVector<AxisListRef>& factorAxisRefs) {
@@ -689,12 +681,11 @@ AxesPerFactor findCommonAxesHeuristic(
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
     const Mesh& mesh) {
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
-  FactorAxesCandidateBag factorAxesCandidates = findFactorAxesCandidates(
-      shardingProjection, shardingRule, tensorSizes, mesh);
-
-  while (!factorAxesCandidates.best().empty()) {
-    FactorAxesPair bestFactorAxes = factorAxesCandidates.best().factorAxes;
-    factorAxesCandidates.resetBest();
+  auto [factorAxesCandidates, bestCandidate] =
+      findFactorAxesCandidatesAndGetBest(shardingProjection, shardingRule,
+                                         tensorSizes, mesh);
+  while (!bestCandidate.empty()) {
+    FactorAxesPair bestFactorAxes = bestCandidate.factorAxes;
     factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
     if (bestFactorAxes.isFullySharded(shardingRule, mesh.attr())) {
       factorAxesCandidates.dropFactorDependencies(bestFactorAxes.factorIndex);
@@ -758,8 +749,7 @@ AxesPerFactor findCommonAxesHeuristic(
     }
 
     // TODO(enver): Optimize updating source tensor sizes.
-    factorAxesCandidates.resetBest();
-    factorAxesCandidates.updateSourceTensorSizes(
+    bestCandidate = factorAxesCandidates.updateSourceTensorSizesAndGetBest(
         shardingProjection, tensorSizes, factorAxisRefs, shardingRule, mesh);
   }
 
