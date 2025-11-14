@@ -513,7 +513,9 @@ class FactorAxesCandidateBag {
     // Since the (local) source tensor sizes get smaller at each iteration on
     // which we extend sharding of a factor, in order to recompute largest
     // source tensor sizes, we first need to reset them to zero.
-    resetLargestSourceTensorSizes();
+    for (FactorAxesCandidate& candidate : candidates) {
+      candidate.largestSourceTensorSize = 0;
+    }
     SmallVector<int64_t> localTensorSizes = llvm::to_vector(tensorSizes);
     for (const auto& [tensorIndex, tensorFactorSharding] :
          llvm::enumerate(llvm::concat<const TensorFactorShardings>(
@@ -573,12 +575,6 @@ class FactorAxesCandidateBag {
   int64_t size() const { return candidates.size(); }
 
  private:
-  void resetLargestSourceTensorSizes() {
-    for (FactorAxesCandidate& candidate : candidates) {
-      candidate.largestSourceTensorSize = 0;
-    }
-  }
-
   void initFactorDependencies(OpShardingRuleAttr shardingRule) {
     for (const TensorMappingAttr& tensorMapping :
          llvm::concat<const TensorMappingAttr>(
@@ -598,14 +594,10 @@ class FactorAxesCandidateBag {
   }
 
   void updateBestCandidateIfValid(const FactorAxesCandidate& candidate) {
-    if (isValid(candidate)) {
+    auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
+    if (it == factorDependenciesMap.end() || it->second.none()) {
       bestCandidate = std::max(bestCandidate, candidate);
     }
-  }
-
-  bool isValid(const FactorAxesCandidate& candidate) {
-    auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
-    return it == factorDependenciesMap.end() || it->second.none();
   }
 
   // A factor is non-full if its sharding size is smaller than the size of the
