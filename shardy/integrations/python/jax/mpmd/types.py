@@ -18,9 +18,10 @@
 from collections.abc import Mapping, Sequence
 import dataclasses
 import enum
-from typing import Any
+from typing import Callable
 
 import jax
+from jax.jaxlib import _sdy_mpmd as jaxlib_mpmd
 import jaxtyping
 
 from shardy.integrations.python.jax.mpmd import partitioning_options as part_options
@@ -39,6 +40,38 @@ NameToStageAssignment = Mapping[str, int]
 # because users can provide compile options overrides only for some meshes.
 MeshToCompileOptions = Mapping[str, jax.stages.CompilerOptions]
 PartitioningOptions = dict[str, bool | str]
+
+## Type aliases for custom scheduling and merging rules
+
+# Sequence of fragment merge rules defining how fragments can be combined.
+FragmentMergeRules = Sequence['FragmentMergeRule']
+# Sequence of fragment schedule rules defining execution order of fragments.
+FragmentScheduleRules = Sequence['FragmentScheduleRule']
+
+# Function that builds schedule rules from fragments and pipeline context.
+ScheduleRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'], FragmentScheduleRules
+]
+
+# Function that constructs a target FragmentInfo from a sequence of source
+# fragments that will be merged together into the target.
+TargetInfoBuilder = Callable[[Sequence['FragmentInfo']], 'FragmentInfo']
+# Function that builds merge rules from fragments and pipeline context.
+MergeRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'], FragmentMergeRules
+]
+# Function that builds both schedule and merge rules from fragments and pipeline
+# context.
+ScheduleMergeRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'],
+    tuple[FragmentScheduleRules, FragmentMergeRules],
+]
+
+# Binary predicate determining if two fragments should be merged or scheduled
+# together.
+RuleGeneratorPredicate = Callable[
+    ['FragmentInfo', 'FragmentInfo', 'PipelineContext'], bool
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,23 +109,172 @@ class FragmentInfo:
 
 @dataclasses.dataclass(frozen=True)
 class FragmentMergeRule:
-  """A rule for merging fragments of a computation."""
+  """A rule for merging fragments of a computation.
+
+  Attributes:
+    sources: The source fragments to be merged. The order does not affect the
+      final position of the merged fragment, which is determined by topological
+      sorting based on data dependencies.
+    target: The target fragment metadata that results from merging the sources.
+  """
 
   sources: Sequence[FragmentInfo]
   target: FragmentInfo
 
 
-FragmentMergeRules = Sequence[FragmentMergeRule]
-
-
 @dataclasses.dataclass(frozen=True)
 class FragmentScheduleRule:
-  """A rule for scheduling fragments of a computation."""
+  """A rule for scheduling fragments in a specific execution order.
+
+  Attributes:
+    ordered_fragments: Fragments in the relative order they should execute. Must
+      contain at least 2 fragments, and all fragments must be on the same mesh.
+  """
 
   ordered_fragments: Sequence[FragmentInfo]
 
 
-FragmentScheduleRules = Sequence[FragmentScheduleRule]
+@dataclasses.dataclass(frozen=True)
+class PipelineContext:
+  """Context for pipeline scheduling and merging predicates."""
+
+  num_meshes: int
+
+
+# LINT.IfChange
+CPU_MESH_SUFFIX = '/cpu'
+# LINT.ThenChange(
+#   https://github.com/openxla/shardy/blob/main/shardy/dialect/mpmd/ir/utils.h
+# )
+
+
+def mesh_is_on_cpu(mesh_name: str) -> bool:
+  """Returns whether the mesh name is for a cpu mesh."""
+  return mesh_name.endswith(CPU_MESH_SUFFIX)
+
+
+def get_schedulable_meshes(topology: Topology) -> list[str]:
+  """Returns the schedulable meshes in the topology."""
+  return [name for name in topology if not mesh_is_on_cpu(name)]
+
+
+# Type conversion functions for FragmentInfo and related types
+def _to_jaxlib_mpmd_split_type(
+    split_type: SplitFragmentType | None,
+) -> jaxlib_mpmd.SplitFragmentType | None:
+  """Convert native Python enum to pybinded enum."""
+  if split_type is None:
+    return None
+  if split_type == SplitFragmentType.KEEP_TRANSFERRED:
+    return jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED
+  elif split_type == SplitFragmentType.DROP_TRANSFERRED:
+    return jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED
+  else:
+    raise ValueError(f'Unknown SplitFragmentType: {split_type}')
+
+
+def _from_jaxlib_mpmd_split_type(
+    split_type: jaxlib_mpmd.SplitFragmentType | None,
+) -> SplitFragmentType | None:
+  """Convert pybinded enum to native Python enum."""
+  if split_type is None:
+    return None
+  if split_type == jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED:
+    return SplitFragmentType.KEEP_TRANSFERRED
+  elif split_type == jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED:
+    return SplitFragmentType.DROP_TRANSFERRED
+  else:
+    raise ValueError(f'Unknown jaxlib_mpmd.SplitFragmentType: {split_type}')
+
+
+def convert_fragment_info_to_pybind(
+    fragment: FragmentInfo,
+) -> jaxlib_mpmd.FragmentInfo:
+  """Converts FragmentInfo to jaxlib_mpmd.FragmentInfo."""
+  return jaxlib_mpmd.FragmentInfo(
+      origins=[
+          jaxlib_mpmd.FragmentOrigin(
+              origin.computation_name, origin.transpose_count
+          )
+          for origin in fragment.origins
+      ],
+      stage_id=fragment.stage_id,
+      call_counter=fragment.call_counter,
+      split_type=_to_jaxlib_mpmd_split_type(fragment.split_type),
+      mesh_name=fragment.mesh_name,
+  )
+
+
+def convert_pybind_fragment_info_to_types(
+    fragment: jaxlib_mpmd.FragmentInfo,
+) -> FragmentInfo:
+  """Converts jaxlib_mpmd.FragmentInfo to FragmentInfo."""
+  return FragmentInfo(
+      origins=[
+          FragmentOrigin(origin.computation_name, origin.transpose_count)
+          for origin in fragment.origins
+      ],
+      stage_id=fragment.stage_id,
+      call_counter=fragment.call_counter,
+      split_type=_from_jaxlib_mpmd_split_type(fragment.split_type),
+      mesh_name=fragment.mesh_name,
+  )
+
+
+def convert_fragment_merge_rules_to_pybind(
+    fragment_merge_rules: FragmentMergeRules,
+) -> list[jaxlib_mpmd.FragmentMergeRule]:
+  """Converts fragment merge rules to jaxlib_mpmd.FragmentMergeRules."""
+  pybind_fragment_merge_rules = []
+  for rule in fragment_merge_rules:
+    fragments = [
+        convert_fragment_info_to_pybind(fragment) for fragment in rule.sources
+    ]
+    pybind_fragment_merge_rules.append(
+        jaxlib_mpmd.FragmentMergeRule(
+            sources=fragments,
+            target=convert_fragment_info_to_pybind(rule.target),
+        )
+    )
+  return pybind_fragment_merge_rules
+
+
+def convert_fragment_schedule_rules_to_pybind(
+    fragment_schedule_rules: FragmentScheduleRules,
+) -> list[jaxlib_mpmd.FragmentScheduleRule]:
+  """Converts fragment schedule rules to jaxlib_mpmd.FragmentScheduleRules."""
+  pybind_fragment_schedule_rules = []
+  for rule in fragment_schedule_rules:
+    fragments = [
+        convert_fragment_info_to_pybind(fragment)
+        for fragment in rule.ordered_fragments
+    ]
+    pybind_fragment_schedule_rules.append(
+        jaxlib_mpmd.FragmentScheduleRule(ordered_fragments=fragments)
+    )
+  return pybind_fragment_schedule_rules
+
+
+@dataclasses.dataclass(frozen=True)
+class PipelineSchedule:
+  """A set of rules and options which define an MPMD pipeline.
+
+  Attributes:
+    merge_rule_builders: A sequence of functions that build merge rules for
+      fragments.
+    schedule_rule_builders: A sequence of functions that build schedule rules
+      for fragments.
+    schedule_merge_rule_builders: A sequence of functions that build both
+      schedule and merge rules for fragments.
+    required_mpmd_options: A mapping of PartitioningEnvironment flags that are
+      required for this schedule to function correctly. See
+      partitioning_options.py for available options.
+  """
+
+  merge_rule_builders: Sequence[MergeRuleBuilder] | None = None
+  schedule_rule_builders: Sequence[ScheduleRuleBuilder] | None = None
+  schedule_merge_rule_builders: Sequence[ScheduleMergeRuleBuilder] | None = None
+  required_mpmd_options: Mapping[str, bool | str] | None = None
 
 
 @dataclasses.dataclass(frozen=True)

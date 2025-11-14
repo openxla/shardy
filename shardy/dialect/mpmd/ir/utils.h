@@ -62,7 +62,11 @@ inline constexpr StringRef kIsSdyPartitioned = "mpmd.is_sdy_partitioned";
 inline constexpr StringRef kIsGspmdPartitioned = "mpmd.is_gspmd_partitioned";
 
 // The suffix of the mesh name for a CPU mesh.
+// LINT.IfChange
 constexpr StringRef kCpuMeshSuffix = "/cpu";
+// LINT.ThenChange(
+//   https://github.com/openxla/shardy/blob/main/shardy/integrations/python/jax/mpmd/types.py
+// )
 
 // Memory kind attributes.
 // Attr on func args and results to indicate whether the value lives on host or
