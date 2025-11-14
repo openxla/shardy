@@ -28,3 +28,36 @@ func.func @unroll_for_loop_of_three_iterations(%arg0: tensor<10xui32>, %arg1: te
   } : tensor<10xui32>, tensor<10xui32>
   func.return %0#0, %0#1 : tensor<10xui32>, tensor<10xui32>
 }
+
+// CHECK-LABEL: func @unroll_two_for_loops_of_three_iterations
+func.func @unroll_two_for_loops_of_three_iterations(%arg0: tensor<10xui32>, %arg1: tensor<10xui32>) -> (tensor<10xui32>, tensor<10xui32>)
+  attributes {mesh_shape = #sdy.mesh<["x"=4]>}
+{
+  // CHECK-NEXT: %[[I0:.*]] = stablehlo.constant {unroll_counter = 0 : ui32} dense<0>
+  // CHECK-NEXT: %[[BCAST0:.*]] = stablehlo.broadcast_in_dim %[[I0]], {{.*}} {unroll_counter = 0 : ui32
+  // CHECK-NEXT: %[[I1:.*]] = stablehlo.constant {unroll_counter = 1 : ui32} dense<1>
+  // CHECK-NEXT: %[[BCAST1:.*]] = stablehlo.broadcast_in_dim %[[I1]], {{.*}} {unroll_counter = 1 : ui32
+  // CHECK-NEXT: %[[I2:.*]] = stablehlo.constant {unroll_counter = 2 : ui32} dense<2>
+  // CHECK-NEXT: %[[BCAST2:.*]] = stablehlo.broadcast_in_dim %[[I2]], {{.*}} {unroll_counter = 2 : ui32
+
+  // CHECK-NEXT: %[[I3:.*]] = stablehlo.constant {unroll_counter = 3 : ui32} dense<0>
+  // CHECK-NEXT: %[[BCAST3:.*]] = stablehlo.broadcast_in_dim %[[I3]], {{.*}} {unroll_counter = 3 : ui32
+  // CHECK-NEXT: %[[I4:.*]] = stablehlo.constant {unroll_counter = 4 : ui32} dense<1>
+  // CHECK-NEXT: %[[BCAST4:.*]] = stablehlo.broadcast_in_dim %[[I4]], {{.*}} {unroll_counter = 4 : ui32
+  // CHECK-NEXT: %[[I5:.*]] = stablehlo.constant {unroll_counter = 5 : ui32} dense<2>
+  // CHECK-NEXT: %[[BCAST5:.*]] = stablehlo.broadcast_in_dim %[[I5]], {{.*}} {unroll_counter = 5 : ui32
+  // CHECK-NEXT: return %[[BCAST2]], %[[BCAST5]]
+
+  %0:2 = mpmd.for (%arg0, %arg1) {iterations = 3 : ui32, unroll_factor = 3 : ui32}
+  (%arg2: tensor<10xui32>, %arg3: tensor<10xui32>, %index: tensor<ui32>) {
+    %1 = stablehlo.broadcast_in_dim %index, dims = [] : (tensor<ui32>) -> tensor<10xui32>
+    mpmd.return %1, %1 : tensor<10xui32>, tensor<10xui32>
+  } : tensor<10xui32>, tensor<10xui32>
+  %1:2 = mpmd.for (%arg0, %arg1) {iterations = 3 : ui32, unroll_factor = 3 : ui32}
+  (%arg2: tensor<10xui32>, %arg3: tensor<10xui32>, %index: tensor<ui32>) {
+    %1 = stablehlo.broadcast_in_dim %index, dims = [] : (tensor<ui32>) -> tensor<10xui32>
+    mpmd.return %1, %1 : tensor<10xui32>, tensor<10xui32>
+  } : tensor<10xui32>, tensor<10xui32>
+
+  func.return %0#0, %1#1 : tensor<10xui32>, tensor<10xui32>
+}
