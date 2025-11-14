@@ -27,6 +27,7 @@ import jaxtyping
 import numpy as np
 
 from shardy.integrations.python.jax import mpmd
+from shardy.integrations.python.jax.mpmd import pipeline_registry
 from shardy.integrations.python.jax.mpmd import stages
 from shardy.integrations.python.jax.mpmd import test_utils
 from shardy.integrations.python.jax.mpmd import types as mpmd_types
@@ -1376,66 +1377,73 @@ class SdyPropagationTest(parameterized.TestCase):
         ),
     )
 
-  @parameterized.parameters(
+  @parameterized.product(
       # Below, the ..1 represents the transpose of the stage.
-      dict(
-          num_microbatches=1,
-          expected_stage_order=[
-              *('stage1', 'stage2', 'stage3', 'stage4'),
-              *('stage4..1', 'stage3..1', 'stage2..1', 'stage1..1'),
-          ],
+      (
+          dict(
+              num_microbatches=1,
+              compute_transpose=True,
+              expected_stage_order=[
+                  *('stage1', 'stage2', 'stage3', 'stage4'),
+                  *('stage4..1', 'stage3..1', 'stage2..1', 'stage1..1'),
+              ],
+          ),
+          dict(
+              num_microbatches=2,
+              compute_transpose=True,
+              expected_stage_order=[
+                  *('stage1', 'stage2', 'stage1', 'stage2'),
+                  *('stage3', 'stage4', 'stage3', 'stage4'),
+                  *('stage4..1', 'stage3..1', 'stage4..1', 'stage3..1'),
+                  *('stage2..1', 'stage1..1', 'stage2..1', 'stage1..1'),
+              ],
+          ),
+          dict(
+              num_microbatches=4,
+              compute_transpose=True,
+              expected_stage_order=[
+                  *('stage1', 'stage2', 'stage1', 'stage2'),
+                  *('stage3', 'stage4', 'stage3', 'stage4'),
+                  *('stage1', 'stage2', 'stage1', 'stage2'),
+                  *('stage3', 'stage4', 'stage3', 'stage4'),
+                  *('stage4..1', 'stage3..1', 'stage4..1', 'stage3..1'),
+                  *('stage2..1', 'stage1..1', 'stage2..1', 'stage1..1'),
+                  *('stage4..1', 'stage3..1', 'stage4..1', 'stage3..1'),
+                  *('stage2..1', 'stage1..1', 'stage2..1', 'stage1..1'),
+              ],
+          ),
+          dict(
+              num_microbatches=1,
+              compute_transpose=False,
+              expected_stage_order=[
+                  *('stage1', 'stage2', 'stage3', 'stage4'),
+              ],
+          ),
+          dict(
+              num_microbatches=2,
+              compute_transpose=False,
+              expected_stage_order=[
+                  *('stage1', 'stage2', 'stage1', 'stage2'),
+                  *('stage3', 'stage4', 'stage3', 'stage4'),
+              ],
+          ),
+          dict(
+              num_microbatches=4,
+              compute_transpose=False,
+              expected_stage_order=[
+                  *('stage1', 'stage2', 'stage1', 'stage2'),
+                  *('stage3', 'stage4', 'stage3', 'stage4'),
+                  *('stage1', 'stage2', 'stage1', 'stage2'),
+                  *('stage3', 'stage4', 'stage3', 'stage4'),
+              ],
+          ),
       ),
-      dict(
-          num_microbatches=2,
-          expected_stage_order=[
-              *('stage1', 'stage2', 'stage1', 'stage2'),
-              *('stage3', 'stage4', 'stage3', 'stage4'),
-              *('stage4..1', 'stage3..1', 'stage4..1', 'stage3..1'),
-              *('stage2..1', 'stage1..1', 'stage2..1', 'stage1..1'),
-          ],
-      ),
-      dict(
-          num_microbatches=4,
-          expected_stage_order=[
-              *('stage1', 'stage2', 'stage1', 'stage2'),
-              *('stage3', 'stage4', 'stage3', 'stage4'),
-              *('stage1', 'stage2', 'stage1', 'stage2'),
-              *('stage3', 'stage4', 'stage3', 'stage4'),
-              *('stage4..1', 'stage3..1', 'stage4..1', 'stage3..1'),
-              *('stage2..1', 'stage1..1', 'stage2..1', 'stage1..1'),
-              *('stage4..1', 'stage3..1', 'stage4..1', 'stage3..1'),
-              *('stage2..1', 'stage1..1', 'stage2..1', 'stage1..1'),
-          ],
-      ),
-      dict(
-          num_microbatches=1,
-          compute_transpose=False,
-          expected_stage_order=[
-              *('stage1', 'stage2', 'stage3', 'stage4'),
-          ],
-      ),
-      dict(
-          num_microbatches=2,
-          compute_transpose=False,
-          expected_stage_order=[
-              *('stage1', 'stage2', 'stage1', 'stage2'),
-              *('stage3', 'stage4', 'stage3', 'stage4'),
-          ],
-      ),
-      dict(
-          num_microbatches=4,
-          compute_transpose=False,
-          expected_stage_order=[
-              *('stage1', 'stage2', 'stage1', 'stage2'),
-              *('stage3', 'stage4', 'stage3', 'stage4'),
-              *('stage1', 'stage2', 'stage1', 'stage2'),
-              *('stage3', 'stage4', 'stage3', 'stage4'),
-          ],
-      ),
+      use_registry=[False, True],
   )
   def test_circular_pipeline(
       self,
       num_microbatches: int,
+      use_registry: bool,
       compute_transpose: bool = True,
       expected_stage_order: Sequence[str] = (),
   ):
@@ -1478,6 +1486,11 @@ class SdyPropagationTest(parameterized.TestCase):
         partitioning_options=mpmd_types.PartitioningOptions(
             mpmd_pipeline_schedule='CircularWithReversedBackward'
         ),
+        pipeline_schedule=pipeline_registry.get_pipeline_schedule(
+            'CIRCULAR_WITH_REVERSED_BACKWARD'
+        )
+        if use_registry
+        else None,
     )
 
     w = jnp.ones((10, 10))
