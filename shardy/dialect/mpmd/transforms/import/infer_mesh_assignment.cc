@@ -1391,12 +1391,19 @@ class InferMeshAssignMeshForFuncLeavesPass
     StringRef mesh_name;
     if (MeshesWithOrigins src_set = GetSrcSet(op)) {
       if (src_set.empty()) {
-        op->emitError("src_set must not be empty for this op.");
-        // In this case, we have to stop here, or otherwise we would crash
-        // below.
-        return signalPassFailure();
+        if (!inferTransfers) {
+          op->emitError("src_set must not be empty for this op. Try setting "
+                        "`mpmd_infer_transfers` in the partitioning options.");
+          // In this case, we have to stop here, or otherwise we would crash
+          // below.
+          return signalPassFailure();
+        }
+        // If we are inferring transfers, then we assign it to the default mesh.
+        // This isn't very performant, but it's better than failing.
+        mesh_name = default_mesh_name;
+      } else {
+        mesh_name = *src_set.GetPrioritizedMeshName();
       }
-      mesh_name = *src_set.GetPrioritizedMeshName();
     } else {
       // If there is no src_set attr, then the src_set is all meshes and so we
       // pick an arbitrary mesh.
