@@ -18,9 +18,11 @@
 from collections.abc import Mapping, Sequence
 import dataclasses
 import enum
-from typing import Any
+from typing import Callable
 
+from absl import logging
 import jax
+from jax.jaxlib import _sdy_mpmd as jaxlib_mpmd
 import jaxtyping
 
 from shardy.integrations.python.jax.mpmd import partitioning_options as part_options
@@ -39,6 +41,38 @@ NameToStageAssignment = Mapping[str, int]
 # because users can provide compile options overrides only for some meshes.
 MeshToCompileOptions = Mapping[str, jax.stages.CompilerOptions]
 PartitioningOptions = dict[str, bool | str]
+
+## Type aliases for custom scheduling and merging rules
+
+# Sequence of fragment merge rules defining how fragments can be combined.
+FragmentMergeRules = Sequence['FragmentMergeRule']
+# Sequence of fragment schedule rules defining execution order of fragments.
+FragmentScheduleRules = Sequence['FragmentScheduleRule']
+
+# Function that builds schedule rules from fragments and pipeline context.
+ScheduleRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'], FragmentScheduleRules
+]
+
+# Function that constructs a target FragmentInfo from a sequence of source
+# fragments that will be merged together into the target.
+TargetInfoBuilder = Callable[[Sequence['FragmentInfo']], 'FragmentInfo']
+# Function that builds merge rules from fragments and pipeline context.
+MergeRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'], FragmentMergeRules
+]
+# Function that builds both schedule and merge rules from fragments and pipeline
+# context.
+ScheduleMergeRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'],
+    tuple[FragmentScheduleRules, FragmentMergeRules],
+]
+
+# Binary predicate determining if two fragments should be merged or scheduled
+# together.
+RuleGeneratorPredicate = Callable[
+    ['FragmentInfo', 'FragmentInfo', 'PipelineContext'], bool
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,23 +110,172 @@ class FragmentInfo:
 
 @dataclasses.dataclass(frozen=True)
 class FragmentMergeRule:
-  """A rule for merging fragments of a computation."""
+  """A rule for merging fragments of a computation.
+
+  Attributes:
+    sources: The source fragments to be merged. The order does not affect the
+      final position of the merged fragment, which is determined by topological
+      sorting based on data dependencies.
+    target: The target fragment metadata that results from merging the sources.
+  """
 
   sources: Sequence[FragmentInfo]
   target: FragmentInfo
 
 
-FragmentMergeRules = Sequence[FragmentMergeRule]
-
-
 @dataclasses.dataclass(frozen=True)
 class FragmentScheduleRule:
-  """A rule for scheduling fragments of a computation."""
+  """A rule for scheduling fragments in a specific execution order.
+
+  Attributes:
+    ordered_fragments: Fragments in the relative order they should execute. Must
+      contain at least 2 fragments, and all fragments must be on the same mesh.
+  """
 
   ordered_fragments: Sequence[FragmentInfo]
 
 
-FragmentScheduleRules = Sequence[FragmentScheduleRule]
+@dataclasses.dataclass(frozen=True)
+class PipelineContext:
+  """Context for pipeline scheduling and merging predicates."""
+
+  num_meshes: int
+
+
+# LINT.IfChange
+CPU_MESH_SUFFIX = '/cpu'
+# LINT.ThenChange(
+#   https://github.com/openxla/shardy/blob/main/shardy/dialect/mpmd/ir/utils.h
+# )
+
+
+def mesh_is_on_cpu(mesh_name: str) -> bool:
+  """Returns whether the mesh name is for a cpu mesh."""
+  return mesh_name.endswith(CPU_MESH_SUFFIX)
+
+
+def get_schedulable_meshes(topology: Topology) -> list[str]:
+  """Returns the schedulable meshes in the topology."""
+  return [name for name in topology if not mesh_is_on_cpu(name)]
+
+
+# Type conversion functions for FragmentInfo and related types
+def _to_jaxlib_mpmd_split_type(
+    split_type: SplitFragmentType | None,
+) -> jaxlib_mpmd.SplitFragmentType | None:
+  """Convert native Python enum to pybinded enum."""
+  if split_type is None:
+    return None
+  if split_type == SplitFragmentType.KEEP_TRANSFERRED:
+    return jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED
+  elif split_type == SplitFragmentType.DROP_TRANSFERRED:
+    return jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED
+  else:
+    raise ValueError(f'Unknown SplitFragmentType: {split_type}')
+
+
+def _from_jaxlib_mpmd_split_type(
+    split_type: jaxlib_mpmd.SplitFragmentType | None,
+) -> SplitFragmentType | None:
+  """Convert pybinded enum to native Python enum."""
+  if split_type is None:
+    return None
+  if split_type == jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED:
+    return SplitFragmentType.KEEP_TRANSFERRED
+  elif split_type == jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED:
+    return SplitFragmentType.DROP_TRANSFERRED
+  else:
+    raise ValueError(f'Unknown jaxlib_mpmd.SplitFragmentType: {split_type}')
+
+
+def convert_fragment_info_to_pybind(
+    fragment: FragmentInfo,
+) -> jaxlib_mpmd.FragmentInfo:
+  """Converts FragmentInfo to jaxlib_mpmd.FragmentInfo."""
+  return jaxlib_mpmd.FragmentInfo(
+      origins=[
+          jaxlib_mpmd.FragmentOrigin(
+              origin.computation_name, origin.transpose_count
+          )
+          for origin in fragment.origins
+      ],
+      stage_id=fragment.stage_id,
+      call_counter=fragment.call_counter,
+      split_type=_to_jaxlib_mpmd_split_type(fragment.split_type),
+      mesh_name=fragment.mesh_name,
+  )
+
+
+def convert_pybind_fragment_info_to_types(
+    fragment: jaxlib_mpmd.FragmentInfo,
+) -> FragmentInfo:
+  """Converts jaxlib_mpmd.FragmentInfo to FragmentInfo."""
+  return FragmentInfo(
+      origins=[
+          FragmentOrigin(origin.computation_name, origin.transpose_count)
+          for origin in fragment.origins
+      ],
+      stage_id=fragment.stage_id,
+      call_counter=fragment.call_counter,
+      split_type=_from_jaxlib_mpmd_split_type(fragment.split_type),
+      mesh_name=fragment.mesh_name,
+  )
+
+
+def convert_fragment_merge_rules_to_pybind(
+    fragment_merge_rules: FragmentMergeRules,
+) -> list[jaxlib_mpmd.FragmentMergeRule]:
+  """Converts fragment merge rules to jaxlib_mpmd.FragmentMergeRules."""
+  pybind_fragment_merge_rules = []
+  for rule in fragment_merge_rules:
+    fragments = [
+        convert_fragment_info_to_pybind(fragment) for fragment in rule.sources
+    ]
+    pybind_fragment_merge_rules.append(
+        jaxlib_mpmd.FragmentMergeRule(
+            sources=fragments,
+            target=convert_fragment_info_to_pybind(rule.target),
+        )
+    )
+  return pybind_fragment_merge_rules
+
+
+def convert_fragment_schedule_rules_to_pybind(
+    fragment_schedule_rules: FragmentScheduleRules,
+) -> list[jaxlib_mpmd.FragmentScheduleRule]:
+  """Converts fragment schedule rules to jaxlib_mpmd.FragmentScheduleRules."""
+  pybind_fragment_schedule_rules = []
+  for rule in fragment_schedule_rules:
+    fragments = [
+        convert_fragment_info_to_pybind(fragment)
+        for fragment in rule.ordered_fragments
+    ]
+    pybind_fragment_schedule_rules.append(
+        jaxlib_mpmd.FragmentScheduleRule(ordered_fragments=fragments)
+    )
+  return pybind_fragment_schedule_rules
+
+
+@dataclasses.dataclass(frozen=True)
+class PipelineSchedule:
+  """A set of rules and options which define an MPMD pipeline.
+
+  Attributes:
+    merge_rule_builders: A sequence of functions that build merge rules for
+      fragments.
+    schedule_rule_builders: A sequence of functions that build schedule rules
+      for fragments.
+    schedule_merge_rule_builders: A sequence of functions that build both
+      schedule and merge rules for fragments.
+    required_mpmd_options: A mapping of PartitioningEnvironment flags that are
+      required for this schedule to function correctly. See
+      partitioning_options.py for available options.
+  """
+
+  merge_rule_builders: Sequence[MergeRuleBuilder] | None = None
+  schedule_rule_builders: Sequence[ScheduleRuleBuilder] | None = None
+  schedule_merge_rule_builders: Sequence[ScheduleMergeRuleBuilder] | None = None
+  required_mpmd_options: Mapping[str, bool | str] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -128,12 +311,9 @@ class MpmdConfig:
       reading from arg shardings is not supported. TODO: b/377706756 - Read from
       arg shardings too, and migrate users to this and remove this option once
       stabilized.
-    fragment_merge_rules: A sequence of fragment merge rules. Each merge rule
-      contains a sequence of fragment metadata objects that should be merged
-      into a single fragment, together with metadata for the resulting fragment.
-    fragment_schedule_rules: A sequence of fragment schedule rules. Each
-      schedule rule contains a sequence of fragment metadata objects in the
-      order that they should be scheduled.
+    pipeline_schedule: A PipelineSchedule object used to generate merge and/or
+      schedule rules for partitioning, as well as set any required MPMD options
+      for the pipeline.
   """
 
   topology: Topology
@@ -143,8 +323,7 @@ class MpmdConfig:
   output_mesh_assignment: PyTree[str | None]
   partitioning_options: PartitioningOptions | None
   read_input_output_mesh_from_shardings: bool
-  fragment_merge_rules: FragmentMergeRules | None
-  fragment_schedule_rules: FragmentScheduleRules | None
+  pipeline_schedule: PipelineSchedule | None
 
   @property
   def _spmd_mesh(self) -> jax.sharding.Mesh:
@@ -212,8 +391,7 @@ def make_config(
     output_mesh_assignment: PyTree[str | None] = (),
     partitioning_options: PartitioningOptions | None = None,
     read_input_output_mesh_from_shardings: bool = False,
-    fragment_merge_rules: FragmentMergeRules | None = None,
-    fragment_schedule_rules: FragmentScheduleRules | None = None,
+    pipeline_schedule: PipelineSchedule | None = None,
 ) -> MpmdConfig:
   """Creates a `MpmdConfig`, inferring the tpu topology if not provided.
 
@@ -228,8 +406,7 @@ def make_config(
     output_mesh_assignment: See `MpmdConfig`.
     partitioning_options: See `MpmdConfig`.
     read_input_output_mesh_from_shardings: see `MpmdConfig`.
-    fragment_merge_rules: See `MpmdConfig`.
-    fragment_schedule_rules: See `MpmdConfig`.
+    pipeline_schedule: See `MpmdConfig`.
 
   Returns:
     An `MpmdConfig` object.
@@ -256,13 +433,6 @@ def make_config(
       input_mesh_assignment,
       output_mesh_assignment,
   )
-  if fragment_merge_rules is None:
-    fragment_merge_rules = []
-  validate_fragment_merge_rules(fragment_merge_rules)
-
-  if fragment_schedule_rules is None:
-    fragment_schedule_rules = []
-  validate_fragment_schedule_rules(fragment_schedule_rules)
 
   return MpmdConfig(
       topology,
@@ -272,8 +442,7 @@ def make_config(
       output_mesh_assignment,
       partitioning_options,
       read_input_output_mesh_from_shardings,
-      fragment_merge_rules,
-      fragment_schedule_rules,
+      pipeline_schedule,
   )
 
 
@@ -452,6 +621,106 @@ class FunctionIOMeshAssignment:
 
   input_meshes: PyTree[str]
   output_meshes: PyTree[str]
+
+
+def override_partitioning_options(
+    mpmd_options: Mapping[str, bool | str] | None,
+    base_options_to_override: PartitioningOptions | None = None,
+) -> PartitioningOptions | None:
+  """Overrides the base partitioning options with the given MPMD options."""
+  if mpmd_options is None:
+    return base_options_to_override
+
+  _validate_partitioning_options(mpmd_options)
+
+  options = {}
+  if base_options_to_override is not None:
+    options.update(base_options_to_override)
+
+  options.update(mpmd_options)
+  return options
+
+
+def check_partitioning_option_conflicts(
+    pipeline_required_options: Mapping[str, bool | str],
+    user_options_dict: Mapping[str, bool | str],
+) -> list[str]:
+  """Checks for conflicts between pipeline requirements and user options.
+
+  Args:
+    pipeline_required_options: Options required by the pipeline schedule.
+    user_options_dict: Options explicitly set by the user.
+
+  Returns:
+    List of conflict error messages. Empty if no conflicts.
+    Logs warnings for options that will be set automatically.
+  """
+  conflicts = []
+  for k, required_value in pipeline_required_options.items():
+    if k in user_options_dict:
+      user_value = user_options_dict[k]
+      if user_value != required_value:
+        conflicts.append(
+            f"  - '{k}': pipeline schedule requires {required_value}, "
+            f'but user specified {user_value}'
+        )
+    else:
+      # Option not set by user, will be set automatically
+      logging.warning(
+          'Setting partitioning option %r to %s (required by pipeline'
+          ' schedule)',
+          k,
+          required_value,
+      )
+  return conflicts
+
+
+def validate_and_merge_partitioning_options(
+    pipeline_required_options: Mapping[str, bool | str] | None,
+    user_provided_options: PartitioningOptions | None,
+) -> PartitioningOptions | None:
+  """Validates and merges user options with pipeline requirements.
+
+  Ensures that user-provided partitioning options don't conflict with options
+  required by the pipeline schedule. If conflicts are found, it raises an error.
+  If the user hasn't set all required options, it logs warnings for the options
+  that still need to be set and will set them automatically.
+
+  Args:
+    pipeline_required_options: Options required by the pipeline schedule.
+    user_provided_options: Options provided by the user via MpmdConfig. This is
+      expected to be a dict or None.
+
+  Returns:
+    Merged partitioning options with pipeline requirements taking precedence
+    where the user hasn't specified them.
+
+  Raises:
+    ValueError: If user options conflict with pipeline required options.
+  """
+  if pipeline_required_options is None:
+    return user_provided_options
+
+  user_options_dict = user_provided_options if user_provided_options else {}
+
+  # Check for conflicts and log warnings
+  conflicts = check_partitioning_option_conflicts(
+      pipeline_required_options, user_options_dict
+  )
+
+  if conflicts:
+    conflict_msg = '\n'.join(conflicts)
+    raise ValueError(
+        f'Conflicting partitioning options detected:\n{conflict_msg}\n'
+        'Please remove these options from your MpmdConfig or ensure they '
+        'match the pipeline schedule requirements.'
+    )
+
+  # Merge the options
+  return override_partitioning_options(
+      mpmd_options=pipeline_required_options,
+      base_options_to_override=user_provided_options,
+  )
 
 
 def _validate_partitioning_options(
