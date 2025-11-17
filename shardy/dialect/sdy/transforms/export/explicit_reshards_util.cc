@@ -241,13 +241,13 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
 
 struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
-  // The total size of the source tensors.
-  int64_t totalSourceTensorSize = 0;
-  // The size of the source tensor. In case the factor-axes pair has multiple
-  // source tensors, the size of the largest one. A tensor is a source for a
-  // factor-axes pair if the axes is a prefix of the factor sharding on the
-  // tensor.
-  int64_t largestSourceTensorSize = 0;
+  // The total global size of the source tensors.
+  int64_t totalGlobalSourceTensorSize = 0;
+  // The size of the local source tensor. In case the factor-axes pair has
+  // multiple source tensors, the size of the largest local one. A tensor is a
+  // source for a factor-axes pair if the axes is a prefix of the factor
+  // sharding on the tensor.
+  int64_t largestLocalSourceTensorSize = 0;
   // The size of axes to shard further. Hence, if the factor is already assigned
   // to axes A, and this factor-axes pair has axes B, the size of further
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
@@ -259,8 +259,8 @@ struct FactorAxesCandidate {
                       int64_t shardingSize, FactorType factorType,
                       int64_t communicationCost)
       : factorAxes(factorAxes),
-        totalSourceTensorSize(sourceTensorSize),
-        largestSourceTensorSize(sourceTensorSize),
+        totalGlobalSourceTensorSize(sourceTensorSize),
+        largestLocalSourceTensorSize(sourceTensorSize),
         shardingSize(shardingSize),
         factorTypePrecedence(precedence(factorType)),
         communicationCost(communicationCost) {}
@@ -268,18 +268,19 @@ struct FactorAxesCandidate {
   FactorAxesCandidate() = default;
 
   // Multi-level comparison.
-  // 0. totalSourceTensorSize
+  // 0. totalGlobalSourceTensorSize
   // 1. communicationCost
   // 2. factorTypePrecedence
-  // 3. largestSourceTensorSize
+  // 3. largestLocalSourceTensorSize
   // 4. shardingSize
   // 5. factorAxes: If A is a strict prefix of B, then A is smaller than B.
   bool operator<(const FactorAxesCandidate& rhs) const {
     auto makeComparisonTuple = [](const FactorAxesCandidate& candidate) {
-      return std::make_tuple(
-          candidate.totalSourceTensorSize, -candidate.communicationCost,
-          candidate.factorTypePrecedence, candidate.largestSourceTensorSize,
-          candidate.shardingSize, candidate.factorAxes);
+      return std::make_tuple(candidate.totalGlobalSourceTensorSize,
+                             -candidate.communicationCost,
+                             candidate.factorTypePrecedence,
+                             candidate.largestLocalSourceTensorSize,
+                             candidate.shardingSize, candidate.factorAxes);
     };
     return makeComparisonTuple(*this) < makeComparisonTuple(rhs);
   }
@@ -319,9 +320,9 @@ void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
       communicationCost);
   if (!inserted) {
     FactorAxesCandidate& candidate = it->second;
-    candidate.totalSourceTensorSize += sourceTensorSize;
-    candidate.largestSourceTensorSize =
-        std::max(candidate.largestSourceTensorSize, sourceTensorSize);
+    candidate.totalGlobalSourceTensorSize += sourceTensorSize;
+    candidate.largestLocalSourceTensorSize =
+        std::max(candidate.largestLocalSourceTensorSize, sourceTensorSize);
   }
 }
 
@@ -505,16 +506,16 @@ class FactorAxesCandidateBag {
 
   // Updates the source tensor sizes of all candidates.
   // TODO(enver): Optimize updating source tensor sizes.
-  void updateSourceTensorSizes(const ShardingProjection& shardingProjection,
-                               ArrayRef<int64_t> tensorSizes,
-                               const SmallVector<AxisListRef>& factorAxisRefs,
-                               OpShardingRuleAttr shardingRule,
-                               const Mesh& meshA) {
+  void updateLocalSourceTensorSizes(
+      const ShardingProjection& shardingProjection,
+      ArrayRef<int64_t> tensorSizes,
+      const SmallVector<AxisListRef>& factorAxisRefs,
+      OpShardingRuleAttr shardingRule, const Mesh& meshA) {
     // Since the (local) source tensor sizes get smaller at each iteration on
     // which we extend sharding of a factor, in order to recompute largest
     // source tensor sizes, we first need to reset them to zero.
     for (FactorAxesCandidate& candidate : candidates) {
-      candidate.largestSourceTensorSize = 0;
+      candidate.largestLocalSourceTensorSize = 0;
     }
     SmallVector<int64_t> localTensorSizes = llvm::to_vector(tensorSizes);
     for (const auto& [tensorIndex, tensorFactorSharding] :
@@ -530,13 +531,13 @@ class FactorAxesCandidateBag {
       for (FactorAxesCandidate& candidate : candidates) {
         if (tensorFactorSharding.factorIndexToSharding.contains(
                 candidate.factorAxes.factorIndex)) {
-          candidate.largestSourceTensorSize =
-              std::max(candidate.largestSourceTensorSize, localTensorSize);
+          candidate.largestLocalSourceTensorSize =
+              std::max(candidate.largestLocalSourceTensorSize, localTensorSize);
           updateBestCandidateIfValid(candidate);
         }
       }
     }
-
+    // TODO(enver): Update only for candidates that changed local tensor size.
     for (FactorAxesCandidate& candidate : candidates) {
       candidate.communicationCost =
           getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
@@ -751,7 +752,7 @@ AxesPerFactor findCommonAxesHeuristic(
 
     // TODO(enver): Optimize updating source tensor sizes.
     factorAxesCandidates.resetBest();
-    factorAxesCandidates.updateSourceTensorSizes(
+    factorAxesCandidates.updateLocalSourceTensorSizes(
         shardingProjection, tensorSizes, factorAxisRefs, shardingRule, mesh);
   }
 
