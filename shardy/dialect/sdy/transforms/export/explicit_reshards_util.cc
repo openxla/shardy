@@ -355,8 +355,7 @@ getShardingAxesInOtherAndThisFactor(
 int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes,
-                             ArrayRef<int64_t> localTensorSizes,
-                             const Mesh& mesh,
+                             ArrayRef<int64_t> localTensorSizes, MeshAttr mesh,
                              const FactorAxesPair& factorAxesPair) {
   // The relative cost of collective operations.
   constexpr int64_t allToAllCost = 1;
@@ -377,7 +376,7 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
   // * B-X = the difference of B and X.
 
   SmallVector<AxisRefAttr> axesX = factorAxesPair.axes.toVector();
-  int64_t axesXSize = factorAxesPair.axes.getShardingSize(mesh.attr());
+  int64_t axesXSize = factorAxesPair.axes.getShardingSize(mesh);
 
   // For each operand, estimate the cost of reshard from original sharding to
   // the candidate sharding axes.
@@ -395,12 +394,12 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
         tensorFactorSharding.factorIndexToSharding.contains(
             factorAxesPair.factorIndex);
     int64_t shardedTensorSize =
-        tensorSize / tensorFactorSharding.getShardingSize(mesh.attr());
+        tensorSize / tensorFactorSharding.getShardingSize(mesh);
     auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
         tensorFactorSharding, factorAxesPair.factorIndex);
 
-    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh.attr());
-    int64_t diffXASize = getShardingSize(diffXA, mesh.attr());
+    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh);
+    int64_t diffXASize = getShardingSize(diffXA, mesh);
 
     if (axesXSize > diffXASize) {
       // all-to-all on AX.
@@ -410,10 +409,10 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
     }
 
     if (operandContainsFactor) {
-      if (!getAxisSetDiff(axesB, axesX, mesh.attr()).empty()) {
+      if (!getAxisSetDiff(axesB, axesX, mesh).empty()) {
         communicationCost += collectivePermuteCost * shardedTensorSize;
       }
-      if (getShardingSize(axesB, mesh.attr()) > diffXASize) {
+      if (getShardingSize(axesB, mesh) > diffXASize) {
         // The operand is over-sharded than the candidate. We need all-gather to
         // shrink the sharding size.
         communicationCost += allGatherCost * shardedTensorSize;
@@ -441,8 +440,8 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
     auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
         tensorFactorSharding, factorAxesPair.factorIndex);
 
-    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh.attr());
-    int64_t diffXASize = getShardingSize(diffXA, mesh.attr());
+    SmallVector<AxisRefAttr> diffXA = getAxisSetDiff(axesX, axesA, mesh);
+    int64_t diffXASize = getShardingSize(diffXA, mesh);
 
     if (shardingRule.isReductionFactor(factorAxesPair.factorIndex)) {
       communicationCost +=
@@ -459,10 +458,10 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
       communicationCost += allToAllCost * shardedTensorSize;
     }
 
-    if (!getAxisSetDiff(axesB, axesX, mesh.attr()).empty()) {
+    if (!getAxisSetDiff(axesB, axesX, mesh).empty()) {
       communicationCost += collectivePermuteCost * shardedTensorSize;
     }
-    if (getShardingSize(axesB, mesh.attr()) < diffXASize) {
+    if (getShardingSize(axesB, mesh) < diffXASize) {
       // The result is less-sharded than the candidate. We need all-gather to
       // shrink the sharding size.
       communicationCost += allGatherCost * shardedTensorSize;
@@ -510,7 +509,7 @@ class FactorAxesCandidateBag {
       const ShardingProjection& shardingProjection,
       ArrayRef<int64_t> tensorSizes,
       const SmallVector<AxisListRef>& factorAxisRefs,
-      OpShardingRuleAttr shardingRule, const Mesh& meshA) {
+      OpShardingRuleAttr shardingRule) {
     // Since the (local) source tensor sizes get smaller at each iteration on
     // which we extend sharding of a factor, in order to recompute largest
     // source tensor sizes, we first need to reset them to zero.
@@ -541,7 +540,7 @@ class FactorAxesCandidateBag {
     for (FactorAxesCandidate& candidate : candidates) {
       candidate.communicationCost =
           getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
-                               localTensorSizes, meshA, candidate.factorAxes);
+                               localTensorSizes, mesh, candidate.factorAxes);
       updateBestCandidateIfValid(candidate);
     }
   }
@@ -644,7 +643,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
         FactorAxesPair factorAxesPair(factorIndex, AxisListRef(axisRefs));
         int64_t communicationCost =
             getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
-                                 tensorSizes, mesh, factorAxesPair);
+                                 tensorSizes, mesh.attr(), factorAxesPair);
         updateFactorAxesCandidate(
             factorAxesCandidatesMap, factorAxesPair, tensorSize, mesh,
             shardingRule.getFactorType(factorIndex), communicationCost);
@@ -753,7 +752,7 @@ AxesPerFactor findCommonAxesHeuristic(
     // TODO(enver): Optimize updating source tensor sizes.
     factorAxesCandidates.resetBest();
     factorAxesCandidates.updateLocalSourceTensorSizes(
-        shardingProjection, tensorSizes, factorAxisRefs, shardingRule, mesh);
+        shardingProjection, tensorSizes, factorAxisRefs, shardingRule);
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until actual
