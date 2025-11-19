@@ -255,14 +255,11 @@ struct FactorAxesCandidate {
   int64_t factorTypePrecedence = 0;
   int64_t communicationCost = INT64_MAX;
 
-  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t sourceTensorSize,
-                      int64_t shardingSize, FactorType factorType)
+  FactorAxesCandidate(FactorAxesPair factorAxes, int64_t shardingSize,
+                      FactorType factorType)
       : factorAxes(factorAxes),
-        totalGlobalSourceTensorSize(sourceTensorSize),
-        largestLocalSourceTensorSize(0),
         shardingSize(shardingSize),
-        factorTypePrecedence(precedence(factorType)),
-        communicationCost(0) {}
+        factorTypePrecedence(precedence(factorType)) {}
 
   FactorAxesCandidate() = default;
 
@@ -305,21 +302,6 @@ struct FactorAxesCandidate {
 
 using FactorAxesCandidatesMap =
     DenseMap<FactorAxesPair, FactorAxesCandidate, FactorAxesPairInfo>;
-
-// Increment the count for the factor-axes pair, also modify source tensor size
-// to keep the largest.
-void updateFactorAxesCandidate(FactorAxesCandidatesMap& factorAxesCandidatesMap,
-                               const FactorAxesPair& factorAxes,
-                               int64_t sourceTensorSize, const Mesh& mesh,
-                               const FactorType factorType) {
-  auto [it, inserted] = factorAxesCandidatesMap.try_emplace(
-      factorAxes, factorAxes, sourceTensorSize,
-      factorAxes.axes.getShardingSize(mesh.attr()), factorType);
-  if (!inserted) {
-    FactorAxesCandidate& candidate = it->second;
-    candidate.totalGlobalSourceTensorSize += sourceTensorSize;
-  }
-}
 
 int64_t getShardingSize(ArrayRef<AxisRefAttr> axisRefs, MeshAttr mesh) {
   int64_t shardingSize = 1;
@@ -609,7 +591,7 @@ class FactorAxesCandidateBag {
 FactorAxesCandidateBag findFactorAxesCandidates(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
-    const Mesh& mesh) {
+    MeshAttr mesh) {
   // TODO(enver): For two factor-axes pairs, if both have the same factor and
   // the same count, and one is the prefix of the other, drop the prefix one.
 
@@ -628,15 +610,17 @@ FactorAxesCandidateBag findFactorAxesCandidates(
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
       while (!axisRefs.empty()) {
         FactorAxesPair factorAxesPair(factorIndex, AxisListRef(axisRefs));
-        updateFactorAxesCandidate(factorAxesCandidatesMap, factorAxesPair,
-                                  tensorSize, mesh,
-                                  shardingRule.getFactorType(factorIndex));
+        auto [it, _] = factorAxesCandidatesMap.try_emplace(
+            factorAxesPair, factorAxesPair, getShardingSize(axisRefs, mesh),
+            shardingRule.getFactorType(factorIndex));
+        FactorAxesCandidate& candidate = it->second;
+        candidate.totalGlobalSourceTensorSize += tensorSize;
         axisRefs = axisRefs.drop_back();
       }
     }
   }
 
-  FactorAxesCandidateBag factorAxesCandidates(mesh.attr(), shardingRule);
+  FactorAxesCandidateBag factorAxesCandidates(mesh, shardingRule);
   for (const auto& [_, candidate] : factorAxesCandidatesMap) {
     factorAxesCandidates.insert(candidate);
   }
@@ -666,7 +650,7 @@ AxesPerFactor findCommonAxesHeuristic(
     const Mesh& mesh) {
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates = findFactorAxesCandidates(
-      shardingProjection, shardingRule, tensorSizes, mesh);
+      shardingProjection, shardingRule, tensorSizes, mesh.attr());
   FactorAxesCandidate bestCandidate =
       factorAxesCandidates.updateCommunicationCostsAndGetBest(
           shardingProjection, tensorSizes, factorAxisRefs, shardingRule);
