@@ -52,7 +52,14 @@ Value GetUint32Constant(RewriterBase& rewriter, Location loc, uint32_t value) {
 }
 
 // Requires: the unroll factor to be equal to the number of iterations.
-void FullyUnrollForOp(ForOp for_op, RewriterBase& rewriter) {
+//
+// We keep track of the `starting_counter` to ensure that the unroll counters
+// in the unrolled loop are unique, but we keep the constant passed in as per
+// the loop. We want to keep unroll counters unique because typically we won't
+// want to merge across for loops. But we may want to add a flag in the future
+// to control this.
+int FullyUnrollForOp(ForOp for_op, RewriterBase& rewriter,
+                     int starting_counter) {
   const uint32_t num_iterations = for_op.getIterations();
 
   Block* for_body = for_op.getBody();
@@ -63,7 +70,8 @@ void FullyUnrollForOp(ForOp for_op, RewriterBase& rewriter) {
     // Create the unrolled index constant.
     Value unrolled_index =
         GetUint32Constant(rewriter, for_op.getLoc(), unroll_counter);
-    SetUnrollCounter(unrolled_index.getDefiningOp(), unroll_counter, rewriter);
+    SetUnrollCounter(unrolled_index.getDefiningOp(),
+                     starting_counter + unroll_counter, rewriter);
 
     IRMapping block_args_to_for_op_operands;
     // The unrolled index argument is mapped to the newly created index
@@ -101,11 +109,13 @@ void FullyUnrollForOp(ForOp for_op, RewriterBase& rewriter) {
             rewriter.clone(for_body_op, block_args_to_for_op_operands);
         // We annotate all unrolled ops with the unroll counter, so that we have
         // enough information to generate the pipeline schedule.
-        SetUnrollCounter(unrolled_op, unroll_counter, rewriter);
+        SetUnrollCounter(unrolled_op, starting_counter + unroll_counter,
+                         rewriter);
       }
     }
   }
   rewriter.eraseOp(for_op);
+  return num_iterations;
 }
 
 class UnrollForLoopsPass
@@ -115,7 +125,9 @@ class UnrollForLoopsPass
  private:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
-    auto walk_result = func_op.getBody().walk([&rewriter](ForOp op) {
+    int for_loop_counter = 0;
+    auto walk_result = func_op.getBody().walk([&rewriter,
+                                               &for_loop_counter](ForOp op) {
       // Crashes if pre-condition is not met.
       SDY_CHECK(op.getIterations() == op.getUnrollFactor())
           << "The unroll factor is required to be the same as the number of "
@@ -132,7 +144,7 @@ class UnrollForLoopsPass
             << "need this feature.";
         return WalkResult::interrupt();
       }
-      FullyUnrollForOp(op, rewriter);
+      for_loop_counter += FullyUnrollForOp(op, rewriter, for_loop_counter);
       // No nested for loops, so no need to visit the body.
       return WalkResult::skip();
     });
