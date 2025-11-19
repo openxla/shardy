@@ -29,6 +29,7 @@ limitations under the License.
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
+#include "stablehlo/dialect/VhloOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Quant/IR/Quant.h"
 #include "mlir/Dialect/Quant/IR/QuantTypes.h"
@@ -1161,6 +1162,12 @@ LogicalResult UnassignOp::inferReturnTypeComponents(
 // CallOp
 //===----------------------------------------------------------------------===//
 
+namespace {
+bool isInVhloFunc(CallOp call_op) {
+  return (call_op)->getParentOfType<mlir::vhlo::FuncOpV1>() != nullptr;
+}
+}  // namespace
+
 void CallOp::setCalleeFromCallable(CallInterfaceCallable callee) {
   // Direct call.
   if (FlatSymbolRefAttr calleeAttr = getCalleeAttr()) {
@@ -1176,8 +1183,11 @@ LogicalResult CallOp::verifySymbolUses(SymbolTableCollection& symbolTable) {
   auto func_op =
       symbolTable.lookupNearestSymbolFrom<FuncOp>(*this, getCalleeAttr());
   if (!func_op) {
-    return emitError("No function was found for function ref '")
-           << getCallee() << "'";
+    // If no FuncOp is found, it could be because we are in VHLO context and
+    // the callee is a vhlo::FuncOpV1.
+    if (isInVhloFunc(*this)) {
+      return success();
+    }
   }
 
   FunctionType func_type = func_op.getFunctionType();
@@ -1220,6 +1230,14 @@ LogicalResult CallOp::verify() {
 
   Operation* parent_op = (*this)->getParentOp();
   FuncOp parent_func = (*this)->getParentOfType<FuncOp>();
+
+  if (!parent_func) {
+    // If no FuncOp is found, it could be because we are in VHLO context and
+    // the callee is a vhlo::FuncOpV1.
+    if (isInVhloFunc(*this)) {
+      return success();
+    }
+  }
 
   if (!isa<FuncOp, ForOp>(parent_op)) {
     return emitError() << "Mpmd CallOp on \"" << (*this).getCallee()
