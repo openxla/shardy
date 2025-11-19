@@ -197,8 +197,8 @@ struct FactorAxesPair {
   int64_t factorIndex = kEmptyFactorIndex;
   AxisListRef axes;
 
-  FactorAxesPair(int64_t factorIndex, AxisListRef axes)
-      : factorIndex(factorIndex), axes(axes) {}
+  FactorAxesPair(int64_t factorIndex, ArrayRef<AxisRefAttr> axisRefs)
+      : factorIndex(factorIndex), axes(AxisListRef(axisRefs)) {}
 
   // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
   // use it when the axes is empty.
@@ -299,9 +299,6 @@ struct FactorAxesCandidate {
 
   bool empty() const { return factorAxes.empty(); }
 };
-
-using FactorAxesCandidatesMap =
-    DenseMap<FactorAxesPair, FactorAxesCandidate, FactorAxesPairInfo>;
 
 int64_t getShardingSize(ArrayRef<AxisRefAttr> axisRefs, MeshAttr mesh) {
   int64_t shardingSize = 1;
@@ -462,8 +459,10 @@ class FactorAxesCandidateBag {
   bool empty() const { return candidates.empty(); }
 
   // Inserts a new candidate to the bag. Performs in constant-time.
-  void insert(const FactorAxesCandidate& candidate) {
-    candidates.push_back(candidate);
+  void insert(const FactorAxesPair& factorAxes,
+              OpShardingRuleAttr shardingRule) {
+    candidates.emplace_back(factorAxes, factorAxes.axes.getShardingSize(mesh),
+                            shardingRule.getFactorType(factorAxes.factorIndex));
   }
 
   // Updates the sharding size of the one at index as the  product of the
@@ -475,6 +474,22 @@ class FactorAxesCandidateBag {
     FactorAxesCandidate& candidate = candidates[index];
     candidate.shardingSize =
         candidate.factorAxes.axes.getExpandedShardingSize(mesh, prefix);
+  }
+
+  // TODO(enver): Optimize by grouping candidates on the same factors.
+  void updateTotalGlobalSourceTensorSizes(
+      const int64_t sourceFactorIndex,
+      ArrayRef<AxisRefAttr> sourceFactorAxisRefs,
+      const int64_t sourceTensorSize) {
+    AxisListRef sourceFactorAxes(sourceFactorAxisRefs);
+    for (FactorAxesCandidate& candidate : candidates) {
+      FactorAxesPair& factorAxesPair = candidate.factorAxes;
+      if (factorAxesPair.factorIndex == sourceFactorIndex &&
+          (sourceFactorAxes == factorAxesPair.axes ||
+           factorAxesPair.axes.strictPrefixOf(sourceFactorAxes))) {
+        candidate.totalGlobalSourceTensorSize += sourceTensorSize;
+      }
+    }
   }
 
   // Updates the local largest source tensor sizes and communication costs of
@@ -597,7 +612,7 @@ FactorAxesCandidateBag findFactorAxesCandidates(
 
   // Count factor-axes pairs by iterating through each sharding, and for each
   // sharding, update candidate for the sharding and all its prefixes.
-  FactorAxesCandidatesMap factorAxesCandidatesMap;
+  DenseSet<FactorAxesPair, FactorAxesPairInfo> factorAxesPairs;
   for (const auto& [tensorSize, tensorFactorSharding] :
        llvm::zip_equal(tensorSizes, llvm::concat<const TensorFactorShardings>(
                                         shardingProjection.getOperands(),
@@ -609,21 +624,29 @@ FactorAxesCandidateBag findFactorAxesCandidates(
       }
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
       while (!axisRefs.empty()) {
-        FactorAxesPair factorAxesPair(factorIndex, AxisListRef(axisRefs));
-        auto [it, _] = factorAxesCandidatesMap.try_emplace(
-            factorAxesPair, factorAxesPair, getShardingSize(axisRefs, mesh),
-            shardingRule.getFactorType(factorIndex));
-        FactorAxesCandidate& candidate = it->second;
-        candidate.totalGlobalSourceTensorSize += tensorSize;
+        factorAxesPairs.insert(FactorAxesPair(factorIndex, axisRefs));
         axisRefs = axisRefs.drop_back();
       }
     }
   }
 
   FactorAxesCandidateBag factorAxesCandidates(mesh, shardingRule);
-  for (const auto& [_, candidate] : factorAxesCandidatesMap) {
-    factorAxesCandidates.insert(candidate);
+  for (const FactorAxesPair& factorAxes : factorAxesPairs) {
+    factorAxesCandidates.insert(factorAxes, shardingRule);
   }
+
+  // Set total global source tensor sizes of candidates.
+  for (const auto& [tensorSize, tensorFactorSharding] :
+       llvm::zip_equal(tensorSizes, llvm::concat<const TensorFactorShardings>(
+                                        shardingProjection.getOperands(),
+                                        shardingProjection.getResults()))) {
+    for (const auto& [factorIndex, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      factorAxesCandidates.updateTotalGlobalSourceTensorSizes(
+          factorIndex, factorSharding.axisRefs, tensorSize);
+    }
+  }
+
   return factorAxesCandidates;
 }
 
