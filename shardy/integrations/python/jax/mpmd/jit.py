@@ -511,7 +511,7 @@ class MpmdWrapped(jax.stages.Wrapped):
       keep_unused: bool = False,
       override_func_name: str | None = None,
   ):
-    """Initializes an MpmdGspmdWrapped object."""
+    """Initializes an MpmdWrapped object."""
 
     if override_func_name:
       @functools.wraps(func)
@@ -631,7 +631,7 @@ def jit(
       the provided value.
 
   Returns:
-    An MpmdGspmdWrapped object.
+    An MpmdWrapped object.
   """
   return MpmdWrapped(
       func,
