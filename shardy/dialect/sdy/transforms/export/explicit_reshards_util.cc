@@ -528,9 +528,16 @@ class FactorAxesCandidateBag {
 
     FactorAxesCandidate bestCandidate;
     for (FactorAxesCandidate& candidate : candidates) {
-      candidate.communicationCost =
-          getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
-                               localTensorSizes, mesh, candidate.factorAxes);
+      // NOTE: The axes on replication factors are distributed to batching
+      // dimensions after the common axes are found for all non-replication
+      // factors. The communication cost calculation does not take this into
+      // account yet and hence is not ready for cases that sharding rule has
+      // replication factors.
+      if (shardingRule.getNeedReplicationFactors().empty()) {
+        candidate.communicationCost =
+            getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
+                                 localTensorSizes, mesh, candidate.factorAxes);
+      }
       if (isValid(candidate)) {
         bestCandidate = std::max(bestCandidate, candidate);
       }
