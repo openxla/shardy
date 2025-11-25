@@ -272,8 +272,8 @@ struct FactorAxesCandidate {
   // 5. factorAxes: If A is a strict prefix of B, then A is smaller than B.
   bool operator<(const FactorAxesCandidate& rhs) const {
     auto makeComparisonTuple = [](const FactorAxesCandidate& candidate) {
-      return std::make_tuple(candidate.totalGlobalSourceTensorSize,
-                             -candidate.communicationCost,
+      return std::make_tuple(-candidate.communicationCost,
+                             candidate.totalGlobalSourceTensorSize,
                              candidate.factorTypePrecedence,
                              candidate.largestLocalSourceTensorSize,
                              candidate.shardingSize, candidate.factorAxes);
