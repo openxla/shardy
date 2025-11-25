@@ -330,7 +330,8 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes,
                              ArrayRef<int64_t> localTensorSizes, MeshAttr mesh,
-                             const FactorAxesPair& factorAxesPair) {
+                             const FactorAxesPair& factorAxesPair,
+                             const int64_t expandedShardingSize) {
   // The relative cost of collective operations.
   constexpr int64_t allToAllCost = 1;
   constexpr int64_t collectivePermuteCost = 2;
@@ -407,10 +408,14 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
   // If the result contains this factor, we need
   // 1. all-to-all to move AX from this factor to other factors.
   // 2. all-gather to shrink the sharding size after the all-to-all above.
-  for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
+  for (const auto& [localTensorSize, tensorFactorSharding] : llvm::zip_equal(
            localTensorSizes.drop_front(shardingProjection.getNumOperands()),
            shardingProjection.getResults())) {
-    int64_t shardedTensorSize = tensorSize / axesXSize;
+    // A candidate factor axes (factorAxesPair) is guaranteed to be an expansion
+    // of its existing sharding and `localTensorSize` has already taken into its
+    // existing sharding. In order to avoid double counting, it needs to shard
+    // further on the expanded sharding size only.
+    int64_t shardedTensorSize = localTensorSize / expandedShardingSize;
     auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
         tensorFactorSharding, factorAxesPair.factorIndex);
 
@@ -534,9 +539,9 @@ class FactorAxesCandidateBag {
       // account yet and hence is not ready for cases that sharding rule has
       // replication factors.
       if (shardingRule.getNeedReplicationFactors().empty()) {
-        candidate.communicationCost =
-            getCommunicationCost(shardingProjection, shardingRule, tensorSizes,
-                                 localTensorSizes, mesh, candidate.factorAxes);
+        candidate.communicationCost = getCommunicationCost(
+            shardingProjection, shardingRule, tensorSizes, localTensorSizes,
+            mesh, candidate.factorAxes, candidate.shardingSize);
       }
       if (isValid(candidate)) {
         bestCandidate = std::max(bestCandidate, candidate);
