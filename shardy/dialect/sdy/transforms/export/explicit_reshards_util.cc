@@ -408,14 +408,15 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
   // If the result contains this factor, we need
   // 1. all-to-all to move AX from this factor to other factors.
   // 2. all-gather to shrink the sharding size after the all-to-all above.
-  for (const auto& [localTensorSize, tensorFactorSharding] : llvm::zip_equal(
+  for (const auto& [tensorSize, localTensorSize, tensorFactorSharding] :
+       llvm::zip_equal(
+           tensorSizes.drop_front(shardingProjection.getNumOperands()),
            localTensorSizes.drop_front(shardingProjection.getNumOperands()),
            shardingProjection.getResults())) {
     // A candidate factor axes (factorAxesPair) is guaranteed to be an expansion
-    // of its existing sharding and `localTensorSize` has already taken into its
+    // of its existing sharding and `localTensorSize has already taken into its
     // existing sharding. In order to avoid double counting, it needs to shard
     // further on the expanded sharding size only.
-    int64_t shardedTensorSize = localTensorSize / expandedShardingSize;
     auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
         tensorFactorSharding, factorAxesPair.factorIndex);
 
@@ -425,9 +426,11 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
     if (shardingRule.isReductionFactor(factorAxesPair.factorIndex)) {
       communicationCost +=
           (diffXASize > 1 ? allReduceCost : reduceScatterCost) *
-          shardedTensorSize;
+          (localTensorSize / expandedShardingSize);
     }
 
+    int64_t shardedTensorSize =
+        tensorSize / tensorFactorSharding.getShardingSize(mesh);
     if (!tensorFactorSharding.factorIndexToSharding.contains(
             factorAxesPair.factorIndex)) {
       continue;
