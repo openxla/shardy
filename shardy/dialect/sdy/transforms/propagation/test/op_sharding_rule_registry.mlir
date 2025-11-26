@@ -318,6 +318,13 @@ func.func @custom_call_compact_wy_helper(%arg0: tensor<128x128xf32>) -> tensor<1
   return %0 : tensor<128x128xf32>
 }
 
+// CHECK-LABEL: func @custom_call_allocate_buffer
+func.func @custom_call_allocate_buffer(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}>
+  %0 = stablehlo.custom_call @AllocateBuffer(%arg0) : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
 // CHECK-LABEL: func @custom_call_inspect_sharding
 func.func @custom_call_inspect_sharding(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}>

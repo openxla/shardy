@@ -535,7 +535,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "xla_ffi_python_gpu_callback") {
           return OpShardingRuleAttr();
         }
-        if (callTargetName == "annotate_device_placement" ||
+        if (callTargetName == "AllocateBuffer" ||
+            callTargetName == "annotate_device_placement" ||
             callTargetName == "Cholesky" ||
             callTargetName == "CompactWyHelper" ||
             callTargetName == "InspectSharding" ||
