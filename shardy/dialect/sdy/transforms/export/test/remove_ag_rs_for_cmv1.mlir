@@ -72,3 +72,17 @@ func.func @dot_reduce_scatter_with_unreduced_axes(
   %1 = sdy.reduce_scatter [{"x"}, {}] %0 out_sharding=<@mesh, [{"x"}, {}], unreduced={"y"}> : tensor<8x32xf32>
   return %1 : tensor<8x32xf32>
 }
+
+// CHECK-LABEL: func @all_gather_dot_reduce_scatter
+func.func @all_gather_dot_reduce_scatter(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>},
+    %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>})
+    -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) {
+  // CHECK: %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}]>]>}
+  // CHECK-NEXT: %1 = sdy.reduce_scatter [{"x"}, {}] %0 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<8x32xf32>
+  // CHECK-NEXT: return %0
+  %0 = sdy.all_gather [{"y"}, {}] %arg0 out_sharding=<@mesh, [{}, {"x"}]> : tensor<8x16xf32>
+  %1 = stablehlo.dot %0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}]>]>} : (tensor<8x16xf32>, tensor<16x32xf32>) -> tensor<8x32xf32>
+  %2 = sdy.reduce_scatter [{"x"}, {}] %1 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<8x32xf32>
+  return %1 : tensor<8x32xf32>
+}
