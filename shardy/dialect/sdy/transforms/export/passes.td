@@ -120,7 +120,6 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
 
 def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"> {
   let summary = "Converts ReshardOp into various Shardy collective ops.";
-  let dependentDialects = ["mlir::sdy::SdyDialect"];
   let description = [{
     Matches reshard ops and rewrites them into various Shardy collective
     ops. After this pass, no reshard ops remain in the module.
