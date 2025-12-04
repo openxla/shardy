@@ -22,7 +22,7 @@ To set up a development environment:
 
     ```bash
     git clone https://github.com/openxla/shardy.git
-    cd shardy/shardy/integrations/python/jax/mpmd
+    cd shardy/integrations/python/jax/mpmd
     ```
 
 2.  **Create and activate a virtual environment:**
@@ -41,7 +41,7 @@ To set up a development environment:
 4.  **Run unit tests:**
 
     ```bash
-    pytest jit_test.py
+    pytest -s jit_test.py
     ```
 
 ## Usage
