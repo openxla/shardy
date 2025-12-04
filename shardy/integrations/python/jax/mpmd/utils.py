@@ -20,7 +20,7 @@ import functools
 from typing import Any, TypeVar
 
 import jax
-from jax.jaxlib import _sdy_mpmd as mpmd_utils
+from jaxlib import _sdy_mpmd as mpmd_utils
 import jaxtyping
 
 PyTree = jaxtyping.PyTree

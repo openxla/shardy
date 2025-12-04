@@ -23,7 +23,7 @@ from absl import logging
 import jax
 from jax.experimental import layout as jax_layout
 from jax.interpreters import mlir
-from jax.jaxlib import _sdy_mpmd as jaxlib_mpmd
+from jaxlib import _sdy_mpmd as jaxlib_mpmd
 import jaxtyping
 import numpy as np
 import typing_extensions

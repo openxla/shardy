@@ -18,7 +18,6 @@
 from collections.abc import Mapping, Sequence
 import dataclasses
 import enum
-from typing import Any
 
 import jax
 import jaxtyping

@@ -18,7 +18,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import chex
 import jax
-from jax.jaxlib import _sdy_mpmd as mpmd_utils
+from jaxlib import _sdy_mpmd as mpmd_utils
 import numpy as np
 from shardy.integrations.python.jax.mpmd import utils
 

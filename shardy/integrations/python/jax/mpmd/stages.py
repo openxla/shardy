@@ -28,7 +28,7 @@ from jax._src.interpreters import pxla
 from jax.experimental import layout
 import jax.extend.backend as jax_backend
 from jax.interpreters import mlir as jax_mlir
-from jax.jaxlib import _sdy_mpmd as jaxlib_mpmd
+from jaxlib import _sdy_mpmd as jaxlib_mpmd
 import jaxtyping
 import numpy as np
 

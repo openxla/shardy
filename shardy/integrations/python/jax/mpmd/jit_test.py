@@ -20,7 +20,6 @@ import functools
 from absl.testing import absltest
 from absl.testing import parameterized
 import chex
-from flax.core import scope
 import jax
 from jax import sharding
 import jax.numpy as jnp
@@ -34,7 +33,6 @@ from shardy.integrations.python.jax.mpmd import types as mpmd_types
 
 
 PyTree = jaxtyping.PyTree
-VariableDict = scope.VariableDict
 
 
 def _replicated(

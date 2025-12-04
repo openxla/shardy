@@ -1,0 +1,81 @@
+# Copyright 2025 The MPMD Authors.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shardy-mpmd"
+version = "0.0.1"
+description = "Shardy MPMD JAX integration for multi-program multi-data parallelism"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "The MPMD Authors"}]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "jax>=0.8.0",
+    "jaxlib>=0.8.0",
+    "jaxtyping>=0.3.3",
+    "numpy>=1.24.0",
+    "absl-py>=1.0.0",
+    "typing_extensions>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-xdist",
+    "chex",
+    "pyink",
+]
+
+[tool.setuptools]
+packages = ["shardy.integrations.python.jax.mpmd"]
+package-dir = {"shardy.integrations.python.jax.mpmd" = "."}
+
+[tool.mypy]
+show_error_codes = true
+no_implicit_optional = true
+warn_redundant_casts = true
+allow_redefinition = true
+
+[[tool.mypy.overrides]]
+module = [
+    "jax.*",
+    "jaxlib.*",
+    "numpy.*",
+    "absl.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["**/*_test.py"]
+python_files = "*_test.py"
+addopts = "--import-mode=importlib"
+pythonpath = ["../../../../.."]
+
+[tool.pyink]
+line-length = 80
+target-version = ["py311"]
+pyink-indentation = 2
+pyink-use-majority-quotes = true
