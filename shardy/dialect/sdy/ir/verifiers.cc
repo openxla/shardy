@@ -1374,6 +1374,39 @@ LogicalResult AllGatherOp::verifySymbolUses(
       });
 }
 
+LogicalResult ShardedToUnreducedOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  LogicalResult result = verifyCollectiveWithAxesPerDim(
+      *this, symbolTableCollection, getAxes(),
+      [this](DimensionShardingAttr operandDimSharding,
+             ArrayRef<AxisRefAttr> dimGatheringAxes, int64_t dim,
+             MeshAttr mesh) -> FailureOr<SmallVector<AxisRefAttr>> {
+        return gatherAxesAlongDim(operandDimSharding, dimGatheringAxes, dim,
+                                  mesh, "shard-to-unreduce",
+                                  getEmitErrorFn(*this));
+      });
+  if (failed(result)) {
+    return result;
+  }
+
+  // out_unreduced_axes should be in_unreduced_axes + sharded_to_unreduced_axes.
+  SmallVector<AxisRefAttr> expectedUnreducedAxes =
+      llvm::to_vector(getSharding(getOperand()).getUnreducedAxes());
+  for (AxisRefListAttr shardedToUnreducedAxes : getAxes()) {
+    expectedUnreducedAxes.append(shardedToUnreducedAxes.getValue().begin(),
+                                 shardedToUnreducedAxes.getValue().end());
+  }
+  MeshAttr mesh = getOutSharding().getMesh(symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>()));
+  sortAndMergeAxes(expectedUnreducedAxes, mesh);
+  if (expectedUnreducedAxes != getOutSharding().getUnreducedAxes()) {
+    return emitOpError(
+        "out_unreduced_axes should be in_unreduced_axes + "
+        "sharded_to_unreduced_axes");
+  }
+  return success();
+}
+
 LogicalResult AllSliceOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   return verifyCollectiveWithAxesPerDim(
