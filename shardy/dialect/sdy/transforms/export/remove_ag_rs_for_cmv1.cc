@@ -15,7 +15,7 @@ limitations under the License.
 
 #include <cassert>
 
-#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -41,31 +41,43 @@ struct RemoveAllGatherReduceScatterForCMV1Pass
       RemoveAllGatherReduceScatterForCMV1PassBase;
 
   void runOnOperation() final {
-    IRRewriter rewriter(&getContext());
+    SmallVector<Operation*> opsToReplace;
 
-    getOperation()->walk([&](Operation* op) {
-      llvm::TypeSwitch<Operation*>(op)
-          .Case<sdy::AllGatherOp>([&](sdy::AllGatherOp allGatherOp) {
-            if (allGatherOp->hasOneUse() &&
-                mlir::isa<stablehlo::DotOp, stablehlo::DotGeneralOp>(
-                    *allGatherOp->user_begin())) {
-              rewriter.replaceOp(allGatherOp, allGatherOp.getTensor());
-            }
-          })
-          .Case<sdy::ReduceScatterOp>([&](sdy::ReduceScatterOp
-                                              reduceScatterOp) {
-            Operation* operandDefOp =
-                reduceScatterOp.getTensor().getDefiningOp();
-            if (isa_and_nonnull<stablehlo::DotOp, stablehlo::DotGeneralOp>(
-                    operandDefOp) &&
-                getSharding(operandDefOp->getResult(0))
-                    .getUnreducedAxes()
-                    .empty()) {
-              setShardings(operandDefOp, {reduceScatterOp.getOutSharding()});
-              rewriter.replaceOp(reduceScatterOp, reduceScatterOp.getTensor());
-            }
-          });
+    getOperation()->walk([&](Operation* dotOp) {
+      if (!mlir::isa<stablehlo::DotOp, stablehlo::DotGeneralOp>(dotOp)) {
+        return;
+      }
+
+      bool hasAllGatherOperand = false;
+      for (Value operand : dotOp->getOperands()) {
+        if (auto allGatherOp = operand.getDefiningOp<sdy::AllGatherOp>();
+            allGatherOp && allGatherOp->hasOneUse()) {
+          opsToReplace.push_back(allGatherOp);
+          hasAllGatherOperand = true;
+        }
+      }
+
+      // If the operand is all-gather, we can keep the reduce-scatter for the
+      // dot result.
+      if (hasAllGatherOperand) {
+        return;
+      }
+
+      if (dotOp->hasOneUse()) {
+        if (auto reduceScatterOp =
+                dyn_cast<sdy::ReduceScatterOp>(*dotOp->user_begin());
+            reduceScatterOp &&
+            getSharding(dotOp->getResult(0)).getUnreducedAxes().empty()) {
+          setShardings(dotOp, {getSharding(reduceScatterOp->getResult(0))});
+          opsToReplace.push_back(reduceScatterOp);
+        }
+      }
     });
+
+    IRRewriter rewriter(&getContext());
+    for (Operation* opToReplace : opsToReplace) {
+      rewriter.replaceOp(opToReplace, opToReplace->getOperand(0));
+    }
   }
 };
 
