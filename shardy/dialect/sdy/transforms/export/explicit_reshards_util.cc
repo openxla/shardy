@@ -272,8 +272,8 @@ struct FactorAxesCandidate {
   // 5. factorAxes: If A is a strict prefix of B, then A is smaller than B.
   bool operator<(const FactorAxesCandidate& rhs) const {
     auto makeComparisonTuple = [](const FactorAxesCandidate& candidate) {
-      return std::make_tuple(-candidate.communicationCost,
-                             candidate.totalGlobalSourceTensorSize,
+      return std::make_tuple(candidate.totalGlobalSourceTensorSize,
+                             -candidate.communicationCost,
                              candidate.factorTypePrecedence,
                              candidate.largestLocalSourceTensorSize,
                              candidate.shardingSize, candidate.factorAxes);
@@ -328,8 +328,7 @@ getShardingAxesInOtherAndThisFactor(
 
 int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes,
-                             ArrayRef<int64_t> localTensorSizes, MeshAttr mesh,
+                             ArrayRef<int64_t> tensorSizes, MeshAttr mesh,
                              const FactorAxesPair& factorAxesPair,
                              const int64_t expandedShardingSize) {
   // The relative cost of collective operations.
@@ -408,15 +407,10 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
   // If the result contains this factor, we need
   // 1. all-to-all to move AX from this factor to other factors.
   // 2. all-gather to shrink the sharding size after the all-to-all above.
-  for (const auto& [tensorSize, localTensorSize, tensorFactorSharding] :
-       llvm::zip_equal(
+  for (const auto& [tensorSize, tensorFactorSharding] : llvm::zip_equal(
            tensorSizes.drop_front(shardingProjection.getNumOperands()),
-           localTensorSizes.drop_front(shardingProjection.getNumOperands()),
            shardingProjection.getResults())) {
-    // A candidate factor axes (factorAxesPair) is guaranteed to be an expansion
-    // of its existing sharding and `localTensorSize has already taken into its
-    // existing sharding. In order to avoid double counting, it needs to shard
-    // further on the expanded sharding size only.
+    int64_t shardedTensorSize = tensorSize / axesXSize;
     auto [axesA, axesB] = getShardingAxesInOtherAndThisFactor(
         tensorFactorSharding, factorAxesPair.factorIndex);
 
@@ -426,11 +420,9 @@ int64_t getCommunicationCost(const ShardingProjection& shardingProjection,
     if (shardingRule.isReductionFactor(factorAxesPair.factorIndex)) {
       communicationCost +=
           (diffXASize > 1 ? allReduceCost : reduceScatterCost) *
-          (localTensorSize / expandedShardingSize);
+          shardedTensorSize;
     }
 
-    int64_t shardedTensorSize =
-        tensorSize / tensorFactorSharding.getShardingSize(mesh);
     if (!tensorFactorSharding.factorIndexToSharding.contains(
             factorAxesPair.factorIndex)) {
       continue;
@@ -543,8 +535,8 @@ class FactorAxesCandidateBag {
       // replication factors.
       if (shardingRule.getNeedReplicationFactors().empty()) {
         candidate.communicationCost = getCommunicationCost(
-            shardingProjection, shardingRule, tensorSizes, localTensorSizes,
-            mesh, candidate.factorAxes, candidate.shardingSize);
+            shardingProjection, shardingRule, tensorSizes, mesh,
+            candidate.factorAxes, candidate.shardingSize);
       }
       if (isValid(candidate)) {
         bestCandidate = std::max(bestCandidate, candidate);
