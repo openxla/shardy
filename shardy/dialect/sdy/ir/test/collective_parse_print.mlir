@@ -395,3 +395,58 @@ func.func @reduce_scatter_subaxis_suffix_of_subaxis(%arg0 : tensor<16x8xf32> {sd
   %0 = sdy.reduce_scatter [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{"y"}, {"z", "x":(1)4}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @sharded_to_unreduced_1
+func.func @sharded_to_unreduced_1(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  %0 = sdy.sharded_to_unreduced [{}, {"x"}] %arg0 out_sharding=<@mesh1, [{"y"}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_2
+func.func @sharded_to_unreduced_2(%arg0 : tensor<16xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"y", "z", "x"}]>}) -> tensor<16xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{"z", "x"}] %arg0 out_sharding=<@mesh2, [{"y"}], unreduced={"x", "z"}>
+  %0 = sdy.sharded_to_unreduced [{"z", "x"}] %arg0 out_sharding=<@mesh2, [{"y"}], unreduced={"x", "z"}> : tensor<16xf32>
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_3
+func.func @sharded_to_unreduced_3(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"y", "z"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{"z"}, {"x"}] %arg0 out_sharding=<@mesh2, [{"y"}, {}], unreduced={"x", "z"}>
+  %0 = sdy.sharded_to_unreduced [{"z"}, {"x"}] %arg0 out_sharding=<@mesh2, [{"y"}, {}], unreduced={"x", "z"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_input_has_unreduced_axes
+func.func @sharded_to_unreduced_input_has_unreduced_axes(%arg0 : tensor<16xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"z", "x"}], unreduced={"y"}>}) -> tensor<16xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{"x"}] %arg0 out_sharding=<@mesh2, [{"z"}], unreduced={"x", "y"}>
+  %0 = sdy.sharded_to_unreduced [{"x"}] %arg0 out_sharding=<@mesh2, [{"z"}], unreduced={"x", "y"}> : tensor<16xf32>
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_subaxis_exact_match
+func.func @sharded_to_unreduced_subaxis_exact_match(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{}, {"x":(1)2}] %arg0 out_sharding=<@mesh3, [{"y"}, {}], unreduced={"x":(1)2}>
+  %0 = sdy.sharded_to_unreduced [{}, {"x":(1)2}] %arg0 out_sharding=<@mesh3, [{"y"}, {}], unreduced={"x":(1)2}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_subaxis_suffix_of_full
+func.func @sharded_to_unreduced_subaxis_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"x", "z"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{}, {"x":(4)2, "z"}] %arg0 out_sharding=<@mesh4, [{"y"}, {"x":(1)4}], unreduced={"x":(4)2, "z"}>
+  %0 = sdy.sharded_to_unreduced [{}, {"x":(4)2, "z"}] %arg0 out_sharding=<@mesh4, [{"y"}, {"x":(1)4}], unreduced={"x":(4)2, "z"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_subaxis_suffix_of_subaxis
+func.func @sharded_to_unreduced_subaxis_suffix_of_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh4, [{"y"}, {"z", "x":(1)4}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{"y"}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{}, {"z", "x":(1)2}], unreduced={"x":(2)2, "y"}>
+  %0 = sdy.sharded_to_unreduced [{"y"}, {"x":(2)2}] %arg0 out_sharding=<@mesh4, [{}, {"z", "x":(1)2}], unreduced={"x":(2)2, "y"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_sort_and_merge_axes
+func.func @sharded_to_unreduced_sort_and_merge_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh6, [{"y":(1)2, "x":(2)2}, {"x":(1)2, "y":(2)2}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{"x":(2)2}, {"x":(1)2, "y":(2)2}] %arg0 out_sharding=<@mesh6, [{"y":(1)2}, {}], unreduced={"x", "y":(2)2}>
+  %0 = sdy.sharded_to_unreduced [{"x":(2)2}, {"x":(1)2, "y":(2)2}] %arg0 out_sharding=<@mesh6, [{"y":(1)2}, {}], unreduced={"x", "y":(2)2}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
