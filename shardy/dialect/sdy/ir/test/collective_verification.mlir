@@ -784,3 +784,165 @@ func.func @reduce_scatter_incompatible_result_sharding_subaxis2(%arg0 : tensor<1
   %0 = sdy.reduce_scatter [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh, [{"y"}, {"x":(1)2, "x":(2)2}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_operand_no_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
+  // expected-error @+1 {{collective on operand without sharding}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh1 = <["x"=2, "y"=2]>
+sdy.mesh @mesh2 = <["a"=2, "b"=2]>
+
+// expected-note @+1 {{operand mesh: #sdy.mesh<["a"=2, "b"=2]>}}
+func.func @sharded_to_unreduced_with_incompatible_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"a"}, {"b"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result mesh does not match operand mesh}}
+  %0 = sdy.sharded_to_unreduced [{}, {"b"}] %arg0 out_sharding=<@mesh1, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_invalid_out_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{duplicate axis ref: "x"}}
+  %0 = sdy.sharded_to_unreduced [{"y"}, {}] %arg0 out_sharding=<@mesh, [{}, {"x", "x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=2]>
+
+func.func @sharded_to_unreduced_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{two consecutive sub-axes can be merged: "x":(1)2, "x":(2)2}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x":(1)2, "x":(2)2}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_duplicate_axes_across_dims(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{duplicate axis ref: "x"}}
+  %0 = sdy.sharded_to_unreduced [{"y", "x"}, {"x"}] %arg0 out_sharding=<@mesh, [{}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incompatible_axes_rank_zero(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result sharding has rank 2 but collective axes has rank 1}}
+  %0 = sdy.sharded_to_unreduced [{}] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incompatible_axes_rank_one(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result sharding has rank 2 but collective axes has rank 1}}
+  %0 = sdy.sharded_to_unreduced [{"y", "x"}] %arg0 out_sharding=<@mesh, [{}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incompatible_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{can't apply shard-to-unreduce axis "y" to operand sharding on dimension 1}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x", "y"}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_with_too_many_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{can't apply shard-to-unreduce axis "x" to operand sharding on dimension 0}}
+  %0 = sdy.sharded_to_unreduced [{"x", "y"}, {}] %arg0 out_sharding=<@mesh, [{}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incomatible_operand_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x":(1)2}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{can't apply shard-to-unreduce axis "x" to operand sharding on dimension 1}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incomatible_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{can't apply shard-to-unreduce axis "x":(2)2 to operand sharding on dimension 1}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x":(2)2}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incompatible_result_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result sharding doesn't match expected sharding [] on dimension 1}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @sharded_to_unreduced_with_incompatible_result_sharding_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{result sharding doesn't match expected sharding ["x":(1)2] on dimension 1}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x":(2)4}] %arg0 out_sharding=<@mesh, [{"y"}, {"x":(1)4}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4, "z"=4]>
+
+func.func @sharded_to_unreduced_missing_unreduced_axes_in_result(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}], unreduced = {"z"}>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{out_unreduced_axes should be in_unreduced_axes + sharded_to_unreduced_axes}}
+  %0 = sdy.sharded_to_unreduced [{"y"}, {"x":(2)2}] %arg0 out_sharding=<@mesh, [{}, {"x":(1)2}], unreduced = {"x":(2)2, "y"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4, "z"=4]>
+
+func.func @sharded_to_unreduced_extra_unreduced_axes_in_result(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{out_unreduced_axes should be in_unreduced_axes + sharded_to_unreduced_axes}}
+  %0 = sdy.sharded_to_unreduced [{"y"}, {"x":(2)2}] %arg0 out_sharding=<@mesh, [{}, {"x":(1)2}], unreduced = {"x":(2)2, "y", "z"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4]>
+
+func.func @sharded_to_unreduced_unsorted_unreduced_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{op unreduced axes are not ordered w.r.t. mesh}}
+  %0 = sdy.sharded_to_unreduced [{"y"}, {"x":(2)2}] %arg0 out_sharding=<@mesh, [{}, {"x":(1)2}], unreduced = {"y", "x":(2)2}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

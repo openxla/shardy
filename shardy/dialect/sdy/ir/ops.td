@@ -459,7 +459,6 @@ def Sdy_NamedComputationOp : Sdy_Op<"named_computation",
   }];
 }
 
-
 def Sdy_AllGatherOp : Sdy_Op<"all_gather",
     [SameOperandsAndResultType, InferTypeOpInterface,
      Sdy_CollectiveOpInterface,
@@ -709,6 +708,39 @@ def Sdy_ReduceScatterOp: Sdy_Op<"reduce_scatter",
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasCanonicalizer = 1;
+}
+
+def Sdy_ShardedToUnreducedOp : Sdy_Op<"sharded_to_unreduced",
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     Sdy_CollectiveOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
+  let summary = "Move some sharded axes of the operand to unreduced axes of the result.";
+  let description = [{
+    The `axes` should be used to shard the operand. This operation makes them
+    unreduced in the result. We have the following relationship:
+
+    all-gather(x, axes) = all-reduce(sharded-to-unreduced(x, axes), axes), where
+    all-gather, sharded-to-unreduced, all-reduce are applied on the same axes.
+
+    Example:
+    ```mlir
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced = ["e"]>]>} : tensor<8x8x8xf32>
+    %2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced = ["b", "c", "d", "e"]> : tensor<8x8x8xf32>
+    ```
+
+    **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+    - Elements in `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - Applying `axes` to the operand sharding gets `out_sharding`.
+  }];
+
+  let arguments = (ins
+    AnyShaped:$tensor,
+    Sdy_ListOfAxisRefLists:$axes,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyShaped:$result);
+  let assemblyFormat = "$axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
 }
 
 #endif  // SDY_OPS
