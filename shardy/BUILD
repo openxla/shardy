@@ -14,7 +14,7 @@ from python.runfiles import Runfiles
 from pathlib import Path
 
 r = Runfiles.Create()
-RUNFILES_DIR = Path(r.Rlocation("shardy")).absolute().as_posix()''',
+RUNFILES_DIR = Path(r.Rlocation("shardy/shardy")).absolute().as_posix()''',
         "@LLVM_TOOLS_DIR@": "../llvm-project/llvm",
     },
     template = "lit.site.cfg.py.in",

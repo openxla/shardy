@@ -51,7 +51,7 @@ Here's how to build the Shardy repo on Linux or macOS:
     ```
 
 3.  Update the
-    [bazel lockfile](https://bazel.build/versions/6.5.0/external/lockfile), if
+    [bazel lockfile](https://bazel.build/versions/7.7.0/external/lockfile), if
     necessary:
 
     ```sh

@@ -17,5 +17,5 @@
 import lit.llvm
 lit.llvm.initialize(lit_config, config)
 config.llvm_tools_dir = "@LLVM_TOOLS_DIR@"
-config.shardy_tools_dir = "@PROJECT_SOURCE_DIR@" + "/shardy/tools"
-lit_config.load_config(config, "@PROJECT_SOURCE_DIR@" + "/shardy/lit.cfg.py")
+config.shardy_tools_dir = "@PROJECT_SOURCE_DIR@" + "/tools"
+lit_config.load_config(config, "@PROJECT_SOURCE_DIR@" + "/lit.cfg.py")
