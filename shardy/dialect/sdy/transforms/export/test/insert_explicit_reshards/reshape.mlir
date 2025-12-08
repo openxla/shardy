@@ -5,10 +5,9 @@ sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
 
 // CHECK-LABEL: func @reshape
 func.func @reshape(%arg0: tensor<16x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y", "x"}]>}) {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {"y"}, {}]> : tensor<16x2x4xf32>
-  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<16x2x4xf32>) -> tensor<16x8xf32>
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[RESHAPE]] <@mesh, [{}, {"y", "x"}]> : tensor<16x8xf32>
-  // CHECK-NEXT: return %[[RESHARD2]] : tensor<16x8xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"y"}, {"x"}]> : tensor<16x2x4xf32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y", "x"}]>]>} : (tensor<16x2x4xf32>) -> tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHAPE]] : tensor<16x8xf32>
   %0 = stablehlo.reshape %arg0  {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y", "x"}]>]>} : (tensor<16x2x4xf32>) -> tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
@@ -22,9 +21,9 @@ func.func @reshape_simple_merge_sharding_is_from_x_to_x_and_x_fits_exactly_to_fi
 
 // CHECK-LABEL: func.func @reshape_simple_merge_sharding_is_from_x_to_y_and_x_fits_exactly_to_first_dim
 func.func @reshape_simple_merge_sharding_is_from_x_to_y_and_x_fits_exactly_to_first_dim(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}, {}]> : tensor<4x8xf32>
-  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
-  // CHECK-NEXT: return %[[RESHAPE]] : tensor<32xf32>
+  // CHECK-NEXT: %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
+  // CHECK-NEXT: %1 = sdy.reshard %0 <@mesh, [{"y"}]> : tensor<32xf32>
+  // CHECK-NEXT: return %1 : tensor<32xf32>
   %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
   return %0 : tensor<32xf32>
 }
@@ -38,9 +37,9 @@ func.func @reshape_simple_merge_sharding_is_from_y_to_y_and_y_underfits_to_first
 
 // CHECK-LABEL: func.func @reshape_simple_merge_sharding_is_from_y_to_x_and_y_underfits_to_first_dim
 func.func @reshape_simple_merge_sharding_is_from_y_to_x_and_y_underfits_to_first_dim(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
-  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[RESHAPE]] <@mesh, [{"x"}]> : tensor<32xf32>
-  // CHECK-NEXT: return %[[RESHARD]] : tensor<32xf32>
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
+  // CHECK-NEXT: return %1 : tensor<32xf32>
   %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
   return %0 : tensor<32xf32>
 }
