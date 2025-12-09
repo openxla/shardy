@@ -782,6 +782,59 @@ Effects: `MemoryEffects::Effect{}`
 
 
 
+### `sdy.sharded_to_unreduced` (sdy::ShardedToUnreducedOp)
+
+_Move some sharded axes of the operand to unreduced axes of the result._
+
+Syntax:
+
+```
+operation ::= `sdy.sharded_to_unreduced` $axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+```
+
+The `axes` should be used to shard the operand. This operation makes them
+unreduced in the result. We have the following relationship:
+
+all-gather(x, axes) = all-reduce(sharded-to-unreduced(x, axes), axes), where
+all-gather, sharded-to-unreduced, all-reduce are applied on the same axes.
+
+Example:
+```mlir
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced = ["e"]>]>} : tensor<8x8x8xf32>
+%2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced = ["b", "c", "d", "e"]> : tensor<8x8x8xf32>
+```
+
+**Constraints:**
+- Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+- Elements in `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+- Applying `axes` to the operand sharding gets `out_sharding`.
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>axes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | shaped of any type values |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | shaped of any type values |
+
+
+
 ### `sdy.sharding_constraint` (sdy::ShardingConstraintOp)
 
 _Constrains a tensor to the specified sharding_
