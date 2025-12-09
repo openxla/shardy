@@ -251,10 +251,11 @@ func.func @dot_incompatible_in_out_mismatch_same_axis_on_different_factors_lhs_n
 
 // CHECK-LABEL: func @dot_incompatible_in_out_mismatch_same_axis_on_different_factors_lhs_non_contracting_dim_is_sharded_smaller_local_contracting_dim
 func.func @dot_incompatible_in_out_mismatch_same_axis_on_different_factors_lhs_non_contracting_dim_is_sharded_smaller_local_contracting_dim(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}, %arg1: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) {
-  // CHECK-NEXT: %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %1 = sdy.all_reduce {"y"} %0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x16xf32>
-  // CHECK-NEXT: %2 = sdy.reshard %1 <@mesh, [{}, {"x"}]> : tensor<8x16xf32>
-  // CHECK-NEXT: return %2 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"y"}]> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg1 <@mesh, [{"y"}, {"x"}]> : tensor<16x16xf32>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD1]], %[[RESHARD2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %[[DOT]] out_sharding=<@mesh, [{}, {"x"}]> : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ALL_REDUCE]] : tensor<8x16xf32>
   %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
@@ -524,12 +525,10 @@ func.func @dot_genaral_one_suffix_has_larger_count_on_another_factor(%arg0: tens
   return %0 : tensor<4x8x16xf32>
 }
 
-// TODO(zixuanjiang). We may want to keep {"y", "x":(1)2, "t":(2)2} for the batch dimension.
 // CHECK-LABEL: func @dot_genaral_batching_dimension_shardings_have_common_prefix
 func.func @dot_genaral_batching_dimension_shardings_have_common_prefix(%arg0: tensor<64x8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "x":(1)2, "t":(1)2}, {"t":(2)2}, {}]>}, %arg1: tensor<64x32x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "x":(1)2, "t":(2)2}, {}, {"t":(1)2}]>}) ->(tensor<64x8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {"t":(2)2}, {"t":(1)2}]>}) {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{"y", "x":(1)2}, {"t":(2)2}, {}]> : tensor<64x8x32xf32>
-  // CHECK: %[[RESHARD2:.*]] = sdy.reshard %arg1 <@mesh_xyzt, [{"y", "x":(1)2}, {}, {"t":(1)2}]> : tensor<64x32x16xf32>
-  // CHECK-NEXT: %[[DOTGENERAL:.*]] = stablehlo.dot_general %[[RESHARD1]], %[[RESHARD2]], batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y", "x":(1)2}, {"t":(2)2}, {"t":(1)2}]>]>} : (tensor<64x8x32xf32>, tensor<64x32x16xf32>) -> tensor<64x8x16xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{"y", "x":(1)2, "t":(2)2}, {}, {}]> : tensor<64x8x32xf32>
+  // CHECK-NEXT: %[[DOTGENERAL:.*]] = stablehlo.dot_general %[[RESHARD1]], %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"y", "x":(1)2, "t":(2)2}, {}, {"t":(1)2}]>]>} : (tensor<64x8x32xf32>, tensor<64x32x16xf32>) -> tensor<64x8x16xf32>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[DOTGENERAL]] <@mesh_xyzt, [{}, {"t":(2)2}, {"t":(1)2}]> : tensor<64x8x16xf32>
   // CHECK-NEXT: return %[[RESHARD2]] : tensor<64x8x16xf32>
   %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"t":(2)2}, {"t":(1)2}]>]>} : (tensor<64x8x32xf32>, tensor<64x32x16xf32>) -> tensor<64x8x16xf32>
@@ -587,62 +586,6 @@ func.func @dot_only_contracting_dims_sharded_and_has_same_shardings(
   return %0 : tensor<8x16xf32>
 }
 
-// The following 4 test targets are analyzed quantitlively in b/448376870#comment6.
-// In short, keep the largest factor sharded.
-
-// CHECK-LABEL: func @dot_ij_jk_ik_i_is_largset
-func.func @dot_ij_jk_ik_i_is_largset(
-    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
-    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
-    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
-  // CHECK-NEXT: %[[RESHARD_LHS:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<16x8xf32>
-  // CHECK-NEXT: %[[RESHARD_RHS:.*]] = sdy.reshard %arg1 <@mesh, [{}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD_LHS]], %[[RESHARD_RHS]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<16x8xf32>, tensor<8x8xf32>) -> tensor<16x8xf32>
-  // CHECK-NEXT: return %[[DOT]] : tensor<16x8xf32>
-  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<16x8xf32>, tensor<8x8xf32>) -> tensor<16x8xf32>
-  return %0 : tensor<16x8xf32>
-}
-
-// CHECK-LABEL: func @dot_ij_jk_ik_j_is_largset
-func.func @dot_ij_jk_ik_j_is_largset(
-    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
-    %arg1: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
-    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
-  // CHECK-NEXT: %[[RESHARD_RHS:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}]> : tensor<16x8xf32>
-  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %arg0, %[[RESHARD_RHS]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[DOT]] out_sharding=<@mesh, [{}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh, [{"x"}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: return %[[RESHARD_OUT]] : tensor<8x8xf32>
-  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}
-
-// CHECK-LABEL: func @dot_ij_jk_ik_k_is_largset
-func.func @dot_ij_jk_ik_k_is_largset(
-    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
-    %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
-    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
-  // CHECK-NEXT: %[[RESHARD_LHS:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD_LHS]], %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DOT]] <@mesh, [{"x"}, {}]> : tensor<8x16xf32>
-  // CHECK-NEXT: return %[[RESHARD_OUT]] : tensor<8x16xf32>
-  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
-  return %0 : tensor<8x16xf32>
-}
-
-// CHECK-LABEL: func @dot_ij_jk_ik_same_ijk
-func.func @dot_ij_jk_ik_same_ijk(
-    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
-    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
-    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
-  // CHECK-NEXT: %[[RESHARD_LHS:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD_LHS]], %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
-  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DOT]] <@mesh, [{"x"}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: return %[[RESHARD_OUT]] : tensor<8x8xf32>
-  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}
-
 // CHECK-LABEL: func @dot_on_square_matrices_lhs_2nd_dim_rhs_2nd_dim_sharded_the_same_way
 func.func @dot_on_square_matrices_lhs_2nd_dim_rhs_2nd_dim_sharded_the_same_way(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>},
@@ -674,10 +617,10 @@ func.func @dot_on_rectangular_inputs_square_output_large_contracting_dim_lhs_2nd
     %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>},
     %arg1: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>})
     -> tensor<8x8xf32> {
-  // CHECK-NEXT: %0 = sdy.reshard %arg1 <@mesh, [{"y"}, {}]> : tensor<16x8xf32>
-  // CHECK-NEXT: %1 = stablehlo.dot %arg0, %0 : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
-  // CHECK-NEXT: %2 = sdy.all_reduce {"y"} %1 out_sharding=<@mesh, [{}, {}]> : tensor<8x8xf32>
-  // CHECK-NEXT: return %2 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD1]], %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}]>]>}
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[DOT]] <@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[RESHARD2]]
   %0 = stablehlo.dot %arg0, %arg1 : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
@@ -709,22 +652,16 @@ func.func @dot_on_rectangular_inputs_square_output_large_contracting_dim_lhs_2nd
   return %0 : tensor<8x8xf32>
 }
 
-// TODO(b/456082569): Should have:
-//   %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [2] x [1], precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x16_y4_z2, [{}, {"y", "z"}, {}]>]>}
-//   %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[DOT]] out_sharding=<@mesh_x16_y4_z2, [{}, {"y", "z"}, {}]>
-//   %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh_x16_y4_z2, [{"y"}, {"x", "z"}, {}]>
-//   return %[[RESHARD]]
 // This one is derived from b/456082569#comment8.
 // CHECK-LABEL: func @dot_general_sharded_contracting_dim_with_axes_redistribution
 func.func @dot_general_sharded_contracting_dim_with_axes_redistribution(
     %arg0: tensor<64x1024x8192xf32> {sdy.sharding = #sdy.sharding<@mesh_x16_y4_z2, [{}, {"y", "z"}, {"x"}]>},
     %arg1: tensor<256x8192xf32> {sdy.sharding = #sdy.sharding<@mesh_x16_y4_z2, [{}, {"x"}]>})
     -> (tensor<64x1024x256xf32> {sdy.sharding = #sdy.sharding<@mesh_x16_y4_z2, [{"y"}, {"x", "z"}, {}]>}) {
-  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh_x16_y4_z2, [{"y"}, {}, {"x"}]> : tensor<64x1024x8192xf32>
-  // CHECK-NEXT: %1 = stablehlo.dot_general %0, %arg1, contracting_dims = [2] x [1], precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x16_y4_z2, [{"y"}, {}, {}]>]>} : (tensor<64x1024x8192xf32>, tensor<256x8192xf32>) -> tensor<64x1024x256xf32>
-  // CHECK-NEXT: %2 = sdy.all_reduce {"x"} %1 out_sharding=<@mesh_x16_y4_z2, [{"y"}, {}, {}]> : tensor<64x1024x256xf32>
-  // CHECK-NEXT: %3 = sdy.reshard %2 <@mesh_x16_y4_z2, [{"y"}, {"x", "z"}, {}]> : tensor<64x1024x256xf32>
-  // CHECK-NEXT: return %3 : tensor<64x1024x256xf32>
+  // CHECK-NEXT:  %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [2] x [1], precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x16_y4_z2, [{}, {"y", "z"}, {}]>]>}
+  // CHECK-NEXT:  %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[DOT]] out_sharding=<@mesh_x16_y4_z2, [{}, {"y", "z"}, {}]>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh_x16_y4_z2, [{"y"}, {"x", "z"}, {}]>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [2] x [1], precision = [DEFAULT, DEFAULT] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x16_y4_z2, [{"y"}, {"x", "z"}, {}]>]>} : (tensor<64x1024x8192xf32>, tensor<256x8192xf32>) -> tensor<64x1024x256xf32>
   return %0 : tensor<64x1024x256xf32>
 }
