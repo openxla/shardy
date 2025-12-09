@@ -268,8 +268,8 @@ struct FactorAxesCandidate {
   FactorAxesCandidate() = default;
 
   // Multi-level comparison.
-  // 0. communicationCost
-  // 1. totalSourceTensorSize
+  // 0. totalSourceTensorSize
+  // 1. communicationCost
   // 2. factorTypePrecedence
   // 3. largestSourceTensorSize
   // 4. shardingSize
@@ -277,7 +277,7 @@ struct FactorAxesCandidate {
   bool operator<(const FactorAxesCandidate& rhs) const {
     auto makeComparisonTuple = [](const FactorAxesCandidate& candidate) {
       return std::make_tuple(
-          -candidate.communicationCost, candidate.totalSourceTensorSize,
+          candidate.totalSourceTensorSize, -candidate.communicationCost,
           candidate.factorTypePrecedence, candidate.largestSourceTensorSize,
           candidate.shardingSize, candidate.factorAxes);
     };
