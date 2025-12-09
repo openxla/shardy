@@ -28,7 +28,9 @@ limitations under the License.
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -331,8 +333,7 @@ class CollectiveInserter {
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
         currentAxesPerDim(getAxesPerDim<SmallVector<AxisRefAttr>>(inSharding)),
-        capacityPerDim(inSharding.getRank(), 1),
-        collectiveAxesPerDim(inSharding.getRank()) {
+        capacityPerDim(inSharding.getRank(), 1) {
     // Unreduced axes in the input and output sharding must match, given we
     // insert an all-reduce if an unreduced axis becomes replicated/sharded, and
     // never insert a reshard that goes from replicated/sharded to unreduced.
@@ -460,16 +461,16 @@ class CollectiveInserter {
 
   // Tries to insert an `sdy.all_gather`.
   void tryAllGather() {
-    bool hasGatheringAxes = false;
-    for (auto [dim, collectiveAxes] : llvm::enumerate(collectiveAxesPerDim)) {
-      SmallVector<AxisRefAttr> gatheringAxes = getGatheringAxes(dim);
-      if (!gatheringAxes.empty()) {
-        hasGatheringAxes = true;
-      }
-      collectiveAxes = AxisRefListAttr::get(getContext(), gatheringAxes);
-    }
-    if (hasGatheringAxes) {
-      result = AllGatherOp::create(rewriter, loc, result, collectiveAxesPerDim,
+    bool needAllGather = false;
+    SmallVector<mlir::sdy::AxisRefListAttr> allGatherAxes =
+        llvm::map_to_vector(llvm::seq<int64_t>(0, getRank()), [&](int64_t dim) {
+          SmallVector<AxisRefAttr> gatheringAxes = getGatheringAxes(dim);
+          needAllGather |= !gatheringAxes.empty();
+          return AxisRefListAttr::get(getContext(), gatheringAxes);
+        });
+
+    if (needAllGather) {
+      result = AllGatherOp::create(rewriter, loc, result, allGatherAxes,
                                    getCurrentSharding());
     }
   }
@@ -857,11 +858,12 @@ class CollectiveInserter {
   // Tries to insert an `sdy.all_slice`.
   void tryAllSlice() {
     if (std::optional<AxesPerDim> slicingAxesPerDim = getSlicingAxesPerDim()) {
-      for (auto [collectiveAxes, slicingAxes] :
-           llvm::zip_equal(collectiveAxesPerDim, *slicingAxesPerDim)) {
-        collectiveAxes = AxisRefListAttr::get(getContext(), slicingAxes);
-      }
-      result = AllSliceOp::create(rewriter, loc, result, collectiveAxesPerDim,
+      SmallVector<mlir::sdy::AxisRefListAttr> allSliceAxes =
+          llvm::map_to_vector(
+              *slicingAxesPerDim, [&](ArrayRef<AxisRefAttr> slicingAxes) {
+                return AxisRefListAttr::get(getContext(), slicingAxes);
+              });
+      result = AllSliceOp::create(rewriter, loc, result, allSliceAxes,
                                   getCurrentSharding());
     }
   }
@@ -1309,7 +1311,6 @@ class CollectiveInserter {
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;
   AxesPerDim currentAxesPerDim;
   SmallVector<int64_t> capacityPerDim;
-  SmallVector<AxisRefListAttr> collectiveAxesPerDim;
   AxisSet inAxisSet;
   AxisToDimAndIndex outAxisToDimAndIndex;
 };
