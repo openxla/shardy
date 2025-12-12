@@ -1067,5 +1067,76 @@ void insertAllReducesForReductionFactors(
   }
 }
 
+bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
+                                        const SymbolTable& symbolTable) {
+  ReshardOp reshardOp = dyn_cast<ReshardOp>(op);
+  if (!reshardOp) {
+    return false;
+  }
+
+  Value input = reshardOp.getInput();
+  TensorShardingAttr inSharding = getSharding(input);
+  TensorShardingAttr outSharding = reshardOp.getSharding();
+  if (!inSharding || !outSharding) {
+    return false;
+  }
+
+  ArrayRef<AxisRefAttr> inUnreducedAxes = inSharding.getUnreducedAxes();
+  ArrayRef<AxisRefAttr> outUnreducedAxes = outSharding.getUnreducedAxes();
+  if (outUnreducedAxes.empty()) {
+    return false;
+  }
+
+  MeshAttr inMesh = inSharding.getMesh(symbolTable);
+  MeshAttr outMesh = outSharding.getMesh(symbolTable);
+  SDY_CHECK(inMesh.equals(outMesh))
+      << "Reshard op has different meshes for input and output. The result has "
+         "non-empty unreduced axes.";
+
+  SmallVector<AxisRefAttr> newUnreducedAxes =
+      getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, inMesh);
+  if (newUnreducedAxes.empty()) {
+    return false;
+  }
+
+  SDY_CHECK(getAxisSetDiff(inUnreducedAxes, outUnreducedAxes, inMesh).empty())
+      << "Both input and output have unreduced axes that does not appear in "
+         "the other.";
+  SDY_CHECK(isa<BlockArgument>(input) || input.getDefiningOp<ReshardOp>())
+      << "Input of sharded-to-unreduced reshard must be a block argument or a "
+         "reshard op.";
+
+  SmallVector<AxisRefAttr> allAxes;
+  SmallVector<AxisRefListAttr> axesPerDim(inSharding.getRank());
+  for (auto [inDimSharding, outDimSharding, axes] :
+       llvm::zip_equal(inSharding.getDimShardings(),
+                       outSharding.getDimShardings(), axesPerDim)) {
+    PrefixStatus prefixStatus =
+        isAxisListPrefixOf(outDimSharding.getAxes(), inDimSharding.getAxes());
+    if (prefixStatus == PrefixStatus::EQUAL) {
+      axes = AxisRefListAttr::get(rewriter.getContext(), {});
+    } else if (prefixStatus == PrefixStatus::STRICT_PREFIX) {
+      SmallVector<AxisRefAttr> diff = getAxisSetDiff(
+          inDimSharding.getAxes(), outDimSharding.getAxes(), inMesh);
+      axes = AxisRefListAttr::get(rewriter.getContext(), diff);
+      allAxes.append(diff);
+    } else {
+      SDY_LOG(FATAL)
+          << "The reshard op needs to be decomposed to a sharded-to-unreduced "
+             "AND other collective ops, which is not supported yet.";
+    }
+  }
+
+  sortAndMergeAxes(allAxes, inMesh);
+  sortAndMergeAxes(newUnreducedAxes, inMesh);
+  SDY_CHECK(allAxes == newUnreducedAxes);
+
+  rewriter.setInsertionPoint(reshardOp);
+  auto shardedToUnreducedOp = ShardedToUnreducedOp::create(
+      rewriter, reshardOp.getLoc(), input, axesPerDim, outSharding);
+  rewriter.replaceOp(reshardOp, shardedToUnreducedOp);
+  return true;
+}
+
 }  // namespace sdy
 }  // namespace mlir

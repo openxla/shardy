@@ -486,6 +486,10 @@ struct InsertExplicitReshardsPass
         return;
       }
 
+      if (convertReshardToShardedToUnreduced(op, rewriter, symbolTable)) {
+        return;
+      }
+
       insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable);
 
       // NOTE: Creating a sharding rule requires data flow edges are present.

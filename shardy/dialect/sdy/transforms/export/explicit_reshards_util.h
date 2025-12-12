@@ -164,6 +164,16 @@ AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes, const Mesh& mesh);
 
+// Converts a `sdy.reshard` op to an `sdy.sharded-to-unreduced` op. Returns true
+// if the conversion is successful.
+//
+// The requirements are:
+// 1. `op` is a `sdy.reshard` op.
+// 2. The input of `op` is another `sdy.reshard` op or a block argument.
+// 3. The `op` can be converted to a single `sdy.sharded-to-unreduced` op.
+bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
+                                        const SymbolTable& symbolTable);
+
 }  // namespace sdy
 }  // namespace mlir
 

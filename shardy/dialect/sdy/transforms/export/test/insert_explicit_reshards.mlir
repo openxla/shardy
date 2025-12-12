@@ -518,3 +518,58 @@ func.func @different_arguments_to_multiple_named_computations_with_same_input_ou
   %4 = stablehlo.add %0, %2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
   return %4 : tensor<210xf32>
 }
+
+//===----------------------------------------------------------------------===//
+// Sharded to unreduced tests
+//===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: func @sharded_to_unreduced_1
+func.func @sharded_to_unreduced_1(
+    %arg0 : tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}], unreduced={"x"}> : tensor<24x8xf32>
+  return %0 : tensor<24x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_single_axis
+func.func @sharded_to_unreduced_single_axis(
+    %arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>})
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh, [{"y"}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_multiple_axes
+func.func @sharded_to_unreduced_multiple_axes(
+    %arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "z", "y"}, {}]>})
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y", "z"}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"z", "y"}, {}] %arg0 out_sharding=<@mesh, [{"x"}, {}], unreduced={"y", "z"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh, [{"x"}, {}], unreduced={"y", "z"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_multiple_dims
+func.func @sharded_to_unreduced_multiple_dims(
+    %arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y", "z"}, {"x"}]>})
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x", "z"}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"z"}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {}], unreduced={"x", "z"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh, [{"y"}, {}], unreduced={"x", "z"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_with_subaxis
+func.func @sharded_to_unreduced_with_subaxis(
+    %arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"z"}, {"x"}]>})
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"z":(1)2}, {"x"}], unreduced={"z":(2)2}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"z":(2)2}, {}] %arg0 out_sharding=<@mesh, [{"z":(1)2}, {"x"}], unreduced={"z":(2)2}>
+  // CHECK-NEXT: return %0
+ %0 = sdy.reshard %arg0 <@mesh, [{"z":(1)2}, {"x"}], unreduced={"z":(2)2}> :  tensor<16x8xf32>
+ return %0 : tensor<16x8xf32>
+}
+
