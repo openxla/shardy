@@ -573,3 +573,13 @@ func.func @sharded_to_unreduced_with_subaxis(
  return %0 : tensor<16x8xf32>
 }
 
+// CHECK-LABEL: func @sharded_to_unreduced_and_replicated_to_unreduced
+func.func @sharded_to_unreduced_and_replicated_to_unreduced(
+    %arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>})
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x", "y", "z"}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x", "y"}>
+  // CHECK-NEXT: %1 = sdy.reshard %0 <@mesh, [{}, {}], unreduced={"x", "y", "z"}>
+  // CHECK-NEXT: return %1
+ %0 = sdy.reshard %arg0 <@mesh, [{}, {}], unreduced={"x", "y", "z"}> :  tensor<16x8xf32>
+ return %0 : tensor<16x8xf32>
+}

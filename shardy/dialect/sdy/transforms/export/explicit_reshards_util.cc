@@ -1093,9 +1093,7 @@ bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
       << "Reshard op has different meshes for input and output. The result has "
          "non-empty unreduced axes.";
 
-  SmallVector<AxisRefAttr> newUnreducedAxes =
-      getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, inMesh);
-  if (newUnreducedAxes.empty()) {
+  if (getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, inMesh).empty()) {
     return false;
   }
 
@@ -1106,7 +1104,7 @@ bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
       << "Input of sharded-to-unreduced reshard must be a block argument or a "
          "reshard op.";
 
-  SmallVector<AxisRefAttr> allAxes;
+  SmallVector<AxisRefAttr> newUnreducedAxes = llvm::to_vector(inUnreducedAxes);
   SmallVector<AxisRefListAttr> axesPerDim(inSharding.getRank());
   for (auto [inDimSharding, outDimSharding, axes] :
        llvm::zip_equal(inSharding.getDimShardings(),
@@ -1119,7 +1117,7 @@ bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
       SmallVector<AxisRefAttr> diff = getAxisSetDiff(
           inDimSharding.getAxes(), outDimSharding.getAxes(), inMesh);
       axes = AxisRefListAttr::get(rewriter.getContext(), diff);
-      allAxes.append(diff);
+      newUnreducedAxes.append(diff);
     } else {
       SDY_LOG(FATAL)
           << "The reshard op needs to be decomposed to a sharded-to-unreduced "
@@ -1127,14 +1125,18 @@ bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
     }
   }
 
-  sortAndMergeAxes(allAxes, inMesh);
   sortAndMergeAxes(newUnreducedAxes, inMesh);
-  SDY_CHECK(allAxes == newUnreducedAxes);
 
   rewriter.setInsertionPoint(reshardOp);
-  auto shardedToUnreducedOp = ShardedToUnreducedOp::create(
-      rewriter, reshardOp.getLoc(), input, axesPerDim, outSharding);
-  rewriter.replaceOp(reshardOp, shardedToUnreducedOp);
+  Operation* result = ShardedToUnreducedOp::create(
+      rewriter, reshardOp.getLoc(), input, axesPerDim,
+      outSharding.replaceUnreducedAxes(newUnreducedAxes));
+  if (newUnreducedAxes != outUnreducedAxes) {
+    SDY_LOG(WARNING) << "need repliaced-to-unreduced";
+    result = ReshardOp::create(rewriter, reshardOp.getLoc(),
+                               result->getResult(0), outSharding);
+  }
+  rewriter.replaceOp(reshardOp, result);
   return true;
 }
 
