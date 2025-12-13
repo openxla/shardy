@@ -1109,13 +1109,21 @@ bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
   for (auto [inDimSharding, outDimSharding, axes] :
        llvm::zip_equal(inSharding.getDimShardings(),
                        outSharding.getDimShardings(), axesPerDim)) {
-    PrefixStatus prefixStatus =
-        isAxisListPrefixOf(outDimSharding.getAxes(), inDimSharding.getAxes());
+    ArrayRef<AxisRefAttr> inAxes = inDimSharding.getAxes();
+    ArrayRef<AxisRefAttr> outAxes = outDimSharding.getAxes();
+    PrefixStatus prefixStatus = isAxisListPrefixOf(outAxes, inAxes);
     if (prefixStatus == PrefixStatus::EQUAL) {
       axes = AxisRefListAttr::get(rewriter.getContext(), {});
     } else if (prefixStatus == PrefixStatus::STRICT_PREFIX) {
-      SmallVector<AxisRefAttr> diff = getAxisSetDiff(
-          inDimSharding.getAxes(), outDimSharding.getAxes(), inMesh);
+      SmallVector<AxisRefAttr> diff;
+      if (!outAxes.empty() && outAxes.back() != inAxes[outAxes.size() - 1]) {
+        std::optional<AxisRefAttr> suffix =
+            inAxes[outAxes.size() - 1].getSuffixWithoutOverlap(outAxes.back(),
+                                                               inMesh);
+        SDY_CHECK(suffix);
+        diff.push_back(*suffix);
+      }
+      diff.append(inAxes.begin() + outAxes.size(), inAxes.end());
       axes = AxisRefListAttr::get(rewriter.getContext(), diff);
       newUnreducedAxes.append(diff);
     } else {
