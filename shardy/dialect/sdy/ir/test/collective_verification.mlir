@@ -946,3 +946,55 @@ func.func @sharded_to_unreduced_unsorted_unreduced_axes(%arg0 : tensor<16x8xf32>
   %0 = sdy.sharded_to_unreduced [{"y"}, {"x":(2)2}] %arg0 out_sharding=<@mesh, [{}, {"x":(1)2}], unreduced = {"y", "x":(2)2}> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4]>
+
+func.func @replicated_to_unreduced_operand_no_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
+  // expected-error @+1 {{collective on operand without sharding}}
+  %0 = sdy.replicated_to_unreduced %arg0 out_sharding=<@mesh2, [{}, {}], unreduced = {"x"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh1 = <["a"=4, "b"=4]>
+sdy.mesh @mesh2 = <["x"=4, "y"=4]>
+
+// expected-note @+1 {{operand mesh: #sdy.mesh<["a"=4, "b"=4]>}}
+func.func @replicated_to_unreduced_different_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{}, {}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{op result mesh does not match operand mesh}}
+  %0 = sdy.replicated_to_unreduced %arg0 out_sharding=<@mesh2, [{}, {}], unreduced = {"x"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4]>
+
+func.func @replicated_to_unreduced_different_dimension_shardings(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"y"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{input and output must share the same dimension shardings}}
+  %0 = sdy.replicated_to_unreduced %arg0 out_sharding=<@mesh, [{"y"}, {}], unreduced = {"x"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4]>
+
+func.func @replicated_to_unreduced_input_has_extra_unreduced_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced = {"x"}>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{output unreduced axes must be a strict superset of input unreduced axes}}
+  %0 = sdy.replicated_to_unreduced %arg0 out_sharding=<@mesh, [{}, {}], unreduced = {"y"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=4]>
+
+func.func @replicated_to_unreduced_same_unreduced_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced = {"x"}>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{output unreduced axes must be a strict superset of input unreduced axes}}
+  %0 = sdy.replicated_to_unreduced %arg0 out_sharding=<@mesh, [{}, {}], unreduced = {"x"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

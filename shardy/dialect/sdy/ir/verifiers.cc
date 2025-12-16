@@ -1407,6 +1407,31 @@ LogicalResult ShardedToUnreducedOp::verifySymbolUses(
   return success();
 }
 
+LogicalResult ReplicatedToUnreducedOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  TensorShardingAttr resultSharding = getOutSharding();
+  const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>());
+  MeshAttr mesh = resultSharding.getMesh(symbolTable);
+
+  if (operandSharding.getDimShardings() != resultSharding.getDimShardings()) {
+    return emitOpError(
+        "input and output must share the same dimension shardings");
+  }
+
+  ArrayRef<AxisRefAttr> inUnreducedAxes = operandSharding.getUnreducedAxes();
+  ArrayRef<AxisRefAttr> outUnreducedAxes = resultSharding.getUnreducedAxes();
+  if (!getAxisSetDiff(inUnreducedAxes, outUnreducedAxes, mesh).empty() ||
+      getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, mesh).empty()) {
+    return emitOpError(
+        "output unreduced axes must be a strict superset of input "
+        "unreduced axes");
+  }
+
+  return success();
+}
+
 LogicalResult AllSliceOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   return verifyCollectiveWithAxesPerDim(

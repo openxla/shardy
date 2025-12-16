@@ -724,8 +724,8 @@ def Sdy_ShardedToUnreducedOp : Sdy_Op<"sharded_to_unreduced",
 
     Example:
     ```mlir
-    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced = ["e"]>]>} : tensor<8x8x8xf32>
-    %2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced = ["b", "c", "d", "e"]> : tensor<8x8x8xf32>
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced={"e"}>]>} : tensor<8x8x8xf32>
+    %2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced={"b", "c", "d", "e"}> : tensor<8x8x8xf32>
     ```
 
     **Constraints:**
@@ -741,6 +741,37 @@ def Sdy_ShardedToUnreducedOp : Sdy_Op<"sharded_to_unreduced",
   );
   let results = (outs AnyShaped:$result);
   let assemblyFormat = "$axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+}
+
+def Sdy_ReplicatedToUnreducedOp : Sdy_Op<"replicated_to_unreduced",
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     Sdy_CollectiveOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
+  let summary = "Move implicitly or explicitly replicated axes to unreduced axes.";
+  let description = [{
+    Move implicitly or explicitly replicated axes to unreduced axes. We have the
+    following relationship:
+
+    all-reduce(replicated-to-unreduced(x)) = x
+
+    Example:
+    ```mlir
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}, {}\], replicated={"c", "d"}, unreduced={"e"}>]>} : tensor<8x8x8xf32>
+    %2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"b"}, {}, {}\], replicated={"d"}, unreduced={"a", "c", "e", "f"}> : tensor<8x8x8xf32>
+    ```
+
+    **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+    - The input and output sharding must have the same dimension shardings.
+    - The output unreduced axes must be a strict superset of the input unreduced axes.
+  }];
+
+  let arguments = (ins
+    AnyShaped:$tensor,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyShaped:$result);
+  let assemblyFormat = "$tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
 }
 
 #endif  // SDY_OPS
