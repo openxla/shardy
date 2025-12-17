@@ -702,6 +702,63 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 
 
 
+### `sdy.replicated_to_unreduced` (sdy::ReplicatedToUnreducedOp)
+
+_Move implicitly or explicitly replicated axes to unreduced axes._
+
+Syntax:
+
+```
+operation ::= `sdy.replicated_to_unreduced` $axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+```
+
+The `axes` should be implicitly or explicitly replicated in the operand.
+This operation makes them unreduced in the result. We have the following
+relationship:
+
+all-reduce(replicated-to-unreduced(x, axes), axes) = x
+
+Example:
+```mlir
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}, {}\], replicated={"c", "d"}, unreduced={"e"}>]>} : tensor<8x8x8xf32>
+%2 = sdy.replicated_to_unreduced {"a", "c", "f"} %1 out_sharding=<@mesh, [{"b"}, {}, {}\], replicated={"d"}, unreduced={"a", "c", "e", "f"}> : tensor<8x8x8xf32>
+```
+
+**Constraints:**
+- Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+- `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+- `axes` must be sorted w.r.t. the mesh.
+- `axes` are not empty.
+- The input and output sharding must have the same dimension shardings.
+- `axes` must be implicitly or explicitly replicated in the operand sharding.
+- inUnreducedAxes + axes = outUnreducedAxes.
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpInterface`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>axes</code></td><td>::mlir::sdy::AxisRefListAttr</td><td>List of axis refs</td></tr>
+<tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `tensor` | shaped of any type values |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | shaped of any type values |
+
+
+
 ### `sdy.reshard` (sdy::ReshardOp)
 
 _Reshards a tensor to a different sharding_
@@ -800,8 +857,8 @@ all-gather, sharded-to-unreduced, all-reduce are applied on the same axes.
 
 Example:
 ```mlir
-%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced = ["e"]>]>} : tensor<8x8x8xf32>
-%2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced = ["b", "c", "d", "e"]> : tensor<8x8x8xf32>
+%1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced={"e"}>]>} : tensor<8x8x8xf32>
+%2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced={"b", "c", "d", "e"}> : tensor<8x8x8xf32>
 ```
 
 **Constraints:**
