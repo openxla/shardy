@@ -724,8 +724,8 @@ def Sdy_ShardedToUnreducedOp : Sdy_Op<"sharded_to_unreduced",
 
     Example:
     ```mlir
-    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced = ["e"]>]>} : tensor<8x8x8xf32>
-    %2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced = ["b", "c", "d", "e"]> : tensor<8x8x8xf32>
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", "c"}, {}, {"d"}\], unreduced={"e"}>]>} : tensor<8x8x8xf32>
+    %2 = sdy.sharded_to_unreduced [{"b", "c"}, {}, {"d"}\] %1 out_sharding=<@mesh, [{"a"}, {}, {}\], unreduced={"b", "c", "d", "e"}> : tensor<8x8x8xf32>
     ```
 
     **Constraints:**
@@ -737,6 +737,43 @@ def Sdy_ShardedToUnreducedOp : Sdy_Op<"sharded_to_unreduced",
   let arguments = (ins
     AnyShaped:$tensor,
     Sdy_ListOfAxisRefLists:$axes,
+    Sdy_TensorSharding:$out_sharding
+  );
+  let results = (outs AnyShaped:$result);
+  let assemblyFormat = "$axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+}
+
+def Sdy_ReplicatedToUnreducedOp : Sdy_Op<"replicated_to_unreduced",
+    [SameOperandsAndResultType, InferTypeOpInterface,
+     Sdy_CollectiveOpInterface,
+     DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
+  let summary = "Move implicitly or explicitly replicated axes to unreduced axes.";
+  let description = [{
+    The `axes` should be implicitly or explicitly replicated in the operand.
+    This operation makes them unreduced in the result. We have the following
+    relationship:
+
+    all-reduce(replicated-to-unreduced(x, axes), axes) = x
+
+    Example:
+    ```mlir
+    %1 = stablehlo.tanh(%0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}, {}\], replicated={"c", "d"}, unreduced={"e"}>]>} : tensor<8x8x8xf32>
+    %2 = sdy.replicated_to_unreduced {"a", "c", "f"} %1 out_sharding=<@mesh, [{"b"}, {}, {}\], replicated={"d"}, unreduced={"a", "c", "e", "f"}> : tensor<8x8x8xf32>
+    ```
+
+    **Constraints:**
+    - Must satisfy the constraints listed in `Sdy_CollectiveOpInterface`.
+    - `axes` must satisfy the constraints listed in `AxisRefListAttr`.
+    - `axes` must be sorted w.r.t. the mesh.
+    - `axes` are not empty.
+    - The input and output sharding must have the same dimension shardings.
+    - `axes` must be implicitly or explicitly replicated in the operand sharding.
+    - inUnreducedAxes + axes = outUnreducedAxes.
+  }];
+
+  let arguments = (ins
+    AnyShaped:$tensor,
+    Sdy_AxisRefList:$axes,
     Sdy_TensorSharding:$out_sharding
   );
   let results = (outs AnyShaped:$result);

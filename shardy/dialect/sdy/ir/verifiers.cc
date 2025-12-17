@@ -1407,6 +1407,73 @@ LogicalResult ShardedToUnreducedOp::verifySymbolUses(
   return success();
 }
 
+LogicalResult ReplicatedToUnreducedOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  TensorShardingAttr resultSharding = getOutSharding();
+  const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>());
+  MeshAttr mesh = resultSharding.getMesh(symbolTable);
+
+  if (operandSharding.getDimShardings() != resultSharding.getDimShardings()) {
+    return emitOpError(
+        "input and output must share the same dimension shardings");
+  }
+
+  // r2u is short for replicated-to-unreduced.
+  ArrayRef<AxisRefAttr> r2uAxes = getAxes();
+  if (r2uAxes.empty()) {
+    return emitOpError("r2u axes must not be empty");
+  }
+
+  // Verify that `axes` are sorted and valid.
+  SmallDenseSet<AxisRefAttr> seenAxisRefs;
+  SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
+  SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
+  if (auto res = verifySortedAxisRefList(r2uAxes, axisNameToSize, seenAxisRefs,
+                                         axisNameToSubAxes,
+                                         getEmitErrorFn(*this), mesh, "r2u");
+      failed(res)) {
+    return res;
+  }
+
+  // Verify that `axes` are implicitly or explicitly replicated in the operand
+  // sharding. Namely, `axes` must not overlap with any of the dimension
+  // shardings or unreduced axes of the operand sharding.
+  for (AxisRefAttr r2uAxis : r2uAxes) {
+    auto overlapsWithr2uAxis = [&](AxisRefAttr axisRef) {
+      return axisRef.overlaps(r2uAxis);
+    };
+
+    if (llvm::any_of(operandSharding.getDimShardings(),
+                     [&](DimensionShardingAttr dimSharding) {
+                       return llvm::any_of(dimSharding.getAxes(),
+                                           overlapsWithr2uAxis);
+                     })) {
+      return emitOpError("r2u axis ")
+             << r2uAxis.toString()
+             << " overlaps with operand dimension sharding";
+    }
+    if (llvm::any_of(operandSharding.getUnreducedAxes(), overlapsWithr2uAxis)) {
+      return emitOpError("r2u axis ")
+             << r2uAxis.toString() << " overlaps with operand unreduced axes";
+    }
+  }
+
+  ArrayRef<AxisRefAttr> inUnreducedAxes = operandSharding.getUnreducedAxes();
+  ArrayRef<AxisRefAttr> outUnreducedAxes = resultSharding.getUnreducedAxes();
+  SmallVector<AxisRefAttr> expectedOutUnreducedAxes =
+      llvm::to_vector(inUnreducedAxes);
+  expectedOutUnreducedAxes.append(r2uAxes.begin(), r2uAxes.end());
+  sortAndMergeAxes(expectedOutUnreducedAxes, mesh);
+  if (expectedOutUnreducedAxes != outUnreducedAxes) {
+    return emitOpError(
+        "out_unreduced_axes should be in_unreduced_axes + r2u_axes");
+  }
+
+  return success();
+}
+
 LogicalResult AllSliceOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   return verifyCollectiveWithAxesPerDim(
