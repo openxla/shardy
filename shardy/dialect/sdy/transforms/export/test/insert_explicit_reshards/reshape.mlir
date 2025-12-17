@@ -72,9 +72,9 @@ func.func @reshape_simple_merge_sharding_is_from_xy_to_x_and_x_fits_exactly_to_f
   return %0 : tensor<32xf32>
 }
 
-// CHECK-LABEL: func.func @reshape_simple_merge_sharding_is_from_sharding_is_from_yx_to_yx_and_y_underfits_to_first_dim
+// CHECK-LABEL: func.func @reshape_simple_merge_sharding_is_from_yx_to_yx_and_y_underfits_to_first_dim
 // NOTE: It reshards this way because the dependencies are dropped as factors are fully-sharded.
-func.func @reshape_simple_merge_sharding_is_from_sharding_is_from_yx_to_yx_and_y_underfits_to_first_dim(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> (tensor<32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y", "x"}]>}) {
+func.func @reshape_simple_merge_sharding_is_from_yx_to_yx_and_y_underfits_to_first_dim(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> (tensor<32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y", "x"}]>}) {
   // CHECK: %0 = sdy.reshard %arg0 <@mesh, [{"y", "x":(1)2}, {"x":(2)2}]> : tensor<4x8xf32>
   // CHECK-NEXT: %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y", "x"}]>]>} : (tensor<4x8xf32>) -> tensor<32xf32>
   // CHECK-NEXT: return %1 : tensor<32xf32>
@@ -166,8 +166,8 @@ func.func @reshape_simple_split_sharding_is_to_only_second_dim_is_sharded(%arg0:
   return %0 : tensor<4x8xf32>
 }
 
-// CHECK-LABEL: func.func @reshape_simple_split_sharding_is_to_to_subaxes
-func.func @reshape_simple_split_sharding_is_to_to_subaxes(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}]>}) -> (tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"x":(2)2, "y"}]>}) {
+// CHECK-LABEL: func.func @reshape_simple_split_sharding_is_to_subaxes
+func.func @reshape_simple_split_sharding_is_to_subaxes(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}]>}) -> (tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"x":(2)2, "y"}]>}) {
   // CHECK-NOT: sdy.reshard
   %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}, {"x":(2)2, "y"}]>]>} : (tensor<16xf32>) -> tensor<2x8xf32>
   return %0 : tensor<2x8xf32>
