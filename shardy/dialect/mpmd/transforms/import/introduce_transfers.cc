@@ -252,12 +252,12 @@ void MaybePushInUnassignOp(FuncOp callee, IRRewriter& rewriter) {
     }
 
     rewriter.setInsertionPointAfterValue(callee_arg);
-    auto callee_assign = rewriter.create<AssignOp>(
-        callee_arg.getLoc(),
+    auto callee_assign = AssignOp::create(
+        rewriter, callee_arg.getLoc(),
         FindUnassignOp(sources.front()->get()).getTensor().getType(),
         callee_arg);
     auto callee_unassign =
-        rewriter.create<UnassignOp>(callee_arg.getLoc(), callee_assign);
+        UnassignOp::create(rewriter, callee_arg.getLoc(), callee_assign);
     rewriter.replaceAllUsesExcept(callee_arg, callee_unassign.getResult(),
                                   callee_assign);
   }

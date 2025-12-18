@@ -291,8 +291,9 @@ struct ApplyShardingConstraintsPass
                         // We can't move the `ManualComputationOp`, so we create
                         // a new `ShardingConstraintOp` after the operand.
                         builder.setInsertionPointAfterValue(operand);
-                        return builder.create<ShardingConstraintOp>(
-                            manualComputationOp.getLoc(), operand, sharding);
+                        return ShardingConstraintOp::create(
+                            builder, manualComputationOp.getLoc(), operand,
+                            sharding);
                       });
                 }
               });

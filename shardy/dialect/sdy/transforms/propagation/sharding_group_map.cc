@@ -118,8 +118,8 @@ void ShardingGroupMap::syncGroupMemberShardings(ModuleOp module) {
     for (Value& member : groupMembers) {
       IRRewriter rewriter(module.getContext());
       rewriter.setInsertionPointAfterValue(member);
-      auto openShardingConstraint = rewriter.create<ShardingConstraintOp>(
-          member.getLoc(), member,
+      auto openShardingConstraint = ShardingConstraintOp::create(
+          rewriter, member.getLoc(), member,
           TensorShardingAttr::getFullyOpenLike(sharding));
       rewriter.replaceAllUsesExcept(member, openShardingConstraint,
                                     openShardingConstraint);

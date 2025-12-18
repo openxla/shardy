@@ -42,7 +42,7 @@ namespace {
 
 MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
   auto createMesh = [&](StringRef meshName) {
-    return builder.create<MeshOp>(loc, meshName, mesh);
+    return MeshOp::create(builder, loc, meshName, mesh);
   };
   if (std::optional<int64_t> deviceId = mesh.getMaximalDeviceId()) {
     std::string meshName = llvm::formatv("maximal_mesh_{0}", deviceId);

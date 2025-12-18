@@ -291,8 +291,8 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
     }
 
     // Create the new ReduceScatterOp
-    auto reduceScatterOp = rewriter.create<ReduceScatterOp>(
-        allReduceOp.getLoc(), allReduceOp.getTensor(),
+    auto reduceScatterOp = ReduceScatterOp::create(
+        rewriter, allReduceOp.getLoc(), allReduceOp.getTensor(),
         ListOfAxisRefListsAttr::get(context, fusionInfo->reduceScatterAxes),
         fusionInfo->reduceScatterOutSharding);
 
@@ -301,12 +301,11 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
     // If there are residual axes, create a new AllSliceOp
     if (fusionInfo->residualSlicingAxes.has_value()) {
       finalResult =
-          rewriter
-              .create<AllSliceOp>(
-                  allSliceOp.getLoc(), reduceScatterOp.getResult(),
-                  ListOfAxisRefListsAttr::get(
-                      context, fusionInfo->residualSlicingAxes.value()),
-                  allSliceOp.getOutSharding())
+          AllSliceOp::create(
+              rewriter, allSliceOp.getLoc(), reduceScatterOp.getResult(),
+              ListOfAxisRefListsAttr::get(
+                  context, fusionInfo->residualSlicingAxes.value()),
+              allSliceOp.getOutSharding())
               .getResult();
     }
 

@@ -248,10 +248,10 @@ void PullResultsOutOf(IRRewriter& rewriter, FragmentOp fragment,
 
   // 1.2 Create the fragment.
   rewriter.setInsertionPointAfter(fragment);
-  FragmentOp transfer_fragment = rewriter.create<FragmentOp>(
-      fragment.getLoc(), transfer_fragment_types, fragment->getOperands(),
-      fragment.getOriginAttr(), fragment.getMeshNameAttr(),
-      fragment.getStageIdAttr());
+  FragmentOp transfer_fragment =
+      FragmentOp::create(rewriter, fragment.getLoc(), transfer_fragment_types,
+                         fragment->getOperands(), fragment.getOriginAttr(),
+                         fragment.getMeshNameAttr(), fragment.getStageIdAttr());
   // TODO(jupvfranco): streamline fragment attribute copying in our codebase.
   CopyAttributes(fragment, transfer_fragment);
   transfer_fragment->setAttr(kSplitKeepTransferredAttrName,
@@ -302,10 +302,10 @@ void PullResultsOutOf(IRRewriter& rewriter, FragmentOp fragment,
 
   // 2.3 Create the actual fragment.
   rewriter.setInsertionPointAfter(transfer_fragment);
-  FragmentOp pulled_fragment = rewriter.create<FragmentOp>(
-      fragment.getLoc(), pulled_fragment_types, pulled_fragment_operands,
-      fragment.getOriginAttr(), fragment.getMeshNameAttr(),
-      fragment.getStageIdAttr());
+  FragmentOp pulled_fragment =
+      FragmentOp::create(rewriter, fragment.getLoc(), pulled_fragment_types,
+                         pulled_fragment_operands, fragment.getOriginAttr(),
+                         fragment.getMeshNameAttr(), fragment.getStageIdAttr());
   // TODO(jupvfranco): streamline fragment attribute copying in our codebase.
   CopyAttributes(fragment, pulled_fragment);
   pulled_fragment->setAttr(kSplitDropTransferredAttrName,

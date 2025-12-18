@@ -84,8 +84,8 @@ void MapNamedComputationToMesh(
   IRMapping operand_to_assigned;
   for (Value operand : named_computation_op.getOperands()) {
     if (!operand_to_assigned.contains(operand)) {
-      auto assign_op = rewriter.create<AssignOp>(
-          named_computation_loc, operand, mesh_name, mesh,
+      auto assign_op = AssignOp::create(
+          rewriter, named_computation_loc, operand, mesh_name, mesh,
           /*origin=*/named_computation_op.getName());
       operand_to_assigned.map(operand, assign_op.getResult());
     }
@@ -110,18 +110,17 @@ void MapNamedComputationToMesh(
     SDY_CHECK(!user_origin_attrs.empty())
         << "Inferred fragments cannot be assigned to stages.";
   }
-  FragmentOp new_fragment = rewriter.create<FragmentOp>(
-      named_computation_loc, result_types, new_operands, user_origin_attrs,
-      mesh_name, stage_id);
+  FragmentOp new_fragment =
+      FragmentOp::create(rewriter, named_computation_loc, result_types,
+                         new_operands, user_origin_attrs, mesh_name, stage_id);
   new_fragment.getRegion().takeBody(named_computation_op.getRegion());
 
   // Create UnassignOps for each result of the new fragment.
   SmallVector<Value> new_results;
   for (Value new_result : new_fragment.getResults()) {
     new_results.push_back(
-        rewriter
-            .create<UnassignOp>(named_computation_loc, new_result,
-                                /*origin=*/named_computation_op.getName())
+        UnassignOp::create(rewriter, named_computation_loc, new_result,
+                           /*origin=*/named_computation_op.getName())
             .getResult());
   }
   rewriter.replaceOp(named_computation_op, new_results);
@@ -176,9 +175,9 @@ bool MapNamedTensorToUnassignOfAssign(NamedTensorOp named_tensor_op,
   std::optional<MeshTensorType> mesh_tensor =
       GetMeshTensorTypeFromAssignment(named_tensor_op, assignment);
   if (mesh_tensor.has_value()) {
-    auto assign_op = rewriter.create<AssignOp>(
-        named_tensor_op.getLoc(), *mesh_tensor, named_tensor_op.getTensor(),
-        /*origin=*/named_tensor_op.getNameAttr());
+    auto assign_op = AssignOp::create(rewriter, named_tensor_op.getLoc(),
+                                      *mesh_tensor, named_tensor_op.getTensor(),
+                                      /*origin=*/named_tensor_op.getNameAttr());
     rewriter.replaceOpWithNewOp<UnassignOp>(
         named_tensor_op, assign_op.getResult(),
         /*origin=*/named_tensor_op.getNameAttr());

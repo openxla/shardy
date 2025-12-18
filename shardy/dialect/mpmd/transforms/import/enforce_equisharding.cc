@@ -51,9 +51,9 @@ class EnforceEquishardingPass
       Type output_mesh_type = func_type.getResult(constraint.output_index);
       Type input_mesh_type = func_type.getInput(constraint.input_index);
       if (input_mesh_type != output_mesh_type) {
-        Value new_operand = rewriter.create<TransferOp>(
-            func_ret->getLoc(), input_mesh_type,
-            func_ret->getOperand(constraint.output_index));
+        Value new_operand =
+            TransferOp::create(rewriter, func_ret->getLoc(), input_mesh_type,
+                               func_ret->getOperand(constraint.output_index));
         func_ret->setOperand(constraint.output_index, new_operand);
       }
     }

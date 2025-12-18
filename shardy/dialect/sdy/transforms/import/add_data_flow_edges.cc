@@ -44,8 +44,8 @@ struct AddDataFlowEdgesPass
         // Skip non-static-shaped tensors, e.g., tokens.
         continue;
       }
-      auto dataFlowEdge = rewriter.create<DataFlowEdgeOp>(
-          edgeOwner.getLoc(), edgeOwner, getSharding(edgeOwner));
+      auto dataFlowEdge = DataFlowEdgeOp::create(
+          rewriter, edgeOwner.getLoc(), edgeOwner, getSharding(edgeOwner));
       rewriter.replaceAllUsesExcept(edgeOwner, dataFlowEdge, dataFlowEdge);
     }
   }

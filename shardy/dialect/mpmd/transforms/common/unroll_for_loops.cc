@@ -47,8 +47,8 @@ void SetUnrollCounter(Operation* op, int counter, RewriterBase& rewriter) {
 Value GetUint32Constant(RewriterBase& rewriter, Location loc, uint32_t value) {
   auto shape = RankedTensorType::get(
       {}, rewriter.getIntegerType(32, /*isSigned=*/false));
-  return rewriter.create<stablehlo::ConstantOp>(
-      loc, DenseIntElementsAttr::get(shape, value));
+  return stablehlo::ConstantOp::create(rewriter, loc,
+                                       DenseIntElementsAttr::get(shape, value));
 }
 
 // Requires: the unroll factor to be equal to the number of iterations.

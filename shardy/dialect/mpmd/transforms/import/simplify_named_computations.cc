@@ -51,8 +51,8 @@ class SimplifyNamedComputationPattern
                                  PatternRewriter& rewriter,
                                  TypeRange result_types, ValueRange operands,
                                  BitVector erased_results) const override {
-    return rewriter.create<NamedComputationOp>(op.getLoc(), result_types,
-                                               operands, op.getOriginAttr());
+    return NamedComputationOp::create(rewriter, op.getLoc(), result_types,
+                                      operands, op.getOriginAttr());
   }
 };
 
@@ -108,7 +108,7 @@ class SimplifyOptimizationBarrier
     }
     // Replace opt_barrier op with a new one with the kept operands.
     auto opt_barrier =
-        rewriter.create<OptimizationBarrierOp>(op.getLoc(), new_operands);
+        OptimizationBarrierOp::create(rewriter, op.getLoc(), new_operands);
 
     int opt_barrier_idx = 0;
     for (auto [idx, operand] : llvm::enumerate(op->getOperands())) {

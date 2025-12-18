@@ -385,7 +385,7 @@ FragmentOp WrapOpWithFragment(
   fragment_operands.reserve(operands_and_free_vars.size());
   for (Value value : operands_and_free_vars) {
     fragment_operands.push_back(
-        rewriter.create<AssignOp>(loc, value, mesh_name, mesh_attr));
+        AssignOp::create(rewriter, loc, value, mesh_name, mesh_attr));
   }
 
   // The fragment result types are fully replicated mesh tensors of the same
@@ -417,7 +417,7 @@ FragmentOp WrapOpWithFragment(
   // corresponding unassign op for which `should_replace_use` returns true.
   for (auto [original_result, fragment_result] :
        llvm::zip(op->getResults(), fragment_op.getResults())) {
-    auto unassign_op = rewriter.create<UnassignOp>(loc, fragment_result);
+    auto unassign_op = UnassignOp::create(rewriter, loc, fragment_result);
     rewriter.replaceUsesWithIf(original_result, unassign_op,
                                should_replace_use);
   }
@@ -672,17 +672,17 @@ Operation* CreateStablehloReduceOp(ReductionType reduction_type,
                                    OpBuilder& builder) {
   switch (reduction_type) {
     case ReductionType::kAdd:
-      return builder.create<stablehlo::AddOp>(loc, values);
+      return stablehlo::AddOp::create(builder, loc, values);
     case ReductionType::kMul:
-      return builder.create<stablehlo::MulOp>(loc, values);
+      return stablehlo::MulOp::create(builder, loc, values);
     case ReductionType::kMax:
-      return builder.create<stablehlo::MaxOp>(loc, values);
+      return stablehlo::MaxOp::create(builder, loc, values);
     case ReductionType::kMin:
-      return builder.create<stablehlo::MinOp>(loc, values);
+      return stablehlo::MinOp::create(builder, loc, values);
     case ReductionType::kOr:
-      return builder.create<stablehlo::OrOp>(loc, values);
+      return stablehlo::OrOp::create(builder, loc, values);
     case ReductionType::kAnd:
-      return builder.create<stablehlo::AndOp>(loc, values);
+      return stablehlo::AndOp::create(builder, loc, values);
     case ReductionType::kNone:
       return nullptr;
   }

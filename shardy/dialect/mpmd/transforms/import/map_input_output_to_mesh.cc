@@ -133,8 +133,8 @@ class MapInputOutputToMeshPass
 
         // Unassign the argument mesh before use.
         rewriter.setInsertionPointAfterValue(arg);
-        auto unassign_op = rewriter.create<UnassignOp>(
-            arg.getLoc(), arg, /*origin=*/kUserInputOrigin);
+        auto unassign_op = UnassignOp::create(rewriter, arg.getLoc(), arg,
+                                              /*origin=*/kUserInputOrigin);
         rewriter.replaceAllUsesExcept(arg, unassign_op.getResult(),
                                       unassign_op);
       }
@@ -152,7 +152,8 @@ class MapInputOutputToMeshPass
 
         rewriter.setInsertionPoint(return_op);
         Value output = return_op->getOperand(output_index);
-        auto assign_op = rewriter.create<AssignOp>(
+        auto assign_op = AssignOp::create(
+            rewriter,
             GetResultInfoLoc(func, output_index).value_or(output.getLoc()),
             GetMeshTensorType(output, mesh_name), output,
             /*origin=*/kUserOutputOrigin);

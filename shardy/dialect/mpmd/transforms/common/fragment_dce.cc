@@ -60,12 +60,12 @@ FragmentOp EliminateUnusedResults(FragmentOp fragment, RewriterBase& rewriter) {
 
   Operation* terminator = fragment->getRegion(0).front().getTerminator();
   terminator->eraseOperands(unused_results);
-  auto new_fragment = rewriter.create<FragmentOp>(
-      fragment.getLoc(),
-      FilterRange<Type>(/*range=*/fragment.getResultTypes(),
-                        /*erase=*/unused_results),
-      fragment.getOperands(), fragment.getOriginAttr(),
-      fragment.getMeshNameAttr(), fragment.getStageIdAttr());
+  auto new_fragment =
+      FragmentOp::create(rewriter, fragment.getLoc(),
+                         FilterRange<Type>(/*range=*/fragment.getResultTypes(),
+                                           /*erase=*/unused_results),
+                         fragment.getOperands(), fragment.getOriginAttr(),
+                         fragment.getMeshNameAttr(), fragment.getStageIdAttr());
   // Copy all attributes except `origin` and `mesh_name`, which were copied
   // during the creation of the new fragment.
   CopyAttributes(fragment, new_fragment,

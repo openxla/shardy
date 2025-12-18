@@ -171,10 +171,10 @@ Value AddNewResultToFragment(FragmentOp fragment, Value returned_value,
   std::vector<Type> result_types(fragment.getResultTypes().begin(),
                                  fragment.getResultTypes().end());
   result_types.push_back(result_type);
-  auto new_fragment = rewriter.create<FragmentOp>(
-      fragment.getLoc(), result_types, fragment.getOperands(),
-      fragment.getOriginAttr(), fragment.getMeshNameAttr(),
-      fragment.getStageIdAttr());
+  auto new_fragment =
+      FragmentOp::create(rewriter, fragment.getLoc(), result_types,
+                         fragment.getOperands(), fragment.getOriginAttr(),
+                         fragment.getMeshNameAttr(), fragment.getStageIdAttr());
   // Copy all attributes except `origin` and `mesh_name`, which were copied
   // during the creation of the new fragment.
   CopyAttributes(fragment, new_fragment,
@@ -236,15 +236,15 @@ Value ConcatResultsOnProducer(FragmentOp producer,
     SDY_CHECK(operand.getType() == result_type);
     auto new_shape = RankedTensorType::get(reshaped_dimensions,
                                            result_type.getElementType());
-    mlir::Value reshape = rewriter.create<stablehlo::ReshapeOp>(
-        producer.getLoc(), new_shape, operand);
+    mlir::Value reshape = stablehlo::ReshapeOp::create(
+        rewriter, producer.getLoc(), new_shape, operand);
     concat_operands.push_back(reshape);
   }
 
   // Finally, concatenate the reshaped values and add the result to the
   // producer.
-  Value concat = rewriter.create<stablehlo::ConcatenateOp>(producer.getLoc(),
-                                                           concat_operands, 0);
+  Value concat = stablehlo::ConcatenateOp::create(rewriter, producer.getLoc(),
+                                                  concat_operands, 0);
   MeshTensorType new_result_type =
       MeshTensorType::get(result_type.getContext(), producer.getMeshName(),
                           cast<RankedTensorType>(concat.getType()));
@@ -264,9 +264,9 @@ Value CreateSliceOnArgument(ArrayRef<int64_t> shape,
     limit_indices.push_back(dim);
     strides.push_back(1);
   }
-  return rewriter.create<stablehlo::SliceOp>(concatenated_arg.getLoc(),
-                                             concatenated_arg, start_indices,
-                                             limit_indices, strides);
+  return stablehlo::SliceOp::create(rewriter, concatenated_arg.getLoc(),
+                                    concatenated_arg, start_indices,
+                                    limit_indices, strides);
 }
 
 // Adds the result of `concat_transfer` to the operands (and block arguments) of
@@ -327,8 +327,8 @@ void SliceConcatOnConsumer(
                                         slice_index, rewriter);
 
     // Drop the leading dimension of size 1 that results from the slicing.
-    Value reshape = rewriter.create<stablehlo::ReshapeOp>(consumer.getLoc(),
-                                                          arg_type, slice);
+    Value reshape = stablehlo::ReshapeOp::create(rewriter, consumer.getLoc(),
+                                                 arg_type, slice);
 
     // Replace the argument with the slice, without erasing it. We do this
     // for the sake of simplicity -- we can use the simplify passes to
@@ -381,8 +381,8 @@ void MergeTransfersProducedByFragment(FragmentOp producer,
         cast<MeshTensorType>(concat_result.getType());
 
     // Transfer the concatenated result to the consumer.
-    auto concat_transfer = rewriter.create<TransferOp>(
-        concat_result.getLoc(),
+    auto concat_transfer = TransferOp::create(
+        rewriter, concat_result.getLoc(),
         MeshTensorType::get(concat_result_type.getContext(),
                             consumer_fragment.getMeshName(),
                             concat_result_type.getRankedTensorType()),
