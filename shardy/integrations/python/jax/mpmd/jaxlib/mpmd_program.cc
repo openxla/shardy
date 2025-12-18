@@ -98,8 +98,6 @@ PartitioningOptions ParsePartitioningOptions(
   PARSE_BOOL_OPTION(mpmd_infer_transfers);
   PARSE_BOOL_OPTION(mpmd_infer_cross_mesh_reductions);
   PARSE_BOOL_OPTION(mpmd_merge_inferred_with_cloning_during_import);
-  PARSE_BOOL_OPTION(mpmd_gspmd_propagate_sharding_across_meshes);
-  PARSE_BOOL_OPTION(mpmd_allow_intra_mesh_transfer);
   PARSE_BOOL_OPTION(mpmd_fragment_remat);
   PARSE_BOOL_OPTION(mpmd_split_bwd_fragments);
   PARSE_BOOL_OPTION(mpmd_assume_homogeneous_devices);

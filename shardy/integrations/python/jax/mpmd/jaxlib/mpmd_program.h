@@ -95,8 +95,6 @@ struct PartitioningOptions {
   bool mpmd_infer_transfers = false;
   bool mpmd_infer_cross_mesh_reductions = false;
   bool mpmd_merge_inferred_with_cloning_during_import = false;
-  bool mpmd_gspmd_propagate_sharding_across_meshes = false;
-  bool mpmd_allow_intra_mesh_transfer = false;
   bool mpmd_fragment_remat = false;
   bool mpmd_merge_remat_fragments = false;
   bool mpmd_split_bwd_fragments = false;

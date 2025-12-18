@@ -19,8 +19,6 @@ MPMD_BOOLEAN_OPTIONS = frozenset({
     'mpmd_infer_transfers',
     'mpmd_infer_cross_mesh_reductions',
     'mpmd_merge_inferred_with_cloning_during_import',
-    'mpmd_gspmd_propagate_sharding_across_meshes',
-    'mpmd_allow_intra_mesh_transfer',
     'mpmd_fragment_remat',
     'mpmd_merge_remat_fragments',
     'mpmd_split_bwd_fragments',

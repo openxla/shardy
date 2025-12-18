@@ -59,6 +59,7 @@ def setUpModule():
   jax.config.update('jax_legacy_prng_key', 'allow')
   jax.config.update('jax_numpy_dtype_promotion', 'standard')
 
+
 class SdyPropagationTest(parameterized.TestCase):
 
   def test_mpmd_hello_world(self):
