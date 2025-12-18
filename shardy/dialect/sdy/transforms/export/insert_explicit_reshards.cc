@@ -486,7 +486,7 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      if (convertReshardToUnreducedCollectives(op, rewriter, symbolTable)) {
+      if (convertReshardToShardedToUnreduced(op, rewriter, symbolTable)) {
         return;
       }
 

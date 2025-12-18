@@ -917,8 +917,8 @@ void insertAllReducesForReductionFactors(
   }
 }
 
-bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
-                                          const SymbolTable& symbolTable) {
+bool convertReshardToShardedToUnreduced(Operation* op, IRRewriter& rewriter,
+                                        const SymbolTable& symbolTable) {
   ReshardOp reshardOp = dyn_cast<ReshardOp>(op);
   if (!reshardOp) {
     return false;
@@ -943,12 +943,7 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
       << "Reshard op has different meshes for input and output. The result has "
          "non-empty unreduced axes.";
 
-  // The relationship of the unreduced axes is "out = in + r2u + s2u", where
-  // "r2u" is the replicated-to-unreduced axes and "s2u" is the
-  // sharded-to-unreduced axes.
-  SmallVector<AxisRefAttr> r2uAnds2uAxes =
-      getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, inMesh);
-  if (r2uAnds2uAxes.empty()) {
+  if (getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, inMesh).empty()) {
     return false;
   }
 
@@ -959,7 +954,7 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
       << "Input of sharded-to-unreduced reshard must be a block argument or a "
          "reshard op.";
 
-  SmallVector<AxisRefAttr> s2uAxes;
+  SmallVector<AxisRefAttr> newUnreducedAxes = llvm::to_vector(inUnreducedAxes);
   SmallVector<AxisRefListAttr> axesPerDim(inSharding.getRank());
   for (auto [inDimSharding, outDimSharding, axes] :
        llvm::zip_equal(inSharding.getDimShardings(),
@@ -980,7 +975,7 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
       }
       diff.append(inAxes.begin() + outAxes.size(), inAxes.end());
       axes = AxisRefListAttr::get(rewriter.getContext(), diff);
-      s2uAxes.append(diff);
+      newUnreducedAxes.append(diff);
     } else {
       SDY_LOG(FATAL)
           << "The reshard op needs to be decomposed to a sharded-to-unreduced "
@@ -988,27 +983,17 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
     }
   }
 
+  sortAndMergeAxes(newUnreducedAxes, inMesh);
+
   rewriter.setInsertionPoint(reshardOp);
-  Value result = input;
-
-  SmallVector<AxisRefAttr> r2uAxes =
-      getAxisSetDiff(r2uAnds2uAxes, s2uAxes, inMesh);
-  if (!r2uAxes.empty()) {
-    SmallVector<AxisRefAttr> inPlusR2uAxes = llvm::to_vector(inUnreducedAxes);
-    inPlusR2uAxes.append(r2uAxes.begin(), r2uAxes.end());
-    sortAndMergeAxes(inPlusR2uAxes, inMesh);
-    TensorShardingAttr r2uSharding =
-        TensorShardingAttr::get(rewriter.getContext(), inSharding.getMeshName(),
-                                inSharding.getDimShardings(),
-                                outSharding.getReplicatedAxes(), inPlusR2uAxes);
-    result = ReplicatedToUnreducedOp::create(rewriter, reshardOp.getLoc(),
-                                             result, r2uAxes, r2uSharding);
+  Operation* result = ShardedToUnreducedOp::create(
+      rewriter, reshardOp.getLoc(), input, axesPerDim,
+      outSharding.replaceUnreducedAxes(newUnreducedAxes));
+  if (newUnreducedAxes != outUnreducedAxes) {
+    SDY_LOG(WARNING) << "need repliaced-to-unreduced";
+    result = ReshardOp::create(rewriter, reshardOp.getLoc(),
+                               result->getResult(0), outSharding);
   }
-  if (!s2uAxes.empty()) {
-    result = ShardedToUnreducedOp::create(rewriter, reshardOp.getLoc(), result,
-                                          axesPerDim, outSharding);
-  }
-
   rewriter.replaceOp(reshardOp, result);
   return true;
 }
