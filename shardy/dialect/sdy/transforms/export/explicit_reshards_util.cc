@@ -71,22 +71,29 @@ bool hasShardedPermutationFactors(
                                !factorSharding.axisRefs.empty();
                       });
 }
-}  // namespace
 
+// Returns the common axes per factor if the factor sharding is compatible.
+// Otherwise, returns empty AxesPerFactor.
+//
+// The factor sharding is compatible if it satisfies:
+// 1. Factors are sharded the same way across operands and results.
+// 2. Factors that need replication are unsharded.
+// 3. There is no overlap between the sharding axes across different factors.
+//
+// Assumes factor shardings do not have overflow axes.
 // TODO(enver): Handle the case when some factor shardings have overflow axes.
 AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule) {
   AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
   BitVector seenFactors(shardingRule.getNumFactors());
+  SmallVector<AxisRefAttr> seenAxisRefs;
   for (const TensorFactorShardings& tensorFactorSharding :
        llvm::concat<const TensorFactorShardings>(
            shardingProjection.getOperands(), shardingProjection.getResults())) {
-    // Detects conflicts within the same factor.
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      // Factors that need replication should be unsharded across all operands
-      // and results in order for it to have a compatible sharding.
+      // Factors that need replication should be unsharded to be compatible.
       if (shardingRule.isNeedReplicationFactor(factorIndex)) {
         if (!factorSharding.axisRefs.empty()) {
           return {};
@@ -94,7 +101,11 @@ AxesPerFactor getCompatibleFactorShardings(
         continue;
       }
       if (!seenFactors.test(factorIndex)) {
+        if (overlaps(factorSharding.axisRefs, seenAxisRefs)) {
+          return {};
+        }
         commonAxesPerFactor[factorIndex] = factorSharding.axisRefs;
+        seenAxisRefs.append(factorSharding.axisRefs);
         seenFactors.set(factorIndex);
       } else if (factorSharding.axisRefs != commonAxesPerFactor[factorIndex]) {
         return {};
@@ -102,24 +113,8 @@ AxesPerFactor getCompatibleFactorShardings(
     }
   }
 
-  // Detect conflict between reduction factors and output shardings.
-  // TODO(enver): Improve the compile-time performance.
-  for (const int64_t factorIndex : shardingRule.getReductionFactors()) {
-    ArrayRef<AxisRefAttr> reductionSharding = commonAxesPerFactor[factorIndex];
-    for (const TensorFactorShardings& outTensorFactorSharding :
-         shardingProjection.getResults()) {
-      for (const auto& [outFactorIndex, outFactorSharding] :
-           outTensorFactorSharding.factorIndexToSharding) {
-        if (overlaps(reductionSharding, outFactorSharding.axisRefs)) {
-          return {};
-        }
-      }
-    }
-  }
   return commonAxesPerFactor;
 }
-
-namespace {
 
 void insertExplicitReshardsOnOperand(
     Operation* op, const int64_t operandIndex,
@@ -720,6 +715,12 @@ void distributeAxisRefsToBatchingFactors(
 AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
+  if (AxesPerFactor compatibleFactorShardings =
+          getCompatibleFactorShardings(shardingProjection, shardingRule);
+      !compatibleFactorShardings.empty()) {
+    return compatibleFactorShardings;
+  }
+
   // Handle the special case of unary operations without factors that need
   // replication. Reshard only one of the tensors.
   if (shardingRule.getNonScalarTensorIndices().size() == 2 &&
