@@ -165,11 +165,12 @@ class UtilsTest(absltest.TestCase):
 
     sharding = jax.sharding.NamedSharding(m1, jax.sharding.PartitionSpec())
     x = jax.ShapeDtypeStruct((4, 4), np.float32, sharding=sharding)
+    x_no_sharding = jax.ShapeDtypeStruct((4, 4), np.float32, sharding=None)
 
-    pytree = (x, (m2, sharding))
+    pytree = (x, (m2, sharding), None, m1.abstract_mesh, x_no_sharding)
 
     result = types.mesh_names(pytree=pytree, topology=topology)
-    self.assertEqual(result, ('mesh1', ('mesh2', 'mesh1')))
+    self.assertEqual(result, ('mesh1', ('mesh2', 'mesh1'), None, None, None))
 
   def test_mesh_names_raises_error_when_mesh_not_in_topology(self):
     pytree = jax.sharding.Mesh(jax.devices(), 'x')

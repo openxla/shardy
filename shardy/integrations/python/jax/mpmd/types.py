@@ -427,6 +427,8 @@ def mesh_names(
     )
 
   def _get_mesh_name(x):
+    if x is None:
+      return None
     if isinstance(x, (jax.Array, jax.ShapeDtypeStruct)):
       return _get_mesh_name(x.sharding)
     if isinstance(x, jax.sharding.NamedSharding):
