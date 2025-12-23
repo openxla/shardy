@@ -327,17 +327,13 @@ class CollectiveInserter {
         mesh(inSharding.getMesh(op)),
         curMeshName(inSharding.getMeshSymName()),
         outMeshName(outSharding.getMeshSymName()),
-        unreducedAxes(outSharding.getUnreducedAxes()),
+        inUnreducedAxes(inSharding.getUnreducedAxes()),
+        outUnreducedAxes(outSharding.getUnreducedAxes()),
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
         currentAxesPerDim(getAxesPerDim<SmallVector<AxisRefAttr>>(inSharding)),
         capacityPerDim(inSharding.getRank(), 1),
         collectiveAxesPerDim(inSharding.getRank()) {
-    // Unreduced axes in the input and output sharding must match, given we
-    // insert an all-reduce if an unreduced axis becomes replicated/sharded, and
-    // never insert a reshard that goes from replicated/sharded to unreduced.
-    assert(inSharding.getUnreducedAxes() == outSharding.getUnreducedAxes());
-
     // We align sub-axes between the input and output axes, so that we can treat
     // sub-axes like full axes and assume any two sub-axes that overlap are also
     // equal, which allows using them as keys in a hash map.
@@ -358,6 +354,15 @@ class CollectiveInserter {
   // If the input and output sharding are the same, returns the input value
   // without inserting any collective.
   Value insert() {
+    if (inUnreducedAxes != outUnreducedAxes) {
+      assert(getAxisSetDiff(inUnreducedAxes, outUnreducedAxes, mesh).empty());
+      SmallVector<AxisRefAttr> newUnreducedAxes =
+          getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, mesh);
+      tryShardedToUnreduced(newUnreducedAxes);
+      assert(isDone());
+      return result;
+    }
+
     // In the common case where all axes are a power of 2, in which case a
     // bigger axis is always divisible by a smaller axis, we are guaranteed to
     // be done after trying all-slice -> collective-permute -> all-to-alls ->
@@ -392,7 +397,6 @@ class CollectiveInserter {
       tryAllGather();
     }
     assert(isDone());
-
     return result;
   }
 
@@ -412,7 +416,7 @@ class CollectiveInserter {
 
   TensorShardingAttr getCurrentSharding() const {
     return TensorShardingAttr::getClosed(getContext(), curMeshName,
-                                         currentAxesPerDim, unreducedAxes);
+                                         currentAxesPerDim, outUnreducedAxes);
   }
 
   // If an all-gather can be performed on `dim`, returns the axes to gather for
@@ -472,6 +476,23 @@ class CollectiveInserter {
       result = AllGatherOp::create(rewriter, loc, result, collectiveAxesPerDim,
                                    getCurrentSharding());
     }
+  }
+
+  // Tries to insert an `sdy.sharded_to_unreduced`.
+  void tryShardedToUnreduced(SmallVector<AxisRefAttr>& newUnreducedAxes) {
+    SmallVector<AxisRefAttr> allAxes;
+    for (auto [dim, collectiveAxes] : llvm::enumerate(collectiveAxesPerDim)) {
+      SmallVector<AxisRefAttr> axes = getGatheringAxes(dim);
+      collectiveAxes = AxisRefListAttr::get(getContext(), axes);
+      allAxes.append(axes);
+    }
+
+    sortAndMergeAxes(newUnreducedAxes, mesh);
+    sortAndMergeAxes(allAxes, mesh);
+    assert(newUnreducedAxes == allAxes);
+
+    result = ShardedToUnreducedOp::create(
+        rewriter, loc, result, collectiveAxesPerDim, getCurrentSharding());
   }
 
   // For each dimension d, distribute axes from `getAvailableAxes(d)` in
@@ -1305,7 +1326,7 @@ class CollectiveInserter {
   Value result;
   MeshAttr mesh;
   FlatSymbolRefAttr curMeshName, outMeshName;
-  ArrayRef<AxisRefAttr> unreducedAxes;
+  ArrayRef<AxisRefAttr> inUnreducedAxes, outUnreducedAxes;
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;
   AxesPerDim currentAxesPerDim;
   SmallVector<int64_t> capacityPerDim;
@@ -1342,15 +1363,15 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
           op, [](Diagnostic& diag) { diag << "Incompatible shardings"; });
     }
     if (outSharding.isFullyReplicated()) {
-      if (inSharding.isFullyReplicated()) {
+      if (inSharding.isFullyReplicated() &&
+          inSharding.getUnreducedAxes() == outSharding.getUnreducedAxes()) {
         rewriter.replaceOp(op, adaptor.getInput());
         return success();
       }
-      // TODO(enver): Hard fail if output sharding has a different unreduced
-      // axes than the input sharding. Note that the out sharding may be fully
-      // replicated and still have different unreduced axes than the input
-      // sharding.
+      SmallVector<AxisRefAttr> oldUnreducedAxes =
+          llvm::to_vector(outSharding.getUnreducedAxes());
       outSharding = TensorShardingAttr::getFullyClosedLike(inSharding);
+      outSharding = outSharding.replaceUnreducedAxes(oldUnreducedAxes);
     }
     // TODO(enver): Set input mesh to output mesh if input sharding is fully
     // replicated. It requires sdy.all_slice can handle that input and output
@@ -1382,7 +1403,7 @@ struct ReshardToCollectivesPass
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
     target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,
-                       CollectivePermuteOp>();
+                       CollectivePermuteOp, ShardedToUnreducedOp>();
     target->addDynamicallyLegalOp<ReshardOp>([&](ReshardOp op) {
       TensorShardingAttr inSharding = getSharding(op.getInput());
       TensorShardingAttr outSharding = op.getSharding();
