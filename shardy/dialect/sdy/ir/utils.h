@@ -147,6 +147,17 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
 
+// If sharding refers to a mesh by name, returns a new TensorShardingAttr with
+// the mesh inlined. Otherwise returns the same sharding.
+TensorShardingAttr inlineMesh(const SymbolTable& symbolTable,
+                              TensorShardingAttr sharding);
+
+// For each sharding in shardingPerValue, if it refers to a mesh by name,
+// returns a new sharding with the mesh inlined.
+TensorShardingPerValueAttr inlineMesh(
+    const SymbolTable& symbolTable,
+    TensorShardingPerValueAttr shardingPerValue);
+
 // Returns the common mesh (or a reference to it) bound by all the
 // `TensorShardingAttr`s or nullptr if there is none.
 //
