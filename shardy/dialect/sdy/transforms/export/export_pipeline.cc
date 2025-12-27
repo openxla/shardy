@@ -82,7 +82,9 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
           /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
           /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges,
       }));
-  pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
+  if (options.updateNonDivisibleInputOutputShardings) {
+    pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
+  }
   pm.addPass(createCloseShardingsPass());
 
   // / We dump the module after propagation at this point, since the export

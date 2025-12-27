@@ -52,6 +52,8 @@ struct PropagationOptions {
   bool enableAutoPartitioning = false;
   // Whether to avoid explicit reshards/collectives on named computations.
   bool avoidReshardsOnNamedComputations = false;
+  // Whether to update axes with non-divisible input/output shardings.
+  bool updateNonDivisibleInputOutputShardings = true;
 };
 
 }  // namespace sdy

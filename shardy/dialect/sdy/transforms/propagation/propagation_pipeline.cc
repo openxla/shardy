@@ -42,6 +42,8 @@ void populateExportOptions(ExportOptions& options,
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
   options.avoidReshardsOnNamedComputations =
       propOptions.avoidReshardsOnNamedComputations;
+  options.updateNonDivisibleInputOutputShardings =
+      propOptions.updateNonDivisibleInputOutputShardings;
 }
 
 }  // namespace
