@@ -15,14 +15,14 @@
 
 """Common types used by PartIR:MPMD."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 import dataclasses
-import enum
 
 import jax
 import jaxtyping
 
 from shardy.integrations.python.jax.mpmd import partitioning_options as part_options
+from shardy.integrations.python.jax.mpmd import pipeline
 
 
 PyTree = jaxtyping.PyTree
@@ -40,58 +40,21 @@ MeshToCompileOptions = Mapping[str, jax.stages.CompilerOptions]
 PartitioningOptions = dict[str, bool | str]
 
 
-@dataclasses.dataclass(frozen=True)
-class FragmentOrigin:
-  """The origin of a fragment."""
-
-  computation_name: str
-  transpose_count: int = 0
-
-
-@enum.unique
-class SplitFragmentType(enum.Enum):
-  """Fragment split behavior for transferred data.
-
-  These values indicate how fragment portions handle transferred data from
-  the original fragment if the fragment is split during compilation:
-  - KEEP_TRANSFERRED: Fragment portion retains transferred data
-  - DROP_TRANSFERRED: Fragment portion drops transferred data
-  """
-
-  KEEP_TRANSFERRED = enum.auto()
-  DROP_TRANSFERRED = enum.auto()
+# LINT.IfChange
+CPU_MESH_SUFFIX = '/cpu'
+# LINT.ThenChange(
+#   https://github.com/openxla/shardy/blob/main/shardy/dialect/mpmd/ir/utils.h
+# )
 
 
-@dataclasses.dataclass(frozen=True)
-class FragmentInfo:
-  """A fragment of a computation."""
-
-  origins: Sequence[FragmentOrigin]
-  stage_id: int | None = None
-  call_counter: int | None = None
-  split_type: SplitFragmentType | None = None
-  mesh_name: str = ''
+def mesh_is_on_cpu(mesh_name: str) -> bool:
+  """Returns whether the mesh name is for a cpu mesh."""
+  return mesh_name.endswith(CPU_MESH_SUFFIX)
 
 
-@dataclasses.dataclass(frozen=True)
-class FragmentMergeRule:
-  """A rule for merging fragments of a computation."""
-
-  sources: Sequence[FragmentInfo]
-  target: FragmentInfo
-
-
-FragmentMergeRules = Sequence[FragmentMergeRule]
-
-
-@dataclasses.dataclass(frozen=True)
-class FragmentScheduleRule:
-  """A rule for scheduling fragments of a computation."""
-
-  ordered_fragments: Sequence[FragmentInfo]
-
-
-FragmentScheduleRules = Sequence[FragmentScheduleRule]
+def get_schedulable_meshes(topology: Topology) -> list[str]:
+  """Returns the names of meshes in the topology that are not CPU meshes."""
+  return [name for name in topology if not mesh_is_on_cpu(name)]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -142,8 +105,8 @@ class MpmdConfig:
   output_mesh_assignment: PyTree[str | None]
   partitioning_options: PartitioningOptions | None
   read_input_output_mesh_from_shardings: bool
-  fragment_merge_rules: FragmentMergeRules | None
-  fragment_schedule_rules: FragmentScheduleRules | None
+  fragment_merge_rules: pipeline.FragmentMergeRules | None
+  fragment_schedule_rules: pipeline.FragmentScheduleRules | None
 
   @property
   def _spmd_mesh(self) -> jax.sharding.Mesh:
@@ -211,8 +174,8 @@ def make_config(
     output_mesh_assignment: PyTree[str | None] = (),
     partitioning_options: PartitioningOptions | None = None,
     read_input_output_mesh_from_shardings: bool = False,
-    fragment_merge_rules: FragmentMergeRules | None = None,
-    fragment_schedule_rules: FragmentScheduleRules | None = None,
+    fragment_merge_rules: pipeline.FragmentMergeRules | None = None,
+    fragment_schedule_rules: pipeline.FragmentScheduleRules | None = None,
 ) -> MpmdConfig:
   """Creates a `MpmdConfig`, inferring the tpu topology if not provided.
 
@@ -257,11 +220,9 @@ def make_config(
   )
   if fragment_merge_rules is None:
     fragment_merge_rules = []
-  validate_fragment_merge_rules(fragment_merge_rules)
 
   if fragment_schedule_rules is None:
     fragment_schedule_rules = []
-  validate_fragment_schedule_rules(fragment_schedule_rules)
 
   return MpmdConfig(
       topology,
@@ -341,65 +302,6 @@ def validate_input_output_mesh_assignments(
           'output_mesh_assignment must not be specified when'
           ' read_input_output_mesh_from_shardings is True.'
       )
-
-
-def validate_fragment_rule_origins(
-    fragment_sequence: Sequence[FragmentInfo],
-) -> None:
-  for fragment in fragment_sequence:
-    if not fragment.origins:
-      raise ValueError(
-          f'Each fragment must have at least one origin, but got {fragment} in'
-          f' {fragment_sequence}.'
-      )
-
-
-def validate_fragment_rule_meshes(
-    fragment_sequence: Sequence[FragmentInfo],
-) -> None:
-  first_mesh = fragment_sequence[0].mesh_name
-  if not all(
-      fragment.mesh_name == first_mesh for fragment in fragment_sequence
-  ):
-    raise ValueError(
-        'Fragments being merged/scheduled must be on the same mesh, but got'
-        f' {fragment_sequence}.'
-    )
-
-
-def validate_fragment_merge_rules(
-    fragment_merge_rules: FragmentMergeRules,
-) -> None:
-  """Validates the fragment merge rules."""
-
-  for rule in fragment_merge_rules:
-    if len(rule.sources) < 2:
-      raise ValueError(
-          'Fragment merge rule must contain at least two source fragments, but'
-          f' got {rule}.'
-      )
-    validate_fragment_rule_origins(rule.sources)
-    validate_fragment_rule_meshes(rule.sources)
-
-    if not rule.target.origins:
-      raise ValueError(
-          f'Target fragment must have at least one origin, but got {rule}.'
-      )
-
-
-def validate_fragment_schedule_rules(
-    fragment_schedule_rules: FragmentScheduleRules,
-) -> None:
-  """Validates the fragment schedule rules."""
-  for rule in fragment_schedule_rules:
-    if len(rule.ordered_fragments) < 2:
-      raise ValueError(
-          'Fragment schedule rule must contain at least two fragments, but'
-          f' got {rule}.'
-      )
-
-    validate_fragment_rule_origins(rule.ordered_fragments)
-    validate_fragment_rule_meshes(rule.ordered_fragments)
 
 
 def mesh_names(
