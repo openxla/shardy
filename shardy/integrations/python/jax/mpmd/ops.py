@@ -29,6 +29,7 @@ from jax._src import util
 from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
 from jax._src.interpreters import partial_eval as internal_pe
+from jax._src.state import discharge as state_discharge
 import jax.extend as jex
 from jax.extend import linear_util as lu
 from jax.extend import source_info_util as siu
@@ -291,6 +292,9 @@ def _register_named_computation_primitive():
   # Allows a jax.remat(mpmd.named_computation(...))
   pe.partial_eval_jaxpr_custom_rules[primitive] = (
       pe.partial_eval_jaxpr_custom_rules[primitives.call_p]
+  )
+  state_discharge.register_discharge_rule(primitive)(
+      state_discharge._call_discharge_rule
   )
   return primitive
 
