@@ -379,15 +379,19 @@ TEST_F(DialectTest, AxisRefAttrGetSuffixWithoutOverlap) {
 }
 
 TEST_F(DialectTest, AxisRefAttrCanMerge) {
-  EXPECT_TRUE(createSubAxis("x", 1, 4).canMerge(createSubAxis("x", 4, 2)));
-  EXPECT_TRUE(createSubAxis("x", 2, 2).canMerge(createSubAxis("x", 4, 4)));
+  auto checkCanMerge = [](AxisRefAttr a, AxisRefAttr b) {
+    EXPECT_TRUE(a.canMerge(b));
+    EXPECT_FALSE(b.canMerge(a));
+  };
+  checkCanMerge(createSubAxis("x", 1, 4), createSubAxis("x", 4, 2));
+  checkCanMerge(createSubAxis("x", 2, 2), createSubAxis("x", 4, 4));
 
   EXPECT_FALSE(createAxis("x").canMerge(createAxis("x")));
+  EXPECT_FALSE(createSubAxis("x", 1, 2).canMerge(createSubAxis("x", 1, 2)));
   EXPECT_FALSE(createAxis("x").canMerge(createAxis("y")));
   EXPECT_FALSE(createSubAxis("x", 1, 2).canMerge(createSubAxis("y", 2, 2)));
   EXPECT_FALSE(createAxis("x").canMerge(createSubAxis("x", 4, 2)));
   EXPECT_FALSE(createSubAxis("x", 1, 2).canMerge(createSubAxis("x", 4, 2)));
-  EXPECT_FALSE(createSubAxis("x", 4, 2).canMerge(createSubAxis("x", 1, 4)));
 }
 
 TEST_F(DialectTest, AxisRefAttrMerge) {
