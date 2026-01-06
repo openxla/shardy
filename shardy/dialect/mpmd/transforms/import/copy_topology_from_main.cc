@@ -74,7 +74,8 @@ class CopyTopologyFromMainPass
     ModuleOp module_op = getOperation();
 
     // TODO(b/428336749): remove gspmd specific logic when no longer needed.
-    MaybeConstructSdyMesh(module_op);
+    // MaybeConstructSdyMesh(module_op);
+    SDY_CHECK(!module_op.getOps<sdy::MeshOp>().empty());
 
     for (FuncOp func_op : module_op.getOps<FuncOp>()) {
       auto main_topology_attr =
