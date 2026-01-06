@@ -48,7 +48,7 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   //    nested concat ops.
   pm.addNestedPass<FuncOp>(createCanonicalizerPass());
 
-  pm.addPass(createCopyTopologyFromMainPass());
+  // pm.addPass(createCopyTopologyFromMainPass());
 
   if (options.enableHeterogeneousMeshes) {
     pm.addPass(createGenerateSdyMeshesFromTopologyPass());
