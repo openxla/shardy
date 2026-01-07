@@ -335,35 +335,6 @@ void saveShardingOriginsOnModule(
   }
 }
 
-// In the case where we have a Value used multiple times as an operand, we
-// should only add the edge once. For example:
-// ```mlir
-// %0 = stablehlo.add %arg0, %arg0 <[<@mesh, [{"a", ?}]>]> : tensor<8xf32>
-// return %0 : tensor<8xf32>
-// ```
-// The sharding projection said that both operand 0 and 1 are updated. However,
-// they are the same value, so we only need to add the edge once. This is only
-// the case for the target of the edge, because if the source appears multiple
-// times, then it's because it effects multiple other operands/results in the
-// op.
-bool insertSeenValue(Operation* op, const PropagationEdge& edge,
-                     llvm::SmallDenseSet<Value>& seenValues) {
-  EdgeNode target = edge.target;
-  switch (target.type) {
-    case EdgeNodeType::OPERAND: {
-      if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
-        return seenValues
-            .insert(getBodyTerminator(funcOp)->getOperand(target.index))
-            .second;
-      }
-      return seenValues.insert(op->getOperand(target.index)).second;
-    }
-    case EdgeNodeType::RESULT: {
-      return true;
-    }
-  }
-}
-
 PropagationEdgesAttr createPropagationEdges(Operation* op,
                                             const AxisToEdgesMap& axisToEdges,
                                             MLIRContext* context) {
