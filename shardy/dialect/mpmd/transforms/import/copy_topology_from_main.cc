@@ -37,14 +37,16 @@ namespace {
 
 // If the module doesn't have an `sdy.mesh`, constructs a global mesh containing
 // all the axes in the main function's topology. Assumes all meshes in the
-// topology are homogeneous.
+// topology are homogeneous. If meshes are not homogenous, we will generate an
+// incorrect global mesh but this will be fixed in the
+// GenerateSdyMeshesFromTopologyPass.
+// (b/474009780): Merge this logic with GenerateSdyMeshesFromTopologyPass.
 void MaybeConstructSdyMesh(ModuleOp module_op) {
   if (!module_op.getOps<sdy::MeshOp>().empty()) {
     return;
   }
 
   FuncOp main_func = GetMainFunction(module_op);
-  SDY_CHECK(HasHomogeneousTopology(main_func));
 
   // Create a global mesh containing all the axes.
   auto current_topology_attr =
