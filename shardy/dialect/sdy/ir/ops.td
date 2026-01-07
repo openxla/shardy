@@ -94,9 +94,6 @@ def Sdy_ReshardOp : Sdy_Op<"reshard",
        ReshardOp may be added if needed.
     3. A partitioner converts a ReshardOp into a collective op (or an identity
        op). There should be no ReshardOp in the results of the partitioner.
-
-  // TODO(b/331680067). Add a canonicalization pattern to remove redundant
-  // reshard ops.
   }];
 
   let arguments = (ins

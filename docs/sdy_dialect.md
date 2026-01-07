@@ -781,9 +781,6 @@ operation ::= `sdy.reshard` $input $sharding attr-dict `:` type($result)
   3. A partitioner converts a ReshardOp into a collective op (or an identity
      op). There should be no ReshardOp in the results of the partitioner.
 
-// TODO(b/331680067). Add a canonicalization pattern to remove redundant
-// reshard ops.
-
 Traits: `AlwaysSpeculatableImplTrait`, `SameOperandsAndResultType`
 
 Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`, `SymbolUserOpInterface`
