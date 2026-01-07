@@ -210,7 +210,22 @@ class InlineNestedUserExposedOpsPass
       }
       std::optional<MeshStageAssignment> parent_mesh_assignment =
           GetMeshStageAssignment(parent, assignment.value);
+
+      auto is_parent_missing_assignment = [&]() {
+        if (!parent_mesh_assignment.has_value()) {
+          parent.emitError("Parent NamedComputation '")
+              << parent.getName()
+              << "' is not assigned to a mesh in the user-defined "
+                 "name-to-mesh assignment.";
+          pass_must_signal_failure = true;
+          return true;
+        }
+        return false;
+      };
       if (auto named_computation = dyn_cast<NamedComputationOp>(op)) {
+        if (is_parent_missing_assignment()) {
+          return WalkResult::interrupt();
+        }
         std::optional<MeshStageAssignment> op_assignment =
             GetMeshStageAssignment(named_computation, assignment.value);
         if (op_assignment.has_value() &&
@@ -226,6 +241,9 @@ class InlineNestedUserExposedOpsPass
         return WalkResult::advance();
       }
       if (auto named_tensor = dyn_cast<NamedTensorOp>(op)) {
+        if (is_parent_missing_assignment()) {
+          return WalkResult::interrupt();
+        }
         std::optional<MeshTensorType> mesh_tensor =
             GetMeshTensorTypeFromAssignment(named_tensor, assignment.value);
         if (mesh_tensor.has_value() && mesh_tensor->getMemoryKind()) {

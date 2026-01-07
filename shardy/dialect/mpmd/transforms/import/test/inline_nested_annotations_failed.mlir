@@ -73,3 +73,16 @@ func.func @nested_unary_mpmd_ops(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attr
   } : (tensor<4x8xf32>) -> tensor<4x8xf32>
   func.return %0 : tensor<4x8xf32>
 }
+
+
+// -----
+
+func.func @parent_named_computation_unassigned(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
+    "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {
+  // expected-error@+1 {{Parent NamedComputation 'no_assignment' is not assigned}}
+  %0 = mpmd.named_computation<"no_assignment"> (%arg0) (%arg1: tensor<4x8xf32>) {
+    %1 = mpmd.named_tensor %arg1 name="f2" : tensor<4x8xf32>
+    mpmd.return %1 : tensor<4x8xf32>
+  } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  func.return %0 : tensor<4x8xf32>
+}
