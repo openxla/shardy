@@ -628,7 +628,8 @@ AxisRefAttr AxisRefAttr::merge(AxisRefAttr other, MeshAttr mesh) const {
   assert(canMerge(other));
   int64_t preSize = getSubAxisInfo().getPreSize();
   int64_t size = getSubAxisInfo().getSize() * other.getSubAxisInfo().getSize();
-  if (preSize == 1 && mesh.getAxisSize(getName()) == size) {
+  if (mesh.getAxisSize(getName()) == size) {
+    assert(preSize == 1);
     return AxisRefAttr::get(getContext(), getName());
   }
   return AxisRefAttr::get(getContext(), getName(), preSize, size);
