@@ -34,6 +34,11 @@ limitations under the License.
 
 namespace mlir::mpmd {
 
+// The attribute to avoid CSE.
+inline constexpr StringRef kMhloNoCseAttr = "mhlo.no_cse";
+// The attribute to indicate that an op has side effects.
+inline constexpr StringRef kHasSideEffectAttr = "has_side_effect";
+
 // The name of the attribute that keeps track of how many times a loop has been
 // unrolled.
 constexpr StringRef kUnrollCounterAttrName = "unroll_counter";
