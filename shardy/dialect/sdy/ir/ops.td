@@ -16,11 +16,11 @@ limitations under the License.
 #ifndef SDY_OPS
 #define SDY_OPS
 
-include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/BuiltinAttributeInterfaces.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "shardy/dialect/sdy/ir/attrs.td"
@@ -106,7 +106,7 @@ def Sdy_ReshardOp : Sdy_Op<"reshard",
   let hasCanonicalizer = 1;
 }
 
-def Sdy_ReturnOp : Sdy_Op<"return", [Pure, Terminator]> {
+def Sdy_ReturnOp : Sdy_Op<"return", [Pure, ReturnLike, Terminator]> {
   let summary = [{
     The `sdy.return` operation terminates the regions attached to
     `sdy` region-based ops and any other Shardy region-based ops. It is
