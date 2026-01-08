@@ -15,9 +15,10 @@
 
 """Common types used by PartIR:MPMD."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence, Set
 import dataclasses
 import enum
+from typing import Callable
 
 import jax
 import jaxtyping
@@ -38,6 +39,28 @@ NameToStageAssignment = Mapping[str, int]
 # because users can provide compile options overrides only for some meshes.
 MeshToCompileOptions = Mapping[str, jax.stages.CompilerOptions]
 PartitioningOptions = dict[str, bool | str]
+
+## Type aliases for custom scheduling and merging rules
+
+FragmentMergeRules = Sequence['FragmentMergeRule']
+FragmentScheduleRules = Sequence['FragmentScheduleRule']
+
+# Function that constructs a target FragmentInfo from a sequence of source
+# fragments that will be merged together into the target.
+TargetInfoBuilder = Callable[[Sequence['FragmentInfo']], 'FragmentInfo']
+
+# Function that builds schedule and/or merge rules from fragments and pipeline
+# context.
+ScheduleMergeRuleBuilder = Callable[
+    [Sequence['FragmentInfo'], 'PipelineContext'],
+    tuple[FragmentScheduleRules, FragmentMergeRules],
+]
+
+# Binary predicate determining if two fragments should be merged or scheduled
+# together.
+RuleGeneratorPredicate = Callable[
+    ['FragmentInfo', 'FragmentInfo', 'PipelineContext'], bool
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -66,7 +89,7 @@ class SplitFragmentType(enum.Enum):
 class FragmentInfo:
   """A fragment of a computation."""
 
-  origins: Sequence[FragmentOrigin]
+  origins: tuple[FragmentOrigin, ...]
   stage_id: int | None = None
   call_counter: int | None = None
   split_type: SplitFragmentType | None = None
@@ -75,23 +98,93 @@ class FragmentInfo:
 
 @dataclasses.dataclass(frozen=True)
 class FragmentMergeRule:
-  """A rule for merging fragments of a computation."""
+  """A rule for merging fragments of a computation.
 
-  sources: Sequence[FragmentInfo]
+  Attributes:
+    sources: The source fragments to be merged. The order does not affect the
+      final position of the merged fragment.
+    target: The target fragment metadata that results from merging the sources.
+  """
+
+  sources: Set[FragmentInfo]
   target: FragmentInfo
 
+  def __post_init__(self):
+    # Validate the fragment merge rule.
+    if len(self.sources) < 2:
+      raise ValueError(
+          'FragmentMergeRule must contain at least 2 source fragments, but got'
+          f' {self}.'
+      )
+    validate_fragment_rule_origins(self.sources)
+    validate_fragment_rule_meshes(self.sources)
 
-FragmentMergeRules = Sequence[FragmentMergeRule]
+    if not self.target.origins:
+      raise ValueError(
+          f'Target fragment must have at least one origin, but got {self}.'
+      )
 
 
 @dataclasses.dataclass(frozen=True)
 class FragmentScheduleRule:
-  """A rule for scheduling fragments of a computation."""
+  """A rule for scheduling fragments in a specific execution order.
+
+  Attributes:
+    ordered_fragments: Fragments in the order they should execute. Must contain
+      at least 2 fragments, and all fragments must be on the same mesh.
+  """
 
   ordered_fragments: Sequence[FragmentInfo]
 
+  def __post_init__(self):
+    # Validate the fragment schedule rule.
+    if len(self.ordered_fragments) < 2:
+      raise ValueError(
+          'FragmentScheduleRule must contain at least 2 fragments, but got'
+          f' {self}.'
+      )
+    validate_fragment_rule_origins(self.ordered_fragments)
+    validate_fragment_rule_meshes(self.ordered_fragments)
 
-FragmentScheduleRules = Sequence[FragmentScheduleRule]
+
+@dataclasses.dataclass(frozen=True)
+class PipelineContext:
+  """Context for pipeline scheduling and merging predicates."""
+
+  num_meshes: int
+
+
+# LINT.IfChange
+CPU_MESH_SUFFIX = '/cpu'
+# LINT.ThenChange(
+#   https://github.com/openxla/shardy/blob/main/shardy/dialect/mpmd/ir/utils.h
+# )
+
+
+def mesh_is_on_cpu(mesh_name: str) -> bool:
+  """Returns whether the mesh name is for a cpu mesh."""
+  return mesh_name.endswith(CPU_MESH_SUFFIX)
+
+
+def get_schedulable_meshes(topology: Topology) -> list[str]:
+  """Returns the names of meshes in the topology that are not CPU meshes."""
+  return [name for name in topology if not mesh_is_on_cpu(name)]
+
+
+@dataclasses.dataclass(frozen=True)
+class PipelineSchedule:
+  """A set of rules and options which define an MPMD pipeline.
+
+  Attributes:
+    schedule_merge_rule_builders: A sequence of functions that builds schedule
+      and/or merge rules for fragments.
+    required_mpmd_options: A mapping of PartitioningEnvironment flags that are
+      required for this schedule to function correctly. See
+      partitioning_options.py for available options.
+  """
+
+  schedule_merge_rule_builders: Sequence[ScheduleMergeRuleBuilder] | None = None
+  required_mpmd_options: Mapping[str, bool | str] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -257,11 +350,9 @@ def make_config(
   )
   if fragment_merge_rules is None:
     fragment_merge_rules = []
-  validate_fragment_merge_rules(fragment_merge_rules)
 
   if fragment_schedule_rules is None:
     fragment_schedule_rules = []
-  validate_fragment_schedule_rules(fragment_schedule_rules)
 
   return MpmdConfig(
       topology,
@@ -344,62 +435,30 @@ def validate_input_output_mesh_assignments(
 
 
 def validate_fragment_rule_origins(
-    fragment_sequence: Sequence[FragmentInfo],
+    fragment_collection: Collection[FragmentInfo],
 ) -> None:
-  for fragment in fragment_sequence:
+  """Validates that all fragments have at least one origin."""
+  for fragment in fragment_collection:
     if not fragment.origins:
       raise ValueError(
           f'Each fragment must have at least one origin, but got {fragment} in'
-          f' {fragment_sequence}.'
+          f' {fragment_collection}.'
       )
 
 
 def validate_fragment_rule_meshes(
-    fragment_sequence: Sequence[FragmentInfo],
+    fragment_collection: Collection[FragmentInfo],
 ) -> None:
-  first_mesh = fragment_sequence[0].mesh_name
+  """Validates that all fragments are on the same mesh."""
+  first_fragment = next(iter(fragment_collection))
+  first_mesh = first_fragment.mesh_name
   if not all(
-      fragment.mesh_name == first_mesh for fragment in fragment_sequence
+      fragment.mesh_name == first_mesh for fragment in fragment_collection
   ):
     raise ValueError(
         'Fragments being merged/scheduled must be on the same mesh, but got'
-        f' {fragment_sequence}.'
+        f' {fragment_collection}.'
     )
-
-
-def validate_fragment_merge_rules(
-    fragment_merge_rules: FragmentMergeRules,
-) -> None:
-  """Validates the fragment merge rules."""
-
-  for rule in fragment_merge_rules:
-    if len(rule.sources) < 2:
-      raise ValueError(
-          'Fragment merge rule must contain at least two source fragments, but'
-          f' got {rule}.'
-      )
-    validate_fragment_rule_origins(rule.sources)
-    validate_fragment_rule_meshes(rule.sources)
-
-    if not rule.target.origins:
-      raise ValueError(
-          f'Target fragment must have at least one origin, but got {rule}.'
-      )
-
-
-def validate_fragment_schedule_rules(
-    fragment_schedule_rules: FragmentScheduleRules,
-) -> None:
-  """Validates the fragment schedule rules."""
-  for rule in fragment_schedule_rules:
-    if len(rule.ordered_fragments) < 2:
-      raise ValueError(
-          'Fragment schedule rule must contain at least two fragments, but'
-          f' got {rule}.'
-      )
-
-    validate_fragment_rule_origins(rule.ordered_fragments)
-    validate_fragment_rule_meshes(rule.ordered_fragments)
 
 
 def mesh_names(
