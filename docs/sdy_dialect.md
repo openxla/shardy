@@ -822,9 +822,9 @@ Syntax:
 operation ::= `sdy.return` attr-dict ($results^ `:` type($results))?
 ```
 
-Traits: `AlwaysSpeculatableImplTrait`, `Terminator`
+Traits: `AlwaysSpeculatableImplTrait`, `ReturnLike`, `Terminator`
 
-Interfaces: `ConditionallySpeculatable`, `NoMemoryEffect (MemoryEffectOpInterface)`
+Interfaces: `ConditionallySpeculatable`, `NoMemoryEffect (MemoryEffectOpInterface)`, `RegionBranchTerminatorOpInterface`
 
 Effects: `MemoryEffects::Effect{}`
 
