@@ -769,17 +769,17 @@ Syntax:
 operation ::= `sdy.reshard` $input $sharding attr-dict `:` type($result)
 ```
 
-  Reshards the input tensor with the specified sharding, which is different
-  from the input tensor's existing sharding.
+Reshards the input tensor with the specified sharding, which is different
+from the input tensor's existing sharding.
 
-  Both ShardingConstraintOp and ReshardOp attach a sharding to a tensor. Their
-  lifespan is:
-  1. Before sharding propagation, ShardingConstraintOp is added by users.
-  2. Sharding propagation consumes ShardingConstraintOp. There is no
-     ShardingConstraintOp in the results of sharding propagation. Instead,
-     ReshardOp may be added if needed.
-  3. A partitioner converts a ReshardOp into a collective op (or an identity
-     op). There should be no ReshardOp in the results of the partitioner.
+Both ShardingConstraintOp and ReshardOp attach a sharding to a tensor. Their
+lifespan is:
+1. Before sharding propagation, ShardingConstraintOp is added by users.
+2. Sharding propagation consumes ShardingConstraintOp. There is no
+   ShardingConstraintOp in the results of sharding propagation. Instead,
+   ReshardOp may be added if needed.
+3. A partitioner converts a ReshardOp into a collective op (or an identity
+   op). There should be no ReshardOp in the results of the partitioner.
 
 Traits: `AlwaysSpeculatableImplTrait`, `SameOperandsAndResultType`
 
