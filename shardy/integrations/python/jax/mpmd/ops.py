@@ -294,7 +294,9 @@ def _register_named_computation_primitive():
       pe.partial_eval_jaxpr_custom_rules[primitives.call_p]
   )
   state_discharge.register_discharge_rule(primitive)(
-      state_discharge._call_discharge_rule
+      functools.partial(
+          state_discharge._call_primitive_discharge_rule, primitive
+      )
   )
   return primitive
 
