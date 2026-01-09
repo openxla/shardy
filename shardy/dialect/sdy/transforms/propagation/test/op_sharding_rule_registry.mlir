@@ -65,6 +65,13 @@ func.func @all_to_all_same_dimension(%arg0: tensor<2x4xi64>, %arg1: tensor<2x4xi
   return %0#0, %0#1 :  tensor<2x4xi64>, tensor<2x4xi64>
 }
 
+// CHECK-LABEL: func @batch_norm_inference
+func.func @batch_norm_inference(%arg0: tensor<4x8x16x32xf32>, %arg1: tensor<16xf32>, %arg2: tensor<16xf32>, %arg3: tensor<16xf32>, %arg4: tensor<16xf32>) -> tensor<4x8x16x32xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, l], [k], [k], [k], [k])->([i, j, k, l]) {i=4, j=8, k=16, l=32}>
+  %0 = "stablehlo.batch_norm_inference"(%arg0, %arg1, %arg2, %arg3, %arg4) {epsilon = 0.001 : f32, feature_index = 2 : i64} : (tensor<4x8x16x32xf32>, tensor<16xf32>, tensor<16xf32>, tensor<16xf32>, tensor<16xf32>) -> tensor<4x8x16x32xf32>
+  func.return %0 : tensor<4x8x16x32xf32>
+}
+
 // CHECK-LABEL: func @bitcast_convert_upcast
 func.func @bitcast_convert_upcast(%arg0: tensor<4x2x2xui32>) -> tensor<4x2xui64> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j]) {i=4, j=2, k=2} need_replication={k}>

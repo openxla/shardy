@@ -325,6 +325,20 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             }
             return builder.build();
           })
+      .Case<stablehlo::BatchNormInferenceOp>(
+          [](stablehlo::BatchNormInferenceOp batchNormInference) {
+            OpShardingRuleBuilder builder(batchNormInference);
+            uint64_t featureIndex = batchNormInference.getFeatureIndex();
+            for (auto [dim, dimSize] : llvm::enumerate(
+                     batchNormInference.getOperand().getType().getShape())) {
+              SmallVector<int64_t> opDims(
+                  batchNormInference.getNumOperands(),
+                  /*value=*/dim == featureIndex ? 0 : kNullDim);
+              opDims[0] = dim;
+              builder.addFactor(opDims, dim, dimSize);
+            }
+            return builder.build();
+          })
       .Case<stablehlo::BroadcastInDimOp>(
           [](stablehlo::BroadcastInDimOp broadcast) {
             OpShardingRuleBuilder builder(broadcast);
