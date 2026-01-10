@@ -463,10 +463,18 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         if (!conservativePropagation) {
           // Only add a factor for spatial dimensions if we are not in
           // conservative mode.
-          for (auto [lhsDim, rhsDim, outDim] :
-               llvm::zip_equal(dimNums.getInputSpatialDimensions(),
-                               dimNums.getKernelSpatialDimensions(),
-                               dimNums.getOutputSpatialDimensions())) {
+          std::optional<ArrayRef<bool>> windowReversal =
+              conv.getWindowReversal();
+          for (auto [i, dims] : llvm::enumerate(
+                   llvm::zip_equal(dimNums.getInputSpatialDimensions(),
+                                   dimNums.getKernelSpatialDimensions(),
+                                   dimNums.getOutputSpatialDimensions()))) {
+            if (windowReversal.has_value() && (*windowReversal)[i]) {
+              // TODO(b/396724444). Add support for the reversed dimensions when
+              // we support it in the mesh.
+              continue;
+            }
+            const auto& [lhsDim, rhsDim, outDim] = dims;
             // The input spatial dimension can be sharded along either the
             // number of windows (corresponds to the output spatial dimension)
             // or the window size (corresponds to the kernel spatial dimension),
@@ -1081,14 +1089,19 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         return builder.build();
       })
       .Case<stablehlo::ReverseOp>([](stablehlo::ReverseOp reverse) {
-        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
-          return llvm::is_contained(reverse.getDimensions(), dim)
-                     ? FactorType::kPermutation
-                     : FactorType::kPassThrough;
-        };
-        return OpShardingRuleBuilder(reverse)
-            .addPointwise(getTensorShape(reverse.getResult()), getFactorType)
-            .build();
+        OpShardingRuleBuilder builder(reverse);
+        for (const auto& [dim, dimSize] :
+             llvm::enumerate(getTensorShape(reverse.getResult()))) {
+          if (llvm::is_contained(reverse.getDimensions(), dim)) {
+            // TODO(b/396724444). Add support for the reversed dimensions when
+            // we support it in the mesh.
+            builder.addFactor(dim, dimSize, FactorType::kPermutation,
+                              /*isBlocked=*/true);
+          } else {
+            builder.addFactor(dim, dimSize);
+          }
+        }
+        return builder.build();
       })
       .Case<stablehlo::RngBitGeneratorOp>(
           [](stablehlo::RngBitGeneratorOp rngBitGenerator) {
