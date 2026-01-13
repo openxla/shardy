@@ -54,9 +54,9 @@ class SimplifyFragmentPattern : public SimplifyRegionOpPatternBase<FragmentOp> {
   FragmentOp createNewOp(FragmentOp op, PatternRewriter& rewriter,
                          TypeRange result_types, ValueRange operands,
                          BitVector erased_results) const override {
-    auto newOp = rewriter.create<FragmentOp>(
-        op.getLoc(), result_types, operands, op.getOriginAttr(),
-        op.getMeshNameAttr(), op.getStageIdAttr());
+    auto newOp = FragmentOp::create(rewriter, op.getLoc(), result_types,
+                                    operands, op.getOriginAttr(),
+                                    op.getMeshNameAttr(), op.getStageIdAttr());
     // Make sure that any attribute that is not origin or mesh_name (which are
     // copied above) is preserved (e.g., remat or call_counter info).
     for (NamedAttribute attr : op->getAttrs()) {

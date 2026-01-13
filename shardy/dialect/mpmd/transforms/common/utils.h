@@ -160,7 +160,7 @@ Operation* MergeRegionOps(
 // arguments, i.e. block arguments that correspond to operands.
 //
 // `builder_args` should include any builder argument that should be forwarded
-// to `rewriter.create<OpTy>()` in addition to result types and operands.
+// to `OpTy::create(rewriter, ...)` in addition to result types and operands.
 //
 // NOTE: we assume OpTy is an op with a single region, that has
 // `num_static_args` static block arguments and an additional block argument
@@ -175,11 +175,9 @@ OpTy MergeRegionOps(OpTy producer_op, OpTy consumer_op,
   return cast<OpTy>(detail::MergeRegionOps(
       producer_op, consumer_op, rewriter, num_static_args,
       replace_producer_use_in_consumer_block,
-      [&](Location loc, TypeRange result_types,
-          ValueRange operands) {
-        return rewriter.create<OpTy>(
-            loc, result_types, operands,
-            std::forward<BuilderArgs>(builder_args)...);
+      [&](Location loc, TypeRange result_types, ValueRange operands) {
+        return OpTy::create(rewriter, loc, result_types, operands,
+                            std::forward<BuilderArgs>(builder_args)...);
       }));
 }
 

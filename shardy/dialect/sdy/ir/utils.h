@@ -404,8 +404,9 @@ void inlineRegionAndConvertTerminatorOp(Region& src, Region& dst) {
 
   for (Block& block : dst.getBlocks()) {
     Operation* returnOp = block.getTerminator();
-    OpBuilder::atBlockEnd(&block).create<TerminatorOpTy>(
-        returnOp->getLoc(), returnOp->getOperands());
+    auto builder = OpBuilder::atBlockEnd(&block);
+    TerminatorOpTy::create(builder, returnOp->getLoc(),
+                           returnOp->getOperands());
     returnOp->erase();
   }
 }

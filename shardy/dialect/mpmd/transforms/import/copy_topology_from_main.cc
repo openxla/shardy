@@ -63,9 +63,9 @@ void MaybeConstructSdyMesh(ModuleOp module_op) {
         sdy::MeshAxisAttr::get(ctx, mesh_axis.getName(), mesh_axis.getSize()));
   }
 
-  OpBuilder::atBlockBegin(module_op.getBody())
-      .create<sdy::MeshOp>(module_op.getLoc(), kGlobalMeshName,
-                           sdy::MeshAttr::get(ctx, sdy_axes));
+  auto builder = OpBuilder::atBlockBegin(module_op.getBody());
+  sdy::MeshOp::create(builder, module_op.getLoc(), kGlobalMeshName,
+                      sdy::MeshAttr::get(ctx, sdy_axes));
 }
 
 class CopyTopologyFromMainPass
