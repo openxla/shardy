@@ -1018,10 +1018,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
 
           int64_t nextFactorGcd = std::gcd(nextInFactor, nextOutFactor);
 
-          auto getNextFactorIfDivereged = [nextFactorGcd](
-                                              int64_t nextFactor,
-                                              int64_t smallerProdFactors,
-                                              int64_t largerProdFactors) {
+          auto getNextFactorIfDiverged = [nextFactorGcd](
+                                             int64_t nextFactor,
+                                             int64_t smallerProdFactors,
+                                             int64_t largerProdFactors) {
             if (largerProdFactors % smallerProdFactors == 0 &&
                 nextFactor % (largerProdFactors / smallerProdFactors) == 0) {
               // We can add a smaller factor that would converge the in and out
@@ -1057,14 +1057,14 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           } else if (prodFactorsIn < prodFactorsOut) {
             // In and out factors have already diverged. Add a factor for the
             // input if its factors are behind the output factors.
-            nextInFactor = getNextFactorIfDivereged(nextInFactor, prodFactorsIn,
-                                                    prodFactorsOut);
+            nextInFactor = getNextFactorIfDiverged(nextInFactor, prodFactorsIn,
+                                                   prodFactorsOut);
             builder.addFactor(inDim, kNullDim, nextInFactor);
             prodFactorsIn *= nextInFactor;
           } else {
             // Similarly, add a factor for the output if its factors are behind
             // the input factors.
-            nextOutFactor = getNextFactorIfDivereged(
+            nextOutFactor = getNextFactorIfDiverged(
                 nextOutFactor, prodFactorsOut, prodFactorsIn);
             builder.addFactor(kNullDim, outDim, nextOutFactor);
             prodFactorsOut *= nextOutFactor;
