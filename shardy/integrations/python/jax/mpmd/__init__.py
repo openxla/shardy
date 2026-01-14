@@ -24,14 +24,14 @@ from shardy.integrations.python.jax.mpmd.ops import fori_loop
 from shardy.integrations.python.jax.mpmd.ops import named_computation
 from shardy.integrations.python.jax.mpmd.ops import named_tensor
 from shardy.integrations.python.jax.mpmd.ops import reduce
+from shardy.integrations.python.jax.mpmd.pipeline import FragmentInfo
+from shardy.integrations.python.jax.mpmd.pipeline import FragmentMergeRule
+from shardy.integrations.python.jax.mpmd.pipeline import FragmentMergeRules
+from shardy.integrations.python.jax.mpmd.pipeline import FragmentOrigin
 from shardy.integrations.python.jax.mpmd.stages import MpmdCompiled as Compiled
 from shardy.integrations.python.jax.mpmd.stages import MpmdExecutable as Executable
 from shardy.integrations.python.jax.mpmd.stages import MpmdJitShardingInfo
 from shardy.integrations.python.jax.mpmd.stages import MpmdLowered as Lowered
-from shardy.integrations.python.jax.mpmd.types import FragmentInfo
-from shardy.integrations.python.jax.mpmd.types import FragmentMergeRule
-from shardy.integrations.python.jax.mpmd.types import FragmentMergeRules
-from shardy.integrations.python.jax.mpmd.types import FragmentOrigin
 from shardy.integrations.python.jax.mpmd.types import FunctionIOMeshAssignment
 from shardy.integrations.python.jax.mpmd.types import make_config
 from shardy.integrations.python.jax.mpmd.types import mesh_names

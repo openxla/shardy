@@ -19,7 +19,7 @@ from absl.testing import parameterized
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
 
 from shardy.integrations.python.jax.mpmd import jaxlib_utils
-from shardy.integrations.python.jax.mpmd import types
+from shardy.integrations.python.jax.mpmd import pipeline
 
 
 class SplitTypeConversionTest(parameterized.TestCase):
@@ -28,12 +28,12 @@ class SplitTypeConversionTest(parameterized.TestCase):
   @parameterized.named_parameters(
       (
           'keep_transferred',
-          types.SplitFragmentType.KEEP_TRANSFERRED,
+          pipeline.SplitFragmentType.KEEP_TRANSFERRED,
           jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED,
       ),
       (
           'drop_transferred',
-          types.SplitFragmentType.DROP_TRANSFERRED,
+          pipeline.SplitFragmentType.DROP_TRANSFERRED,
           jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED,
       ),
       ('none', None, None),
@@ -52,27 +52,27 @@ class FragmentInfoConversionTest(parameterized.TestCase):
   @parameterized.named_parameters(
       (
           'single_origin',
-          types.FragmentInfo(
-              origins=(types.FragmentOrigin('comp1', 0),), mesh_name='mesh1'
+          pipeline.FragmentInfo(
+              origins=(pipeline.FragmentOrigin('comp1', 0),), mesh_name='mesh1'
           ),
       ),
       (
           'multiple_origins',
-          types.FragmentInfo(
+          pipeline.FragmentInfo(
               origins=(
-                  types.FragmentOrigin('comp1', 0),
-                  types.FragmentOrigin('comp2', 1),
+                  pipeline.FragmentOrigin('comp1', 0),
+                  pipeline.FragmentOrigin('comp2', 1),
               ),
               mesh_name='mesh1',
           ),
       ),
       (
           'all_fields',
-          types.FragmentInfo(
-              origins=(types.FragmentOrigin('comp1', 2),),
+          pipeline.FragmentInfo(
+              origins=(pipeline.FragmentOrigin('comp1', 2),),
               stage_id=5,
               call_counter=3,
-              split_type=types.SplitFragmentType.KEEP_TRANSFERRED,
+              split_type=pipeline.SplitFragmentType.KEEP_TRANSFERRED,
               mesh_name='mesh2',
           ),
       ),
@@ -89,18 +89,21 @@ class FragmentMergeRulesConversionTest(absltest.TestCase):
 
   def test_single_rule(self):
     """Test converting single merge rule."""
-    f1 = types.FragmentInfo(
-        origins=(types.FragmentOrigin('f1', 0),), mesh_name='m1'
+    f1 = pipeline.FragmentInfo(
+        origins=(pipeline.FragmentOrigin('f1', 0),), mesh_name='m1'
     )
-    f2 = types.FragmentInfo(
-        origins=(types.FragmentOrigin('f2', 0),), mesh_name='m1'
+    f2 = pipeline.FragmentInfo(
+        origins=(pipeline.FragmentOrigin('f2', 0),), mesh_name='m1'
     )
-    target = types.FragmentInfo(
-        origins=(types.FragmentOrigin('f1', 0), types.FragmentOrigin('f2', 0)),
+    target = pipeline.FragmentInfo(
+        origins=(
+            pipeline.FragmentOrigin('f1', 0),
+            pipeline.FragmentOrigin('f2', 0),
+        ),
         mesh_name='m1',
     )
 
-    rule = types.FragmentMergeRule(sources={f1, f2}, target=target)
+    rule = pipeline.FragmentMergeRule(sources={f1, f2}, target=target)
     result = jaxlib_utils.convert_fragment_merge_rules_to_pybind([rule])
 
     self.assertLen(result, 1)
@@ -114,18 +117,18 @@ class FragmentScheduleRulesConversionTest(absltest.TestCase):
   def test_preserves_order(self):
     """Test that ordered_fragments order is preserved."""
     frags = [
-        types.FragmentInfo(
-            origins=(types.FragmentOrigin('first', 0),), mesh_name='m1'
+        pipeline.FragmentInfo(
+            origins=(pipeline.FragmentOrigin('first', 0),), mesh_name='m1'
         ),
-        types.FragmentInfo(
-            origins=(types.FragmentOrigin('second', 0),), mesh_name='m1'
+        pipeline.FragmentInfo(
+            origins=(pipeline.FragmentOrigin('second', 0),), mesh_name='m1'
         ),
-        types.FragmentInfo(
-            origins=(types.FragmentOrigin('third', 0),), mesh_name='m1'
+        pipeline.FragmentInfo(
+            origins=(pipeline.FragmentOrigin('third', 0),), mesh_name='m1'
         ),
     ]
 
-    rule = types.FragmentScheduleRule(ordered_fragments=frags)
+    rule = pipeline.FragmentScheduleRule(ordered_fragments=frags)
     result = jaxlib_utils.convert_fragment_schedule_rules_to_pybind([rule])
 
     self.assertEqual(

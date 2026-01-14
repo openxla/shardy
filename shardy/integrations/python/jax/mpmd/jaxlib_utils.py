@@ -12,22 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Utilities for converting between Python types and jaxlib pybind types."""
+"""Utilities for converting between Python types and jaxlib pybind pipeline."""
 
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
 
-from shardy.integrations.python.jax.mpmd import types
+from shardy.integrations.python.jax.mpmd import pipeline
 
 
 def _to_jaxlib_split_type(
-    split_type: types.SplitFragmentType | None,
+    split_type: pipeline.SplitFragmentType | None,
 ) -> jaxlib_mpmd.SplitFragmentType | None:
   """Convert native Python enum to pybinded enum."""
   if split_type is None:
     return None
-  if split_type == types.SplitFragmentType.KEEP_TRANSFERRED:
+  if split_type == pipeline.SplitFragmentType.KEEP_TRANSFERRED:
     return jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED
-  elif split_type == types.SplitFragmentType.DROP_TRANSFERRED:
+  elif split_type == pipeline.SplitFragmentType.DROP_TRANSFERRED:
     return jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED
   else:
     raise ValueError(f'Unknown SplitFragmentType: {split_type}')
@@ -35,20 +35,20 @@ def _to_jaxlib_split_type(
 
 def _from_jaxlib_split_type(
     split_type: jaxlib_mpmd.SplitFragmentType | None,
-) -> types.SplitFragmentType | None:
+) -> pipeline.SplitFragmentType | None:
   """Convert pybinded enum to native Python enum."""
   if split_type is None:
     return None
   if split_type == jaxlib_mpmd.SplitFragmentType.KEEP_TRANSFERRED:
-    return types.SplitFragmentType.KEEP_TRANSFERRED
+    return pipeline.SplitFragmentType.KEEP_TRANSFERRED
   elif split_type == jaxlib_mpmd.SplitFragmentType.DROP_TRANSFERRED:
-    return types.SplitFragmentType.DROP_TRANSFERRED
+    return pipeline.SplitFragmentType.DROP_TRANSFERRED
   else:
     raise ValueError(f'Unknown jaxlib_mpmd.SplitFragmentType: {split_type}')
 
 
 def convert_fragment_info_to_pybind(
-    fragment: types.FragmentInfo,
+    fragment: pipeline.FragmentInfo,
 ) -> jaxlib_mpmd.FragmentInfo:
   """Converts FragmentInfo to jaxlib_mpmd.FragmentInfo."""
   return jaxlib_mpmd.FragmentInfo(
@@ -67,11 +67,13 @@ def convert_fragment_info_to_pybind(
 
 def convert_pybind_fragment_info_to_types(
     fragment: jaxlib_mpmd.FragmentInfo,
-) -> types.FragmentInfo:
+) -> pipeline.FragmentInfo:
   """Converts jaxlib_mpmd.FragmentInfo to FragmentInfo."""
-  return types.FragmentInfo(
+  return pipeline.FragmentInfo(
       origins=tuple(
-          types.FragmentOrigin(origin.computation_name, origin.transpose_count)
+          pipeline.FragmentOrigin(
+              origin.computation_name, origin.transpose_count
+          )
           for origin in fragment.origins
       ),
       stage_id=fragment.stage_id,
@@ -82,7 +84,7 @@ def convert_pybind_fragment_info_to_types(
 
 
 def convert_fragment_merge_rules_to_pybind(
-    fragment_merge_rules: types.FragmentMergeRules,
+    fragment_merge_rules: pipeline.FragmentMergeRules,
 ) -> list[jaxlib_mpmd.FragmentMergeRule]:
   """Converts fragment merge rules to jaxlib_mpmd.FragmentMergeRules."""
   pybind_fragment_merge_rules = []
@@ -100,7 +102,7 @@ def convert_fragment_merge_rules_to_pybind(
 
 
 def convert_fragment_schedule_rules_to_pybind(
-    fragment_schedule_rules: types.FragmentScheduleRules,
+    fragment_schedule_rules: pipeline.FragmentScheduleRules,
 ) -> list[jaxlib_mpmd.FragmentScheduleRule]:
   """Converts fragment schedule rules to jaxlib_mpmd.FragmentScheduleRules."""
   pybind_fragment_schedule_rules = []
