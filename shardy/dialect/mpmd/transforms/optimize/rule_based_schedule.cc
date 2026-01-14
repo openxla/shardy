@@ -79,7 +79,7 @@ class RuleBasedSchedulePass
         // next iteration, unless we encounter an error that should break the
         // dependency chain.
         bool should_update_predecessor_info = true;
-        auto predecessor_update_guard = llvm::make_scope_exit([&]() {
+        llvm::scope_exit predecessor_update_guard([&]() {
           if (should_update_predecessor_info) {
             predecessor_info = &successor_info;
           }
