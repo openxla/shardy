@@ -169,29 +169,35 @@ PartitioningResult MpmdProgram::ApplyPartitioning(PartitioningPhase phases) {
 
   func::FuncOp main_func = GetMainFunction(module);
   SetTopology(named_meshes, main_func);
-  SetArgDonationAttributes(main_func, donate_argnums);
 
-  // It is not necessary to do this
-  // validation after the export pipeline because here we're only checking that
-  // the attributes set on the main func are consistent with the received donate
-  // args.
-  VerifyOnlyDonatedArgsHaveDonationAttributes(main_func, donate_argnums);
+  if (phases & PartitioningPhase::kImport) {
+    SetArgDonationAttributes(main_func, donate_argnums);
 
-  SDY_LOG(INFO) << "Importing function named " << func_name
-                << " for MPMD partitioning.";
+    // It is not necessary to do this validation after the export pipeline
+    // because here we're only checking that the attributes set on the main func
+    // are consistent with the received donate args.
+    VerifyOnlyDonatedArgsHaveDonationAttributes(main_func, donate_argnums);
 
-  Import(module);
+    SDY_LOG(INFO) << "Importing function named " << func_name
+                  << " for MPMD partitioning.";
 
-  SDY_LOG(INFO) << "Optimizing function named " << func_name
-                << " for pipeline parallelism.";
-  Optimize(module);
+    Import(module);
+  }
 
-  SDY_LOG(INFO) << "Applying SDY propagation to function named " << func_name
-                << ".";
-  PropagateSharding(module);
+  if (phases & PartitioningPhase::kOptimize) {
+    SDY_LOG(INFO) << "Optimizing function named " << func_name
+                  << " for pipeline parallelism.";
+    Optimize(module);
+  }
 
-  SDY_LOG(INFO) << "Exporting MPMD function named " << func_name << ".";
-  Export(module);
+  if (phases & PartitioningPhase::kPartition) {
+    SDY_LOG(INFO) << "Applying SDY propagation to function named " << func_name
+                  << ".";
+    PropagateSharding(module);
+
+    SDY_LOG(INFO) << "Exporting MPMD function named " << func_name << ".";
+    Export(module);
+  }
 
   return PartitioningResult(module);
 }
@@ -206,7 +212,8 @@ void MpmdProgram::Import(ModuleOp module) {
       ConvertMeshVectorToMap(input_meshes)};
   import_options.outputIndexToMeshAssignment = {
       ConvertMeshVectorToMap(output_meshes)};
-  import_options.mergeAfterScheduling = options.mpmd_merge_after_scheduling;
+  import_options.mergeAfterScheduling =
+      options.mpmd_merge_inferred_after_scheduling;
   import_options.absorbInferredFragmentsOnEntryPointFunction =
       options.mpmd_absorb_inferred_fragments_on_entry_point_function;
   import_options.cloneInferredFragments =
@@ -227,7 +234,8 @@ void MpmdProgram::Optimize(ModuleOp module) {
 
   OptimizeOptions optimize_options;
   optimize_options.fragmentMergeRules = llvm::to_vector(fragment_merge_rules);
-  optimize_options.mergeAfterScheduling = options.mpmd_merge_after_scheduling;
+  optimize_options.mergeAfterScheduling =
+      options.mpmd_merge_inferred_after_scheduling;
   optimize_options.applyFragmentRemat = options.mpmd_fragment_remat;
   optimize_options.mergeRematFragments = options.mpmd_merge_remat_fragments;
   optimize_options.absorbInferredFragmentsOnEntryPointFunction =
