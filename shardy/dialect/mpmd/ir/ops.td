@@ -575,6 +575,9 @@ def ForOp : Mpmd_Op<"for",
    std::optional<ResultRange> getLoopResults() {
       return getResults();
     }
+    bool isValidInductionVarType(Type type) {
+      return getElementTypeOrSelf(type).isInteger();
+    }
   }];
 
 }
