@@ -72,8 +72,10 @@ constexpr StringRef kCpuMeshSuffix = "/cpu";
 // Attr on func args and results to indicate whether the value lives on host or
 // device. If not present, it means it lives on device.
 inline constexpr StringRef kMemoryKindAttr = "mhlo.memory_kind";
-// Attr value to indicate whether the value is on the host.
+// Attr value to indicate whether the value is pinned on the host.
 inline constexpr StringRef kMemoryKindPinnedHost = "pinned_host";
+// Attr value to indicate whether the value is unpinned on the host.
+inline constexpr StringRef kMemoryKindUnpinnedHost = "unpinned_host";
 // Attr value to indicate whether the value is on the device.
 inline constexpr StringRef kMemoryKindDevice = "device";
 

@@ -63,26 +63,53 @@ DenseSet<BlockArgument> GetDonatedBlockArguments(
 DenseMap<Operation*, SmallVector<unsigned int>>
 OperandsForDeletionMapping(func::FuncOp main_func);
 
+inline bool IsMemoryKindOnHost(mlir::StringAttr memory_kind) {
+  if (!memory_kind) {
+    return false;
+  }
+  mlir::StringRef memory_kind_val = memory_kind.getValue();
+  return memory_kind_val == mpmd::kMemoryKindPinnedHost ||
+         memory_kind_val == mpmd::kMemoryKindUnpinnedHost;
+}
+
+
 // Checks the arg attrs of the op to see if the arg is on the host.
-inline bool IsArgOnHost(Operation* op, int index) {
-  return GetArgAttr(op, index, kMemoryKindAttr) ==
-         StringAttr::get(op->getContext(), kMemoryKindPinnedHost);
+inline bool IsArgOnHost(mlir::Operation* op, int index) {
+  mlir::StringAttr memory_kind_attr = mlir::dyn_cast_or_null<mlir::StringAttr>(
+      mlir::mpmd::GetArgAttr(op, index, mlir::mpmd::kMemoryKindAttr));
+  return IsMemoryKindOnHost(memory_kind_attr);
 }
 
-// Checks the arg of the function is on the host.
-inline bool IsArgOnHost(func::FuncOp func, int index) {
-  return func.getArgAttrOfType<StringAttr>(index,
-                                                 kMemoryKindAttr) ==
-         StringAttr::get(func.getContext(), kMemoryKindPinnedHost);
+inline std::optional<mlir::StringRef> GetMemoryKindIfArgOnHost(
+    mlir::func::FuncOp func, int index) {
+  mlir::StringAttr memory_kind_attr = func.getArgAttrOfType<mlir::StringAttr>(
+      index, mlir::mpmd::kMemoryKindAttr);
+  if (!memory_kind_attr) {
+    return std::nullopt;
+  }
+  mlir::StringRef memory_kind_val = memory_kind_attr.getValue();
+  if (memory_kind_val == mlir::mpmd::kMemoryKindPinnedHost ||
+      memory_kind_val == mlir::mpmd::kMemoryKindUnpinnedHost) {
+    return memory_kind_val;
+  }
+  return std::nullopt;
 }
 
-// Checks the result attrs of the op to see if the result is on the host.
-inline bool IsResultOnHost(OpResult op_result) {
-  return GetResAttr(op_result.getOwner(),
-                                op_result.getResultNumber(),
-                                kMemoryKindAttr) ==
-         StringAttr::get(op_result.getContext(),
-                               kMemoryKindPinnedHost);
+inline std::optional<mlir::StringRef> GetMemoryKindIfResultOnHost(
+    mlir::OpResult op_result) {
+  auto memory_kind = dyn_cast_or_null<mlir::StringAttr>(
+      mlir::mpmd::GetResAttr(op_result.getOwner(), op_result.getResultNumber(),
+                             mlir::mpmd::kMemoryKindAttr));
+
+  if (!memory_kind) {
+    return std::nullopt;
+  }
+  mlir::StringRef memory_kind_val = memory_kind.getValue();
+  if (memory_kind_val == mlir::mpmd::kMemoryKindPinnedHost ||
+      memory_kind_val == mlir::mpmd::kMemoryKindUnpinnedHost) {
+    return memory_kind_val;
+  }
+  return std::nullopt;
 }
 
 // Checks if the layout of the input and output match.

@@ -60,7 +60,7 @@ std::optional<unsigned int> FindAliasingOutput(
     // 2. the output has not been aliased yet, and
     // 3. the output is not on host memory.
     // 4. the input and output have the same layout.
-    if (output.getType() != input_type || IsResultOnHost(output) ||
+    if (output.getType() != input_type || GetMemoryKindIfResultOnHost(output) ||
         !IsInputOutputLayoutMatch(op, input_index, output_index)) {
       continue;
     }
