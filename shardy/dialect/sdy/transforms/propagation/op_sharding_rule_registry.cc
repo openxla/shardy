@@ -701,6 +701,11 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           }
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
+        if (auto shardingRuleOp =
+              llvm::dyn_cast<ShardingRuleOpInterface>(
+                customCall.getOperation())) {
+          return shardingRuleOp.getShardingRule();
+        }
         // TODO(b/327191011): output unregistered op stats instead.
         static llvm::once_flag onceFlag;
         emitOpWarningOnce(
