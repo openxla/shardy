@@ -108,3 +108,25 @@ func.func private @f(%arg0: tensor<3x5xf32>, %arg1: tensor<3x5xf32>) -> (tensor<
   return %0, %arg1 : tensor<3x5xf32>, tensor<3x5xf32>
 }
 // No error.
+
+// -----
+// CHECK-LABEL: sdy.mesh @mesh = <["x"=2]>
+#topology = #mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
+
+// Do not CSE on custom calls with no_cse attribute. It should also add side
+// effect attribute to the custom call.
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
+    "topology"=#topology} {
+// CHECK-NEXT: %[[FRAG:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1
+// CHECK-NEXT:   %[[CUSTOM_CALL:.*]] = stablehlo.custom_call @Sharding
+// CHECK-SAME:  {has_side_effect = true, mhlo.no_cse}
+// CHECK-NEXT:   %[[CUSTOM_CALL_2:.*]] = stablehlo.custom_call @Sharding
+// CHECK-SAME:  {has_side_effect = true, mhlo.no_cse}
+  %1:2 = mpmd.named_computation<"f1"> (%arg0, %arg0) (%arg3: tensor<4x8xf32>, %arg4: tensor<4x8xf32>) {
+    %2 = stablehlo.custom_call @Sharding(%arg3) {mhlo.no_cse} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+    %3 = stablehlo.custom_call @Sharding(%arg4) {mhlo.no_cse} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+    mpmd.return %2, %3 : tensor<4x8xf32>, tensor<4x8xf32>
+  } : (tensor<4x8xf32>, tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
+  func.return %1#0 : tensor<4x8xf32>
+}

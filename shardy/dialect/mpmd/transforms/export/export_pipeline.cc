@@ -79,6 +79,10 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // and by DCE'ing the fragment bodies.
   pm.addNestedPass<FuncOp>(createFragmentDcePass());
 
+  // Now all CSE is done, we can remove the side effect from custom calls that
+  // have the no_cse attribute.
+  pm.addNestedPass<FuncOp>(createRemoveSideEffectAfterCSEPass());
+
   // Must be applied after the last -mpmd-fragment-dedup, as it may add
   // duplicated fragment results and after -canonicalize, as it may add
   // identity fragments, which would be canonicalized away.
