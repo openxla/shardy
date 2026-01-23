@@ -890,6 +890,46 @@ func.func @out_unreduced_axes_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#
   return %0 : tensor<16x8xf32>
 }
 
+// CHECK-LABEL: func @sharded_to_unreduced_1
+func.func @sharded_to_unreduced_1(%arg0 : tensor<24x8xf32> {sdy.sharding=#sdy.sharding<@mesh1d_6, [{"x"}, {}]>}) -> tensor<24x8xf32> {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"x"}, {}] %arg0 out_sharding=<@mesh1d_6, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh1d_6, [{}, {}], unreduced={"x"}> : tensor<24x8xf32>
+  return %0 : tensor<24x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_single_axis
+func.func @sharded_to_unreduced_single_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{}, {"x"}] %arg0 out_sharding=<@mesh2d, [{"y"}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh2d, [{"y"}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_multiple_axes
+func.func @sharded_to_unreduced_multiple_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"x", "z", "y"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"z", "y"}, {}] %arg0 out_sharding=<@mesh3d, [{"x"}, {}], unreduced={"y", "z"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"x"}, {}], unreduced={"y", "z"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_multiple_dims
+func.func @sharded_to_unreduced_multiple_dims(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"y", "z"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"z"}, {"x"}] %arg0 out_sharding=<@mesh3d, [{"y"}, {}], unreduced={"x", "z"}>
+  // CHECK-NEXT: return %0
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"y"}, {}], unreduced={"x", "z"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_with_subaxis
+func.func @sharded_to_unreduced_with_subaxis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2d_2x8, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"y":(4)2}, {}] %arg0 out_sharding=<@mesh2d_2x8, [{"y":(1)4}, {"x"}], unreduced={"y":(4)2}>
+  // CHECK-NEXT: return %0
+ %0 = sdy.reshard %arg0 <@mesh2d_2x8, [{"y":(1)4}, {"x"}], unreduced={"y":(4)2}> :  tensor<16x8xf32>
+ return %0 : tensor<16x8xf32>
+}
+
 // TODO(b/391138813): Add proper support for axes that can't co-exist
 
 // LABEL: func @reshard_with_non_divisible_subaxes_same_pre_size
