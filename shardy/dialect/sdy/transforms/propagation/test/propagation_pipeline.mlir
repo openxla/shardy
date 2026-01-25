@@ -97,9 +97,11 @@ sdy.mesh @mesh = <["a"=2, "b"=2]>
 // CHECK-SAME:  ) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
 // CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
 func.func @add_extra_sharding_constraint_for_incompatible_group_member_shardings(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
-  // CHECK-NEXT: %[[RESHARD_0:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {"b"}]>
-  // CHECK-NEXT: %[[RESHARD_1:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {"b"}]>
-  // CHECK-NEXT: return %[[RESHARD_0]], %[[RESHARD_1]]
+  // CHECK-NEXT: %[[RESHARD_0:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[RESHARD_1:.*]] = sdy.reshard %[[RESHARD_0]] <@mesh, [{"a"}, {"b"}]>
+  // CHECK-NEXT: %[[RESHARD_2:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {"b"}]>
+  // CHECK-NEXT: %[[RESHARD_3:.*]] = sdy.reshard %[[RESHARD_2]] <@mesh, [{"a"}, {"b"}]>
+  // CHECK-NEXT: return %[[RESHARD_1]], %[[RESHARD_3]]
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{}, {"b", ?}]> : tensor<8x8xf32>
   sdy.sharding_group %0 group_id=1183 : tensor<8x8xf32>
   %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {?}]> : tensor<8x8xf32>

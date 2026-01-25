@@ -42,7 +42,6 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
   passOptions.avoidReshardsOnNamedComputations =
       options.avoidReshardsOnNamedComputations;
-  addCanonicalizerPass(pm, kReshardLabel);
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enableInsertExplicitCollectives) {
