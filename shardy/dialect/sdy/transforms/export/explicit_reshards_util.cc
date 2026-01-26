@@ -468,9 +468,6 @@ FactorAxesCandidateBag findFactorAxesCandidates(
                                         shardingProjection.getResults()))) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
-        continue;
-      }
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
       while (!axisRefs.empty()) {
         factorAxesPairs.insert(FactorAxesPair(factorIndex, axisRefs));
@@ -717,16 +714,12 @@ void distributeAxisRefsToBatchingFactors(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, const Mesh& mesh,
     AxesPerFactor& factorCommonAxes) {
-  AxesPerFactor greatestCommonPrefixShardings =
-      shardingProjection.getGreatestCommonPrefixAxes(
-          shardingRule.getNumFactors());
   for (const int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
     SmallVector<AxisRefAttr> axisRefsToDistribute =
-        greatestCommonPrefixShardings[factorIndex];
+        factorCommonAxes[factorIndex];
     if (shardingRule.isFactorInAllNonScalarTensors(factorIndex) &&
         !axisRefsToDistribute.empty()) {
-      // TODO(enver): Instead of the greatest common prefix, explore options
-      // to distribute more.
+      factorCommonAxes[factorIndex].clear();
       distributeAxisRefsToBatchingFactors(axisRefsToDistribute, shardingRule,
                                           mesh, factorCommonAxes);
     }
