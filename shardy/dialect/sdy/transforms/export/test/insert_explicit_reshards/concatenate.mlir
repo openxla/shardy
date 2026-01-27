@@ -99,11 +99,9 @@ func.func @concatenate_operands_are_results_of_slices_conflicting_shardings(%arg
 // TODO(b/473911650): A better solution is to reshard the operands to [{}, {"x"}].
 // CHECK-LABEL: func @concatenate_with_operands_replicated
 func.func @concatenate_with_operands_replicated(%arg0: tensor<4x64xbf16>) -> (tensor<12x64xbf16> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
-  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<4x64xbf16>
-  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<4x64xbf16>
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<4x64xbf16>
-  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD0]], %[[RESHARD1]], %[[RESHARD2]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x64xbf16>, tensor<4x64xbf16>, tensor<4x64xbf16>) -> tensor<12x64xbf16>
-  // CHECK-NEXT: return %[[CONCATENATE]] : tensor<12x64xbf16>
+  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %arg0, %arg0, %arg0, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = stablehlo.concatenate %arg0, %arg0, %arg0, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x64xbf16>, tensor<4x64xbf16>, tensor<4x64xbf16>) -> tensor<12x64xbf16>
   return %0 : tensor<12x64xbf16>
 }

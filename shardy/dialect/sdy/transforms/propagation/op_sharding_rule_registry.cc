@@ -409,6 +409,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           if (dim != concat.getDimension()) {
             return FactorType::kPassThrough;
           }
+
           // In the pattern concat(slice(l), slice(r)), it needs
           // permutation.
           if (llvm::all_of(concat->getOperands(), [](Value operand) {
@@ -419,8 +420,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           // In the pattern concat(slice(x), x, slice(x)), it needs
           // permutation.
           Value sameOperand = findOperandBeforeSlice(concat->getOperand(0));
-          if (llvm::all_of(concat->getOperands(), [&](Value operand) {
-                return sameOperand == findOperandBeforeSlice(operand);
+          if (llvm::all_of(concat->getOperands(),
+                           [&](Value operand) {
+                             return sameOperand ==
+                                    findOperandBeforeSlice(operand);
+                           }) &&
+              llvm::any_of(concat->getOperands(), [&](Value operand) {
+                return operand.getDefiningOp<stablehlo::SliceOp>() != nullptr;
               })) {
             return FactorType::kPermutation;
           }

@@ -220,6 +220,21 @@ func.func @concat_not_all_operands_are_from_slices_of_the_same_tensor(%arg0: ten
   return %2 : tensor<4x96x256xf32>
 }
 
+// CHECK-LABEL: concat_operands_are_on_the_same_tensor
+func.func @concat_operands_are_on_the_same_tensor(%arg0: tensor<4x64xbf16>) -> (tensor<12x64xbf16>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [i, j])->([i, j]) {i=12, j=64} need_replication={i}>
+  %0 = stablehlo.concatenate %arg0, %arg0, %arg0, dim = 0 : (tensor<4x64xbf16>, tensor<4x64xbf16>, tensor<4x64xbf16>) -> tensor<12x64xbf16>
+  return %0 : tensor<12x64xbf16>
+}
+
+// CHECK-LABEL: concat_operands_are_on_the_same_tensor_one_is_slice
+func.func @concat_operands_are_on_the_same_tensor_one_is_slice(%arg0: tensor<4x64xbf16>) -> (tensor<10x64xbf16>) {
+  %0 = stablehlo.slice %arg0 [0:2, 0:64] : (tensor<4x64xbf16>) -> tensor<2x64xbf16>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [i, j])->([i, j]) {i=10, j=64} permutation={i}>
+  %1 = stablehlo.concatenate %arg0, %0, %arg0, dim = 0 : (tensor<4x64xbf16>, tensor<2x64xbf16>, tensor<4x64xbf16>) -> tensor<10x64xbf16>
+  return %1: tensor<10x64xbf16>
+}
+
 // CHECK-LABEL: func @conv_simple
 func.func @conv_simple(%arg0 : tensor<2x224x224x192xf32>, %arg1 : tensor<3x3x192x64xf32>) -> tensor<2x112x112x64xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, lm, n], [k, m, n, o])->([i, j, l, o]) {i=2, j=112, k=2, l=112, m=2, n=192, o=64} reduction={k, m, n} permutation={j, l}>
