@@ -30,3 +30,17 @@ toc:
     path: /shardy/sdy_op_interfaces
   - title: SDY propagation passes
     path: /shardy/sdy_propagation_passes
+- title: Shardy MPMD
+  section:
+  - title: MPMD dialect
+    path: /shardy/mpmd/mpmd_dialect
+  - title: MPMD common passes
+    path: /shardy/mpmd/mpmd_common_passes
+  - title: MPMD export passes
+    path: /shardy/mpmd/mpmd_export_passes
+  - title: MPMD import passes
+    path: /shardy/mpmd/mpmd_import_passes
+  - title: MPMD optimize passes
+    path: /shardy/mpmd/mpmd_optimize_passes
+  - title: MPMD sharding propagation passes
+    path: /shardy/mpmd/mpmd_sharding_propagation_passes
