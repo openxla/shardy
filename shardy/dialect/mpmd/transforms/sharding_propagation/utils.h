@@ -21,23 +21,24 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "mlir/IR/Value.h"
 
 namespace mlir::mpmd {
 
-// Updates the in_shardings attr of fragment users of the result of `transfer`.
-inline void UpdateFragmentUserInShardings(
-    mlir::mpmd::TransferOp transfer, mlir::sdy::TensorShardingAttr sharding) {
-  for (mlir::Operation* user : transfer.getResult().getUsers()) {
+inline void UpdateValueUserInShardings(
+    Value value, mlir::sdy::TensorShardingAttr sharding) {
+  for (mlir::Operation* user : value.getUsers()) {
     if (auto fragment_user = mlir::dyn_cast<mlir::mpmd::FragmentOp>(user)) {
       for (auto [operand_number, input] :
            llvm::enumerate(fragment_user.getInputs())) {
-        if (input == transfer.getResult()) {
+        if (input == value) {
           fragment_user.setInputSharding(operand_number, sharding);
         }
       }
     }
   }
 }
+
 
 }  // namespace mlir::mpmd
 
