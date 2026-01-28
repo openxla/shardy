@@ -32,3 +32,13 @@ func.func @manual_computation_free_axes_non_divisible(
   } : (tensor<4xf32>, tensor<12xf32>, tensor<24xf32>, tensor<48xf32>, tensor<96xf32>, tensor<192xf32>) -> (tensor<4xf32>, tensor<12xf32>, tensor<24xf32>, tensor<48xf32>, tensor<96xf32>, tensor<192xf32>)
   return %0#0, %0#1, %0#2, %0#3, %0#4, %0#5 : tensor<4xf32>, tensor<12xf32>, tensor<24xf32>, tensor<48xf32>, tensor<96xf32>, tensor<192xf32>
 }
+
+// CHECK-LABEL: func @all_reduce_of_replicated_to_unreduced
+func.func @all_reduce_of_replicated_to_unreduced(
+      %arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"c"}, {}], unreduced={"b"}>})
+      -> (tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"c"}, {}], unreduced={"b"}>}) {
+  // CHECK-NEXT: %0 = sdy.replicated_to_unreduced
+  // CHECK-NEXT: return %arg0 : tensor<16x8xf32>
+  %0 = sdy.sharding_constraint %arg0 <@mesh3d, [{"c"}, {}], unreduced={"a", "b"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

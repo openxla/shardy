@@ -62,6 +62,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
         options.dumpDirectory, "after_partitioner_with_global_shapes",
         dumpIndex++));
   } else {
+    addCanonicalizerPass(pm, kCollectiveLabel);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_minimal_partitioner_with_global_shapes",
         dumpIndex++));
