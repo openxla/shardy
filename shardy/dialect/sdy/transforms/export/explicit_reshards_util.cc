@@ -468,9 +468,6 @@ FactorAxesCandidateBag findFactorAxesCandidates(
                                         shardingProjection.getResults()))) {
     for (const auto& [factorIndex, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
-        continue;
-      }
       ArrayRef<AxisRefAttr> axisRefs = factorSharding.axisRefs;
       while (!axisRefs.empty()) {
         factorAxesPairs.insert(FactorAxesPair(factorIndex, axisRefs));
@@ -714,19 +711,14 @@ void distributeAxisRefsToBatchingFactors(
 // Distribute the greatest common prefix of shardings of factors that need
 // replication to batching factors.
 void distributeAxisRefsToBatchingFactors(
-    const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, const Mesh& mesh,
     AxesPerFactor& factorCommonAxes) {
-  AxesPerFactor greatestCommonPrefixShardings =
-      shardingProjection.getGreatestCommonPrefixAxes(
-          shardingRule.getNumFactors());
   for (const int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
     SmallVector<AxisRefAttr> axisRefsToDistribute =
-        greatestCommonPrefixShardings[factorIndex];
+        factorCommonAxes[factorIndex];
+    factorCommonAxes[factorIndex].clear();
     if (shardingRule.isFactorInAllNonScalarTensors(factorIndex) &&
         !axisRefsToDistribute.empty()) {
-      // TODO(enver): Instead of the greatest common prefix, explore options
-      // to distribute more.
       distributeAxisRefsToBatchingFactors(axisRefsToDistribute, shardingRule,
                                           mesh, factorCommonAxes);
     }
@@ -756,8 +748,7 @@ AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
       shardingProjection, shardingRule, tensorSizes, mesh);
 
   if (!shardingRule.getNeedReplicationFactors().empty()) {
-    distributeAxisRefsToBatchingFactors(shardingProjection, shardingRule, mesh,
-                                        factorCommonAxes);
+    distributeAxisRefsToBatchingFactors(shardingRule, mesh, factorCommonAxes);
   }
 
   return factorCommonAxes;
