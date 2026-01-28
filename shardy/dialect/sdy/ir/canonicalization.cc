@@ -323,6 +323,38 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
   }
 };
 
+class AllReduceOfShardedToUnreducedPattern
+    : public OpRewritePattern<AllReduceOp> {
+ public:
+  using OpRewritePattern<AllReduceOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(AllReduceOp allReduceOp,
+                                PatternRewriter& rewriter) const override {
+    auto s2uOp =
+        allReduceOp.getTensor().getDefiningOp<ShardedToUnreducedOp>();
+    if (!s2uOp) {
+      return failure();
+    }
+
+    SmallVector<AxisRefAttr> s2uAxesVec;
+    for (AxisRefListAttr axisRefList : s2uOp.getAxes()) {
+      for (AxisRefAttr axisRef : axisRefList.getValue()) {
+        s2uAxesVec.push_back(axisRef);
+      }
+    }
+    sortAndMergeAxes(s2uAxesVec, s2uOp.getOutSharding().getMesh(s2uOp));
+
+    if (!llvm::equal(s2uAxesVec, allReduceOp.getReductionAxes())) {
+      return failure();
+    }
+
+    rewriter.replaceOpWithNewOp<AllGatherOp>(
+        allReduceOp, s2uOp.getTensor(), s2uOp.getAxesAttr(),
+        allReduceOp.getOutSharding());
+    return success();
+  }
+};
+
 }  // namespace
 
 void ManualComputationOp::getCanonicalizationPatterns(
@@ -351,8 +383,10 @@ void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* context) {
-  results.addWithLabel<AllReduceNoopPattern>(StringRef(kCollectiveLabel),
-                                             context);
+  results.addWithLabel<AllReduceNoopPattern,
+                       AllReduceOfReplicatedToUnreducedPattern,
+                       AllReduceOfShardedToUnreducedPattern>(
+      StringRef(kCollectiveLabel), context);
 }
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,

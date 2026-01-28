@@ -319,3 +319,22 @@ func.func @all_to_all_fusion_multiple_uses(%arg0 : tensor<64x16x8x8xf32> {sdy.sh
   %2 = sdy.all_to_all [{"x"}: 2->0] %0 out_sharding=<@mesh, [{"x"}, {"y"}, {}, {}]> : tensor<64x16x8x8xf32>
   return %1, %2 : tensor<64x16x8x8xf32>, tensor<64x16x8x8xf32>
 }
+
+// CHECK-LABEL: func @all_reduce_of_replicated_to_unreduced
+func.func @all_reduce_of_replicated_to_unreduced(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %0 = sdy.replicated_to_unreduced
+  // CHECK-NEXT: return %arg0 : tensor<16x8xf32>
+  %0 = sdy.replicated_to_unreduced {"y"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x", "y"}> : tensor<16x8xf32>
+  %1 = sdy.all_reduce {"y"} %0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  return %1 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @all_reduce_of_sharded_to_unreduced
+func.func @all_reduce_of_sharded_to_unreduced(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced
+  // CHECK-NEXT: %1 = sdy.all_gather [{"y"}, {"x"}] %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %1 : tensor<16x8xf32>
+  %0 = sdy.sharded_to_unreduced [{"y"}, {"x"}] %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x", "y"}> : tensor<16x8xf32>
+  %1 = sdy.all_reduce {"x", "y"} %0 out_sharding=<@mesh, [{}, {}]> : tensor<16x8xf32>
+  return %1 : tensor<16x8xf32>
+}

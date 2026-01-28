@@ -53,6 +53,11 @@ def AllSliceOfAllGatherPattern : Pat<
   (replaceWithValue $tensor),
   [(Constraint<AllMatchPred<["gatheringAxes", "slicingAxes"]>, "axes match">)]>;
 
+def AllReduceOfReplicatedToUnreducedPattern : Pat<
+  (Sdy_AllReduceOp (Sdy_ReplicatedToUnreducedOp $tensor, $r2u_axes, $_), $u2r_axes, $_),
+  (replaceWithValue $tensor),
+  [(Constraint<AllMatchPred<["r2u_axes", "u2r_axes"]>, "axes match">)]>;
+
 def AllToAllParamsNoOverlap: Constraint<CPred<"!$0.overlaps($1)">, "no overlap">;
 
 def CombineAllToAllParams: NativeCodeCall<"$0.combineAndSort($1)">;
