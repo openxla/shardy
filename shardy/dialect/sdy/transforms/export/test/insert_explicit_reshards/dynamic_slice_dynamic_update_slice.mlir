@@ -4,8 +4,8 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 
 // CHECK-LABEL: func @dynamic_slice
 func.func @dynamic_slice(%arg0: tensor<32x4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {"y"}]>}, %arg1: tensor<i32>, %arg2: tensor<i32>, %arg3: tensor<i32>) -> (tensor<32x1x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"y"}]>}) {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"y"}, {}, {}]> : tensor<32x4x8xf32>
-  // CHECK-NEXT: %[[DYNAMIC_SLICE:.*]] = stablehlo.dynamic_slice %[[RESHARD1]], %arg1, %arg2, %arg3, sizes = [32, 1, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}, {}]>]>}
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{"x", "y"}, {}, {}]> : tensor<32x4x8xf32>
+  // CHECK-NEXT: %[[DYNAMIC_SLICE:.*]] = stablehlo.dynamic_slice %[[RESHARD1]], %arg1, %arg2, %arg3, sizes = [32, 1, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x", "y"}, {}, {}]>]>}
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[DYNAMIC_SLICE]] <@mesh, [{}, {}, {"y"}]>
   // CHECK-NEXT: return %[[RESHARD2]]
   %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, %arg3, sizes = [32, 1, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {"y"}]>]>}: (tensor<32x4x8xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x1x2xf32>
