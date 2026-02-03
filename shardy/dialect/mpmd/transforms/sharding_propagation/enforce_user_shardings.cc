@@ -158,9 +158,10 @@ void EnforceUserResultSharding(OpOperand& return_operand, func::FuncOp func) {
     // have taken care of it.
     defining_fragment.setUserSpecifiedResultSharding(
         cast<OpResult>(return_operand.get()).getResultNumber(), user_sharding);
+    UpdateValueUserInShardings(result, user_sharding);
   } else if (auto transfer_op = result.getDefiningOp<TransferOp>()) {
     sdy::setSharding(transfer_op.getResult(), user_sharding);
-    UpdateFragmentUserInShardings(transfer_op, user_sharding);
+    UpdateValueUserInShardings(result, user_sharding);
   }
 }
 

@@ -257,3 +257,43 @@ func.func @enforce_result_sharding_on_transfer_result_used_in_fragment(
     return %0, %1 : !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
   }
 }
+
+
+// -----
+
+!mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+#topology = #mpmd.topology<<"m1": <["user"=2, "propagated"=2]>>>
+#user_sharding = #sdy.sharding<@mesh, [{"user"}, {}]>
+#propagated_sharding = #sdy.sharding<@mesh, [{"propagated"}, {}]>
+
+module {
+  sdy.mesh @mesh = <["user"=2, "propagated"=2]>
+
+// CHECK-LABEL: func @enforce_user_sharding_multiple_results
+func.func @enforce_user_sharding_multiple_results(
+  %arg0: !mesh_1_tensor_4_8_f32) ->
+  (!mesh_1_tensor_4_8_f32 {sdy.sharding = #user_sharding},
+   !mesh_1_tensor_4_8_f32 {sdy.sharding = #user_sharding}) attributes {topology = #topology} {
+    // Producer fragment of %0#1 set the output sharding to B
+    // CHECK: %[[PRODUCER:.*]]:2 = mpmd.fragment
+    // CHECK-SAME: out_shardings=[<@mesh, [{?}, {?}]>, <@mesh, [{"user"}, {}]>]
+    %0:2 = mpmd.fragment<mesh="m1", origin=["producer"],
+      out_shardings=[<@mesh, [{?}, {?}]>, #propagated_sharding]> (%arg0) (%arg1: tensor<4x8xf32>) {
+      mpmd.return %arg1, %arg1 : tensor<4x8xf32>, tensor<4x8xf32>
+    } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32)
+
+    // A user fragment %0#1 has the sharding (input_sharding) set to B
+    // CHECK: mpmd.fragment
+    // CHECK-SAME: in_shardings=[<@mesh, [{"user"}, {}]>]
+    // CHECK-SAME: (%[[PRODUCER]]#1)
+    %1 = mpmd.fragment<mesh="m1", origin=["user"], in_shardings=[#propagated_sharding]> (%0#1) (%arg2: tensor<4x8xf32>) {
+      mpmd.return %arg2 : tensor<4x8xf32>
+    } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+    // %2 = transfer %0#1 has its sharding set to B
+    // CHECK: mpmd.transfer {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"user"}, {}]>]>} %[[PRODUCER]]#1
+    %2 = mpmd.transfer {sdy.sharding = #sdy.sharding_per_value<[#propagated_sharding]>} %0#1 : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+    return %2, %0#1 : !mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32
+  }
+}

@@ -221,8 +221,7 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
   // We need to do this because the later
   // `ConvertSdyShardingsToMpmdTypesPass` that moves the sharding to
   // `MeshTensorType` will read the in-shardings from the fragment.
-  UpdateFragmentUserInShardings(new_transfer,
-    src_sharding_or_null);
+  UpdateValueUserInShardings(new_transfer.getResult(), src_sharding_or_null);
 
   if (sdy::hasAnyUserOfType<TransferOp, func::ReturnOp>(
           new_transfer.getResult())) {
