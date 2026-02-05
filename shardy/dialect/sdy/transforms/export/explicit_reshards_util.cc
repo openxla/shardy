@@ -243,11 +243,6 @@ struct FactorAxesCandidate {
   FactorAxesPair factorAxes;
   // The total global size of the source tensors.
   int64_t totalGlobalSourceTensorSize = 0;
-  // The size of the local source tensor. In case the factor-axes pair has
-  // multiple source tensors, the size of the largest local one. A tensor is a
-  // source for a factor-axes pair if the axes is a prefix of the factor
-  // sharding on the tensor.
-  int64_t largestLocalSourceTensorSize = 0;
   // The size of axes to shard further. Hence, if the factor is already assigned
   // to axes A, and this factor-axes pair has axes B, the size of further
   // sharding is size(B)/size(A), and where A is a strict prefix of B.
@@ -265,14 +260,12 @@ struct FactorAxesCandidate {
   // Multi-level comparison.
   // 1. totalGlobalSourceTensorSize
   // 2. factorTypePrecedence
-  // 3. largestLocalSourceTensorSize
-  // 4. shardingSize
-  // 5. factorAxes: If A is a strict prefix of B, then A is smaller than B.
+  // 3. shardingSize
+  // 4. factorAxes: If A is a strict prefix of B, then A is smaller than B.
   bool operator<(const FactorAxesCandidate& rhs) const {
     auto makeComparisonTuple = [](const FactorAxesCandidate& candidate) {
       return std::make_tuple(candidate.totalGlobalSourceTensorSize,
                              candidate.factorTypePrecedence,
-                             candidate.largestLocalSourceTensorSize,
                              candidate.shardingSize, candidate.factorAxes);
     };
     return makeComparisonTuple(*this) < makeComparisonTuple(rhs);
@@ -344,38 +337,7 @@ class FactorAxesCandidateBag {
     }
   }
 
-  // Updates the local largest source tensor sizes of all candidates and returns
-  // the new best.
-  FactorAxesCandidate updateLocalTensorSizeAndGetBest(
-      const ShardingProjection& shardingProjection,
-      ArrayRef<int64_t> tensorSizes,
-      const SmallVector<AxisListRef>& factorAxisRefs) {
-    // Since the (local) source tensor sizes get smaller at each iteration on
-    // which we extend sharding of a factor, in order to recompute largest
-    // source tensor sizes, we first need to reset them to zero.
-    for (FactorAxesCandidate& candidate : candidates) {
-      candidate.largestLocalSourceTensorSize = 0;
-    }
-
-    for (const auto& [tensorIndex, tensorFactorSharding] :
-         llvm::enumerate(llvm::concat<const TensorFactorShardings>(
-             shardingProjection.getOperands(),
-             shardingProjection.getResults()))) {
-      int64_t localTensorSize = tensorSizes[tensorIndex];
-      for (const auto& [factorIndex, _] :
-           tensorFactorSharding.factorIndexToSharding) {
-        // TODO(enver): Consider cases tensor size may not be divisible.
-        localTensorSize /= factorAxisRefs[factorIndex].getShardingSize(mesh);
-      }
-      for (FactorAxesCandidate& candidate : candidates) {
-        if (tensorFactorSharding.factorIndexToSharding.contains(
-                candidate.factorAxes.factorIndex)) {
-          candidate.largestLocalSourceTensorSize =
-              std::max(candidate.largestLocalSourceTensorSize, localTensorSize);
-        }
-      }
-    }
-
+  FactorAxesCandidate getBestCandidate() {
     FactorAxesCandidate bestCandidate;
     for (FactorAxesCandidate& candidate : candidates) {
       // The axes on replication factors are distributed to batching dimensions
@@ -520,9 +482,7 @@ AxesPerFactor findCommonAxesHeuristic(
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates = findFactorAxesCandidates(
       shardingProjection, shardingRule, tensorSizes, mesh.attr());
-  FactorAxesCandidate bestCandidate =
-      factorAxesCandidates.updateLocalTensorSizeAndGetBest(
-          shardingProjection, tensorSizes, factorAxisRefs);
+  FactorAxesCandidate bestCandidate = factorAxesCandidates.getBestCandidate();
   while (!bestCandidate.empty()) {
     FactorAxesPair bestFactorAxes = bestCandidate.factorAxes;
     factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
@@ -587,8 +547,7 @@ AxesPerFactor findCommonAxesHeuristic(
       factorAxesCandidates.updateShardingSizeAt(candidateIndex++);
     }
 
-    bestCandidate = factorAxesCandidates.updateLocalTensorSizeAndGetBest(
-        shardingProjection, tensorSizes, factorAxisRefs);
+    bestCandidate = factorAxesCandidates.getBestCandidate();
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until actual
