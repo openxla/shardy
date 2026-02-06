@@ -113,6 +113,16 @@ func.func @reduce_multiple_results(
   return %2#0, %2#1 : tensor<64xf32>, tensor<64xi32>
 }
 
+// CHECK-LABEL: func @unreduced_to_replicated_and_avoid_all_reduce_for_sharded_reduction_factor
+func.func @unreduced_to_replicated_and_avoid_all_reduce_for_sharded_reduction_factor(%arg0: tensor<8x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> (tensor<4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x"}>}) {
+  %0 = sdy.constant dense<0> : tensor<i64>
+  // CHECK:      %[[ALL_REDUCE_Y:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]>
+  // CHECK-NEXT: %[[REDUCE:.*]] = stablehlo.reduce(%[[ALL_REDUCE_Y]] init: %0) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>]>
+  // CHECK-NEXT: return %[[REDUCE]]
+  %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [])->([j]) {i=8, j=4} reduction={i}>} : (tensor<8x4xi64>, tensor<i64>) -> tensor<4xi64>
+  return %1 : tensor<4xi64>
+}
+
 //===----------------------------------------------------------------------===//
 // Dot tests
 //===----------------------------------------------------------------------===//
