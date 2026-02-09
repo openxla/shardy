@@ -337,7 +337,7 @@ class FactorAxesCandidateBag {
     }
   }
 
-  FactorAxesCandidate getBestCandidate() {
+  FactorAxesCandidate findBestCandidate() {
     FactorAxesCandidate bestCandidate;
     for (FactorAxesCandidate& candidate : candidates) {
       // The axes on replication factors are distributed to batching dimensions
@@ -482,8 +482,18 @@ AxesPerFactor findCommonAxesHeuristic(
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates = findFactorAxesCandidates(
       shardingProjection, shardingRule, tensorSizes, mesh.attr());
-  FactorAxesCandidate bestCandidate = factorAxesCandidates.getBestCandidate();
-  while (!bestCandidate.empty()) {
+  while (!factorAxesCandidates.empty()) {
+    FactorAxesCandidate bestCandidate =
+        factorAxesCandidates.findBestCandidate();
+    // TODO(enver): If there is no best canditate at this point, it means the
+    // candidate set is nonempty but all invalid. Investigate how this happens.
+    if (bestCandidate.empty()) {
+      return toAxesPerFactor(factorAxisRefs);
+    }
+    // TODO(enver): Instead of finding the best candidate by a linear search at
+    // the beginning of each iteration, keep the best on `factorAxesCandidates`
+    // bag, through an internal priority queue, when a candidate becomes valid
+    // and/or gets modified.
     FactorAxesPair bestFactorAxes = bestCandidate.factorAxes;
     factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
     if (bestFactorAxes.isFullySharded(shardingRule, mesh.attr())) {
@@ -546,8 +556,6 @@ AxesPerFactor findCommonAxesHeuristic(
       }
       factorAxesCandidates.updateShardingSizeAt(candidateIndex++);
     }
-
-    bestCandidate = factorAxesCandidates.getBestCandidate();
   }
 
   // TODO(enver): Consider to keep factorAxisRefs for longer until actual
