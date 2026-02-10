@@ -40,6 +40,9 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   options.skipInline = true;
   sdy::addPropagationPipeline(pm, options);
 
+  // Populate unreduced out_shardings
+  pm.addNestedPass<func::FuncOp>(createPopulateUnreducedOutShardingPass());
+
   // Enforce user specified shardings.
   pm.addNestedPass<func::FuncOp>(createEnforceUserShardingsPass());
 
