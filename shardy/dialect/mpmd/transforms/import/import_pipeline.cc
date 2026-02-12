@@ -50,10 +50,6 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
 
   pm.addPass(createCopyTopologyFromMainPass());
 
-  if (options.enableHeterogeneousMeshes) {
-    pm.addPass(createGenerateSdyMeshesFromTopologyPass());
-  }
-
   // Unroll mpmd.for loops as they aren't yet supported by mesh inference.
   // TODO(jupvfranco): postpone unrolling until after SPMD propagation.
   pm.addNestedPass<FuncOp>(createUnrollForLoopsPass());
@@ -92,6 +88,14 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   // eliminate).
   pm.addNestedPass<FuncOp>(createSimplifyNamedComputationsPass());
 
+  // Rename existing meshes and add new ones from topology.
+  pm.addPass(createRenameMeshesPass());
+  pm.addPass(createAddSdyMeshesFromTopologyPass());
+
+  if (options.enableHeterogeneousMeshes) {
+    pm.addPass(createGenerateSdyMeshesFromTopologyPass());
+  }
+
   // Map main function inputs and outputs to meshes.
   MapInputOutputToMeshPassOptions map_in_out_options;
   map_in_out_options.inputAssignment =
@@ -114,6 +118,9 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   pm.addNestedPass<FuncOp>(
       createMapNamedOpsToMpmdOpsPass(MapNamedOpsToMpmdOpsPassOptions{
           std::move(options.nameToMeshAssignment)}));
+
+  // Remove internal sdy meshes introduced by the rename meshes pass.
+  pm.addPass(createRemoveInternalSdyMeshesPass());
 
   // Introduce transfer ops from unassign/assign ops.
   pm.addPass(createIntroduceTransfersPass());

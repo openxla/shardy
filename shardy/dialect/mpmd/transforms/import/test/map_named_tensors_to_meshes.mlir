@@ -1,5 +1,8 @@
 // RUN: mpmd_opt %s -mpmd-map-named-ops-to-mpmd-ops='assignment=actual_reference@m1,n1@m1,n2@m2' -mpmd-introduce-transfers 2>&1 | FileCheck %s
 
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
+
 !mesh_1_replicated = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_2_replicated = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 

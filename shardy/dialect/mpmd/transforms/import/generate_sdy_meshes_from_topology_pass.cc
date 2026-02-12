@@ -129,8 +129,6 @@ class GenerateSdyMeshesFromTopologyPass
       }
       check_axes(sharding.getReplicatedAxes());
       check_axes(sharding.getUnreducedAxes());
-      SDY_CHECK(!llvm::is_contained(old_meshes, mesh_name))
-          << "Invalid mesh name: " << mesh_name.str();
       return sdy::TensorShardingAttr::get(
           sharding.getContext(), mesh_name, sharding.getDimShardings(),
           sharding.getReplicatedAxes(), sharding.getUnreducedAxes());

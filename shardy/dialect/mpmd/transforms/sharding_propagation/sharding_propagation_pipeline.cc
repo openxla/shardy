@@ -44,8 +44,8 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   pm.addNestedPass<func::FuncOp>(createEnforceUserShardingsPass());
 
   // Extract reshard from inter-mesh transfers.
-  pm.addNestedPass<func::FuncOp>(
-      createExtractReshardsFromInterMeshTransfersPass());
+  // pm.addNestedPass<func::FuncOp>(
+  //     createExtractReshardsFromInterMeshTransfersPass());
 
   // Add the shardings back to `MeshTensorType`. Before this pass, the shardings
   // are on the attributes of fragments and transfer ops.

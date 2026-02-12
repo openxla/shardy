@@ -31,6 +31,7 @@ gentbl_cc_library(
 cc_library(
     name = "passes",
     srcs = [
+        "add_sdy_meshes_from_topology_pass.cc",
         "copy_topology_from_main.cc",
         "enforce_equisharding.cc",
         "generate_sdy_meshes_from_topology_pass.cc",
@@ -41,6 +42,8 @@ cc_library(
         "introduce_transfers.cc",
         "map_input_output_to_mesh.cc",
         "map_named_ops_to_mpmd_ops.cc",
+        "remove_internal_sdy_meshes.cc",
+        "rename_meshes_pass.cc",
         "simplify_named_computations.cc",
         "validate_named_ops_in_mpmd_func.cc",
     ],
