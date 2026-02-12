@@ -15,10 +15,16 @@
 
 """Core data structures and helper functions for MPMD pipeline scheduling.
 
+A MPMD computation can be viewed as a collection of "fragments", where each
+fragment is a piece of a computation that will be executed on a specific mesh
+at a specific time. Pipeline scheduling allows the user to control the order of
+these fragments, as well as merge fragments together.
+
 The primary entry point for defining a schedule is the `PipelineSchedule`
 object, which uses rule builders to determine the execution order and
 merging of these fragments. Rule builders take lists of fragments and build
-concrete scheduling/merging rules.
+concrete scheduling/merging rules - these rules determine how fragments are
+scheduled and merged together.
 
 There are two main approaches to defining pipeline schedules:
 

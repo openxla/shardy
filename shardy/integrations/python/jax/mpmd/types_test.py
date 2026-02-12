@@ -260,5 +260,77 @@ class MakePartitioningOptionsTest(parameterized.TestCase):
       )
 
 
+class ValidateAndMergePartitioningOptionsTest(parameterized.TestCase):
+  """Tests for validate_and_merge_partitioning_options function."""
+
+  def test_no_pipeline_options_returns_user_options(self):
+    user_options = {'mpmd_infer_transfers': True}
+    result = types.validate_and_merge_partitioning_options(
+        pipeline_required_options=None, user_provided_options=user_options
+    )
+    self.assertEqual(user_options, result)
+
+  def test_no_user_options_returns_pipeline_options(self):
+    result = types.validate_and_merge_partitioning_options(
+        pipeline_required_options={'mpmd_infer_transfers': True},
+        user_provided_options=None,
+    )
+    self.assertEqual({'mpmd_infer_transfers': True}, result)
+
+  def test_no_conflict_with_compatible_options(self):
+    result = types.validate_and_merge_partitioning_options(
+        pipeline_required_options={
+            'mpmd_infer_transfers': True,
+            'mpmd_split_bwd_fragments': True,
+        },
+        user_provided_options={
+            'mpmd_infer_transfers': True,
+            'mpmd_fragment_remat': False,
+        },
+    )
+    expected = {
+        'mpmd_infer_transfers': True,
+        'mpmd_fragment_remat': False,
+        'mpmd_split_bwd_fragments': True,
+    }
+    self.assertEqual(expected, result)
+
+  def test_conflict_raises_error(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        r'(?s)Conflicting partitioning options detected:.*'
+        r'mpmd_infer_transfers.*'
+        r'pipeline schedule requires True.*'
+        r'user specified False',
+    ):
+      types.validate_and_merge_partitioning_options(
+          pipeline_required_options={'mpmd_infer_transfers': True},
+          user_provided_options={'mpmd_infer_transfers': False},
+      )
+
+  def test_pipeline_schedule_conflict_raises_error(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        r'(?s)Conflicting partitioning options detected:.*'
+        r'mpmd_pipeline_schedule.*'
+        r'pipeline schedule requires 1F1B.*'
+        r'user specified GPipe',
+    ):
+      types.validate_and_merge_partitioning_options(
+          pipeline_required_options={'mpmd_pipeline_schedule': '1F1B'},
+          user_provided_options={'mpmd_pipeline_schedule': 'GPipe'},
+      )
+
+  def test_warnings_for_new_options(self):
+    with self.assertLogs(level='WARNING') as logs:
+      types.validate_and_merge_partitioning_options(
+          pipeline_required_options={'mpmd_infer_transfers': True},
+          user_provided_options=None,
+      )
+    self.assertLen(logs.output, 1)
+    self.assertIn('mpmd_infer_transfers', logs.output[0])
+    self.assertIn('required by pipeline schedule', logs.output[0])
+
+
 if __name__ == '__main__':
   absltest.main()

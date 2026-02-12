@@ -35,6 +35,12 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/import/mesh_assignment_map.h"
 #include "shardy/dialect/mpmd/transforms/optimize/pipeline_schedule.h"
 
+// An increasing version number to protect jax code against breaking changes.
+// Please suffix the version number with a brief description of your change
+// in a comment. The goal here is to force a merge conflict if two changes
+// attempt to grab the same version number.
+#define SHARDY_MPMD_JAXLIB_VERSION 1  // Add fragment_schedule_rules
+
 namespace mlir::mpmd {
 
 // Represents phases of the partitioning pipeline. This is used as a bitmask to
@@ -103,7 +109,7 @@ struct PartitioningOptions {
   bool mpmd_absorb_inferred_fragments_on_entry_point_function = false;
   bool mpmd_copy_constant_creation_from_producer_to_consumer = false;
   bool mpmd_apply_merge_transfers_pass = false;
-  bool mpmd_merge_after_scheduling = false;
+  bool mpmd_merge_inferred_after_scheduling = false;
 };
 
 PartitioningOptions ParsePartitioningOptions(
@@ -120,6 +126,7 @@ struct MpmdProgram {
   const std::vector<std::optional<std::string>>& output_meshes;
   const std::vector<int64_t>& donate_argnums;
   const mlir::mpmd::FragmentMergeRules& fragment_merge_rules;
+  const mlir::mpmd::FragmentScheduleRules& fragment_schedule_rules;
 
   // Runs the PartIR MPMD partitioning passes on the MPMD program.
   //
