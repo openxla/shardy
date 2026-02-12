@@ -1,5 +1,8 @@
 // RUN: mpmd_opt %s -mpmd-inline-nested-user-exposed-ops='assignment=f1@m1,f2@m1' 2>&1 | FileCheck %s
 
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
+
 
 // CHECK-LABEL: func @nested_named_comp_assignment
 func.func @nested_named_comp_assignment(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {

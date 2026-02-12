@@ -1,5 +1,7 @@
 // RUN: mpmd_opt %s -mpmd-map-named-ops-to-mpmd-ops='assignment=f1@m1,f2@m1' 2>&1 | FileCheck %s
 
+sdy.mesh @m1 = <["x"=2]>
+
 !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 
 !mesh_2_tensor_4_8_f32 = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>

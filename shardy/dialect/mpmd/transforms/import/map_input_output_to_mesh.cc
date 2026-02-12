@@ -21,6 +21,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
@@ -29,6 +30,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/common/utils.h"
 #include "shardy/dialect/mpmd/transforms/import/mesh_inference_origins.h"
 #include "shardy/dialect/mpmd/transforms/import/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir::mpmd {
 
@@ -96,11 +98,14 @@ class MapInputOutputToMeshPass
   using MapInputOutputToMeshPassBase::MapInputOutputToMeshPassBase;
 
  private:
-  MeshTensorType GetMeshTensorType(Value value, StringRef mesh_name) {
+  MeshTensorType GetMeshTensorType(Value value, StringRef mesh_name,
+                                   SymbolTable& symbol_table) {
     auto ranked_tensor_type = cast<RankedTensorType>(value.getType());
     std::pair<StringRef, std::optional<StringRef>> mesh_name_and_memory_kind =
         TryToExtractMemoryKindFromMeshName(mesh_name);
     StringRef mesh_name_without_suffix = mesh_name_and_memory_kind.first;
+    SDY_CHECK(symbol_table.lookup<sdy::MeshOp>(mesh_name_without_suffix))
+        << "Mesh " << mesh_name_without_suffix.str() << " does not exist.";
     StringAttr memory_kind = {};
     if (mesh_name_and_memory_kind.second.has_value()) {
       memory_kind = StringAttr::get(value.getContext(),
@@ -112,6 +117,7 @@ class MapInputOutputToMeshPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+    SymbolTable symbol_table(module);
     for (func::FuncOp func : GetMpmdFunctions(module)) {
       if (!IsEntryPointFunction(func)) {
         continue;
@@ -129,7 +135,7 @@ class MapInputOutputToMeshPass
 
         // Assign the mesh to the argument.
         Value arg = func.getArgument(input_index);
-        arg.setType(GetMeshTensorType(arg, mesh_name));
+        arg.setType(GetMeshTensorType(arg, mesh_name, symbol_table));
 
         // Unassign the argument mesh before use.
         rewriter.setInsertionPointAfterValue(arg);
@@ -155,7 +161,7 @@ class MapInputOutputToMeshPass
         auto assign_op = AssignOp::create(
             rewriter,
             GetResultInfoLoc(func, output_index).value_or(output.getLoc()),
-            GetMeshTensorType(output, mesh_name), output,
+            GetMeshTensorType(output, mesh_name, symbol_table), output,
             /*origin=*/kUserOutputOrigin);
         return_op->setOperand(output_index, assign_op.getResult());
       }
