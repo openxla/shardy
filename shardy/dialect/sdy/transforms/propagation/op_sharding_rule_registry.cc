@@ -303,6 +303,43 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         }
         return builder.build();
       })
+      .Case<stablehlo::BatchNormInferenceOp>(
+          [](stablehlo::BatchNormInferenceOp bn) {
+            // Sharding rule for stablehlo.batch_norm_inference.
+            //
+            // Intent: allow feature-axis sharding and pass it through between input,
+            // BN params {scale, offset, mean, var}, and output.
+            //
+            // Rationale: BN params are feature-wise and broadcast over other axes.
+            //
+            // Limits: ranked shapes; valid feature_index; params broadcastable on feature;
+            // no sharding of params on non-feature axes.
+
+            RankedTensorType inType  = bn.getOperand().getType();
+            RankedTensorType outType = bn.getResult().getType();
+
+            OpShardingRuleBuilder builder(bn);
+
+            llvm::SmallVector<int64_t> opDims(bn->getNumOperands(), kNullDim);
+
+            for (auto [dimIdx, dimensionSize] : llvm::enumerate(inType.getShape())) {
+              const int64_t axis = static_cast<int64_t>(dimIdx);
+              std::fill(opDims.begin(), opDims.end(), kNullDim);
+              opDims[0] = axis;
+              builder.addFactor(opDims, axis, dimensionSize);
+            }
+
+            const int64_t featureSize = outType.getDimSize(bn.getFeatureIndex());
+            // The feature dimension can be sharded on all operands.
+            for (int64_t paramIdx : {1LL, 2LL, 3LL, 4LL}) {
+              std::fill(opDims.begin(), opDims.end(), kNullDim);
+              opDims[paramIdx] = 0;
+              builder.addFactor(opDims, kNullDim, featureSize,
+                    FactorType::kPassThrough, true);
+            }
+
+            return builder.build();
+      })
       .Case<stablehlo::BitcastConvertOp>(
           [](stablehlo::BitcastConvertOp bitcastConvert) {
             ArrayRef<int64_t> inShape =
