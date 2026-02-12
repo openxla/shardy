@@ -120,12 +120,22 @@ class ConvertSdyShardingsToMpmdTypesPass
     func_op->removeAttr(sdy::kShardingAttr);
     UpdateFunctionType(func_op);
 
-    // Verify that all transfers have the same operand and result sharding.
+    // Verify that all transfers have the same operand and result sharding,
+    // unless the transfer is between different meshes.
     func_op->walk([](TransferOp transfer) {
       sdy::TensorShardingAttr operand_sharding =
           GetShardingFromMeshTensorValue(transfer.getTensor());
       sdy::TensorShardingAttr result_sharding =
           GetShardingFromMeshTensorValue(transfer.getResult());
+
+      // Skip inter-mesh transfers — different shardings are expected.
+      StringRef operand_mesh =
+          cast<MeshTensorType>(transfer.getTensor().getType()).getMeshName();
+      StringRef result_mesh =
+          cast<MeshTensorType>(transfer.getResult().getType()).getMeshName();
+      if (operand_mesh != result_mesh) {
+        return WalkResult::advance();
+      }
 
       // TODO(petebu): Add check for TransferOp between heterogeneous meshes.
       if (operand_sharding && result_sharding &&

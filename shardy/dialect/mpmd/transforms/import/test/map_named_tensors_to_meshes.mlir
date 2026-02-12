@@ -3,6 +3,9 @@
 !mesh_1_replicated = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_2_replicated = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
+
 // CHECK-LABEL: func @only_actual
 func.func @only_actual(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {

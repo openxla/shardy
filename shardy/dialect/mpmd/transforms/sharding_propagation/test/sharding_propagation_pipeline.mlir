@@ -299,14 +299,12 @@ func.func @preserves_replicated_through_transfer(
   -> (!mesh_2_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>},
       !mesh_2_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}], replicated = {"x"}>})
   attributes {topology=#homogenous_topology} {
-// CHECK-NEXT: %[[RESHARD1:.*]] = mpmd.fragment
-// CHECK: } : (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>) -> !mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>
-// CHECK-NEXT: mpmd.transfer %[[RESHARD1]] :
+// CHECK-NEXT: mpmd.transfer %arg0 :
+// CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>) ->
+// CHECK-SAME: !mpmd.mesh_tensor<"m2", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>
 // CHECK-NEXT: mpmd.transfer %arg1 :
 // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>) ->
-// CHECK-SAME: !mpmd.mesh_tensor<"m2", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>
-// CHECK-NEXT: %[[RESHARD2:.*]] = mpmd.fragment
-// CHECK: } : (!mpmd.mesh_tensor<"m2", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>) -> !mpmd.mesh_tensor<"m2", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>
+// CHECK-SAME: !mpmd.mesh_tensor<"m2", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>
   %0 = mpmd.transfer %arg0 : (!mesh_1_tensor_16_32_f32) -> !mesh_2_tensor_16_32_f32
   %1 = mpmd.transfer %arg1 : (!mesh_1_tensor_16_32_f32) -> !mesh_2_tensor_16_32_f32
   func.return %0, %1 : !mesh_2_tensor_16_32_f32, !mesh_2_tensor_16_32_f32
@@ -334,11 +332,8 @@ func.func @introduce_reshard_for_transfer_operand_and_result_with_different_shar
     mpmd.return %2 : tensor<8x2xf32>
   } : (!mesh_1_tensor_8_2_f32, !mesh_1_tensor_8_2_f32) -> !mesh_1_tensor_8_2_f32
   // CHECK: %[[FRAG:.*]] = mpmd.fragment<mesh="mesh1", origin=["add"]> (%arg0, %arg1) (%arg2: tensor<8x2xf32>, %arg3: tensor<8x2xf32>) {
-  // CHECK: %[[TRANSFER:.*]] = mpmd.transfer %0 : (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>) -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>
-  // CHECK: %[[RESHARD:.*]] = mpmd.fragment<mesh="mesh2", origin=[]> (%[[TRANSFER]]) (%arg2: tensor<8x2xf32>) {
-  // CHECK: mpmd.return %arg2 : tensor<8x2xf32>
-  // CHECK: } : (!mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>) -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
-  // CHECK: return %[[FRAG]], %[[RESHARD]] : !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>, !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
+  // CHECK: %[[TRANSFER:.*]] = mpmd.transfer %[[FRAG]] : (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>) -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
+  // CHECK: return %[[FRAG]], %[[TRANSFER]] : !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>, !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
   %1 = mpmd.transfer {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"devices", ?}, {?}]>]>} %0 : (!mesh_1_tensor_8_2_f32) -> !mesh_2_tensor_8_2_f32
   return %0, %1 : !mesh_1_tensor_8_2_f32, !mesh_2_tensor_8_2_f32
 }
@@ -372,13 +367,9 @@ func.func @transfer_result_less_sharded_than_operand(
 
 // CHECK-NEXT: %[[TRANSFER:.*]] = mpmd.transfer %[[ADD]]
 // CHECK-SAME:  (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>)
-// CHECK-SAME:  -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>
+// CHECK-SAME:  -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
 
-// CHECK-NEXT: %[[RESHARD:.*]] = mpmd.fragment<mesh="mesh2", origin=[]> (%[[TRANSFER]])
-// CHECK: } : (!mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>)
-// CHECK-SAME: -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
-
-// CHECK-NEXT: %[[ADD]], %[[RESHARD]]
+// CHECK-NEXT: %[[ADD]], %[[TRANSFER]]
 
   %0 = mpmd.fragment<mesh="mesh1", origin=["add"], in_shardings=[<@mesh, [{"devices", ?}, {?}]>, <@mesh, [{"devices", ?}, {?}]>], out_shardings=[<@mesh, [{"devices", ?}, {?}]>]> (%arg0, %arg1) (%arg2: tensor<8x2xf32>, %arg3: tensor<8x2xf32>) {
     %2 = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"devices", ?}, {?}]>]>} : tensor<8x2xf32>
@@ -413,17 +404,13 @@ func.func @transfer_result_more_sharded_than_operand(
 // CHECK-NEXT: }
 // CHECK-SAME: (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>,
 // CHECK-SAME: !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>) ->
-// CHECK-SAME: !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>
-
-// CHECK-NEXT: %[[RESHARD:.*]] = mpmd.fragment<mesh="mesh1", origin=[]> (%[[ADD]])
-// CHECK: } : (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>)
-// CHECK-SAME: -> !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
+// CHECK-SAME: !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
 
 // CHECK-NEXT: %[[TRANSFER:.*]] = mpmd.transfer %[[ADD]]
-// CHECK-SAME:  (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>)
+// CHECK-SAME:  (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>)
 // CHECK-SAME:  -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>
 
-// CHECK-NEXT: %[[RESHARD]], %[[TRANSFER]]
+// CHECK-NEXT: %[[ADD]], %[[TRANSFER]]
 
   %0 = mpmd.fragment<mesh="mesh1", origin=["add"], in_shardings=[<@mesh, [{"devices", ?}, {?}]>, <@mesh, [{"devices", ?}, {?}]>]> (%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"devices", ?}, {?}]>]>} (%arg2: tensor<8x2xf32>, %arg3: tensor<8x2xf32>) {
     %2 = stablehlo.add %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"devices", ?}, {?}]>]>} : tensor<8x2xf32>
@@ -528,11 +515,7 @@ sdy.mesh @mesh = <["x"=8]>
 func.func @introduce_reshard_for_arg(
   %arg0: !mesh_1_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
   -> (!mesh_2_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) attributes {topology=#homogenous_topology} {
-  // CHECK:  %[[RESHARD:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%arg0) (%arg1: tensor<16x32xf32>) {
-  // CHECK-NEXT:    mpmd.return %arg1 : tensor<16x32xf32>
-  // CHECK-NEXT:  } : (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>) ->
-  // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>
-  // CHECK-NEXT: %[[TRANSFER:.*]] = mpmd.transfer %[[RESHARD]] : (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>)
+  // CHECK:  %[[TRANSFER:.*]] = mpmd.transfer %arg0 : (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>)
   // CHECK-SAME: -> !mpmd.mesh_tensor<"m2", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>
   %1 = mpmd.transfer %arg0 : (!mesh_1_tensor_16_32_f32) -> !mesh_2_tensor_16_32_f32
   %2 = mpmd.fragment<mesh="m2", origin=[]> (%1) (%arg1: tensor<16x32xf32>) {
@@ -622,12 +605,10 @@ func.func @partly_divisible_sharding_after_propagation_turns_to_subaxis_sharding
     mpmd.return %3 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
   // CHECK: %[[TRANSFER_RESULT:.*]] = mpmd.transfer %[[FRAGMENT_RESULT]] :
-  // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x":(1)4}, {}]>>) ->
-  // CHECK-SAME: !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x":(1)4}, {}]>>
+  // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x":(1)4}, {}]>>)
+  // CHECK-SAME: -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{}, {}]>>
   %1 = mpmd.transfer %0 : (!mesh_1_tensor_4_8_f32) -> !mesh_2_tensor_4_8_f32
-  // CHECK:  %[[RESHARD_RESULT:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[TRANSFER_RESULT]])
-  // CHECK: (!mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x":(1)4}, {}]>>) ->
-  // CHECK-SAME: !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{}, {}]>>
+  // The transfer result already has sharding [{}, {}], so no reshard needed.
   func.return %1 : !mesh_2_tensor_4_8_f32
 }
 }
@@ -715,12 +696,11 @@ func.func @return_value_used_in_another_fragment(%arg0: !mesh_1_tensor {sdy.shar
 } {
   // CHECK: %[[TRANSFER_RESULT:.*]] = mpmd.transfer %arg0 :
   // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4xf32>, sharding=<@mesh, [{"y"}]>>)
-  // CHECK-SAME: -> !mpmd.mesh_tensor<"m2", tensor<4xf32>, sharding=<@mesh, [{"y"}]>>
-  %0 = mpmd.transfer %arg0 : (!mesh_1_tensor) -> !mesh_2_tensor // %arg0 is sharded by y axis
-  // CHECK: mpmd.fragment<mesh="m2", origin=[]> (%[[TRANSFER_RESULT]]) (%arg2: tensor<4xf32>) {
-  // CHECK-NEXT:     mpmd.return %arg2 : tensor<4xf32>
-  // CHECK-NEXT:  } : (!mpmd.mesh_tensor<"m2", tensor<4xf32>, sharding=<@mesh, [{"y"}]>>)
   // CHECK-SAME: -> !mpmd.mesh_tensor<"m2", tensor<4xf32>, sharding=<@mesh, [{"x"}]>>
+  %0 = mpmd.transfer %arg0 : (!mesh_1_tensor) -> !mesh_2_tensor // %arg0 is sharded by y axis
+  // The transfer result gets {"x"} from backward propagation. Fragment f2 takes
+  // the transfer result and arg1 directly.
+  // CHECK: mpmd.fragment<mesh="m2", origin=["f2"]> (%[[TRANSFER_RESULT]], %arg1)
   %1 = mpmd.fragment<mesh="m2", origin=["f2"]> (%0, %arg1) (%arg2: tensor<4xf32>, %arg3: tensor<4xf32>) {
     %1 = stablehlo.add %arg2, %arg3 : tensor<4xf32>
     mpmd.return %1 : tensor<4xf32>

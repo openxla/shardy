@@ -21,12 +21,14 @@ limitations under the License.
 #include "llvm/ADT/StringRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Visitors.h"
@@ -140,7 +142,8 @@ std::optional<MeshStageAssignment> GetMeshStageAssignment(
 }
 
 std::optional<MeshTensorType> GetMeshTensorTypeFromAssignment(
-    NamedTensorOp op, const UserAssignmentMap& assignment_map) {
+    NamedTensorOp op, const UserAssignmentMap& assignment_map,
+    SymbolTable& symbol_table) {
   auto assignment_it = assignment_map.find(std::string_view(op.getName()));
   if (assignment_it == assignment_map.end()) {
     return std::nullopt;
@@ -150,6 +153,8 @@ std::optional<MeshTensorType> GetMeshTensorTypeFromAssignment(
   std::pair<StringRef, std::optional<StringRef>> mesh_name_and_memory_kind =
       TryToExtractMemoryKindFromMeshName(assignment_it->second.first);
   StringRef mesh_name_without_memory_kind = mesh_name_and_memory_kind.first;
+  SDY_CHECK(symbol_table.lookup<sdy::MeshOp>(mesh_name_without_memory_kind))
+      << "Mesh " << mesh_name_without_memory_kind.str() << " does not exist.";
   StringAttr memory_kind = {};
   if (mesh_name_and_memory_kind.second.has_value()) {
     memory_kind = StringAttr::get(op.getContext(),
@@ -170,10 +175,11 @@ std::optional<MeshTensorType> GetMeshTensorTypeFromAssignment(
 // Returns whether it succeeded in converting the named_tensor.
 bool MapNamedTensorToUnassignOfAssign(NamedTensorOp named_tensor_op,
                                       IRRewriter& rewriter,
-                                      const UserAssignmentMap& assignment) {
+                                      const UserAssignmentMap& assignment,
+                                      SymbolTable& symbol_table) {
   rewriter.setInsertionPoint(named_tensor_op);
-  std::optional<MeshTensorType> mesh_tensor =
-      GetMeshTensorTypeFromAssignment(named_tensor_op, assignment);
+  std::optional<MeshTensorType> mesh_tensor = GetMeshTensorTypeFromAssignment(
+      named_tensor_op, assignment, symbol_table);
   if (mesh_tensor.has_value()) {
     auto assign_op = AssignOp::create(rewriter, named_tensor_op.getLoc(),
                                       *mesh_tensor, named_tensor_op.getTensor(),
@@ -192,11 +198,11 @@ bool MapNamedTensorToUnassignOfAssign(NamedTensorOp named_tensor_op,
 class InlineNestedUserExposedOpsPass
     : public impl::InlineNestedUserExposedOpsPassBase<
           InlineNestedUserExposedOpsPass> {
-  using InlineNestedUserExposedOpsPassBase::
-      InlineNestedUserExposedOpsPassBase;
+  using InlineNestedUserExposedOpsPassBase::InlineNestedUserExposedOpsPassBase;
 
  private:
   void runOnFunc(func::FuncOp func_op) override {
+    SymbolTable symbol_table(func_op->getParentOfType<ModuleOp>());
     IRRewriter rewriter(func_op.getContext());
     bool pass_must_signal_failure = false;
 
@@ -245,7 +251,8 @@ class InlineNestedUserExposedOpsPass
           return WalkResult::interrupt();
         }
         std::optional<MeshTensorType> mesh_tensor =
-            GetMeshTensorTypeFromAssignment(named_tensor, assignment.value);
+            GetMeshTensorTypeFromAssignment(named_tensor, assignment.value,
+                                            symbol_table);
         if (mesh_tensor.has_value() && mesh_tensor->getMemoryKind()) {
           SDY_LOG(WARNING) << "Named tensor "
                            << std::string_view(named_tensor.getName())
@@ -282,6 +289,7 @@ class MapNamedOpsToMpmdOpsPass
 
  private:
   void runOnFunc(func::FuncOp func_op) override {
+    SymbolTable symbol_table(func_op->getParentOfType<ModuleOp>());
     IRRewriter rewriter(func_op.getContext());
     bool pass_must_signal_failure = false;
 
@@ -305,7 +313,7 @@ class MapNamedOpsToMpmdOpsPass
 
       if (auto named_tensor = dyn_cast<NamedTensorOp>(op)) {
         if (!MapNamedTensorToUnassignOfAssign(named_tensor, rewriter,
-                                              assignment.value)) {
+                                              assignment.value, symbol_table)) {
           pass_must_signal_failure = true;
         }
       }
