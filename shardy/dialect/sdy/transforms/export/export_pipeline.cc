@@ -85,6 +85,7 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
       }));
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
+    pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
   }
   pm.addPass(createCloseShardingsPass());
 
