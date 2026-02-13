@@ -92,6 +92,16 @@ _Removes propagation debug info (propagation edges and origin shardings) during 
 
 _Removes ShardingGroupOps after propagation._
 
+### `-sdy-remove-sub-axes-in-input-output-shardings`
+
+_Removes sub-axes in input/output shardings._
+
+Some users of Shardy expect the function inputs/outputs to have shardings
+without sub-axes. This pass removes sub-axes and their trailing axes from
+input/output shardings. This pass is usually after
+`sdy-update-non-divisible-input-output-shardings` to ensure that the removal
+of sub-axes does not introduce any non-divisible shardings.
+
 ### `-sdy-reshard-to-collectives`
 
 _Converts ReshardOp into various Shardy collective ops._
