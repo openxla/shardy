@@ -19,6 +19,7 @@ limitations under the License.
 #include <variant>
 #include <vector>
 
+#include "llvm/ADT/STLExtras.h"
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
