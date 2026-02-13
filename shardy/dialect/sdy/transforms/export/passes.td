@@ -55,6 +55,18 @@ def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def RemoveSubAxesInInputOutputShardingsPass : Pass<"sdy-remove-sub-axes-in-input-output-shardings", "ModuleOp"> {
+  let summary = "Removes sub-axes in input/output shardings.";
+  let description = [{
+    Some users of Shardy expect the function inputs/outputs to have shardings
+    without sub-axes. This pass removes sub-axes and their trailing axes from
+    input/output shardings. This pass is usually after
+    `sdy-update-non-divisible-input-output-shardings` to ensure that the removal
+    of sub-axes does not introduce any non-divisible shardings.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::FuncOp"> {
   let summary = "Inserts explicit reshards to make all operations have compatible shardings.";
   let description = [{

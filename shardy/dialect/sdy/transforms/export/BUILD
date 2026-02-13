@@ -38,6 +38,7 @@ cc_library(
         "remove_ag_rs_for_cmv1.cc",
         "remove_propagation_debug_info.cc",
         "remove_sharding_groups.cc",
+        "remove_sub_axes_in_input_output_shardings.cc",
         "reshard_to_collectives.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
