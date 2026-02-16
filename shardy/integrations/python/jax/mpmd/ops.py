@@ -240,13 +240,17 @@ def named_computation_partir_lowering(
   # empty.
   constants = []
   with ir.InsertionPoint(block):
+    sharded_args = [
+        jex.mlir.lower_with_sharding_in_types(ctx, arg, aval)
+        for arg, aval in zip(block.arguments, ctx.avals_in)
+    ]
     outs, tokens = jax_mlir.jaxpr_subcomp(
         ctx.module_context,
         call_jaxpr,
         ctx.name_stack.extend(name),
         ctx.tokens_in,
         constants,
-        *block.arguments,
+        *sharded_args,
         dim_var_values=ctx.dim_var_values,
         const_lowering=ctx.const_lowering,
     )
@@ -412,13 +416,14 @@ def call_mpmd_jit_lowering(
   # TODO(b/434270189): fix for hoisted constant args.
   num_const_args = 0
   in_avals = call_jaxpr.in_avals
+  arg_shardings = tuple(a.sharding for a in in_avals)
   input_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_in)
   output_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_out)
 
   # TODO(jupvfranco): Consider memoizing the lowering function instead of
   # caching in the context (similar to `_call_get_cached_jaxpr` below).
   # TODO(jupvfranco): Consider using effects in the key too.
-  key = (call_jaxpr, tuple(input_types), tuple(output_types))
+  key = (call_jaxpr, tuple(input_types), tuple(output_types), arg_shardings)
   if key in ctx.module_context.cached_primitive_lowerings:
     func_declaration = ctx.module_context.cached_primitive_lowerings[key]
   else:
@@ -429,6 +434,7 @@ def call_mpmd_jit_lowering(
         effects,
         num_const_args=num_const_args,
         in_avals=in_avals,
+        arg_shardings=arg_shardings,
     )
     ctx.module_context.cached_primitive_lowerings[key] = func_declaration
 
@@ -983,6 +989,7 @@ def fori_loop_mpmd_jit_lowering(
   # TODO(b/434270189): fix for hoisted constant args.
   num_const_args = 0
   in_avals = call_jaxpr.in_avals
+  arg_shardings = tuple(a.sharding for a in in_avals)
   effects = list(ctx.tokens_in.effects())
   func_declaration = jax_mlir.lower_jaxpr_to_fun(
       ctx.module_context,
@@ -991,6 +998,7 @@ def fori_loop_mpmd_jit_lowering(
       effects,
       num_const_args=num_const_args,
       in_avals=in_avals,
+      arg_shardings=arg_shardings,
   )
 
   input_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_in)
