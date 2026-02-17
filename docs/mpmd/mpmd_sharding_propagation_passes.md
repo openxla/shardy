@@ -58,6 +58,22 @@ homogeneous topology.
 
 Precondition: all shardings are specified as op attributes and not in types.
 
+### `-mpmd-populate-unreduced-out-sharding`
+
+_Populates unreduced out shardings for fragments._
+
+Iterates through each fragment, looks at its return values, checks if that
+value has an unreduced axis sharding constraint, and if so, amends the
+fragment `out_sharding` attribute to have the unreduced sharding.
+
+If the `out_sharding` attribute doesn't exist, it is added with default
+replicated shardings (with the exception of the unreduced axes).
+
+This is needed because the SDY propagation pipeline does not populate the
+unreduced out shardings, only the in shardings. Since technically Shardy
+is not responsible for unreduced axes propagation, this pass lives in MPMD
+instead of SDY.
+
 ### `-mpmd-simplify-program`
 
 _Removes redundant arg/results from fragments._
