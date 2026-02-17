@@ -34,6 +34,7 @@ cc_library(
         "convert_sdy_shardings_to_mpmd_types.cc",
         "enforce_user_shardings.cc",
         "extract_reshards_from_inter_mesh_transfers.cc",
+        "populate_unreduced_out_sharding.cc",
         "sharding_propagation_pipeline.cc",
         "simplify_program.cc",
     ],

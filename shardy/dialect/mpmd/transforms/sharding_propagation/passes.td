@@ -46,6 +46,26 @@ def ConvertSdyConstantsPass :
   let dependentDialects = ["mlir::stablehlo::StablehloDialect"];
 }
 
+def PopulateUnreducedOutShardingPass :
+    PassBase<"mpmd-populate-unreduced-out-sharding", "DistributedFunctionPass"> {
+  let summary = "Populates unreduced out shardings for fragments.";
+  let description = [{
+    Iterates through each fragment, looks at its return values, checks if that
+    value has an unreduced axis sharding constraint, and if so, amends the
+    fragment `out_sharding` attribute to have the unreduced sharding.
+
+    If the `out_sharding` attribute doesn't exist, it is added with default
+    replicated shardings (with the exception of the unreduced axes).
+
+    This is needed because the SDY propagation pipeline does not populate the
+    unreduced out shardings, only the in shardings. Since technically Shardy
+    is not responsible for unreduced axes propagation, this pass lives in MPMD
+    instead of SDY.
+  }];
+
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::mpmd::MpmdDialect"];
+}
+
 def EnforceUserShardingsPass :
     PassBase<"mpmd-enforce-user-shardings", "DistributedFunctionPass"> {
   let summary = "Enforces the user specified shardings for inputs and outputs.";

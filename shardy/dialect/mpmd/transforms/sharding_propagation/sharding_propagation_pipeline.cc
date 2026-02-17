@@ -40,6 +40,12 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   options.skipInline = true;
   sdy::addPropagationPipeline(pm, options);
 
+  // Populate unreduced out_shardings. This is needed because SDY propagation
+  // does not populate the out_shardings for unreduced axes (as it is
+  // technically not responsible for propagating unreduced axes), only the in
+  // shardings.
+  pm.addNestedPass<func::FuncOp>(createPopulateUnreducedOutShardingPass());
+
   // Enforce user specified shardings.
   pm.addNestedPass<func::FuncOp>(createEnforceUserShardingsPass());
 
