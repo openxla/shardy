@@ -17,9 +17,8 @@ func.func @man_comp_different_meshes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf
 sdy.mesh @meshA = <["a"=4]>
 sdy.mesh @meshB = <["b"=4]>
 
-// TODO(b/415376816). This should be an error since we use different meshes in
-// the body.
 func.func @man_comp_different_meshes_in_body(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{all shardings must be bound to the same mesh. stablehlo.add is bound to mesh #sdy.mesh<["b"=4]>, while the common mesh is #sdy.mesh<["a"=4]>}}
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@meshA, [{}, {}]>] out_shardings=[<@meshA, [{}, {}]>] manual_axes={"a"} (%arg1: tensor<16x32xf32>) {
     %1 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{}, {}]>]>} : tensor<16x32xf32>
     sdy.return %1 : tensor<16x32xf32>
