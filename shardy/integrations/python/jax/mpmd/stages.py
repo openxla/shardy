@@ -502,8 +502,16 @@ class MpmdLowered(stages.Lowered):
     compiled_ifrt_module = jaxlib_mpmd.clone_mlir_module(
         self.partitioning_result.ifrt_ir_module
     )
-    # TODO: b/424385447 - Add compilation once IFRT IR compilation is OSSed.
-    program_executable = None
+    backend_py = device_assignment[0].client
+    program_executable = jaxlib_mpmd.compile_mpmd(
+        backend_py,
+        compiled_ifrt_module,
+        device_assignment,
+        flat_out_avals,
+        flat_out_shardings,
+        self._get_compile_options(compiler_options),
+        {},
+    )
     executable = MpmdExecutable(
         program_executable,
         module_ir=compiled_ifrt_module,
