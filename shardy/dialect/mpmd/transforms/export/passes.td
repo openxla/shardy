@@ -142,3 +142,17 @@ def ValidateNoReshardsPass :
     This pass identifies such fragments and emits an error.
   }];
 }
+
+def ValidateNoBackwardDepsPass :
+        PassBase<"mpmd-validate-no-backward-deps", "DistributedFunctionPass"> {
+  let summary = "Validates no backward dependencies exist in forward-only programs.";
+  let description = [{
+    For forward-only pipeline programs (all fragments have transpose_count 0),
+    checks that every data dependency between fragments goes from a lower stage
+    to a higher stage (stage i -> stage j where j > i). A backward dependency
+    (j <= i) creates pipeline bubbles.
+
+    This pass only applies to forward-only programs. Programs with backward
+    fragments are skipped.
+  }];
+}

@@ -270,6 +270,7 @@ void MpmdProgram::Export(ModuleOp module) {
   export_options.groupFragmentsAcrossMeshes =
       options.mpmd_assume_homogeneous_devices;
   export_options.applyMergeTransfers = options.mpmd_apply_merge_transfers_pass;
+  export_options.failOnBackwardDeps = options.mpmd_fail_on_backward_deps;
   export_options.verboseLogging = true;
   addExportPipeline(pm, export_options);
 

@@ -127,6 +127,10 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
     pm.addNestedPass<FuncOp>(createValidateNoReshardsPass());
   }
 
+  if (options.failOnBackwardDeps) {
+    pm.addNestedPass<FuncOp>(createValidateNoBackwardDepsPass());
+  }
+
   // This pass should be applied after all passes that operate on fragment ops.
   LowerToFragmentCallsPassOptions lower_to_fragment_calls_options;
   lower_to_fragment_calls_options.groupAcrossMeshes =
@@ -145,6 +149,12 @@ struct ExportPipelineOptions
       llvm::cl::desc(
           "Whether to emit an error when a reshard-only fragment is detected."),
       llvm::cl::init(false)};
+  Option<bool> failOnBackwardDeps{
+      *this, "fail-on-backward-deps",
+      llvm::cl::desc(
+          "Whether to emit an error when a backward dependency is detected "
+          "in a forward-only program."),
+      llvm::cl::init(false)};
 };
 
 }  // namespace
@@ -157,6 +167,7 @@ void registerExportPipeline() {
         ExportOptions options;
         options.failOnReshardOnlyFragments =
             pipelineOptions.failOnReshardOnlyFragments;
+        options.failOnBackwardDeps = pipelineOptions.failOnBackwardDeps;
         addExportPipeline(pm, options);
       });
 }
