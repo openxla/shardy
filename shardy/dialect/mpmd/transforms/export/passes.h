@@ -45,6 +45,7 @@ struct ExportOptions {
   bool groupFragmentsAcrossMeshes = true;
   // Whether to apply the merge transfers optimization pass.
   bool applyMergeTransfers = false;
+  bool failOnReshardOnlyFragments = false;
   // Whether to enable verbose logging.
   bool verboseLogging = false;
 };

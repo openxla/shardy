@@ -131,3 +131,14 @@ def DelayTransfersFromCpuPass :
     can be beneficial for HBM usage.
   }];
 }
+
+def ValidateNoReshardsPass :
+        PassBase<"mpmd-validate-no-reshards", "DistributedFunctionPass"> {
+  let summary = "Validates that no reshard-only fragments exist.";
+  let description = [{
+    A reshard-only fragment is a fragment that contains only a `mpmd.return` of
+    one of its arguments. These fragments usually indicate an unexpected reshard.
+
+    This pass identifies such fragments and emits an error.
+  }];
+}

@@ -15,8 +15,10 @@ limitations under the License.
 
 #include <utility>
 
+#include "llvm/Support/CommandLine.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassOptions.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
@@ -121,6 +123,10 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // offloading and aliasing passes.
   pm.addNestedPass<FuncOp>(createMarkFragmentReservedMemoryPass());
 
+  if (options.failOnReshardOnlyFragments) {
+    pm.addNestedPass<FuncOp>(createValidateNoReshardsPass());
+  }
+
   // This pass should be applied after all passes that operate on fragment ops.
   LowerToFragmentCallsPassOptions lower_to_fragment_calls_options;
   lower_to_fragment_calls_options.groupAcrossMeshes =
@@ -130,12 +136,28 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
       std::move(lower_to_fragment_calls_options)));
 }
 
+namespace {
+
+struct ExportPipelineOptions
+    : public PassPipelineOptions<ExportPipelineOptions> {
+  Option<bool> failOnReshardOnlyFragments{
+      *this, "fail-on-reshard-only-fragments",
+      llvm::cl::desc(
+          "Whether to emit an error when a reshard-only fragment is detected."),
+      llvm::cl::init(false)};
+};
+
+}  // namespace
+
 void registerExportPipeline() {
-  PassPipelineRegistration<>(
+  PassPipelineRegistration<ExportPipelineOptions>(
       "mpmd-export-pipeline",
       "Run the standard set of passes to export an MPMD program.",
-      [](OpPassManager& pm) {
-        addExportPipeline(pm);
+      [](OpPassManager& pm, const ExportPipelineOptions& pipelineOptions) {
+        ExportOptions options;
+        options.failOnReshardOnlyFragments =
+            pipelineOptions.failOnReshardOnlyFragments;
+        addExportPipeline(pm, options);
       });
 }
 
