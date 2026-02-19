@@ -310,7 +310,7 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   }
 
   int64_t rank = tensorType.getRank();
-  if (shardingAttr.getRank() != rank) {
+  if (!shardingAttr.isFullyReplicated() && shardingAttr.getRank() != rank) {
     return emitError("sharding doesn't match tensor rank: ")
            << shardingAttr.getRank() << " != " << rank;
   }
