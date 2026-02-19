@@ -32,6 +32,7 @@ cc_library(
     srcs = [
         "close_shardings.cc",
         "constant_or_scalar_merger.cc",
+        "convert_global_to_local.cc",
         "drop_sharding_rules.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
@@ -62,6 +63,7 @@ cc_library(
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:FuncTransforms",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Rewrite",

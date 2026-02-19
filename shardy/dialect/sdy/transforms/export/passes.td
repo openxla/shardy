@@ -218,3 +218,15 @@ def RemovePropagationDebugInfoPass : Pass<"sdy-remove-propagation-debug-info", "
   let summary = "Removes propagation debug info (propagation edges and origin shardings) during export.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
+  let summary = "Converts an SDY program from global shapes to local shapes.";
+  let description = [{
+    Converts an SDY program from global shapes to local shapes by partitioning
+    logical dimensions based on sharding attributes.
+
+    This pass leverages a type converter to map RankedTensorType from global
+    logical shapes to device-local physical shapes.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+}
