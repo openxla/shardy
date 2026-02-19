@@ -110,6 +110,7 @@ struct PartitioningOptions {
   bool mpmd_copy_constant_creation_from_producer_to_consumer = false;
   bool mpmd_apply_merge_transfers_pass = false;
   bool mpmd_merge_inferred_after_scheduling = false;
+  bool mpmd_fail_on_backward_deps = false;
 };
 
 PartitioningOptions ParsePartitioningOptions(

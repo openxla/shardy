@@ -46,6 +46,7 @@ struct ExportOptions {
   // Whether to apply the merge transfers optimization pass.
   bool applyMergeTransfers = false;
   bool failOnReshardOnlyFragments = false;
+  bool failOnBackwardDeps = false;
   // Whether to enable verbose logging.
   bool verboseLogging = false;
 };

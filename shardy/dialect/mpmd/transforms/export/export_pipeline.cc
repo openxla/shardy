@@ -136,6 +136,11 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
       options.failOnReshardOnlyFragments;
   pm.addNestedPass<FuncOp>(
       createValidateNoReshardsPass(std::move(validateOptions)));
+
+  ValidateNoBackwardDepsPassOptions backwardDepsOptions;
+  backwardDepsOptions.failOnBackwardDeps = options.failOnBackwardDeps;
+  pm.addNestedPass<FuncOp>(
+      createValidateNoBackwardDepsPass(std::move(backwardDepsOptions)));
 }
 
 namespace {
@@ -146,6 +151,12 @@ struct ExportPipelineOptions
       *this, "fail-on-reshard-only-fragments",
       llvm::cl::desc(
           "Whether to emit an error when a reshard-only fragment is detected."),
+      llvm::cl::init(false)};
+  Option<bool> failOnBackwardDeps{
+      *this, "fail-on-backward-deps",
+      llvm::cl::desc(
+          "Whether to emit an error when a backward dependency is detected "
+          "in a forward-only program."),
       llvm::cl::init(false)};
 };
 
@@ -159,6 +170,7 @@ void registerExportPipeline() {
         ExportOptions options;
         options.failOnReshardOnlyFragments =
             pipelineOptions.failOnReshardOnlyFragments;
+        options.failOnBackwardDeps = pipelineOptions.failOnBackwardDeps;
         addExportPipeline(pm, options);
       });
 }
