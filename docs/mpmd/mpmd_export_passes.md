@@ -96,3 +96,12 @@ Marks fragment args and results with attributes to identify which values
 live in host memory, so that this information can be used by XLA. Also marks
 the entrypoint func args and results so that Pathways can use this
 information.
+
+### `-mpmd-validate-no-reshards`
+
+_Validates that no reshard-only fragments exist._
+
+A reshard-only fragment is a fragment that contains only a `mpmd.return` of
+one of its arguments. These fragments usually indicate an unexpected reshard.
+
+This pass identifies such fragments and emits an error.
