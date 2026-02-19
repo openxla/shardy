@@ -140,18 +140,6 @@ class SdyPropagationTest(parameterized.TestCase):
         lowered1.function_named_shardings.output_specs,
     )
 
-  def test_compile_fails_because_not_pathways_backend(self):
-
-    lowered: stages.MpmdLowered = mpmd.jit(
-        lambda x: x, get_2_stage_mpmd_config()
-    ).lower(np.ones((3, 5), dtype=jnp.float32))
-    with self.assertRaisesRegex(
-        NotImplementedError,
-        'MPMD functions can only be compiled through Pathways, but only the'
-        r" following backends are available: \('cpu',\)",
-    ):
-      lowered.compile()
-
   def test_mpmd_simple_spmd_sharding(self):
     topology = test_utils.get_two_mesh_topology()
     assignment = {'stage1': 'mesh1', 'stage2': 'mesh2'}

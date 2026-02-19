@@ -26,7 +26,6 @@ from jax._src import core
 from jax._src import stages
 from jax._src.interpreters import pxla
 from jax.experimental import layout
-import jax.extend.backend as jax_backend
 from jax.interpreters import mlir as jax_mlir
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
 import jaxtyping
@@ -37,8 +36,6 @@ from shardy.integrations.python.jax.mpmd import utils
 
 PyTree = jaxtyping.PyTree
 FunctionNamedShardings = utils.FunctionNamedShardings
-# Will replace this once jaxlib landed.
-ifrt_mpmd_py = Any # pylint: disable=invalid-name
 
 
 @dataclasses.dataclass(frozen=True)
@@ -372,7 +369,6 @@ class MpmdLowered(stages.Lowered):
       stablehlo_mlir_module: the result of JAX lowering to StableHLO.
       partitioning_result: the result of partitioning.
       jax_fn_info: See `utils.JaxFunctionInfo`.
-      jax_fn_info: See `utils.JaxFunctionInfo`.
       args_info: A PyTree of `ArgInfo` corresponding to the input PyTree.
       lowering_metadata: lowering metrics and additional information.
       topology: the MPMD topology used.
@@ -439,98 +435,6 @@ class MpmdLowered(stages.Lowered):
 
     self.mpmd_module = partitioning_result.mpmd_module
 
-  def _compile_pathways(
-      self,
-      compiler_options: (
-          stages.CompilerOptions | mpmd_types.MeshToCompileOptions | None
-      ) = None,
-      device_assignment: tuple[jax.Device, ...] | None = None,
-  ) -> MpmdCompiled:
-    in_avals = jax.tree.map(lambda x: x._aval, self.args_info)  # pylint: disable=protected-access
-    flat_in_avals = jax.tree.leaves(in_avals)
-    flat_out_avals = self.global_flat_output_abstract_values
-    if device_assignment is None:
-      in_shardings = self.function_named_shardings.input_specs
-      flat_out_shardings = jax.tree.leaves(
-          self.function_named_shardings.output_specs
-      )
-      topology = self.topology
-      device_assignment = []
-      for _, mesh in self.topology.items():
-        device_assignment.extend(mesh.devices.flat)
-    else:
-      cur_device_idx = 0
-      topology: mpmd_types.Topology = {}
-      lowered_mesh_to_compiled_mesh: dict[
-          jax.sharding.Mesh, jax.sharding.Mesh
-      ] = {}
-      for mesh_name, mesh in self.topology.items():
-        abstract_mesh = mesh.abstract_mesh
-        new_device_idx = cur_device_idx + mesh.size
-        if new_device_idx > len(device_assignment):
-          raise ValueError(
-              f'`device_assignment` of length {len(device_assignment)} does not'
-              f' have enough devices for topology {self.topology}'
-          )
-        new_mesh = _abstract_to_concrete_mesh(
-            abstract_mesh,
-            device_assignment[cur_device_idx:new_device_idx],
-        )
-        topology[mesh_name] = new_mesh
-        lowered_mesh_to_compiled_mesh[mesh] = new_mesh
-        cur_device_idx = new_device_idx
-
-      flat_out_shardings = jax.tree.leaves(
-          self.function_named_shardings.output_specs
-      )
-      flat_out_shardings = [
-          jax.sharding.NamedSharding(
-              lowered_mesh_to_compiled_mesh[s.mesh], s.spec, s.memory_kind  # type: ignore
-          )
-          for s in flat_out_shardings
-      ]
-      in_shardings = jax.tree.map(
-          lambda s: jax.sharding.NamedSharding(
-              lowered_mesh_to_compiled_mesh[s.mesh], s.spec, s.memory_kind  # type: ignore
-          ),
-          self.function_named_shardings.input_specs,
-      )
-
-    # Clone the IFRT IR module to avoid modifying in place the IFRT IR module.
-    # This is necessary so that lowered.as_text(dialect='ifrt') returns the
-    # IFRT IR module even after compilation.
-    compiled_ifrt_module = jaxlib_mpmd.clone_mlir_module(
-        self.partitioning_result.ifrt_ir_module
-    )
-    backend_py = device_assignment[0].client
-    program_executable = jaxlib_mpmd.compile_mpmd(
-        backend_py,
-        compiled_ifrt_module,
-        device_assignment,
-        flat_out_avals,
-        flat_out_shardings,
-        self._get_compile_options(compiler_options),
-        {},
-    )
-    executable = MpmdExecutable(
-        program_executable,
-        module_ir=compiled_ifrt_module,
-        func_name=self.name,
-        flat_in_avals=flat_in_avals,
-        out_avals=flat_out_avals,
-        in_shardings=in_shardings,
-        flat_out_shardings=flat_out_shardings,
-        kept_inputs_indices=self.kept_inputs_indices,
-        donated_inputs_indices=set(self.donate_argnums),
-        topology=topology,
-    )
-    return MpmdCompiled(
-        executable,
-        self.args_info,
-        self.output_tree,
-        self.no_kwargs,
-    )
-
   def _get_compile_options(
       self,
       compiler_options: (
@@ -586,27 +490,93 @@ class MpmdLowered(stages.Lowered):
 
     Raises:
       ValueError: if the function has already been compiled.
-      NotImplementedError: if the backend is not supported, or if the backend is
-        MLCR and Shardy partitioner is not enabled.
     """
-    available_backends = tuple(jax_backend.backends().keys())
-    if 'pathways' in available_backends:
-      return self._compile_pathways(compiler_options, device_assignment)
-    # TODO(b/428206925): Remove sliceme once the backend is fully deprecated.
-    # See go/mlcr for more details.
-    if 'sliceme' in available_backends or 'mlcr' in available_backends:
-      if jax.config.jax_use_shardy_partitioner:
-        return self._compile_pathways(compiler_options, device_assignment)
-      else:
-        raise NotImplementedError(
-            'MLCR backends only supports Shardy partitioning.'
-            ' Please set `jax.config.jax_use_shardy_partitioner` to True.'
+    in_avals = jax.tree.map(lambda x: x._aval, self.args_info)  # pylint: disable=protected-access
+    flat_in_avals = jax.tree.leaves(in_avals)
+    flat_out_avals = self.global_flat_output_abstract_values
+    if device_assignment is None:
+      in_shardings = self.function_named_shardings.input_specs
+      flat_out_shardings = jax.tree.leaves(
+          self.function_named_shardings.output_specs
+      )
+      topology = self.topology
+      device_assignment = []
+      for _, mesh in self.topology.items():
+        device_assignment.extend(mesh.devices.flat)
+    else:
+      cur_device_idx = 0
+      topology: mpmd_types.Topology = {}
+      lowered_mesh_to_compiled_mesh: dict[
+          jax.sharding.Mesh, jax.sharding.Mesh
+      ] = {}
+      for mesh_name, mesh in self.topology.items():
+        abstract_mesh = mesh.abstract_mesh
+        new_device_idx = cur_device_idx + mesh.size
+        if new_device_idx > len(device_assignment):
+          raise ValueError(
+              f'`device_assignment` of length {len(device_assignment)} does not'
+              f' have enough devices for topology {self.topology}'
+          )
+        new_mesh = _abstract_to_concrete_mesh(
+            abstract_mesh,
+            device_assignment[cur_device_idx:new_device_idx],
         )
-    raise NotImplementedError(
-        'MPMD functions can only be compiled through Pathways, but only the'
-        f' following backends are available: {available_backends}.'
-        ' Make sure you have one of the following backends available:'
-        ' pathways, mlcr.'
+        topology[mesh_name] = new_mesh
+        lowered_mesh_to_compiled_mesh[mesh] = new_mesh
+        cur_device_idx = new_device_idx
+
+      flat_out_shardings = jax.tree.leaves(
+          self.function_named_shardings.output_specs
+      )
+      flat_out_shardings = [
+          jax.sharding.NamedSharding(
+              lowered_mesh_to_compiled_mesh[s.mesh],
+              s.spec,
+              memory_kind=s.memory_kind,
+          )
+          for s in flat_out_shardings
+      ]
+      in_shardings = jax.tree.map(
+          lambda s: jax.sharding.NamedSharding(
+              lowered_mesh_to_compiled_mesh[s.mesh],
+              s.spec,
+              memory_kind=s.memory_kind,
+          ),
+          self.function_named_shardings.input_specs,
+      )
+
+    # Clone the IFRT IR module to avoid modifying in place the IFRT IR module.
+    # This is necessary so that lowered.as_text(dialect='ifrt') returns the
+    # IFRT IR module even after compilation.
+    compiled_ifrt_module = jaxlib_mpmd.clone_mlir_module(
+        self.partitioning_result.ifrt_ir_module
+    )
+    program_executable = jaxlib_mpmd.compile_mpmd(
+        backend=device_assignment[0].client,
+        ifrt_mlir_module=compiled_ifrt_module,
+        devices=device_assignment,
+        out_avals=flat_out_avals,
+        out_shardings=flat_out_shardings,
+        xla_compile_options=self._get_compile_options(compiler_options),
+        loaded_executable_bindings={},
+    )
+    executable = MpmdExecutable(
+        program_executable,
+        module_ir=compiled_ifrt_module,
+        func_name=self.name,
+        flat_in_avals=flat_in_avals,
+        out_avals=flat_out_avals,
+        in_shardings=in_shardings,
+        flat_out_shardings=flat_out_shardings,
+        kept_inputs_indices=self.kept_inputs_indices,
+        donated_inputs_indices=set(self.donate_argnums),
+        topology=topology,
+    )
+    return MpmdCompiled(
+        executable,
+        self.args_info,
+        self.output_tree,
+        self.no_kwargs,
     )
 
   def as_text(
