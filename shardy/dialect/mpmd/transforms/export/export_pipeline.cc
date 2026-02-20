@@ -123,10 +123,6 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // offloading and aliasing passes.
   pm.addNestedPass<FuncOp>(createMarkFragmentReservedMemoryPass());
 
-  if (options.failOnReshardOnlyFragments) {
-    pm.addNestedPass<FuncOp>(createValidateNoReshardsPass());
-  }
-
   // This pass should be applied after all passes that operate on fragment ops.
   LowerToFragmentCallsPassOptions lower_to_fragment_calls_options;
   lower_to_fragment_calls_options.groupAcrossMeshes =
@@ -134,6 +130,12 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   lower_to_fragment_calls_options.verboseLogging = options.verboseLogging;
   pm.addPass(createLowerToFragmentCallsPass(
       std::move(lower_to_fragment_calls_options)));
+
+  ValidateNoReshardsPassOptions validateOptions;
+  validateOptions.failOnReshardOnlyFragments =
+      options.failOnReshardOnlyFragments;
+  pm.addNestedPass<FuncOp>(
+      createValidateNoReshardsPass(std::move(validateOptions)));
 }
 
 namespace {
