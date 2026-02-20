@@ -16,6 +16,16 @@ constant sub-computation. If the constants have same shardings after
 propagation, this pass merges them to save compilation time. See
 -sdy-constant-or-scalar-splitter for more info.
 
+### `-sdy-convert-global-to-local`
+
+_Converts an SDY program from global shapes to local shapes._
+
+Converts an SDY program from global shapes to local shapes by partitioning
+logical dimensions based on sharding attributes.
+
+This pass leverages a type converter to map RankedTensorType from global
+logical shapes to device-local physical shapes.
+
 ### `-sdy-drop-sharding-rules`
 
 _Drops `OpShardingRuleAttr` from all registered ops._
