@@ -17,13 +17,17 @@ limitations under the License.
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <numeric>
 #include <optional>
 #include <string>
+#include <utility>
 
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -31,6 +35,7 @@ limitations under the License.
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
@@ -43,6 +48,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/macros.h"
@@ -670,6 +676,199 @@ bool overlaps(ArrayRef<AxisRefAttr> axisRefs,
     }
   }
   return false;
+}
+
+namespace {
+
+// Implements an N-dimensional array with dynamic shape and data, which is
+// similar to `xla::Array`, to support the conversion of V2 replica groups to
+// V1.
+template <typename T>
+class NDArray {
+ public:
+  explicit NDArray(llvm::ArrayRef<int64_t> shape)
+      : shape(shape.begin(), shape.end()) {
+    int64_t totalElements = 1;
+    for (int64_t dim : shape) totalElements *= dim;
+    data.resize(totalElements);
+  }
+
+  // Fills the array with sequentially increasing values.
+  void fillIota(T startValue) {
+    std::iota(data.begin(), data.end(), startValue);
+  }
+
+  // Sets values from a flat buffer.
+  void setValues(llvm::ArrayRef<T> values) {
+    SDY_CHECK(static_cast<int64_t>(values.size()) ==
+              static_cast<int64_t>(data.size()));
+    std::copy(values.begin(), values.end(), data.begin());
+  }
+
+  // Modifies dimensions without changing underlying data.
+  void reshape(llvm::ArrayRef<int64_t> newShape) {
+    int64_t newSize = 1;
+    for (int64_t dim : newShape) newSize *= dim;
+    SDY_CHECK(newSize == static_cast<int64_t>(data.size()));
+    shape.assign(newShape.begin(), newShape.end());
+  }
+
+  // Permutes dimensions and rearranges data accordingly.
+  void transpose(llvm::ArrayRef<int64_t> permutation) {
+    SDY_CHECK(permutation.size() == shape.size());
+
+    llvm::SmallVector<int64_t> newShape(shape.size());
+    for (size_t i = 0; i < shape.size(); ++i) {
+      newShape[i] = shape[permutation[i]];
+    }
+
+    std::vector<T> newData(data.size());
+    auto strides = getStrides(shape);
+    auto newStrides = getStrides(newShape);
+
+    // Iterate through all indices of the current array.
+    llvm::SmallVector<int64_t> index(shape.size(), 0);
+    for (int64_t i = 0; i < static_cast<int64_t>(data.size()); ++i) {
+      // Map current index to the new linear index in transposed space.
+      int64_t newLinearIndex = 0;
+      for (size_t j = 0; j < permutation.size(); ++j) {
+        newLinearIndex += index[permutation[j]] * newStrides[j];
+      }
+      newData[newLinearIndex] = data[i];
+
+      // Standard multi-dimensional index increment.
+      for (int j = static_cast<int>(shape.size()) - 1; j >= 0; --j) {
+        if (++index[j] < shape[j]) break;
+        index[j] = 0;
+      }
+    }
+
+    data = std::move(newData);
+    shape = std::move(newShape);
+  }
+
+  auto begin() { return data.begin(); }
+  auto end() { return data.end(); }
+  auto begin() const { return data.begin(); }
+  auto end() const { return data.end(); }
+
+ private:
+  static llvm::SmallVector<int64_t> getStrides(llvm::ArrayRef<int64_t> shape) {
+    llvm::SmallVector<int64_t> strides(shape.size());
+    if (shape.empty()) return strides;
+    strides.back() = 1;
+    for (int i = static_cast<int>(shape.size()) - 2; i >= 0; --i) {
+      strides[i] = strides[i + 1] * shape[i + 1];
+    }
+    return strides;
+  }
+
+  llvm::SmallVector<int64_t> shape;
+  std::vector<T> data;
+};
+
+}  // namespace
+
+SmallVector<AxisRefAttr> getOrderedAxisRefs(Attribute shardingOrAxisList,
+                                            MeshAttr mesh) {
+  // We use a map vector to maintain the order of mesh axes.
+  llvm::MapVector<StringRef, SmallVector<int64_t>> axisNameToPreSizes;
+  axisNameToPreSizes.reserve(mesh.getAxes().size());
+  for (MeshAxisAttr meshAxis : mesh.getAxes()) {
+    SmallVector<int64_t>& preSizes = axisNameToPreSizes[meshAxis.getName()];
+    preSizes.push_back(1);
+    preSizes.push_back(meshAxis.getSize());
+  }
+
+  auto consumeAxisRefList = [&](ArrayRef<AxisRefAttr> axisRefs) {
+    for (AxisRefAttr axisRef : axisRefs) {
+      // Add sub-axis pre-sizes to `axisNameToPreSizes`. We'll dedup later.
+      if (axisRef.getSubAxisInfo()) {
+        SmallVector<int64_t>& preSizes = axisNameToPreSizes[axisRef.getName()];
+        preSizes.push_back(axisRef.getSubAxisInfo().getPreSize());
+        preSizes.push_back(axisRef.getSubAxisInfo().getNextPreSize());
+      }
+    }
+  };
+
+  if (auto sharding = mlir::dyn_cast<TensorShardingAttr>(shardingOrAxisList)) {
+    for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
+      consumeAxisRefList(dimSharding.getAxes());
+    }
+    consumeAxisRefList(sharding.getUnreducedAxes());
+  } else {
+    consumeAxisRefList(
+        mlir::cast<AxisRefListAttr>(shardingOrAxisList).getValue());
+  }
+
+  SmallVector<AxisRefAttr> axisRefs;
+  mlir::MLIRContext* ctx = mesh.getContext();
+  for (auto& [axisName, preSizes] : axisNameToPreSizes) {
+    if (preSizes.size() == 2) {
+      // Full axis
+      axisRefs.push_back(AxisRefAttr::get(ctx, axisName));
+      continue;
+    }
+    llvm::sort(preSizes);
+    preSizes.erase(llvm::unique(preSizes), preSizes.end());
+    for (int64_t i = 0; i < preSizes.size() - 1; ++i) {
+      int64_t preSize = preSizes[i];
+      int64_t size = preSizes[i + 1] / preSize;
+      axisRefs.push_back(AxisRefAttr::get(
+          ctx, axisName, SubAxisInfoAttr::get(ctx, preSize, size)));
+    }
+  }
+
+  return axisRefs;
+}
+
+mlir::DenseIntElementsAttr getReplicaGroups(
+    sdy::AxisRefListAttr reductionAxesAttr, MeshAttr mesh,
+    OpBuilder& rewriter) {
+  SmallVector<AxisRefAttr> meshAxisRefs =
+      getOrderedAxisRefs(reductionAxesAttr, mesh);
+
+  ArrayRef<AxisRefAttr> reductionAxes = reductionAxesAttr.getValue();
+  int64_t groupSize = 1;
+  llvm::SmallDenseMap<AxisRefAttr, int64_t> axisRefToReductionIndex;
+  axisRefToReductionIndex.reserve(reductionAxes.size());
+  for (auto [index, axis] : llvm::enumerate(reductionAxes)) {
+    groupSize *= axis.getSize(mesh);
+    axisRefToReductionIndex[axis] = index;
+  }
+  int64_t totalSize = mesh.getTotalSize();
+  int64_t numGroups = totalSize / groupSize;
+
+  SmallVector<int64_t> transposePerm(meshAxisRefs.size());
+  SmallVector<int64_t> reshapeDims;
+  reshapeDims.reserve(meshAxisRefs.size());
+
+  int64_t nonReductionIndex = 0;
+  int64_t nonReductionCount = meshAxisRefs.size() - reductionAxes.size();
+  for (auto [meshIndex, axis] : llvm::enumerate(meshAxisRefs)) {
+    reshapeDims.push_back(axis.getSize(mesh));
+    auto reductionIndexIt = axisRefToReductionIndex.find(axis);
+    if (reductionIndexIt == axisRefToReductionIndex.end()) {
+      // Axis is not a reduction axis.
+      transposePerm[nonReductionIndex++] = meshIndex;
+    } else {
+      transposePerm[nonReductionCount + reductionIndexIt->second] = meshIndex;
+    }
+  }
+
+  // TODO(b/410040098): output V2 if possible, and maybe canonicalize.
+  NDArray<int64_t> array(reshapeDims);
+  if (mesh.getDeviceIds().empty()) {
+    array.fillIota(0);
+  } else {
+    array.setValues(mesh.getDeviceIds());
+  }
+  array.transpose(transposePerm);
+  array.reshape({totalSize});
+  auto replicaGroupsType = RankedTensorType::get({numGroups, groupSize},
+                                                 rewriter.getIntegerType(64));
+  return mlir::DenseIntElementsAttr::get(replicaGroupsType,
+                                         llvm::to_vector(array));
 }
 
 }  // namespace sdy
