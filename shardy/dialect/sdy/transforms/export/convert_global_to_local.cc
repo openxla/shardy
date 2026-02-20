@@ -286,7 +286,7 @@ struct ConvertGlobalToLocalPass
     // Ensure all 'sdy' ops are gone, except for the mesh definition, which will
     // be removed later.
     target.addIllegalDialect<SdyDialect>();
-    target.addLegalOp<sdy::MeshOp>();
+    target.addLegalOp<MeshOp>();
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();
