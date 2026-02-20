@@ -2475,6 +2475,27 @@ void WalkAndAbsorbMeshlessProducers(
   }
 }
 
+// Replaces a broadcast of an unassigned value with chained transfers. Assigns
+// targeting the same mesh as the source become identity (no transfer needed),
+// while assigns targeting different meshes become TransferOps chained through
+// intermediate meshes.
+//
+// For example, given a value on m1 broadcast to m1, m2, m3:
+//
+//   x = unassign(x_m1)
+//   b = broadcast(x)
+//   a1 = assign(b) -> m1
+//   a2 = assign(b) -> m2
+//   a3 = assign(b) -> m3
+//
+// ~~>
+//
+//   t1 = transfer x_m1 -> m2
+//   t2 = transfer t1   -> m3    (chained from m2, not from m1)
+//   return x_m1, t1, t2
+//
+// Assigns are sorted lexicographically by mesh name to produce a deterministic
+// chain order.
 class BroadcastToTransfersPattern : public OpRewritePattern<BroadcastOp> {
   using OpRewritePattern<BroadcastOp>::OpRewritePattern;
 
@@ -2485,22 +2506,37 @@ class BroadcastToTransfersPattern : public OpRewritePattern<BroadcastOp> {
     SDY_CHECK(unassign_op)
         << "Expected the operand of the BroadcastOp to be the "
            "result of an UnassignOp";
-    bool module_rewritten = false;
-    // We copy the users to a vector because we modify the list of users when
-    // replacing the op, which would cause a segfault otherwise.
-    SmallVector<Operation*> users(op->getUsers().begin(), op->getUsers().end());
-    for (Operation* user : users) {
+    SmallVector<AssignOp> assign_users;
+    for (Operation* user : op->getUsers()) {
       if (auto assign_op = dyn_cast<AssignOp>(user)) {
-        if (assign_op.getType() != unassign_op.getTensor().getType()) {
-          rewriter.replaceOpWithNewOp<TransferOp>(
-              assign_op, assign_op.getType(), unassign_op.getTensor());
-        } else {
-          assign_op->setOperand(0, unassign_op.getResult());
-        }
-        module_rewritten = true;
+        assign_users.push_back(assign_op);
       }
     }
-    return success(module_rewritten);
+    if (assign_users.empty()) {
+      return failure();
+    }
+
+    // Sort by mesh name to get a deterministic chain order.
+    llvm::sort(assign_users, [](AssignOp a, AssignOp b) {
+      return a.getType().getMeshName() < b.getType().getMeshName();
+    });
+
+    // Chain transfers: each new transfer uses the result of the previous one
+    // as its source, starting from the original unassigned value.
+    Value prev_transfer = unassign_op.getTensor();
+    for (AssignOp assign_op : assign_users) {
+      if (assign_op.getType() == prev_transfer.getType()) {
+        // Same mesh as the current chain head — no transfer needed.
+        rewriter.replaceOp(assign_op, prev_transfer);
+      } else {
+        rewriter.setInsertionPoint(assign_op);
+        auto transfer = TransferOp::create(rewriter, assign_op.getLoc(),
+                                           assign_op.getType(), prev_transfer);
+        prev_transfer = transfer;
+        rewriter.replaceOp(assign_op, transfer.getResult());
+      }
+    }
+    return success();
   }
 };
 

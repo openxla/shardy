@@ -37,7 +37,7 @@ func.func @broadcast_only_user_assigned(%arg0: tensor<4x8xf32>, %arg1: tensor<4x
 // In the next test, we have a single computational op, which is clearly
 // assigned to m1 (as its operands are assigned to m1 too).
 // The result of this computation is then used in all meshes, so we introduce
-// transfers for every mesh that is not m1.
+// chained transfers.
 
 // CHECK-LABEL: func @chained_broadcast
 func.func @chained_broadcast(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
@@ -47,8 +47,8 @@ func.func @chained_broadcast(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4
 // CHECK-NEXT:   stablehlo.add
 // CHECK-NEXT:   return
 // CHECK-NEXT: }
-// CHECK-DAG:  mpmd.transfer %0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
-// CHECK-DAG:  mpmd.transfer %0 : {{.*}}m1{{.*}} -> {{.*}}m3{{.*}}
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %[[ADD_FRAG]] : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
   %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
   %add = stablehlo.add %u, %u : tensor<4x8xf32>
   %b0 = mpmd.broadcast %add : tensor<4x8xf32>
@@ -95,4 +95,19 @@ func.func @escape_broadcast(%arg0: !mesh_1_tensor_4_8_f32, %arg1: !mesh_2_tensor
     mpmd.return %3 : tensor<4x8xf32>
   } : (!mesh_3_tensor_4_8_f32, !mesh_3_tensor_4_8_f32) -> !mesh_3_tensor_4_8_f32
   func.return %m3_frag : !mesh_3_tensor_4_8_f32
+}
+
+// CHECK-LABEL: func @arg_broadcast
+func.func @arg_broadcast(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>, <"m3": <["x"=2]>>>}
+{
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %b = mpmd.broadcast %u : tensor<4x8xf32>
+
+  %a1 = mpmd.assign %b : (tensor<4x8xf32>) -> !mesh_1_tensor_4_8_f32
+  %a2 = mpmd.assign %b : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a3 = mpmd.assign %b : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
+  func.return %a1, %a2, %a3 : !mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
 }
