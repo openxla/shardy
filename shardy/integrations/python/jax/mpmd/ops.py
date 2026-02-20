@@ -1135,21 +1135,57 @@ def fori_loop(
   )
 
 
+def _fori_loop_discharge_rule(
+    in_avals, _, *args, call_jaxpr, num_iterations, carried_arguments_start,
+    **kwargs):
+  from jax._src.state.types import AbstractRef  # pylint: disable=g-import-not-at-top
+
+  jaxpr_inner = call_jaxpr.jaxpr
+  num_outs = len(jaxpr_inner.outvars)
+
+  jaxpr_in_avals = [v.aval for v in jaxpr_inner.invars]
+  is_ref = [isinstance(aval, AbstractRef) for aval in jaxpr_in_avals]
+
+  discharged_jaxpr, discharged_consts = state_discharge.discharge_state(
+      jaxpr_inner, call_jaxpr.consts)
+  discharged_fn = jex.core.jaxpr_as_fun(
+      jex.core.ClosedJaxpr(discharged_jaxpr, discharged_consts))
+
+  consts = list(args[:carried_arguments_start])
+  carried = list(args[carried_arguments_start:])
+  for i in range(num_iterations):
+    all_inputs = consts + carried + [jnp.uint32(i)]
+    all_outputs = discharged_fn(*all_inputs)
+    carried = list(all_outputs[:num_outs])
+    ref_vals = list(all_outputs[num_outs:])
+
+    ref_iter = iter(ref_vals)
+    for j in range(len(consts)):
+      if is_ref[j]:
+        consts[j] = next(ref_iter)
+    for j in range(len(carried)):
+      if is_ref[carried_arguments_start + j]:
+        carried[j] = next(ref_iter)
+
+  new_invals = tuple(
+      consts[i] if i < carried_arguments_start
+      else carried[i - carried_arguments_start]
+      if isinstance(aval, AbstractRef) else None
+      for i, aval in enumerate(in_avals))
+  return new_invals, carried
+
+
 def _register_fori_loop_primitive():
   """Registers the `fori_loop` op to JAX."""
   primitive = jex.core.Primitive('fori_loop')
   primitive.multiple_results = True
   primitive.def_impl(_for_i_impl)
   primitive.def_effectful_abstract_eval(_call_abstract_eval)
-  # Introduces the rule to lower this primitive as a call_primitive, so that
-  # jax.jit users can still lower for_i loops.
-  # TODO(jupvfranco): ideally, this should be lowered the same way a scan is
-  # lowered. However, we lower the loop as if fully unrolled for the sake of
-  # simplicity. jax.jitting a fori_loop should be used for testing only (jax
-  # users should use a jax.lax.fori_loop instead) so it shouldn't affect any
-  # performance sensitive code. We should revisit soon though.
   jax_mlir.register_lowering(
       primitive, jax_mlir.lower_fun(_for_i_impl, multiple_results=True)
+  )
+  state_discharge.register_discharge_rule(primitive)(
+      _fori_loop_discharge_rule
   )
   return primitive
 
