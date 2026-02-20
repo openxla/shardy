@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <utility>
@@ -69,9 +71,11 @@ Type getLocalType(Type type, TensorShardingAttr sharding,
 
 struct ConversionState {
   llvm::DenseSet<Operation*> convertedOps;
+  int64_t nextChannelId;
 
   void addConvertedOp(Operation* op) { convertedOps.insert(op); }
   bool isConverted(Operation* op) { return convertedOps.contains(op); }
+  int64_t getNextChannelId() { return nextChannelId++; }
 };
 
 class GlobalToLocalTypeConverter : public TypeConverter {
@@ -160,6 +164,59 @@ class StablehloOpPattern : public ConversionPattern {
 
     conversionState.addConvertedOp(newOp);
     rewriter.replaceOp(op, newOp->getResults());
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+// Returns the channel ID after the maximum channel ID in the given `moduleOp`.
+// TODO(b/419222666): remove dependency on `channel_handle` attribute name.
+int64_t getNextChannelId(ModuleOp moduleOp) {
+  int64_t maxChannelId = 0;
+  moduleOp->walk([&](mlir::Operation* op) {
+    if (auto channelHandle =
+            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
+      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
+    }
+  });
+  return maxChannelId + 1;
+}
+
+class AllReduceOpPattern : public OpConversionPattern<AllReduceOp> {
+ public:
+  AllReduceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                     ConversionState& state)
+      : OpConversionPattern<AllReduceOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      AllReduceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    MeshAttr mesh = op.getOutSharding().getMesh(op);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh for all_reduce");
+    }
+
+    Type localResultType = adaptor.getTensor().getType();
+    mlir::DenseIntElementsAttr replicaGroups =
+        getReplicaGroups(op.getReductionAxesAttr(), mesh, rewriter);
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        op->getContext(), /*handle=*/conversionState.getNextChannelId(),
+        /*type=*/1);
+
+    stablehlo::AllReduceOp allReduce = stablehlo::AllReduceOp::create(
+        rewriter, op.getLoc(), localResultType, adaptor.getTensor(),
+        replicaGroups, channelHandle,
+        /*use_global_device_ids=*/true);
+
+    auto elementType =
+        mlir::cast<RankedTensorType>(localResultType).getElementType();
+    stablehlo::buildReduceBody<stablehlo::AddOp>(
+        elementType, allReduce.getComputation(), rewriter);
+    conversionState.addConvertedOp(allReduce);
+    rewriter.replaceOp(op, allReduce.getResults());
     return success();
   }
 
@@ -265,14 +322,17 @@ struct ConvertGlobalToLocalPass
     });
 
     ConversionState conversionState;
+    conversionState.nextChannelId = getNextChannelId(module);
+
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, StablehloOpPattern>(
-        typeConverter, &getContext(), conversionState);
+    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, StablehloOpPattern,
+                 AllReduceOpPattern>(typeConverter, &getContext(),
+                                     conversionState);
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(
