@@ -54,6 +54,10 @@ struct PropagationOptions {
   bool avoidReshardsOnNamedComputations = false;
   // Whether to update axes with non-divisible input/output shardings.
   bool updateNonDivisibleInputOutputShardings = true;
+  // Whether to propagate shardings directly on a non-flat graph without
+  // flattening it. The default is false, meaning it will flatten the graph and
+  // then propagate.
+  bool enableNativeNonFlatSupport = false;
 };
 
 }  // namespace sdy
