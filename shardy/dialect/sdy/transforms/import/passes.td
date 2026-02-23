@@ -52,6 +52,14 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
     target if it exists.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+
+  let options = [
+    Option<"enableNativeNonFlatSupport", "enable-native-non-flat-support", "bool",
+           /*default=*/"false",
+           "Whether to propagate shardings directly on a non-flat graph without "
+           "flattening it. The default is false, meaning it will flatten the "
+           "graph and then propagate.">
+  ];
   //TODO(b/330339693): update this doc when `getDataFlowEdgeOwners` is removed.
 }
 
