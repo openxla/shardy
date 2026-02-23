@@ -13,12 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <utility>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
@@ -44,6 +47,8 @@ namespace sdy {
 
 namespace {
 
+constexpr int64_t kChannelHandleType = 1;
+
 // Computes the local type of a given type and sharding.
 //
 // If the sharding is not defined or the mesh is not defined, the original
@@ -68,10 +73,13 @@ Type getLocalType(Type type, TensorShardingAttr sharding,
 }
 
 struct ConversionState {
-  llvm::DenseSet<Operation*> convertedOps;
+  llvm::DenseSet<Operation*> toConvertOps;
+  int64_t nextChannelId = 0;
 
-  void addConvertedOp(Operation* op) { convertedOps.insert(op); }
-  bool isConverted(Operation* op) { return convertedOps.contains(op); }
+  void addToConvertOp(Operation* op) { toConvertOps.insert(op); }
+  void removeToConvertOp(Operation* op) { toConvertOps.erase(op); }
+  bool needConversion(Operation* op) { return toConvertOps.contains(op); }
+  int64_t getNextChannelId() { return nextChannelId++; }
 };
 
 class GlobalToLocalTypeConverter : public TypeConverter {
@@ -132,20 +140,25 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
 
-// Generic StableHLO op pattern.
-class StablehloOpPattern : public ConversionPattern {
+// Pattern for generic ops that do not require special handling beyond type
+// conversion, such as StableHLO ops, sdy.all_reduce, etc.
+class GenericOpPattern : public ConversionPattern {
  public:
-  StablehloOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                     ConversionState& state)
+  GenericOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                   ConversionState& state)
       : ConversionPattern(converter, MatchAnyOpTypeTag(), 1, ctx),
         conversionState(state) {}
 
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
-    // Skip non-StableHLO ops and ops with specific patterns.
-    if (op->getDialect()->getNamespace() != "stablehlo" ||
-        isa<stablehlo::ConstantOp>(op)) {
+    auto withSpecificPattern = [&](Operation* op) {
+      return isa<stablehlo::ConstantOp, AllGatherOp>(op);
+    };
+    // Skip non-StableHLO non-sdy ops and ops with specific patterns.
+    if ((op->getDialect()->getNamespace() != "stablehlo" &&
+         op->getDialect()->getNamespace() != "sdy") ||
+        withSpecificPattern(op)) {
       return failure();
     }
 
@@ -157,9 +170,8 @@ class StablehloOpPattern : public ConversionPattern {
     Operation* newOp =
         rewriter.create(op->getLoc(), op->getName().getIdentifier(), operands,
                         newResultTypes, op->getAttrs(), op->getSuccessors());
-
-    conversionState.addConvertedOp(newOp);
     rewriter.replaceOp(op, newOp->getResults());
+    conversionState.removeToConvertOp(op);
     return success();
   }
 
@@ -177,8 +189,8 @@ class ReturnOpPattern : public OpConversionPattern<func::ReturnOp> {
   LogicalResult matchAndRewrite(
       func::ReturnOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
-    conversionState.addConvertedOp(op);
     rewriter.replaceOpWithNewOp<func::ReturnOp>(op, adaptor.getOperands());
+    conversionState.removeToConvertOp(op);
     return success();
   }
 
@@ -215,7 +227,7 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
         newResultTypes.push_back(globalType);
       }
     }
-    conversionState.addConvertedOp(op);
+    conversionState.removeToConvertOp(op);
     auto newFuncType =
         rewriter.getFunctionType(signature.getConvertedTypes(), newResultTypes);
     // Update the function type.
@@ -226,6 +238,73 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
       return failure();
     }
 
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+// Returns the channel ID after the maximum channel ID in the given `moduleOp`.
+// TODO(b/419222666): remove dependency on `channel_handle` attribute name.
+int64_t getNextChannelId(ModuleOp moduleOp) {
+  int64_t maxChannelId = 0;
+  moduleOp->walk([&](mlir::Operation* op) {
+    if (auto channelHandle =
+            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
+      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
+    }
+  });
+  return maxChannelId + 1;
+}
+
+class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
+ public:
+  AllGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                     ConversionState& state)
+      : OpConversionPattern<AllGatherOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      AllGatherOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    MeshAttr mesh = op.getOutSharding().getMesh(op);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    Value curInput = adaptor.getTensor();
+    for (auto [dim, gatheringAxes] : llvm::enumerate(op.getGatheringAxes())) {
+      auto axisList = cast<AxisRefListAttr>(gatheringAxes);
+      if (axisList.empty()) {
+        continue;
+      }
+
+      auto inputType = cast<RankedTensorType>(curInput.getType());
+      SmallVector<int64_t> curShape = llvm::to_vector(inputType.getShape());
+      DenseIntElementsAttr replicaGroups =
+          getReplicaGroups(axisList, mesh, rewriter);
+
+      int64_t groupSize = replicaGroups.getShapedType().getShape().back();
+      if (curShape[dim] != ShapedType::kDynamic) {
+        curShape[dim] *= groupSize;
+      }
+
+      auto channelHandle = stablehlo::ChannelHandleAttr::get(
+          op->getContext(), /*handle=*/conversionState.getNextChannelId(),
+          kChannelHandleType);
+
+      auto allGather = rewriter.create<stablehlo::AllGatherOp>(
+          op.getLoc(),
+          TypeRange{
+              RankedTensorType::get(curShape, inputType.getElementType())},
+          curInput, dim, replicaGroups, channelHandle,
+          /*use_global_device_ids=*/true);
+      curInput = allGather.getResult(0);
+    }
+
+    conversionState.removeToConvertOp(op);
+    rewriter.replaceOp(op, curInput);
     return success();
   }
 
@@ -265,28 +344,39 @@ struct ConvertGlobalToLocalPass
     });
 
     ConversionState conversionState;
+    // Walk the module and collect the set of ops that need to be converted.
+    // We use the set to determine whether a given op is legal or not during
+    // conversion.
+    module.walk([&](Operation* op) {
+      if (isa<MeshOp>(op)) {
+        return;
+      }
+      conversionState.addToConvertOp(op);
+    });
+    conversionState.nextChannelId = getNextChannelId(module);
+
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, StablehloOpPattern>(
-        typeConverter, &getContext(), conversionState);
+    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, GenericOpPattern,
+                 AllGatherOpPattern>(typeConverter, &getContext(),
+                                     conversionState);
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(
-        [&](func::FuncOp op) { return conversionState.isConverted(op); });
+        [&](func::FuncOp op) { return !conversionState.needConversion(op); });
     target.addDynamicallyLegalOp<func::ReturnOp>(
-        [&](func::ReturnOp op) { return conversionState.isConverted(op); });
+        [&](func::ReturnOp op) { return !conversionState.needConversion(op); });
 
     target.addDynamicallyLegalDialect<stablehlo::StablehloDialect>(
-        [&](Operation* op) { return conversionState.isConverted(op); });
+        [&](Operation* op) { return !conversionState.needConversion(op); });
 
-    // Ensure all 'sdy' ops are gone, except for the mesh definition, which will
-    // be removed later.
-    target.addIllegalDialect<SdyDialect>();
-    target.addLegalOp<sdy::MeshOp>();
+    target.addDynamicallyLegalDialect<SdyDialect>(
+        [&](Operation* op) { return !conversionState.needConversion(op); });
+    target.addLegalOp<MeshOp>();
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();
