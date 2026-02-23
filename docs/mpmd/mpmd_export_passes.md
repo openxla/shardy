@@ -104,4 +104,11 @@ _Validates that no reshard-only fragments exist._
 A reshard-only fragment is a fragment that contains only a `mpmd.return` of
 one of its arguments. These fragments usually indicate an unexpected reshard.
 
-This pass identifies such fragments and emits an error.
+By default, this pass emits a warning for each such fragment. If
+`fail-on-reshard-only-fragments` is set, it emits an error and fails.
+
+#### Options
+
+```
+-fail-on-reshard-only-fragments : Whether to emit an error (and fail) instead of a warning.
+```
