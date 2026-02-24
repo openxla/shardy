@@ -64,7 +64,8 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
-  pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass());
+  pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass(
+      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
