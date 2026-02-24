@@ -48,6 +48,11 @@ namespace {
 // Replaces the AssignOp of an UnassignOp with a TransferOp, or a noop if the
 // transfer is not needed. It reuses existing transfers if possible. For a given
 // value, this create at most one transfer of that value to a given mesh.
+//
+// When the unassign has multiple cross-mesh assign users, this pattern replaces
+// all of them at once with chained transfers (m1->m2->m3) rather than
+// independent ones (m1->m2, m1->m3). Assigns are sorted lexicographically by
+// mesh name for deterministic chain order.
 class AssignOfUnassignPattern : public OpRewritePattern<AssignOp> {
   using OpRewritePattern<AssignOp>::OpRewritePattern;
 
@@ -88,6 +93,30 @@ class AssignOfUnassignPattern : public OpRewritePattern<AssignOp> {
         existing_transfer_it->moveBefore(op);
       }
       rewriter.replaceOp(op, existing_transfer_it->getResults());
+      return success();
+    }
+
+    StringRef source_mesh = op_to_transfer.getType().getMeshName();
+    SmallVector<AssignOp> cross_mesh_assigns;
+    for (Operation* user : unassign_op.getResult().getUsers()) {
+      auto assign = dyn_cast<AssignOp>(user);
+      if (assign && assign.getType().getMeshName() != source_mesh) {
+        cross_mesh_assigns.push_back(assign);
+      }
+    }
+
+    if (cross_mesh_assigns.size() >= 2) {
+      llvm::sort(cross_mesh_assigns, [](AssignOp a, AssignOp b) {
+        return a.getType().getMeshName() < b.getType().getMeshName();
+      });
+      Value prev_transfer = op_to_transfer;
+      for (AssignOp assign : cross_mesh_assigns) {
+        rewriter.setInsertionPoint(assign);
+        auto transfer = TransferOp::create(rewriter, assign.getLoc(),
+                                           assign.getType(), prev_transfer);
+        prev_transfer = transfer;
+        rewriter.replaceOp(assign, transfer.getResult());
+      }
     } else {
       rewriter.replaceOpWithNewOp<TransferOp>(op, op.getType(),
                                               unassign_op.getTensor());
