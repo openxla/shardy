@@ -1167,12 +1167,15 @@ def _fori_loop_discharge_rule(
       if is_ref[carried_arguments_start + j]:
         carried[j] = next(ref_iter)
 
-  new_invals = tuple(
-      consts[i] if i < carried_arguments_start
-      else carried[i - carried_arguments_start]
-      if isinstance(aval, AbstractRef) else None
-      for i, aval in enumerate(in_avals))
-  return new_invals, carried
+  new_invals = [None] * len(in_avals)
+  for i in range(len(in_avals)):
+    if isinstance(in_avals[i], AbstractRef):
+      if i < carried_arguments_start:
+        new_invals[i] = consts[i]
+      else:
+        new_invals[i] = carried[i - carried_arguments_start]
+
+  return tuple(new_invals), carried
 
 
 def _register_fori_loop_primitive():
