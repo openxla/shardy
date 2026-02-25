@@ -132,20 +132,22 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
 
-// Generic StableHLO op pattern.
-class StablehloOpPattern : public ConversionPattern {
+// Pattern for generic ops that do not require special handling beyond type
+// conversion, such as StableHLO ops, sdy.all_reduce, etc.
+class GenericOpPattern : public ConversionPattern {
  public:
-  StablehloOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                     ConversionState& state)
+  GenericOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                   ConversionState& state)
       : ConversionPattern(converter, MatchAnyOpTypeTag(), 1, ctx),
         conversionState(state) {}
 
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
-    // Skip non-StableHLO ops and ops with specific patterns.
-    if (op->getDialect()->getNamespace() != "stablehlo" ||
-        isa<stablehlo::ConstantOp>(op)) {
+    // Skip non-StableHLO non-sdy ops and ops with specific patterns.
+    // TODO(bixia): add ops with specific conversion patterns.
+    if ((op->getDialect()->getNamespace() != "stablehlo" &&
+         op->getDialect()->getNamespace() != "sdy")) {
       return failure();
     }
 
@@ -265,13 +267,14 @@ struct ConvertGlobalToLocalPass
     });
 
     ConversionState conversionState;
+
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, StablehloOpPattern>(
+    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, GenericOpPattern>(
         typeConverter, &getContext(), conversionState);
 
     ConversionTarget target(getContext());
@@ -283,10 +286,9 @@ struct ConvertGlobalToLocalPass
     target.addDynamicallyLegalDialect<stablehlo::StablehloDialect>(
         [&](Operation* op) { return conversionState.isConverted(op); });
 
-    // Ensure all 'sdy' ops are gone, except for the mesh definition, which will
-    // be removed later.
-    target.addIllegalDialect<SdyDialect>();
-    target.addLegalOp<sdy::MeshOp>();
+    target.addDynamicallyLegalDialect<SdyDialect>(
+        [&](Operation* op) { return conversionState.isConverted(op); });
+    target.addLegalOp<MeshOp>();
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();

@@ -28,3 +28,14 @@ func.func @func_with_dot_then_add(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.s
   // CHECK-NEXT:  return %[[ADD]] : tensor<4x8xf32>
   return %1 : tensor<8x32xf32>
 }
+
+// CHECK-LABEL: func.func @sdy_all_reduce
+// CHECK-SAME:    (%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}]>})
+// CHECK-SAME:    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}]>}) {
+func.func @sdy_all_reduce(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}]>})
+    -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}]>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh_2_4, [{}, {"y"}]> : tensor<16x8xf32>
+  %0 = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh_2_4, [{}, {"y"}]> : tensor<16x32xf32>
+  // CHECK-NEXT: return %[[ALL_REDUCE]] : tensor<16x8xf32>
+  return %0 : tensor<16x32xf32>
+}
