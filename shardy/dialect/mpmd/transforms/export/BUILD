@@ -38,6 +38,7 @@ cc_library(
         "mark_input_output_with_layouts.cc",
         "mark_offloaded_input_output.cc",
         "reschedule_ops.cc",
+        "validate_no_backward_deps.cc",
         "validate_no_reshards.cc",
     ],
     hdrs = [
