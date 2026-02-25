@@ -68,10 +68,11 @@ Type getLocalType(Type type, TensorShardingAttr sharding,
 }
 
 struct ConversionState {
-  llvm::DenseSet<Operation*> convertedOps;
+  llvm::DenseSet<Operation*> toConvertOps;
 
-  void addConvertedOp(Operation* op) { convertedOps.insert(op); }
-  bool isConverted(Operation* op) { return convertedOps.contains(op); }
+  void addToConvertOp(Operation* op) { toConvertOps.insert(op); }
+  void removeToConvertOp(Operation* op) { toConvertOps.erase(op); }
+  bool needConversion(Operation* op) { return toConvertOps.contains(op); }
 };
 
 class GlobalToLocalTypeConverter : public TypeConverter {
@@ -159,9 +160,8 @@ class GenericOpPattern : public ConversionPattern {
     Operation* newOp =
         rewriter.create(op->getLoc(), op->getName().getIdentifier(), operands,
                         newResultTypes, op->getAttrs(), op->getSuccessors());
-
-    conversionState.addConvertedOp(newOp);
     rewriter.replaceOp(op, newOp->getResults());
+    conversionState.removeToConvertOp(op);
     return success();
   }
 
@@ -179,8 +179,8 @@ class ReturnOpPattern : public OpConversionPattern<func::ReturnOp> {
   LogicalResult matchAndRewrite(
       func::ReturnOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
-    conversionState.addConvertedOp(op);
     rewriter.replaceOpWithNewOp<func::ReturnOp>(op, adaptor.getOperands());
+    conversionState.removeToConvertOp(op);
     return success();
   }
 
@@ -217,7 +217,7 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
         newResultTypes.push_back(globalType);
       }
     }
-    conversionState.addConvertedOp(op);
+    conversionState.removeToConvertOp(op);
     auto newFuncType =
         rewriter.getFunctionType(signature.getConvertedTypes(), newResultTypes);
     // Update the function type.
@@ -267,6 +267,15 @@ struct ConvertGlobalToLocalPass
     });
 
     ConversionState conversionState;
+    // Walk the module and collect the set of ops that need to be converted.
+    // We use the set to determine whether a given op is legal or not during
+    // conversion.
+    module.walk([&](Operation* op) {
+      if (isa<MeshOp>(op)) {
+        return;
+      }
+      conversionState.addToConvertOp(op);
+    });
 
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
@@ -279,15 +288,15 @@ struct ConvertGlobalToLocalPass
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(
-        [&](func::FuncOp op) { return conversionState.isConverted(op); });
+        [&](func::FuncOp op) { return !conversionState.needConversion(op); });
     target.addDynamicallyLegalOp<func::ReturnOp>(
-        [&](func::ReturnOp op) { return conversionState.isConverted(op); });
+        [&](func::ReturnOp op) { return !conversionState.needConversion(op); });
 
     target.addDynamicallyLegalDialect<stablehlo::StablehloDialect>(
-        [&](Operation* op) { return conversionState.isConverted(op); });
+        [&](Operation* op) { return !conversionState.needConversion(op); });
 
     target.addDynamicallyLegalDialect<SdyDialect>(
-        [&](Operation* op) { return conversionState.isConverted(op); });
+        [&](Operation* op) { return !conversionState.needConversion(op); });
     target.addLegalOp<MeshOp>();
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
