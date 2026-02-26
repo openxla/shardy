@@ -917,16 +917,18 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
          "reshard op.";
 
   SmallVector<AxisRefAttr> s2uAxes;
-  SmallVector<AxisRefListAttr> axesPerDim(inSharding.getRank());
-  for (auto [inDimSharding, outDimSharding, axes] :
-       llvm::zip_equal(inSharding.getDimShardings(),
+  SmallVector<AxisRefListAttr> axesPerDim(
+      inSharding.getRank(), AxisRefListAttr::get(rewriter.getContext(), {}));
+  bool needReshard = false;
+  SmallVector<DimensionShardingAttr> tmpDimShardings =
+      llvm::to_vector(outSharding.getDimShardings());
+  for (auto [inDimSharding, tmpDimSharding, outDimSharding, axes] :
+       llvm::zip_equal(inSharding.getDimShardings(), tmpDimShardings,
                        outSharding.getDimShardings(), axesPerDim)) {
     ArrayRef<AxisRefAttr> inAxes = inDimSharding.getAxes();
     ArrayRef<AxisRefAttr> outAxes = outDimSharding.getAxes();
     PrefixStatus prefixStatus = isAxisListPrefixOf(outAxes, inAxes);
-    if (prefixStatus == PrefixStatus::EQUAL) {
-      axes = AxisRefListAttr::get(rewriter.getContext(), {});
-    } else if (prefixStatus == PrefixStatus::STRICT_PREFIX) {
+    if (prefixStatus == PrefixStatus::STRICT_PREFIX) {
       SmallVector<AxisRefAttr> diff;
       if (!outAxes.empty() && outAxes.back() != inAxes[outAxes.size() - 1]) {
         std::optional<AxisRefAttr> suffix =
@@ -936,17 +938,24 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
         diff.push_back(*suffix);
       }
       diff.append(inAxes.begin() + outAxes.size(), inAxes.end());
-      axes = AxisRefListAttr::get(rewriter.getContext(), diff);
-      s2uAxes.append(diff);
-    } else {
-      SDY_LOG(FATAL)
-          << "The reshard op needs to be decomposed to a sharded-to-unreduced "
-             "AND other collective ops, which is not supported yet.";
+      if (getAxisSetDiff(diff, r2uAnds2uAxes, inMesh).empty()) {
+        axes = AxisRefListAttr::get(rewriter.getContext(), diff);
+        s2uAxes.append(diff);
+        tmpDimSharding = inDimSharding;
+      } else {
+        needReshard = true;
+      }
+    } else if (prefixStatus == PrefixStatus::NOT_A_PREFIX) {
+      needReshard = true;
     }
   }
 
   rewriter.setInsertionPoint(reshardOp);
   Value result = input;
+  if (needReshard) {
+    result = ReshardOp::create(rewriter, reshardOp.getLoc(), result,
+                               inSharding.replaceDimShardings(tmpDimShardings));
+  }
 
   SmallVector<AxisRefAttr> r2uAxes =
       getAxisSetDiff(r2uAnds2uAxes, s2uAxes, inMesh);
@@ -954,10 +963,9 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
     SmallVector<AxisRefAttr> inPlusR2uAxes = llvm::to_vector(inUnreducedAxes);
     inPlusR2uAxes.append(r2uAxes.begin(), r2uAxes.end());
     sortAndMergeAxes(inPlusR2uAxes, inMesh);
-    TensorShardingAttr r2uSharding =
-        TensorShardingAttr::get(rewriter.getContext(), inSharding.getMeshName(),
-                                inSharding.getDimShardings(),
-                                outSharding.getReplicatedAxes(), inPlusR2uAxes);
+    TensorShardingAttr r2uSharding = TensorShardingAttr::get(
+        rewriter.getContext(), inSharding.getMeshName(), tmpDimShardings,
+        outSharding.getReplicatedAxes(), inPlusR2uAxes);
     result = ReplicatedToUnreducedOp::create(rewriter, reshardOp.getLoc(),
                                              result, r2uAxes, r2uSharding);
   }

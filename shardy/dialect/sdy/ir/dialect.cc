@@ -813,6 +813,13 @@ TensorShardingAttr TensorShardingAttr::replaceDimSharding(
                                  getReplicatedAxes(), getUnreducedAxes());
 }
 
+TensorShardingAttr TensorShardingAttr::replaceDimShardings(
+    ArrayRef<DimensionShardingAttr> dimShardings) const {
+  assert(dimShardings.size() == getDimShardings().size());
+  return TensorShardingAttr::get(getContext(), getMeshOrRef(), dimShardings,
+                                 getReplicatedAxes(), getUnreducedAxes());
+}
+
 TensorShardingAttr TensorShardingAttr::replaceReplicatedAxes(
     ArrayRef<AxisRefAttr> replicatedAxes) const {
   return TensorShardingAttr::get(getContext(), getMeshOrRef(),
