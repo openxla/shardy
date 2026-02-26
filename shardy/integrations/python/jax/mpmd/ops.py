@@ -253,6 +253,7 @@ def named_computation_partir_lowering(
         *sharded_args,
         dim_var_values=ctx.dim_var_values,
         const_lowering=ctx.const_lowering,
+        outer_traceback=ctx.traceback,
     )
     ctx.set_tokens_out(tokens)
     # The return op expects a single flat list with all outputs.
