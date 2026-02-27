@@ -30,6 +30,7 @@ limitations under the License.
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
@@ -100,7 +101,18 @@ struct SinkDataFlowEdgesPass
       // documentation for `Operation::walk` for more details.
       if (isa<DataFlowEdgeOp>(op)) {
         DataFlowEdgeOp dataFlowEdgeOp = cast<DataFlowEdgeOp>(op);
-        rewriter.replaceOp(dataFlowEdgeOp, dataFlowEdgeOp.getInput());
+        Value input = dataFlowEdgeOp.getInput();
+        // TODO(enver): Drop enableNativeNonFlatSupport check and assume func
+        // arguments do not have data flow edges in the first place.
+        if (func::FuncOp funcOp = dyn_cast<func::FuncOp>(getOwningOp(input));
+            funcOp && enableNativeNonFlatSupport) {
+          int argNum = cast<BlockArgument>(input).getArgNumber();
+          if (TensorShardingAttr sharding = dataFlowEdgeOp.getShardingAttr();
+              sharding) {
+            funcOp.setArgAttr(argNum, kShardingAttr, sharding);
+          }
+        }
+        rewriter.replaceOp(dataFlowEdgeOp, input);
         return WalkResult::skip();
       }
       auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op);
