@@ -160,14 +160,14 @@ def FragmentOp : Mpmd_Op<"fragment", [
   }];
 
   let arguments = (ins
-    Variadic<Mpmd_MeshTensorType>:$inputs,
+    Variadic<AnyTypeOf<[Mpmd_MeshTensorType, HLO_Token]>>:$inputs,
     TypedArrayAttrBase<Mpmd_UserOrigin, "array of origin infos">:$origin,
     StrAttr:$mesh_name,
     OptionalAttr<I64Attr>:$stage_id,
     OptionalAttr<Sdy_TensorShardingPerValue>:$in_shardings,
     OptionalAttr<Sdy_TensorShardingPerValue>:$out_shardings
   );
-  let results = (outs Variadic<Mpmd_MeshTensorType>:$results);
+  let results = (outs Variadic<AnyTypeOf<[Mpmd_MeshTensorType, HLO_Token]>>:$results);
   let regions = (region SizedRegion<1>:$region);
 
   let hasCustomAssemblyFormat = 1;
