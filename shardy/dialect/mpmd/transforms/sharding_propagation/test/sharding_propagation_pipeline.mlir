@@ -823,3 +823,35 @@ func.func public @simple_propagation_within_fragment_inputs_simplified(
   } : (!mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>) -> (!mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>)
   return %0#0, %0#1 : !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<16x10x3xf32>>
 }
+
+// -----
+
+module {
+sdy.mesh @tpu = <["tpu_dim0"=8]>
+sdy.mesh @cpu = <["cpu_dim0"=1]>
+
+// CHECK-LABEL: @heterogeneous_inter_mesh_propagation_blocked
+func.func @heterogeneous_inter_mesh_propagation_blocked(
+  %arg0: !mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>
+  {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_dim0"}, {}]>})
+  -> !mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>
+  attributes {topology = #mpmd.topology<<"tpu" : <["tpu_dim0"=8]>>, <"cpu" : <["cpu_dim0"=1]>>>} {
+  // CHECK: mpmd.fragment<mesh="tpu", origin=["producer"]
+  %0 = mpmd.fragment<mesh="tpu", origin=["producer"]> (%arg0) (%arg1: tensor<16x32xf32>) {
+    %3 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
+    mpmd.return %3 : tensor<16x32xf32>
+  } : (!mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>) -> !mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>
+  // The transfer operand retains @tpu sharding but the result should NOT.
+  // CHECK: mpmd.transfer %0 :
+  // CHECK-SAME: sharding=<@tpu, [{"tpu_dim0"}, {}]>
+  // CHECK-SAME: -> !mpmd.mesh_tensor<"cpu", tensor<16x32xf32>>
+  %1 = mpmd.transfer %0 : (!mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>) -> !mpmd.mesh_tensor<"cpu", tensor<16x32xf32>>
+  // CHECK: mpmd.fragment<mesh="cpu", origin=["consumer"]>
+  %2 = mpmd.fragment<mesh="cpu", origin=["consumer"]> (%1) (%arg1: tensor<16x32xf32>) {
+    %3 = stablehlo.add %arg1, %arg1 : tensor<16x32xf32>
+    mpmd.return %3 : tensor<16x32xf32>
+  } : (!mpmd.mesh_tensor<"cpu", tensor<16x32xf32>>) -> !mpmd.mesh_tensor<"cpu", tensor<16x32xf32>>
+  %3 = mpmd.transfer %2 : (!mpmd.mesh_tensor<"cpu", tensor<16x32xf32>>) -> !mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>
+  func.return %3 : !mpmd.mesh_tensor<"tpu", tensor<16x32xf32>>
+}
+}
