@@ -39,7 +39,12 @@ def SinkDataFlowEdgesPass : Pass<"sdy-sink-data-flow-edges", "func::FuncOp"> {
            /*default=*/"false",
            "Whether to sink the debug propagation edge sharding info. See "
            "`debug-propagation-edge-sharding` option in propagation for more "
-           "info.">
+           "info.">,
+    Option<"enableNativeNonFlatSupport", "enable-native-non-flat-support", "bool",
+           /*default=*/"false",
+           "Whether to propagate shardings directly on a non-flat graph without "
+           "flattening it. The default is false, meaning it will flatten the "
+           "graph and then propagate.">
   ];
 }
 
