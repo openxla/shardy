@@ -42,3 +42,12 @@ func.func @all_reduce_of_replicated_to_unreduced(
   %0 = sdy.sharding_constraint %arg0 <@mesh3d, [{"c"}, {}], unreduced={"a", "b"}> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @update_input_output_shardings
+// CHECK-SAME:    %arg0: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{}, {"b"}]>}
+// CHECK-SAME:    -> (tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{}, {"b"}]>})
+func.func @update_input_output_shardings(
+    %arg0: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{"a", ?}, {"b"}]>})
+    ->    (tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{"a":(1)2}, {"b", "c"}]>}) {
+  return %arg0 : tensor<2x4xf32>
+}
