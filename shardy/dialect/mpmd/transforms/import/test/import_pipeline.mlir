@@ -1,6 +1,7 @@
 // RUN: mpmd_opt %s -mpmd-import-pipeline='name-to-mesh-assignment=f1@m1,f2@m2' -split-input-file 2>&1 | FileCheck %s
 
-// CHECK-LABEL: sdy.mesh @mesh = <["x"=2]>
+// CHECK-LABEL: sdy.mesh @m1 = <["x"=2]>
+// CHECK-NEXT: sdy.mesh @m2 = <["x"=2]>
 #topology = #mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 
 // named_computation_duplicate_args_simplified
@@ -21,7 +22,8 @@ func.func @main(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
 
 // -----
 
-// CHECK-LABEL: sdy.mesh @mesh = <["x"=2]>
+// CHECK-LABEL: sdy.mesh @m1 = <["x"=2]>
+// CHECK-NEXT: sdy.mesh @m2 = <["x"=2]>
 #topology = #mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 
 // named_computation_duplicate_and_noop_results_simplified
@@ -53,7 +55,8 @@ func.func @main(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>)
 
 // -----
 
-// CHECK-LABEL: sdy.mesh @mesh = <["x"=2]>
+// CHECK-LABEL: sdy.mesh @m1 = <["x"=2]>
+// CHECK-NEXT: sdy.mesh @m2 = <["x"=2]>
 #topology = #mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 
 // noop_named_computation_args_removed_before_mesh_assignment
@@ -85,6 +88,8 @@ func.func @main(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>)
 
 // -----
 
+// CHECK-LABEL: sdy.mesh @m1 = <["x"=2]>
+// CHECK-NEXT: sdy.mesh @m2 = <["x"=2]>
 #topology = #mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 
 // mesh_inference_succeeds_through_returned_callee_arg

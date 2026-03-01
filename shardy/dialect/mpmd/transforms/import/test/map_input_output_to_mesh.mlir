@@ -3,6 +3,9 @@
 !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_2_tensor_4_8_f32 = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["y"=2]>
+
 
 // CHECK: func.func @multiple_input_output_mesh_assignment(%arg0: !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, %arg1: !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>) -> (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>, !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>)
 // CHECK-DAG: %[[UNASSIGN_1:.*]] = mpmd.unassign {origin = "user_in"} %arg0 : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
