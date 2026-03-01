@@ -1228,7 +1228,13 @@ class InferMeshAssignMeshForFuncLeavesPass
           }
 
           if (IsMeshlessOp(op)) {
-            if (op->getNumResults() == 0) {
+            // Ops whose results are all non-tensor types (e.g., tokens)
+            // cannot be assigned via AssignOp, so treat them the same as
+            // resultless ops.
+            bool has_tensor_result = llvm::any_of(
+                op->getResultTypes(),
+                [](Type t) { return isa<RankedTensorType>(t); });
+            if (op->getNumResults() == 0 || !has_tensor_result) {
               AssignResultlessOp(op, first_mesh_name, rewriter);
             } else if (op->use_empty()) {
               AssignUnusedOp(op, first_mesh_name, meshes_by_name, rewriter);
@@ -1412,6 +1418,11 @@ class InferMeshAssignMeshForFuncLeavesPass
     rewriter.setInsertionPointAfter(op);
     sdy::MeshAttr mesh = GetMeshByName(meshes_by_name, mesh_name);
     for (Value res : op->getResults()) {
+      // AssignOp only accepts tensor types; skip non-tensor results
+      // (e.g., tokens).
+      if (!isa<RankedTensorType>(res.getType())) {
+        continue;
+      }
       AssignOp::create(rewriter, op->getLoc(), res, mesh_name, mesh,
                        kInferredUnusedOrigin);
     }
@@ -2171,6 +2182,11 @@ void AbsorbMeshlessProducer(FragmentOp consumer, Operation* op,
   // Note: when the op is inlined, old_result and new_result are the same.
   for (auto [old_result, new_result] :
        llvm::zip(op->getResults(), new_results)) {
+    // Non-tensor results (e.g., tokens) are not wrapped in AssignOp,
+    // so there is nothing to remap for them.
+    if (!isa<RankedTensorType>(old_result.getType())) {
+      continue;
+    }
     for (Operation* user : old_result.getUsers()) {
       AssignOp assign_op = cast<AssignOp>(user);
       for (OpOperand& assign_use : assign_op->getUses()) {
@@ -2194,12 +2210,18 @@ void AbsorbMeshlessProducer(FragmentOp consumer, Operation* op,
   }
   rewriter.setInsertionPoint(consumer);
   for (Value operand : op_operands_and_free_vars) {
-    new_consumer_operands.push_back(
-        AssignOp::create(rewriter, operand.getLoc(),
-                         MeshTensorType::getFullyReplicated(
-                             operand.getContext(), mesh_name, mesh_attr,
-                             cast<RankedTensorType>(operand.getType())),
-                         operand));
+    if (isa<RankedTensorType>(operand.getType())) {
+      new_consumer_operands.push_back(
+          AssignOp::create(rewriter, operand.getLoc(),
+                           MeshTensorType::getFullyReplicated(
+                               operand.getContext(), mesh_name, mesh_attr,
+                               cast<RankedTensorType>(operand.getType())),
+                           operand));
+    } else {
+      // Non-tensor operands (e.g., tokens) pass through directly;
+      // they cannot be wrapped in AssignOp/MeshTensorType.
+      new_consumer_operands.push_back(operand);
+    }
   }
   consumer->setOperands(new_consumer_operands);
 }
@@ -2244,8 +2266,11 @@ void AssignOpBasedOnConsumers(Operation* op, const int max_clones,
   bool has_non_fragment_user = false;
   for (Operation* user : op->getUsers()) {
     auto assign_op = dyn_cast<AssignOp>(user);
-    SDY_CHECK(assign_op) << "Expected user to be AssignOp, got: "
-                         << user->getName().getStringRef().str();
+    // Non-tensor results (e.g., tokens) bypass AssignOp, so their users
+    // will not be AssignOps. Skip them.
+    if (!assign_op) {
+      continue;
+    }
     for (Operation* assign_user : assign_op->getUsers()) {
       if (auto fragment_op = dyn_cast<FragmentOp>(assign_user)) {
         fragment_users.insert(fragment_op);

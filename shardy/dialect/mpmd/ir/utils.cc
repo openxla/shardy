@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "shardy/dialect/mpmd/ir/utils.h"
 
+#include "shardy/common/logging.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <functional>
@@ -365,8 +367,6 @@ SmallVector<MpmdDataflowEdge> GetMpmdDataflowEdges(FuncOp func_op) {
 FragmentOp WrapOpWithFragment(
     Operation* op, StringRef mesh_name, RewriterBase& rewriter,
     std::function<bool(OpOperand&)> should_replace_use) {
-  // We set the insertion point right before `op` so assigns of operands will be
-  // in the right place regardless of previous insertion point.
   rewriter.setInsertionPoint(op);
 
   llvm::SetVector<Value> operands_and_free_vars(op->operand_begin(),
@@ -384,8 +384,13 @@ FragmentOp WrapOpWithFragment(
   SmallVector<Value> fragment_operands;
   fragment_operands.reserve(operands_and_free_vars.size());
   for (Value value : operands_and_free_vars) {
-    fragment_operands.push_back(
-        AssignOp::create(rewriter, loc, value, mesh_name, mesh_attr));
+    if (isa<RankedTensorType>(value.getType())) {
+      fragment_operands.push_back(
+          AssignOp::create(rewriter, loc, value, mesh_name, mesh_attr));
+    } else {
+      // Non-tensor operands (e.g., tokens) pass through without AssignOp.
+      fragment_operands.push_back(value);
+    }
   }
 
   // The fragment result types are fully replicated mesh tensors of the same
@@ -394,9 +399,13 @@ FragmentOp WrapOpWithFragment(
   SmallVector<Type> fragment_result_types;
   fragment_result_types.reserve(op->getNumResults());
   for (Type result_type : op->getResultTypes()) {
-    auto local_type = cast<RankedTensorType>(result_type);
-    fragment_result_types.push_back(MeshTensorType::getFullyReplicated(
-        ctx, mesh_name, mesh_attr, local_type));
+    if (auto local_type = dyn_cast<RankedTensorType>(result_type)) {
+      fragment_result_types.push_back(MeshTensorType::getFullyReplicated(
+          ctx, mesh_name, mesh_attr, local_type));
+    } else {
+      // Non-tensor result types (e.g., tokens) pass through directly.
+      fragment_result_types.push_back(result_type);
+    }
   }
 
   FragmentOp fragment_op = FragmentOp::createMeshFragmentWithGlobalBody(
@@ -409,17 +418,40 @@ FragmentOp WrapOpWithFragment(
         IRMapping mapping;
         mapping.map(operands_and_free_vars, args);
         // Clone the original `op` inside the fragment's block using the
-        // populated IRMapping, and return the results of the cloned op.
-        return block_builder.clone(*op, mapping)->getResults();
+        // populated IRMapping.
+        Operation* cloned_op = block_builder.clone(*op, mapping);
+
+        // Side-effecting HLO ops (send/recv/create_token) must have
+        // sharding. Set maximal sharding on them so the SPMD partitioner
+        // does not reject them. Replicated sharding is not valid for these
+        // ops (side-effecting ops can't have replicated sharding).
+        auto set_replicated_sharding = [&](Operation* inner_op) {
+          if (isPure(inner_op)) return;
+          auto opName = inner_op->getName().getStringRef();
+          if (opName.contains("send") || opName.contains("recv") ||
+              opName.contains("create_token")) {
+            inner_op->setAttr("mhlo.sharding",
+                              block_builder.getStringAttr("{maximal device=0}"));
+          }
+        };
+        set_replicated_sharding(cloned_op);
+        cloned_op->walk(set_replicated_sharding);
+        return cloned_op->getResults();
       });
 
   // Unassign all fragment results and replace all uses of `op` with the
   // corresponding unassign op for which `should_replace_use` returns true.
   for (auto [original_result, fragment_result] :
        llvm::zip(op->getResults(), fragment_op.getResults())) {
-    auto unassign_op = UnassignOp::create(rewriter, loc, fragment_result);
-    rewriter.replaceUsesWithIf(original_result, unassign_op,
-                               should_replace_use);
+    if (isa<RankedTensorType>(original_result.getType())) {
+      auto unassign_op = UnassignOp::create(rewriter, loc, fragment_result);
+      rewriter.replaceUsesWithIf(original_result, unassign_op,
+                                 should_replace_use);
+    } else {
+      // Non-tensor results (e.g., tokens) bypass UnassignOp.
+      rewriter.replaceUsesWithIf(original_result, fragment_result,
+                                 should_replace_use);
+    }
   }
   return fragment_op;
 }
