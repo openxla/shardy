@@ -34,6 +34,9 @@ limitations under the License.
 
 namespace mlir::mpmd {
 
+// The attribute to avoid CSE.
+inline constexpr StringRef kMhloNoCseAttr = "mhlo.no_cse";
+
 // The name of the attribute that keeps track of how many times a loop has been
 // unrolled.
 constexpr StringRef kUnrollCounterAttrName = "unroll_counter";
