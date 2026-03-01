@@ -2,6 +2,19 @@
 
 !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_2_tensor_4_8_f32 = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+!mesh_3_tensor_4_8_f32 = !mpmd.mesh_tensor<"m3", tensor<4x8xf32>>
+
+// CHECK-LABEL: func @chained_transfers_across_three_meshes
+func.func @chained_transfers_across_three_meshes(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>>} {
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+// CHECK-NEXT: return %[[T1]], %[[T2]]
+  %u0 = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a1 = mpmd.assign %u0 : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a2 = mpmd.assign %u0 : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
+  func.return %a1, %a2 : !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
+}
 
 // CHECK-LABEL: func @push_assign_through_single_add
 func.func @push_assign_through_single_add(%arg0: !mesh_1_tensor_4_8_f32, %arg1: !mesh_2_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
