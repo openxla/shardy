@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <utility>
@@ -145,10 +146,8 @@ class GenericOpPattern : public ConversionPattern {
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
-    // Skip non-StableHLO non-sdy ops and ops with specific patterns.
-    // TODO(bixia): add ops with specific conversion patterns.
-    if ((op->getDialect()->getNamespace() != "stablehlo" &&
-         op->getDialect()->getNamespace() != "sdy")) {
+    if (op->getDialect()->getNamespace() != "stablehlo" &&
+        !isa<sdy::AllReduceOp>(op)) {
       return failure();
     }
 
@@ -235,6 +234,99 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
   ConversionState& conversionState;
 };
 
+class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
+ public:
+  AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    ConversionState& state)
+      : OpConversionPattern<AllSliceOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      AllSliceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    Location loc = op.getLoc();
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    MeshAttr mesh = op.getOutSharding().getMesh(symbolTable);
+
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    RankedTensorType localResultType =
+        cast<RankedTensorType>(converter->convertType(op));
+
+    int64_t numDevices = mesh.getTotalSize();
+    Type i64Ty = rewriter.getI64Type();
+    auto indexTy = RankedTensorType::get({}, i64Ty);
+    auto tableTy = RankedTensorType::get({numDevices}, i64Ty);
+    auto slicedTableTy = RankedTensorType::get({1}, i64Ty);
+
+    Value partitionId = stablehlo::ConvertOp::create(
+        rewriter, loc, indexTy,
+        stablehlo::PartitionIdOp::create(rewriter, loc));
+
+    // Generate start indices for slicing.
+    SmallVector<Value> startIndices;
+    startIndices.reserve(localResultType.getRank());
+    for (int64_t i = 0; i < localResultType.getRank(); ++i) {
+      auto axisList = cast<AxisRefListAttr>(op.getSlicingAxes()[i]);
+      if (axisList.getValue().empty()) {
+        startIndices.push_back(stablehlo::ConstantOp::create(
+            rewriter, loc,
+            DenseIntElementsAttr::get(indexTy, static_cast<int64_t>(0))));
+        continue;
+      }
+      // Calculate a compile-time offset table for this dimension.
+      SmallVector<int64_t> offsetsTable(numDevices);
+      int64_t shardSize = localResultType.getDimSize(i);
+      for (int64_t devId = 0; devId < numDevices; ++devId) {
+        int64_t dimCoordinate = 0;
+        for (AxisRefAttr axis : axisList.getValue()) {
+          int64_t axisSize = axis.getSize(mesh);
+
+          int64_t suffixSize = 1;
+          bool foundAxis = false;
+          for (MeshAxisAttr meshAxis : mesh.getAxes()) {
+            if (foundAxis) {
+              suffixSize *= meshAxis.getSize();
+            }
+            if (meshAxis.getName() == axis.getName()) {
+              foundAxis = true;
+            }
+          }
+
+          int64_t axisCoord =
+              (devId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
+          dimCoordinate = dimCoordinate * axisSize + axisCoord;
+        }
+        offsetsTable[devId] = dimCoordinate * shardSize;
+      }
+
+      // Create the offset table and look up the table using partition_id.
+      auto tableConst = stablehlo::ConstantOp::create(
+          rewriter, loc, DenseIntElementsAttr::get(tableTy, offsetsTable));
+      auto offsetSlice = stablehlo::DynamicSliceOp::create(
+          rewriter, loc, slicedTableTy, tableConst, ValueRange{partitionId},
+          rewriter.getDenseI64ArrayAttr({1}));
+      startIndices.push_back(
+          stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice));
+    }
+
+    auto dynamicSlice = stablehlo::DynamicSliceOp::create(
+        rewriter, loc, localResultType, adaptor.getTensor(), startIndices,
+        localResultType.getShape());
+    rewriter.replaceOp(op, dynamicSlice->getResults());
+    conversionState.removeToConvertOp(op);
+
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -283,8 +375,9 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<FuncOpSignaturePattern, ReturnOpPattern, GenericOpPattern>(
-        typeConverter, &getContext(), conversionState);
+    patterns.add<AllSliceOpPattern, FuncOpSignaturePattern, ReturnOpPattern,
+                 GenericOpPattern>(typeConverter, &getContext(),
+                                   conversionState);
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(
