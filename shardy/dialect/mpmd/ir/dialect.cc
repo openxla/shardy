@@ -29,7 +29,6 @@ limitations under the License.
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
-#include "stablehlo/dialect/VhloOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Quant/IR/Quant.h"
 #include "mlir/Dialect/Quant/IR/QuantTypes.h"
@@ -66,6 +65,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
 #include "stablehlo/dialect/StablehloOps.h"
+#include "stablehlo/dialect/VhloOps.h"
 
 namespace mlir::mpmd {
 
@@ -1088,6 +1088,15 @@ LogicalResult TransferOp::verify() {
 }
 
 sdy::OpShardingRuleAttr TransferOp::getShardingRule() {
+  if (isInterMesh()) {
+    sdy::MeshAttr srcMesh =
+        GetMeshOrFail(*this, getTensor().getType().getMeshName());
+    sdy::MeshAttr dstMesh =
+        GetMeshOrFail(*this, getResult().getType().getMeshName());
+    if (srcMesh != dstMesh) {
+      return sdy::OpShardingRuleAttr();
+    }
+  }
   return sdy::OpShardingRuleBuilder::buildPointwise(*this);
 }
 
