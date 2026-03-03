@@ -44,7 +44,6 @@ void populateExportOptions(ExportOptions& options,
       propOptions.avoidReshardsOnNamedComputations;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
-  options.enableNativeNonFlatSupport = propOptions.enableNativeNonFlatSupport;
 }
 
 }  // namespace
