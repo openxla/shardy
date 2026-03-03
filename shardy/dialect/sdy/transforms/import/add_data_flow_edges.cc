@@ -64,6 +64,9 @@ struct AddDataFlowEdgesPass
       // such as the entry function.
       addDataFlowEdges(funcOp.getArguments(), rewriter);
     }
+    funcOp.walk([&](func::CallOp callOp) {
+      addDataFlowEdges(callOp.getResults(), rewriter);
+    });
   }
 };
 
