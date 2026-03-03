@@ -126,15 +126,21 @@ func.func @reduce_scatter_fusion_missing_in_sharding(%arg0 : tensor<16x8xf32>) -
 }
 
 // CHECK-LABEL: func @reduce_scatter_fusion_multiple_same_uses
-func.func @reduce_scatter_fusion_multiple_same_uses(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<16x8xf32> {
+func.func @reduce_scatter_fusion_multiple_same_uses(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> (tensor<16x8xf32>, tensor<16x8xf32>, tensor<16x8xf32>) {
   // CHECK-NEXT: %0 = sdy.reduce_scatter [{"x"}, {"y"}] %arg0 out_sharding=<@mesh2, [{"x"}, {"y"}]> : tensor<16x8xf32>
   // CHECK-NEXT: %1 = sdy.all_slice [{"z"}, {"p"}] %0 out_sharding=<@mesh2, [{"x", "z"}, {"y", "p"}]> :  tensor<16x8xf32>
-  // CHECK-NEXT: return %1 : tensor<16x8xf32>
+  // CHECK-NEXT: %2 = stablehlo.sine %1 : tensor<16x8xf32>
+  // CHECK-NEXT: %3 = stablehlo.cosine %1 : tensor<16x8xf32>
+  // CHECK-NEXT: %4 = stablehlo.abs %1 : tensor<16x8xf32>
+  // CHECK-NEXT: return %2, %3, %4 : tensor<16x8xf32>, tensor<16x8xf32>, tensor<16x8xf32>
   %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<16x8xf32>
   %1 = sdy.all_slice [{"x", "z"}, {"y", "p"}] %0 out_sharding=<@mesh2, [{"x", "z"}, {"y", "p"}]> : tensor<16x8xf32>
-  %2 = sdy.all_slice [{"x", "z"}, {"y", "p"}] %0 out_sharding=<@mesh2, [{"x", "z"}, {"y", "p"}]> : tensor<16x8xf32>
+  %2 = stablehlo.sine %1 : tensor<16x8xf32>
   %3 = sdy.all_slice [{"x", "z"}, {"y", "p"}] %0 out_sharding=<@mesh2, [{"x", "z"}, {"y", "p"}]> : tensor<16x8xf32>
-  return %3 : tensor<16x8xf32>
+  %4 = stablehlo.cosine %3 : tensor<16x8xf32>
+  %5 = sdy.all_slice [{"x", "z"}, {"y", "p"}] %0 out_sharding=<@mesh2, [{"x", "z"}, {"y", "p"}]> : tensor<16x8xf32>
+  %6 = stablehlo.abs %5 : tensor<16x8xf32>
+  return %2, %4, %6 : tensor<16x8xf32>, tensor<16x8xf32>, tensor<16x8xf32>
 }
 
 // CHECK-LABEL: func @reduce_scatter_fusion_merge_subaxis

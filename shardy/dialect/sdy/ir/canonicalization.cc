@@ -274,6 +274,11 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
             "sdy.all_reduce has an sdy.all_slice user with different slicing "
             "axes");
       }
+      if (userSliceOp->isBeforeInBlock(allSliceOp)) {
+        return rewriter.notifyMatchFailure(
+            allSliceOp,
+            "This sdy.all_slice is not the first user of the sdy.all_reduce");
+      }
     }
 
     MLIRContext* context = rewriter.getContext();
