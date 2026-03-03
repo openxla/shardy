@@ -261,6 +261,17 @@ def named_computation_partir_lowering(
   return named_comp_op.results
 
 
+def _prepend_name_to_jaxpr(jaxpr: jex.core.Jaxpr, name: str) -> jex.core.Jaxpr:
+  name_prefix = siu.NameStack().extend(name)
+  new_eqns = []
+  for eqn in jaxpr.eqns:
+    new_source_info = eqn.source_info.replace(
+        name_stack=name_prefix + eqn.source_info.name_stack
+    )
+    new_eqns.append(eqn.replace(source_info=new_source_info))
+  return jaxpr.replace(eqns=new_eqns)
+
+
 def _named_computation_default_lowering(
     ctx: jax_mlir.LoweringRuleContext,
     *args: Sequence[ir.Value],
@@ -269,10 +280,14 @@ def _named_computation_default_lowering(
     call_jaxpr: jex.core.Jaxpr,
 ):
   del transpose_count  # Unused for the ordinary jit-based lowering.
-  call_lowering = functools.partial(
-      jax_mlir.core_call_lowering, name=f'partir_named_computation_call_{name}'
+  modified_jaxpr = _prepend_name_to_jaxpr(call_jaxpr, name)
+  return jax_mlir.core_call_lowering(
+      ctx,
+      *args,
+      name=f'partir_named_computation_call_{name}',
+      backend=None,
+      call_jaxpr=modified_jaxpr,
   )
-  return call_lowering(ctx, *args, call_jaxpr=call_jaxpr)
 
 
 def _register_named_computation_primitive():
