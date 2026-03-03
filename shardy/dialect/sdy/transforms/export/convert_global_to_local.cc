@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -20,6 +22,7 @@ limitations under the License.
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
@@ -35,6 +38,7 @@ limitations under the License.
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -44,6 +48,8 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
+
+constexpr int64_t kChannelHandleType = 1;
 
 // Computes the local type of a given type and sharding.
 //
@@ -70,10 +76,12 @@ Type getLocalType(Type type, TensorShardingAttr sharding,
 
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;
+  int64_t nextChannelId = 0;
 
   void addToConvertOp(Operation* op) { toConvertOps.insert(op); }
   void removeToConvertOp(Operation* op) { toConvertOps.erase(op); }
   bool needConversion(Operation* op) { return toConvertOps.contains(op); }
+  int64_t getNextChannelId() { return nextChannelId++; }
 };
 
 class GlobalToLocalTypeConverter : public TypeConverter {
@@ -234,6 +242,184 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
   ConversionState& conversionState;
 };
 
+// Returns the channel ID after the maximum channel ID in the given `moduleOp`.
+// TODO(b/419222666): remove dependency on `channel_handle` attribute name.
+int64_t getNextChannelId(ModuleOp moduleOp) {
+  int64_t maxChannelId = 0;
+  moduleOp->walk([&](mlir::Operation* op) {
+    if (auto channelHandle =
+            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
+      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
+    }
+  });
+  return maxChannelId + 1;
+}
+
+class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
+ public:
+  AllGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                     ConversionState& state, bool perDimAllGather)
+      : OpConversionPattern<AllGatherOp>(converter, ctx),
+        conversionState(state),
+        perDimAllGather(perDimAllGather) {}
+
+  LogicalResult rewriteAllGatherCombiningDims(
+      AllGatherOp op, MeshAttr mesh, Value input,
+      ConversionPatternRewriter& rewriter) const {
+    MLIRContext* ctx = op->getContext();
+    auto localType = cast<RankedTensorType>(input.getType());
+    ArrayRef<int64_t> localShape = localType.getShape();
+    int64_t rank = localShape.size();
+
+    SmallVector<int64_t> gatheringDims;
+    SmallVector<int64_t> gatheringFactors;
+    SmallVector<AxisRefAttr> allGatheringAxes;
+
+    // Collect all gathering axes, their corresponding dimensions and their
+    // gathering factors of the dimensions.
+    for (auto [dim, axesList] : llvm::enumerate(op.getGatheringAxes())) {
+      ::llvm::ArrayRef<AxisRefAttr> axes = axesList.getValue();
+      if (axes.empty()) {
+        continue;
+      }
+      gatheringDims.push_back(dim);
+      int64_t factor = 1;
+      for (AxisRefAttr axis : axes) {
+        factor *= axis.getSize(mesh);
+        allGatheringAxes.push_back(axis);
+      }
+      gatheringFactors.push_back(factor);
+    }
+
+    SDY_CHECK(gatheringDims.size() > 1);
+
+    // Add a leading dimension of size 1 to gather all partitions at once.
+    SmallVector<int64_t> tmpShape = {1};
+    llvm::append_range(tmpShape, localShape);
+    Value curInput = stablehlo::ReshapeOp::create(
+        rewriter, op.getLoc(),
+        RankedTensorType::get(tmpShape, localType.getElementType()), input);
+
+    // Perform All-Gather on dim 0.
+    DenseIntElementsAttr replicaGroups = getReplicaGroups(
+        AxisRefListAttr::get(ctx, allGatheringAxes), mesh, rewriter);
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        ctx, /*handle=*/conversionState.getNextChannelId(), kChannelHandleType);
+    // Change tmpShape to represent the result of the All-Gather.
+    tmpShape[0] = replicaGroups.getShapedType().getShape().back();
+    auto allGather = stablehlo::AllGatherOp::create(
+        rewriter, op.getLoc(),
+        TypeRange{RankedTensorType::get(tmpShape, localType.getElementType())},
+        curInput, /*all_gather_dim=*/0, replicaGroups, channelHandle,
+        /*use_global_device_ids=*/true);
+    curInput = allGather.getResult(0);
+
+    // Split the leading dimension into individual gathering factors.
+    SmallVector<int64_t> splitShape = gatheringFactors;
+    llvm::append_range(splitShape, localShape);
+    curInput = stablehlo::ReshapeOp::create(
+        rewriter, op.getLoc(),
+        RankedTensorType::get(splitShape, localType.getElementType()),
+        curInput);
+
+    // Transpose factors next to their corresponding dimensions.
+    SmallVector<int64_t> xposePerm;
+    int64_t nextFactorIdx = 0;
+    for (int64_t i = 0; i < rank; ++i) {
+      if (llvm::is_contained(gatheringDims, i)) {
+        xposePerm.push_back(nextFactorIdx++);
+        xposePerm.push_back(i + gatheringDims.size());
+      } else {
+        xposePerm.push_back(i + gatheringDims.size());
+      }
+    }
+    curInput = stablehlo::TransposeOp::create(
+        rewriter, op.getLoc(), curInput,
+        rewriter.getDenseI64ArrayAttr(xposePerm));
+
+    // Merge the factors into the local dimensions.
+    SmallVector<int64_t> finalShape = llvm::to_vector(localShape);
+    for (size_t j = 0; j < gatheringDims.size(); ++j) {
+      finalShape[gatheringDims[j]] *= gatheringFactors[j];
+    }
+    curInput = stablehlo::ReshapeOp::create(
+        rewriter, op.getLoc(),
+        RankedTensorType::get(finalShape, localType.getElementType()),
+        curInput);
+
+    conversionState.removeToConvertOp(op);
+    rewriter.replaceOp(op, curInput);
+    return success();
+  }
+
+  LogicalResult rewriteAllGatherPerDim(
+      AllGatherOp op, MeshAttr mesh, Value input,
+      ConversionPatternRewriter& rewriter) const {
+    Value curInput = input;
+    ::llvm::ArrayRef<AxisRefListAttr> gatheringAxes = op.getGatheringAxes();
+    for (int64_t dim = gatheringAxes.size() - 1; dim >= 0; --dim) {
+      auto axisList = cast<AxisRefListAttr>(gatheringAxes[dim]);
+      if (axisList.empty()) {
+        continue;
+      }
+
+      auto inputType = cast<RankedTensorType>(curInput.getType());
+      SmallVector<int64_t> curShape = llvm::to_vector(inputType.getShape());
+      DenseIntElementsAttr replicaGroups =
+          getReplicaGroups(axisList, mesh, rewriter);
+
+      int64_t groupSize = replicaGroups.getShapedType().getShape().back();
+      if (curShape[dim] != ShapedType::kDynamic) {
+        curShape[dim] *= groupSize;
+      }
+
+      auto channelHandle = stablehlo::ChannelHandleAttr::get(
+          op->getContext(), /*handle=*/conversionState.getNextChannelId(),
+          kChannelHandleType);
+
+      auto allGather = stablehlo::AllGatherOp::create(
+          rewriter, op.getLoc(),
+          TypeRange{
+              RankedTensorType::get(curShape, inputType.getElementType())},
+          curInput, dim, replicaGroups, channelHandle,
+          /*use_global_device_ids=*/true);
+      curInput = allGather.getResult(0);
+    }
+
+    conversionState.removeToConvertOp(op);
+    rewriter.replaceOp(op, curInput);
+    return success();
+  }
+
+  LogicalResult matchAndRewrite(
+      AllGatherOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    int64_t numGatheringDims = llvm::count_if(
+        op.getGatheringAxes(),
+        [](AxisRefListAttr axesList) { return !axesList.empty(); });
+
+    SDY_CHECK(numGatheringDims > 0)
+        << "No-op AllGatherOp should have been removed by "
+           "canonicalization.";
+
+    MeshAttr mesh = op.getOutSharding().getMesh(op);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    if (perDimAllGather || numGatheringDims == 1) {
+      return rewriteAllGatherPerDim(op, mesh, adaptor.getTensor(), rewriter);
+    }
+
+    return rewriteAllGatherCombiningDims(op, mesh, adaptor.getTensor(),
+                                         rewriter);
+  }
+
+ private:
+  ConversionState& conversionState;
+  bool perDimAllGather;
+};
+
 class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
  public:
   AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -348,6 +534,8 @@ class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
 //
 struct ConvertGlobalToLocalPass
     : public impl::ConvertGlobalToLocalPassBase<ConvertGlobalToLocalPass> {
+  using ConvertGlobalToLocalPassBase::ConvertGlobalToLocalPassBase;
+
  protected:
   void runOnOperation() final {
     ModuleOp module = getOperation();
@@ -368,6 +556,7 @@ struct ConvertGlobalToLocalPass
       }
       conversionState.addToConvertOp(op);
     });
+    conversionState.nextChannelId = getNextChannelId(module);
 
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
@@ -378,6 +567,8 @@ struct ConvertGlobalToLocalPass
     patterns.add<AllSliceOpPattern, FuncOpSignaturePattern, ReturnOpPattern,
                  GenericOpPattern>(typeConverter, &getContext(),
                                    conversionState);
+    patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
+                                     conversionState, perDimensionAllGather);
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(

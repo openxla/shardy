@@ -229,4 +229,9 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
     logical shapes to device-local physical shapes.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+  let options = [
+      Option<"perDimensionAllGather", "per-dimension-all-gather",
+            "bool", /*default=*/"false",
+            "Keep per-dimension all-gather without combining them into a single all-gather.">,
+    ];
 }
