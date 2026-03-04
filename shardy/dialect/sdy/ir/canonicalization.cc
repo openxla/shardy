@@ -360,6 +360,39 @@ class AllReduceOfShardedToUnreducedPattern
   }
 };
 
+// Pattern of common subexpression elimination (CSE) for sdy.reshard.
+//
+// Given:
+// B = sdy.reshard(A)
+// C = sdy.reshard(A)
+// This pattern replaces C with B if (1) B and C share the same sharding and
+// block, and (2) B is before C.
+class ReshardCommonSubexpressionEliminationPattern
+    : public OpRewritePattern<ReshardOp> {
+ public:
+  using OpRewritePattern<ReshardOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(ReshardOp reshardOp,
+                                PatternRewriter& rewriter) const override {
+    Value operand = reshardOp.getInput();
+
+    for (Operation* user : operand.getUsers()) {
+      if (user == reshardOp) {
+        continue;
+      }
+      auto otherReshard = dyn_cast<ReshardOp>(user);
+      if (otherReshard &&
+          otherReshard.getSharding() == reshardOp.getSharding() &&
+          otherReshard->getBlock() == reshardOp->getBlock() &&
+          otherReshard->isBeforeInBlock(reshardOp)) {
+        rewriter.replaceOp(reshardOp, otherReshard.getResult());
+        return success();
+      }
+    }
+    return failure();
+  }
+};
+
 }  // namespace
 
 void ManualComputationOp::getCanonicalizationPatterns(
@@ -370,6 +403,7 @@ void ManualComputationOp::getCanonicalizationPatterns(
 
 void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                             MLIRContext* context) {
+  results.add<ReshardCommonSubexpressionEliminationPattern>(context);
   results.addWithLabel<ReshardOfReshardPattern>(StringRef(kReshardLabel),
                                                 context);
 }
