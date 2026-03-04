@@ -17,6 +17,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <utility>
 
@@ -513,6 +514,209 @@ class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
   ConversionState& conversionState;
 };
 
+class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
+ public:
+  AllToAllOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    ConversionState& state)
+      : OpConversionPattern<AllToAllOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult rewriteAllToAllOneParam(
+      AllToAllOp op, MeshAttr mesh, Value input,
+      ConversionPatternRewriter& rewriter) const {
+    AllToAllParamAttr param = op.getParams()[0];
+    auto axisList = AxisRefListAttr::get(op->getContext(), param.getAxes());
+    if (axisList.empty()) {
+      return op.emitOpError("failed to resolve axes");
+    }
+
+    DenseIntElementsAttr replicaGroups =
+        getReplicaGroups(axisList, mesh, rewriter);
+    int64_t numDevicesPerGroup =
+        replicaGroups.getShapedType().getShape().back();
+    auto inputType = cast<RankedTensorType>(input.getType());
+    SmallVector<int64_t> resultShape = llvm::to_vector(inputType.getShape());
+    int64_t srcDim = param.getSrcDim();
+    int64_t tgtDim = param.getTgtDim();
+
+    if (resultShape[srcDim] == ShapedType::kDynamic ||
+        resultShape[tgtDim] == ShapedType::kDynamic) {
+      return op.emitOpError("dynamic shape not supported");
+    }
+    if (resultShape[tgtDim] % numDevicesPerGroup != 0) {
+      return op.emitOpError("dimension not divisible by num devices per group");
+    }
+    resultShape[srcDim] *= numDevicesPerGroup;
+    resultShape[tgtDim] /= numDevicesPerGroup;
+
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        op->getContext(), /*handle=*/conversionState.getNextChannelId(),
+        kChannelHandleType);
+    auto allToAll = stablehlo::AllToAllOp::create(
+        rewriter, op.getLoc(),
+        TypeRange{
+            RankedTensorType::get(resultShape, inputType.getElementType())},
+        ValueRange{input},
+        /*split_dimension=*/tgtDim,
+        /*concat_dimension=*/srcDim,
+        /*split_count=*/numDevicesPerGroup, replicaGroups, channelHandle);
+
+    conversionState.removeToConvertOp(op);
+    rewriter.replaceOp(op, allToAll->getResults());
+    return success();
+  }
+
+  LogicalResult rewriteAllToAllMultipleParams(
+      AllToAllOp op, MeshAttr mesh, Value input,
+      ConversionPatternRewriter& rewriter) const {
+    Location loc = op.getLoc();
+    auto inputType = cast<RankedTensorType>(input.getType());
+    ArrayRef<int64_t> inputShape = inputType.getShape();
+    int64_t rank = inputShape.size();
+    ArrayRef<AllToAllParamAttr> params = op.getParams();
+    int64_t numParams = params.size();
+
+    // Sort parameters by target_dims.
+    SmallVector<int64_t> sortedParamIndices(numParams);
+    std::iota(sortedParamIndices.begin(), sortedParamIndices.end(), 0);
+    llvm::sort(sortedParamIndices, [&](int64_t a, int64_t b) {
+      return params[a].getTgtDim() < params[b].getTgtDim();
+    });
+
+    // For each param with index sortedparamIndices[i], compute the number of
+    // devices in each param and collect all axes.
+    SmallVector<int64_t> numDevicesPerParams;
+    SmallVector<AxisRefAttr> allAxes;
+    for (int64_t idx : sortedParamIndices) {
+      numDevicesPerParams.push_back(
+          getTotalAxesSize(params[idx].getAxes(), mesh));
+      for (auto axis : params[idx].getAxes()) {
+        allAxes.push_back(axis);
+      }
+    }
+
+    // Split the input on target_dims using the number of devices per param as
+    // splitted factors, transpose the splitted factors to the front, then
+    // reshape the splitted factors to a single dim in dim 0.
+
+    // The shape after we split the input.
+    SmallVector<int64_t> shape0;
+    // The permutation on the splitted input to move the factors to the front.
+    SmallVector<int64_t> permutation0;
+    for (int64_t i = 0; i < rank; ++i) {
+      auto* it = llvm::find_if(sortedParamIndices, [&](int64_t idx) {
+        return params[idx].getTgtDim() == i;
+      });
+      if (it == sortedParamIndices.end()) {
+        shape0.push_back(inputShape[i]);
+        continue;
+      }
+      int64_t numDevicesPerParam =
+          numDevicesPerParams[std::distance(sortedParamIndices.begin(), it)];
+      permutation0.push_back(shape0.size());
+      shape0.push_back(numDevicesPerParam);
+      if (inputShape[i] == ShapedType::kDynamic ||
+          inputShape[i] % numDevicesPerParam != 0) {
+        return op.emitOpError(
+            "dynamic shape or dimension not divisible by num devices per "
+            "param");
+      }
+      shape0.push_back(inputShape[i] / numDevicesPerParam);
+    }
+    for (int64_t i = 0; i < shape0.size(); ++i) {
+      if (!llvm::is_contained(permutation0, i)) {
+        permutation0.push_back(i);
+      }
+    }
+
+    Value reshape0 = stablehlo::ReshapeOp::create(
+        rewriter, loc,
+        RankedTensorType::get(shape0, inputType.getElementType()), input);
+    Value transpose0 =
+        stablehlo::TransposeOp::create(rewriter, loc, reshape0, permutation0);
+    SmallVector<int64_t> transpose0Shape = llvm::to_vector(
+        cast<RankedTensorType>(transpose0.getType()).getShape());
+    DenseIntElementsAttr replicaGroups = getReplicaGroups(
+        AxisRefListAttr::get(rewriter.getContext(), allAxes), mesh, rewriter);
+    int64_t numDevicesPerGroup =
+        replicaGroups.getShapedType().getShape().back();
+    // The size of dim 0 that contains all the splitted factors, which is the
+    // the same as the number of devices in each replica group.
+    SmallVector<int64_t> shape1 = {numDevicesPerGroup};
+    llvm::append_range(
+        shape1, ArrayRef<int64_t>(transpose0Shape).drop_front(numParams));
+    Value reshape1 = stablehlo::ReshapeOp::create(
+        rewriter, loc,
+        RankedTensorType::get(shape1, inputType.getElementType()), transpose0);
+
+    // Perform all-to-all on the combined dim 0.
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        rewriter.getContext(), conversionState.getNextChannelId(), /*type=*/1);
+    auto allToAll = stablehlo::AllToAllOp::create(
+        rewriter, loc, reshape1.getType(), reshape1,
+        /*split_dimension=*/0, /*concat_dimension=*/0,
+        /*split_count=*/numDevicesPerGroup, replicaGroups, channelHandle);
+
+    // Distribute gathered data to src_dims.
+
+    // Split dim 0 back into factors.
+    Value reshape2 = stablehlo::ReshapeOp::create(
+        rewriter, loc, transpose0.getType(), allToAll.getResult(0));
+    // Align factors back to their corresponding source dimensions.
+    SmallVector<int64_t> permutation1;
+    for (int64_t i = 0; i < rank; ++i) {
+      permutation1.push_back(i + numParams);
+    }
+    for (int64_t i = 0; i < numParams; ++i) {
+      int64_t srcDim = params[sortedParamIndices[i]].getSrcDim();
+      auto* it = llvm::find(permutation1, srcDim + numParams);
+      permutation1.insert(it, i);
+    }
+    Value transpose1 =
+        stablehlo::TransposeOp::create(rewriter, loc, reshape2, permutation1);
+    SmallVector<int64_t> transpose1Shape = llvm::to_vector(
+        cast<RankedTensorType>(transpose1.getType()).getShape());
+    SmallVector<int64_t> finalShape;
+    for (int64_t i = 0; i < transpose1Shape.size(); ++i) {
+      if (permutation1[i] < numParams) {
+        // Restore the full local dimension by merging factor and quotient.
+        finalShape.push_back(transpose1Shape[i] * transpose1Shape[i + 1]);
+        i++;
+      } else {
+        finalShape.push_back(transpose1Shape[i]);
+      }
+    }
+
+    Value reshape3 = stablehlo::ReshapeOp::create(
+        rewriter, loc,
+        RankedTensorType::get(finalShape, inputType.getElementType()),
+        transpose1);
+
+    rewriter.replaceOp(op, reshape3);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+  LogicalResult matchAndRewrite(
+      AllToAllOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    MeshAttr mesh = op.getOutSharding().getMesh(op);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    SDY_CHECK(!op.getParams().empty());
+    if (op.getParams().size() == 1) {
+      return rewriteAllToAllOneParam(op, mesh, adaptor.getTensor(), rewriter);
+    }
+    return rewriteAllToAllMultipleParams(op, mesh, adaptor.getTensor(),
+                                         rewriter);
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -564,9 +768,9 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<AllSliceOpPattern, FuncOpSignaturePattern, ReturnOpPattern,
-                 GenericOpPattern>(typeConverter, &getContext(),
-                                   conversionState);
+    patterns.add<AllSliceOpPattern, AllToAllOpPattern, FuncOpSignaturePattern,
+                 GenericOpPattern, ReturnOpPattern>(
+        typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimensionAllGather);
 
