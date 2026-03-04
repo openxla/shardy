@@ -58,10 +58,21 @@ func.func @reshard_cse_two_different_reshards(%arg0: tensor<8x8xf32>) -> (tensor
 // CHECK-NEXT: return %1, %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 func.func @reshard_cse_three_same_reshards(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   %0 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]> : tensor<8x8xf32>
-  %1 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]> : tensor<8x8xf32>
+  %1 = stablehlo.sine %0 : tensor<8x8xf32>
   %2 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]> : tensor<8x8xf32>
-  %3 = stablehlo.sine %0 : tensor<8x8xf32>
-  %4 = stablehlo.cosine %1 : tensor<8x8xf32>
-  %5 = stablehlo.abs %2 : tensor<8x8xf32>
-  return %3, %4, %5 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+  %3 = stablehlo.cosine %2 : tensor<8x8xf32>
+  %4 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]> : tensor<8x8xf32>
+  %5 = stablehlo.abs %4 : tensor<8x8xf32>
+  return %1, %3, %5 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_chains_and_cse
+// CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}, {"a"}]> : tensor<8x8xf32>
+// CHECK-NEXT: return %0, %0 : tensor<8x8xf32>, tensor<8x8xf32>
+func.func @reshard_chains_and_cse(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  %0 = sdy.reshard %arg0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %1 = sdy.reshard %arg0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  %2 = sdy.reshard %0 <@mesh, [{"b"}, {"a"}]> : tensor<8x8xf32>
+  %3 = sdy.reshard %1 <@mesh, [{"b"}, {"a"}]> : tensor<8x8xf32>
+  return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
 }
