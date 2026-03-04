@@ -4,10 +4,10 @@
 sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
 
 
-// CHECK-LABEL: func @sdy_all_slice_on_1dim_2axes_xy
+// CHECK-LABEL: func @one_dim_two_axes_xy
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}], replicated={"x", "y"}>})
 // CHECK-SAME: -> (tensor<16x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"x", "y"}]>})
-func.func @sdy_all_slice_on_1dim_2axes_xy(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}], replicated={"x", "y"}>})
+func.func @one_dim_two_axes_xy(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}], replicated={"x", "y"}>})
     -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"x", "y"}]>}) {
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK: %[[PIDI64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
@@ -21,10 +21,10 @@ func.func @sdy_all_slice_on_1dim_2axes_xy(%arg0: tensor<16x32xf32> {sdy.sharding
   return %0 : tensor<16x32xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_slice_1dim_2axes_zx
+// CHECK-LABEL: func @one_dim_two_axes_zx
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
 // CHECK-SAME: -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z", "x"}]>})
-func.func @sdy_all_slice_1dim_2axes_zx(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
+func.func @one_dim_two_axes_zx(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
     -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z", "x"}]>}) {
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK: %[[PIDI64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
@@ -38,10 +38,10 @@ func.func @sdy_all_slice_1dim_2axes_zx(%arg0: tensor<16x32xf32> {sdy.sharding = 
   return %0 : tensor<16x32xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_slice_1dim_2axes_subaxis
+// CHECK-LABEL: func @one_dim_two_axes_subaxis
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
 // CHECK-SAME: -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"x", "y":(2)2}]>})
-func.func @sdy_all_slice_1dim_2axes_subaxis(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
+func.func @one_dim_two_axes_subaxis(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
     -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"x", "y":(2)2}]>}) {
  // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK: %[[PIDI64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
@@ -55,10 +55,10 @@ func.func @sdy_all_slice_1dim_2axes_subaxis(%arg0: tensor<16x32xf32> {sdy.shardi
   return %0 : tensor<16x32xf32>
 }
 
-// CHECK-LABEL: func.func @sdy_all_slice_on_2dims
+// CHECK-LABEL: func.func @two_dims_full_axes
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}], replicated={"x", "y"}>})
 // CHECK-SAME: -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x"}, {"y"}]>})
-func.func @sdy_all_slice_on_2dims(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}], replicated={"x", "y"}>})
+func.func @two_dims_full_axes(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}], replicated={"x", "y"}>})
     -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x"}, {"y"}]>}) {
   // CHECK:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK:  %[[PIDI64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>

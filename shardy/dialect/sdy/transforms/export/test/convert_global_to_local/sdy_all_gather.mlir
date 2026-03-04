@@ -6,10 +6,10 @@ sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 // CHECK: sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
 sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
 
-// CHECK-LABEL: func @sdy_all_gather_on_1dim
+// CHECK-LABEL: func @one_dim
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<1x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y"}, {}]>})
 // CHECK-SAME:    -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
-func.func@sdy_all_gather_on_1dim(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y"}, {}]>})
+func.func@one_dim(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y"}, {}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [ {"x"}, {} ]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
@@ -22,10 +22,10 @@ func.func@sdy_all_gather_on_1dim(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.s
   return %0 : tensor<8x16xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_gather_on_1dim_2axes_xy
+// CHECK-LABEL: func @one_dim_two_axes_xy
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>})
-func.func@sdy_all_gather_on_1dim_2axes_xy(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
+func.func@one_dim_two_axes_xy(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {}, {"z"} ]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
@@ -38,10 +38,10 @@ func.func@sdy_all_gather_on_1dim_2axes_xy(%arg0 : tensor<8x16xf32> {sdy.sharding
   return %0 : tensor<8x16xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_gather_on_1dim_2axes_yx
+// CHECK-LABEL: func @one_dim_two_axes_yx
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "x"}, {"z"}]>})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>})
-func.func@sdy_all_gather_on_1dim_2axes_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "x"}, {"z"}]>})
+func.func@one_dim_two_axes_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "x"}, {"z"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {}, {"z"} ]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
@@ -54,10 +54,10 @@ func.func@sdy_all_gather_on_1dim_2axes_yx(%arg0 : tensor<8x16xf32> {sdy.sharding
   return %0 : tensor<8x16xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_gather_on_1dim_2axes_subaxis
+// CHECK-LABEL: func @one_dim_two_axes_subaxis
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y":(2)2}, {"z"}]>})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>})
-func.func@sdy_all_gather_on_1dim_2axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y":(2)2}, {"z"}]>})
+func.func@one_dim_two_axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y":(2)2}, {"z"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {}, {"z"} ]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
@@ -70,10 +70,10 @@ func.func@sdy_all_gather_on_1dim_2axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sha
   return %0 : tensor<8x16xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_gather_on_2dims_yz
+// CHECK-LABEL: func @two_dims_yz
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
 // CHECK-SAME: -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x"}, {}]>})
-func.func @sdy_all_gather_on_2dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
+func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {"x"}, {}]>}){
 
   // --- Per-Dimension All-Gather Strategy (keep-per-dimension-all-gather=true) ---
@@ -108,10 +108,10 @@ func.func @sdy_all_gather_on_2dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #
   return %0 : tensor<8x16xf32>
 }
 
-// CHECK-LABEL: func @sdy_all_gather_on_2dims_yx
+// CHECK-LABEL: func @two_dims_yx
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z", "y"}, {"x"}]>})
 // CHECK-SAME: -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z"}, {}]>})
-func.func @sdy_all_gather_on_2dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z", "y"}, {"x"}]>})
+func.func @two_dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z", "y"}, {"x"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {"z"}, {}]>}){
 
   // --- Per-Dimension All-Gather Strategy (keep-per-dimension-all-gather=true) ---
