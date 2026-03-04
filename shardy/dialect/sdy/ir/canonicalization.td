@@ -38,8 +38,6 @@ def AllGatherNoopPattern : Pat<(Sdy_AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$ga
 def AllSliceNoopPattern : Pat<(Sdy_AllSliceOp $tensor, Sdy_EmptyAxesPerDim:$slicingAxes, $outSharding),
                                (replaceWithValue $tensor)>;
 
-// TODO(b/410842735): Add patterns for all-to-all params with empty axes.
-
 def AllReduceNoopPattern : Pat<(Sdy_AllReduceOp $tensor, Sdy_EmptyAxisList:$reductionAxes, $resultSharding),
                                (replaceWithValue $tensor)>;
 
