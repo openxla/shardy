@@ -78,23 +78,6 @@ IntegerAttr GetMergedStageIdAttribute(FragmentOp producer_op,
   return producer_stage ? producer_stage : consumer_op.getStageIdAttr();
 }
 
-bool TypeHasOneElement(Type type) {
-  auto tensor_type = dyn_cast<RankedTensorType>(type);
-  if (!tensor_type || !tensor_type.hasStaticShape()) return false;
-  for (int64_t i = 0; i < tensor_type.getRank(); ++i) {
-    if (tensor_type.getDimSize(i) != 1) return false;
-  }
-  return true;
-}
-
-// Returns true if `op` is an inter-mesh TransferOp whose global type has only
-// one element.
-bool IsNonScalarInterMeshTransfer(Operation* op) {
-  TransferOp transfer_op = DynCastInterMeshTransfer(op);
-  return transfer_op &&
-         !TypeHasOneElement(transfer_op.getType().getGlobalTensorType());
-}
-
 // We only clone fragments with at most one non-return op.
 inline const int kInferredFragmentMaxSizeForCloning = 2;
 
@@ -336,7 +319,7 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
       producer_op.getMeshNameAttr(),
       /*stage_id=*/GetMergedStageIdAttribute(producer_op, mergeable_user));
 
-  for (const auto [attr_name, attr] : merged_attributes) {
+  for (const auto &[attr_name, attr] : merged_attributes) {
     merged_fragment->setAttr(attr_name, attr);
   }
 
