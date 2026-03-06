@@ -545,7 +545,15 @@ LogicalResult InnerAndOuterTypesMatchInFragment(FragmentOpTy op,
   if (failed(mesh_attr)) {
     return failure();
   }
-  auto mesh_type = cast<MeshTensorType>(outer_type);
+  auto mesh_type = dyn_cast<MeshTensorType>(outer_type);
+  if (!mesh_type) {
+    if (inner_type != outer_type) {
+      return op.emitError("expected the type of the ")
+             << inner_name << " to match the " << outer_name << ": "
+             << outer_type << ", got: " << inner_type;
+    }
+    return success();
+  }
   if (mesh_type.getMeshName() != mesh_name) {
     return op.emitError("expected the mesh name of the ")
            << outer_name
@@ -895,8 +903,12 @@ FragmentOp CreateMeshFragmentWithBody(
   sdy::MeshAttr mesh_attr = GetMeshOrFail(fragment_op, mesh_name);
 
   for (Value operand : tensors) {
-    fragment_block.addArgument(get_arg_type(operand, mesh_attr),
-                               operand.getLoc());
+    if (isa<MeshTensorType>(operand.getType())) {
+      fragment_block.addArgument(get_arg_type(operand, mesh_attr),
+                                 operand.getLoc());
+    } else {
+      fragment_block.addArgument(operand.getType(), operand.getLoc());
+    }
   }
   ArrayRef<Value> arguments(fragment_block.args_begin(),
                             fragment_block.args_end());
