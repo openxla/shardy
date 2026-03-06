@@ -27,6 +27,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
@@ -727,6 +728,65 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
   ConversionState& conversionState;
 };
 
+class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
+ public:
+  ConstantOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    ConversionState& state)
+      : OpConversionPattern<sdy::ConstantOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::ConstantOp op, OpAdaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    Type globalType = op.getType();
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    auto localType = cast<RankedTensorType>(converter->convertType(op));
+    ElementsAttr elementsAttr = op.getValue();
+    Location loc = op.getLoc();
+
+    // Unsharded or splat constants.
+    if (localType == globalType || elementsAttr.isSplat()) {
+      Attribute newAttr =
+          localType == globalType
+              ? elementsAttr
+              : SplatElementsAttr::get(localType,
+                                       elementsAttr.getSplatValue<Attribute>());
+
+      rewriter.replaceOp(
+          op, stablehlo::ConstantOp::create(rewriter, loc, localType,
+                                            cast<ElementsAttr>(newAttr)));
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+
+    // Sharded dense constants.
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    TensorShardingAttr sharding = getSharding(op.getResult());
+    MeshAttr mesh = sharding.getMesh(symbolTable);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh for constant");
+    }
+    auto globalConst =
+        stablehlo::ConstantOp::create(rewriter, loc, globalType, elementsAttr);
+
+    SmallVector<ArrayRef<AxisRefAttr>> slicingAxesPerDim;
+    slicingAxesPerDim.reserve(localType.getRank());
+    for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
+      slicingAxesPerDim.push_back(dimSharding.getAxes());
+    }
+    rewriter.replaceOp(
+        op, emitDynamicSliceForAxes(loc, globalConst, mesh, slicingAxesPerDim,
+                                    localType, rewriter));
+    conversionState.removeToConvertOp(op);
+
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -778,8 +838,8 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<AllSliceOpPattern, AllToAllOpPattern, FuncOpSignaturePattern,
-                 GenericOpPattern, ReturnOpPattern>(
+    patterns.add<AllSliceOpPattern, AllToAllOpPattern, ConstantOpPattern,
+                 FuncOpSignaturePattern, GenericOpPattern, ReturnOpPattern>(
         typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimensionAllGather);
