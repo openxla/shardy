@@ -73,4 +73,8 @@ def AllToAllFusionPattern : Pat<
                   $outer_sharding),
   [(HasOneUse:$inner_all_to_all), (AllToAllParamsNoOverlap $inner_params, $outer_params)]>;
 
+def ReduceScatterNoopPattern : Pat<
+  (Sdy_ReduceScatterOp $tensor, Sdy_EmptyAxesPerDim:$reduceScatterAxes, $outSharding),
+  (replaceWithValue $tensor)>;
+
 #endif  // SDY_CANONICALIZATION
