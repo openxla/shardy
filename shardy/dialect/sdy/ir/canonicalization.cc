@@ -444,6 +444,8 @@ void ReduceScatterOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                   MLIRContext* context) {
   results.addWithLabel<ReduceScatterFusion>(StringRef(kCollectiveLabel),
                                             context);
+  results.addWithLabel<ReduceScatterNoopPattern>(StringRef(kCollectiveLabel),
+                                                 context);
 }
 
 }  // namespace sdy
