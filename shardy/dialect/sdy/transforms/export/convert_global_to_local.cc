@@ -21,6 +21,7 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -94,26 +95,11 @@ class GlobalToLocalTypeConverter : public TypeConverter {
 
     // Converts global RankedTensorType to local type.
     addConversion([&](Value value) -> std::optional<Type> {
-      auto type = dyn_cast<RankedTensorType>(value.getType());
-      if (!type) {
-        // Pass through to other converters if it is not a RankedTensorType.
-        return std::nullopt;
+      if (auto type = dyn_cast<RankedTensorType>(value.getType())) {
+        return getLocalType(type, getSharding(value), symbolTable);
       }
-      TensorShardingAttr sharding;
-      if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-        // For block arguments, we look up the pre-populated sharding. This is
-        // because the block is unlinked from its original function by the
-        // conversion framework when FuncOp signature is converted.
-        auto it = argShardings.find(blockArg);
-        if (it != argShardings.end()) {
-          sharding = it->second;
-        }
-      } else {
-        // For other values, it's safe to call getSharding as we keep the
-        // sharding attribute on the converted op.
-        sharding = getSharding(value);
-      }
-      return getLocalType(type, sharding, symbolTable);
+      // Pass through to other converters if it is not a RankedTensorType.
+      return std::nullopt;
     });
 
     // Materializations to resolve intermediate casts.
@@ -136,6 +122,23 @@ class GlobalToLocalTypeConverter : public TypeConverter {
       }
     }
   }
+
+  // Retrieves the sharding of a value, checking the cached argShardings for
+  // unlinked block args.
+  TensorShardingAttr getSharding(Value value) const {
+    if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+      // For block arguments, we look up the pre-populated sharding. This is
+      // because the block is unlinked from its original function by the
+      // conversion framework when FuncOp signature is converted.
+      auto it = argShardings.find(blockArg);
+      if (it != argShardings.end()) {
+        return it->second;
+      }
+    }
+    // For other values, it's safe to call getSharding as we keep the sharding
+    // attribute on the converted op.
+    return mlir::sdy::getSharding(value);
+  };
 
   const SymbolTable& getSymbolTable() const { return symbolTable; }
 
@@ -728,6 +731,120 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
   ConversionState& conversionState;
 };
 
+class CollectivePermuteOpPattern
+    : public OpConversionPattern<CollectivePermuteOp> {
+ public:
+  CollectivePermuteOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                             ConversionState& state)
+      : OpConversionPattern<CollectivePermuteOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      CollectivePermuteOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr outSharding = op.getOutSharding();
+    TensorShardingAttr inSharding = converter->getSharding(op.getTensor());
+
+    SDY_CHECK(outSharding != inSharding)
+        << "Shardy canonicalizer should have removed no-op collective-permute.";
+
+    MeshAttr mesh = outSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    // Collective all AxisRef to produce an ordered list of all sharding axes.
+    SmallVector<AxisRefAttr> allAxisRefs;
+    for (TensorShardingAttr sharding : {inSharding, outSharding}) {
+      if (sharding) {
+        sharding.forEachAxisRef(
+            [&](AxisRefAttr axis) { allAxisRefs.push_back(axis); });
+      }
+    }
+    SmallVector<AxisRefAttr> allOrderedAxes = getOrderedAxisRefs(
+        AxisRefListAttr::get(getContext(), allAxisRefs), mesh);
+
+    // Return the ordered list of axes for a given sharding that is a
+    // permutation of allOrderedAxes. This ensures every device ID is mapped to
+    // a unique logical ID in the space defined by these sharding axes.
+    auto getShardingAxes = [&](TensorShardingAttr sharding) {
+      SmallVector<AxisRefAttr> axes;
+      for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
+        for (AxisRefAttr axis : dimSharding.getAxes()) {
+          for (AxisRefAttr atomic : allOrderedAxes) {
+            if (axis.getName() == atomic.getName() && axis.contains(atomic)) {
+              if (!llvm::is_contained(axes, atomic)) {
+                axes.push_back(atomic);
+              }
+            }
+          }
+        }
+      }
+      // Add axes not involved in slicing.
+      for (AxisRefAttr atomic : allOrderedAxes) {
+        if (!llvm::is_contained(axes, atomic)) {
+          axes.push_back(atomic);
+        }
+      }
+      return axes;
+    };
+
+    // Given a device ID in the global mesh and an ordered list of sharding
+    // axes, return the linear index for the partitioned data that the device
+    // holds.
+    auto getPartitionedDataId = [&](int64_t device,
+                                    ArrayRef<AxisRefAttr> axes) {
+      int64_t rem = device;
+      // The coordinate of the device in the global mesh.
+      llvm::SmallDenseMap<StringRef, int64_t> coords;
+      for (MeshAxisAttr axis : llvm::reverse(mesh.getAxes())) {
+        coords[axis.getName()] = rem % axis.getSize();
+        rem /= axis.getSize();
+      }
+      // The linear index of the data on the device, in the space defined by the
+      // given sharding axes.
+      int64_t id = 0;
+      for (AxisRefAttr axis : axes) {
+        int64_t subCoord = (coords[axis.getName()] / axis.getSubAxisPreSize()) %
+                           axis.getSize(mesh);
+        id = id * axis.getSize(mesh) + subCoord;
+      }
+      return id;
+    };
+
+    SmallVector<AxisRefAttr> outShardingAxes = getShardingAxes(outSharding);
+    int64_t numDevices = mesh.getTotalSize();
+    llvm::DenseMap<int64_t, int64_t> logicalIdToOutDevId;
+    for (int64_t j = 0; j < numDevices; ++j) {
+      logicalIdToOutDevId[getPartitionedDataId(j, outShardingAxes)] = j;
+    }
+
+    SmallVector<AxisRefAttr> inShardingAxes = getShardingAxes(inSharding);
+    SmallVector<int64_t> pairs;
+    for (int64_t i = 0; i < numDevices; ++i) {
+      pairs.push_back(i);
+      pairs.push_back(
+          logicalIdToOutDevId[getPartitionedDataId(i, inShardingAxes)]);
+    }
+
+    auto pairsAttr = DenseIntElementsAttr::get(
+        RankedTensorType::get({numDevices, 2}, rewriter.getI64Type()), pairs);
+    auto channel = stablehlo::ChannelHandleAttr::get(
+        getContext(), conversionState.getNextChannelId(), 1);
+    rewriter.replaceOpWithNewOp<stablehlo::CollectivePermuteOp>(
+        op, adaptor.getTensor().getType(), adaptor.getTensor(), pairsAttr,
+        channel);
+
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
  public:
   ConstantOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -838,7 +955,8 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<AllSliceOpPattern, AllToAllOpPattern, ConstantOpPattern,
+    patterns.add<AllSliceOpPattern, AllToAllOpPattern,
+                 CollectivePermuteOpPattern, ConstantOpPattern,
                  FuncOpSignaturePattern, GenericOpPattern, ReturnOpPattern>(
         typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
