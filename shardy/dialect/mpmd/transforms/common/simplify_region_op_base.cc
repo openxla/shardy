@@ -89,6 +89,27 @@ void RemoveNoopResults(Operation* op, BitVector& erase_operands,
   }
 }
 
+bool hasSideEffects(Operation* op) {
+  if (auto attr = op->getAttrOfType<BoolAttr>("has_side_effect")) {
+    return attr.getValue();
+  }
+  return false;
+}
+
+// Returns true only if op and all nested ops are pure and lack side effects.
+bool isReallyPure(Operation* op) {
+  if (!isPure(op) || hasSideEffects(op)) return false;
+  bool found = false;
+  op->walk([&](Operation* nestedOp) {
+    if (!isPure(nestedOp) || hasSideEffects(nestedOp)) {
+      found = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return !found;
+}
+
 // Checks if the result of an operation can be removed from its producer's
 // results, i.e., if it is unused and if it's removal doesn't cause any op
 // with side effects to be removed.
@@ -188,8 +209,12 @@ LogicalResult SimplifyRegionOp(Operation* op, PatternRewriter& rewriter,
 
   // If all results must be erased, we erase the op.
   if (erase_results.all()) {
-    rewriter.eraseOp(op);
-    return success();
+    // Only erase if the op (and all nested ops) are truly side-effect-free.
+    if (isReallyPure(op)) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
   }
 
   if (erase_operands.none() && erase_results.none()) {

@@ -252,3 +252,32 @@ func.func @noop_results_and_duplicate_operand(
     !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor,
     !mesh_1_tensor, !mesh_1_tensor_dist_y
 }
+
+// CHECK-LABEL: func @pure_unused_fragment_is_erased
+func.func @pure_unused_fragment_is_erased(%arg0: !mesh_1_tensor)
+  -> () attributes {
+    "topology"=#mpmd.topology<<"m1": <["x"=2, "y"=2]>>>} {
+// CHECK-NEXT: return
+  %0 = mpmd.fragment<mesh="m1", origin=["f"]> (%arg0)
+    (%arg1: tensor<4x8xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %1 : tensor<4x8xf32>
+  } : (!mesh_1_tensor) -> !mesh_1_tensor
+  func.return
+}
+
+// CHECK-LABEL: func @side_effect_unused_fragment_is_not_erased
+func.func @side_effect_unused_fragment_is_not_erased(%arg0: !mesh_1_tensor)
+  -> () attributes {
+    "topology"=#mpmd.topology<<"m1": <["x"=2, "y"=2]>>>} {
+// CHECK-NEXT: mpmd.fragment
+// CHECK:        stablehlo.custom_call @debug_print
+// CHECK:      return
+  %0 = mpmd.fragment<mesh="m1", origin=["f"]> (%arg0)
+    (%arg1: tensor<4x8xf32>) {
+    %1 = stablehlo.custom_call @debug_print(%arg1) {has_side_effect = true} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+    mpmd.return %1 : tensor<4x8xf32>
+  } : (!mesh_1_tensor) -> !mesh_1_tensor
+  func.return
+}
+
