@@ -294,7 +294,7 @@ def _register_named_computation_primitive():
   """Registers named_computation primitive and a JAX CallPrimitive."""
   primitive = jax.core.CallPrimitive('named_computation')
   # Makes it possible to execute eagerly.
-  primitive.def_impl(jax.core.call_impl)
+  primitive.def_impl(lambda f, *args, **_: f.call_wrapped(*args))
 
   def custom_call_transpose(params, *rest, primitive=primitive):
     new_params = dict(params)
