@@ -421,6 +421,69 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
   bool perDimAllGather;
 };
 
+Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
+                              ArrayRef<ArrayRef<AxisRefAttr>> slicingAxesPerDim,
+                              RankedTensorType localResultType,
+                              ConversionPatternRewriter& rewriter) {
+  int64_t numDevices = mesh.getTotalSize();
+  Type i64Ty = rewriter.getI64Type();
+  auto indexTy = RankedTensorType::get({}, i64Ty);
+  auto tableTy = RankedTensorType::get({numDevices}, i64Ty);
+  auto slicedTableTy = RankedTensorType::get({1}, i64Ty);
+
+  Value partitionId = stablehlo::ConvertOp::create(
+      rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
+
+  // Generate start indices for slicing.
+  SmallVector<Value> startIndices;
+  startIndices.reserve(localResultType.getRank());
+  for (int64_t i = 0; i < localResultType.getRank(); ++i) {
+    ArrayRef<AxisRefAttr> axes = slicingAxesPerDim[i];
+    if (axes.empty()) {
+      startIndices.push_back(stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseIntElementsAttr::get(indexTy, static_cast<int64_t>(0))));
+      continue;
+    }
+
+    // Calculate a compile-time offset table for this dimension.
+    SmallVector<int64_t> offsetsTable(numDevices);
+    int64_t shardSize = localResultType.getDimSize(i);
+    for (int64_t devId = 0; devId < numDevices; ++devId) {
+      int64_t dimCoordinate = 0;
+      for (AxisRefAttr axis : axes) {
+        int64_t axisSize = axis.getSize(mesh);
+
+        int64_t suffixSize = 1;
+        bool foundAxis = false;
+        for (MeshAxisAttr meshAxis : mesh.getAxes()) {
+          if (foundAxis) suffixSize *= meshAxis.getSize();
+          if (meshAxis.getName() == axis.getName()) foundAxis = true;
+        }
+
+        int64_t axisCoord =
+            (devId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
+        dimCoordinate = dimCoordinate * axisSize + axisCoord;
+      }
+      offsetsTable[devId] = dimCoordinate * shardSize;
+    }
+
+    // Create the offset table and look up the table using partition_id.
+    auto tableConst = stablehlo::ConstantOp::create(
+        rewriter, loc, DenseIntElementsAttr::get(tableTy, offsetsTable));
+    auto offsetSlice = stablehlo::DynamicSliceOp::create(
+        rewriter, loc, slicedTableTy, tableConst, ValueRange{partitionId},
+        rewriter.getDenseI64ArrayAttr({1}));
+    startIndices.push_back(
+        stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice));
+  }
+
+  return stablehlo::DynamicSliceOp::create(rewriter, loc, localResultType,
+                                           globalTensor, startIndices,
+                                           localResultType.getShape())
+      .getResult();
+}
+
 class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
  public:
   AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -443,68 +506,15 @@ class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
 
     RankedTensorType localResultType =
         cast<RankedTensorType>(converter->convertType(op));
-
-    int64_t numDevices = mesh.getTotalSize();
-    Type i64Ty = rewriter.getI64Type();
-    auto indexTy = RankedTensorType::get({}, i64Ty);
-    auto tableTy = RankedTensorType::get({numDevices}, i64Ty);
-    auto slicedTableTy = RankedTensorType::get({1}, i64Ty);
-
-    Value partitionId = stablehlo::ConvertOp::create(
-        rewriter, loc, indexTy,
-        stablehlo::PartitionIdOp::create(rewriter, loc));
-
-    // Generate start indices for slicing.
-    SmallVector<Value> startIndices;
-    startIndices.reserve(localResultType.getRank());
-    for (int64_t i = 0; i < localResultType.getRank(); ++i) {
-      auto axisList = cast<AxisRefListAttr>(op.getSlicingAxes()[i]);
-      if (axisList.getValue().empty()) {
-        startIndices.push_back(stablehlo::ConstantOp::create(
-            rewriter, loc,
-            DenseIntElementsAttr::get(indexTy, static_cast<int64_t>(0))));
-        continue;
-      }
-      // Calculate a compile-time offset table for this dimension.
-      SmallVector<int64_t> offsetsTable(numDevices);
-      int64_t shardSize = localResultType.getDimSize(i);
-      for (int64_t devId = 0; devId < numDevices; ++devId) {
-        int64_t dimCoordinate = 0;
-        for (AxisRefAttr axis : axisList.getValue()) {
-          int64_t axisSize = axis.getSize(mesh);
-
-          int64_t suffixSize = 1;
-          bool foundAxis = false;
-          for (MeshAxisAttr meshAxis : mesh.getAxes()) {
-            if (foundAxis) {
-              suffixSize *= meshAxis.getSize();
-            }
-            if (meshAxis.getName() == axis.getName()) {
-              foundAxis = true;
-            }
-          }
-
-          int64_t axisCoord =
-              (devId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
-          dimCoordinate = dimCoordinate * axisSize + axisCoord;
-        }
-        offsetsTable[devId] = dimCoordinate * shardSize;
-      }
-
-      // Create the offset table and look up the table using partition_id.
-      auto tableConst = stablehlo::ConstantOp::create(
-          rewriter, loc, DenseIntElementsAttr::get(tableTy, offsetsTable));
-      auto offsetSlice = stablehlo::DynamicSliceOp::create(
-          rewriter, loc, slicedTableTy, tableConst, ValueRange{partitionId},
-          rewriter.getDenseI64ArrayAttr({1}));
-      startIndices.push_back(
-          stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice));
+    SmallVector<ArrayRef<AxisRefAttr>> slicingAxesPerDim;
+    slicingAxesPerDim.reserve(localResultType.getRank());
+    for (AxisRefListAttr axisList : op.getSlicingAxes()) {
+      slicingAxesPerDim.push_back(axisList.getValue());
     }
 
-    auto dynamicSlice = stablehlo::DynamicSliceOp::create(
-        rewriter, loc, localResultType, adaptor.getTensor(), startIndices,
-        localResultType.getShape());
-    rewriter.replaceOp(op, dynamicSlice->getResults());
+    rewriter.replaceOp(op, emitDynamicSliceForAxes(loc, adaptor.getTensor(),
+                                                   mesh, slicingAxesPerDim,
+                                                   localResultType, rewriter));
     conversionState.removeToConvertOp(op);
 
     return success();
