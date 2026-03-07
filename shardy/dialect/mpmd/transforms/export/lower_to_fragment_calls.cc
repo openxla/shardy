@@ -304,19 +304,17 @@ std::vector<FragmentOp> GroupFragmentsAndMarkWithGroupName(
     stream << kFragmentNamePrefix << group_id << "_";
 
     // Append the fragment name.
-    stream << fragment_name << ".";
+    stream << fragment_name;
 
+    // Truncate the group name to something short enough to be easily readable
+    group_name = Truncate(group_name, 200);
     // Find function name in the module.
     StringRef module_name = GetModuleName(module_op);
     // Drop the jit_ prefix if present.
     module_name = DropJitPrefix(module_name);
-    // Truncate the function name to 32 characters.
-    std::string truncated_module_name = Truncate(module_name, 32);
-    stream << truncated_module_name;
 
-    int max_group_name_length = 64 - truncated_module_name.size();
-    group_name = Truncate(group_name, max_group_name_length);
-    fragment->setAttr(kGroupName, rewriter.getStringAttr(group_name));
+    fragment->setAttr(kGroupName,
+                      rewriter.getStringAttr(group_name + "." + module_name));
   }
 
   return all_fragments;
