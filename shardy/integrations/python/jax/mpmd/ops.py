@@ -135,7 +135,7 @@ def _named_computation(
     flat_args, in_tree = tree_util.tree_flatten((dyn_args, dyn_kwargs))
     flat_fun, out_tree = api_util.flatten_fun(fun, in_tree)
     out_flat = named_computation_p.bind(
-        flat_fun, *flat_args, name=name, transpose_count=transpose_count
+        *flat_args, subfuns=(flat_fun,), name=name, transpose_count=transpose_count
     )
     return tree_util.tree_unflatten(out_tree(), out_flat)
 
