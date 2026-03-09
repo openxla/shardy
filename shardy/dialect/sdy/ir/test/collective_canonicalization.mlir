@@ -344,3 +344,10 @@ func.func @all_reduce_of_sharded_to_unreduced(%arg0 : tensor<16x8xf32> {sdy.shar
   %1 = sdy.all_reduce {"x", "y"} %0 out_sharding=<@mesh, [{}, {}]> : tensor<16x8xf32>
   return %1 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @null_reduce_scatter
+func.func @null_reduce_scatter(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: return %arg0 : tensor<16x8xf32>
+  %0 = sdy.reduce_scatter [{}, {}] %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

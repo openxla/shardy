@@ -46,6 +46,10 @@ def CollectivePermuteNoopPattern : Pat<
   (replaceWithValue $tensor),
   [(TensorShardingEquivalent $tensor, $out_sharding)]>;
 
+def ReduceScatterNoopPattern : Pat<
+  (Sdy_ReduceScatterOp $tensor, Sdy_EmptyAxesPerDim:$reduceScatterAxes, $outSharding),
+  (replaceWithValue $tensor)>;
+
 def AllSliceOfAllGatherPattern : Pat<
   (Sdy_AllSliceOp (Sdy_AllGatherOp $tensor, $gatheringAxes, $_), $slicingAxes, $_),
   (replaceWithValue $tensor),

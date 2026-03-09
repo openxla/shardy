@@ -442,8 +442,9 @@ void CollectivePermuteOp::getCanonicalizationPatterns(
 
 void ReduceScatterOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                   MLIRContext* context) {
-  results.addWithLabel<ReduceScatterFusion>(StringRef(kCollectiveLabel),
-                                            context);
+  results.addWithLabel<ReduceScatterFusion, ReduceScatterNoopPattern>(
+      StringRef(kCollectiveLabel), context);
+  ;
 }
 
 }  // namespace sdy
