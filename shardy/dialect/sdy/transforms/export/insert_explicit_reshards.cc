@@ -172,8 +172,7 @@ void insertExplicitReshardsOnDataFlowOp(
 template <class OpTy>
 void processDot(OpTy op, ShardingProjection& shardingProjection,
                 ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
-                const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
-                const Mesh& mesh) {
+                OpShardingRuleAttr shardingRule, MeshOp meshOp) {
   if (outShardings.empty()) {
     // Result doesn't have a sharding.
     return;
@@ -262,39 +261,39 @@ void processDot(OpTy op, ShardingProjection& shardingProjection,
   // We can reshard the result to make it compatible with the sharding of the
   // LHS and RHS.
   resAxes.assign(conflictingOperandAxes.begin(), conflictingOperandAxes.end());
-  setSharding(op.getResult(),
-              resultSharding.createTensorShardingAttr(
-                  op.getContext(), shardingRule.getResultMapping(0),
-                  shardingRule.getFactorSizes(), mesh.name(), mesh.attr()));
+  setSharding(
+      op.getResult(),
+      resultSharding.createTensorShardingAttr(
+          op.getContext(), shardingRule.getResultMapping(0),
+          shardingRule.getFactorSizes(), meshOp.getName(), meshOp.getMesh()));
   rewriter.setInsertionPointAfter(op);
   auto reshardOp = ReshardOp::create(rewriter, op.getLoc(), op.getResult(),
                                      outShardings.front());
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
 }
 
-Mesh getMeshOrDefault(TensorShardingAttr sharding,
-                      const SymbolTable& symbolTable, const Mesh& defaultMesh) {
+MeshOp getMeshOpOrDefault(TensorShardingAttr sharding,
+                          const SymbolTable& symbolTable, MeshOp defaultMesh) {
   if (!sharding) {
     return defaultMesh;
   }
   // NOTE: sharding always has a meshOrRef because it is a required parameter.
-  return Mesh(sharding.getMesh(symbolTable),
-              cast<FlatSymbolRefAttr>(sharding.getMeshOrRef()).getValue());
+  return getMeshOp(symbolTable,
+                   cast<FlatSymbolRefAttr>(sharding.getMeshOrRef()).getValue());
 }
 
-Mesh getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
-                       ArrayRef<TensorShardingAttr> outShardings,
-                       const SymbolTable& symbolTable,
-                       const Mesh& defaultMesh) {
+MeshOp getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
+                         ArrayRef<TensorShardingAttr> outShardings,
+                         const SymbolTable& symbolTable, MeshOp defaultMesh) {
   int64_t maxMeshCount = 0;
   llvm::SmallDenseMap<StringRef, int64_t> meshCounts;
-  Mesh mostCommonMesh = defaultMesh;
+  MeshOp mostCommonMesh = defaultMesh;
   for (const TensorShardingAttr sharding :
        llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
     if (!isFullyReplicated(sharding)) {
-      const Mesh meshOfSharding =
-          getMeshOrDefault(sharding, symbolTable, defaultMesh);
-      const int64_t meshCount = ++meshCounts[meshOfSharding.name()];
+      MeshOp meshOfSharding =
+          getMeshOpOrDefault(sharding, symbolTable, defaultMesh);
+      const int64_t meshCount = ++meshCounts[meshOfSharding.getName()];
       if (meshCount > maxMeshCount) {
         maxMeshCount = meshCount;
         mostCommonMesh = meshOfSharding;
@@ -308,9 +307,9 @@ Mesh getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
 //  1. There is no tensor with a sharding attribute.
 //  2. Tensors have different meshes (ignoring device ids)
 //  3. Some tensors have maximal meshes.
-std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
-                            ArrayRef<TensorShardingAttr> outShardings,
-                            const SymbolTable& symbolTable) {
+std::optional<MeshOp> getMesh(ArrayRef<TensorShardingAttr> inShardings,
+                              ArrayRef<TensorShardingAttr> outShardings,
+                              const SymbolTable& symbolTable) {
   std::optional<StringRef> meshName = getCommonMeshName(
       inShardings, outShardings, symbolTable, /*ignoreDeviceIds=*/true);
   if (!meshName.has_value()) {
@@ -320,14 +319,14 @@ std::optional<Mesh> getMesh(ArrayRef<TensorShardingAttr> inShardings,
     // reshards so operands and results are all bound by the same mesh.
     return std::nullopt;
   }
-  MeshAttr meshAttr = getMeshAttr(symbolTable, *meshName);
-  assert(meshAttr && "unknown mesh");
-  if (meshAttr.isMaximal()) {
+  MeshOp meshOp = getMeshOp(symbolTable, *meshName);
+  assert(meshOp && "unknown mesh");
+  if (meshOp.getMesh().isMaximal()) {
     return std::nullopt;
   }
   // Return the mesh with the most common device id.
   return getMostCommonMesh(inShardings, outShardings, symbolTable,
-                           /*defaultMesh=*/Mesh(meshAttr, *meshName));
+                           /*defaultMesh=*/meshOp);
 }
 
 void insertAllReduceOnOpIfUnreducedToReplicated(
@@ -398,7 +397,6 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
-
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
@@ -418,7 +416,7 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
                         ArrayRef<TensorShardingAttr> inShardings,
                         ArrayRef<TensorShardingAttr> outShardings,
                         IRRewriter& rewriter, const SymbolTable& symbolTable,
-                        OpShardingRuleAttr shardingRule, const Mesh& mesh,
+                        OpShardingRuleAttr shardingRule, MeshOp meshOp,
                         const bool onFullVersion) {
   // Checks if factors are sharded the same way across operands and results.
 
@@ -426,7 +424,7 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   // projection have overflow axes.
   if (onFullVersion) {
     AxesPerFactor commonAxesPerFactor = findCommonAxes(
-        shardingProjection, shardingRule, getTensorSizes(op), mesh);
+        shardingProjection, shardingRule, getTensorSizes(op), meshOp);
 
     UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
                                                 shardingRule.getNumResults());
@@ -438,18 +436,18 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
     }
     insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
                            updateTensorShardings, rewriter, shardingRule,
-                           symbolTable, mesh);
+                           symbolTable, meshOp);
     return commonAxesPerFactor;
   }
 
   TypeSwitch<Operation*>(op)
-      .Case<stablehlo::DotOp>([&](stablehlo::DotOp dotOp) {
+      .Case([&](stablehlo::DotOp dotOp) {
         processDot(dotOp, shardingProjection, outShardings, rewriter,
-                   symbolTable, shardingRule, mesh);
+                   shardingRule, meshOp);
       })
-      .Case<stablehlo::DotGeneralOp>([&](stablehlo::DotGeneralOp dotGeneralOp) {
+      .Case([&](stablehlo::DotGeneralOp dotGeneralOp) {
         processDot(dotGeneralOp, shardingProjection, outShardings, rewriter,
-                   symbolTable, shardingRule, mesh);
+                   shardingRule, meshOp);
       });
   return AxesPerFactor();
 }
@@ -509,14 +507,14 @@ struct InsertExplicitReshardsPass
       SmallVector<TensorShardingAttr> outShardings =
           getShardings(op->getResults());
 
-      std::optional<Mesh> mesh =
+      std::optional<MeshOp> meshOp =
           getMesh(inShardings, outShardings, symbolTable);
-      if (!mesh.has_value()) {
+      if (!meshOp.has_value()) {
         return;
       }
 
       ShardingProjection shardingProjection = ShardingProjection::build(
-          inShardings, outShardings, shardingRule, mesh->attr(),
+          inShardings, outShardings, shardingRule, meshOp->getMesh(),
           /*closedIfMissing=*/true);
       // Return without inserting reshards if any factor sharding has overflow
       // axes. This case is not handled yet.
@@ -526,11 +524,11 @@ struct InsertExplicitReshardsPass
       }
       AxesPerFactor commonAxesPerFactor =
           processOp(op, shardingProjection, inShardings, outShardings, rewriter,
-                    symbolTable, shardingRule, *mesh, onFullVersion);
+                    symbolTable, shardingRule, *meshOp, onFullVersion);
       // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
       insertAllReducesForReductionFactors(op, shardingProjection,
                                           commonAxesPerFactor, shardingRule,
-                                          *mesh, rewriter, onFullVersion);
+                                          *meshOp, rewriter, onFullVersion);
 
       // TODO(enver): Remove sharding rules from ops.
     });

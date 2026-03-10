@@ -119,13 +119,14 @@ AxesPerFactor getCompatibleFactorShardings(
 void insertExplicitReshardsOnOperand(
     Operation* op, const int64_t operandIndex,
     const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule, const Mesh& mesh, IRRewriter& rewriter) {
+    OpShardingRuleAttr shardingRule, MeshOp meshOp, IRRewriter& rewriter) {
   auto operand = op->getOperand(operandIndex);
-  auto newTensorSharding =
-      shardingProjection.getOperand(operandIndex)
-          .createTensorShardingAttr(
-              mesh.getContext(), shardingRule.getOperandMapping(operandIndex),
-              shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
+  auto newTensorSharding = shardingProjection.getOperand(operandIndex)
+                               .createTensorShardingAttr(
+                                   meshOp->getContext(),
+                                   shardingRule.getOperandMapping(operandIndex),
+                                   shardingRule.getFactorSizes(),
+                                   meshOp.getName(), meshOp.getMesh());
   auto reshardOp =
       ReshardOp::create(rewriter, operand.getLoc(), operand, newTensorSharding);
   op->setOperand(operandIndex, reshardOp);
@@ -134,16 +135,17 @@ void insertExplicitReshardsOnOperand(
 void insertExplicitReshardsOnResult(
     Operation* op, const int64_t resultIndex,
     const ShardingProjection& shardingProjection,
-    OpShardingRuleAttr shardingRule, const Mesh& mesh, IRRewriter& rewriter) {
+    OpShardingRuleAttr shardingRule, MeshOp meshOp, IRRewriter& rewriter) {
   auto result = op->getResult(resultIndex);
   auto newTensorSharding =
       shardingProjection.getResult(resultIndex)
-          .createTensorShardingAttr(
-              mesh.getContext(), shardingRule.getResultMapping(resultIndex),
-              shardingRule.getFactorSizes(), mesh.name(), mesh.attr());
+          .createTensorShardingAttr(meshOp->getContext(),
+                                    shardingRule.getResultMapping(resultIndex),
+                                    shardingRule.getFactorSizes(),
+                                    meshOp.getName(), meshOp.getMesh());
   auto reshardOp = ReshardOp::create(
       rewriter, result.getLoc(), result,
-      getOrCreateSharding(result, mesh.name(), /*closedIfMissing=*/true));
+      getOrCreateSharding(result, meshOp.getName(), /*closedIfMissing=*/true));
   rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
   setSharding(result, newTensorSharding);
 }
@@ -153,11 +155,11 @@ void insertExplicitReshardsOnResult(
 // mesh1 = [x:2, y:2]
 // mesh2 = [x:2, y:2], device_ids=[1,0,3,2].
 // If we replicate along y and only use the x in sharding.
-bool shouldReshardToCommonMesh(TensorShardingAttr sharding, const Mesh& mesh,
+bool shouldReshardToCommonMesh(TensorShardingAttr sharding, MeshOp meshOp,
                                const SymbolTable& symbolTable) {
   return !isFullyReplicated(sharding) &&
          sharding.getMesh(symbolTable).getDeviceIds() !=
-             mesh.attr().getDeviceIds();
+             meshOp.getMesh().getDeviceIds();
 }
 }  // namespace
 
@@ -168,23 +170,23 @@ void insertExplicitReshards(Operation* op,
                             UpdateTensorShardings updateTensorShardings,
                             IRRewriter& rewriter,
                             OpShardingRuleAttr shardingRule,
-                            const SymbolTable& symbolTable, const Mesh& mesh) {
+                            const SymbolTable& symbolTable, MeshOp meshOp) {
   rewriter.setInsertionPoint(op);
   for (const auto& [operandIndex, operandSharding] :
        llvm::enumerate(inShardings)) {
     if (updateTensorShardings.updateOperands.test(operandIndex) ||
-        shouldReshardToCommonMesh(operandSharding, mesh, symbolTable)) {
+        shouldReshardToCommonMesh(operandSharding, meshOp, symbolTable)) {
       insertExplicitReshardsOnOperand(op, operandIndex, shardingProjection,
-                                      shardingRule, mesh, rewriter);
+                                      shardingRule, meshOp, rewriter);
     }
   }
   rewriter.setInsertionPointAfter(op);
   for (const auto& [resultIndex, resultSharding] :
        llvm::enumerate(outShardings)) {
     if (updateTensorShardings.updateResults.test(resultIndex) ||
-        shouldReshardToCommonMesh(resultSharding, mesh, symbolTable)) {
+        shouldReshardToCommonMesh(resultSharding, meshOp, symbolTable)) {
       insertExplicitReshardsOnResult(op, resultIndex, shardingProjection,
-                                     shardingRule, mesh, rewriter);
+                                     shardingRule, meshOp, rewriter);
     }
   }
 }
@@ -478,10 +480,10 @@ AxesPerFactor toAxesPerFactor(const SmallVector<AxisListRef>& factorAxisRefs) {
 AxesPerFactor findCommonAxesHeuristic(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
-    const Mesh& mesh) {
+    MeshOp meshOp) {
   SmallVector<AxisListRef> factorAxisRefs(shardingRule.getNumFactors());
   FactorAxesCandidateBag factorAxesCandidates = findFactorAxesCandidates(
-      shardingProjection, shardingRule, tensorSizes, mesh.attr());
+      shardingProjection, shardingRule, tensorSizes, meshOp.getMesh());
   while (!factorAxesCandidates.empty()) {
     FactorAxesCandidate bestCandidate =
         factorAxesCandidates.findBestCandidate();
@@ -496,7 +498,7 @@ AxesPerFactor findCommonAxesHeuristic(
     // and/or gets modified.
     FactorAxesPair bestFactorAxes = bestCandidate.factorAxes;
     factorAxisRefs[bestFactorAxes.factorIndex] = bestFactorAxes.axes;
-    if (bestFactorAxes.isFullySharded(shardingRule, mesh.attr())) {
+    if (bestFactorAxes.isFullySharded(shardingRule, meshOp.getMesh())) {
       factorAxesCandidates.dropFactorDependencies(bestFactorAxes.factorIndex);
     }
     // Invalidate axes that overlaps with the picked one across all unseen
@@ -572,7 +574,7 @@ AxesPerFactor findCommonAxesHeuristic(
 std::pair<int64_t, int64_t> sortedTensorIndicesOnUnaryOperation(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
-    const Mesh& mesh) {
+    MeshOp meshOp) {
   SmallVector<int64_t> tensorIndices = shardingRule.getNonScalarTensorIndices();
   const int64_t lhs = tensorIndices[0];
   const int64_t rhs = tensorIndices[1];
@@ -582,7 +584,7 @@ std::pair<int64_t, int64_t> sortedTensorIndicesOnUnaryOperation(
     const TensorFactorShardings& tensor =
         shardingProjection.getTensor(tensorIndex);
     return {!hasShardedPermutationFactors(tensor, shardingRule),
-            tensorSizes[tensorIndex], tensor.getShardingSize(mesh.attr())};
+            tensorSizes[tensorIndex], tensor.getShardingSize(meshOp.getMesh())};
   };
 
   if (getPreferenceTuple(lhs) >= getPreferenceTuple(rhs)) {
@@ -600,10 +602,10 @@ std::pair<int64_t, int64_t> sortedTensorIndicesOnUnaryOperation(
 AxesPerFactor findCommonAxesOnUnaryOperation(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule, ArrayRef<int64_t> tensorSizes,
-    const Mesh& mesh) {
+    MeshOp meshOp) {
   const auto [preferredTensor, otherTensor] =
       sortedTensorIndicesOnUnaryOperation(shardingProjection, shardingRule,
-                                          tensorSizes, mesh);
+                                          tensorSizes, meshOp);
   const FactorIndexToSharding& preferredFactorSharding =
       shardingProjection.getTensor(preferredTensor).factorIndexToSharding;
   const FactorIndexToSharding& otherFactorSharding =
@@ -630,7 +632,7 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
 
 void distributeAxisRefsToBatchingFactors(
     ArrayRef<AxisRefAttr> axisRefsToDistribute, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh, AxesPerFactor& factorCommonAxes) {
+    MeshOp meshOp, AxesPerFactor& factorCommonAxes) {
   // TODO(enver): Instead iterate batching factors in the order of their
   // available capacity, the one with largest available capacity being the
   // first one to distribute `axisRefsToDistribute`. Sort first, and then
@@ -644,7 +646,7 @@ void distributeAxisRefsToBatchingFactors(
     }
     SmallVector<AxisRefAttr>& factorSharding = factorCommonAxes[factorIndex];
     const int64_t factorShardingSize =
-        AxisListRef(factorSharding).getShardingSize(mesh.attr());
+        AxisListRef(factorSharding).getShardingSize(meshOp.getMesh());
     // NOTE: Here, `factorSize` can be smaller than `factorShardingSize` as in
     // some cases it is allowed to have shardings larger than its size.
     if ((factorSize % factorShardingSize) != 0) {
@@ -655,7 +657,7 @@ void distributeAxisRefsToBatchingFactors(
     int64_t factorCapacity = factorSize / factorShardingSize;
     while (!axisRefsToDistribute.empty()) {
       AxisRefAttr axisRef = axisRefsToDistribute.front();
-      const int64_t axisSize = axisRef.getSize(mesh.attr());
+      const int64_t axisSize = axisRef.getSize(meshOp.getMesh());
       // TODO(enver): Split `axisRef` to fit it into the batching factor's
       // available space. The gcd of `axisSize` and `factorCapacity` should fit
       // to the batching factor.
@@ -664,7 +666,7 @@ void distributeAxisRefsToBatchingFactors(
       if (factorCapacity % axisSize != 0) {
         break;
       }
-      addAxisOrMerge(factorSharding, axisRef, mesh.attr());
+      addAxisOrMerge(factorSharding, axisRef, meshOp.getMesh());
 
       factorCapacity /= axisSize;
       axisRefsToDistribute = axisRefsToDistribute.drop_front();
@@ -677,9 +679,9 @@ void distributeAxisRefsToBatchingFactors(
 
 // Distribute the greatest common prefix of shardings of factors that need
 // replication to batching factors.
-void distributeAxisRefsToBatchingFactors(
-    OpShardingRuleAttr shardingRule, const Mesh& mesh,
-    AxesPerFactor& factorCommonAxes) {
+void distributeAxisRefsToBatchingFactors(OpShardingRuleAttr shardingRule,
+                                         MeshOp meshOp,
+                                         AxesPerFactor& factorCommonAxes) {
   for (const int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
     SmallVector<AxisRefAttr> axisRefsToDistribute =
         factorCommonAxes[factorIndex];
@@ -687,7 +689,7 @@ void distributeAxisRefsToBatchingFactors(
     if (shardingRule.isFactorInAllNonScalarTensors(factorIndex) &&
         !axisRefsToDistribute.empty()) {
       distributeAxisRefsToBatchingFactors(axisRefsToDistribute, shardingRule,
-                                          mesh, factorCommonAxes);
+                                          meshOp, factorCommonAxes);
     }
   }
 }
@@ -695,7 +697,7 @@ void distributeAxisRefsToBatchingFactors(
 
 AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh) {
+                             ArrayRef<int64_t> tensorSizes, MeshOp meshOp) {
   if (AxesPerFactor compatibleFactorShardings =
           getCompatibleFactorShardings(shardingProjection, shardingRule);
       !compatibleFactorShardings.empty()) {
@@ -708,14 +710,14 @@ AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
       shardingRule.getNeedReplicationFactors().empty() &&
       !shardingRule.hasDimensionsWithMultipleFactors()) {
     return findCommonAxesOnUnaryOperation(shardingProjection, shardingRule,
-                                          tensorSizes, mesh);
+                                          tensorSizes, meshOp);
   }
 
   AxesPerFactor factorCommonAxes = findCommonAxesHeuristic(
-      shardingProjection, shardingRule, tensorSizes, mesh);
+      shardingProjection, shardingRule, tensorSizes, meshOp);
 
   if (!shardingRule.getNeedReplicationFactors().empty()) {
-    distributeAxisRefsToBatchingFactors(shardingRule, mesh, factorCommonAxes);
+    distributeAxisRefsToBatchingFactors(shardingRule, meshOp, factorCommonAxes);
   }
 
   return factorCommonAxes;
@@ -843,7 +845,7 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh, IRRewriter& rewriter, const bool onFullVersion) {
+    MeshOp meshOp, IRRewriter& rewriter, const bool onFullVersion) {
   if (op->getResults().empty()) {
     return;
   }
@@ -855,18 +857,18 @@ void insertAllReducesForReductionFactors(
 
   // The first result unreduced axes is also the common one.
   SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-      reductionAxes, getUnreducedAxes(op->getResult(0)), mesh.attr());
+      reductionAxes, getUnreducedAxes(op->getResult(0)), meshOp.getMesh());
   if (allReduceAxes.empty()) {
     return;
   }
 
-  sortAndMergeAxes(allReduceAxes, mesh.attr());
+  sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
 
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
     TensorShardingAttr resultSharding =
-        getOrCreateSharding(result, mesh.name(),
+        getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
     auto allReduceOp = AllReduceOp::create(rewriter, result.getLoc(), result,
                                            allReduceAxes, resultSharding);

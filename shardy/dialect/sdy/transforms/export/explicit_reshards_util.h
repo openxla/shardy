@@ -20,7 +20,6 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
@@ -31,18 +30,6 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
-
-// TODO(enver): Use MeshOp instead.
-// The struct contains a mesh attribute and its name.
-struct Mesh {
-  MeshAttr mesh;
-  StringRef meshName;
-  Mesh() = default;
-  Mesh(MeshAttr mesh, StringRef meshName) : mesh(mesh), meshName(meshName) {};
-  MLIRContext* getContext() const { return mesh.getContext(); }
-  MeshAttr attr() const { return mesh; }
-  StringRef name() const { return meshName; }
-};
 
 // Inserts an `sdy.all-reduce` on `use` if `sourceSharding` has unreduced axes
 // or sub-axes that aren't in the user's unreduced axes
@@ -128,7 +115,7 @@ void insertExplicitReshards(Operation* op,
                             UpdateTensorShardings updateTensorShardings,
                             IRRewriter& rewriter,
                             OpShardingRuleAttr shardingRule,
-                            const SymbolTable& symbolTable, const Mesh& mesh);
+                            const SymbolTable& symbolTable, MeshOp meshOp);
 
 // Inserts an `sdy.all-reduce` for each result of `op`.
 //
@@ -145,7 +132,7 @@ void insertExplicitReshards(Operation* op,
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
-    const Mesh& mesh, IRRewriter& rewriter, bool onFullVersion);
+    MeshOp meshOp, IRRewriter& rewriter, bool onFullVersion);
 
 // Finds common factor axes on the operands and results of `op` so that the
 // sharding of `op` is compatible with its sharding rule.
@@ -162,7 +149,7 @@ void insertAllReducesForReductionFactors(
 // Guarantees to return a non-empty AxesPerFactor.
 AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
-                             ArrayRef<int64_t> tensorSizes, const Mesh& mesh);
+                             ArrayRef<int64_t> tensorSizes, MeshOp meshOp);
 
 // Converts a `sdy.reshard` op to an `sdy.replicated-to-unreduced` op and/or an
 // `sdy.sharded-to-unreduced` op. Returns true if the conversion is successful.
