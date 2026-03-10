@@ -30,6 +30,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Attributes.h"
@@ -1258,15 +1259,14 @@ ManualComputationOp::getBlockArgumentEdgeOwnerShardings() {
 
 void ManualComputationOp::setBlockArgumentEdgeOwnerShardings(
     ArrayRef<TensorShardingAttr> shardings) {
-  // TODO(bartchr): see if we can use a `to_vector`+`map_iterator` here.
   ArrayRef<StringAttr> manualAxes = getManualAxes();
-  SmallVector<TensorShardingAttr> shardingsWithManualAxes;
-  shardingsWithManualAxes.reserve(shardings.size());
-  for (auto [i, sharding] : llvm::enumerate(shardings)) {
-    shardingsWithManualAxes.push_back(addFreeAxesToManualComputationSharding(
-        getInSharding(i), sharding, manualAxes));
-  }
-  setInShardings(shardingsWithManualAxes);
+  setInShardings(llvm::map_to_vector(
+      llvm::zip_equal(getInShardings().getShardings(), shardings),
+      [&](auto&& pair) {
+        auto&& [outerSharding, newSharding] = pair;
+        return addFreeAxesToManualComputationSharding(
+            outerSharding, newSharding, manualAxes);
+      }));
 }
 
 SmallVector<TensorShardingAttr>
