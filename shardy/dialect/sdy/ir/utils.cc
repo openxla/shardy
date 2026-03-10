@@ -203,6 +203,33 @@ MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
   return nullptr;
 }
 
+TensorShardingAttr inlineMesh(const SymbolTable& symbolTable,
+                              TensorShardingAttr sharding) {
+  if (auto name = dyn_cast<FlatSymbolRefAttr>(sharding.getMeshOrRef())) {
+    MeshAttr mesh = getMeshAttr(symbolTable, name);
+    assert(mesh && "unknown mesh");
+    return TensorShardingAttr::get(
+        sharding.getContext(), mesh, sharding.getDimShardings(),
+        sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+  }
+  return sharding;
+}
+
+TensorShardingPerValueAttr inlineMesh(
+    const SymbolTable& symbolTable,
+    TensorShardingPerValueAttr shardingPerValue) {
+  if (!shardingPerValue) {
+    return shardingPerValue;
+  }
+  SmallVector<TensorShardingAttr> inlinedShardings;
+  inlinedShardings.reserve(shardingPerValue.getShardings().size());
+  for (TensorShardingAttr shardingAttr : shardingPerValue.getShardings()) {
+    inlinedShardings.push_back(inlineMesh(symbolTable, shardingAttr));
+  }
+  return TensorShardingPerValueAttr::get(shardingPerValue.getContext(),
+                                         inlinedShardings);
+}
+
 Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
                              ArrayRef<TensorShardingAttr> resultsShardings,
                              const SymbolTable& symbolTable,
