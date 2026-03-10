@@ -38,8 +38,6 @@ struct PropagationOptions {
   // Whether to avoid exporting the module for partitioning so that the module
   // will be compatible for another round of propagation.
   bool avoidExportForPartitioning = false;
-  // Whether to skip inlining in the module.
-  bool skipInline = false;
   // Whether to enable inserting explicit collectives.
   bool enableInsertExplicitCollectives = false;
   // Whether to remove all-gather and reduce-scatter ops for CMV1.
