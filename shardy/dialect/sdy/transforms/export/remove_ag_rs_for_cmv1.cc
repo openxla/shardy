@@ -44,7 +44,7 @@ struct RemoveAllGatherReduceScatterForCMV1Pass
     SmallVector<Operation*> opsToReplace;
 
     getOperation()->walk([&](Operation* dotOp) {
-      if (!mlir::isa<stablehlo::DotOp, stablehlo::DotGeneralOp>(dotOp)) {
+      if (!isa<stablehlo::DotOp, stablehlo::DotGeneralOp>(dotOp)) {
         return;
       }
 

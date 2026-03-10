@@ -51,7 +51,7 @@ class ValidateNoReshardsPass
               "unexpected reshard. Operands: ";
 
       auto printSharding = [](Type type, InFlightDiagnostic& diag) {
-        auto meshType = mlir::dyn_cast<MeshTensorType>(type);
+        auto meshType = dyn_cast<MeshTensorType>(type);
         if (auto sharding = meshType ? meshType.getSharding() : nullptr) {
           diag << sharding;
         } else {
@@ -76,7 +76,7 @@ class ValidateNoReshardsPass
         first = false;
         printSharding(type, diag);
         for (OpOperand& use : result.getUses()) {
-          auto returnOp = mlir::dyn_cast<func::ReturnOp>(use.getOwner());
+          auto returnOp = dyn_cast<func::ReturnOp>(use.getOwner());
           if (!returnOp) {
             continue;
           }
@@ -97,12 +97,12 @@ class ValidateNoReshardsPass
     if (!llvm::hasSingleElement(body)) {
       return false;
     }
-    auto returnOp = mlir::dyn_cast<func::ReturnOp>(body.front());
+    auto returnOp = dyn_cast<func::ReturnOp>(body.front());
     if (!returnOp) {
       return false;
     }
     return llvm::all_of(returnOp.getOperands(),
-                        [](Value v) { return mlir::isa<BlockArgument>(v); });
+                        [](Value v) { return isa<BlockArgument>(v); });
   }
 };
 

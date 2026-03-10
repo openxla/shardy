@@ -492,8 +492,7 @@ SmallVector<TensorShardingAttr> getFullyReplicatedShardings(
   shardings.reserve(types.size());
   for (Type type : types) {
     int64_t rank = 0;
-    // TODO(tomnatan): remove mlir:: once Attribute::dyn_cast is removed.
-    if (auto tensorType = mlir::dyn_cast<ShapedType>(type)) {
+    if (auto tensorType = dyn_cast<ShapedType>(type)) {
       assert(tensorType.hasStaticShape());
       rank = tensorType.getRank();
     }

@@ -70,7 +70,7 @@ Attribute DimensionShardingAttr::parse(AsmParser& parser, Type type) {
       return DimensionShardingAttr();
     }
     // TODO(tomnatan): remove mlir:: once Attribute::cast is removed.
-    axes.push_back(mlir::cast<AxisRefAttr>(axisRef));
+    axes.push_back(cast<AxisRefAttr>(axisRef));
   }
 
   int64_t priority = -1;

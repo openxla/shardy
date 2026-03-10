@@ -765,7 +765,7 @@ LogicalResult MeshAttr::verify(
                        << totalProductOfAxes << " != " << totalDeviceIds;
   }
 
-  std::vector<int64_t> sortedDeviceIds(deviceIds.begin(), deviceIds.end());
+  SmallVector<int64_t> sortedDeviceIds(deviceIds.begin(), deviceIds.end());
   llvm::sort(sortedDeviceIds);
   if (!llvm::equal(sortedDeviceIds, llvm::seq<int64_t>(0, totalDeviceIds))) {
     return emitError() << "sorted device ids must be iota(product(axes)), got: "
@@ -815,7 +815,7 @@ LogicalResult DataFlowEdgeOp::verifySymbolUses(
   }
   if (Operation* depOp = getInput().getDefiningOp();
       depOp && inDialect<SdyDialect>(depOp) &&
-      !mlir::isa<ShardableDataFlowOpInterface>(depOp)) {
+      !isa<ShardableDataFlowOpInterface>(depOp)) {
     return emitOpError(
                "expected input of sdy.data_flow_edge to not be defined by an "
                "SdyDialect op (other than an sdy.named_computation).")
@@ -933,7 +933,7 @@ LogicalResult verifyManualComputationValue(
     }
 
     SmallVector<int64_t> newDimSizes;
-    auto globalShapedType = mlir::dyn_cast<ShapedType>(globalType);
+    auto globalShapedType = dyn_cast<ShapedType>(globalType);
     if (!globalShapedType) {
       // Skipping verification for non-shaped types. This could for example be
       // a token type.
@@ -964,7 +964,7 @@ LogicalResult verifyManualComputationValue(
     //    arguments/results match.
     auto expectedLocalRankedType =
         RankedTensorType::get(newDimSizes, globalShapedType.getElementType());
-    auto localRankedType = mlir::cast<RankedTensorType>(localType);
+    auto localRankedType = cast<RankedTensorType>(localType);
     if (expectedLocalRankedType != localRankedType) {
       return op->emitOpError(valueKindStr)
              << " shape, corresponding sharding, and region " << valueKindStr

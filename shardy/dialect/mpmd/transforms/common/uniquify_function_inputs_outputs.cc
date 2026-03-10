@@ -133,7 +133,7 @@ void uniquifyReturnsWithTransferOps(func::FuncOp func_op,
   for (OpOperand& operand : return_op->getOpOperands()) {
     if (!seen_values.contains(operand.get())) {
       seen_values.insert(operand.get());
-      if (!mlir::isa<BlockArgument>(operand.get())) {
+      if (!isa<BlockArgument>(operand.get())) {
         continue;
       }
     }

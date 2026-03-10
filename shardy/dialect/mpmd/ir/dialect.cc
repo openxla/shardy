@@ -393,7 +393,7 @@ ParseResult parseFunctionalTypeAndResolveOperands(
 ParseResult parseSingleBlockRegionOp(OpAsmParser& parser,
                                      OperationState& result,
                                      NamedAttrList attrs) {
-  llvm::SmallVector<OpAsmParser::UnresolvedOperand> operands;
+  SmallVector<OpAsmParser::UnresolvedOperand> operands;
   if (parser.parseOperandList(operands, OpAsmParser::Delimiter::Paren)) {
     return failure();
   }
@@ -656,7 +656,7 @@ namespace {
 
 ParseResult parseMeshAndOrigin(OpAsmParser& parser, NamedAttrList& attrs) {
   StringAttr mesh_name_attr;
-  std::vector<Attribute> user_origins;
+  SmallVector<Attribute, 0> user_origins;
 
   if (parser.parseKeyword("mesh") || parser.parseEqual() ||
       parser.parseAttribute(mesh_name_attr, "mesh_name", attrs))
@@ -987,7 +987,7 @@ void FragmentCallOp::print(OpAsmPrinter& p) {
 
 ParseResult FragmentCallOp::parse(OpAsmParser& parser, OperationState& result) {
   NamedAttrList attrs;
-  llvm::SmallVector<OpAsmParser::UnresolvedOperand> operands;
+  SmallVector<OpAsmParser::UnresolvedOperand> operands;
   SymbolRefAttr callee;
   if (parser.parseLess() || parseMeshAndOrigin(parser, attrs) ||
       parser.parseGreater() || parser.parseAttribute(callee, "callee", attrs) ||
@@ -1159,7 +1159,7 @@ LogicalResult UnassignOp::verify() {
 LogicalResult UnassignOp::inferReturnTypeComponents(
     MLIRContext*, std::optional<Location> location, ValueShapeRange operands,
     DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    llvm::SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
+    SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
   UnassignOp::Adaptor adaptor(operands, attributes, properties, regions);
   inferredReturnShapes.emplace_back(
       cast<ShapedType>(cast<MeshTensorType>(adaptor.getTensor().getType())

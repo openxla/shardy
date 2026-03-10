@@ -442,7 +442,7 @@ void cloneRegionAndConvertTerminatorOp(Region& src, Region& dst) {
 // `OpTy`, returns it.
 template <class OpTy>
 OpTy getEnclosingOfType(Operation* op) {
-  if (auto typedOp = mlir::dyn_cast<OpTy>(op)) {
+  if (auto typedOp = dyn_cast<OpTy>(op)) {
     return typedOp;
   }
   return op->getParentOfType<OpTy>();
@@ -503,9 +503,8 @@ SmallVector<AxisRefAttr> getAxisSetDiff(ArrayRef<AxisRefAttr> axesA,
 template <class... OpTys>
 bool hasAnyUserOfType(ValueRange values) {
   return llvm::any_of(values, [](Value value) {
-    return llvm::any_of(value.getUsers(), [](Operation* user) {
-      return mlir::isa<OpTys...>(user);
-    });
+    return llvm::any_of(value.getUsers(),
+                        [](Operation* user) { return isa<OpTys...>(user); });
   });
 }
 
