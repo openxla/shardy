@@ -123,6 +123,16 @@ class GlobalToLocalTypeConverter : public TypeConverter {
     }
   }
 
+  // Collects the free-axes shardings for manual_computation block arguments.
+  void populateArgShardings(ManualComputationOp manualCompOp) {
+    SmallVector<TensorShardingAttr> shardings =
+        manualCompOp.getBlockArgumentEdgeOwnerShardings();
+    for (auto [arg, sharding] :
+         llvm::zip(manualCompOp.getBody().getArguments(), shardings)) {
+      argShardings[arg] = sharding;
+    }
+  }
+
   // Retrieves the sharding of a value, checking the cached argShardings for
   // unlinked block args.
   TensorShardingAttr getSharding(Value value) const {
@@ -160,7 +170,7 @@ class GenericOpPattern : public ConversionPattern {
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
     if (op->getDialect()->getNamespace() != "stablehlo" &&
-        !isa<sdy::AllReduceOp>(op)) {
+        !isa<sdy::AllReduceOp>(op) && !isa<sdy::ReturnOp>(op)) {
       return failure();
     }
 
@@ -904,6 +914,50 @@ class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
   ConversionState& conversionState;
 };
 
+class ManualComputationOpPattern
+    : public OpConversionPattern<ManualComputationOp> {
+ public:
+  ManualComputationOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                             ConversionState& state)
+      : OpConversionPattern<ManualComputationOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      ManualComputationOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+
+    // Prepare signature conversion and convert the region.
+    TypeConverter::SignatureConversion signature(
+        op.getBody().getNumArguments());
+    for (BlockArgument arg : op.getBody().getArguments()) {
+      signature.addInputs(arg.getArgNumber(), converter->convertType(arg));
+    }
+    if (failed(rewriter.convertRegionTypes(&op.getBody(), *converter,
+                                           &signature))) {
+      return failure();
+    }
+
+    // Inline the region.
+    Block& bodyBlock = op.getBody().front();
+    auto sdyReturnOp = cast<sdy::ReturnOp>(bodyBlock.getTerminator());
+    SmallVector<Value> results = sdyReturnOp.getResults();
+    rewriter.inlineBlockBefore(&bodyBlock, op, adaptor.getTensors());
+
+    // Replace the uses of sdy.manual_computation with the inlined return
+    // values.
+    rewriter.replaceOp(op, results);
+    rewriter.eraseOp(sdyReturnOp);
+
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -933,8 +987,12 @@ struct ConvertGlobalToLocalPass
     SymbolTable symbolTable(module);
     GlobalToLocalTypeConverter typeConverter(symbolTable);
 
-    module.walk([&](func::FuncOp funcOp) {
-      typeConverter.populateArgShardings(funcOp);
+    module.walk([&](Operation* op) {
+      if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
+        typeConverter.populateArgShardings(funcOp);
+      } else if (auto manualCompOp = dyn_cast<ManualComputationOp>(op)) {
+        typeConverter.populateArgShardings(manualCompOp);
+      }
     });
 
     ConversionState conversionState;
@@ -955,10 +1013,11 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<AllSliceOpPattern, AllToAllOpPattern,
-                 CollectivePermuteOpPattern, ConstantOpPattern,
-                 FuncOpSignaturePattern, GenericOpPattern, ReturnOpPattern>(
-        typeConverter, &getContext(), conversionState);
+    patterns
+        .add<AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
+             ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
+             ManualComputationOpPattern, ReturnOpPattern>(
+            typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimensionAllGather);
 
