@@ -32,6 +32,8 @@ include "shardy/dialect/sdy/ir/op_interface.td"
 include "shardy/dialect/sdy/ir/attrs.td"
 include "stablehlo/dialect/Base.td"
 
+def MeshTensorOrToken : AnyTypeOf<[Mpmd_MeshTensorType, HLO_Token]>;
+
 // Base class for MPMD operations.
 class Mpmd_Op<string mnemonic, list<Trait> traits = []> :
     Op<Mpmd_Dialect, mnemonic, traits>;
@@ -160,14 +162,14 @@ def FragmentOp : Mpmd_Op<"fragment", [
   }];
 
   let arguments = (ins
-    Variadic<Mpmd_MeshTensorType>:$inputs,
+    Variadic<MeshTensorOrToken>:$inputs,
     TypedArrayAttrBase<Mpmd_UserOrigin, "array of origin infos">:$origin,
     StrAttr:$mesh_name,
     OptionalAttr<I64Attr>:$stage_id,
     OptionalAttr<Sdy_TensorShardingPerValue>:$in_shardings,
     OptionalAttr<Sdy_TensorShardingPerValue>:$out_shardings
   );
-  let results = (outs Variadic<Mpmd_MeshTensorType>:$results);
+  let results = (outs Variadic<MeshTensorOrToken>:$results);
   let regions = (region SizedRegion<1>:$region);
 
   let hasCustomAssemblyFormat = 1;

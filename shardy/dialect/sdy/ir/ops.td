@@ -70,10 +70,10 @@ def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
   }];
 
   let arguments = (ins
-    AnyShaped:$input,
+    AnyType:$input,
     Sdy_TensorSharding:$sharding);
 
-  let results = (outs AnyShaped:$result);
+  let results = (outs AnyType:$result);
 
   let assemblyFormat = "$input $sharding attr-dict `:` type($result)";
 }
@@ -97,10 +97,10 @@ def Sdy_ReshardOp : Sdy_Op<"reshard",
   }];
 
   let arguments = (ins
-    AnyShaped:$input,
+    AnyType:$input,
     Sdy_TensorSharding:$sharding);
 
-  let results = (outs AnyShaped:$result);
+  let results = (outs AnyType:$result);
 
   let assemblyFormat = "$input $sharding attr-dict `:` type($result)";
   let hasCanonicalizer = 1;

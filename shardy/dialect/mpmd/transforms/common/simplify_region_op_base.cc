@@ -188,8 +188,12 @@ LogicalResult SimplifyRegionOp(Operation* op, PatternRewriter& rewriter,
 
   // If all results must be erased, we erase the op.
   if (erase_results.all()) {
-    rewriter.eraseOp(op);
-    return success();
+    // Only erase if the op (and all nested ops) are truly side-effect-free.
+    if (isPure(op)) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    return failure();
   }
 
   if (erase_operands.none() && erase_results.none()) {

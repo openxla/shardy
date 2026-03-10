@@ -116,12 +116,20 @@ OpShardingRuleBuilder::OpShardingRuleBuilder(
   resultMappings.reserve(resultTypes.size());
   int64_t maxRank = 0;
   for (Type operandType : operandTypes) {
-    int64_t rank = cast<ShapedType>(operandType).getRank();
+    // Non-shaped types (e.g. tokens) have rank 0.
+    int64_t rank = 0;
+    if (auto shapedType = dyn_cast<ShapedType>(operandType)) {
+      rank = shapedType.getRank();
+    }
     maxRank = std::max(maxRank, rank);
     operandMappings.push_back(TensorMapping(rank));
   }
   for (Type resultType : resultTypes) {
-    int64_t rank = cast<ShapedType>(resultType).getRank();
+    // Non-shaped types (e.g. tokens) have rank 0.
+    int64_t rank = 0;
+    if (auto shapedType = dyn_cast<ShapedType>(resultType)) {
+      rank = shapedType.getRank();
+    }
     maxRank = std::max(maxRank, rank);
     resultMappings.push_back(TensorMapping(rank));
   }
@@ -154,9 +162,13 @@ OpShardingRuleAttr OpShardingRuleBuilder::build() {
 }
 
 OpShardingRuleAttr OpShardingRuleBuilder::buildPointwise(Operation* op) {
+  // Non-shaped types (e.g. tokens) have no pointwise sharding rule.
+  auto shapedType = dyn_cast<ShapedType>(op->getResultTypes().front());
+  if (!shapedType) {
+    return OpShardingRuleAttr();
+  }
   // All results should have the same shape, so we look at the first.
-  ArrayRef<int64_t> shape =
-      cast<ShapedType>(op->getResultTypes().front()).getShape();
+  ArrayRef<int64_t> shape = shapedType.getShape();
 
   OpShardingRuleBuilder builder(op);
 

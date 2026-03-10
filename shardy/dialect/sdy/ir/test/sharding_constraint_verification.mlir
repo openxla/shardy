@@ -33,3 +33,16 @@ func.func @constraint_replication_inside_bound_manual_computation(%arg0: tensor<
   } : (tensor<16x32xf32>) -> tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// ShardingConstraintOp accepts tokens, but tokens have no dimensions, so only
+// rank-0 shardings (with no replicated/unreduced axes) are valid. Verify that a
+// non-rank-0 sharding on a token is rejected.
+func.func @token_sharding_constraint_rank_mismatch(%arg0: !stablehlo.token) -> !stablehlo.token {
+  // expected-error @+1 {{non-shaped tensors can only have a sharding with rank 0 and no replicated or unreduced axes}}
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}]> : !stablehlo.token
+  return %0 : !stablehlo.token
+}
