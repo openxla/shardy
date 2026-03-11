@@ -41,6 +41,7 @@ limitations under the License.
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/macros.h"
 
 namespace mlir {
 namespace sdy {
@@ -564,8 +565,16 @@ bool isUsedBy(Value value, Operation* user);
 
 // Returns the largest prefix of `axisRef` that does not overlap with any axes
 // in `otherAxisRefs`.
-std::optional<AxisRefAttr> getPrefixWithoutOverlap(
-    AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs);
+template <typename Range>
+std::optional<AxisRefAttr> getPrefixWithoutOverlap(AxisRefAttr axisRef,
+                                                   const Range& otherAxisRefs) {
+  AxisRefAttr result = axisRef;
+  for (AxisRefAttr otherAxisRef : otherAxisRefs) {
+    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
+        result, result.getPrefixWithoutOverlap(otherAxisRef));
+  }
+  return result;
+}
 
 // For each axis in `axes`, remove the axis and the following ones if they
 // overlap with any axes in `otherAxisRefs`.

@@ -166,14 +166,6 @@ class AxisListRef {
   // Creates an AxisListRef with given `axisRefs` and `tailAxisRef`.
   AxisListRef(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
       : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
-  // Returns prefix of input `axisRef` that does not overlap with this axes.
-  // TODO(enver): Move this method to utilities.
-  // TODO(enver): Instead make this a method of AxisRefAttr, after moving
-  // AxesWithTail to a general data structure in Shardy.
-  // TODO(enver): Reuse getPrefixWithoutOverlap method in
-  // shardy/dialect/sdy/ir/utils.h, after an iterator is added.
-  std::optional<AxisRefAttr> getPrefixOfInputWithoutOverlap(
-      AxisRefAttr axisRef) const;
 
   // Trims axes to have the first `newSizeExcludingNewTail` axes and, in case
   // non-empty, `newTailAxisRef` as an additional final axis.

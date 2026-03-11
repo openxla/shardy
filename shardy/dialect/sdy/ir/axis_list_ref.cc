@@ -25,6 +25,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/macros.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -93,19 +94,9 @@ void AxisListRef::trim(int64_t newSizeExcludingNewTail,
   }
 }
 
-std::optional<AxisRefAttr> AxisListRef::getPrefixOfInputWithoutOverlap(
-    AxisRefAttr axisRef) const {
-  AxisRefAttr prefixAxisRef = axisRef;
-  for (AxisRefAttr againstAxisRef : *this) {
-    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
-        prefixAxisRef, prefixAxisRef.getPrefixWithoutOverlap(againstAxisRef));
-  }
-  return prefixAxisRef;
-}
-
 bool AxisListRef::truncateWithoutOverlap(const AxisListRef& rhs) {
   for (const auto [axisRefIndex, axisRef] : llvm::enumerate(*this)) {
-    if (auto prefixAxisRef = rhs.getPrefixOfInputWithoutOverlap(axisRef);
+    if (auto prefixAxisRef = getPrefixWithoutOverlap(axisRef, rhs);
         prefixAxisRef != axisRef) {
       trim(axisRefIndex, prefixAxisRef);
       return true;

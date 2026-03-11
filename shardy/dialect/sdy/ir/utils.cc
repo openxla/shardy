@@ -637,16 +637,6 @@ bool isUsedBy(Value value, Operation* user) {
   });
 }
 
-// TODO(enver): Use it in AxisListRef methods.
-std::optional<AxisRefAttr> getPrefixWithoutOverlap(
-    AxisRefAttr axisRef, ArrayRef<AxisRefAttr> otherAxisRefs) {
-  AxisRefAttr result = axisRef;
-  for (AxisRefAttr otherAxisRef : otherAxisRefs) {
-    SDY_ASSIGN_OR_RETURN_IF_NULLOPT(
-        result, result.getPrefixWithoutOverlap(otherAxisRef));
-  }
-  return result;
-}
 
 void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
                                     ArrayRef<AxisRefAttr> otherAxisRefs) {
