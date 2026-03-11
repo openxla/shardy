@@ -72,6 +72,31 @@ bool hasShardedPermutationFactors(
                       });
 }
 
+// Returns the common axes if all operands and results have the same sharding at
+// `factorIndex`. A tensor is ignored if it does not contain the factor.
+// Otherwise, returns std::nullopt.
+std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
+    const ShardingProjection& shardingProjection, int64_t factorIndex) {
+  std::optional<ArrayRef<AxisRefAttr>> compatibleSharding;
+  bool factorSeen = false;
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(), shardingProjection.getResults())) {
+    if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
+            getFactorSharding(tensorFactorSharding, factorIndex)) {
+      if (factorSeen) {
+        if (compatibleSharding != factorSharding) {
+          return std::nullopt;
+        }
+      } else {
+        compatibleSharding = *factorSharding;
+        factorSeen = true;
+      }
+    }
+  }
+  return compatibleSharding.value_or(ArrayRef<AxisRefAttr>());
+}
+
 // Returns the common axes per factor if the factor sharding is compatible.
 // Otherwise, returns empty AxesPerFactor.
 //
@@ -86,31 +111,29 @@ AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule) {
   AxesPerFactor commonAxesPerFactor(shardingRule.getNumFactors());
-  BitVector seenFactors(shardingRule.getNumFactors());
   SmallVector<AxisRefAttr> seenAxisRefs;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    for (const auto& [factorIndex, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      // Factors that need replication should be unsharded to be compatible.
-      if (shardingRule.isNeedReplicationFactor(factorIndex)) {
-        if (!factorSharding.axisRefs.empty()) {
-          return {};
-        }
-        continue;
-      }
-      if (!seenFactors.test(factorIndex)) {
-        if (overlaps(factorSharding.axisRefs, seenAxisRefs)) {
-          return {};
-        }
-        commonAxesPerFactor[factorIndex] = factorSharding.axisRefs;
-        seenAxisRefs.append(factorSharding.axisRefs);
-        seenFactors.set(factorIndex);
-      } else if (factorSharding.axisRefs != commonAxesPerFactor[factorIndex]) {
+  for (int64_t factorIndex = 0; factorIndex < shardingRule.getNumFactors();
+       ++factorIndex) {
+    std::optional<ArrayRef<AxisRefAttr>> compatibleSharding =
+        getCompatibleFactorSharding(shardingProjection, factorIndex);
+    if (!compatibleSharding) {
+      return {};
+    }
+
+    // Factors that need replication should be unsharded to be compatible.
+    if (shardingRule.isNeedReplicationFactor(factorIndex)) {
+      if (!compatibleSharding->empty()) {
         return {};
       }
+      continue;
     }
+
+    if (overlaps(*compatibleSharding, seenAxisRefs)) {
+      return {};
+    }
+
+    commonAxesPerFactor[factorIndex] = llvm::to_vector(*compatibleSharding);
+    seenAxisRefs.append(compatibleSharding->begin(), compatibleSharding->end());
   }
 
   return commonAxesPerFactor;
@@ -740,10 +763,10 @@ namespace {
 // Returns reduction axes that are the union of all axes on reduction factors.
 // The result axes are not necessarily canonicalized.
 //
-// Returns empty axes if not `onFullVersion` and op results do not have
-// unreduced axes.
+// If `onFullVersion` is true, assumes `commonAxesPerFactor` is not empty.
 //
-// Assumes `commonAxesPerFactor` is non-empty if `onFullVersion` is true.
+// If `onFullVersion` is false and op results do not have unreduced axes,
+// returns empty axes.
 //
 // Hard fails if some reduction factors do not have compatible shardings.
 SmallVector<AxisRefAttr> getReductionAxes(
@@ -762,29 +785,16 @@ SmallVector<AxisRefAttr> getReductionAxes(
     return {};
   }
 
-  // TODO(enver): Repurpose getCompatibleFactorShardings to return compatible
-  // factors, and simplify the following logic.
   SmallVector<AxisRefAttr> axesAlongAllReductionFactors;
   for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-    // We only iterate operands since reduction factors are not in results.
-    bool seen = false;
-    SmallVector<AxisRefAttr> axesAlongCurrentReductionFactor;
-    for (const TensorFactorShardings& tensorFactorSharding :
-         shardingProjection.getOperands()) {
-      if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
-              getFactorSharding(tensorFactorSharding, reductionFactor)) {
-        if (seen) {
-          SDY_CHECK(axesAlongCurrentReductionFactor == *factorSharding)
-              << "For the operation " << op
-              << ", the result has unreduced axes while the operand has "
-                 "incompatible sharding along reduction factors.";
-        } else {
-          axesAlongCurrentReductionFactor = llvm::to_vector(*factorSharding);
-          seen = true;
-        }
-      }
-    }
-    axesAlongAllReductionFactors.append(axesAlongCurrentReductionFactor);
+    std::optional<ArrayRef<AxisRefAttr>> factorSharding =
+        getCompatibleFactorSharding(shardingProjection, reductionFactor);
+    SDY_CHECK(factorSharding)
+        << "For the operation " << op
+        << ", the result has unreduced axes while the operand has "
+           "incompatible sharding along reduction factors.";
+    axesAlongAllReductionFactors.append(factorSharding->begin(),
+                                        factorSharding->end());
   }
   return axesAlongAllReductionFactors;
 }
