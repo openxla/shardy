@@ -135,7 +135,8 @@ def _named_computation(
     flat_args, in_tree = tree_util.tree_flatten((dyn_args, dyn_kwargs))
     flat_fun, out_tree = api_util.flatten_fun(fun, in_tree)
     out_flat = named_computation_p.bind(
-        flat_fun, *flat_args, name=name, transpose_count=transpose_count
+        *flat_args, subfuns=(flat_fun,), name=name,
+        transpose_count=transpose_count
     )
     return tree_util.tree_unflatten(out_tree(), out_flat)
 
@@ -294,7 +295,7 @@ def _register_named_computation_primitive():
   """Registers named_computation primitive and a JAX CallPrimitive."""
   primitive = jax.core.CallPrimitive('named_computation')
   # Makes it possible to execute eagerly.
-  primitive.def_impl(jax.core.call)
+  primitive.def_impl(jax.core.call_impl)
 
   def custom_call_transpose(params, *rest, primitive=primitive):
     new_params = dict(params)
