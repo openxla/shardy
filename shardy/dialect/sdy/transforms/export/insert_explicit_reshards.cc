@@ -419,18 +419,12 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
                         OpShardingRuleAttr shardingRule, MeshOp meshOp,
                         const bool onFullVersion) {
   // Checks if factors are sharded the same way across operands and results.
-
-  // TODO(b/446833985): Return common axes per factor also when the sharding
-  // projection have overflow axes.
   if (onFullVersion) {
+    UpdateTensorShardings updateTensorShardings =
+        shardingProjection.tensorsContainOverflowAxes();
     AxesPerFactor commonAxesPerFactor = findCommonAxes(
         shardingProjection, shardingRule, getTensorSizes(op), meshOp);
-
-    UpdateTensorShardings updateTensorShardings(shardingRule.getNumOperands(),
-                                                shardingRule.getNumResults());
     for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
-      // TODO(enver): Add unit tests to test overflow axes are cleared after
-      // handling the case that some factors have overflow axes.
       updateTensorShardings |=
           shardingProjection.updateSharding(index, axes, /*overflowAxes=*/{});
     }
@@ -516,12 +510,6 @@ struct InsertExplicitReshardsPass
       ShardingProjection shardingProjection = ShardingProjection::build(
           inShardings, outShardings, shardingRule, meshOp->getMesh(),
           /*closedIfMissing=*/true);
-      // Return without inserting reshards if any factor sharding has overflow
-      // axes. This case is not handled yet.
-      // TODO(enver): Handle the case when factor shardings have overflow axes.
-      if (hasOverflowAxes(shardingProjection)) {
-        return;
-      }
       AxesPerFactor commonAxesPerFactor =
           processOp(op, shardingProjection, inShardings, outShardings, rewriter,
                     symbolTable, shardingRule, *meshOp, onFullVersion);

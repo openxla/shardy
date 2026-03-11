@@ -68,9 +68,6 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value);
 // Returns a concatenated array of operand and result tensor sizes.
 SmallVector<int64_t> getTensorSizes(Operation* op);
 
-// Returns true iff any tensor factor sharding has non-empty overflow axes.
-bool hasOverflowAxes(const ShardingProjection& shardingProjection);
-
 // Insert explicit reshards for operands and results that change by
 // the given `shardingProjection` for a given `op`. The reshards are inserted
 // only to make the given operation compatible.
@@ -104,7 +101,6 @@ bool hasOverflowAxes(const ShardingProjection& shardingProjection);
 // stablehlo.negate op remained unchanged.
 //
 // Assumes factor shardings do not have overflow axes.
-// TODO(enver): Handle the case when some factor shardings have overflow axes.
 //
 // Assumes all tensor shardings have the same mesh as `mesh` on axes but may be
 // different on device order.

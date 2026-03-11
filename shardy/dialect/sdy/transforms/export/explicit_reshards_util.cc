@@ -45,20 +45,6 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-bool hasOverflowAxes(const ShardingProjection& shardingProjection) {
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    for (const auto& [_, factorSharding] :
-         tensorFactorSharding.factorIndexToSharding) {
-      if (!factorSharding.overflowAxes.empty()) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 namespace {
 bool hasShardedPermutationFactors(
     const TensorFactorShardings& tensorFactorSharding,
@@ -106,7 +92,6 @@ std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
 // 3. There is no overlap between the sharding axes across different factors.
 //
 // Assumes factor shardings do not have overflow axes.
-// TODO(enver): Handle the case when some factor shardings have overflow axes.
 AxesPerFactor getCompatibleFactorShardings(
     const ShardingProjection& shardingProjection,
     OpShardingRuleAttr shardingRule) {

@@ -462,5 +462,27 @@ AxesPerFactor ShardingProjection::getGreatestCommonPrefixAxes(
   return factorAxisRefs;
 }
 
+UpdateTensorShardings ShardingProjection::tensorsContainOverflowAxes() const {
+  UpdateTensorShardings updateTensorShardings(getNumOperands(),
+                                              getNumResults());
+
+  for (const auto& [i, tensorFactorSharding] : llvm::enumerate(operands)) {
+    for (const auto& [_, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      updateTensorShardings.updateOperands[i] =
+          !factorSharding.overflowAxes.empty();
+    }
+  }
+  for (const auto& [i, tensorFactorSharding] : llvm::enumerate(results)) {
+    for (const auto& [_, factorSharding] :
+         tensorFactorSharding.factorIndexToSharding) {
+      updateTensorShardings.updateResults[i] =
+          !factorSharding.overflowAxes.empty();
+    }
+  }
+
+  return updateTensorShardings;
+}
+
 }  // namespace sdy
 }  // namespace mlir

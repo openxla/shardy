@@ -108,8 +108,7 @@ struct TensorFactorShardings {
                           ArrayRef<AxisRefAttr> newOverflowAxes);
 
   // Creates a `TensorShardingAttr` by projecting the factor shardings in
-  // this `TensorFactorShardings` to dimension shardings w.r.t. to
-  // `tensorMapping`.
+  // this `TensorFactorShardings` to dimension shardings w.r.t. `tensorMapping`.
   //
   // Ignores sharding of any factor that needs strided view.
   TensorShardingAttr createTensorShardingAttr(MLIRContext* ctx,
@@ -266,6 +265,10 @@ class ShardingProjection {
   // factor sharding, for the corresponding factor, as the greatest common
   // prefix of factor shardings across all operands and results.
   AxesPerFactor getGreatestCommonPrefixAxes(int64_t numFactors) const;
+
+  // Returns an `UpdateTensorShardings` indicating whether operands and results
+  // contain overflow axes.
+  UpdateTensorShardings tensorsContainOverflowAxes() const;
 
  private:
   SmallVector<TensorFactorShardings> operands;

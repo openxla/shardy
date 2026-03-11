@@ -361,4 +361,36 @@ func.func @reshape_size_1_dimensions_2(
   return %0 : tensor<4x1xi32>
 }
 
-// TODO(enver): Add a unit test for overflow axes on reshapes.
+// CHECK-LABEL: func @reshape_overflow_axes_split_shape
+func.func @reshape_overflow_axes_split_shape(
+    %arg0: tensor<12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}]>})
+    -> (tensor<6x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // CHECK: %0 = sdy.reshard %arg0 <@mesh, [{"x":(1)2}]> : tensor<12xf32>
+  // CHECK-NEXT: %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}, {}]>]>} : (tensor<12xf32>) -> tensor<6x2xf32>
+  // CHECK-NEXT: %2 = sdy.reshard %1 <@mesh, [{}, {}]> : tensor<6x2xf32>
+  // CHECK-NEXT: return %2 : tensor<6x2xf32>
+  %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<12xf32>) -> tensor<6x2xf32>
+  return %0 : tensor<6x2xf32>
+}
+
+// CHECK-LABEL: func @reshape_overflow_axes_merge_shape
+func.func @reshape_overflow_axes_merge_shape(
+    %arg0: tensor<6x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+    -> (tensor<12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}]>}) {
+  // CHECK: %0 = sdy.reshard %arg0 <@mesh, [{"x":(1)2}, {}]> : tensor<6x2xf32>
+  // CHECK-NEXT: %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}]>]>} : (tensor<6x2xf32>) -> tensor<12xf32>
+  // CHECK-NEXT: %2 = sdy.reshard %1 <@mesh, [{"x", "y"}]> : tensor<12xf32>
+  // CHECK-NEXT: return %2 : tensor<12xf32>
+  %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x", "y"}]>]>} : (tensor<6x2xf32>) -> tensor<12xf32>
+  return %0 : tensor<12xf32>
+}
+
+// CHECK-LABEL: func @reshape_no_overflow_axes
+func.func @reshape_no_overflow_axes(
+    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}]>})
+    -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) {
+  // CHECK: %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<16xf32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: return %0 : tensor<4x4xf32>
+  %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<16xf32>) -> tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}
