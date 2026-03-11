@@ -1,5 +1,7 @@
 // RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s
 
+// CHECK: sdy.mesh @mesh_4 = <["x"=4]>
+sdy.mesh @mesh_4 = <["x"=4]>
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 // CHECK: sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
@@ -67,4 +69,34 @@ func.func @nested_manual_computations(%arg0: tensor<16x32xf32> {sdy.sharding = #
   } : (tensor<16x32xf32>) -> tensor<16x32xf32>
   // CHECK-NEXT: return %[[ADD]] : tensor<4x8xf32>
   return %0 : tensor<16x32xf32>
+}
+
+// CHECK-LABEL: func @stablehlo_all_reduce
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>})
+// CHECK-SAME: -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}, {}]>}) {
+func.func @stablehlo_all_reduce(%arg0 : tensor<64x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>})
+  -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}, {}]>}) {
+  %0 = sdy.manual_computation(%arg0)
+    in_shardings=[<@mesh_4, [{"x"}, {}]>]
+    out_shardings=[<@mesh_4, [{}, {}]>]
+    manual_axes={"x"}
+    (%arg1: tensor<16x8xf32>) {
+      // CHECK-NEXT: %[[RES:.*]] = "stablehlo.all_reduce"(%[[ARG0]]) <{
+      // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3]]> : tensor<1x4xi64>
+      // CHECK-SAME: }> ({
+      // CHECK-NEXT: ^bb0(%[[RED_ARG1:.*]]: tensor<f32>, %[[RED_ARG2:.*]]: tensor<f32>):
+      // CHECK-NEXT:   %[[SUM:.*]] = stablehlo.add %[[RED_ARG1]], %[[RED_ARG2]] : tensor<f32>
+      // CHECK-NEXT:   stablehlo.return %[[SUM]] : tensor<f32>
+      // CHECK-NEXT: }) : (tensor<16x8xf32>) -> tensor<16x8xf32>
+      %1 = "stablehlo.all_reduce"(%arg1) ({
+        ^bb0(%arg2: tensor<f32>, %arg3: tensor<f32>):
+          %2 = stablehlo.add %arg2, %arg3 : tensor<f32>
+          stablehlo.return %2 : tensor<f32>
+      }) {
+        replica_groups = dense<[[0, 1, 2, 3]]> : tensor<1x4xi64>
+      } : (tensor<16x8xf32>) -> tensor<16x8xf32>
+      sdy.return %1 : tensor<16x8xf32>
+  } : (tensor<64x8xf32>) -> (tensor<16x8xf32>)
+  // CHECK-NEXT: return %[[RES]] : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
 }

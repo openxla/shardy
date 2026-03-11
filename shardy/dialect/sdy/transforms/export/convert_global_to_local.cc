@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -179,9 +180,27 @@ class GenericOpPattern : public ConversionPattern {
     llvm::transform(
         op->getResults(), std::back_inserter(newResultTypes),
         [&](Value result) { return typeConverter->convertType(result); });
-    Operation* newOp =
-        rewriter.create(op->getLoc(), op->getName().getIdentifier(), operands,
-                        newResultTypes, op->getAttrs(), op->getSuccessors());
+
+    // Use OperationState to copy all properties including nested regions.
+    OperationState state(op->getLoc(), op->getName());
+    state.addOperands(operands);
+    state.addTypes(newResultTypes);
+    state.addAttributes(op->getAttrs());
+    state.addSuccessors(op->getSuccessors());
+    for (int i = 0; i < op->getNumRegions(); ++i) {
+      state.addRegion();
+    }
+    Operation* newOp = rewriter.create(state);
+
+    // Move the regions from the old operation to the new one, assuming the
+    // region signatures remain unchanged, such as the regions for
+    // stablehlo.all_reduce or stablehlo.reduce. For regions that require
+    // special handling, they should be handled by specific patterns.
+    for (auto [oldRegion, newRegion] :
+         llvm::zip(op->getRegions(), newOp->getRegions())) {
+      rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
+    }
+
     rewriter.replaceOp(op, newOp->getResults());
     conversionState.removeToConvertOp(op);
     return success();
