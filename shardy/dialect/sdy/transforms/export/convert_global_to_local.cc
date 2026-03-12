@@ -16,6 +16,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <numeric>
 #include <optional>
@@ -455,7 +456,7 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
 };
 
 Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
-                              ArrayRef<ArrayRef<AxisRefAttr>> slicingAxesPerDim,
+                              ArrayRef<AxisRefListAttr> slicingAxesPerDim,
                               RankedTensorType localResultType,
                               ConversionPatternRewriter& rewriter) {
   int64_t numDevices = mesh.getTotalSize();
@@ -471,7 +472,7 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
   SmallVector<Value> startIndices;
   startIndices.reserve(localResultType.getRank());
   for (int64_t i = 0; i < localResultType.getRank(); ++i) {
-    ArrayRef<AxisRefAttr> axes = slicingAxesPerDim[i];
+    ArrayRef<AxisRefAttr> axes = slicingAxesPerDim[i].getValue();
     if (axes.empty()) {
       startIndices.push_back(stablehlo::ConstantOp::create(
           rewriter, loc,
@@ -539,15 +540,11 @@ class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
 
     RankedTensorType localResultType =
         cast<RankedTensorType>(converter->convertType(op));
-    SmallVector<ArrayRef<AxisRefAttr>> slicingAxesPerDim;
-    slicingAxesPerDim.reserve(localResultType.getRank());
-    for (AxisRefListAttr axisList : op.getSlicingAxes()) {
-      slicingAxesPerDim.push_back(axisList.getValue());
-    }
 
-    rewriter.replaceOp(op, emitDynamicSliceForAxes(loc, adaptor.getTensor(),
-                                                   mesh, slicingAxesPerDim,
-                                                   localResultType, rewriter));
+    rewriter.replaceOp(
+        op, emitDynamicSliceForAxes(loc, adaptor.getTensor(), mesh,
+                                    op.getSlicingAxesAttr(), localResultType,
+                                    rewriter));
     conversionState.removeToConvertOp(op);
 
     return success();
@@ -916,11 +913,13 @@ class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
     auto globalConst =
         stablehlo::ConstantOp::create(rewriter, loc, globalType, elementsAttr);
 
-    SmallVector<ArrayRef<AxisRefAttr>> slicingAxesPerDim;
+    SmallVector<AxisRefListAttr> slicingAxesPerDim;
     slicingAxesPerDim.reserve(localType.getRank());
     for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
-      slicingAxesPerDim.push_back(dimSharding.getAxes());
+      slicingAxesPerDim.push_back(
+          AxisRefListAttr::get(op.getContext(), dimSharding.getAxes()));
     }
+
     rewriter.replaceOp(
         op, emitDynamicSliceForAxes(loc, globalConst, mesh, slicingAxesPerDim,
                                     localType, rewriter));
@@ -975,6 +974,218 @@ class ManualComputationOpPattern
 
  private:
   ConversionState& conversionState;
+};
+
+class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
+ public:
+  ReduceScatterOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                         ConversionState& state,
+                         bool combineMultiDimensionReduceScatter)
+      : OpConversionPattern<ReduceScatterOp>(converter, ctx),
+        conversionState(state),
+        combineMultiDimensionReduceScatter(combineMultiDimensionReduceScatter) {
+  }
+
+  LogicalResult rewriteReduceScatterOneDim(
+      ReduceScatterOp op, Value input, int64_t scatterDim, AxisRefListAttr axes,
+      MeshAttr mesh, ConversionPatternRewriter& rewriter) const {
+    Location loc = op.getLoc();
+    auto inputType = cast<RankedTensorType>(input.getType());
+    const auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    auto localResultType = cast<RankedTensorType>(converter->convertType(op));
+
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        op->getContext(), conversionState.getNextChannelId(), /*type=*/1);
+    DenseIntElementsAttr replicaGroups = getReplicaGroups(axes, mesh, rewriter);
+
+    auto reduceScatter = stablehlo::ReduceScatterOp::create(
+        rewriter, loc, localResultType, input, scatterDim, replicaGroups,
+        channelHandle, /*use_global_device_ids=*/true);
+    stablehlo::buildReduceBody<stablehlo::AddOp>(
+        inputType.getElementType(), reduceScatter.getComputation(), rewriter);
+
+    rewriter.replaceOp(op, reduceScatter.getResult());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+  LogicalResult rewriteReduceScatterCombiningMultipleDims(
+      ReduceScatterOp op, Value input, MeshAttr mesh,
+      ArrayRef<AxisRefListAttr> slicingAxesPerDim,
+      ArrayRef<AxisRefAttr> allReduceAxes,
+      ConversionPatternRewriter& rewriter) const {
+    Location loc = op.getLoc();
+    auto inputType = cast<RankedTensorType>(input.getType());
+    ArrayRef<int64_t> inputShape = inputType.getShape();
+    int64_t rank = inputShape.size();
+    const auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    auto localResultType = cast<RankedTensorType>(converter->convertType(op));
+
+    // Identify the scattering dimensions and calculate their factors.
+    SmallVector<int64_t> scatteredDims;
+    SmallVector<int64_t> scatteredFactors;
+    for (int64_t i = 0; i < rank; ++i) {
+      if (!slicingAxesPerDim[i].empty()) {
+        scatteredDims.push_back(i);
+        scatteredFactors.push_back(
+            getTotalAxesSize(slicingAxesPerDim[i], mesh));
+      }
+    }
+
+    // Reshape to split each scattered dimension into (factor, quotient).
+    SmallVector<int64_t> splitShape;
+    // Maps the original dimension index to the index of its 'factor' sub-dim in
+    // splitShape.
+    SmallVector<int64_t> factorDimIndices;
+    for (int64_t i = 0; i < rank; ++i) {
+      auto* it = llvm::find(scatteredDims, i);
+      if (it == scatteredDims.end()) {
+        splitShape.push_back(inputShape[i]);
+      }
+      int64_t factor =
+          scatteredFactors[std::distance(scatteredDims.begin(), it)];
+      factorDimIndices.push_back(splitShape.size());
+      splitShape.push_back(factor);
+      if (inputShape[i] == ShapedType::kDynamic ||
+          inputShape[i] % factor != 0) {
+        return op.emitOpError("dimension not divisible by scattering factor");
+      }
+      splitShape.push_back(inputShape[i] / factor);
+    }
+    Value curInput = stablehlo::ReshapeOp::create(
+        rewriter, loc,
+        RankedTensorType::get(splitShape, inputType.getElementType()), input);
+
+    // Transpose to move all scattering factor dimensions to the front.
+    SmallVector<int64_t> permutation = factorDimIndices;
+    for (int64_t i = 0; i < static_cast<int64_t>(splitShape.size()); ++i) {
+      if (!llvm::is_contained(factorDimIndices, i)) {
+        permutation.push_back(i);
+      }
+    }
+    curInput = stablehlo::TransposeOp::create(
+        rewriter, loc, curInput, rewriter.getDenseI64ArrayAttr(permutation));
+
+    // Reshape to combine all factor dimensions into a single leading dimension
+    // 0.
+    int64_t totalFactor =
+        llvm::accumulate(scatteredFactors, 1, std::multiplies<int64_t>());
+    SmallVector<int64_t> combinedShape = {totalFactor};
+    llvm::append_range(combinedShape, localResultType.getShape());
+    curInput = stablehlo::ReshapeOp::create(
+        rewriter, loc,
+        RankedTensorType::get(combinedShape, inputType.getElementType()),
+        curInput);
+
+    // Perform one stablehlo.reduce_scatter on dimension 0.
+    DenseIntElementsAttr replicaGroups = getReplicaGroups(
+        AxisRefListAttr::get(rewriter.getContext(), allReduceAxes), mesh,
+        rewriter);
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        op->getContext(), conversionState.getNextChannelId(), /*type=*/1);
+
+    // The result of the reduce-scatter will have dimension 0 reduced to size 1.
+    combinedShape[0] = 1;
+    auto rsType =
+        RankedTensorType::get(combinedShape, inputType.getElementType());
+    auto reduceScatter = stablehlo::ReduceScatterOp::create(
+        rewriter, loc, rsType, curInput, /*scatter_dimension=*/0, replicaGroups,
+        channelHandle, /*use_global_device_ids=*/true);
+    stablehlo::buildReduceBody<stablehlo::AddOp>(
+        inputType.getElementType(), reduceScatter.getComputation(), rewriter);
+
+    // Reshape to remove the leading dimension of size 1, matching the final
+    // local shape.
+    rewriter.replaceOp(
+        op, stablehlo::ReshapeOp::create(rewriter, loc, localResultType,
+                                         reduceScatter.getResult()));
+    conversionState.removeToConvertOp(op);
+
+    return success();
+  }
+
+  LogicalResult rewriteReduceScatterWithAllReduceAndDynamicSlice(
+      ReduceScatterOp op, Value input, MeshAttr mesh,
+      ArrayRef<AxisRefListAttr> slicingAxesPerDim,
+      ArrayRef<AxisRefAttr> allReduceAxes,
+      ConversionPatternRewriter& rewriter) const {
+    Location loc = op.getLoc();
+    auto inputType = cast<RankedTensorType>(input.getType());
+    const auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    auto localResultType = cast<RankedTensorType>(converter->convertType(op));
+
+    // Perform one All-Reduce across all involved axes.
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        op->getContext(), conversionState.getNextChannelId(), /*type=*/1);
+    DenseIntElementsAttr replicaGroups = getReplicaGroups(
+        AxisRefListAttr::get(rewriter.getContext(), allReduceAxes), mesh,
+        rewriter);
+
+    auto allReduce = stablehlo::AllReduceOp::create(
+        rewriter, loc, inputType, input, replicaGroups, channelHandle,
+        /*use_global_device_ids=*/true);
+    stablehlo::buildReduceBody<stablehlo::AddOp>(
+        inputType.getElementType(), allReduce.getComputation(), rewriter);
+
+    // Perform the "Scatter" part using a multi-dimensional DynamicSlice.
+    Value localPiece =
+        emitDynamicSliceForAxes(loc, allReduce.getResult(0), mesh,
+                                slicingAxesPerDim, localResultType, rewriter);
+
+    rewriter.replaceOp(op, localPiece);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+  LogicalResult matchAndRewrite(
+      ReduceScatterOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    MeshAttr mesh = converter->getSharding(op.getTensor()).getMesh(symbolTable);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    // Collect axes and count dimensions involved in the scatter.
+    SmallVector<AxisRefAttr> allReduceAxes;
+    int64_t lastSlicingDim;
+    int64_t numSlicingDims = 0;
+    for (auto [dim, axesList] : llvm::enumerate(op.getReduceScatterAxes())) {
+      if (!axesList.empty()) {
+        lastSlicingDim = dim;
+        numSlicingDims++;
+        allReduceAxes.append(axesList.getValue().begin(),
+                             axesList.getValue().end());
+      }
+    }
+
+    SDY_CHECK(numSlicingDims > 0)
+        << "Shardy should have canonicalized no-op reduce-scatter.";
+
+    if (numSlicingDims == 1) {
+      return rewriteReduceScatterOneDim(
+          op, adaptor.getTensor(), lastSlicingDim,
+          cast<AxisRefListAttr>(op.getReduceScatterAxes()[lastSlicingDim]),
+          mesh, rewriter);
+    }
+    if (combineMultiDimensionReduceScatter) {
+      return rewriteReduceScatterCombiningMultipleDims(
+          op, adaptor.getTensor(), mesh, op.getReduceScatterAxesAttr(),
+          allReduceAxes, rewriter);
+    }
+    return rewriteReduceScatterWithAllReduceAndDynamicSlice(
+        op, adaptor.getTensor(), mesh, op.getReduceScatterAxesAttr(),
+        allReduceAxes, rewriter);
+  }
+
+ private:
+  ConversionState& conversionState;
+  bool combineMultiDimensionReduceScatter;
 };
 
 // This pass converts a Shardy module with consistent sharding notations and
@@ -1039,6 +1250,9 @@ struct ConvertGlobalToLocalPass
             typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimensionAllGather);
+    patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
+                                         conversionState,
+                                         combineMultiDimensionReduceScatter);
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(

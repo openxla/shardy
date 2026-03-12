@@ -238,5 +238,8 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
       Option<"perDimensionAllGather", "per-dimension-all-gather",
             "bool", /*default=*/"false",
             "Keep per-dimension all-gather without combining them into a single all-gather.">,
+      Option<"combineMultiDimensionReduceScatter", "combine-multi-dimensions-reduce-scatter",
+            "bool", /*default=*/"false",
+            "Combine multi-dimension reduce-scatter into a single reduce-scatter.">,
     ];
 }
