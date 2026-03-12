@@ -40,6 +40,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/macros.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "stablehlo/dialect/AssemblyFormat.h"
 
@@ -236,24 +237,23 @@ FailureOr<int64_t> parseFactorSymbolIndex(AsmParser& parser,
 FailureOr<int64_t> parseFactorSymbolIndex(AsmParser& parser,
                                           StringRef& factorsStr,
                                           int64_t expectedFactorIndex) {
-  FailureOr<int64_t> factorIndex = parseFactorSymbolIndex(parser, factorsStr);
-  if (failed(factorIndex)) {
-    return failure();
-  }
+  int64_t factorIndex;
+  SDY_ASSIGN_OR_RETURN_FAILURE(factorIndex,
+                               parseFactorSymbolIndex(parser, factorsStr));
   // Check the symbol appears in increasing order starting from 0,
   // incrementing by 1 each time. So only `{i=#, j=#, ...}` are accepted.
   // These are all invalid:
   //   - {k=#, i=#, j=#}  // i comes before k
   //   - {m=#, n=#, o=#}  // has to start at i (index 0)
   //   - {i=#, k=#}       // can't skip an index, j (index 1) is missing
-  if (*factorIndex != expectedFactorIndex) {
+  if (factorIndex != expectedFactorIndex) {
     return parser.emitError(
                parser.getCurrentLocation(),
                "expecting factor indices to be ordered like an iota "
                "([0,1,2,...], "
                "e.g. {i=#, j=#, ...}). Expecting factor index symbol '")
            << factorSymbolString(expectedFactorIndex) << "', received: '"
-           << factorSymbolString(*factorIndex) << "'";
+           << factorSymbolString(factorIndex) << "'";
   }
   return factorIndex;
 }
@@ -268,13 +268,10 @@ FailureOr<int64_t> parseFactorSymbolIndex(AsmParser& parser,
 ParseResult parseSymbolIndices(AsmParser& parser, StringRef factorsStr,
                                SmallVector<int64_t>& indices) {
   while (!factorsStr.empty()) {
-    // TODO(bartchr): Add SDY_ASSIGN_OR_RETURN_FAILURE macro for re-returning
-    // failures. Or check if there already is one in MLIR.
-    FailureOr<int64_t> index = parseFactorSymbolIndex(parser, factorsStr);
-    if (failed(index)) {
-      return failure();
-    }
-    indices.push_back(*index);
+    int64_t index;
+    SDY_ASSIGN_OR_RETURN_FAILURE(index,
+                                 parseFactorSymbolIndex(parser, factorsStr));
+    indices.push_back(index);
   }
   return success();
 }
@@ -347,12 +344,10 @@ ParseResult parseFactorsWithType(AsmParser& parser,
     if (parser.parseKeyword(&factorSymbol)) {
       return failure();
     }
-    FailureOr<int64_t> factorIndex =
-        parseFactorSymbolIndex(parser, factorSymbol);
-    if (failed(factorIndex)) {
-      return failure();
-    }
-    factors.push_back(*factorIndex);
+    int64_t factorIndex;
+    SDY_ASSIGN_OR_RETURN_FAILURE(factorIndex,
+                                 parseFactorSymbolIndex(parser, factorSymbol));
+    factors.push_back(factorIndex);
     return success();
   };
 

@@ -21,6 +21,10 @@ limitations under the License.
   SDY_ASSIGN_OR_RETURN_IF_NULLOPT_IMPL(CONCAT_(_expr_result, __LINE__), lhs, \
                                        expr)
 
+// Macro to assign value from FailureOr<T> or return failure.
+#define SDY_ASSIGN_OR_RETURN_FAILURE(lhs, expr) \
+  SDY_ASSIGN_OR_RETURN_FAILURE_IMPL(CONCAT_(_expr_result, __LINE__), lhs, expr)
+
 // =================================================================
 // == Implementation details, do not rely on anything below here. ==
 // =================================================================
@@ -34,5 +38,12 @@ limitations under the License.
     return std::nullopt;                                        \
   }                                                             \
   lhs = std::move(result).value();
+
+#define SDY_ASSIGN_OR_RETURN_FAILURE_IMPL(result, lhs, expr) \
+  auto result = expr;                                        \
+  if (failed(result)) {                                      \
+    return failure();                                        \
+  }                                                          \
+  lhs = std::move(*result);
 
 #endif  // SHARDY_DIALECT_SDY_IR_MACROS_H_
