@@ -167,22 +167,18 @@ class AxisListRef {
   AxisListRef(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
       : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
 
-  // Trims axes to have the first `newSizeExcludingNewTail` axes and, in case
-  // non-empty, `newTailAxisRef` as an additional final axis.
+  // Trims axes to have the first `baseSize` axes and, in case non-empty,
+  // `newTail` as an additional final axis.
   //
-  // As a result, `newSizeExcludingNewTail` is the new size of AxisListRef
-  // excluding `newTailAxisRef`. That is, if `newTailAxisRef` is non-empty then
-  // the new size of AxisListRef equals to `newSizeExcludingNewTail`+1,
-  // otherwise it equals to `newSizeExcludingNewTail`.
+  // As a result, `baseSize` is the new size of AxisListRef excluding `newTail`.
+  // That is, if `newTail` is non-empty then the new size of AxisListRef equals
+  // to `baseSize`+1, otherwise it equals to `baseSize`.
   //
   // Assumes that:
   //  1. `this` AxisListRef is non-empty, and
-  //  2. `newSizeExcludingNewTail` is strictly smaller than size().
-  //  3. Input `newTailAxisRef` is a prefix of the (`newSize`+1)st axis.
-  // TODO(enver): It is a bit confusing to have two 'New' in the name of
-  // `newSizeExcludingNewTail`.
-  void trim(int64_t newSizeExcludingNewTail,
-            std::optional<AxisRefAttr> newTailAxisRef);
+  //  2. `baseSize` is strictly smaller than size().
+  //  3. Input `newTail` is a prefix of the (`baseSize`+1)st axis.
+  void trim(int64_t baseSize, std::optional<AxisRefAttr> newTail);
 
   // `AxisListRef` is the concatenation of `axisRefs` and `tailAxisRef`. If
   // `tailAxisRef` is empty, then `axisRefs` is empty as well.

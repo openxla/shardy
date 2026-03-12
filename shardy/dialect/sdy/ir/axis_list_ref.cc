@@ -79,18 +79,16 @@ void AxisListRef::clear() {
   tailAxisRef = AxisRefAttr();
 }
 
-void AxisListRef::trim(int64_t newSizeExcludingNewTail,
-                       std::optional<AxisRefAttr> newTailAxisRef) {
-  assert(newSizeExcludingNewTail < size() &&
-         "new size is not strictly smaller than size()");
-  if (newTailAxisRef) {
-    axisRefs = axisRefs.take_front(newSizeExcludingNewTail);
-    tailAxisRef = *newTailAxisRef;
-  } else if (newSizeExcludingNewTail == 0) {
+void AxisListRef::trim(int64_t baseSize, std::optional<AxisRefAttr> newTail) {
+  assert(baseSize < size() && "new size is not strictly smaller than size()");
+  if (newTail) {
+    axisRefs = axisRefs.take_front(baseSize);
+    tailAxisRef = *newTail;
+  } else if (baseSize == 0) {
     clear();
   } else {
-    tailAxisRef = axisRefs[newSizeExcludingNewTail - 1];
-    axisRefs = axisRefs.take_front(newSizeExcludingNewTail - 1);
+    tailAxisRef = axisRefs[baseSize - 1];
+    axisRefs = axisRefs.take_front(baseSize - 1);
   }
 }
 
