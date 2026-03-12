@@ -456,17 +456,11 @@ struct InsertExplicitReshardsPass
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
     funcOp->walk([&](Operation* op) {
-      const bool onFullVersion = isOnFullVersion(op, enableFullVersion);
-
       if (op->hasTrait<OpTrait::IsTerminator>()) {
-        if (isa<func::ReturnOp>(op)) {
-          // TODO(enver): Does not need to be part of the walk on the func,
-          // instead get the terminator with getBodyTerminator.
-          insertExplicitReshardsOnFuncReturn(op, funcOp, rewriter, symbolTable,
-                                             onFullVersion);
-        }
         return;
       }
+
+      const bool onFullVersion = isOnFullVersion(op, enableFullVersion);
 
       if (auto shardableDataFlowOp =
               dyn_cast<ShardableDataFlowOpInterface>(op)) {
@@ -520,6 +514,10 @@ struct InsertExplicitReshardsPass
 
       // TODO(enver): Remove sharding rules from ops.
     });
+
+    insertExplicitReshardsOnFuncReturn(getBodyTerminator(funcOp), funcOp,
+                                       rewriter, symbolTable,
+                                       enableFullVersion);
   }
 };
 

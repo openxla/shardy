@@ -88,9 +88,9 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   }
   pm.addPass(createCloseShardingsPass());
 
-  // / We dump the module after propagation at this point, since the export
-  // passes before are removing internal implementation details of the
-  // propagation itself and make the module more readable.
+  // We dump the module after propagation at this point, since the export passes
+  // before are removing internal implementation details of the propagation
+  // itself and make the module more readable.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "after_propagation", dumpIndex++));
 

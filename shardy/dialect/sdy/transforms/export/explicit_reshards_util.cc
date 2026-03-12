@@ -347,9 +347,9 @@ class FactorAxesCandidateBag {
     }
   }
 
-  FactorAxesCandidate findBestCandidate() {
+  FactorAxesCandidate findBestCandidate() const {
     FactorAxesCandidate bestCandidate;
-    for (FactorAxesCandidate& candidate : candidates) {
+    for (const FactorAxesCandidate& candidate : candidates) {
       // The axes on replication factors are distributed to batching dimensions
       // after the common axes are found for all non-replication factors.
       if (isValid(candidate)) {
@@ -382,7 +382,7 @@ class FactorAxesCandidateBag {
   FactorAxesCandidate& at(const int64_t index) { return candidates[index]; }
   // Returns the number of candidates in the bag.
   int64_t size() const { return candidates.size(); }
-  bool isValid(const FactorAxesCandidate& candidate) {
+  bool isValid(const FactorAxesCandidate& candidate) const {
     auto it = factorDependenciesMap.find(candidate.factorAxes.factorIndex);
     return it == factorDependenciesMap.end() || it->second.none();
   }
