@@ -43,15 +43,7 @@ struct InlineMeshesPass : public impl::InlineMeshesPassBase<InlineMeshesPass> {
     SymbolTable symbolTable(moduleOp);
 
     transformShardings(moduleOp, [&](TensorShardingAttr sharding) {
-      if (auto name = dyn_cast<FlatSymbolRefAttr>(sharding.getMeshOrRef())) {
-        MeshAttr mesh = getMeshAttr(symbolTable, name);
-        assert(mesh && "unknown mesh");
-        return TensorShardingAttr::get(sharding.getContext(), mesh,
-                                       sharding.getDimShardings(),
-                                       sharding.getReplicatedAxes(),
-                                       sharding.getUnreducedAxes());
-      }
-      return sharding;
+      return inlineMesh(symbolTable, sharding);
     });
 
     // Remove all MeshOps.
