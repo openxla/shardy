@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-add-data-flow-edges | FileCheck %s
+// RUN: sdy_opt %s -sdy-add-data-flow-edges -split-input-file | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
@@ -237,3 +237,17 @@ func.func @manual_computation_user_priority(
   } : (tensor<32x32xf32>, tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0 : tensor<32x32xf32>
 }
+
+// -----
+
+// CHECK-LABEL: func @main
+// CHECK-NOT: sdy.data_flow_edge
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = call @foo(%arg0) : (tensor<8xf32>) -> (tensor<8xf32>)
+  return %0 : tensor<8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  return %arg0 : tensor<8xf32>
+}
+
