@@ -451,9 +451,25 @@ TensorShardingAttr getFuncResultSharding(FuncOp funcOp, int64_t resNum) {
   return funcOp.getResultAttrOfType<TensorShardingAttr>(resNum, kShardingAttr);
 }
 
+TensorShardingAttr getShardingOrNull(
+    TensorShardingPerValueAttr shardingPerValue, int64_t num) {
+  if (!shardingPerValue) {
+    return TensorShardingAttr();
+  }
+  return shardingPerValue.getSharding(num);
+}
+
 void setFuncResultSharding(FuncOp funcOp, int64_t resNum,
                            TensorShardingAttr sharding) {
   funcOp.setResultAttr(resNum, kShardingAttr, sharding);
+}
+
+void setFuncResultShardings(func::FuncOp funcOp,
+                            TensorShardingPerValueAttr shardingPerValue) {
+  for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
+    setFuncResultSharding(funcOp, resNum,
+                          getShardingOrNull(shardingPerValue, resNum));
+  }
 }
 
 SmallVector<AxisRefAttr> getGreatestCommonPrefix(ArrayRef<AxisRefAttr> first,

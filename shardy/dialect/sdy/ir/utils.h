@@ -329,9 +329,20 @@ void setSharding(Value value, TensorShardingAttr sharding);
 // Return the sharding of the `resNum` result of the given `funcOp`.
 TensorShardingAttr getFuncResultSharding(func::FuncOp funcOp, int64_t resNum);
 
+// Returns the sharding of the `num` sharding of the given
+// `shardingPerValue`. Returns null sharding if `shardingPerValue` is null.
+TensorShardingAttr getShardingOrNull(
+    TensorShardingPerValueAttr shardingPerValue, int64_t num);
+
 // Sets the sharding of the `resNum` result of the given `funcOp` to `sharding`.
 void setFuncResultSharding(func::FuncOp funcOp, int64_t resNum,
                            TensorShardingAttr sharding);
+
+// Sets/overrides the result sharding attributes on `funcOp` to a
+// `TensorShardingPerValueAttr` named `sdy.sharding` consisting of `shardings`.
+// Clears func result sharding if `shardingPerValue` is null.
+void setFuncResultShardings(func::FuncOp funcOp,
+                            TensorShardingPerValueAttr shardingPerValue);
 
 // Returns the sharding of each value in `values`. Returns an empty array if the
 // op has no sharding attributes.
