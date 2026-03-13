@@ -125,12 +125,12 @@ class GlobalToLocalTypeConverter : public TypeConverter {
     }
   }
 
-  // Collects the free-axes shardings for manual_computation block arguments.
-  void populateArgShardings(ManualComputationOp manualCompOp) {
-    SmallVector<TensorShardingAttr> shardings =
-        manualCompOp.getBlockArgumentEdgeOwnerShardings();
+  // Collects block arguments for ShardableDataFlowOp, such as
+  // manual_computation and named_computation.
+  void populateArgShardings(ShardableDataFlowOpInterface op) {
     for (auto [arg, sharding] :
-         llvm::zip(manualCompOp.getBody().getArguments(), shardings)) {
+         llvm::zip(op.getBlockArgumentEdgeOwners(),
+                   op.getBlockArgumentEdgeOwnerShardings())) {
       argShardings[arg] = sharding;
     }
   }
@@ -245,8 +245,8 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
     TypeConverter::SignatureConversion signature(op.getNumArguments());
-    for (const BlockArgument& arg : op.getArguments()) {
-      signature.addInputs(arg.getArgNumber(), converter->convertType(arg));
+    for (auto [index, arg] : llvm::enumerate(op.getArguments())) {
+      signature.addInputs(index, converter->convertType(arg));
     }
     SmallVector<Type> newResultTypes;
     for (int i = 0; i < op.getNumResults(); ++i) {
@@ -949,8 +949,8 @@ class ManualComputationOpPattern
     // Prepare signature conversion and convert the region.
     TypeConverter::SignatureConversion signature(
         op.getBody().getNumArguments());
-    for (BlockArgument arg : op.getBody().getArguments()) {
-      signature.addInputs(arg.getArgNumber(), converter->convertType(arg));
+    for (auto [index, arg] : llvm::enumerate(op.getBody().getArguments())) {
+      signature.addInputs(index, converter->convertType(arg));
     }
     if (failed(rewriter.convertRegionTypes(&op.getBody(), *converter,
                                            &signature))) {
@@ -1188,6 +1188,54 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
   bool combineMultiDimensionReduceScatter;
 };
 
+class NamedComputationOpPattern
+    : public OpConversionPattern<NamedComputationOp> {
+ public:
+  NamedComputationOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                            ConversionState& state)
+      : OpConversionPattern<NamedComputationOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      NamedComputationOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+
+    SmallVector<Type> newResultTypes;
+    llvm::transform(
+        op.getResults(), std::back_inserter(newResultTypes),
+        [&](Value result) { return converter->convertType(result); });
+
+    // Prepare signature conversion for the internal region.
+    TypeConverter::SignatureConversion signature(
+        op.getBody().getNumArguments());
+    for (auto [index, arg] : llvm::enumerate(op.getBody().getArguments())) {
+      signature.addInputs(index, converter->convertType(arg));
+    }
+
+    auto newOp = NamedComputationOp::create(
+        rewriter, op.getLoc(), newResultTypes, op.getName(),
+        adaptor.getOperands(), op.getInShardings().value_or(nullptr),
+        op.getOutShardings().value_or(nullptr));
+
+    // Move and convert the region.
+    rewriter.inlineRegionBefore(op.getBody(), newOp.getBody(),
+                                newOp.getBody().end());
+    if (failed(rewriter.convertRegionTypes(&newOp.getBody(), *converter,
+                                           &signature))) {
+      return failure();
+    }
+
+    rewriter.replaceOp(op, newOp.getResults());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -1220,8 +1268,8 @@ struct ConvertGlobalToLocalPass
     module.walk([&](Operation* op) {
       if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
         typeConverter.populateArgShardings(funcOp);
-      } else if (auto manualCompOp = dyn_cast<ManualComputationOp>(op)) {
-        typeConverter.populateArgShardings(manualCompOp);
+      } else if (auto dataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        typeConverter.populateArgShardings(dataFlowOp);
       }
     });
 
@@ -1243,11 +1291,11 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns
-        .add<AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
-             ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
-             ManualComputationOpPattern, ReturnOpPattern>(
-            typeConverter, &getContext(), conversionState);
+    patterns.add<
+        AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
+        ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
+        ManualComputationOpPattern, NamedComputationOpPattern, ReturnOpPattern>(
+        typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimensionAllGather);
     patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
