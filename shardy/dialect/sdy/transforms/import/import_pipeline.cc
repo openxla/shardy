@@ -17,7 +17,6 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
@@ -26,31 +25,8 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-namespace {
-
-GreedyRewriteConfig getCanonicalizerConfig(bool enableRegionSimplification) {
-  return GreedyRewriteConfig()
-      .setUseTopDownTraversal(true)
-      .setRegionSimplificationLevel(enableRegionSimplification
-                                        ? GreedySimplifyRegionLevel::Normal
-                                        : GreedySimplifyRegionLevel::Disabled)
-      .enableFolding(false)
-      .enableConstantCSE(false);
-}
-
-}  // namespace
-
 void addImportPipeline(OpPassManager& pm, int& dumpIndex,
                        const PropagationOptions& options) {
-  // We need to apply the inliner pass so we have a single main function,
-  // otherwise we would need to propagate shardings between call ops and callee
-  // functions.
-  if (!options.skipInline) {
-    pm.addPass(createInlinerPass({}, [&](OpPassManager& pm) {
-      pm.addPass(createCanonicalizerPass(
-          getCanonicalizerConfig(/*enableRegionSimplification=*/true)));
-    }));
-  }
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());

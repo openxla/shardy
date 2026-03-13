@@ -37,7 +37,6 @@ void addShardingPropagationPipeline(OpPassManager& pm,
   sdy::PropagationOptions options;
   options.dumpDirectory = sdyDumpDir;
   options.avoidExportForPartitioning = true;
-  options.skipInline = true;
   sdy::addPropagationPipeline(pm, options);
 
   // Populate unreduced out_shardings. This is needed because SDY propagation
