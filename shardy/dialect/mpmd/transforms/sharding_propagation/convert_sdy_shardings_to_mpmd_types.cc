@@ -59,7 +59,7 @@ class ConvertSdyShardingsToMpmdTypesPass
   void runOnFunc(func::FuncOp func_op) override {
     func_op->walk([&](Operation* op) {
       TypeSwitch<Operation*, void>(op)
-          .Case<FragmentOp>([](FragmentOp fragment) {
+          .Case([](FragmentOp fragment) {
             if (std::optional<sdy::TensorShardingPerValueAttr> in_shardings =
                     fragment.getInShardings()) {
               for (OpOperand& operand : fragment->getOpOperands()) {
@@ -81,13 +81,13 @@ class ConvertSdyShardingsToMpmdTypesPass
               fragment.removeOutShardingsAttr();
             }
           })
-          .Case<TransferOp>([](TransferOp transfer) {
+          .Case([](TransferOp transfer) {
             UpdateValueTypeWithSharding(transfer.getTensor(),
                                         sdy::getSharding(transfer.getTensor()));
             UpdateValueTypeWithSharding(transfer.getResult(),
                                         sdy::getSharding(transfer.getResult()));
           })
-          .Case<ForOp>([](ForOp for_op) {
+          .Case([](ForOp for_op) {
             for (OpOperand& operand : for_op->getOpOperands()) {
               sdy::TensorShardingAttr sharding =
                   sdy::getSharding(operand.get());

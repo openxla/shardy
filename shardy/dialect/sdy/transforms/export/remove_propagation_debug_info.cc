@@ -46,9 +46,9 @@ struct RemovePropagationDebugInfoPass
         kBlockArgShardingOriginsAttr, kResultShardingOriginsAttr};
 
     ModuleOp module = getOperation();
-    module.walk([&](Operation *op) {
-      TypeSwitch<Operation *, void>(op)
-          .Case<func::FuncOp>([&](func::FuncOp funcOp) {
+    module.walk([&](Operation* op) {
+      TypeSwitch<Operation*, void>(op)
+          .Case([&](func::FuncOp funcOp) {
             for (const StringRef &debugAttr : propagationDebugAttrs) {
               for (int64_t argNum = 0; argNum < funcOp.getNumArguments();
                    ++argNum) {
@@ -60,7 +60,7 @@ struct RemovePropagationDebugInfoPass
               }
             }
           })
-          .Default([&](Operation *op) {
+          .Default([&](Operation* op) {
             for (const StringRef &debugAttr : propagationDebugAttrs) {
               op->removeAttr(debugAttr);
             }

@@ -191,8 +191,7 @@ struct UpdateNonDivisibleInputOutputShardingsPass
     // `ShardingRuleOp`s.
     moduleOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
       TypeSwitch<Operation*>(op)
-          .Case<ShardableDataFlowOpInterface>([&](ShardableDataFlowOpInterface
-                                                      shardableDataFlowOp) {
+          .Case([&](ShardableDataFlowOpInterface shardableDataFlowOp) {
             if (shardableDataFlowOp.shouldKeepEdgeOwnerShardingsDivisible()) {
               updateValueShardings(
                   shardableDataFlowOp.getBlockArgumentEdgeOwners(),
@@ -212,7 +211,7 @@ struct UpdateNonDivisibleInputOutputShardingsPass
                   symbolTable);
             }
           })
-          .Case<ShardingRuleOpInterface>(
+          .Case(
               [&](ShardingRuleOpInterface shardableRuleOp) {
                 if (shardableRuleOp.shouldKeepOutputShardingsDivisible()) {
                   updateValueShardings(

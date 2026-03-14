@@ -313,7 +313,7 @@ void saveShardingOriginsOnModule(
                            builder.getDictionaryAttr(entries));
     }
     TypeSwitch<Operation*, void>(owningOp)
-        .Case<func::FuncOp>([&, value = value](func::FuncOp funcOp) {
+        .Case([&, value = value](func::FuncOp funcOp) {
           funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
                             kShardingOriginsAttr,
                             builder.getDictionaryAttr(entries));

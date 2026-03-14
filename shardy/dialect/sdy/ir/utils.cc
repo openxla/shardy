@@ -25,6 +25,7 @@ limitations under the License.
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
@@ -51,7 +52,6 @@ limitations under the License.
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "shardy/dialect/sdy/ir/macros.h"
 
 namespace mlir {
 namespace sdy {
@@ -346,11 +346,10 @@ Value getShardableValue(Value value) {
   }
 
   return TypeSwitch<Operation*, Value>(getOwningOp(value))
-      .Case<FuncOp>([&](FuncOp) { return value; })
-      .Case<ShardableDataFlowOpInterface>(
-          [&](ShardableDataFlowOpInterface shardableRegionOp) {
-            return shardableRegionOp.getEdgeOwnerFromTarget(value);
-          })
+      .Case([&](FuncOp) { return value; })
+      .Case([&](ShardableDataFlowOpInterface shardableRegionOp) {
+        return shardableRegionOp.getEdgeOwnerFromTarget(value);
+      })
       .Default([&](Operation* op) {
         // We only fail if the value isn't scalar. Scalar block arguments, such
         // as the arguments of a reduction function, don't have a shardable
@@ -371,27 +370,25 @@ TensorShardingAttr getSharding(Value value) {
     return TensorShardingAttr();
   }
   return TypeSwitch<Operation*, TensorShardingAttr>(getOwningOp(value))
-      .Case<FuncOp>([value](FuncOp funcOp) {
+      .Case([value](FuncOp funcOp) {
         return funcOp.getArgAttrOfType<TensorShardingAttr>(
             cast<BlockArgument>(value).getArgNumber(), kShardingAttr);
       })
-      .Case<DataFlowEdgeOp>([](DataFlowEdgeOp dataFlowEdgeOp) {
+      .Case([](DataFlowEdgeOp dataFlowEdgeOp) {
         return dataFlowEdgeOp.getShardingAttr();
       })
-      .Case<ShardingConstraintOp>([](ShardingConstraintOp shardingConstraint) {
+      .Case([](ShardingConstraintOp shardingConstraint) {
         return shardingConstraint.getSharding();
       })
-      .Case<ReshardOp>(
-          [](ReshardOp reshardOp) { return reshardOp.getSharding(); })
-      .Case<CollectiveOpInterface>([](CollectiveOpInterface collectiveOp) {
+      .Case([](ReshardOp reshardOp) { return reshardOp.getSharding(); })
+      .Case([](CollectiveOpInterface collectiveOp) {
         return collectiveOp.getOutSharding();
       })
       // TODO: b/360076171 - Add tests for ShardableDataFlowOpInterface,
       // potentially with a test dialect.
-      .Case<ShardableDataFlowOpInterface>(
-          [value](ShardableDataFlowOpInterface shardableRegionOp) {
-            return shardableRegionOp.getEdgeOwnerSharding(value);
-          })
+      .Case([value](ShardableDataFlowOpInterface shardableRegionOp) {
+        return shardableRegionOp.getEdgeOwnerSharding(value);
+      })
       .Default([value](Operation* op) {
         if (TensorShardingPerValueAttr shardingPerResult =
                 getShardingPerValue(op)) {
@@ -422,25 +419,23 @@ void setSharding(Value value, TensorShardingAttr sharding) {
   value = getShardableValue(value);
   assert(value && "value should exist if its sharding is updated");
   TypeSwitch<Operation*>(getOwningOp(value))
-      .Case<FuncOp>([&](FuncOp funcOp) {
+      .Case([&](FuncOp funcOp) {
         funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
                           kShardingAttr, sharding);
       })
-      .Case<DataFlowEdgeOp>([&](DataFlowEdgeOp dataFlowEdgeOp) {
+      .Case([&](DataFlowEdgeOp dataFlowEdgeOp) {
         dataFlowEdgeOp.setShardingAttr(sharding);
       })
-      .Case<ShardingConstraintOp>([&](ShardingConstraintOp shardingConstraint) {
+      .Case([&](ShardingConstraintOp shardingConstraint) {
         shardingConstraint.setShardingAttr(sharding);
       })
-      .Case<ReshardOp>(
-          [&](ReshardOp reshardOp) { reshardOp.setShardingAttr(sharding); })
-      .Case<CollectiveOpInterface>([&](CollectiveOpInterface collectiveOp) {
+      .Case([&](ReshardOp reshardOp) { reshardOp.setShardingAttr(sharding); })
+      .Case([&](CollectiveOpInterface collectiveOp) {
         collectiveOp.setOutShardingAttr(sharding);
       })
-      .Case<ShardableDataFlowOpInterface>(
-          [&](ShardableDataFlowOpInterface shardableRegionOp) {
-            shardableRegionOp.setEdgeOwnerSharding(value, sharding);
-          })
+      .Case([&](ShardableDataFlowOpInterface shardableRegionOp) {
+        shardableRegionOp.setEdgeOwnerSharding(value, sharding);
+      })
       .Default([&](Operation* op) {
         replaceShardingAtIndex(op, cast<OpResult>(value).getResultNumber(),
                                sharding);

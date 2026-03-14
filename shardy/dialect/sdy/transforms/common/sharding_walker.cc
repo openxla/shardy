@@ -130,7 +130,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
   rootOp->walk<WalkOrder::PreOrder>([&](Operation* op) {
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
-        .Case<FuncOp>([&](FuncOp funcOp) {
+        .Case([&](FuncOp funcOp) {
           for (BlockArgument arg : funcOp.getArguments()) {
             processSharding(arg, transformShardings, callback);
           }
@@ -139,7 +139,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                             callback);
           }
         })
-        .Case<ManualComputationOp>(
+        .Case(
             [&](ManualComputationOp manualComputationOp) {
               processShardings(
                   manualComputationOp.getInShardings(),
@@ -155,7 +155,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                     manualComputationOp.setOutShardingsAttr(newShardings);
                   });
             })
-        .Case<ShardableDataFlowOpInterface>(
+        .Case(
             [&](ShardableDataFlowOpInterface shardableDataFlowOp) {
               processShardings(
                   shardableDataFlowOp.getBlockArgumentEdgeOwnerShardings(),

@@ -248,10 +248,10 @@ struct ApplyShardingConstraintsPass
     handler.prepareHandler(moduleOp);
 
     OpBuilder builder(&context);
-    moduleOp.walk([&](Operation* op) {
-      TypeSwitch<Operation*>(op)
-          .Case<ShardingConstraintOp>(
-              [](ShardingConstraintOp shardingConstraintOp) {
+    moduleOp.walk(
+        [&](Operation* op) {
+          TypeSwitch<Operation*>(op)
+              .Case([](ShardingConstraintOp shardingConstraintOp) {
                 // If `getTailOfShardingConstraintChain` returns a non-null
                 // value, we replace all uses of `head`s input that:
                 // 1. Aren't a `func.return` op.
@@ -279,8 +279,7 @@ struct ApplyShardingConstraintsPass
                                   return shardingConstraintOp;
                                 });
               })
-          .Case<ManualComputationOp>(
-              [&](ManualComputationOp manualComputationOp) {
+              .Case([&](ManualComputationOp manualComputationOp) {
                 for (auto [operand, sharding] : llvm::zip_equal(
                          manualComputationOp.getOperands(),
                          manualComputationOp.getInShardings().getShardings())) {
@@ -297,7 +296,7 @@ struct ApplyShardingConstraintsPass
                       });
                 }
               });
-    });
+        });
 
     // Unregister the handler and save the sharding origins on the module.
     context.registerActionHandler(nullptr);

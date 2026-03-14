@@ -134,15 +134,12 @@ SmallVector<OpOperand*> getEdgeSourcesFromRegionBasedOp(Value owner,
       OpTrait::template hasSingleBlockImplicitTerminator<RegionOpTy>::value);
   assert(getOwningOp(owner) == op.getOperation());
   return TypeSwitch<Value, SmallVector<OpOperand*>>(owner)
-      .Case<BlockArgument>(
-          [op](BlockArgument blockArg) -> SmallVector<OpOperand*> {
-            return {&op->getOpOperand(blockArg.getArgNumber())};
-          })
-      .template Case<OpResult>(
-          [op](OpResult opResult) -> SmallVector<OpOperand*> {
-            return {
-                &getBodyTerminatorOpOperands(op)[opResult.getResultNumber()]};
-          })
+      .Case([op](BlockArgument blockArg) -> SmallVector<OpOperand*> {
+        return {&op->getOpOperand(blockArg.getArgNumber())};
+      })
+      .Case([op](OpResult opResult) -> SmallVector<OpOperand*> {
+        return {&getBodyTerminatorOpOperands(op)[opResult.getResultNumber()]};
+      })
       .Default([](Value _) -> SmallVector<OpOperand*> { return {}; });
 }
 
