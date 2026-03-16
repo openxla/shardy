@@ -151,7 +151,7 @@ class MarkFragmentReservedMemoryPass
         }
         // Add sizes of the results which are now live.
         for (OpResult result : op.getResults()) {
-          if (!IsResultOnHost(result) && !result.use_empty()) {
+          if (!GetMemoryKindIfResultOnHost(result).has_value() && !result.use_empty()) {
             MeshTensorType type = cast<MeshTensorType>(result.getType());
             AddLiveValue(type, current_memory_usage_per_mesh, &op);
           }
