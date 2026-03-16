@@ -42,6 +42,7 @@ func.func @has_backward_dep(%arg0: !mesh_1_tensor) -> !mesh_1_tensor attributes 
     %10 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %10 : tensor<4x8xf32>
   } : (!mesh_2_tensor) -> !mesh_2_tensor
+  // expected-error@+1 {{Detected backward transfer but expected forward-only pipeline since there are no transpose fragments}}
   %3 = mpmd.transfer %2 : (!mesh_2_tensor) -> !mesh_1_tensor
   // expected-error@+1 {{Detected backward dependency but expected forward-only pipeline since there are no transpose fragments}}
   %4 = mpmd.fragment<mesh="m1", origin=[]> (%3) (%arg1: tensor<4x8xf32>) {
