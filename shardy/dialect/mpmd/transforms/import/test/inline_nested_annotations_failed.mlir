@@ -1,5 +1,9 @@
 // RUN: mpmd_opt %s -split-input-file -mpmd-inline-nested-user-exposed-ops='assignment=f1@m1/1,f2@m2,f3@m1/2' -verify-diagnostics
 
+
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
+
 func.func @nested_named_comp_assignment_different_mesh(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {
   %1 = mpmd.named_computation<"f1"> (%arg0) (%arg1: tensor<4x8xf32>) {
@@ -15,6 +19,9 @@ func.func @nested_named_comp_assignment_different_mesh(%arg0: tensor<4x8xf32>) -
 }
 
 // -----
+
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
 
 func.func @nested_different_named_comp_assignment_different_stage(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {
@@ -32,6 +39,9 @@ func.func @nested_different_named_comp_assignment_different_stage(%arg0: tensor<
 
 // -----
 
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
+
 func.func @nested_named_computation_assignment_different_name(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {
   %1 = mpmd.named_computation<"f2"> (%arg0) (%arg1: tensor<4x8xf32>) {
@@ -47,6 +57,9 @@ func.func @nested_named_computation_assignment_different_name(%arg0: tensor<4x8x
 }
 
 // -----
+
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
 
 func.func @nested_named_computation_assignment_different_stage(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {
@@ -64,6 +77,9 @@ func.func @nested_named_computation_assignment_different_stage(%arg0: tensor<4x8
 
 // -----
 
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
+
 func.func @nested_unary_mpmd_ops(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {
   %0 = mpmd.named_computation<"f1"> (%arg0) (%arg1: tensor<4x8xf32>) {
@@ -76,6 +92,9 @@ func.func @nested_unary_mpmd_ops(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attr
 
 
 // -----
+
+sdy.mesh @m1 = <["x"=2]>
+sdy.mesh @m2 = <["x"=2]>
 
 func.func @parent_named_computation_unassigned(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>,<"m2": <["x"=2]>>>} {

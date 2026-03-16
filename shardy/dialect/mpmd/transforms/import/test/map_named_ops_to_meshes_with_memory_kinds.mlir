@@ -1,5 +1,7 @@
 // RUN: mpmd_opt %s -mpmd-map-named-ops-to-mpmd-ops='assignment=x@m1#pinned_host,y@m1#device,f1@m1#pinned_host' -mpmd-map-named-ops-to-mpmd-ops 2>&1 | FileCheck %s
 
+sdy.mesh @m1 = <["x"=2]>
+
 // CHECK-LABEL: func @assign_to_pinned_host_and_device
 func.func @assign_to_pinned_host_and_device(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
