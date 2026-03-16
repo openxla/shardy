@@ -455,20 +455,77 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
   bool perDimAllGather;
 };
 
+// Returns the logical index of the shard that the given device (`deviceId`)
+// resides in, along a dimension sharded by the provided `axes`.
+//
+// This "shard index" ranges is [0, (TotalShardCount - 1)] and identifies
+// the device's position in the logical grid formed by the sharding axes.
+int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
+                      ArrayRef<AxisRefAttr> axes) {
+  int64_t shardIndex = 0;
+  for (AxisRefAttr axis : axes) {
+    int64_t axisSize = axis.getSize(mesh);
+    int64_t suffixSize = 1;
+    bool foundAxis = false;
+    // Calculate the product of the sizes of all mesh axes that follow the
+    // current axis. This product is the stride needed to extract the axis
+    // coordinate from the linear device ID.
+    for (MeshAxisAttr meshAxis : mesh.getAxes()) {
+      if (foundAxis) {
+        suffixSize *= meshAxis.getSize();
+      }
+      if (meshAxis.getName() == axis.getName()) {
+        foundAxis = true;
+      }
+    }
+
+    // Extract the coordinate component for the current (possibly sub-) axis.
+    int64_t axisCoord =
+        (deviceId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
+
+    // Linearize the coordinates of all axes sharding this dimension.
+    shardIndex = shardIndex * axisSize + axisCoord;
+  }
+  return shardIndex;
+}
+
+// Returns a 0-rank i64 tensor containing the global offset for the given shard
+// axes and local shard size.
+Value getDimensionOffset(Location loc, MeshAttr mesh,
+                         ArrayRef<AxisRefAttr> axes, int64_t shardSize,
+                         ConversionPatternRewriter& rewriter) {
+  int64_t numDevices = mesh.getTotalSize();
+  Type i64Ty = rewriter.getI64Type();
+  auto indexTy = RankedTensorType::get({}, i64Ty);
+
+  // partitionId = (i64)stablehlo.partition_id
+  Value partitionId = stablehlo::ConvertOp::create(
+      rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
+
+  // Calculate a compile-time offset table for this dimension.
+  SmallVector<int64_t> offsetsTable = llvm::to_vector(
+      llvm::map_range(llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
+        return getShardIndex(devId, mesh, axes) * shardSize;
+      }));
+
+  // Create the offset table and look up the value for the current device.
+  auto tableConst = stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i64Ty),
+                                offsetsTable));
+  auto offsetSlice = stablehlo::DynamicSliceOp::create(
+      rewriter, loc, RankedTensorType::get({1}, i64Ty), tableConst,
+      ValueRange{partitionId}, rewriter.getDenseI64ArrayAttr({1}));
+
+  return stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice);
+}
+
 Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
                               ArrayRef<AxisRefListAttr> slicingAxesPerDim,
                               RankedTensorType localResultType,
                               ConversionPatternRewriter& rewriter) {
-  int64_t numDevices = mesh.getTotalSize();
-  Type i64Ty = rewriter.getI64Type();
-  auto indexTy = RankedTensorType::get({}, i64Ty);
-  auto tableTy = RankedTensorType::get({numDevices}, i64Ty);
-  auto slicedTableTy = RankedTensorType::get({1}, i64Ty);
-
-  Value partitionId = stablehlo::ConvertOp::create(
-      rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
-
   // Generate start indices for slicing.
+  auto indexTy = RankedTensorType::get({}, rewriter.getI64Type());
   SmallVector<Value> startIndices;
   startIndices.reserve(localResultType.getRank());
   for (int64_t i = 0; i < localResultType.getRank(); ++i) {
@@ -480,36 +537,8 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
       continue;
     }
 
-    // Calculate a compile-time offset table for this dimension.
-    SmallVector<int64_t> offsetsTable(numDevices);
-    int64_t shardSize = localResultType.getDimSize(i);
-    for (int64_t devId = 0; devId < numDevices; ++devId) {
-      int64_t dimCoordinate = 0;
-      for (AxisRefAttr axis : axes) {
-        int64_t axisSize = axis.getSize(mesh);
-
-        int64_t suffixSize = 1;
-        bool foundAxis = false;
-        for (MeshAxisAttr meshAxis : mesh.getAxes()) {
-          if (foundAxis) suffixSize *= meshAxis.getSize();
-          if (meshAxis.getName() == axis.getName()) foundAxis = true;
-        }
-
-        int64_t axisCoord =
-            (devId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
-        dimCoordinate = dimCoordinate * axisSize + axisCoord;
-      }
-      offsetsTable[devId] = dimCoordinate * shardSize;
-    }
-
-    // Create the offset table and look up the table using partition_id.
-    auto tableConst = stablehlo::ConstantOp::create(
-        rewriter, loc, DenseIntElementsAttr::get(tableTy, offsetsTable));
-    auto offsetSlice = stablehlo::DynamicSliceOp::create(
-        rewriter, loc, slicedTableTy, tableConst, ValueRange{partitionId},
-        rewriter.getDenseI64ArrayAttr({1}));
-    startIndices.push_back(
-        stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice));
+    startIndices.push_back(getDimensionOffset(
+        loc, mesh, axes, localResultType.getDimSize(i), rewriter));
   }
 
   return stablehlo::DynamicSliceOp::create(rewriter, loc, localResultType,
@@ -817,34 +846,11 @@ class CollectivePermuteOpPattern
       return axes;
     };
 
-    // Given a device ID in the global mesh and an ordered list of sharding
-    // axes, return the linear index for the partitioned data that the device
-    // holds.
-    auto getPartitionedDataId = [&](int64_t device,
-                                    ArrayRef<AxisRefAttr> axes) {
-      int64_t rem = device;
-      // The coordinate of the device in the global mesh.
-      llvm::SmallDenseMap<StringRef, int64_t> coords;
-      for (MeshAxisAttr axis : llvm::reverse(mesh.getAxes())) {
-        coords[axis.getName()] = rem % axis.getSize();
-        rem /= axis.getSize();
-      }
-      // The linear index of the data on the device, in the space defined by the
-      // given sharding axes.
-      int64_t id = 0;
-      for (AxisRefAttr axis : axes) {
-        int64_t subCoord = (coords[axis.getName()] / axis.getSubAxisPreSize()) %
-                           axis.getSize(mesh);
-        id = id * axis.getSize(mesh) + subCoord;
-      }
-      return id;
-    };
-
     SmallVector<AxisRefAttr> outShardingAxes = getShardingAxes(outSharding);
     int64_t numDevices = mesh.getTotalSize();
     llvm::DenseMap<int64_t, int64_t> logicalIdToOutDevId;
     for (int64_t j = 0; j < numDevices; ++j) {
-      logicalIdToOutDevId[getPartitionedDataId(j, outShardingAxes)] = j;
+      logicalIdToOutDevId[getShardIndex(j, mesh, outShardingAxes)] = j;
     }
 
     SmallVector<AxisRefAttr> inShardingAxes = getShardingAxes(inSharding);
@@ -852,7 +858,7 @@ class CollectivePermuteOpPattern
     for (int64_t i = 0; i < numDevices; ++i) {
       pairs.push_back(i);
       pairs.push_back(
-          logicalIdToOutDevId[getPartitionedDataId(i, inShardingAxes)]);
+          logicalIdToOutDevId[getShardIndex(i, mesh, inShardingAxes)]);
     }
 
     auto pairsAttr = DenseIntElementsAttr::get(

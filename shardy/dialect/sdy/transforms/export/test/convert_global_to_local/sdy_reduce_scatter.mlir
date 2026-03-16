@@ -67,8 +67,11 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sd
   // CHECK-AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID_I64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
   // CHECK-AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi64>) -> tensor<i64>
   //
+  // CHECK-AR-DS: %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-AR-DS: %[[PID_I64_1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
+  //
   // CHECK-AR-DS: %[[TABLE1:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4]> : tensor<16xi64>
-  // CHECK-AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID_I64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
+  // CHECK-AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID_I64_1]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
   // CHECK-AR-DS: %[[IDX1:.*]] = stablehlo.reshape %[[OFF1]] : (tensor<1xi64>) -> tensor<i64>
   //
   // CHECK-AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i64>, tensor<i64>) -> tensor<2x4xf32>
