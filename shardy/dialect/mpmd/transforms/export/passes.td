@@ -149,3 +149,25 @@ def ValidateNoReshardsPass :
            "Whether to emit an error (and fail) instead of a warning.">,
   ];
 }
+
+def ValidateNoBackwardDepsPass :
+        PassBase<"mpmd-validate-no-backward-deps", "DistributedFunctionPass"> {
+  let summary = "Validates no backward dependencies exist in forward-only programs.";
+  let description = [{
+    Checks that every data dependency between fragment calls goes from a
+    lexicographically earlier mesh name to a later one. A backward dependency
+    creates pipeline bubbles.
+
+    By default, this pass emits a warning for each such dependency. If
+    `fail-on-backward-deps` is set, it emits an error and fails.
+
+    This pass only applies to forward-only programs, i.e., programs where all
+    fragments have a transpose count of 0. Programs with backward fragments
+    (transpose count != 0) are skipped.
+  }];
+  let options = [
+    Option<"failOnBackwardDeps", "fail-on-backward-deps", "bool",
+           /*default=*/"false",
+           "Whether to emit an error (and fail) instead of a warning.">
+  ];
+}
