@@ -235,10 +235,10 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
   let options = [
-      Option<"perDimensionAllGather", "per-dimension-all-gather",
+      Option<"perDimAllGather", "per-dim-all-gather",
             "bool", /*default=*/"false",
             "Keep per-dimension all-gather without combining them into a single all-gather.">,
-      Option<"combineMultiDimensionReduceScatter", "combine-multi-dimensions-reduce-scatter",
+      Option<"combineMultiDimensionReduceScatter", "combine-multi-dimension-reduce-scatter",
             "bool", /*default=*/"false",
             "Combine multi-dimension reduce-scatter into a single reduce-scatter.">,
     ];

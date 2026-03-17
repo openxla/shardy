@@ -1,5 +1,5 @@
 // RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,CHECK-COMBINED
-// RUN: sdy_opt %s -sdy-convert-global-to-local='per-dimension-all-gather=true' | FileCheck %s --check-prefixes=CHECK,CHECK-PER-DIM
+// RUN: sdy_opt %s -sdy-convert-global-to-local='per-dim-all-gather=true' | FileCheck %s --check-prefixes=CHECK,CHECK-PER-DIM
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
@@ -76,7 +76,7 @@ func.func@one_dim_two_axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy
 func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {"x"}, {}]>}){
 
-  // --- Per-Dimension All-Gather Strategy (keep-per-dimension-all-gather=true) ---
+  // --- Per-Dimension All-Gather Strategy (per-dim-all-gather=true) ---
   // CHECK-PER-DIM: %[[GATHER1:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-PER-DIM-SAME: all_gather_dim = 1 : i64,
   // CHECK-PER-DIM-SAME: channel_handle = #stablehlo.channel_handle<handle = 5, type = 1>,
@@ -90,7 +90,7 @@ func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
   // CHECK-PER-DIM-SAME: use_global_device_ids
   // CHECK-PER-DIM-SAME: }> : (tensor<1x16xf32>) -> tensor<4x16xf32>
 
-  // --- Combined Dimensions All-Gather Strategy (keep-per-dimension-all-gather=false) ---
+  // --- Combined Dimensions All-Gather Strategy (per-dim-all-gather=false) ---
   // CHECK-COMBINED: %[[RESHAPE1:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<1x8xf32>) -> tensor<1x1x8xf32>
   // CHECK-COMBINED: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[RESHAPE1]]) <{
   // CHECK-COMBINED-SAME: all_gather_dim = 0 : i64,
@@ -114,7 +114,7 @@ func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
 func.func @two_dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z", "y"}, {"x"}]>})
   -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {"z"}, {}]>}){
 
-  // --- Per-Dimension All-Gather Strategy (keep-per-dimension-all-gather=true) ---
+  // --- Per-Dimension All-Gather Strategy (per-dim-all-gather=true) ---
   // CHECK-PER-DIM: %[[GATHER1:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-PER-DIM-SAME: all_gather_dim = 1 : i64,
   // CHECK-PER-DIM-SAME: channel_handle = #stablehlo.channel_handle<handle = 7, type = 1>,
@@ -128,7 +128,7 @@ func.func @two_dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
   // CHECK-PER-DIM-SAME: use_global_device_ids
   // CHECK-PER-DIM-SAME: }> : (tensor<1x16xf32>) -> tensor<4x16xf32>
 
-  // --- Combined Dimensions All-Gather Strategy (keep-per-dimension-all-gather=false) ---
+  // --- Combined Dimensions All-Gather Strategy (per-dim-all-gather=false) ---
   // CHECK-COMBINED: %[[RESHAPE1:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<1x8xf32>) -> tensor<1x1x8xf32>
   // CHECK-COMBINED: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[RESHAPE1]]) <{
   // CHECK-COMBINED-SAME: all_gather_dim = 0 : i64,

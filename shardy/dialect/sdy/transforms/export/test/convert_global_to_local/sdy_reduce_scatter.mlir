@@ -1,5 +1,5 @@
 // RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,CHECK-AR-DS
-// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimensions-reduce-scatter=true' | FileCheck %s --check-prefixes=CHECK,CHECK-COMBINED
+// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true' | FileCheck %s --check-prefixes=CHECK,CHECK-COMBINED
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
@@ -49,7 +49,7 @@ func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<
 // CHECK-SAME: -> (tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {"x"}]>})
 func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {}]>})
   -> (tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {"x"}]>}) {
-  // --- Use All-Reduce and Dynamic Slice (combine-multi-dimensions-reduce-scatter=false) ---
+  // --- Use All-Reduce and Dynamic Slice (combine-multi-dimension-reduce-scatter=false) ---
   // CHECK-AR-DS-NEXT: %[[ALL_REDUCE:.*]] = "stablehlo.all_reduce"(%[[ARG0]]) <{
   // CHECK-AR-DS-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>
   // CHECK-AR-DS-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]> : tensor<2x8xi64>
@@ -76,7 +76,7 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sd
   //
   // CHECK-AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i64>, tensor<i64>) -> tensor<2x4xf32>
 
-  // --- Combine Multi-Dimensions Reduce Scatter (combine-multi-dimensions-reduce-scatter=true) ---
+  // --- Combine Multi-Dimension Reduce Scatter (combine-multi-dimension-reduce-scatter=true) ---
   // CHECK-COMBINED-NEXT: %[[RESHAPE0:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<8x8xf32>) -> tensor<4x2x2x4xf32>
   // CHECK-COMBINED-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[RESHAPE0]], dims = [0, 2, 1, 3] : (tensor<4x2x2x4xf32>) -> tensor<4x2x2x4xf32>
   // CHECK-COMBINED-NEXT: %[[RESHAPE1:.*]] = stablehlo.reshape %[[TRANSPOSE]] : (tensor<4x2x2x4xf32>) -> tensor<8x2x4xf32>

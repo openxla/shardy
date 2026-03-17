@@ -1363,7 +1363,7 @@ struct ConvertGlobalToLocalPass
              ReturnOpPattern, StablehloIotaOpPattern>(
             typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
-                                     conversionState, perDimensionAllGather);
+                                     conversionState, perDimAllGather);
     patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
                                          conversionState,
                                          combineMultiDimensionReduceScatter);
