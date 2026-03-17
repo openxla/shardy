@@ -909,9 +909,10 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
   SDY_CHECK(getAxisSetDiff(inUnreducedAxes, outUnreducedAxes, inMesh).empty())
       << "Both input and output have unreduced axes that does not appear in "
          "the other.";
-  SDY_CHECK(isa<BlockArgument>(input) || input.getDefiningOp<ReshardOp>())
-      << "Input of sharded-to-unreduced reshard must be a block argument or a "
-         "reshard op.";
+  SDY_CHECK(isa<BlockArgument>(input) || input.getDefiningOp<ReshardOp>() ||
+            input.getDefiningOp<ManualComputationOp>())
+      << "Input of replicated-to-unreduced and sharded-to-unreduced must be a "
+         "block argument, a reshard op, or a manual computation op.";
 
   SmallVector<AxisRefAttr> s2uAxes;
   SmallVector<AxisRefListAttr> axesPerDim(
