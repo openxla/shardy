@@ -148,6 +148,8 @@ class GlobalToLocalTypeConverter : public TypeConverter {
       if (it != argShardings.end()) {
         return it->second;
       }
+      // The block argument is not sharded.
+      return nullptr;
     }
     // For other values, it's safe to call getSharding as we keep the sharding
     // attribute on the converted op.
@@ -175,7 +177,7 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     if ((op->getDialect()->getNamespace() != "stablehlo" &&
          !isa<sdy::AllReduceOp, sdy::ReturnOp>(op)) ||
-        isa<stablehlo::IotaOp, stablehlo::PadOp>(op)) {
+        isa<stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp>(op)) {
       return failure();
     }
 
@@ -1245,6 +1247,177 @@ class NamedComputationOpPattern
   ConversionState& conversionState;
 };
 
+// Adjusts the values stored in the index_vector_dim of the start_indices
+// for a stablehlo.gather to reflect the sharding of the gather operand.
+//
+// In stablehlo.gather, the values stored in index_vector_dim are used to
+// index into some dimensions of the gather operand. These dimensions are
+// specified by the start_index_map. Let's call these dimensions the
+// "indexed dimensions" in the operand.
+//
+// If such a indexed dimension is sharded, we subtract the global starting
+// offset of the local shard, computed by `getDimensionOffset`, from the
+// corresponding component in start_indices, to implement the op on local
+// devices.
+//
+Value computeLocalIndices(Location loc, Value indices, MeshAttr mesh,
+                          TensorShardingAttr operandSharding,
+                          RankedTensorType localOperandType,
+                          ArrayRef<int64_t> startIndexMap,
+                          int64_t indexVectorDim,
+                          ConversionPatternRewriter& rewriter) {
+  if (isFullyReplicated(operandSharding)) {
+    return indices;
+  }
+
+  MLIRContext* ctx = rewriter.getContext();
+  Value adjustedIndices = indices;
+  auto indicesType = cast<RankedTensorType>(indices.getType());
+
+  for (auto [i, indexedDim] : llvm::enumerate(startIndexMap)) {
+    auto axes = operandSharding.getDimShardings()[indexedDim].getAxes();
+    if (axes.empty()) {
+      continue;
+    }
+
+    Value offset = getDimensionOffset(
+        loc, mesh, axes, localOperandType.getDimSize(indexedDim), rewriter);
+    offset = stablehlo::ConvertOp::create(
+        rewriter, loc, RankedTensorType::get({}, indicesType.getElementType()),
+        offset);
+
+    if (indicesType.getRank() <= indexVectorDim ||
+        indicesType.getDimSize(indexVectorDim) == 1) {
+      // Each index-group contains a single value. Apply single-indexed-dim
+      // adjustment by subtracting the offset from all values in start_indices.
+      adjustedIndices = stablehlo::SubtractOp::create(
+          rewriter, loc, indicesType, adjustedIndices,
+          stablehlo::BroadcastOp::create(
+              rewriter, loc, indicesType, offset,
+              DenseI64ArrayAttr::get(ctx, indicesType.getShape())));
+      // There should be only one indexedDim in this case, we can break out of
+      // the loop.
+      break;
+    }
+
+    // Each index-group contains multiple values. Apply multi-indexed-dim
+    // adjustment by slicing the component corresponding to i, subtracting
+    // the offset from the component, and updating the component via DUS.
+    SmallVector<int64_t> sliceShape = llvm::to_vector(indicesType.getShape());
+    sliceShape[indexVectorDim] = 1;
+    auto sliceType =
+        RankedTensorType::get(sliceShape, indicesType.getElementType());
+    SmallVector<int64_t> sliceOffsets(indicesType.getRank(), 0);
+    sliceOffsets[indexVectorDim] = i;
+    Value component = stablehlo::SliceOp::create(
+        rewriter, loc, sliceType, adjustedIndices,
+        DenseI64ArrayAttr::get(ctx, sliceOffsets),
+        DenseI64ArrayAttr::get(ctx, sliceShape),
+        DenseI64ArrayAttr::get(ctx,
+                               SmallVector<int64_t>(indicesType.getRank(), 1)));
+
+    Value broadcastOffset =
+        stablehlo::BroadcastOp::create(rewriter, loc, sliceType, offset,
+                                       DenseI64ArrayAttr::get(ctx, sliceShape));
+    Value adjustedComponent = stablehlo::SubtractOp::create(
+        rewriter, loc, sliceType, component, broadcastOffset);
+
+    SmallVector<Value> updateStartIndices;
+    updateStartIndices.reserve(indicesType.getRank());
+    for (int64_t d = 0; d < indicesType.getRank(); ++d) {
+      updateStartIndices.push_back(stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseIntElementsAttr::get(
+              RankedTensorType::get({}, rewriter.getI64Type()),
+              sliceOffsets[d])));
+    }
+    adjustedIndices = stablehlo::DynamicUpdateSliceOp::create(
+        rewriter, loc, indicesType, adjustedIndices, adjustedComponent,
+        updateStartIndices);
+  }
+  return adjustedIndices;
+}
+
+// Returns the local slice sizes for a stablehlo.gather operation.
+//
+// We adjust the slice sizes for the sharded non-batching dimensions, through
+// dividing the slice size for the dimension by the total size of the mesh axes
+// sharding the dimension.
+SmallVector<int64_t> computeLocalSliceSizes(stablehlo::GatherOp op,
+                                            TensorShardingAttr operandSharding,
+                                            MeshAttr mesh) {
+  SmallVector<int64_t> localSliceSizes = llvm::to_vector(op.getSliceSizes());
+  if (isFullyReplicated(operandSharding)) {
+    return localSliceSizes;
+  }
+
+  ArrayRef<int64_t> batchingDims =
+      op.getDimensionNumbers().getOperandBatchingDims();
+  for (int64_t i = 0; i < localSliceSizes.size(); ++i) {
+    if (llvm::is_contained(batchingDims, i)) {
+      continue;
+    }
+    ArrayRef<AxisRefAttr> axes = operandSharding.getDimShardings()[i].getAxes();
+    if (!axes.empty()) {
+      localSliceSizes[i] /= getTotalAxesSize(axes, mesh);
+    }
+  }
+  return localSliceSizes;
+}
+
+class StablehloGatherOpPattern
+    : public OpConversionPattern<stablehlo::GatherOp> {
+ public:
+  StablehloGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                           ConversionState& state)
+      : OpConversionPattern<stablehlo::GatherOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::GatherOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr operandSharding =
+        converter->getSharding(op.getOperand());
+    TensorShardingAttr indicesSharding =
+        converter->getSharding(op.getStartIndices());
+    TensorShardingAttr resultSharding = converter->getSharding(op.getResult());
+
+    if (isFullyReplicated(operandSharding) &&
+        isFullyReplicated(indicesSharding) &&
+        isFullyReplicated(resultSharding)) {
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+
+    MeshAttr mesh = resultSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    stablehlo::GatherDimensionNumbersAttr dimNumbers = op.getDimensionNumbers();
+    Value localIndices = computeLocalIndices(
+        op.getLoc(), adaptor.getStartIndices(), mesh, operandSharding,
+        cast<RankedTensorType>(adaptor.getOperand().getType()),
+        dimNumbers.getStartIndexMap(), dimNumbers.getIndexVectorDim(),
+        rewriter);
+    SmallVector<int64_t> localSliceSizes =
+        computeLocalSliceSizes(op, operandSharding, mesh);
+
+    rewriter.replaceOpWithNewOp<stablehlo::GatherOp>(
+        op, converter->convertType(op.getResult()), adaptor.getOperand(),
+        localIndices, dimNumbers,
+        rewriter.getDenseI64ArrayAttr(localSliceSizes),
+        op.getIndicesAreSorted());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
  public:
   StablehloIotaOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -1539,8 +1712,9 @@ struct ConvertGlobalToLocalPass
         .add<AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
              ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
              ManualComputationOpPattern, NamedComputationOpPattern,
-             ReturnOpPattern, StablehloIotaOpPattern, StablehloPadOpPattern>(
-            typeConverter, &getContext(), conversionState);
+             ReturnOpPattern, StablehloGatherOpPattern, StablehloIotaOpPattern,
+             StablehloPadOpPattern>(typeConverter, &getContext(),
+                                    conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
     patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
