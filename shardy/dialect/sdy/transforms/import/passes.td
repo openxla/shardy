@@ -45,8 +45,9 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
   let summary = "Inserts `DataFlowEdgeOp` for every data-flow edge.";
   let description = [{
     Inserts `DataFlowEdgeOp` for every value that is the owner of a data-flow
-    edge, i.e., all values returned by `getDataFlowEdgeOwners` on every op in
-    the module.
+    edge, i.e., all values returned by `getBlockArgumentEdgeOwners` and
+    `getOpResultEdgeOwners` on every `ShardableDataFlowOpInterface` in the
+    module.
 
     The inserted `DataFlowEdgeOp` will take the existing sharding of the owner
     target if it exists.
@@ -60,7 +61,6 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
            "flattening it. The default is false, meaning it will flatten the "
            "graph and then propagate.">
   ];
-  //TODO(b/330339693): update this doc when `getDataFlowEdgeOwners` is removed.
 }
 
 def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "ModuleOp"> {
