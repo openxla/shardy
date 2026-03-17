@@ -70,7 +70,6 @@ Attribute DimensionShardingAttr::parse(AsmParser& parser, Type type) {
     if (!axisRef) {
       return DimensionShardingAttr();
     }
-    // TODO(tomnatan): remove mlir:: once Attribute::cast is removed.
     axes.push_back(cast<AxisRefAttr>(axisRef));
   }
 
