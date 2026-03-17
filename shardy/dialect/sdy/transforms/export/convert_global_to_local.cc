@@ -44,6 +44,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -171,8 +172,9 @@ class GenericOpPattern : public ConversionPattern {
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
-    if (op->getDialect()->getNamespace() != "stablehlo" &&
-        !isa<sdy::AllReduceOp>(op) && !isa<sdy::ReturnOp>(op)) {
+    if ((op->getDialect()->getNamespace() != "stablehlo" &&
+        !isa<sdy::AllReduceOp, sdy::ReturnOp>(op)) ||
+        isa<stablehlo::IotaOp>(op)) {
       return failure();
     }
 
@@ -1242,6 +1244,63 @@ class NamedComputationOpPattern
   ConversionState& conversionState;
 };
 
+class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
+ public:
+  StablehloIotaOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                         ConversionState& state)
+      : OpConversionPattern<stablehlo::IotaOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::IotaOp op, OpAdaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    TensorShardingAttr sharding = getSharding(op->getResult(0));
+    if (isFullyReplicated(sharding)) {
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    MeshAttr mesh = sharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+    auto localType = cast<RankedTensorType>(converter->convertType(op));
+    Location loc = op.getLoc();
+    int64_t iotaDim = op.getIotaDimension();
+    // Create the local iota.
+    Value localIota =
+        stablehlo::IotaOp::create(rewriter, loc, localType, iotaDim);
+    if (sharding.getDimShardings()[iotaDim].getAxes().empty()) {
+      rewriter.replaceOp(op, localIota);
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+
+    // Calculate and apply the global offset for this shard.
+    int64_t shardSize = localType.getDimSize(iotaDim);
+    Type convertedOffsetType =
+        RankedTensorType::get({}, localType.getElementType());
+    Value offset = getDimensionOffset(
+        loc, mesh, sharding.getDimShardings()[iotaDim].getAxes(), shardSize,
+        rewriter);
+    Value offsetConverted = stablehlo::ConvertOp::create(
+        rewriter, loc, convertedOffsetType, offset);
+    Value broadcastOffset = stablehlo::BroadcastOp::create(
+        rewriter, loc, localType, offsetConverted,
+        rewriter.getDenseI64ArrayAttr(localType.getShape()));
+    rewriter.replaceOpWithNewOp<stablehlo::AddOp>(op, localIota,
+                                                  broadcastOffset);
+
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -1297,11 +1356,12 @@ struct ConvertGlobalToLocalPass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
 
-    patterns.add<
-        AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
-        ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
-        ManualComputationOpPattern, NamedComputationOpPattern, ReturnOpPattern>(
-        typeConverter, &getContext(), conversionState);
+    patterns
+        .add<AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
+             ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
+             ManualComputationOpPattern, NamedComputationOpPattern,
+             ReturnOpPattern, StablehloIotaOpPattern>(
+            typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimensionAllGather);
     patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
