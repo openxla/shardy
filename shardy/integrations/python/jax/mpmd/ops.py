@@ -233,7 +233,7 @@ def named_computation_partir_lowering(
   origin = ir.Attribute.parse(f'#mpmd.user_origin<"{name}"({transpose_count})>')
 
   named_comp_op = mpmd.NamedComputationOp(
-      flat_output_types, jax_mlir.flatten_ir_values(args), origin
+      flat_output_types, jax_mlir.flatten_ir_values(args), origin  # pytype: disable=wrong-arg-types
   )
 
   block = named_comp_op.region.blocks.append(*flat_input_types)
@@ -458,7 +458,7 @@ def call_mpmd_jit_lowering(
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   call_op = mpmd.CallOp(
       flat_output_types,
-      jax_mlir.flatten_ir_values(args),
+      jax_mlir.flatten_ir_values(args),  # pytype: disable=wrong-arg-types
       ir.FlatSymbolRefAttr.get(func_declaration.sym_name.value),
   )
 
@@ -1025,7 +1025,7 @@ def fori_loop_mpmd_jit_lowering(
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   for_loop = mpmd.ForOp(
       const_types + flat_output_types,
-      jax_mlir.flatten_ir_values(args),
+      jax_mlir.flatten_ir_values(args),  # pytype: disable=wrong-arg-types
       num_iterations,
       unroll_factor=num_iterations,
   )
