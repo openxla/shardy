@@ -26,6 +26,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
@@ -173,8 +174,8 @@ class GenericOpPattern : public ConversionPattern {
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
     if ((op->getDialect()->getNamespace() != "stablehlo" &&
-        !isa<sdy::AllReduceOp, sdy::ReturnOp>(op)) ||
-        isa<stablehlo::IotaOp>(op)) {
+         !isa<sdy::AllReduceOp, sdy::ReturnOp>(op)) ||
+        isa<stablehlo::IotaOp, stablehlo::PadOp>(op)) {
       return failure();
     }
 
@@ -505,10 +506,10 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
       rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
 
   // Calculate a compile-time offset table for this dimension.
-  SmallVector<int64_t> offsetsTable = llvm::to_vector(
-      llvm::map_range(llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
+  SmallVector<int64_t> offsetsTable = llvm::map_to_vector(
+      llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
         return getShardIndex(devId, mesh, axes) * shardSize;
-      }));
+      });
 
   // Create the offset table and look up the value for the current device.
   auto tableConst = stablehlo::ConstantOp::create(
@@ -1301,6 +1302,185 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
   ConversionState& conversionState;
 };
 
+class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
+ public:
+  StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                        ConversionState& state)
+      : OpConversionPattern<stablehlo::PadOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::PadOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr inSharding = converter->getSharding(op.getOperand());
+    TensorShardingAttr outSharding = converter->getSharding(op.getResult());
+    if (isFullyReplicated(inSharding)) {
+      // If input is fully replicated, output must also be fully replicated or
+      // else the pad op should have been converted to a pad followed by a
+      // collective to reshard its result.
+      SDY_CHECK(isFullyReplicated(outSharding));
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    MeshAttr mesh = inSharding.getMesh(symbolTable);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    auto globalInputType = cast<RankedTensorType>(op.getOperand().getType());
+    auto globalResultType = cast<RankedTensorType>(op.getType());
+    int64_t rank = globalInputType.getRank();
+    int64_t numDevices = mesh.getTotalSize();
+    ArrayRef<int64_t> edgePaddingLow = op.getEdgePaddingLow();
+    ArrayRef<int64_t> interiorPaddingAttr = op.getInteriorPadding();
+    // Calculate device-specific local offsets and check for uniformity.
+    SmallVector<SmallVector<int64_t>> allOffsets(
+        rank, SmallVector<int64_t>(numDevices));
+    // Whether all devices have the same offset for a given dimension.
+    BitVector isDimUniform(rank, true);
+    for (int64_t i = 0; i < rank; ++i) {
+      ArrayRef<AxisRefAttr> inAxes = inSharding.getDimShardings()[i].getAxes();
+      ArrayRef<AxisRefAttr> outAxes =
+          outSharding.getDimShardings()[i].getAxes();
+      SDY_CHECK(inAxes == outAxes)
+          << "dimension " << i << " has mismatched sharding axes ("
+          << strippedAttrsString(inAxes) << " vs "
+          << strippedAttrsString(outAxes)
+          << "). This requires a reshard collective which should have been "
+             "handled "
+          << "by previous passes.";
+
+      int64_t pLow = edgePaddingLow[i];
+      int64_t pInt = interiorPaddingAttr[i];
+      int64_t totalAxesSize = getTotalAxesSize(inAxes, mesh);
+      // The input slice size per device.
+      int64_t sIn =
+          globalInputType.getDimSize(i) / (inAxes.empty() ? 1 : totalAxesSize);
+      // The output slice size per device.
+      int64_t sOut = globalResultType.getDimSize(i) /
+                     (outAxes.empty() ? 1 : totalAxesSize);
+
+      for (int64_t devId = 0; devId < numDevices; ++devId) {
+        int64_t kIn = getShardIndex(devId, mesh, inAxes);
+        int64_t kOut = getShardIndex(devId, mesh, outAxes);
+        // offset = (GlobalStartOfInputData)−(GlobalStartOfOutputShard)
+        allOffsets[i][devId] = (kIn * sIn) * (pInt + 1) + pLow - (kOut * sOut);
+        if (allOffsets[i][devId] != allOffsets[i][0]) {
+          isDimUniform[i] = false;
+        }
+      }
+    }
+
+    Location loc = op.getLoc();
+    auto localResultType =
+        cast<RankedTensorType>(typeConverter->convertType(op.getResult()));
+    auto localInput = adaptor.getOperand();
+    auto localInputType = cast<RankedTensorType>(localInput.getType());
+    // If ALL dimensions are uniform, use a stablehlo.pad.
+    if (isDimUniform.all()) {
+      SmallVector<int64_t> localLow, localHigh;
+      localLow.reserve(rank);
+      localHigh.reserve(rank);
+      for (int64_t i = 0; i < rank; ++i) {
+        int64_t lLow = allOffsets[i][0];
+        localLow.push_back(lLow);
+        int64_t sInLocal = localInputType.getDimSize(i);
+        int64_t expandedInputSize =
+            (sInLocal - 1) * (interiorPaddingAttr[i] + 1) + 1;
+        localHigh.push_back(localResultType.getDimSize(i) -
+                            (expandedInputSize + lLow));
+      }
+      rewriter.replaceOp(
+          op, stablehlo::PadOp::create(rewriter, loc, localResultType,
+                                       localInput, adaptor.getPaddingValue(),
+                                       localLow, localHigh, interiorPaddingAttr)
+                  .getResult());
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+
+    // For non-uniform cases, we pad the input enough to cover all possible
+    // shifts to produce a safePad, then slice the localResultType piece from
+    // the safePad.
+    SmallVector<int64_t> kLow, kHigh, safePadShape;
+    kLow.reserve(rank);
+    kHigh.reserve(rank);
+    safePadShape.reserve(rank);
+    for (int64_t i = 0; i < rank; ++i) {
+      int64_t maxO = *llvm::max_element(allOffsets[i]);
+      int64_t minO = *llvm::min_element(allOffsets[i]);
+      int64_t sInLocal = localInputType.getDimSize(i);
+      int64_t sInExpanded = (sInLocal - 1) * (interiorPaddingAttr[i] + 1) + 1;
+
+      // We pad the input on the left by maxO so that the slice start (maxO -
+      // offset) is always >= 0.
+      int64_t lowPad = std::max<int64_t>(0, maxO);
+      kLow.push_back(lowPad);
+
+      // We pad on the right so that the slice (size localResultSize) is always
+      // in bounds.
+      int64_t highPad = std::max<int64_t>(
+          0, localResultType.getDimSize(i) - minO - sInExpanded);
+      kHigh.push_back(highPad);
+      safePadShape.push_back(lowPad + sInExpanded + highPad);
+    }
+
+    auto safePadType =
+        RankedTensorType::get(safePadShape, localInputType.getElementType());
+    Value safePad = stablehlo::PadOp::create(
+        rewriter, loc, safePadType, localInput, adaptor.getPaddingValue(), kLow,
+        kHigh, interiorPaddingAttr);
+
+    Value partitionId = stablehlo::ConvertOp::create(
+        rewriter, loc, RankedTensorType::get({}, rewriter.getI64Type()),
+        stablehlo::PartitionIdOp::create(rewriter, loc));
+
+    SmallVector<Value> sliceOffsets;
+    sliceOffsets.reserve(rank);
+    for (int64_t i = 0; i < rank; ++i) {
+      // The relative offset in the safePad is (kLow[i] - O_local(k)).
+      SmallVector<int64_t> sliceTable = llvm::map_to_vector(
+          allOffsets[i], [&](int64_t o) { return kLow[i] - o; });
+
+      auto getTableOffset = [&](ArrayRef<int64_t> tableData,
+                                bool uniform) -> Value {
+        if (uniform) {
+          return stablehlo::ConstantOp::create(
+              rewriter, loc, rewriter.getI64IntegerAttr(tableData[0]));
+        }
+        auto tableType =
+            RankedTensorType::get({numDevices}, rewriter.getI64Type());
+        auto table = stablehlo::ConstantOp::create(
+            rewriter, loc, tableType,
+            DenseIntElementsAttr::get(tableType, tableData));
+        auto slice = stablehlo::DynamicSliceOp::create(
+            rewriter, loc, RankedTensorType::get({1}, rewriter.getI64Type()),
+            table, {partitionId}, rewriter.getDenseI64ArrayAttr({1}));
+        return stablehlo::ReshapeOp::create(
+                   rewriter, loc,
+                   RankedTensorType::get({}, rewriter.getI64Type()), slice)
+            .getResult();
+      };
+
+      sliceOffsets.push_back(getTableOffset(sliceTable, isDimUniform[i]));
+    }
+
+    // Extract the final local result from safePad.
+    rewriter.replaceOp(op, stablehlo::DynamicSliceOp::create(
+                               rewriter, loc, localResultType, safePad,
+                               sliceOffsets, localResultType.getShape())
+                               .getResult());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -1355,12 +1535,11 @@ struct ConvertGlobalToLocalPass
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
-
     patterns
         .add<AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
              ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
              ManualComputationOpPattern, NamedComputationOpPattern,
-             ReturnOpPattern, StablehloIotaOpPattern>(
+             ReturnOpPattern, StablehloIotaOpPattern, StablehloPadOpPattern>(
             typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
