@@ -108,3 +108,25 @@ func.func @no_sharding(%arg0: !mpmd.mesh_tensor<"mesh", tensor<8x8xf32>>) -> !mp
   } : (!mpmd.mesh_tensor<"mesh", tensor<8x8xf32>>) -> !mpmd.mesh_tensor<"mesh", tensor<8x8xf32>>
   return %0 : !mpmd.mesh_tensor<"mesh", tensor<8x8xf32>>
 }
+
+// -----
+
+// MPMD mesh name ("m1") differs from SDY mesh name ("mesh").
+// The out_shardings must reference @mesh, not @m1.
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @unreduced_out_sharding_different_mpmd_mesh_name
+func.func @unreduced_out_sharding_different_mpmd_mesh_name(%arg0: !mpmd.mesh_tensor<"m1", tensor<8x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<8x8xf32>>
+  attributes { "topology"=#mpmd.topology<<"m1": <["x"=2, "y"=2]>>> }
+{
+  // CHECK: %[[FRAGMENT:.*]] = mpmd.fragment<mesh="m1", origin=["f1"], in_shardings=[<@mesh, [{}, {}], unreduced={"x"}>], out_shardings=[<@mesh, [{}, {}], unreduced={"x"}>]>
+  // CHECK-SAME: (%arg0) (%[[ARG1:.*]]: tensor<8x8xf32>) {
+  %0 = mpmd.fragment<mesh="m1", origin=["f1"], in_shardings=[<@mesh, [{}, {}], unreduced={"x"}>]> (%arg0) (%arg1: tensor<8x8xf32>) {
+    // CHECK-NEXT: %[[CONSTRAINT:.*]] = sdy.sharding_constraint %[[ARG1]] <@mesh, [{}, {}], unreduced={"x"}> : tensor<8x8xf32>
+    // CHECK-NEXT: mpmd.return %[[CONSTRAINT]] : tensor<8x8xf32>
+    %1 = sdy.sharding_constraint %arg1 <@mesh, [{}, {}], unreduced={"x"}> : tensor<8x8xf32>
+    mpmd.return %1 : tensor<8x8xf32>
+  } : (!mpmd.mesh_tensor<"m1", tensor<8x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<8x8xf32>>
+  return %0 : !mpmd.mesh_tensor<"m1", tensor<8x8xf32>>
+}

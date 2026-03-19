@@ -18,6 +18,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
@@ -62,11 +63,14 @@ class PopulateUnreducedOutShardingPass
       std::optional<sdy::TensorShardingPerValueAttr> out_shardings_attr =
           fragment_op.getOutShardings();
       SmallVector<sdy::TensorShardingAttr> new_out_shardings;
-      bool modified = false;
 
       if (!out_shardings_attr) {
         new_out_shardings.reserve(fragment_op.getNumResults());
         for (Value result : fragment_op.getResults()) {
+          // fragment_op.getMeshName() is just a placeholder here, as these
+          // shardings will have their mesh rewritten to the SDY mesh before
+          // they are set as attributes on the fragment op - we just don't have
+          // the SDY mesh at this point yet.
           new_out_shardings.push_back(getOrCreateFullyClosedSharding(
               result, fragment_op.getMeshName()));
         }
@@ -74,28 +78,57 @@ class PopulateUnreducedOutShardingPass
         new_out_shardings = llvm::to_vector(out_shardings_attr->getShardings());
       }
 
+      // Set when out_shardings are updated with unreduced axes from a
+      // constraint. Carries the SDY mesh ref (e.g. @mesh), which may differ
+      // from the MPMD mesh name (e.g. "mesh1"), and is used to ensure all
+      // out_shardings reference the correct SDY mesh before writing.
+      Attribute updated_mesh_ref;
+
       for (auto [i, yielded_value] : llvm::enumerate(yielded_values)) {
-        if (auto constraint_op =
-                yielded_value.getDefiningOp<sdy::ShardingConstraintOp>()) {
-          sdy::TensorShardingAttr constraint_sharding =
-              constraint_op.getSharding();
-          if (!constraint_sharding.getUnreducedAxes().empty()) {
-            sdy::TensorShardingAttr current_sharding = new_out_shardings[i];
-            if (!current_sharding) {
-              current_sharding = getOrCreateFullyClosedSharding(
-                  fragment_op.getResult(i), fragment_op.getMeshName());
-            }
-            if (current_sharding.getUnreducedAxes() !=
-                constraint_sharding.getUnreducedAxes()) {
-              new_out_shardings[i] = current_sharding.replaceUnreducedAxes(
-                  constraint_sharding.getUnreducedAxes());
-              modified = true;
-            }
-          }
+        auto constraint_op =
+            yielded_value.getDefiningOp<sdy::ShardingConstraintOp>();
+        if (!constraint_op) {
+          continue;
         }
+
+        sdy::TensorShardingAttr constraint_sharding =
+            constraint_op.getSharding();
+        if (constraint_sharding.getUnreducedAxes().empty()) {
+          continue;
+        }
+
+        sdy::TensorShardingAttr current_sharding = new_out_shardings[i];
+        if (current_sharding && current_sharding.getUnreducedAxes() ==
+                                    constraint_sharding.getUnreducedAxes()) {
+          continue;
+        }
+
+        sdy::TensorShardingAttr base_sharding = current_sharding;
+        if (!base_sharding) {
+          base_sharding = getOrCreateFullyClosedSharding(
+              fragment_op.getResult(i), constraint_sharding.getMeshName());
+        }
+        // Build the sharding with the SDY mesh name from the
+        // constraint, preserving dim shardings and replicated axes
+        // from the existing or a new fully-closed sharding.
+        updated_mesh_ref = constraint_sharding.getMeshOrRef();
+        new_out_shardings[i] = sdy::TensorShardingAttr::get(
+            base_sharding.getContext(), updated_mesh_ref,
+            base_sharding.getDimShardings(), base_sharding.getReplicatedAxes(),
+            constraint_sharding.getUnreducedAxes());
       }
 
-      if (modified) {
+      if (updated_mesh_ref) {
+        // Ensure all out_shardings reference the SDY mesh, not the MPMD
+        // mesh which may have been used when creating default shardings.
+        for (sdy::TensorShardingAttr& sharding : new_out_shardings) {
+          if (sharding && sharding.getMeshOrRef() != updated_mesh_ref) {
+            sharding = sdy::TensorShardingAttr::get(
+                sharding.getContext(), updated_mesh_ref,
+                sharding.getDimShardings(), sharding.getReplicatedAxes(),
+                sharding.getUnreducedAxes());
+          }
+        }
         fragment_op.setOutShardingsAttr(sdy::TensorShardingPerValueAttr::get(
             fragment_op.getContext(), new_out_shardings));
       }
