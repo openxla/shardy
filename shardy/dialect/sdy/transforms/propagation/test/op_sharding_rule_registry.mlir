@@ -657,8 +657,8 @@ func.func @gather(%arg0: tensor<3x4x2x5xf32>, %arg1: tensor<2x3x3xi64>) -> tenso
 }
 
 // CHECK-LABEL: @gather_implicit_index_vector_dim
-func.func @gather_implicit_index_vector_dim(%arg0: tensor<3x4x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, n, l], [i, j, k])->([i, j, k, l]) {i=2, j=3, k=2, l=2, m=3, n=4} reduction={m, n}>
+func.func @gather_implicit_index_vector_dim_and_size_one_collapsed_slice_dim(%arg0: tensor<3x1x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, n, l], [i, j, k])->([i, j, k, l]) {i=2, j=3, k=2, l=2, m=3, n=1} reduction={m} need_replication={n}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],
@@ -667,7 +667,7 @@ func.func @gather_implicit_index_vector_dim(%arg0: tensor<3x4x2xf32>, %arg1: ten
       index_vector_dim = 3>,
     slice_sizes = array<i64: 1, 1, 2>,
     indices_are_sorted = false
-  } : (tensor<3x4x2xf32>, tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32>
+  } : (tensor<3x1x2xf32>, tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32>
   return %0 : tensor<2x3x2x2xf32>
 }
 
