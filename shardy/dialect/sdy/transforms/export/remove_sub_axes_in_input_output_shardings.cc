@@ -43,6 +43,10 @@ TensorShardingAttr removeSubAxesInDimensionShardings(
   SmallVector<DimensionShardingAttr> newDimShardings;
   newDimShardings.reserve(sharding.getRank());
   for (DimensionShardingAttr oldDimSharding : sharding.getDimShardings()) {
+    if (oldDimSharding.getIsClosed()) {
+      newDimShardings.push_back(oldDimSharding);
+      continue;
+    }
     SmallVector<AxisRefAttr> newAxes;
     for (AxisRefAttr axis : oldDimSharding.getAxes()) {
       if (axis.getSubAxisInfo()) {

@@ -65,7 +65,7 @@ def RemoveSubAxesInInputOutputShardingsPass : Pass<"sdy-remove-sub-axes-in-input
   let description = [{
     Some users of Shardy expect the function inputs/outputs to have shardings
     without sub-axes. This pass removes sub-axes and their trailing axes from
-    input/output shardings. This pass is usually after
+    input/output open dimension shardings. This pass is usually after
     `sdy-update-non-divisible-input-output-shardings` to ensure that the removal
     of sub-axes does not introduce any non-divisible shardings.
   }];
