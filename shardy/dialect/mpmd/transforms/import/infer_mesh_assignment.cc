@@ -1885,7 +1885,9 @@ void AssignCalleeFuncArgsToAssignUsers(
     }
     SmallVector<StringRef> mesh_names = llvm::map_to_vector(
         assign_users_by_mesh_name, [](const auto& it) { return it.first; });
-    llvm::sort(mesh_names);
+    llvm::stable_sort(mesh_names, [](StringRef a, StringRef b) {
+      return IsMeshBeforeOtherMesh(a, b);
+    });
 
     SDY_CHECK(!mesh_names.empty()) << "No mesh names found.";
     if (mesh_names.size() > 1) {
@@ -2404,7 +2406,9 @@ void RewriteForOpArgsAndTypes(
     }
     SmallVector<StringRef> mesh_names = llvm::map_to_vector(
         assign_users_by_mesh_name, [](const auto& it) { return it.first; });
-    llvm::sort(mesh_names);
+    llvm::stable_sort(mesh_names, [](StringRef a, StringRef b) {
+      return IsMeshBeforeOtherMesh(a, b);
+    });
 
     // TODO(b/401476674): Handle multiple meshes.
     SDY_CHECK_LE(mesh_names.size(), 1)
@@ -2544,8 +2548,9 @@ class BroadcastToTransfersPattern : public OpRewritePattern<BroadcastOp> {
     }
 
     // Sort by mesh name to get a deterministic chain order.
-    llvm::sort(assign_users, [](AssignOp a, AssignOp b) {
-      return a.getType().getMeshName() < b.getType().getMeshName();
+    llvm::stable_sort(assign_users, [](AssignOp a, AssignOp b) {
+      return IsMeshBeforeOtherMesh(a.getType().getMeshName(),
+                                   b.getType().getMeshName());
     });
 
     // Chain transfers: each new transfer uses the result of the previous one

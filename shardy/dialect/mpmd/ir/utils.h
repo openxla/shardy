@@ -366,6 +366,14 @@ sdy::MeshAttr GetMeshOrFail(Operation* op);
 // Same as `GetMeshAttr(op, mesh_name)` but hards fail if an error is returned.
 sdy::MeshAttr GetMeshOrFail(Operation* op, StringRef mesh_name);
 
+// TODO(b/493934989): Remove this hack once we can correctly get the mesh
+// order.
+// Returns True if `mesh` is before `other_mesh` where before currently is
+// defined as: 1) if both meshes have a number suffix, the first mesh is before
+// the second mesh if its number is smaller. 2) otherwise, lexicographically.
+bool IsMeshBeforeOtherMesh(const mlir::StringRef& mesh,
+                           const mlir::StringRef& other_mesh);
+
 // Finds an operation inside `module` that carries an attribute named
 // `annotation`. Returns `nullptr` if such operation does not exist.
 Operation* FindAnnotatedOperation(ModuleOp module, StringRef annotation);
