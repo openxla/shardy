@@ -56,4 +56,3 @@ func.func @sharded_2d() -> (tensor<16x8xi32> {sdy.sharding = #sdy.sharding<@mesh
   // CHECK: return %[[RES]] : tensor<4x4xi32>
   return %0 : tensor<16x8xi32>
 }
-

@@ -27,8 +27,8 @@ func.func @one_dim_not_sharded(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shard
 // CHECK-LABEL: func @one_dim_sharded
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
 // CHECK-SAME: -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y":(2)2}, {}]>})
-func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
-  -> (tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh_2_4, [{"x", "y":(2)2}, {}]>}) {
+func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+  -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y":(2)2}, {}]>}) {
   // CHECK: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[ARG0]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>
   // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7]]> : tensor<4x2xi64>
@@ -47,8 +47,8 @@ func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<
 // CHECK-LABEL: func @two_dim_add_suffix_of_full
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {}]>})
 // CHECK-SAME: -> (tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {"x"}]>})
-func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {}]>})
-  -> (tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {"x"}]>}) {
+func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {}]>})
+  -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {"x"}]>}) {
   // --- Use All-Reduce and Dynamic Slice (combine-multi-dimension-reduce-scatter=false) ---
   // CHECK-AR-DS-NEXT: %[[ALL_REDUCE:.*]] = "stablehlo.all_reduce"(%[[ARG0]]) <{
   // CHECK-AR-DS-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>

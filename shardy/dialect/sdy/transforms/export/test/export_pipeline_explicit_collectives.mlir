@@ -15,7 +15,7 @@ func.func @reduce_scatter_fusion(%arg0: tensor<16x8x8xf32> {sdy.sharding = #sdy.
 }
 
 // CHECK-LABEL: func @all_slice_all_gather
-func.func @all_slice_all_gather(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"x"}]>}) {
+func.func @all_slice_all_gather(%arg0 : tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) {
   // CHECK: %0 = sdy.all_slice [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<16x2xf32>
   // CHECK-NEXT: %1 = sdy.all_gather [{"y"}, {}] %0 out_sharding=<@mesh, [{}, {"x"}]> : tensor<16x2xf32>
   // CHECK-NEXT: return %1 : tensor<16x2xf32>
@@ -24,7 +24,7 @@ func.func @all_slice_all_gather(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.shar
 }
 
 // CHECK-LABEL: func @reshard_of_reshard
-func.func @reshard_of_reshard(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) {
+func.func @reshard_of_reshard(%arg0 : tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>}) -> (tensor<16x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) {
   // CHECK: %0 = sdy.all_slice [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<16x2xf32>
   // CHECK-NEXT: return %0 : tensor<16x2xf32>
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{}, {"x"}]> : tensor<16x2xf32>
@@ -33,7 +33,7 @@ func.func @reshard_of_reshard(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.shardi
 }
 
 // CHECK-LABEL: func @all_to_all_fusion
-func.func @all_to_all_fusion(%arg0 : tensor<64x16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}, {}, {}]>}) -> (tensor<64x16x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}, {"x"}, {"y"}]>}) {
+func.func @all_to_all_fusion(%arg0 : tensor<64x16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}, {}, {}]>}) -> (tensor<64x16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"x"}, {"y"}]>}) {
   // CHECK-NEXT: %0 = sdy.all_to_all [{"x"}: 0->2, {"y"}: 1->3] %arg0 out_sharding=<@mesh, [{}, {}, {"x"}, {"y"}]> : tensor<64x16x8x8xf32>
   // CHECK-NEXT: return %0 : tensor<64x16x8x8xf32>
   %0 = sdy.reshard %arg0 <@mesh, [{}, {"y"}, {"x"}, {}]> : tensor<64x16x8x8xf32>

@@ -34,7 +34,7 @@ func.func @dont_merge_constants_different_regions(%arg0: tensor<i32>) -> tensor<
     // CHECK: %[[C1:.*]] = sdy.constant dense<1> : tensor<i32>
     // CHECK-NEXT: stablehlo.compare{{.*}} %[[C1]]
     %c_0 = sdy.constant dense<1> : tensor<i32>
-    %2 = stablehlo.compare  LT, %iterArg, %c_0 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    %2 = stablehlo.compare LT, %iterArg, %c_0 : (tensor<i32>, tensor<i32>) -> tensor<i1>
     stablehlo.return %2 : tensor<i1>
    } do {
     // CHECK: %[[C2:.*]] = sdy.constant dense<1> : tensor<i32>

@@ -75,5 +75,3 @@ func.func @two_dims_full_axes(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.shar
   // CHECK: return %[[RESULT]] : tensor<8x8xf32>
   return %0 : tensor<16x32xf32>
 }
-
-

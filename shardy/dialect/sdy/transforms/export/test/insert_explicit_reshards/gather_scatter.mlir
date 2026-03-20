@@ -42,7 +42,7 @@ func.func @gather_implicit_dimension(
 
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{"x":(1)2}, {}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
   // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[RESHARD1]], %arg1)
-  // CHECK-SAME: #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]>
+  // CHECK-SAME: #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]>]>}
   // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x":(1)2, "y":(1)2} %[[GATHER]] out_sharding=<@mesh_xyzt, [{}, {}, {"z":(1)2}, {"z":(2)2}, {"y":(2)2}, {"t"}]> : tensor
   // CHECK-NEXT: return %[[ALL_REDUCE]]
   %0 = "stablehlo.gather"(%arg0, %arg1) {
@@ -204,4 +204,3 @@ func.func @gather_reduction_factor_sharding_overlaps_with_output_sharding(%arg0:
   %0 = "stablehlo.gather"(%arg0, %arg1) <{dimension_numbers = #stablehlo.gather<offset_dims = [3], collapsed_slice_dims = [1], operand_batching_dims = [0], start_indices_batching_dims = [0], start_index_map = [1], index_vector_dim = 3>, indices_are_sorted = false, slice_sizes = array<i64: 1, 1, 3>}> {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}, {}]>]>} : (tensor<4x2x3xf32>, tensor<4x2x2x1xi32>) -> tensor<4x2x2x3xf32>
   return %0 : tensor<4x2x2x3xf32>
 }
-

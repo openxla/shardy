@@ -182,7 +182,7 @@ func.func @manual_computation_all_reduce_free_axis_on_return_value(%arg0: tensor
   // CHECK-NEXT: return %[[MANUAL_COMP]]
   %0 = sdy.manual_computation(%arg0)
     in_shardings=[<@mesh, [{"x"}], unreduced={"y"}>] out_shardings=[<@mesh, [{"x"}]>] manual_axes={"x"} (%arg1: tensor<52xf32>) {
-    %1 = stablehlo.abs %arg1 {sdy.sharding=#sdy.sharding_per_value<[<@mesh, [{}], unreduced={"y"}>]>} : tensor<52xf32>
+    %1 = stablehlo.abs %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"y"}>]>} : tensor<52xf32>
     sdy.return %1 : tensor<52xf32>
   } : (tensor<208xf32>) -> tensor<208xf32>
   return %0 : tensor<208xf32>

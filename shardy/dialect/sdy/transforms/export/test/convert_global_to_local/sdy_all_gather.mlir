@@ -9,15 +9,15 @@ sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
 // CHECK-LABEL: func @one_dim
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<1x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y"}, {}]>})
 // CHECK-SAME:    -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
-func.func@one_dim(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y"}, {}]>})
-  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [ {"x"}, {} ]>}){
+func.func @one_dim(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y"}, {}]>})
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>,
   // CHECK-SAME{LITERAL}:   replica_groups = dense<[[0, 1, 2, 3], [4, 5, 6, 7]]> : tensor<2x4xi64>,
   // CHECK-SAME:   use_global_device_ids
   // CHECK-SAME: }> : (tensor<1x16xf32>) -> tensor<4x16xf32>
-  %0 = sdy.all_gather[{"y"}, {}] %arg0 out_sharding = <@mesh_2_4, [{"x"}, {}]> : tensor<8x16xf32>
+  %0 = sdy.all_gather [{"y"}, {}] %arg0 out_sharding=<@mesh_2_4, [{"x"}, {}]> : tensor<8x16xf32>
   // CHECK: return %[[GATHER]] : tensor<4x16xf32>
   return %0 : tensor<8x16xf32>
 }
@@ -25,15 +25,15 @@ func.func@one_dim(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2
 // CHECK-LABEL: func @one_dim_two_axes_xy
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>})
-func.func@one_dim_two_axes_xy(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
-  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {}, {"z"} ]>}){
+func.func @one_dim_two_axes_xy(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>,
   // CHECK-SAME{LITERAL}:   replica_groups = dense<[[0, 2, 4, 6, 8, 10, 12, 14], [1, 3, 5, 7, 9, 11, 13, 15]]> : tensor<2x8xi64>,
   // CHECK-SAME:   use_global_device_ids
   // CHECK-SAME: }> : (tensor<1x8xf32>) -> tensor<8x8xf32>
-  %0 = sdy.all_gather[{"x", "y"}, {}] %arg0 out_sharding = <@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
+  %0 = sdy.all_gather [{"x", "y"}, {}] %arg0 out_sharding=<@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
   // CHECK: return %[[GATHER]] : tensor<8x8xf32>
   return %0 : tensor<8x16xf32>
 }
@@ -41,15 +41,15 @@ func.func@one_dim_two_axes_xy(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.shar
 // CHECK-LABEL: func @one_dim_two_axes_yx
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "x"}, {"z"}]>})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>})
-func.func@one_dim_two_axes_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "x"}, {"z"}]>})
-  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {}, {"z"} ]>}){
+func.func @one_dim_two_axes_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "x"}, {"z"}]>})
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
   // CHECK-SAME{LITERAL}:   replica_groups = dense<[[0, 8, 2, 10, 4, 12, 6, 14], [1, 9, 3, 11, 5, 13, 7, 15]]> : tensor<2x8xi64>,
   // CHECK-SAME:   use_global_device_ids
   // CHECK-SAME: }> : (tensor<1x8xf32>) -> tensor<8x8xf32>
-  %0 = sdy.all_gather[{"y", "x"}, {}] %arg0 out_sharding = <@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
+  %0 = sdy.all_gather [{"y", "x"}, {}] %arg0 out_sharding=<@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
   // CHECK: return %[[GATHER]] : tensor<8x8xf32>
   return %0 : tensor<8x16xf32>
 }
@@ -57,15 +57,15 @@ func.func@one_dim_two_axes_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.shar
 // CHECK-LABEL: func @one_dim_two_axes_subaxis
 // CHECK-SAME:    (%[[ARG0:.*]]: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y":(2)2}, {"z"}]>})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>})
-func.func@one_dim_two_axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y":(2)2}, {"z"}]>})
-  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {}, {"z"} ]>}){
+func.func @one_dim_two_axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y":(2)2}, {"z"}]>})
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"z"}]>}){
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 4, type = 1>,
   // CHECK-SAME{LITERAL}:   replica_groups = dense<[[0, 2, 8, 10], [1, 3, 9, 11], [4, 6, 12, 14], [5, 7, 13, 15]]> : tensor<4x4xi64>,
   // CHECK-SAME:   use_global_device_ids
   // CHECK-SAME: }> : (tensor<2x8xf32>) -> tensor<8x8xf32>
-  %0 = sdy.all_gather[{"x", "y":(2)2}, {}] %arg0 out_sharding = <@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
+  %0 = sdy.all_gather [{"x", "y":(2)2}, {}] %arg0 out_sharding=<@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
   // CHECK: return %[[GATHER]] : tensor<8x8xf32>
   return %0 : tensor<8x16xf32>
 }
@@ -74,7 +74,7 @@ func.func@one_dim_two_axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
 // CHECK-SAME: -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x"}, {}]>})
 func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {"z"}]>})
-  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {"x"}, {}]>}){
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x"}, {}]>}){
 
   // --- Per-Dimension All-Gather Strategy (per-dim-all-gather=true) ---
   // CHECK-PER-DIM: %[[GATHER1:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
@@ -112,7 +112,7 @@ func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z", "y"}, {"x"}]>})
 // CHECK-SAME: -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z"}, {}]>})
 func.func @two_dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z", "y"}, {"x"}]>})
-  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [ {"z"}, {}]>}){
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"z"}, {}]>}){
 
   // --- Per-Dimension All-Gather Strategy (per-dim-all-gather=true) ---
   // CHECK-PER-DIM: %[[GATHER1:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
