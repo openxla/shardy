@@ -82,10 +82,10 @@ TEST(ExtractFunctionIOShardingSpecsAndMeshes, FunctionWithSingleTransfer) {
 
   EXPECT_THAT(specs_and_mesh.input_specs,
               ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
-                                    "arg")));
+                                    IsEmpty(), "arg")));
   EXPECT_THAT(specs_and_mesh.output_specs,
               ElementsAre(FieldsAre("mesh2", SpmdTensorPartitionSpec{{"x"}, {}},
-                                    "res")));
+                                    IsEmpty(), "res")));
 }
 
 TEST(ExtractFunctionIOShardingSpecsAndMeshes, MultipleInputMultipleOutput) {
@@ -118,14 +118,14 @@ TEST(ExtractFunctionIOShardingSpecsAndMeshes, MultipleInputMultipleOutput) {
       ExtractFunctionIOShardingSpecsAndMeshes(func_op);
   EXPECT_THAT(specs_and_mesh.input_specs,
               ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
-                                    std::nullopt),
+                                    IsEmpty(), std::nullopt),
                           FieldsAre("mesh1", SpmdTensorPartitionSpec{{"x"}, {}},
-                                    std::nullopt)));
+                                    IsEmpty(), std::nullopt)));
   EXPECT_THAT(specs_and_mesh.output_specs,
               ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
-                                    std::nullopt),
+                                    IsEmpty(), std::nullopt),
                           FieldsAre("mesh1", SpmdTensorPartitionSpec{{"x"}, {}},
-                                    std::nullopt)));
+                                    IsEmpty(), std::nullopt)));
 }
 
 TEST(ExtractFunctionIOShardingSpecsAndMeshes, IOTypesHaveMemoryKinds) {
@@ -151,11 +151,44 @@ TEST(ExtractFunctionIOShardingSpecsAndMeshes, IOTypesHaveMemoryKinds) {
 
   EXPECT_THAT(
       specs_and_mesh.input_specs,
-      ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{}, "device")));
+      ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{}, IsEmpty(),
+                            "device")));
 
   EXPECT_THAT(specs_and_mesh.output_specs,
               ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{},
-                                    "pinned_host")));
+                                    IsEmpty(), "pinned_host")));
+}
+
+TEST(ExtractFunctionIOShardingSpecsAndMeshes, FunctionWithTransferToUnreduced) {
+  const std::string kProgram = R"mlir(
+    func.func @main(%arg0 : !mpmd.mesh_tensor<"mesh1", tensor<12x16xf32>, sharding=<@mesh, [{?}, {"y"}], unreduced={"x"}>>)
+        -> (!mpmd.mesh_tensor<"mesh2", tensor<12x16xf32>, sharding=<@mesh, [{?}, {?}], unreduced={"x"}>>) attributes {
+        "topology"=#mpmd.topology<
+          <"mesh1": <["x"=2, "y"=4]>>,
+          <"mesh2": <["x"=2, "y"=4]>>
+        >} {
+      %0 = mpmd.transfer %arg0 : (!mpmd.mesh_tensor<"mesh1", tensor<12x16xf32>, sharding=<@mesh, [{?}, {"y"}], unreduced={"x"}>>) -> !mpmd.mesh_tensor<"mesh2", tensor<12x16xf32>, sharding=<@mesh, [{?}, {?}], unreduced={"x"}>>
+      func.return %0 : !mpmd.mesh_tensor<"mesh2", tensor<12x16xf32>, sharding=<@mesh, [{?}, {?}], unreduced={"x"}>>
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  SDY_CHECK(module);
+  auto func_op = GetMainFunction(*module);
+  SDY_CHECK(func_op);
+
+  FunctionIOShardingSpecsAndMeshes specs_and_mesh =
+      ExtractFunctionIOShardingSpecsAndMeshes(func_op);
+
+  EXPECT_THAT(specs_and_mesh.input_specs,
+              ElementsAre(FieldsAre("mesh1", SpmdTensorPartitionSpec{{}, {"y"}},
+                                    ElementsAre("x"), std::nullopt)));
+  EXPECT_THAT(specs_and_mesh.output_specs,
+              ElementsAre(FieldsAre("mesh2", SpmdTensorPartitionSpec{{}, {}},
+                                    ElementsAre("x"), std::nullopt)));
 }
 
 SmallVector<SmallVector<OpResult>> GetCallOpResults(FuncOp func_op) {

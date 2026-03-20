@@ -77,14 +77,28 @@ SpmdTensorPartitionSpec ExtractTensorPartitionSpec(MeshTensorType type) {
   return spec;
 }
 
+std::vector<std::string> ExtractUnreducedAxes(MeshTensorType type) {
+  if (!type.getSharding()) {
+    return {};
+  }
+  std::vector<std::string> unreduced_axes;
+  unreduced_axes.reserve(type.getSharding().getUnreducedAxes().size());
+  for (sdy::AxisRefAttr axis : type.getSharding().getUnreducedAxes()) {
+    unreduced_axes.push_back(axis.getName().str());
+  }
+  return unreduced_axes;
+}
+
 NamedSpmdShardingSpec GetNamedShardingSpec(MeshTensorType mesh_tensor) {
   SpmdTensorPartitionSpec spec = ExtractTensorPartitionSpec(mesh_tensor);
+  std::vector<std::string> unreduced_axes = ExtractUnreducedAxes(mesh_tensor);
   std::optional<std::string> memory_kind;
   if (mesh_tensor.getMemoryKind()) {
     memory_kind = mesh_tensor.getMemoryKind().getValue().str();
   }
-  return NamedSpmdShardingSpec{mesh_tensor.getMeshName().str(), spec,
-                               memory_kind};
+  return NamedSpmdShardingSpec{mesh_tensor.getMeshName().str(), std::move(spec),
+                               std::move(unreduced_axes),
+                               std::move(memory_kind)};
 }
 
 }  // namespace

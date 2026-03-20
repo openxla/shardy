@@ -117,6 +117,7 @@ using SpmdTensorPartitionSpec = std::vector<std::vector<std::string>>;
 struct NamedSpmdShardingSpec {
   std::string mesh_name;
   SpmdTensorPartitionSpec tensor_spec;
+  std::vector<std::string> unreduced_axes;
   std::optional<std::string> memory_kind;
 };
 

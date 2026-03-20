@@ -39,7 +39,7 @@ limitations under the License.
 // Please suffix the version number with a brief description of your change
 // in a comment. The goal here is to force a merge conflict if two changes
 // attempt to grab the same version number.
-#define SHARDY_MPMD_JAXLIB_VERSION 1  // Add fragment_schedule_rules
+#define SHARDY_MPMD_JAXLIB_VERSION 2  // NamedSpmdShardingSpec::unreduced_axes
 
 namespace mlir::mpmd {
 

@@ -41,6 +41,7 @@ class FunctionNamedShardings:
 def _sdy_spec_to_named_sharding(
     sdy_sharding: Sequence[Sequence[str]],
     mesh: jax.sharding.Mesh,
+    unreduced_axes: Set[str] | None = None,
     memory_kind: str | None = None,
 ) -> jax.sharding.NamedSharding:
   """Converts a SDY spec to a NamedSharding."""
@@ -56,9 +57,10 @@ def _sdy_spec_to_named_sharding(
         # with trailing Nones.
         cloned_sharding.pop()
 
+    unreduced = unreduced_axes or set()
     if not cloned_sharding:
-      return jax.sharding.PartitionSpec()
-    return jax.sharding.PartitionSpec(*cloned_sharding)
+      return jax.sharding.PartitionSpec(unreduced=unreduced)
+    return jax.sharding.PartitionSpec(*cloned_sharding, unreduced=unreduced)
 
   return jax.sharding.NamedSharding(
       mesh, get_pspec(sdy_sharding), memory_kind=memory_kind
@@ -76,7 +78,8 @@ def meshes_and_sdy_specs_to_named_shardings(
       _sdy_spec_to_named_sharding(
           input_spec.tensor_spec,
           topology[input_spec.mesh_name],
-          input_spec.memory_kind,
+          unreduced_axes=set(input_spec.unreduced_axes),
+          memory_kind=input_spec.memory_kind,
       )
       for input_spec in meshes_and_specs.input_specs
   ]
@@ -85,7 +88,8 @@ def meshes_and_sdy_specs_to_named_shardings(
       _sdy_spec_to_named_sharding(
           output_spec.tensor_spec,
           topology[output_spec.mesh_name],
-          output_spec.memory_kind,
+          unreduced_axes=set(output_spec.unreduced_axes),
+          memory_kind=output_spec.memory_kind,
       )
       for output_spec in meshes_and_specs.output_specs
   ]
