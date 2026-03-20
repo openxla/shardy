@@ -161,6 +161,43 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
 
+// Converts op to its local version by replacing its operands with the already
+// converted operands and removing the op from the toConvertOps list.
+LogicalResult localizeGenericOp(Operation* op, ValueRange operands,
+                                ConversionPatternRewriter& rewriter,
+                                const TypeConverter* typeConverter,
+                                ConversionState& conversionState) {
+  // Compute local shapes for results.
+  SmallVector<Type> newResultTypes;
+  llvm::transform(
+      op->getResults(), std::back_inserter(newResultTypes),
+      [&](Value result) { return typeConverter->convertType(result); });
+
+  // Use OperationState to copy all properties including nested regions.
+  OperationState state(op->getLoc(), op->getName());
+  state.addOperands(operands);
+  state.addTypes(newResultTypes);
+  state.addAttributes(op->getAttrs());
+  state.addSuccessors(op->getSuccessors());
+  for (int i = 0; i < op->getNumRegions(); ++i) {
+    state.addRegion();
+  }
+  Operation* newOp = rewriter.create(state);
+
+  // Move the regions from the old operation to the new one, assuming the
+  // region signatures remain unchanged, such as the regions for
+  // stablehlo.all_reduce or stablehlo.reduce. For regions that require
+  // special handling, they should be handled by specific patterns.
+  for (auto [oldRegion, newRegion] :
+       llvm::zip(op->getRegions(), newOp->getRegions())) {
+    rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
+  }
+
+  rewriter.replaceOp(op, newOp->getResults());
+  conversionState.removeToConvertOp(op);
+  return success();
+}
+
 // Pattern for generic ops that do not require special handling beyond type
 // conversion, such as StableHLO ops, sdy.all_reduce, etc.
 class GenericOpPattern : public ConversionPattern {
@@ -178,36 +215,8 @@ class GenericOpPattern : public ConversionPattern {
         isa<stablehlo::IotaOp, stablehlo::PadOp>(op)) {
       return failure();
     }
-
-    // Compute local shapes for results.
-    SmallVector<Type> newResultTypes;
-    llvm::transform(
-        op->getResults(), std::back_inserter(newResultTypes),
-        [&](Value result) { return typeConverter->convertType(result); });
-
-    // Use OperationState to copy all properties including nested regions.
-    OperationState state(op->getLoc(), op->getName());
-    state.addOperands(operands);
-    state.addTypes(newResultTypes);
-    state.addAttributes(op->getAttrs());
-    state.addSuccessors(op->getSuccessors());
-    for (int i = 0; i < op->getNumRegions(); ++i) {
-      state.addRegion();
-    }
-    Operation* newOp = rewriter.create(state);
-
-    // Move the regions from the old operation to the new one, assuming the
-    // region signatures remain unchanged, such as the regions for
-    // stablehlo.all_reduce or stablehlo.reduce. For regions that require
-    // special handling, they should be handled by specific patterns.
-    for (auto [oldRegion, newRegion] :
-         llvm::zip(op->getRegions(), newOp->getRegions())) {
-      rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
-    }
-
-    rewriter.replaceOp(op, newOp->getResults());
-    conversionState.removeToConvertOp(op);
-    return success();
+    return localizeGenericOp(op, operands, rewriter, typeConverter,
+                             conversionState);
   }
 
  private:
@@ -1321,8 +1330,8 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       // else the pad op should have been converted to a pad followed by a
       // collective to reshard its result.
       SDY_CHECK(isFullyReplicated(outSharding));
-      conversionState.removeToConvertOp(op);
-      return success();
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter,
+                               getTypeConverter(), conversionState);
     }
     const SymbolTable& symbolTable = converter->getSymbolTable();
     MeshAttr mesh = inSharding.getMesh(symbolTable);

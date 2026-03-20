@@ -4,6 +4,22 @@
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 
+// CHECK-LABEL: func @replicated_after_all_gather
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) -> tensor<10x18xf32>
+func.func @replicated_after_all_gather(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) -> tensor<10x18xf32> {
+  // CHECK: %[[CST:.*]] = stablehlo.constant
+  %pv = stablehlo.constant dense<0.0> : tensor<f32>
+  // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{all_gather_dim = 0 : i64,
+  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>,
+  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // CHECK-SAME: (tensor<4x16xf32>) -> tensor<8x16xf32>
+  %0 = sdy.all_gather [{"x"}, {}] %arg0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<8x16xf32>
+  // CHECK: %[[PAD:.*]] = stablehlo.pad %[[GATHER]], %[[CST]], low = [1, 1], high = [1, 1], interior = [0, 0] : (tensor<8x16xf32>, tensor<f32>) -> tensor<10x18xf32>
+  %1 = stablehlo.pad %0, %pv, low = [1, 1], high = [1, 1], interior = [0, 0] : (tensor<8x16xf32>, tensor<f32>) -> tensor<10x18xf32>
+  // CHECK: return %[[PAD]]
+  return %1 : tensor<10x18xf32>
+}
+
 // CHECK-LABEL: func @pad_non_sharded_dim
 // CHECK-SAME:  %[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
 // CHECK-SAME:  -> (tensor<8x24xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
