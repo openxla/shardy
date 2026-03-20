@@ -212,7 +212,7 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     if ((op->getDialect()->getNamespace() != "stablehlo" &&
          !isa<sdy::AllReduceOp, sdy::ReturnOp>(op)) ||
-        isa<stablehlo::IotaOp, stablehlo::PadOp>(op)) {
+        isa<stablehlo::IotaOp, stablehlo::PadOp, stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(op, operands, rewriter, typeConverter,
@@ -1490,6 +1490,82 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
   ConversionState& conversionState;
 };
 
+class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
+ public:
+  StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                          ConversionState& state)
+      : OpConversionPattern<stablehlo::SliceOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::SliceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr inSharding = converter->getSharding(op.getOperand());
+    TensorShardingAttr outSharding = converter->getSharding(op.getResult());
+
+    if (isFullyReplicated(inSharding) && isFullyReplicated(outSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter,
+                               getTypeConverter(), conversionState);
+    }
+
+    auto globalInputType = cast<RankedTensorType>(op.getOperand().getType());
+    SmallVector<int64_t> newStartIndices, newLimitIndices;
+    int64_t rank = globalInputType.getRank();
+    newStartIndices.reserve(rank);
+    newLimitIndices.reserve(rank);
+
+    for (int64_t i = 0; i < rank; ++i) {
+      auto inAxes = inSharding.getDimShardings()[i].getAxes();
+      auto outAxes = outSharding.getDimShardings()[i].getAxes();
+
+      if (inAxes != outAxes) {
+        return op.emitOpError()
+               << "dimension " << i << " has mismatched sharding axes ("
+               << strippedAttrsString(inAxes) << " vs "
+               << strippedAttrsString(outAxes)
+               << "). This requires a reshard which should have been handled "
+                  "by previous passes.";
+      }
+
+      int64_t globalStart = op.getStartIndices()[i];
+      int64_t globalLimit = op.getLimitIndices()[i];
+      if (inAxes.empty()) {
+        // Unsharded -> Unsharded. Use global indices.
+        newStartIndices.push_back(globalStart);
+        newLimitIndices.push_back(globalLimit);
+      } else {
+        // Sharded -> Sharded. Expect a full slice.
+        if (globalStart != 0 || globalLimit != globalInputType.getDimSize(i)) {
+          return op.emitOpError() << "dimension " << i
+                                  << " is sharded but the slice is not a full "
+                                     "slice and requires device communication.";
+        }
+        newStartIndices.push_back(0);
+        newLimitIndices.push_back(
+            cast<RankedTensorType>(adaptor.getOperand().getType())
+                .getDimSize(i));
+      }
+    }
+
+    // Generate a local slice.
+    rewriter.replaceOp(
+        op, stablehlo::SliceOp::create(
+                rewriter, op.getLoc(),
+                cast<RankedTensorType>(converter->convertType(op.getResult())),
+                adaptor.getOperand(), newStartIndices, newLimitIndices,
+                op.getStrides())
+                .getResult());
+
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -1544,12 +1620,12 @@ struct ConvertGlobalToLocalPass
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
-    patterns
-        .add<AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
-             ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
-             ManualComputationOpPattern, NamedComputationOpPattern,
-             ReturnOpPattern, StablehloIotaOpPattern, StablehloPadOpPattern>(
-            typeConverter, &getContext(), conversionState);
+    patterns.add<
+        AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
+        ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
+        ManualComputationOpPattern, NamedComputationOpPattern, ReturnOpPattern,
+        StablehloIotaOpPattern, StablehloPadOpPattern, StablehloSliceOpPattern>(
+        typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
     patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
