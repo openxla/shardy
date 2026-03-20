@@ -49,6 +49,12 @@ namespace mlir::mpmd {
 
 namespace {
 
+#ifndef NDEBUG
+static constexpr bool kEnableVerifier = true;
+#else
+static constexpr bool kEnableVerifier = false;
+#endif
+
 // Sets `jax.buffer_donor` attribute on the donated arguments that do not have
 // either `jax.buffer_donor` or `tf.aliasing_output` attributes set.
 // It is necessary to do this for cases when JAX does not have sufficient info
@@ -204,7 +210,7 @@ PartitioningResult MpmdProgram::ApplyPartitioning(PartitioningPhase phases) {
 
 void MpmdProgram::Import(ModuleOp module) {
   PassManager pm(module->getName());
-  pm.enableVerifier(false);
+  pm.enableVerifier(kEnableVerifier);
 
   ImportOptions import_options;
   import_options.nameToMeshAssignment = {std::move(assignment)};
@@ -230,7 +236,7 @@ void MpmdProgram::Import(ModuleOp module) {
 
 void MpmdProgram::Optimize(ModuleOp module) {
   PassManager pm(module->getName());
-  pm.enableVerifier(false);
+  pm.enableVerifier(kEnableVerifier);
 
   OptimizeOptions optimize_options;
   optimize_options.fragmentMergeRules = llvm::to_vector(fragment_merge_rules);
@@ -251,7 +257,7 @@ void MpmdProgram::Optimize(ModuleOp module) {
 
 void MpmdProgram::PropagateSharding(ModuleOp module) {
   PassManager pm(module->getName());
-  pm.enableVerifier(false);
+  pm.enableVerifier(kEnableVerifier);
 
   addShardingPropagationPipeline(pm, "");
   module->setAttr(kIsSdyPartitioned, Builder(module).getBoolAttr(true));
@@ -262,7 +268,7 @@ void MpmdProgram::PropagateSharding(ModuleOp module) {
 
 void MpmdProgram::Export(ModuleOp module) {
   PassManager pm(module->getName());
-  pm.enableVerifier(false);
+  pm.enableVerifier(kEnableVerifier);
 
   ExportOptions export_options;
   export_options.copyConstantsFromProducerToConsumer =
