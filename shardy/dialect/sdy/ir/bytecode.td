@@ -225,6 +225,7 @@ def Sdy_AllToAllParamListAttrBc: DialectAttribute<(attr
   Array<Sdy_AllToAllParamAttrBc>:$value
 )> {
   let cType = "AllToAllParamListAttr";
+  let cBuilder = "AllToAllParamListAttr::get(context, value)";
 }
 
 // This enum contains marker codes used to indicate which attribute is
