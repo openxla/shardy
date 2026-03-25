@@ -598,9 +598,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         // SPMD operations which perform purely collective permutes between
         // partitions. These operations may return multiple tensors, but all
         // result tensors are expected to have the same sharding as the input.
-        if (callTargetName == "_SPMDInternalOp_MultiRotate" ||
-            callTargetName == "_SPMDInternalOp_MultiSlice" ||
+        if (callTargetName == "_SPMDInternalOp_MultiPad" ||
             callTargetName == "_SPMDInternalOp_RotateRight" ||
+            callTargetName == "_SPMDInternalOp_MultiRotate" ||
+            callTargetName == "_SPMDInternalOp_MultiSlice" ||
             callTargetName == "_SPMDInternalOp_Wrap") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
