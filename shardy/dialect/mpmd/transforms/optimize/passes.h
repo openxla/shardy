@@ -58,6 +58,8 @@ struct OptimizeOptions {
   bool absorbInferredFragmentsOnEntryPointFunction = false;
   // Whether to clone inferred fragments when merging.
   bool cloneInferredFragments = false;
+  // Whether to sink transfers.
+  bool sinkTransfers = true;
   // The pipeline schedule to use.
   PipelineSchedule pipelineSchedule = PipelineSchedule::kGPipe;
 };

@@ -36,6 +36,7 @@ cc_library(
         "rule_based_schedule.cc",
         "scheduler.cc",
         "scheduling_and_rule_based_merge.cc",
+        "sink_transfers.cc",
     ],
     hdrs = [
         "passes.h",
