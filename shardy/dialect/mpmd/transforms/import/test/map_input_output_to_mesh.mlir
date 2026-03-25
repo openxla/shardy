@@ -43,3 +43,19 @@ func.func @same_output_mapped_to_different_meshes(%arg0: tensor<4x8xf32>, %arg1:
   %1 = stablehlo.add %arg0, %arg1 : tensor<4x8xf32>
   func.return %1, %1 : tensor<4x8xf32>, tensor<4x8xf32>
 }
+
+// Verify that unassign ops are grouped contiguously at the top of the block
+// (in argument order), not scattered in non-deterministic DenseMap iteration
+// order. This ensures reproducible IR output for testing and debugging.
+
+// CHECK-LABEL: func @unassigns_grouped_at_top
+// CHECK-NEXT: %[[U0:.*]] = mpmd.unassign {origin = "user_in"} %arg0
+// CHECK-NEXT: %[[U1:.*]] = mpmd.unassign {origin = "user_in"} %arg1
+// CHECK-NEXT: stablehlo.add %[[U0]], %[[U1]]
+func.func @unassigns_grouped_at_top(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>) attributes {
+    "topology"=#mpmd.topology<
+    <"m1": <["x"=2]>>, <"m2": <["y"=2]>>>} {
+  %1 = stablehlo.add %arg0, %arg1 : tensor<4x8xf32>
+  func.return %1, %1 : tensor<4x8xf32>, tensor<4x8xf32>
+}
+

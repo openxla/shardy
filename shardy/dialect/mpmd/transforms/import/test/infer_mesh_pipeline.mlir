@@ -440,11 +440,11 @@ func.func @op_with_no_results_multiple_meshes(%arg0: !mesh_2_tensor_4_16_f32)
 // CHECK-NEXT:    stablehlo.add %arg1, %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }
-// CHECK-NEXT:  mpmd.fragment<mesh="m2", origin=[]> (%[[INFERRED_2]]) (%arg1
+// CHECK-NEXT:  mpmd.fragment<mesh="m1", origin=[]> (%[[INFERRED_1]]) (%arg1
 // CHECK-NEXT:    sdy.sharding_group %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }
-// CHECK-NEXT:  mpmd.fragment<mesh="m1", origin=[]> (%[[INFERRED_1]]) (%arg1
+// CHECK-NEXT:  mpmd.fragment<mesh="m2", origin=[]> (%[[INFERRED_2]]) (%arg1
 // CHECK-NEXT:    sdy.sharding_group %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }

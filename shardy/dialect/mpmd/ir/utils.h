@@ -367,6 +367,27 @@ sdy::MeshAttr GetMeshOrFail(Operation* op);
 // Same as `GetMeshAttr(op, mesh_name)` but hards fail if an error is returned.
 sdy::MeshAttr GetMeshOrFail(Operation* op, StringRef mesh_name);
 
+// TODO(b/493934989): Remove this hack once we can correctly get the mesh
+// order.
+// Returns True if `mesh` is before `other_mesh` where before currently is
+// defined as: 1) if both meshes have a number suffix, the first mesh is before
+// the second mesh if its number is smaller. 2) otherwise, lexicographically.
+bool IsMeshBeforeOtherMesh(mlir::StringRef mesh, mlir::StringRef other_mesh);
+
+// Collects all AssignOp users of `unassign_op` whose target mesh differs from
+// the source mesh of the UnassignOp.
+SmallVector<AssignOp> GetCrossMeshAssignUsers(UnassignOp unassign_op);
+
+// Replaces a list of AssignOps with chained TransferOps. The assigns are sorted
+// by mesh name (via IsMeshBeforeOtherMesh) to produce a deterministic chain
+// order, then all transfers are inserted contiguously before the earliest
+// assign in block order to prevent dominance violations (b/475997012).
+//
+// If an assign targets the same mesh as the current chain head, it is replaced
+// with the chain head directly (no transfer needed).
+void ReplaceAssignsWithChainedTransfers(SmallVector<AssignOp>& assigns,
+                                        Value source, RewriterBase& rewriter);
+
 // Finds an operation inside `module` that carries an attribute named
 // `annotation`. Returns `nullptr` if such operation does not exist.
 Operation* FindAnnotatedOperation(ModuleOp module, StringRef annotation);

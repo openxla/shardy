@@ -72,13 +72,13 @@ func.func @escape_broadcast(%arg0: !mesh_1_tensor_4_8_f32, %arg1: !mesh_2_tensor
     >} {
 
 // CHECK-NEXT: %[[T0:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %[[T0]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
 // CHECK-NEXT: %[[MUL_FRAG:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[T0]], %arg1)
 // CHECK-NEXT:   multiply
 // CHECK-NEXT:   return
 // CHECK-NEXT: }
-// CHECK-DAG:  %[[T1:.*]] = mpmd.transfer %[[MUL_FRAG]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
-// CHECK-DAG:  %[[T2:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m3{{.*}}
-// CHECK-DAG:  mpmd.fragment<mesh="m3", origin=[]> (%[[T2]], %[[T1]])
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[MUL_FRAG]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+// CHECK-NEXT: mpmd.fragment<mesh="m3", origin=[]> (%[[T1]], %[[T2]])
 
   %u0 = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
 
@@ -111,3 +111,73 @@ func.func @arg_broadcast(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f
   %a3 = mpmd.assign %b : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
   func.return %a1, %a2, %a3 : !mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
 }
+
+// The next test exercises AssignOfUnassignFuncArgPattern directly (without
+// mpmd.broadcast). A func arg on m1 is unassigned and then assigned to m2
+// and m3. The assigns should be replaced with chained transfers:
+// m1 -> m2 -> m3.
+
+// CHECK-LABEL: func @func_arg_chained_no_broadcast
+func.func @func_arg_chained_no_broadcast(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>, <"m3": <["x"=2]>>>}
+{
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a1 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_1_tensor_4_8_f32
+  %a2 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a3 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
+  func.return %a1, %a2, %a3 : !mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
+}
+
+// Verify a single cross-mesh assign creates one transfer (no chaining needed).
+// This exercises the non-chaining path in AssignOfUnassignFuncArgPattern.
+
+// CHECK-LABEL: func @func_arg_single_cross_mesh
+func.func @func_arg_single_cross_mesh(%arg0: !mesh_1_tensor_4_8_f32) -> !mesh_2_tensor_4_8_f32
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>}
+{
+// CHECK-NEXT: %[[T:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  func.return %a : !mesh_2_tensor_4_8_f32
+}
+
+// Verify numeric mesh name ordering in chained transfers: m2 comes before m10
+// (numeric comparison), not lexicographic where "m10" < "m2".
+
+!mesh_10_tensor_4_8_f32 = !mpmd.mesh_tensor<"m10", tensor<4x8xf32>>
+
+// CHECK-LABEL: func @numeric_mesh_ordering_in_chain
+func.func @numeric_mesh_ordering_in_chain(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_10_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>, <"m10": <["x"=2]>>>}
+{
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m10{{.*}}
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a1 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_1_tensor_4_8_f32
+  %a2 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a3 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_10_tensor_4_8_f32
+  func.return %a1, %a2, %a3 : !mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_10_tensor_4_8_f32
+}
+
+// Verify AssignOfUnassignPattern (non-func-arg) chains transfers when the
+// unassign source is a fragment result, not a block argument.
+
+// CHECK-LABEL: func @non_func_arg_chained
+func.func @non_func_arg_chained(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>, <"m3": <["x"=2]>>>}
+{
+// The fragment result is on m1 and assigned to m2 and m3. The assigns should
+// be replaced with chained transfers: m1 -> m2 -> m3.
+// CHECK: %[[FRAG:.*]] = mpmd.fragment<mesh="m1"
+// CHECK: %[[T1:.*]] = mpmd.transfer %[[FRAG]] : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %add = stablehlo.add %u, %u : tensor<4x8xf32>
+  %b = mpmd.broadcast %add : tensor<4x8xf32>
+  %a2 = mpmd.assign %b : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a3 = mpmd.assign %b : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
+  func.return %a2, %a3 : !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
+}
+

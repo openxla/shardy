@@ -119,9 +119,13 @@ class MapInputOutputToMeshPass
       IRRewriter rewriter(func->getContext());
 
       // Go through the input index to mesh name map and assign the mesh to the
-      // corresponding argument. Note that the order of this iteration is not
-      // deterministic since llvm::DenseMap is unordered but the order does
-      // not matter here.
+      // corresponding argument. We set the insertion point to the start of the
+      // block and advance it after each unassign so that all unassign ops are
+      // grouped contiguously at the top in a deterministic order. Without this,
+      // iteration over the DenseMap is non-deterministic, and
+      // setInsertionPointAfterValue on block args all resolve to the block
+      // start, causing unassigns to appear in reverse/random iteration order.
+      rewriter.setInsertionPointToStart(&func.front());
       for (const auto& [input_index, mesh_name] : inputAssignment.value) {
         SDY_CHECK_GE(input_index, 0) << "Input index must be non-negative.";
         SDY_CHECK_LT(input_index, func.getNumArguments())
@@ -132,18 +136,18 @@ class MapInputOutputToMeshPass
         arg.setType(GetMeshTensorType(arg, mesh_name));
 
         // Unassign the argument mesh before use.
-        rewriter.setInsertionPointAfterValue(arg);
         auto unassign_op = UnassignOp::create(rewriter, arg.getLoc(), arg,
                                               /*origin=*/kUserInputOrigin);
+
+        // Advance insertion point past the unassign so subsequent unassigns
+        // are ordered after this one, preserving block argument order.
+        rewriter.setInsertionPointAfter(unassign_op);
         rewriter.replaceAllUsesExcept(arg, unassign_op.getResult(),
                                       unassign_op);
       }
 
       // Go through the output index to mesh name map and assign the mesh to the
-      // corresponding return value. Note that the order of this iteration is
-      // not deterministic since llvm::DenseMap is unordered but the order
-      // does not matter here because we only need the assigned ops to be
-      // present and any order is valid.
+      // corresponding return value.
       Operation* return_op = func.getBlocks().back().getTerminator();
       for (const auto& [output_index, mesh_name] : outputAssignment.value) {
         SDY_CHECK_GE(output_index, 0) << "Output index must be non-negative.";
@@ -157,8 +161,10 @@ class MapInputOutputToMeshPass
             GetResultInfoLoc(func, output_index).value_or(output.getLoc()),
             GetMeshTensorType(output, mesh_name), output,
             /*origin=*/kUserOutputOrigin);
+
         return_op->setOperand(output_index, assign_op.getResult());
       }
+
       // Update the function signature.
       UpdateFunctionType(func);
       CleanUpMemoryKindAttributes(func);

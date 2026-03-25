@@ -975,5 +975,110 @@ TEST(GetEdgeOwner, ShouldGetCorrectOwnerFromSourceOrTarget) {
   }
 }
 
+// --- IsMeshBeforeOtherMesh tests ---
+
+TEST(IsMeshBeforeOtherMesh, NumericSuffixOrdering) {
+  // Both meshes have a numeric suffix — compare by number.
+  EXPECT_TRUE(IsMeshBeforeOtherMesh("m1", "m2"));
+  EXPECT_FALSE(IsMeshBeforeOtherMesh("m2", "m1"));
+  EXPECT_FALSE(IsMeshBeforeOtherMesh("m1", "m1"));
+  EXPECT_TRUE(IsMeshBeforeOtherMesh("mesh2", "mesh10"));
+  EXPECT_FALSE(IsMeshBeforeOtherMesh("mesh10", "mesh2"));
+}
+
+TEST(IsMeshBeforeOtherMesh, LexicographicFallback) {
+  // No numeric suffix — fall back to lexicographic.
+  EXPECT_TRUE(IsMeshBeforeOtherMesh("alpha", "beta"));
+  EXPECT_FALSE(IsMeshBeforeOtherMesh("beta", "alpha"));
+  EXPECT_FALSE(IsMeshBeforeOtherMesh("alpha", "alpha"));
+}
+
+TEST(IsMeshBeforeOtherMesh, MixedNumericAndNonNumeric) {
+  // One has a suffix and the other doesn't — lexicographic fallback
+  // because GetMeshNumber returns nullopt for the non-numeric one.
+  EXPECT_TRUE(IsMeshBeforeOtherMesh("a", "m1"));
+  EXPECT_FALSE(IsMeshBeforeOtherMesh("m1", "a"));
+}
+
+// --- GetCrossMeshAssignUsers tests ---
+
+TEST(GetCrossMeshAssignUsers, NoCrossMeshAssignUsers) {
+  const std::string kProgram = R"mlir(
+    !m1_t = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !m1_t) -> !m1_t
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %u = mpmd.unassign %arg0 : (!m1_t) -> tensor<4x8xf32>
+      %a = mpmd.assign %u : (tensor<4x8xf32>) -> !m1_t
+      func.return %a : !m1_t
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  SDY_CHECK(module);
+  FuncOp func = GetMainFunction(*module);
+  UnassignOp unassign = *func.getOps<UnassignOp>().begin();
+
+  // The only assign targets the same mesh (m1) — no cross-mesh users.
+  SmallVector<AssignOp> result = GetCrossMeshAssignUsers(unassign);
+  EXPECT_THAT(result, IsEmpty());
+}
+
+TEST(GetCrossMeshAssignUsers, MixedSameAndCrossMeshAssigns) {
+  const std::string kProgram = R"mlir(
+    !m1_t = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    !m2_t = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+    func.func @main(%arg0: !m1_t) -> (!m1_t, !m2_t)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>} {
+      %u = mpmd.unassign %arg0 : (!m1_t) -> tensor<4x8xf32>
+      %a1 = mpmd.assign %u : (tensor<4x8xf32>) -> !m1_t
+      %a2 = mpmd.assign %u : (tensor<4x8xf32>) -> !m2_t
+      func.return %a1, %a2 : !m1_t, !m2_t
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  SDY_CHECK(module);
+  FuncOp func = GetMainFunction(*module);
+  UnassignOp unassign = *func.getOps<UnassignOp>().begin();
+
+  // Only the m2 assign is cross-mesh.
+  SmallVector<AssignOp> result = GetCrossMeshAssignUsers(unassign);
+  ASSERT_EQ(result.size(), 1);
+  EXPECT_EQ(result[0].getType().getMeshName(), "m2");
+}
+
+TEST(GetCrossMeshAssignUsers, MultipleCrossMeshAssigns) {
+  const std::string kProgram = R"mlir(
+    !m1_t = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    !m2_t = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+    !m3_t = !mpmd.mesh_tensor<"m3", tensor<4x8xf32>>
+    func.func @main(%arg0: !m1_t) -> (!m2_t, !m3_t)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>>} {
+      %u = mpmd.unassign %arg0 : (!m1_t) -> tensor<4x8xf32>
+      %a1 = mpmd.assign %u : (tensor<4x8xf32>) -> !m2_t
+      %a2 = mpmd.assign %u : (tensor<4x8xf32>) -> !m3_t
+      func.return %a1, %a2 : !m2_t, !m3_t
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  SDY_CHECK(module);
+  FuncOp func = GetMainFunction(*module);
+  UnassignOp unassign = *func.getOps<UnassignOp>().begin();
+
+  // Both assigns are cross-mesh (m2 and m3).
+  SmallVector<AssignOp> result = GetCrossMeshAssignUsers(unassign);
+  EXPECT_EQ(result.size(), 2);
+}
+
 }  // namespace
 }  // namespace mlir::mpmd

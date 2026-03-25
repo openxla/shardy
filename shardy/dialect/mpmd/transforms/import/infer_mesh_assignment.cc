@@ -26,6 +26,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
@@ -287,22 +288,29 @@ class DedupAssignOfUnassignAndTransferPattern final
   }
 };
 
-// Replaces an assign of unassign between different meshes, where the operand of
-// the unassign is a block argument of a func op, with an inter-mesh
-// transfer.
+// Replaces assigns of unassign between different meshes, where the operand of
+// the unassign is a block argument of a func op, with chained inter-mesh
+// transfers.
+//
+// When the unassign has multiple cross-mesh assign users, this pattern replaces
+// all of them at once with chained transfers (m1->m2->m3) rather than
+// independent ones (m1->m2, m1->m3). Assigns are sorted by their mesh index
+// for deterministic chain order.
 //
 // In symbols:
 //
 // func.func f(arg0: mesh_tensor<m1>) {
 //   x = unassign arg0
 //   y = assign x -> m2
+//   z = assign x -> m3
 //   ...
 // }
 //
 // ~~>
 //
 // func.func f(arg0: mesh_tensor<m1>) {
-//   y = transfer arg0   m1 -> m2
+//   y = transfer arg0 m1 -> m2
+//   z = transfer y    m2 -> m3   (chained from m2, not from m1)
 //   ...
 // }
 //
@@ -336,14 +344,21 @@ class AssignOfUnassignFuncArgPattern final : public OpRewritePattern<AssignOp> {
       return failure();
     }
 
-    rewriter.replaceOpWithNewOp<TransferOp>(op, op.getType(),
-                                            unassign_op.getTensor());
+    SmallVector<AssignOp> cross_mesh_assigns =
+        GetCrossMeshAssignUsers(unassign_op);
 
+    ReplaceAssignsWithChainedTransfers(cross_mesh_assigns,
+                                       unassign_op.getTensor(), rewriter);
     return success();
   }
 };
 
 // This pattern replaces assign(unassign(%v, m1), m2) ~~> transfer(%v, m1->m2).
+//
+// When the unassign has multiple cross-mesh assign users, this pattern replaces
+// all of them at once with chained transfers (m1->m2->m3) rather than
+// independent ones (m1->m2, m1->m3). Assigns are sorted lexicographically by
+// mesh name for deterministic chain order.
 class AssignOfUnassignPattern final : public OpRewritePattern<AssignOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -368,11 +383,15 @@ class AssignOfUnassignPattern final : public OpRewritePattern<AssignOp> {
       });
     }
 
-    auto transfer = rewriter.replaceOpWithNewOp<TransferOp>(
-        op, op.getType(), unassign_op.getTensor());
-    // TODO: b/329221688 - Improve these logs to make it easier to debug.
-    SDY_VLOG(2) << "Created cross-mesh transfer "
-                << PrintOperationForLog(transfer);
+    // Collect all cross-mesh assign users of the unassign so we can replace
+    // them with a single chain of transfers (m1->m2->m3) instead of
+    // independent transfers (m1->m2, m1->m3). Chaining allows IFRT to group
+    // the data transfers.
+    SmallVector<AssignOp> cross_mesh_assigns =
+        GetCrossMeshAssignUsers(unassign_op);
+
+    ReplaceAssignsWithChainedTransfers(cross_mesh_assigns,
+                                       unassign_op.getTensor(), rewriter);
     return success();
   }
 };
@@ -1456,8 +1475,17 @@ class InferMeshAssignMeshForFuncLeavesPass
     }
     ClearUseSetAndSrcSet(op);
     rewriter.setInsertionPointAfter(op);
-
-    for (StringRef mesh_name : src_set->getArrayRef()) {
+    // Sort mesh names for deterministic IR output. Without this, iteration
+    // order depends on SetVector internals, causing non-reproducible IR that
+    // breaks FileCheck tests and complicates debugging.
+    llvm::SmallVector<StringRef, 4> mesh_names;
+    if (src_set.has_value()) {
+      mesh_names.append(src_set->begin(), src_set->end());
+    }
+    llvm::stable_sort(mesh_names, [](StringRef a, StringRef b) {
+      return IsMeshBeforeOtherMesh(a, b);
+    });
+    for (StringRef mesh_name : mesh_names) {
       WrapOpWithFragment(op, mesh_name, rewriter);
       if (isPure(op)) {
         // For pure ops, we only need to wrap it in a fragment once. But for
@@ -1883,9 +1911,13 @@ void AssignCalleeFuncArgsToAssignUsers(
             .push_back(assign_user);
       }
     }
+    // Sort mesh names for deterministic IR output (test stability and
+    // debugging reproducibility).
     SmallVector<StringRef> mesh_names = llvm::map_to_vector(
         assign_users_by_mesh_name, [](const auto& it) { return it.first; });
-    llvm::sort(mesh_names);
+    llvm::stable_sort(mesh_names, [](StringRef a, StringRef b) {
+      return IsMeshBeforeOtherMesh(a, b);
+    });
 
     SDY_CHECK(!mesh_names.empty()) << "No mesh names found.";
     if (mesh_names.size() > 1) {
@@ -2235,7 +2267,14 @@ void WrapBasedOnAssignUsers(Operation* op, RewriterBase& rewriter) {
     AssignOp assign_op = cast<AssignOp>(user);
     user_mesh_types.insert(assign_op.getType().getMeshName());
   }
-  for (StringRef mesh_name : user_mesh_types) {
+  // Copy to a vector and sort for deterministic IR output. DenseSet has
+  // no guaranteed iteration order.
+  llvm::SmallVector<StringRef> user_mesh_types_vec = llvm::map_to_vector(
+      user_mesh_types, [](StringRef mesh_name) { return mesh_name; });
+  llvm::stable_sort(user_mesh_types_vec, [](StringRef a, StringRef b) {
+    return IsMeshBeforeOtherMesh(a, b);
+  });
+  for (StringRef mesh_name : user_mesh_types_vec) {
     WrapOpWithFragment(
         op, mesh_name, rewriter,
         /*should_replace_use=*/[&mesh_name](OpOperand& use) {
@@ -2402,9 +2441,13 @@ void RewriteForOpArgsAndTypes(
             .push_back(assign_user);
       }
     }
+    // Sort mesh names for deterministic IR output (test stability and
+    // debugging reproducibility).
     SmallVector<StringRef> mesh_names = llvm::map_to_vector(
         assign_users_by_mesh_name, [](const auto& it) { return it.first; });
-    llvm::sort(mesh_names);
+    llvm::stable_sort(mesh_names, [](StringRef a, StringRef b) {
+      return IsMeshBeforeOtherMesh(a, b);
+    });
 
     // TODO(b/401476674): Handle multiple meshes.
     SDY_CHECK_LE(mesh_names.size(), 1)
@@ -2543,26 +2586,8 @@ class BroadcastToTransfersPattern : public OpRewritePattern<BroadcastOp> {
       return failure();
     }
 
-    // Sort by mesh name to get a deterministic chain order.
-    llvm::sort(assign_users, [](AssignOp a, AssignOp b) {
-      return a.getType().getMeshName() < b.getType().getMeshName();
-    });
-
-    // Chain transfers: each new transfer uses the result of the previous one
-    // as its source, starting from the original unassigned value.
-    Value prev_transfer = unassign_op.getTensor();
-    for (AssignOp assign_op : assign_users) {
-      if (assign_op.getType() == prev_transfer.getType()) {
-        // Same mesh as the current chain head — no transfer needed.
-        rewriter.replaceOp(assign_op, prev_transfer);
-      } else {
-        rewriter.setInsertionPoint(assign_op);
-        auto transfer = TransferOp::create(rewriter, assign_op.getLoc(),
-                                           assign_op.getType(), prev_transfer);
-        prev_transfer = transfer;
-        rewriter.replaceOp(assign_op, transfer.getResult());
-      }
-    }
+    ReplaceAssignsWithChainedTransfers(assign_users, unassign_op.getTensor(),
+                                       rewriter);
     return success();
   }
 };

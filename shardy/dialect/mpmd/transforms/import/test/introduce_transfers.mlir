@@ -2,6 +2,64 @@
 
 !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_2_tensor_4_8_f32 = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+!mesh_3_tensor_4_8_f32 = !mpmd.mesh_tensor<"m3", tensor<4x8xf32>>
+
+// CHECK-LABEL: func @chained_transfers_across_three_meshes
+func.func @chained_transfers_across_three_meshes(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>>} {
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+// CHECK-NEXT: return %[[T1]], %[[T2]]
+  %u0 = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a1 = mpmd.assign %u0 : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a2 = mpmd.assign %u0 : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
+  func.return %a1, %a2 : !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
+}
+
+// Verify that a single cross-mesh assign creates a single transfer (no
+// chaining).
+// CHECK-LABEL: func @single_cross_mesh_assign
+func.func @single_cross_mesh_assign(%arg0: !mesh_1_tensor_4_8_f32) -> !mesh_2_tensor_4_8_f32
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>} {
+// CHECK-NEXT: %[[T:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: return %[[T]]
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  func.return %a : !mesh_2_tensor_4_8_f32
+}
+
+// Verify numeric mesh name ordering: m2 should come before m10 (not
+// lexicographic where "m10" < "m2"). The chain should be m1 -> m2 -> m10.
+!mesh_10_tensor_4_8_f32 = !mpmd.mesh_tensor<"m10", tensor<4x8xf32>>
+
+// CHECK-LABEL: func @numeric_mesh_ordering
+func.func @numeric_mesh_ordering(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_2_tensor_4_8_f32, !mesh_10_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m10": <["z"=2]>>>} {
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m10{{.*}}
+// CHECK-NEXT: return %[[T1]], %[[T2]]
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a1 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a2 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_10_tensor_4_8_f32
+  func.return %a1, %a2 : !mesh_2_tensor_4_8_f32, !mesh_10_tensor_4_8_f32
+}
+
+// Verify that same-mesh assigns (noop) are handled independently from
+// cross-mesh assigns (chained). The assign to m1 is a noop (replaced by
+// the source directly), while the assigns to m2 and m3 are chained:
+// m1 -> m2 -> m3. GetCrossMeshAssignUsers should filter out the m1 assign.
+// CHECK-LABEL: func @mixed_same_and_cross_mesh_assigns
+func.func @mixed_same_and_cross_mesh_assigns(%arg0: !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32)
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>>} {
+// CHECK-NEXT: %[[T1:.*]] = mpmd.transfer %arg0 : {{.*}}m1{{.*}} -> {{.*}}m2{{.*}}
+// CHECK-NEXT: %[[T2:.*]] = mpmd.transfer %[[T1]] : {{.*}}m2{{.*}} -> {{.*}}m3{{.*}}
+// CHECK-NEXT: return %arg0, %[[T1]], %[[T2]]
+  %u = mpmd.unassign %arg0 : (!mesh_1_tensor_4_8_f32) -> tensor<4x8xf32>
+  %a1 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_1_tensor_4_8_f32
+  %a2 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_2_tensor_4_8_f32
+  %a3 = mpmd.assign %u : (tensor<4x8xf32>) -> !mesh_3_tensor_4_8_f32
+  func.return %a1, %a2, %a3 : !mesh_1_tensor_4_8_f32, !mesh_2_tensor_4_8_f32, !mesh_3_tensor_4_8_f32
+}
 
 // CHECK-LABEL: func @push_assign_through_single_add
 func.func @push_assign_through_single_add(%arg0: !mesh_1_tensor_4_8_f32, %arg1: !mesh_2_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32

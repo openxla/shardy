@@ -16,6 +16,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -659,6 +660,77 @@ sdy::MeshAttr GetMeshOrFail(Operation* op, StringRef mesh_name) {
   FailureOr<sdy::MeshAttr> mesh_attr = GetMeshAttr(op, mesh_name);
   SDY_CHECK(succeeded(mesh_attr));
   return *mesh_attr;
+}
+
+namespace {
+
+// TODO(b/493934989): Remove this hack once we can correctly get the mesh
+// order.
+// Returns the number of the mesh if it exists, otherwise returns `nullopt`.
+std::optional<int> GetMeshNumber(mlir::StringRef mesh_name) {
+  size_t last_non_digit = mesh_name.find_last_not_of("0123456789");
+  size_t start_pos =
+      (last_non_digit == llvm::StringRef::npos) ? 0 : last_non_digit + 1;
+  llvm::StringRef number_part = mesh_name.substr(start_pos);
+  if (number_part.empty()) {
+    return std::nullopt;
+  }
+  int mesh_number;
+  if (number_part.getAsInteger(10, mesh_number)) {
+    return std::nullopt;
+  }
+  return mesh_number;
+}
+
+}  // namespace
+
+bool IsMeshBeforeOtherMesh(mlir::StringRef mesh, mlir::StringRef other_mesh) {
+  auto mesh_number = GetMeshNumber(mesh);
+  auto other_mesh_number = GetMeshNumber(other_mesh);
+  if (mesh_number.has_value() && other_mesh_number.has_value()) {
+    return *mesh_number < *other_mesh_number;
+  }
+  return mesh < other_mesh;
+}
+
+SmallVector<AssignOp> GetCrossMeshAssignUsers(UnassignOp unassign_op) {
+  StringRef source_mesh = unassign_op.getTensor().getType().getMeshName();
+  SmallVector<AssignOp> cross_mesh_assigns;
+  for (Operation* user : unassign_op.getResult().getUsers()) {
+    auto assign = dyn_cast<AssignOp>(user);
+    if (assign && assign.getType().getMeshName() != source_mesh) {
+      cross_mesh_assigns.push_back(assign);
+    }
+  }
+  return cross_mesh_assigns;
+}
+
+void ReplaceAssignsWithChainedTransfers(SmallVector<AssignOp>& assigns,
+                                        Value source, RewriterBase& rewriter) {
+  // Sort assigns by mesh name so the chain topology (e.g., m1->m2->m3) is
+  // deterministic regardless of the order assigns were collected.
+  llvm::stable_sort(assigns, [](AssignOp a, AssignOp b) {
+    return IsMeshBeforeOtherMesh(a.getType().getMeshName(),
+                                 b.getType().getMeshName());
+  });
+  // Insert all chained transfers before the earliest assign in block order.
+  // This ensures every transfer dominates its uses (b/475997012).
+  AssignOp first_assign_in_block = *llvm::min_element(
+      assigns, [](AssignOp a, AssignOp b) { return a->isBeforeInBlock(b); });
+  rewriter.setInsertionPoint(first_assign_in_block);
+  Value prev_transfer = source;
+  for (AssignOp assign : assigns) {
+    if (assign.getType() == prev_transfer.getType()) {
+      rewriter.replaceOp(assign, prev_transfer);
+    } else {
+      auto transfer = TransferOp::create(rewriter, assign.getLoc(),
+                                         assign.getType(), prev_transfer);
+      // TODO: b/329221688 - Improve these logs to make it easier to debug.
+      SDY_VLOG(2) << "Created chained cross-mesh transfer: " << transfer;
+      prev_transfer = transfer;
+      rewriter.replaceOp(assign, transfer.getResult());
+    }
+  }
 }
 
 Operation* FindAnnotatedOperation(ModuleOp module, StringRef annotation) {

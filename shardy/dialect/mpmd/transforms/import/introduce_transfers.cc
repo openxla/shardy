@@ -48,6 +48,12 @@ namespace {
 // Replaces the AssignOp of an UnassignOp with a TransferOp, or a noop if the
 // transfer is not needed. It reuses existing transfers if possible. For a given
 // value, this create at most one transfer of that value to a given mesh.
+//
+// When the unassign has multiple cross-mesh assign users, this pattern replaces
+// all of them at once with chained transfers (m1->m2->m3) rather than
+// independent ones (m1->m2, m1->m3). For achieving pipeline order, assigns are
+// sorted by mesh name suffix number or lexicographically if no suffix number
+// exists.
 class AssignOfUnassignPattern : public OpRewritePattern<AssignOp> {
   using OpRewritePattern<AssignOp>::OpRewritePattern;
 
@@ -88,6 +94,15 @@ class AssignOfUnassignPattern : public OpRewritePattern<AssignOp> {
         existing_transfer_it->moveBefore(op);
       }
       rewriter.replaceOp(op, existing_transfer_it->getResults());
+      return success();
+    }
+
+    SmallVector<AssignOp> cross_mesh_assigns =
+        GetCrossMeshAssignUsers(unassign_op);
+
+    if (cross_mesh_assigns.size() >= 2) {
+      ReplaceAssignsWithChainedTransfers(cross_mesh_assigns, op_to_transfer,
+                                         rewriter);
     } else {
       rewriter.replaceOpWithNewOp<TransferOp>(op, op.getType(),
                                               unassign_op.getTensor());
