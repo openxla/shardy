@@ -109,7 +109,7 @@ void addGatherScatterFactors(
     RankedTensorType startIndices, int64_t indexVectorDim,
     ArrayRef<int64_t> offsetDims, ArrayRef<int64_t> collapsedSliceDims,
     ArrayRef<int64_t> inputBatchingDims, ArrayRef<int64_t> indicesBatchingDims,
-    GatherScatterAddFactorFn addFactorFn) {
+    ArrayRef<int64_t> startIndexMap, GatherScatterAddFactorFn addFactorFn) {
   auto addUnblockedFactorFn =
       [addFactorFn](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                     int64_t factorSize, FactorType factorType) {
@@ -145,7 +145,8 @@ void addGatherScatterFactors(
         addUnblockedFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim,
                              slicesDim, slicesDimSize,
                              FactorType::kNeedReplication);
-      } else if (slicesDimSize == 1) {
+      } else if (slicesDimSize == 1 &&
+                 llvm::is_contained(startIndexMap, inputDim)) {
         // If this dimension is sharded on the operand, we need an all-reduce on
         // the result.
         addUnblockedFactorFn(inputDim, /*indicesDim=*/kNullDim,
@@ -197,7 +198,9 @@ void addGatherScatterFactors(
       // it is meaningless to shard a dimension of size 1. Otherwise, we can
       // shard this dimension, which triggers an all-reduce on the result.
       type =
-          dimSize == 1 ? FactorType::kNeedReplication : FactorType::kReduction;
+          (dimSize != 1 && llvm::is_contained(startIndexMap, collapsedSliceDim))
+              ? FactorType::kReduction
+              : FactorType::kNeedReplication;
     }
     addUnblockedFactorFn(collapsedSliceDim, /*indicesDim=*/kNullDim,
                          /*slicesDim=*/kNullDim, dimSize, type);
@@ -883,7 +886,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             gather.getStartIndices().getType(), dimNums.getIndexVectorDim(),
             dimNums.getOffsetDims(), dimNums.getCollapsedSliceDims(),
             dimNums.getOperandBatchingDims(),
-            dimNums.getStartIndicesBatchingDims(),
+            dimNums.getStartIndicesBatchingDims(), dimNums.getStartIndexMap(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                 int64_t factorSize, FactorType factorType, bool isBlocked) {
               builder.addFactor({inputDim, indicesDim}, slicesDim, factorSize,
@@ -1148,6 +1151,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             /*collapsedSliceDims=*/dimNums.getInsertedWindowDims(),
             dimNums.getInputBatchingDims(),
             dimNums.getScatterIndicesBatchingDims(),
+            dimNums.getScatterDimsToOperandDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                 int64_t factorSize, FactorType factorType, bool isBlocked) {
               builder.addFactor(
