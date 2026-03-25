@@ -18,10 +18,11 @@
 from collections.abc import Callable, Sequence, Set
 import dataclasses
 import functools
-from typing import Any, NamedTuple, cast
+from typing import Any, Iterable, NamedTuple, cast
 
 from absl import logging
 import jax
+from jax import tree_util
 from jax._src import core
 from jax._src import stages
 from jax._src.interpreters import pxla
@@ -36,6 +37,11 @@ from shardy.integrations.python.jax.mpmd import utils
 
 PyTree = jaxtyping.PyTree
 FunctionNamedShardings = utils.FunctionNamedShardings
+
+
+class MeshExecutableFastpathData(NamedTuple):
+  out_pytree_def: Any
+  kept_var_bitvec: Iterable[bool]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -181,8 +187,20 @@ class MpmdExecutable(stages.Executable):
   def create_cpp_call(
       self, params: stages.CompiledCallParams
   ) -> Callable[..., Sequence[Any]] | None:
-    del self
-    return None
+    # TODO(b/434270189): handle const args fast path
+    if params.const_args:
+      return None
+
+    def cache_miss(*args, **kwargs):
+      outs, _, args_flat = stages.Compiled.call(params, *args, **kwargs)
+
+      kept_var_bitvec = [i in self._kept_var_idx for i in range(len(args_flat))]
+      fastpath_data = MeshExecutableFastpathData(params.out_tree,
+                                                 kept_var_bitvec)
+      return outs, fastpath_data
+
+    self._executable.setup_fastpath(cache_miss, tree_util.default_registry)
+    return self._executable.execute_fastpath
 
   def as_text(self) -> str:
     """Returns the IFRT IR module after backend-specific lowering passes."""
@@ -252,6 +270,25 @@ class MpmdExecutable(stages.Executable):
     """
     return self._executable
 
+  @property
+  def ifrt_ir_program_memory_stats(
+      self) -> jaxlib_mpmd.IfrtIrProgramMemoryStats:
+    """Return all IFRT memory stats."""
+    return self._executable.get_ifrt_ir_program_memory_stats()
+
+  @property
+  def ifrt_ir_program_memory_xprof(self) -> str:
+    """Return a XPROF url to a program memory trace."""
+    return self._executable.get_ifrt_ir_program_xprof_url()
+
+  @property
+  def peak_memory_bytes(self) -> int:
+    """Return the maximum memory footprint across all devices."""
+    return max(
+        self.ifrt_ir_program_memory_stats.device_to_peak_bytes_used.values(),
+        default=0,
+    )
+
 
 class MpmdCompiled(jax.stages.Compiled):
   """A compiled computation for MPMD parallelism."""
@@ -272,6 +309,22 @@ class MpmdCompiled(jax.stages.Compiled):
   @property
   def mpmd_executable(self) -> MpmdExecutable:
     return self._mpmd_executable
+
+  @property
+  def ifrt_ir_program_memory_stats(
+      self) -> jaxlib_mpmd.IfrtIrProgramMemoryStats:
+    """Return all IFRT memory stats."""
+    return self._mpmd_executable.ifrt_ir_program_memory_stats
+
+  @property
+  def ifrt_ir_program_memory_xprof(self) -> str:
+    """Return all IFRT memory stats."""
+    return self._mpmd_executable.ifrt_ir_program_memory_xprof
+
+  @property
+  def peak_memory_bytes(self) -> int:
+    """Return the maximum memory footprint across all devices."""
+    return self._mpmd_executable.peak_memory_bytes
 
 
 def _add_input_specs_for_removed_inputs(
