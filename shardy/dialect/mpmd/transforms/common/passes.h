@@ -40,5 +40,7 @@ namespace mlir::mpmd {
 #include "shardy/dialect/mpmd/transforms/common/passes.h.inc"
 
 void AddCallInliningRelatedPasses(OpPassManager& pm);
+
 }  // namespace mlir::mpmd
+
 #endif  // SHARDY_DIALECT_MPMD_TRANSFORMS_COMMON_PASSES_H_

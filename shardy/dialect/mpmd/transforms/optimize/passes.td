@@ -94,16 +94,3 @@ def PipelineSchedulerPass :
            "Whether to remove control dependencies at the end of the pass.">
   ];
 }
-
-def SinkTransfersPass :
-    PassBase<"mpmd-sink-transfers", "DistributedFunctionPass"> {
-  let summary = "Moves transfers right before their first user in the same "
-                "block.";
-  let description = [{
-    Moves transfers to just before their first user in the same block. This
-    delays device-to-device communication, improving prefill performance by
-    reducing overlap with unrelated computation. Furthermore, grouping
-    transfers right before their consumers facilitates their merging into a
-    single batched operation by later passes (e.g., IFRT's `ifrt-merge-reshards`).
-  }];
-}

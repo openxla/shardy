@@ -64,11 +64,6 @@ void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options) {
   if (options.mergeForwardWithBackward) {
     pm.addNestedPass<FuncOp>(createMergeForwardWithBackwardPass());
   }
-
-  // Sink transfers to just before their earliest user.
-  if (options.sinkTransfers) {
-    pm.addNestedPass<FuncOp>(createSinkTransfersPass());
-  }
 }
 
 namespace {
@@ -90,10 +85,6 @@ struct OptimizePipelineOptions
           clEnumValN(PipelineSchedule::k1F1B, "1F1B", "1F1B schedule"),
           clEnumValN(PipelineSchedule::kCircular, "Circular",
                      "Circular schedule"))};
-
-  Option<bool> sinkTransfers{*this, "sink-transfers",
-                             llvm::cl::desc("Whether to sink transfers."),
-                             llvm::cl::init(true)};
 };
 
 }  // namespace
@@ -106,7 +97,6 @@ void registerOptimizePipeline() {
         OptimizeOptions options;
         options.mergeAfterScheduling = pipelineOptions.mergeAfterScheduling;
         options.pipelineSchedule = pipelineOptions.pipelineSchedule;
-        options.sinkTransfers = pipelineOptions.sinkTransfers;
         addOptimizePipeline(pm, options);
       });
 }
