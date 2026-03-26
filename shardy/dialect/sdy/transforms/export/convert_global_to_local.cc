@@ -154,6 +154,14 @@ class GlobalToLocalTypeConverter : public TypeConverter {
     return mlir::sdy::getSharding(value);
   };
 
+  SmallVector<Type> convertResultTypes(ValueRange results) const {
+    SmallVector<Type> localResultTypes;
+    localResultTypes.reserve(results.size());
+    llvm::transform(results, std::back_inserter(localResultTypes),
+                    [&](Value result) { return convertType(result); });
+    return localResultTypes;
+  }
+
   const SymbolTable& getSymbolTable() const { return symbolTable; }
 
  private:
@@ -165,18 +173,12 @@ class GlobalToLocalTypeConverter : public TypeConverter {
 // converted operands and removing the op from the toConvertOps list.
 LogicalResult localizeGenericOp(Operation* op, ValueRange operands,
                                 ConversionPatternRewriter& rewriter,
-                                const TypeConverter* typeConverter,
+                                const GlobalToLocalTypeConverter* typeConverter,
                                 ConversionState& conversionState) {
-  // Compute local shapes for results.
-  SmallVector<Type> newResultTypes;
-  llvm::transform(
-      op->getResults(), std::back_inserter(newResultTypes),
-      [&](Value result) { return typeConverter->convertType(result); });
-
   // Use OperationState to copy all properties including nested regions.
   OperationState state(op->getLoc(), op->getName());
   state.addOperands(operands);
-  state.addTypes(newResultTypes);
+  state.addTypes(typeConverter->convertResultTypes(op->getResults()));
   state.addAttributes(op->getAttrs());
   state.addSuccessors(op->getSuccessors());
   for (int i = 0; i < op->getNumRegions(); ++i) {
@@ -211,12 +213,15 @@ class GenericOpPattern : public ConversionPattern {
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
     if ((op->getDialect()->getNamespace() != "stablehlo" &&
-         !isa<sdy::AllReduceOp, sdy::ReturnOp>(op)) ||
-        isa<stablehlo::IotaOp, stablehlo::PadOp, stablehlo::SliceOp>(op)) {
+         !isa<sdy::ReturnOp>(op)) ||
+        isa<stablehlo::DotOp, stablehlo::IotaOp, stablehlo::PadOp,
+            stablehlo::SliceOp>(op)) {
       return failure();
     }
-    return localizeGenericOp(op, operands, rewriter, typeConverter,
-                             conversionState);
+    return localizeGenericOp(
+        op, operands, rewriter,
+        static_cast<const GlobalToLocalTypeConverter*>(typeConverter),
+        conversionState);
   }
 
  private:
@@ -465,6 +470,50 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
  private:
   ConversionState& conversionState;
   bool perDimAllGather;
+};
+
+class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
+ public:
+  AllReduceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                     ConversionState& state)
+      : OpConversionPattern<sdy::AllReduceOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::AllReduceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    TensorShardingAttr outSharding = op.getOutSharding();
+    SDY_CHECK(outSharding);
+
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    MeshAttr mesh = outSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    DenseIntElementsAttr replicaGroups =
+        getReplicaGroups(op.getReductionAxesAttr(), mesh, rewriter);
+    auto channelHandle = stablehlo::ChannelHandleAttr::get(
+        op->getContext(), conversionState.getNextChannelId(),
+        kChannelHandleType);
+
+    auto allReduce = stablehlo::AllReduceOp::create(
+        rewriter, op.getLoc(), converter->convertResultTypes(op->getResults()),
+        adaptor.getOperands(), replicaGroups, channelHandle,
+        /*use_global_device_ids=*/true);
+    Type elementType = cast<RankedTensorType>(allReduce->getResult(0).getType())
+                           .getElementType();
+    stablehlo::buildReduceBody<stablehlo::AddOp>(
+        elementType, allReduce.getComputation(), rewriter);
+
+    rewriter.replaceOp(op, allReduce.getResults());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
 };
 
 // Returns the logical index of the shard that the given device (`deviceId`)
@@ -732,7 +781,8 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
 
     // Perform all-to-all on the combined dim 0.
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        rewriter.getContext(), conversionState.getNextChannelId(), /*type=*/1);
+        rewriter.getContext(), conversionState.getNextChannelId(),
+        kChannelHandleType);
     auto allToAll = stablehlo::AllToAllOp::create(
         rewriter, loc, reshape1.getType(), reshape1,
         /*split_dimension=*/0, /*concat_dimension=*/0,
@@ -1014,7 +1064,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto localResultType = cast<RankedTensorType>(converter->convertType(op));
 
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        op->getContext(), conversionState.getNextChannelId(), /*type=*/1);
+        op->getContext(), conversionState.getNextChannelId(),
+        kChannelHandleType);
     DenseIntElementsAttr replicaGroups = getReplicaGroups(axes, mesh, rewriter);
 
     auto reduceScatter = stablehlo::ReduceScatterOp::create(
@@ -1102,7 +1153,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
         AxisRefListAttr::get(rewriter.getContext(), allReduceAxes), mesh,
         rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        op->getContext(), conversionState.getNextChannelId(), /*type=*/1);
+        op->getContext(), conversionState.getNextChannelId(),
+        kChannelHandleType);
 
     // The result of the reduce-scatter will have dimension 0 reduced to size 1.
     combinedShape[0] = 1;
@@ -1137,7 +1189,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
 
     // Perform one All-Reduce across all involved axes.
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        op->getContext(), conversionState.getNextChannelId(), /*type=*/1);
+        op->getContext(), conversionState.getNextChannelId(),
+        kChannelHandleType);
     DenseIntElementsAttr replicaGroups = getReplicaGroups(
         AxisRefListAttr::get(rewriter.getContext(), allReduceAxes), mesh,
         rewriter);
@@ -1220,11 +1273,6 @@ class NamedComputationOpPattern
     auto* converter =
         static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
 
-    SmallVector<Type> newResultTypes;
-    llvm::transform(
-        op.getResults(), std::back_inserter(newResultTypes),
-        [&](Value result) { return converter->convertType(result); });
-
     // Prepare signature conversion for the internal region.
     TypeConverter::SignatureConversion signature(
         op.getBody().getNumArguments());
@@ -1233,8 +1281,9 @@ class NamedComputationOpPattern
     }
 
     auto newOp = NamedComputationOp::create(
-        rewriter, op.getLoc(), newResultTypes, op.getName(),
-        adaptor.getOperands(), op.getInShardings().value_or(nullptr),
+        rewriter, op.getLoc(), converter->convertResultTypes(op.getResults()),
+        op.getName(), adaptor.getOperands(),
+        op.getInShardings().value_or(nullptr),
         op.getOutShardings().value_or(nullptr));
 
     // Move and convert the region.
@@ -1248,6 +1297,69 @@ class NamedComputationOpPattern
     rewriter.replaceOp(op, newOp.getResults());
     conversionState.removeToConvertOp(op);
     return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
+ public:
+  StablehloDotOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                        ConversionState& state)
+      : OpConversionPattern<stablehlo::DotOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::DotOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+
+    Value lhs = op.getLhs();
+    TensorShardingAttr lhsSharding = converter->getSharding(lhs);
+
+    // If the input is fully replicated, we just localize the types.
+    if (isFullyReplicated(lhsSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    MeshAttr mesh = lhsSharding.getMesh(symbolTable);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh.");
+    }
+
+    // Identify the sharded contracting dimension axes in the LHS.
+    // In stablehlo.dot, the contracting dimension is the last dimension of LHS.
+    auto lhsType = cast<RankedTensorType>(lhs.getType());
+    int64_t lhsContractingDim = lhsType.getRank() - 1;
+    ArrayRef<AxisRefAttr> contractingAxes =
+        lhsSharding.getDimShardings()[lhsContractingDim].getAxes();
+
+    if (!contractingAxes.empty()) {
+      SDY_CHECK(getTotalAxesSize(contractingAxes, mesh) > 1)
+          << "We should have removed trivial sharding in a previous pass.";
+
+      // Verify that an AllReduce has been inserted by a previous pass.
+      // The local partial sums must be combined.
+      SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
+          << "Expected sharded contracting dot to have one user and the user "
+             "is "
+             "an sdy.all_reduce.";
+
+      auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
+      SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
+                AxisRefListAttr::get(op->getContext(), contractingAxes))
+          << "The axes of the sdy.all_reduce should match the sharded "
+             "contracting dimension of the dot.";
+    }
+
+    // Localize the operation by replacing global types with local physical
+    // types.
+    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                             conversionState);
   }
 
  private:
@@ -1330,8 +1442,8 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       // else the pad op should have been converted to a pad followed by a
       // collective to reshard its result.
       SDY_CHECK(isFullyReplicated(outSharding));
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter,
-                               getTypeConverter(), conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
     }
     const SymbolTable& symbolTable = converter->getSymbolTable();
     MeshAttr mesh = inSharding.getMesh(symbolTable);
@@ -1506,8 +1618,8 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
     TensorShardingAttr outSharding = converter->getSharding(op.getResult());
 
     if (isFullyReplicated(inSharding) && isFullyReplicated(outSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter,
-                               getTypeConverter(), conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
     }
 
     auto globalInputType = cast<RankedTensorType>(op.getOperand().getType());
@@ -1620,11 +1732,12 @@ struct ConvertGlobalToLocalPass
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
-    patterns.add<
-        AllSliceOpPattern, AllToAllOpPattern, CollectivePermuteOpPattern,
-        ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
-        ManualComputationOpPattern, NamedComputationOpPattern, ReturnOpPattern,
-        StablehloIotaOpPattern, StablehloPadOpPattern, StablehloSliceOpPattern>(
+    patterns.add<AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
+                 CollectivePermuteOpPattern, ConstantOpPattern,
+                 FuncOpSignaturePattern, GenericOpPattern,
+                 ManualComputationOpPattern, NamedComputationOpPattern,
+                 ReturnOpPattern, StablehloDotOpPattern, StablehloIotaOpPattern,
+                 StablehloPadOpPattern, StablehloSliceOpPattern>(
         typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
