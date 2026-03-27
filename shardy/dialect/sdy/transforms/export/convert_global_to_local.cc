@@ -148,6 +148,8 @@ class GlobalToLocalTypeConverter : public TypeConverter {
       if (it != argShardings.end()) {
         return it->second;
       }
+      // The block argument is not sharded.
+      return nullptr;
     }
     // For other values, it's safe to call getSharding as we keep the sharding
     // attribute on the converted op.
@@ -168,6 +170,17 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   const SymbolTable& symbolTable;
   llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
+
+// Copies all attributes from 'op' to 'newOp', except those specified in
+// 'attributesToExclude'.
+void copyAttributes(Operation* op, Operation* newOp,
+                    ArrayRef<StringRef> attributesToExclude) {
+  for (auto attr : op->getAttrs()) {
+    if (!llvm::is_contained(attributesToExclude, attr.getName().getValue())) {
+      newOp->setAttr(attr.getName(), attr.getValue());
+    }
+  }
+}
 
 // Converts op to its local version by replacing its operands with the already
 // converted operands and removing the op from the toConvertOps list.
@@ -214,7 +227,8 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     if ((op->getDialect()->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
-        isa<stablehlo::IotaOp, stablehlo::PadOp, stablehlo::SliceOp>(op)) {
+        isa<stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp,
+            stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(
@@ -1302,6 +1316,395 @@ class NamedComputationOpPattern
   ConversionState& conversionState;
 };
 
+SmallVector<int64_t> computeLocalSliceSizes(stablehlo::GatherOp op,
+                                            TensorShardingAttr operandSharding,
+                                            MeshAttr mesh) {
+  SmallVector<int64_t> localSliceSizes = llvm::to_vector(op.getSliceSizes());
+  if (isFullyReplicated(operandSharding)) {
+    return localSliceSizes;
+  }
+  auto globalOperandType = cast<RankedTensorType>(op.getOperand().getType());
+  auto operandBatchingDims = op.getDimensionNumbers().getOperandBatchingDims();
+
+  for (int64_t i = 0; i < localSliceSizes.size(); ++i) {
+    // Skip operand batching dimensions and trivial slice dimensions.
+    if (localSliceSizes[i] == 1 || llvm::is_contained(operandBatchingDims, i)) {
+      continue;
+    }
+
+    ArrayRef<AxisRefAttr> axes = operandSharding.getDimShardings()[i].getAxes();
+    if (axes.empty()) {
+      continue;
+    }
+
+    // It should be a full slice dimension with size divisible by the total axes
+    // size.
+    int64_t totalAxesSize = getTotalAxesSize(axes, mesh);
+    SDY_CHECK(localSliceSizes[i] == globalOperandType.getDimSize(i) &&
+              (localSliceSizes[i] % totalAxesSize) == 0);
+    localSliceSizes[i] /= totalAxesSize;
+  }
+  return localSliceSizes;
+}
+
+// Returns the min and max for the indices in a scatter/gather:
+//
+// Is a indexed dim is not a trivial slice dimension, the bounds are (0,
+// global_dim_size - 1).
+// Otherwise,  the bounds are (offset, offset + shard_size - 1).
+std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
+    Location loc, MeshAttr mesh, TensorShardingAttr operandSharding,
+    RankedTensorType globalOperandType, RankedTensorType localOperandType,
+    ArrayRef<int64_t> startIndexMap, ArrayRef<int64_t> trivialSliceDims,
+    Type indexEltTy, ConversionPatternRewriter& rewriter) {
+  SmallVector<Value> minBounds, maxBounds;
+  minBounds.reserve(startIndexMap.size());
+  maxBounds.reserve(startIndexMap.size());
+
+  for (int64_t indexedDim : startIndexMap) {
+    if (!llvm::is_contained(trivialSliceDims, indexedDim)) {
+      // For non-trivial dims, the bounds cover the entire global range.
+      minBounds.push_back(stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseIntElementsAttr::get(RankedTensorType::get({}, indexEltTy),
+                                    (int64_t)0)));
+
+      maxBounds.push_back(stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseIntElementsAttr::get(
+              RankedTensorType::get({}, indexEltTy),
+              globalOperandType.getDimSize(indexedDim) - 1)));
+      continue;
+    }
+    ArrayRef<AxisRefAttr> axes =
+        operandSharding.getDimShardings()[indexedDim].getAxes();
+    int64_t shardSize = localOperandType.getDimSize(indexedDim);
+    Value offset = getDimensionOffset(loc, mesh, axes, shardSize, rewriter);
+    // Ensure offset matches the index element type (e.g., i32 or i64).
+    offset = stablehlo::ConvertOp::create(
+        rewriter, loc, RankedTensorType::get({}, indexEltTy), offset);
+
+    minBounds.push_back(offset);
+    Value shardSizeMinus1 = stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseIntElementsAttr::get(RankedTensorType::get({}, indexEltTy),
+                                  shardSize - 1));
+    maxBounds.push_back(stablehlo::AddOp::create(
+        rewriter, loc, RankedTensorType::get({}, indexEltTy), offset,
+        shardSizeMinus1));
+  }
+
+  return {minBounds, maxBounds};
+}
+
+// Creates a global clamp to [0, global_dim_size - 1] for all indexed dims.
+Value clampGatherIndices(Location loc, Value indices,
+                         RankedTensorType globalOperandType,
+                         ArrayRef<int64_t> startIndexMap, int64_t ivd,
+                         ConversionPatternRewriter& rewriter) {
+  auto indicesType = cast<RankedTensorType>(indices.getType());
+  Type indexEltTy = indicesType.getElementType();
+
+  auto buildIndicesLikeTensor = [&](ArrayRef<int64_t> values) -> Value {
+    if (ivd < indicesType.getRank() && values.size() > 1) {
+      auto attr = DenseIntElementsAttr::get(
+          RankedTensorType::get(values.size(), indexEltTy), values);
+      Value valuesConst = stablehlo::ConstantOp::create(rewriter, loc, attr);
+      return stablehlo::BroadcastInDimOp::create(
+          rewriter, loc, indicesType, valuesConst,
+          rewriter.getDenseI64ArrayAttr({ivd}));
+    }
+    return stablehlo::ConstantOp::create(
+        rewriter, loc, DenseIntElementsAttr::get(indicesType, values[0]));
+  };
+
+  SmallVector<int64_t> globalMaxValues =
+      llvm::map_to_vector(startIndexMap, [&](int64_t indexedDim) {
+        return globalOperandType.getDimSize(indexedDim) - 1;
+      });
+
+  return stablehlo::ClampOp::create(rewriter, loc, indicesType,
+                                    buildIndicesLikeTensor({0}), indices,
+                                    buildIndicesLikeTensor(globalMaxValues));
+}
+
+// Computes the local indices and mask for a scatter or gather op with trivial
+// slice dimensions.
+//
+// If there is any trivial slice dimension are in start_index_map, we need to
+// adjust the start_indices to be local and compute a mask based on whether the
+// original indices are in the local shard.
+//
+// If there is any trivial slice dimension is not in start_index_map, we need to
+// compute a mask based on whether the global offset of the shard is 0.
+template <typename DimNumbersOp>
+std::pair<Value, Value> computeLocalIndicesAndMask(
+    Location loc, Value indices, MeshAttr mesh,
+    TensorShardingAttr operandSharding, RankedTensorType globalOperandType,
+    RankedTensorType localOperandType, DimNumbersOp dimNumbers,
+    ArrayRef<int64_t> trivialSliceDims, ConversionPatternRewriter& rewriter) {
+  int64_t ivd = dimNumbers.getIndexVectorDim();
+  ArrayRef<int64_t> startIndexMap;
+  if constexpr (std::is_same_v<DimNumbersOp,
+                               stablehlo::ScatterDimensionNumbersAttr>) {
+    startIndexMap = dimNumbers.getScatterDimsToOperandDims();
+  } else {
+    startIndexMap = dimNumbers.getStartIndexMap();
+  }
+  auto indicesType = cast<RankedTensorType>(indices.getType());
+  Type indexEltTy = indicesType.getElementType();
+  Value adjustedIndices = indices;
+  Value mask = nullptr;
+
+  bool needIndicesBasedPred = llvm::any_of(trivialSliceDims, [&](int64_t d) {
+    return llvm::is_contained(startIndexMap, d);
+  });
+  if (needIndicesBasedPred) {
+    Value baseIndices;
+    if constexpr (std::is_same_v<DimNumbersOp,
+                                 stablehlo::ScatterDimensionNumbersAttr>) {
+      // Use original unclamped indices so OOB indices stay OOB locally.
+      baseIndices = indices;
+    } else {
+      // Use globally clamped indices for gather semantics.
+      baseIndices = clampGatherIndices(loc, indices, globalOperandType,
+                                       startIndexMap, ivd, rewriter);
+    }
+    auto [minBounds, maxBounds] = getTrivialSliceDimBounds(
+        loc, mesh, operandSharding, globalOperandType, localOperandType,
+        startIndexMap, trivialSliceDims, indexEltTy, rewriter);
+
+    // Builds bounds tensors matching the indices tensor type.
+    auto buildBoundsTensor = [&](ArrayRef<Value> bounds) -> Value {
+      if (ivd >= indicesType.getRank() || indicesType.getDimSize(ivd) == 1) {
+        // Scalar or single-element vector: uses the direct broadcast.
+        return stablehlo::BroadcastInDimOp::create(
+            rewriter, loc, indicesType, bounds[0],
+            rewriter.getDenseI64ArrayAttr({}));
+      }
+
+      // Multi-element bound values, reshape, concatenate, then broadcast.
+      SmallVector<Value> reshaped =
+          llvm::map_to_vector(bounds, [&](Value b) -> Value {
+            return stablehlo::ReshapeOp::create(
+                       rewriter, loc, RankedTensorType::get({1}, indexEltTy), b)
+                .getResult();
+          });
+      Value concat = stablehlo::ConcatenateOp::create(
+          rewriter, loc,
+          RankedTensorType::get({(int64_t)bounds.size()}, indexEltTy), reshaped,
+          0);
+      return stablehlo::BroadcastInDimOp::create(
+          rewriter, loc, indicesType, concat,
+          rewriter.getDenseI64ArrayAttr({ivd}));
+    };
+
+    Value indicesMin = buildBoundsTensor(minBounds);
+    Value indicesMax = buildBoundsTensor(maxBounds);
+
+    adjustedIndices =
+        stablehlo::SubtractOp::create(rewriter, loc, baseIndices, indicesMin);
+
+    Value ge =
+        stablehlo::CompareOp::create(rewriter, loc, baseIndices, indicesMin,
+                                     stablehlo::ComparisonDirection::GE);
+    Value le =
+        stablehlo::CompareOp::create(rewriter, loc, baseIndices, indicesMax,
+                                     stablehlo::ComparisonDirection::LE);
+    mask = stablehlo::AndOp::create(rewriter, loc, ge, le);
+  }
+
+  bool needPartitionBasedPred = llvm::any_of(trivialSliceDims, [&](int64_t d) {
+    return !llvm::is_contained(startIndexMap, d);
+  });
+  if (needPartitionBasedPred) {
+    // For unindexed sharded dims, the shard is only valid if global offset 0 is
+    // in-shard. This is equivalent to checking if the shard's global dimension
+    // offset is 0.
+    Value partitionMask = nullptr;
+
+    for (int64_t dim : trivialSliceDims) {
+      if (!llvm::is_contained(startIndexMap, dim)) {
+        ArrayRef<AxisRefAttr> axes =
+            operandSharding.getDimShardings()[dim].getAxes();
+        int64_t shardSize = localOperandType.getDimSize(dim);
+        Value offset = getDimensionOffset(loc, mesh, axes, shardSize, rewriter);
+        Value zero = stablehlo::ConstantOp::create(
+            rewriter, loc,
+            DenseIntElementsAttr::get(cast<RankedTensorType>(offset.getType()),
+                                      (int64_t)0));
+        Value eqZero = stablehlo::CompareOp::create(
+            rewriter, loc, offset, zero, stablehlo::ComparisonDirection::EQ);
+        partitionMask =
+            partitionMask
+                ? stablehlo::AndOp::create(rewriter, loc, partitionMask, eqZero)
+                : eqZero;
+      }
+    }
+    if (mask) {
+      // Broadcast scalar partitionMask to match the rank of indices-based mask.
+      partitionMask = stablehlo::BroadcastInDimOp::create(
+          rewriter, loc, mask.getType(), partitionMask,
+          rewriter.getDenseI64ArrayAttr({}));
+      mask = stablehlo::AndOp::create(rewriter, loc, mask, partitionMask);
+    } else {
+      mask = partitionMask;
+    }
+  }
+
+  return {adjustedIndices, mask};
+}
+
+class StablehloGatherOpPattern
+    : public OpConversionPattern<stablehlo::GatherOp> {
+ public:
+  StablehloGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                           ConversionState& state)
+      : OpConversionPattern<stablehlo::GatherOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::GatherOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr operandSharding =
+        converter->getSharding(op.getOperand());
+
+    if (isFullyReplicated(operandSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    MeshAttr mesh = operandSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    // Identify trivial slice dimensions (sharded, non-batching, slice size 1).
+    auto globalOperandType = cast<RankedTensorType>(op.getOperand().getType());
+    stablehlo::GatherDimensionNumbersAttr dimNumbers = op.getDimensionNumbers();
+    ArrayRef<int64_t> sliceSizes = op.getSliceSizes();
+    SmallVector<int64_t> trivialSliceDims;
+    SmallVector<AxisRefAttr> reductionAxes;
+    for (int64_t i = 0; i < globalOperandType.getRank(); ++i) {
+      auto axes = operandSharding.getDimShardings()[i].getAxes();
+      if (!axes.empty() && getTotalAxesSize(axes, mesh) > 1 &&
+          sliceSizes[i] == 1 &&
+          !llvm::is_contained(dimNumbers.getOperandBatchingDims(), i)) {
+        trivialSliceDims.push_back(i);
+        reductionAxes.append(axes.begin(), axes.end());
+      }
+    }
+
+    SmallVector<int64_t> localSliceSizes =
+        computeLocalSliceSizes(op, operandSharding, mesh);
+    SmallVector<StringRef> attrsToExclude = {"dimension_numbers", "slice_sizes",
+                                             "indices_are_sorted"};
+    Location loc = op.getLoc();
+    if (trivialSliceDims.empty()) {
+      // No trivial slice dimensions. We only need to adjust the slice sizes
+      // for sharded dimensions and construct the local gather.
+      Value result = stablehlo::GatherOp::create(
+          rewriter, loc, converter->convertType(op.getResult()),
+          adaptor.getOperand(), adaptor.getStartIndices(), dimNumbers,
+          rewriter.getDenseI64ArrayAttr(localSliceSizes),
+          op.getIndicesAreSorted());
+      copyAttributes(op, result.getDefiningOp(), attrsToExclude);
+      rewriter.replaceOp(op, result);
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+
+    // There are trivial slice dimensions. We need to adjust the start_indices,
+    // and compute a mask.
+    auto [adjustedIndices, mask] = computeLocalIndicesAndMask(
+        loc, adaptor.getStartIndices(), mesh, operandSharding,
+        globalOperandType,
+        cast<RankedTensorType>(adaptor.getOperand().getType()), dimNumbers,
+        trivialSliceDims, rewriter);
+    Value result = stablehlo::GatherOp::create(
+        rewriter, loc, converter->convertType(op.getResult()),
+        adaptor.getOperand(), adjustedIndices, dimNumbers,
+        rewriter.getDenseI64ArrayAttr(localSliceSizes),
+        op.getIndicesAreSorted());
+    copyAttributes(op, result.getDefiningOp(), attrsToExclude);
+
+    // Reduce the mask along the index_vector_dim.
+    auto maskType = cast<RankedTensorType>(mask.getType());
+    int64_t ivd = dimNumbers.getIndexVectorDim();
+    if (maskType.getRank() > 0 && ivd < maskType.getRank()) {
+      SmallVector<int64_t> reducedShape = llvm::to_vector(maskType.getShape());
+      reducedShape.erase(reducedShape.begin() + ivd);
+
+      auto reducedMaskType =
+          RankedTensorType::get(reducedShape, rewriter.getI1Type());
+      Value initValue = stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseIntElementsAttr::get(
+              RankedTensorType::get({}, rewriter.getI1Type()), true));
+      auto reduceOp = stablehlo::ReduceOp::create(
+          rewriter, loc, reducedMaskType, mask, initValue,
+          rewriter.getDenseI64ArrayAttr({ivd}));
+      stablehlo::buildReduceBody<stablehlo::AndOp>(
+          rewriter.getI1Type(), reduceOp.getOperation()->getRegion(0),
+          rewriter);
+
+      mask = reduceOp.getResult(0);
+      maskType = cast<RankedTensorType>(mask.getType());
+    }
+
+    // Broadcast the mask to the result shape. We need to determine the
+    // broadcast dimensions based on the mask rank.
+    RankedTensorType resultType = cast<RankedTensorType>(result.getType());
+    DenseI64ArrayAttr bcastDims;
+    if (maskType.getRank() == 0) {
+      // The mask is a scalar.
+      bcastDims = rewriter.getDenseI64ArrayAttr({});
+    } else {
+      // The mask has a shape containing all the batching dims.
+      SmallVector<int64_t> gatherBatchDims;
+      for (int64_t i = 0; i < resultType.getRank(); ++i) {
+        if (!llvm::is_contained(dimNumbers.getOffsetDims(), i)) {
+          gatherBatchDims.push_back(i);
+        }
+      }
+      bcastDims = rewriter.getDenseI64ArrayAttr(gatherBatchDims);
+    }
+    Value bcastMask = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc,
+        RankedTensorType::get(resultType.getShape(), rewriter.getI1Type()),
+        mask, bcastDims);
+
+    // Zero out the result where the mask is false (index was out of bounds
+    // for the shard).
+    Value zero = stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseElementsAttr::get(
+            resultType, rewriter.getZeroAttr(resultType.getElementType())));
+    result =
+        stablehlo::SelectOp::create(rewriter, loc, bcastMask, result, zero);
+
+    // Verify that an AllReduce has been inserted, such as by
+    // insert-explicit-reshards pass.
+    auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
+    SDY_CHECK(op->hasOneUse() && allReduceOp)
+        << "Expected the gather to have one user and the user is an "
+           "sdy.all_reduce.";
+    SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
+              AxisRefListAttr::get(op->getContext(), reductionAxes))
+        << "The axes of the sdy.all_reduce should match the sharded collapsed "
+           "operand dimensions of the gather.";
+
+    rewriter.replaceOp(op, result);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
  public:
   StablehloIotaOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -1668,13 +2071,13 @@ struct ConvertGlobalToLocalPass
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
-    patterns.add<AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
-                 CollectivePermuteOpPattern, ConstantOpPattern,
-                 FuncOpSignaturePattern, GenericOpPattern,
-                 ManualComputationOpPattern, NamedComputationOpPattern,
-                 ReturnOpPattern, StablehloIotaOpPattern, StablehloPadOpPattern,
-                 StablehloSliceOpPattern>(typeConverter, &getContext(),
-                                          conversionState);
+    patterns.add<
+        AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
+        CollectivePermuteOpPattern, ConstantOpPattern, FuncOpSignaturePattern,
+        GenericOpPattern, ManualComputationOpPattern, NamedComputationOpPattern,
+        ReturnOpPattern, StablehloGatherOpPattern, StablehloIotaOpPattern,
+        StablehloPadOpPattern, StablehloSliceOpPattern>(
+        typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
     patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
