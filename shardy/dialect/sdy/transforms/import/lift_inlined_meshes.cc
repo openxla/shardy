@@ -21,6 +21,9 @@ limitations under the License.
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/Signals.h"
+#include "llvm/Support/raw_ostream.h"
+#include "mhlo/IR/hlo_ops.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -31,6 +34,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -54,11 +58,58 @@ MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
   return createMesh("mesh");
 }
 
+MeshOp createNewMeshOp(Location loc, mlir::stablehlo::MeshAttr mesh,
+                       OpBuilder& builder) {
+  auto createMesh = [&](StringRef meshName, MeshAttr sdyMesh) {
+    return MeshOp::create(builder, loc, meshName, sdyMesh);
+  };
+  SmallVector<MeshAxisAttr> sdyAxes;
+  for (auto axisAttr : mesh.getAxes()) {
+    auto shloMeshAxis = mlir::dyn_cast<mlir::stablehlo::MeshAxisAttr>(axisAttr);
+    if (!shloMeshAxis) continue;
+    sdyAxes.push_back(MeshAxisAttr::get(
+        mesh.getContext(), shloMeshAxis.getName(), shloMeshAxis.getSize()));
+  }
+  auto sdyMeshAttr = MeshAttr::get(mesh.getContext(), sdyAxes);
+  return createMesh("mesh", sdyMeshAttr);
+}
+
 TensorShardingAttr replaceMesh(TensorShardingAttr sharding,
                                StringAttr meshName) {
   return TensorShardingAttr::get(
-      sharding.getContext(), meshName, sharding.getDimShardings(),
-      sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+      sharding.getContext(), FlatSymbolRefAttr::get(meshName),
+      sharding.getDimShardings(), sharding.getReplicatedAxes(),
+      sharding.getUnreducedAxes());
+}
+
+template <typename ReplicaGroupMeshAxesAttrTy>
+Attribute liftMeshInReplicaGroups(
+    Attribute attr, SymbolTable& symbolTable,
+    llvm::SmallDenseMap<Attribute, StringAttr>& meshOrRefToNewName,
+    OpBuilder& builder, Location loc) {
+  if (auto replicaGroupsAttr =
+          mlir::dyn_cast<ReplicaGroupMeshAxesAttrTy>(attr)) {
+    Attribute meshOrRef = replicaGroupsAttr.getMesh();
+    StringAttr& newMeshName = meshOrRefToNewName[meshOrRef];
+    if (newMeshName) {
+      return ReplicaGroupMeshAxesAttrTy::get(
+          replicaGroupsAttr.getContext(), FlatSymbolRefAttr::get(newMeshName),
+          replicaGroupsAttr.getAxes());
+    }
+    if (auto mesh = mlir::dyn_cast<MeshAttr>(meshOrRef)) {
+      newMeshName = symbolTable.insert(createNewMeshOp(loc, mesh, builder));
+      return ReplicaGroupMeshAxesAttrTy::get(
+          replicaGroupsAttr.getContext(), FlatSymbolRefAttr::get(newMeshName),
+          replicaGroupsAttr.getAxes());
+    }
+    if (auto shloMesh = mlir::dyn_cast<mlir::stablehlo::MeshAttr>(meshOrRef)) {
+      newMeshName = symbolTable.insert(createNewMeshOp(loc, shloMesh, builder));
+      return ReplicaGroupMeshAxesAttrTy::get(
+          replicaGroupsAttr.getContext(), FlatSymbolRefAttr::get(newMeshName),
+          replicaGroupsAttr.getAxes());
+    }
+  }
+  return attr;
 }
 
 struct LiftInlinedMeshesPass
@@ -67,6 +118,7 @@ struct LiftInlinedMeshesPass
 
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
+
     SymbolTable symbolTable(moduleOp);
 
     // A map from both:
@@ -122,6 +174,22 @@ struct LiftInlinedMeshesPass
         return replaceMesh(sharding, newMeshName);
       }
       return sharding;
+    });
+
+    moduleOp.walk([&](Operation* op) {
+      if (auto attr = op->getAttrOfType<Attribute>("replica_groups")) {
+        auto newAttr =
+            liftMeshInReplicaGroups<mlir::stablehlo::ReplicaGroupMeshAxesAttr>(
+                attr, symbolTable, meshOrRefToNewName, builder, op->getLoc());
+        if (newAttr == attr) {
+          newAttr =
+              liftMeshInReplicaGroups<mlir::mhlo::ReplicaGroupMeshAxesAttr>(
+                  attr, symbolTable, meshOrRefToNewName, builder, op->getLoc());
+        }
+        if (newAttr != attr) {
+          op->setAttr("replica_groups", newAttr);
+        }
+      }
     });
   }
 };
