@@ -658,7 +658,7 @@ func.func @gather(%arg0: tensor<3x4x2x5xf32>, %arg1: tensor<2x3x3xi64>) -> tenso
 
 // CHECK-LABEL: @gather_implicit_index_vector_dim
 func.func @gather_implicit_index_vector_dim_and_size_one_collapsed_slice_dim(%arg0: tensor<3x1x2xf32>, %arg1: tensor<2x3x2xi64>) -> tensor<2x3x2x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, n, l], [i, j, k])->([i, j, k, l]) {i=2, j=3, k=2, l=2, m=3, n=1} reduction={m} need_replication={n}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([m, n, l], [i, j, k])->([i, j, k, l]) {i=2, j=3, k=2, l=2, m=3, n=1} need_replication={m, n}>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [3],
@@ -703,6 +703,20 @@ func.func @gather_index_vector_dim_before_batching_dim(%arg0: tensor<5x3x7x4xf32
     indices_are_sorted = false
   } : (tensor<5x3x7x4xf32>, tensor<7x2x5x3xi64>) -> tensor<7x5x3x2xf32>
   return %0 : tensor<7x5x3x2xf32>
+}
+
+// CHECK-LABEL: @gather_operand_dim_not_in_start_index_map
+func.func @gather_operand_dim_not_in_start_index_map(%arg0: tensor<8x4x10x7xf32>, %arg1: tensor<2xi64>) -> tensor<2x1x1x7xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, j, l, m], [i])->([i, k, l, m]) {i=2, j=4, k=1, l=10, m=7, n=8} reduction={j} need_replication={k, l, n} blocked_propagation={l}
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1, 2, 3],
+      collapsed_slice_dims = [0],
+      start_index_map = [1],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 1, 1, 7>
+  } : (tensor<8x4x10x7xf32>, tensor<2xi64>) -> tensor<2x1x1x7xf32>
+  return %0 : tensor<2x1x1x7xf32>
 }
 
 // CHECK-LABEL: func @pad
