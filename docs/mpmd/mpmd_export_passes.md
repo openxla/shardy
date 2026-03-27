@@ -39,7 +39,6 @@ ith function with name "some_name" for i > 0 will have the name
 #### Options
 
 ```
--group-across-meshes : Whether to do more aggressive fragment grouping, across meshes. This may not be desirable for heterogeneous systems.
 -verbose-logging     : Whether to enable verbose logging
 ```
 

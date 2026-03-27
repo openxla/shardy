@@ -40,9 +40,6 @@ struct ExportOptions {
   // Whether to copy constants produced in one fragment to their consumers,
   // possibly through transfers.
   bool copyConstantsFromProducerToConsumer = false;
-  // Whether to do more aggressive fragment grouping, across meshes. This may
-  // not be desirable for heterogeneous systems.
-  bool groupFragmentsAcrossMeshes = true;
   // Whether to apply the merge transfers optimization pass.
   bool applyMergeTransfers = false;
   bool failOnReshardOnlyFragments = false;

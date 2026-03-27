@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-lower-to-fragment-calls='group-across-meshes=false' -split-input-file 2>&1 | FileCheck %s
+// RUN: mpmd_opt %s -mpmd-lower-to-fragment-calls -split-input-file 2>&1 | FileCheck %s
 
 !mesh_1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 

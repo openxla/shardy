@@ -86,17 +86,12 @@ std::optional<int64_t> GetIntegerAttr(Operation* op, StringRef name) {
 //
 // TODO(dvytin): consider merging even across different equivalent meshes.
 struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
-  static unsigned getHashValue(FragmentOp fragment_op,
-                               bool group_across_meshes) {
+  static unsigned getHashValue(FragmentOp fragment_op) {
     llvm::hash_code hash;
-    if (group_across_meshes) {
-      // Hash the mesh shape.
-      hash = hash_value(*mpmd::GetMeshAttr(fragment_op));
-    } else {
-      // Hash the mesh name to avoid deduping fragments executed on different
-      // meshes (which may be unsafe in heterogeneous settings).
-      hash = llvm::hash_value(fragment_op.getMeshName());
-    }
+    // Hash the mesh name to avoid deduping fragments executed on different
+    // meshes (which may be unsafe in heterogeneous settings).
+    hash = llvm::hash_value(fragment_op.getMeshName());
+
     // Hash the fragment argument attributes.
     hash = llvm::hash_combine(hash, fragment_op->getAttr(kArgAttrName));
     hash = llvm::hash_combine(hash, fragment_op->getAttr(kResAttrName));
@@ -122,8 +117,7 @@ struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
     return hash;
   }
 
-  static bool isEqual(FragmentOp lhs, FragmentOp rhs,
-                      bool group_across_meshes) {
+  static bool isEqual(FragmentOp lhs, FragmentOp rhs) {
     if (lhs == rhs) {
       return true;
     }
@@ -132,14 +126,9 @@ struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
       return false;
     }
 
-    bool equal_meshes;
-    if (group_across_meshes) {
-      equal_meshes = *mpmd::GetMeshAttr(lhs) == *mpmd::GetMeshAttr(rhs);
-    } else {
-      // Compare the mesh names to avoid deduping fragments executed on
-      // different meshes (which may be unsafe in heterogeneous settings).
-      equal_meshes = lhs.getMeshName() == rhs.getMeshName();
-    }
+    // Compare the mesh names to avoid deduping fragments executed on
+    // different meshes (which may be unsafe in heterogeneous settings).
+    bool equal_meshes = lhs.getMeshName() == rhs.getMeshName();
 
     return equal_meshes &&
            lhs->getAttr(kArgAttrName) == rhs->getAttr(kArgAttrName) &&
@@ -150,29 +139,14 @@ struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
   }
 };
 
-struct FragmentBodyEquivalenceCrossMeshGroupingInfo
-    : FragmentBodyEquivalenceBaseInfo {
-  static unsigned getHashValue(FragmentOp fragment_op) {
-    return FragmentBodyEquivalenceBaseInfo::getHashValue(
-        fragment_op, /*group_across_meshes=*/true);
-  }
-
-  static bool isEqual(FragmentOp lhs, FragmentOp rhs) {
-    return FragmentBodyEquivalenceBaseInfo::isEqual(
-        lhs, rhs, /*group_across_meshes=*/true);
-  }
-};
-
 struct FragmentBodyEquivalenceSameMeshGroupingInfo
     : FragmentBodyEquivalenceBaseInfo {
   static unsigned getHashValue(FragmentOp fragment_op) {
-    return FragmentBodyEquivalenceBaseInfo::getHashValue(
-        fragment_op, /*group_across_meshes=*/false);
+    return FragmentBodyEquivalenceBaseInfo::getHashValue(fragment_op);
   }
 
   static bool isEqual(FragmentOp lhs, FragmentOp rhs) {
-    return FragmentBodyEquivalenceBaseInfo::isEqual(
-        lhs, rhs, /*group_across_meshes=*/false);
+    return FragmentBodyEquivalenceBaseInfo::isEqual(lhs, rhs);
   }
 };
 
@@ -332,16 +306,9 @@ class LowerToFragmentCallsPass
 
     IRRewriter rewriter(&ctx);
 
-
-    std::vector<FragmentOp> all_fragments =
-        groupAcrossMeshes
-            ? GroupFragmentsAndMarkWithGroupName<
-                  FragmentBodyEquivalenceCrossMeshGroupingInfo>(
-                  module_op, rewriter, is_all_forward)
-            : GroupFragmentsAndMarkWithGroupName<
-                  FragmentBodyEquivalenceSameMeshGroupingInfo>(
-                  module_op, rewriter, is_all_forward);
-
+    std::vector<FragmentOp> all_fragments = GroupFragmentsAndMarkWithGroupName<
+        FragmentBodyEquivalenceSameMeshGroupingInfo>(module_op, rewriter,
+                                                     is_all_forward);
 
     // Step 3: Log the fragment naming per mesh, for debugging purposes.
     if (auto func = dyn_cast_or_null<FuncOp>(module_op.lookupSymbol("main"))) {

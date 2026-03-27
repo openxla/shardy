@@ -125,8 +125,6 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
 
   // This pass should be applied after all passes that operate on fragment ops.
   LowerToFragmentCallsPassOptions lower_to_fragment_calls_options;
-  lower_to_fragment_calls_options.groupAcrossMeshes =
-      options.groupFragmentsAcrossMeshes;
   lower_to_fragment_calls_options.verboseLogging = options.verboseLogging;
   pm.addPass(createLowerToFragmentCallsPass(
       std::move(lower_to_fragment_calls_options)));

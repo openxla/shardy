@@ -273,8 +273,6 @@ void MpmdProgram::Export(ModuleOp module) {
   ExportOptions export_options;
   export_options.copyConstantsFromProducerToConsumer =
       options.mpmd_copy_constant_creation_from_producer_to_consumer;
-  export_options.groupFragmentsAcrossMeshes =
-      options.mpmd_assume_homogeneous_devices;
   export_options.applyMergeTransfers = options.mpmd_apply_merge_transfers_pass;
   export_options.failOnBackwardDeps = options.mpmd_fail_on_backward_deps;
   export_options.verboseLogging = true;

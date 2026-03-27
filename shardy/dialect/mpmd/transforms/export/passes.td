@@ -38,10 +38,6 @@ def LowerToFragmentCallsPass : Pass<"mpmd-lower-to-fragment-calls", "ModuleOp"> 
   let dependentDialects = ["mlir::mpmd::MpmdDialect", "mlir::sdy::SdyDialect"];
 
   let options = [
-    Option<"groupAcrossMeshes", "group-across-meshes", "bool",
-           /*default=*/"false",
-           "Whether to do more aggressive fragment grouping, across meshes. "
-           "This may not be desirable for heterogeneous systems.">,
     Option<"verboseLogging", "verbose-logging", "bool", /*default=*/"false",
            "Whether to enable verbose logging">,
   ];
