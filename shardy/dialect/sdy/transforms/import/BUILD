@@ -56,6 +56,7 @@ cc_library(
         "//shardy/dialect/sdy/transforms/propagation:op_sharding_rule_registry",
         "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
+        "//third_party/tensorflow/compiler/xla/mlir_hlo",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
