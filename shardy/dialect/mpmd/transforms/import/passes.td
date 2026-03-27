@@ -427,6 +427,34 @@ def GenerateSdyMeshesFromTopologyPass :
   }];
 }
 
+def RenameMeshesPass :
+    Pass<"mpmd-rename-meshes", "ModuleOp"> {
+  let summary = "Renames existing shardy meshes to prefix them with '__'.";
+  let description = [{
+    This pass renames existing meshes by prefixing them with "__". This involves
+    creating new sdy.mesh ops, updating shardings to refer to the new mesh names,
+    and deleting the original sdy.mesh ops.
+  }];
+}
+
+def AddSdyMeshesFromTopologyPass :
+    Pass<"mpmd-add-sdy-meshes-from-topology", "ModuleOp"> {
+  let summary = "Adds shardy meshes based on the MPMD topology, without modifying existing ones.";
+  let description = [{
+    This pass reads the MPMD topology attribute and creates corresponding
+    sdy.mesh ops. It does not modify or remove any existing mesh ops or shardings.
+  }];
+}
+
+def RemoveInternalSdyMeshesPass :
+    Pass<"mpmd-remove-internal-sdy-meshes", "ModuleOp"> {
+  let summary = "Removes shardy meshes whose names start with '__'.";
+  let description = [{
+    This pass removes all sdy.mesh ops whose names start with "__". These are
+    temporary meshes introduced during the import pipeline.
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // End of - Infer Mesh assignment passes
 //===----------------------------------------------------------------------===//
