@@ -34,6 +34,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
@@ -227,8 +228,8 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     if ((op->getDialect()->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
-        isa<stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp,
-            stablehlo::SliceOp>(op)) {
+        isa<stablehlo::DotOp, stablehlo::GatherOp, stablehlo::IotaOp,
+            stablehlo::PadOp, stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(
@@ -1316,6 +1317,99 @@ class NamedComputationOpPattern
   ConversionState& conversionState;
 };
 
+class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
+ public:
+  StablehloDotOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                        ConversionState& state)
+      : OpConversionPattern<stablehlo::DotOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::DotOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+
+    Value lhs = op.getLhs();
+    TensorShardingAttr lhsSharding = converter->getSharding(lhs);
+
+    // If the input is fully replicated, we just localize the types.
+    if (isFullyReplicated(lhsSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    MeshAttr mesh = lhsSharding.getMesh(symbolTable);
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh.");
+    }
+
+    // Identify the sharded contracting dimension axes in the LHS.
+    // In stablehlo.dot, the contracting dimension is the last dimension of LHS.
+    auto lhsType = cast<RankedTensorType>(lhs.getType());
+    int64_t lhsContractingDim = lhsType.getRank() - 1;
+    ArrayRef<AxisRefAttr> contractingAxes =
+        lhsSharding.getDimShardings()[lhsContractingDim].getAxes();
+
+    if (!contractingAxes.empty()) {
+      int64_t totalAxesSize = getTotalAxesSize(contractingAxes, mesh);
+
+      // Check divisibility of sharded contracting dimensions.
+      SDY_CHECK(lhsType.getDimSize(lhsContractingDim) % totalAxesSize == 0)
+          << "Sharded contracting dimension must be divisible by the total "
+             "size "
+             "of the axes sharding it.";
+
+      // Padding should be 0 if the operand is a pad operand.
+      auto checkPadding =
+          [](Value operand) {
+            auto padOp = operand.getDefiningOp<stablehlo::PadOp>();
+            if (!padOp) {
+              return;
+            }
+            DenseElementsAttr attr;
+            bool isZero = false;
+            if (matchPattern(padOp.getPaddingValue(), m_Constant(&attr)) &&
+                attr.isSplat()) {
+              Attribute splatValue = attr.getSplatValue<Attribute>();
+              if (auto floatAttr = dyn_cast<FloatAttr>(splatValue)) {
+                isZero = floatAttr.getValue().isZero();
+              } else if (auto intAttr = dyn_cast<IntegerAttr>(splatValue)) {
+                isZero = intAttr.getValue().isZero();
+              }
+            }
+            SDY_CHECK(isZero)
+                << "Padding value must be zero for sharded contracting dot.";
+          };
+
+      checkPadding(lhs);
+      checkPadding(op.getRhs());
+
+      // Verify that an AllReduce has been inserted by a previous pass.
+      // The local partial sums must be combined.
+      SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
+          << "Expected sharded contracting dot to have one user and the user "
+             "is "
+             "an sdy.all_reduce.";
+
+      auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
+      SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
+                AxisRefListAttr::get(op->getContext(), contractingAxes))
+          << "The axes of the sdy.all_reduce should match the sharded "
+             "contracting dimension of the dot.";
+    }
+
+    // Localize the operation by replacing global types with local physical
+    // types.
+    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                             conversionState);
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 SmallVector<int64_t> computeLocalSliceSizes(stablehlo::GatherOp op,
                                             TensorShardingAttr operandSharding,
                                             MeshAttr mesh) {
@@ -2075,8 +2169,8 @@ struct ConvertGlobalToLocalPass
         AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
         CollectivePermuteOpPattern, ConstantOpPattern, FuncOpSignaturePattern,
         GenericOpPattern, ManualComputationOpPattern, NamedComputationOpPattern,
-        ReturnOpPattern, StablehloGatherOpPattern, StablehloIotaOpPattern,
-        StablehloPadOpPattern, StablehloSliceOpPattern>(
+        ReturnOpPattern, StablehloDotOpPattern, StablehloGatherOpPattern,
+        StablehloIotaOpPattern, StablehloPadOpPattern, StablehloSliceOpPattern>(
         typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
