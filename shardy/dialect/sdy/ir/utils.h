@@ -626,6 +626,20 @@ SmallVector<AxisRefAttr> getOrderedAxisRefs(Attribute shardingOrAxisList,
 DenseIntElementsAttr getReplicaGroups(AxisRefListAttr reductionAxesAttr,
                                       MeshAttr mesh, OpBuilder& rewriter);
 
+// Gets `kOriginalFuncName` attribute attached to `funcOp`. In
+// case there is no such attribute attached, create one on the name of `funcOp`.
+StringAttr getOriginalFuncName(func::FuncOp funcOp);
+
+// Returns the shardings for the arguments of `funcOp`, with fully replicated
+// shardings for empty shardings on `funcOp`.
+TensorShardingPerValueAttr getFuncArgShardings(func::FuncOp funcOp,
+                                               const SymbolTable& symbolTable);
+
+// Returns the shardings for the results of `funcOp`, with fully replicated
+// shardings for empty shardings on `funcOp`.
+TensorShardingPerValueAttr getFuncResultShardings(
+    func::FuncOp funcOp, const SymbolTable& symbolTable);
+
 }  // namespace sdy
 }  // namespace mlir
 
