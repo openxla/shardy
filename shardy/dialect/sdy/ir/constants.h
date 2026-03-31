@@ -83,6 +83,9 @@ inline const std::string kCollectiveLabel = "sdy-collective";
 // Symbol name for the empty mesh.
 inline const std::string kEmptyMeshSymbol = "empty_mesh";
 
+// Attribute name for the original name of the func before flattening.
+inline constexpr llvm::StringRef kOriginalFuncName = "sdy.original_func_name";
+
 }  // namespace sdy
 }  // namespace mlir
 
