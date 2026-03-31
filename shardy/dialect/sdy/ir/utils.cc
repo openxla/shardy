@@ -29,11 +29,13 @@ limitations under the License.
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
+#include "mlir/Analysis/CallGraph.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -48,6 +50,7 @@ limitations under the License.
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -58,6 +61,7 @@ namespace sdy {
 
 namespace {
 
+using func::CallOp;
 using func::FuncOp;
 
 template <typename T>
@@ -893,6 +897,38 @@ DenseIntElementsAttr getReplicaGroups(AxisRefListAttr reductionAxesAttr,
   auto replicaGroupsType = RankedTensorType::get({numGroups, groupSize},
                                                  rewriter.getIntegerType(64));
   return DenseIntElementsAttr::get(replicaGroupsType, llvm::to_vector(array));
+}
+
+bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+               bool preOrder) {
+  CallGraph callGraph(moduleOp);
+  llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
+  if (preOrder) {  // Iterate pre-order.
+    for (CallGraphNode* node : rpo) {
+      if (node->isExternal()) {
+        continue;
+      }
+      if (node->getCallableRegion()
+              ->walk<WalkOrder::PreOrder>(
+                  [&](CallOp callOp) { return processCallOp(callOp); })
+              .wasInterrupted()) {
+        return false;
+      }
+    }
+    return true;
+  }
+  // Iterate post-order.
+  for (CallGraphNode* node : llvm::reverse(rpo)) {
+    if (node->isExternal()) {
+      continue;
+    }
+    if (node->getCallableRegion()
+            ->walk([&](CallOp callOp) { return processCallOp(callOp); })
+            .wasInterrupted()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace sdy

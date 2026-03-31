@@ -626,6 +626,17 @@ SmallVector<AxisRefAttr> getOrderedAxisRefs(Attribute shardingOrAxisList,
 DenseIntElementsAttr getReplicaGroups(AxisRefListAttr reductionAxesAttr,
                                       MeshAttr mesh, OpBuilder& rewriter);
 
+// Walks on the call graph and performs `processCallOp` on them. Iterates on the
+// calls and blocks in post order of the call graph by default, that is, the
+// functions are processed before their callers, and child blocks are processed
+// before their parents. Iterates calls and blocks in pre order if `preOrder` is
+// true, that is, the functions are processed after their callers, and child
+// blocks are processed after their parents. Returns false if the walk was
+// interrupted, returns true otherwise.
+using ProcessCallOpFn = std::function<mlir::WalkResult(func::CallOp)>;
+bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+               bool preOrder = false);
+
 }  // namespace sdy
 }  // namespace mlir
 
