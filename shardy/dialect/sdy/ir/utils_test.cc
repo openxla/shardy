@@ -20,7 +20,9 @@ limitations under the License.
 #include <optional>
 #include <random>
 #include <string>
+#include <vector>
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/IR/SymbolTable.h"
@@ -509,6 +511,136 @@ TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesMerge) {
                     return {axis};
                   });
   EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("b", 2, 8)));
+}
+
+TEST_F(UtilsTest, WalkCallsPostOrder) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @bar()\n"
+      "  func.func private @foo() {\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  std::vector<std::string> calledFuncs;
+  walkCalls(
+      localModule.get(),
+      [&](func::CallOp callOp) {
+        calledFuncs.push_back(callOp.getCallee().str());
+      },
+      /*preOrder=*/false);
+  EXPECT_THAT(calledFuncs, ElementsAre("bar", "foo"));
+}
+
+TEST_F(UtilsTest, WalkCallsPreOrder) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @bar()\n"
+      "  func.func private @foo() {\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  std::vector<std::string> calledFuncs;
+  walkCalls(
+      localModule.get(),
+      [&](func::CallOp callOp) {
+        calledFuncs.push_back(callOp.getCallee().str());
+      },
+      /*preOrder=*/true);
+  EXPECT_THAT(calledFuncs, ElementsAre("foo", "bar"));
+}
+
+TEST_F(UtilsTest, WalkCallsPostOrder_ThreeCalls) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @baz()\n"
+      "  func.func private @bar() {\n"
+      "    call @baz() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func private @foo() {\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  std::vector<std::string> calledFuncs;
+  walkCalls(
+      localModule.get(),
+      [&](func::CallOp callOp) {
+        calledFuncs.push_back(callOp.getCallee().str());
+      },
+      /*preOrder=*/false);
+  EXPECT_THAT(calledFuncs, ElementsAre("baz", "bar", "foo"));
+}
+
+TEST_F(UtilsTest, WalkCallsPreOrder_ThreeCalls) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @baz()\n"
+      "  func.func private @bar() {\n"
+      "    call @baz() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func private @foo() {\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  std::vector<std::string> calledFuncs;
+  walkCalls(
+      localModule.get(),
+      [&](func::CallOp callOp) {
+        calledFuncs.push_back(callOp.getCallee().str());
+      },
+      /*preOrder=*/true);
+  EXPECT_THAT(calledFuncs, ElementsAre("foo", "bar", "baz"));
+}
+
+TEST_F(UtilsTest, WalkCalls_TwoFuncsCallSameFunc) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @baz()\n"
+      "  func.func private @bar() {\n"
+      "    call @baz() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func private @foo() {\n"
+      "    call @baz() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  std::vector<std::string> calledFuncs;
+  walkCalls(localModule.get(), [&](func::CallOp callOp) {
+    calledFuncs.push_back(callOp.getCallee().str());
+  });
+  EXPECT_THAT(calledFuncs, ElementsAre("baz", "baz", "foo", "bar"));
 }
 
 }  // namespace

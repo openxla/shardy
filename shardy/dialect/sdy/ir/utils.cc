@@ -29,11 +29,13 @@ limitations under the License.
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
+#include "mlir/Analysis/CallGraph.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -48,6 +50,7 @@ limitations under the License.
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -58,6 +61,7 @@ namespace sdy {
 
 namespace {
 
+using func::CallOp;
 using func::FuncOp;
 
 template <typename T>
@@ -459,7 +463,7 @@ void setFuncResultSharding(FuncOp funcOp, int64_t resNum,
   funcOp.setResultAttr(resNum, kShardingAttr, sharding);
 }
 
-void setFuncResultShardings(FuncOp funcOp,
+void setFuncResultShardings(func::FuncOp funcOp,
                             TensorShardingPerValueAttr shardingPerValue) {
   for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
     setFuncResultSharding(funcOp, resNum,
@@ -968,6 +972,30 @@ TensorShardingPerValueAttr getFuncResultShardings(
                   getFuncResultTensorRank(funcOp, resultNum), meshOrRef));
   }
   return TensorShardingPerValueAttr::get(funcOp.getContext(), resultShardings);
+}
+
+void walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+               bool preOrder) {
+  CallGraph callGraph(moduleOp);
+  llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
+  if (preOrder) {  // Iterate pre-order.
+    for (CallGraphNode* node : rpo) {
+      if (node->isExternal()) {
+        continue;
+      }
+      node->getCallableRegion()->walk<WalkOrder::PreOrder>(
+          [&](CallOp callOp) { processCallOp(callOp); });
+    }
+    return;
+  }
+  // Iterate post-order.
+  for (CallGraphNode* node : llvm::reverse(rpo)) {
+    if (node->isExternal()) {
+      continue;
+    }
+    node->getCallableRegion()->walk(
+        [&](CallOp callOp) { processCallOp(callOp); });
+  }
 }
 
 }  // namespace sdy

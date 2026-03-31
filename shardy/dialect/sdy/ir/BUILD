@@ -166,6 +166,7 @@ cc_library(
         ":ops_inc",
         "//shardy/common:logging",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:BytecodeOpInterface",
         "@llvm-project//mlir:ControlFlowInterfaces",
         "@llvm-project//mlir:FuncDialect",
