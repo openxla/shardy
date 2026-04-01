@@ -34,6 +34,7 @@ cc_library(
         "constant_or_scalar_merger.cc",
         "convert_global_to_local.cc",
         "drop_sharding_rules.cc",
+        "export_named_computations.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
         "remove_ag_rs_for_cmv1.cc",
