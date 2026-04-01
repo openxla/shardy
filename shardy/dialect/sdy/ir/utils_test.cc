@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/testing_utils.h"
 #include <gmock/gmock.h>
@@ -528,12 +529,13 @@ TEST_F(UtilsTest, WalkCallsPostOrder) {
       "}",
       &context);
   std::vector<std::string> calledFuncs;
-  walkCalls(
+  EXPECT_TRUE(walkCalls(
       localModule.get(),
       [&](func::CallOp callOp) {
         calledFuncs.push_back(callOp.getCallee().str());
+        return WalkResult::advance();
       },
-      /*preOrder=*/false);
+      /*preOrder=*/false));
   EXPECT_THAT(calledFuncs, ElementsAre("bar", "foo"));
 }
 
@@ -552,12 +554,13 @@ TEST_F(UtilsTest, WalkCallsPreOrder) {
       "}",
       &context);
   std::vector<std::string> calledFuncs;
-  walkCalls(
+  EXPECT_TRUE(walkCalls(
       localModule.get(),
       [&](func::CallOp callOp) {
         calledFuncs.push_back(callOp.getCallee().str());
+        return WalkResult::advance();
       },
-      /*preOrder=*/true);
+      /*preOrder=*/true));
   EXPECT_THAT(calledFuncs, ElementsAre("foo", "bar"));
 }
 
@@ -580,12 +583,13 @@ TEST_F(UtilsTest, WalkCallsPostOrder_ThreeCalls) {
       "}",
       &context);
   std::vector<std::string> calledFuncs;
-  walkCalls(
+  EXPECT_TRUE(walkCalls(
       localModule.get(),
       [&](func::CallOp callOp) {
         calledFuncs.push_back(callOp.getCallee().str());
+        return WalkResult::advance();
       },
-      /*preOrder=*/false);
+      /*preOrder=*/false));
   EXPECT_THAT(calledFuncs, ElementsAre("baz", "bar", "foo"));
 }
 
@@ -608,16 +612,17 @@ TEST_F(UtilsTest, WalkCallsPreOrder_ThreeCalls) {
       "}",
       &context);
   std::vector<std::string> calledFuncs;
-  walkCalls(
+  EXPECT_TRUE(walkCalls(
       localModule.get(),
       [&](func::CallOp callOp) {
         calledFuncs.push_back(callOp.getCallee().str());
+        return WalkResult::advance();
       },
-      /*preOrder=*/true);
+      /*preOrder=*/true));
   EXPECT_THAT(calledFuncs, ElementsAre("foo", "bar", "baz"));
 }
 
-TEST_F(UtilsTest, WalkCalls_TwoFuncsCallSameFunc) {
+TEST_F(UtilsTest, WalkCalls_Interrupted) {
   auto localModule = mlir::parseSourceString<ModuleOp>(
       "module {\n"
       "  func.func private @baz()\n"
@@ -626,21 +631,21 @@ TEST_F(UtilsTest, WalkCalls_TwoFuncsCallSameFunc) {
       "    return\n"
       "  }\n"
       "  func.func private @foo() {\n"
-      "    call @baz() : () -> ()\n"
+      "    call @bar() : () -> ()\n"
       "    return\n"
       "  }\n"
       "  func.func @main() {\n"
       "    call @foo() : () -> ()\n"
-      "    call @bar() : () -> ()\n"
       "    return\n"
       "  }\n"
       "}",
       &context);
   std::vector<std::string> calledFuncs;
-  walkCalls(localModule.get(), [&](func::CallOp callOp) {
+  EXPECT_FALSE(walkCalls(localModule.get(), [&](func::CallOp callOp) {
     calledFuncs.push_back(callOp.getCallee().str());
-  });
-  EXPECT_THAT(calledFuncs, ElementsAre("baz", "baz", "foo", "bar"));
+    return WalkResult::interrupt();
+  }));
+  EXPECT_THAT(calledFuncs, ElementsAre("baz"));
 }
 
 }  // namespace

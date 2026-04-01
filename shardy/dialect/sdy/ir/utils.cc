@@ -973,8 +973,7 @@ TensorShardingPerValueAttr getFuncResultShardings(
   }
   return TensorShardingPerValueAttr::get(funcOp.getContext(), resultShardings);
 }
-
-void walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
                bool preOrder) {
   CallGraph callGraph(moduleOp);
   llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
@@ -983,19 +982,27 @@ void walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
       if (node->isExternal()) {
         continue;
       }
-      node->getCallableRegion()->walk<WalkOrder::PreOrder>(
-          [&](CallOp callOp) { processCallOp(callOp); });
+      if (node->getCallableRegion()
+              ->walk<WalkOrder::PreOrder>(
+                  [&](CallOp callOp) { return processCallOp(callOp); })
+              .wasInterrupted()) {
+        return false;
+      }
     }
-    return;
+    return true;
   }
   // Iterate post-order.
   for (CallGraphNode* node : llvm::reverse(rpo)) {
     if (node->isExternal()) {
       continue;
     }
-    node->getCallableRegion()->walk(
-        [&](CallOp callOp) { processCallOp(callOp); });
+    if (node->getCallableRegion()
+            ->walk([&](CallOp callOp) { return processCallOp(callOp); })
+            .wasInterrupted()) {
+      return false;
+    }
   }
+  return true;
 }
 
 }  // namespace sdy

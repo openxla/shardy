@@ -17,7 +17,6 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
 #include <cstdint>
-#include <functional>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -616,18 +615,6 @@ bool overlaps(ArrayRef<AxisRefAttr> axisRefs,
 SmallVector<AxisRefAttr> getOrderedAxisRefs(Attribute shardingOrAxisList,
                                             MeshAttr mesh);
 
-// Walks on the call graph and performs `processCallOp` on them. Iterates on the
-// calls and blocks in post order of the call graph by default, that is, the
-// functions are processed before their callers, and child blocks are processed
-// before their parents. Iterates calls and blocks in pre order if `preOrder` is
-// true, that is, the functions are processed after their callers, and child
-// blocks are processed after their parents. It walks through the called func
-// separately for each call. It means it walks through an implicitly flattened
-// call graph for non-flat call graphs.
-using ProcessCallOpFn = std::function<void(func::CallOp)>;
-void walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
-               bool preOrder = false);
-
 // Builds the replica groups for `reductionAxesAttr`.
 //
 // For example, given:
@@ -652,6 +639,17 @@ TensorShardingPerValueAttr getFuncArgShardings(func::FuncOp funcOp,
 // shardings for empty shardings on `funcOp`.
 TensorShardingPerValueAttr getFuncResultShardings(
     func::FuncOp funcOp, const SymbolTable& symbolTable);
+
+// Walks on the call graph and performs `processCallOp` on them. Iterates on the
+// calls and blocks in post order of the call graph by default, that is, the
+// functions are processed before their callers, and child blocks are processed
+// before their parents. Iterates calls and blocks in pre order if `preOrder` is
+// true, that is, the functions are processed after their callers, and child
+// blocks are processed after their parents. Returns false if the walk was
+// interrupted, returns true otherwise.
+using ProcessCallOpFn = std::function<mlir::WalkResult(func::CallOp)>;
+bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+               bool preOrder = false);
 
 }  // namespace sdy
 }  // namespace mlir
