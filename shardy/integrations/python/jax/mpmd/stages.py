@@ -524,6 +524,8 @@ class MpmdLowered(stages.Lowered):
       compiler_options: (
           stages.CompilerOptions | mpmd_types.MeshToCompileOptions | None
       ) = None,
+      *,
+      ifrt_ir_compile_options: dict[str, Any] | None = None,
       device_assignment=None,
   ) -> MpmdCompiled:
     """See base class.
@@ -534,6 +536,7 @@ class MpmdLowered(stages.Lowered):
         every mesh. If a dict is provided, then every mesh name must be part of
         the mpmd topology and if the user doesn't set compiler options for a
         given mesh, the compiler will use defaults.
+      ifrt_ir_compile_options: An optional dict of IFRT IR compile options.
       device_assignment: An optional sequence of devices to use for compilation.
         This argument can be used to compile a lowered MPMD computation for
         different devices.
@@ -544,9 +547,6 @@ class MpmdLowered(stages.Lowered):
     Raises:
       ValueError: if the function has already been compiled.
     """
-    in_avals = jax.tree.map(lambda x: x._aval, self.args_info)  # pylint: disable=protected-access
-    flat_in_avals = jax.tree.leaves(in_avals)
-    flat_out_avals = self.global_flat_output_abstract_values
     if device_assignment is None:
       in_shardings = self.function_named_shardings.input_specs
       flat_out_shardings = jax.tree.leaves(
@@ -578,16 +578,13 @@ class MpmdLowered(stages.Lowered):
         lowered_mesh_to_compiled_mesh[mesh] = new_mesh
         cur_device_idx = new_device_idx
 
-      flat_out_shardings = jax.tree.leaves(
-          self.function_named_shardings.output_specs
-      )
       flat_out_shardings = [
           jax.sharding.NamedSharding(
               lowered_mesh_to_compiled_mesh[s.mesh],
               s.spec,
               memory_kind=s.memory_kind,
           )
-          for s in flat_out_shardings
+          for s in jax.tree.leaves(self.function_named_shardings.output_specs)
       ]
       in_shardings = jax.tree.map(
           lambda s: jax.sharding.NamedSharding(
@@ -608,17 +605,17 @@ class MpmdLowered(stages.Lowered):
         backend=device_assignment[0].client,
         ifrt_mlir_module=compiled_ifrt_module,
         devices=device_assignment,
-        out_avals=flat_out_avals,
+        out_avals=self.global_flat_output_abstract_values,
         out_shardings=flat_out_shardings,
         xla_compile_options=self._get_compile_options(compiler_options),
-        loaded_executable_bindings={},
+        ifrt_ir_compile_options=ifrt_ir_compile_options,
     )
     executable = MpmdExecutable(
         program_executable,
         module_ir=compiled_ifrt_module,
         func_name=self.name,
-        flat_in_avals=flat_in_avals,
-        out_avals=flat_out_avals,
+        flat_in_avals=[x._aval for x in jax.tree.leaves(self.args_info)],  # pylint: disable=protected-access,
+        out_avals=self.global_flat_output_abstract_values,
         in_shardings=in_shardings,
         flat_out_shardings=flat_out_shardings,
         kept_inputs_indices=self.kept_inputs_indices,
@@ -626,10 +623,10 @@ class MpmdLowered(stages.Lowered):
         topology=topology,
     )
     return MpmdCompiled(
-        executable,
-        self.args_info,
-        self.output_tree,
-        self.no_kwargs,
+        executable=executable,
+        args_info=self.args_info,
+        out_tree=self.output_tree,
+        no_kwargs=self.no_kwargs,
     )
 
   def as_text(
