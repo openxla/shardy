@@ -96,6 +96,12 @@ int64_t getTensorRank(Type type);
 // Assumes the `ShapeTensor` has a rank.
 int64_t getTensorRank(Value value);
 
+// Returns the rank of the func result tensor of `funcOp` at index `resNum` if
+// its type is a `ShapeTensor`, otherwise returns 0.
+//
+// Assumes the `ShapeTensor` has a rank.
+int64_t getFuncResultTensorRank(func::FuncOp funcOp, int64_t resNum);
+
 // Returns true if the value is a tensor with rank 0.
 bool isScalar(Value value);
 
@@ -146,6 +152,11 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // the enclosing module of `op`, and returns its `MeshAttr` if it exists in the
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
+
+// Returns the first non-maximal mesh on the given shardings, if there is
+// one. Otherwise returns `nullptr`.
+Attribute getMeshOrRef(int64_t numElements, const SymbolTable& symbolTable,
+                       std::function<TensorShardingAttr(int64_t)> getSharding);
 
 // If sharding refers to a mesh by name, returns a new TensorShardingAttr with
 // the mesh inlined. Otherwise returns the same sharding.

@@ -908,9 +908,6 @@ StringAttr getOriginalFuncName(FuncOp funcOp) {
   return funcOp.getSymNameAttr();
 }
 
-namespace {
-// Returns the first non-maximal mesh on the given shardings, if there is
-// one. Otherwise returns `nullptr`.
 mlir::Attribute getMeshOrRef(
     int64_t numElements, const SymbolTable& symbolTable,
     std::function<TensorShardingAttr(int64_t)> getSharding) {
@@ -926,7 +923,6 @@ mlir::Attribute getMeshOrRef(
 int64_t getFuncResultTensorRank(FuncOp funcOp, int64_t resNum) {
   return getTensorRank(funcOp.getResultTypes()[resNum]);
 }
-}  // namespace
 
 TensorShardingPerValueAttr getFuncArgShardings(FuncOp funcOp,
                                                const SymbolTable& symbolTable) {
