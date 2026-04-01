@@ -191,7 +191,6 @@ class MakePartitioningOptionsTest(parameterized.TestCase):
       option=[
           'mpmd_infer_transfers',
           'mpmd_infer_cross_mesh_reductions',
-          'mpmd_merge_inferred_with_cloning_during_import',
           'mpmd_fragment_remat',
           'mpmd_merge_remat_fragments',
           'mpmd_split_bwd_fragments',
@@ -233,7 +232,6 @@ class MakePartitioningOptionsTest(parameterized.TestCase):
   @parameterized.parameters(
       ('mpmd_infer_transfers', None),
       ('mpmd_infer_cross_mesh_reductions', 0),
-      ('mpmd_merge_inferred_with_cloning_during_import', ''),
       ('mpmd_fragment_remat', None),
       ('mpmd_merge_remat_fragments', 0.0),
       ('mpmd_split_bwd_fragments', ''),

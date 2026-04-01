@@ -103,7 +103,6 @@ PartitioningOptions ParsePartitioningOptions(
 
   PARSE_BOOL_OPTION(mpmd_infer_transfers);
   PARSE_BOOL_OPTION(mpmd_infer_cross_mesh_reductions);
-  PARSE_BOOL_OPTION(mpmd_merge_inferred_with_cloning_during_import);
   PARSE_BOOL_OPTION(mpmd_fragment_remat);
   PARSE_BOOL_OPTION(mpmd_split_bwd_fragments);
   PARSE_BOOL_OPTION(mpmd_assume_homogeneous_devices);
@@ -222,8 +221,6 @@ void MpmdProgram::Import(ModuleOp module) {
       options.mpmd_merge_inferred_after_scheduling;
   import_options.absorbInferredFragmentsOnEntryPointFunction =
       options.mpmd_absorb_inferred_fragments_on_entry_point_function;
-  import_options.cloneInferredFragments =
-      options.mpmd_merge_inferred_with_cloning_during_import;
   import_options.inferMeshOptions = {
       options.mpmd_infer_transfers,
       options.mpmd_infer_cross_mesh_reductions,
@@ -246,8 +243,6 @@ void MpmdProgram::Optimize(ModuleOp module) {
   optimize_options.mergeRematFragments = options.mpmd_merge_remat_fragments;
   optimize_options.absorbInferredFragmentsOnEntryPointFunction =
       options.mpmd_absorb_inferred_fragments_on_entry_point_function;
-  optimize_options.cloneInferredFragments =
-      options.mpmd_merge_inferred_with_cloning_during_import;
   optimize_options.pipelineSchedule = options.mpmd_pipeline_schedule;
   addOptimizePipeline(pm, optimize_options);
 

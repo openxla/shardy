@@ -56,8 +56,6 @@ struct ImportOptions {
   // Whether to absorb inferred fragments into user-defined fragments on
   // entry-point functions.
   bool absorbInferredFragmentsOnEntryPointFunction = false;
-  // Whether to clone inferred fragments when merging.
-  bool cloneInferredFragments = false;
   // Infer mesh pipeline options.
   InferMeshOptions inferMeshOptions;
   // Enable heterogeneous meshes.

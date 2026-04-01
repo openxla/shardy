@@ -129,8 +129,7 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
 
   if (!options.mergeAfterScheduling) {
     AddMergeInferredFragmentsPasses(
-        pm, options.absorbInferredFragmentsOnEntryPointFunction,
-        options.cloneInferredFragments);
+        pm, options.absorbInferredFragmentsOnEntryPointFunction);
   }
 
   // Enforce the user-specified input/output equi-assignment constraints.
@@ -153,8 +152,7 @@ void addImportPipeline(OpPassManager& pm, ImportOptions options) {
   // Merge any inferred fragments with user-defined fragments that could not be
   // merged before because of CallOps.
   if (!options.mergeAfterScheduling) {
-    pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass(
-        MergeInferredFragmentsPassOptions{options.cloneInferredFragments}));
+    pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
   }
   // Merge fragments into scheduling units.
   AddSchedulingPreprocessingPasses(pm, options.splitBwdFragments,

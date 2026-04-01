@@ -95,9 +95,6 @@ bool IsNonScalarInterMeshTransfer(Operation* op) {
          !TypeHasOneElement(transfer_op.getType().getGlobalTensorType());
 }
 
-// We only clone fragments with at most one non-return op.
-inline const int kInferredFragmentMaxSizeForCloning = 2;
-
 void PrintMergeDebug(FragmentOp producer_op) {
   LLVM_DEBUG({
     llvm::dbgs() << "\n\n=== Processing fragment: '"
@@ -304,24 +301,6 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
   // NOTE: Merging `producer_op` and `closest_user` may delay transfers
   // depending on the definition of AllowMerging.
 
-  if (AllowCloningProducerFragment(producer_op)) {
-    rewriter.setInsertionPoint(producer_op);
-    FragmentOp cloned_producer_op =
-        cast<FragmentOp>(rewriter.clone(*producer_op));
-    for (auto [original_result, cloned_result] :
-         llvm::zip(producer_op.getResults(), cloned_producer_op.getResults())) {
-      rewriter.replaceUsesWithIf(
-          original_result, cloned_result, [mergeable_user](OpOperand& operand) {
-            // We also replace uses in any func return ops, so that the
-            // original fragment can be removed if it's completely merged.
-            return operand.getOwner() == mergeable_user ||
-                   isa<func::ReturnOp>(operand.getOwner());
-          });
-    }
-    order[cloned_producer_op] = order[producer_op];
-    producer_op = cloned_producer_op;
-  }
-
   SmallVector<std::pair<StringRef, Attribute>> merged_attributes =
       MergedAttributes(producer_op, mergeable_user);
 
@@ -348,15 +327,13 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
   return merged_fragment;
 }
 
-// Merges fragments recursively, attempting to clone the producer
-// fragment if possible. We may want to clone to avoid introducing
-// dependencies.
+// Merges fragments recursively. A fragment may have multiple consumers that
+// can each be merged, so we merge one-by-one until no more merges are possible.
 //
 // Pre-condition: All users of the producer_op have been processed by this
 // rewrite, i.e., we do the rewrite in post-order traversal.
 void MergeFragmentBasePass::MergeFragmentsRecursivelyRewrite(
     FragmentOp producer_op, RewriterBase& rewriter, OpOrderMap& order) const {
-  bool clone_producer_op = AllowCloningProducerFragment(producer_op);
   FragmentOp last_merged = producer_op;
   // Because all users have been processed, we will never need to merge
   // transitive users. E.g., when processing f1, we won't have a mergeable
@@ -364,15 +341,9 @@ void MergeFragmentBasePass::MergeFragmentsRecursivelyRewrite(
   // already be merged. But we still need to do recursive merging for when f1
   // has multiple users.
   while (last_merged) {
-    // TODO(b/313631663) - Remove cloning from merging.
-    FragmentOp to_merge = clone_producer_op ? producer_op : last_merged;
-    PrintMergeDebug(to_merge);
+    PrintMergeDebug(last_merged);
     last_merged =
-        FragmentOrNull(MergeFragmentsRewrite(to_merge, rewriter, order));
-  }
-
-  if (clone_producer_op && producer_op.use_empty() && isPure(producer_op)) {
-    rewriter.eraseOp(producer_op);
+        FragmentOrNull(MergeFragmentsRewrite(last_merged, rewriter, order));
   }
 }
 
@@ -448,14 +419,6 @@ class MergeInferredFragmentsPass
     return success();
   }
 
-  bool AllowCloningProducerFragment(FragmentOp producer_op) const final {
-    return cloneInferredFragments && !producer_op.isUserFragment() &&
-           isPure(producer_op) &&
-           producer_op.getBody()->getOperations().size() <=
-               kInferredFragmentMaxSizeForCloning &&
-           producer_op->getNumResults() == 1;
-  }
-
   bool AllowMergingWithAnyConsumer() const final { return mergeAnyConsumer; }
 
   FailureOr<FragmentOp> GetMergeCandidate(FragmentOp producer_op,
@@ -464,9 +427,8 @@ class MergeInferredFragmentsPass
       return MergeFragmentBasePass::GetMergeCandidate(producer_op, order);
     }
 
-    SDY_CHECK(!cloneInferredFragments && !mergeAnyConsumer)
-        << "merge-sideways cannot be used with clone-inferred-fragments "
-           "or merge-any-consumer";
+    SDY_CHECK(!mergeAnyConsumer)
+        << "merge-sideways cannot be used with merge-any-consumer";
 
     Operation* current = producer_op->getNextNode();
     while (current) {
@@ -528,10 +490,6 @@ class MergeForwardWithBackwardPass
     return success();
   }
 
-  bool AllowCloningProducerFragment(FragmentOp producer_op) const final {
-    return false;
-  }
-
   bool AllowMergingWithAnyConsumer() const final { return false; }
 };
 
@@ -581,11 +539,6 @@ class MergeUserDefinedFragmentsIntoSchedulingUnitsPass
           log_failure);
     }
     return success();
-  }
-
-  bool AllowCloningProducerFragment(FragmentOp producer_op) const final {
-    // User defined fragments can never be cloned.
-    return false;
   }
 
   bool AllowMergingWithAnyConsumer() const final { return false; }
@@ -674,8 +627,7 @@ class VerifyStageMergingPass
 }  // namespace
 
 void AddMergeInferredFragmentsPasses(OpPassManager& pm,
-                                     bool absorb_on_entry_point_function,
-                                     bool clone_inferred_fragments) {
+                                     bool absorb_on_entry_point_function) {
   // Absorb inferred fragments into user defined fragments to guarantee that
   // the shape of the program in the body of a call-op or microbatching loop
   // resembles the shape the user defined, via named computations + stage/mesh
@@ -687,7 +639,6 @@ void AddMergeInferredFragmentsPasses(OpPassManager& pm,
   // fragments (i.e., fragments that result from NamedComputations).
   {
     MergeInferredFragmentsPassOptions merge_inferred_options;
-    merge_inferred_options.cloneInferredFragments = clone_inferred_fragments;
     merge_inferred_options.mergeAnyConsumer = true;
     pm.addNestedPass<FuncOp>(
         createMergeInferredFragmentsPass(std::move(merge_inferred_options)));

@@ -46,10 +46,6 @@ class MergeFragmentBasePass : public DistributedFunctionPass {
                                      FragmentOp consumer_op,
                                      bool log_failure) const = 0;
 
-  // Checks whether a `producer_op` fragment may be cloned during merge. Must be
-  // defined by subclasses of the pass.
-  virtual bool AllowCloningProducerFragment(FragmentOp producer_op) const = 0;
-
   // Whether a producer fragment should be merged with the closest mergeable
   // consumer or with the closest consumer.
   virtual bool AllowMergingWithAnyConsumer() const = 0;
@@ -79,9 +75,9 @@ class MergeFragmentBasePass : public DistributedFunctionPass {
                                               RewriterBase& rewriter,
                                               OpOrderMap& order) const;
 
-  // Merges fragments recursively, attempting to clone the producer
-  // fragment if possible. We may want to clone to avoid introducing
-  // dependencies.
+  // Merges fragments recursively. A fragment may have multiple consumers that
+  // can each be merged, so we merge one-by-one until no more merges are
+  // possible.
   //
   // Pre-condition: All users of the producer_op have been processed by this
   // rewrite, i.e., we do the rewrite in post-order traversal.
@@ -95,8 +91,7 @@ class MergeFragmentBasePass : public DistributedFunctionPass {
 // Adds the sequence of passes that merges inferred fragments with user defined
 // fragments.
 void AddMergeInferredFragmentsPasses(mlir::OpPassManager& pm,
-  bool absorb_on_entry_point_function,
-  bool clone_inferred_fragments);
+                                     bool absorb_on_entry_point_function);
 
 }  // namespace mlir::mpmd
 

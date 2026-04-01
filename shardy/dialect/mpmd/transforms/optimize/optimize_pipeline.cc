@@ -56,8 +56,7 @@ void addOptimizePipeline(OpPassManager& pm, OptimizeOptions options) {
 
   if (options.mergeAfterScheduling) {
     AddMergeInferredFragmentsPasses(
-        pm, options.absorbInferredFragmentsOnEntryPointFunction,
-        options.cloneInferredFragments);
+        pm, options.absorbInferredFragmentsOnEntryPointFunction);
   }
 
   // Merge fragments as specified by the user.

@@ -56,8 +56,6 @@ struct OptimizeOptions {
   // Whether to absorb inferred fragments into user-defined fragments on
   // entry-point functions.
   bool absorbInferredFragmentsOnEntryPointFunction = false;
-  // Whether to clone inferred fragments when merging.
-  bool cloneInferredFragments = false;
   // The pipeline schedule to use.
   PipelineSchedule pipelineSchedule = PipelineSchedule::kGPipe;
 };
