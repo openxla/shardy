@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -allow-unregistered-dialect  -sdy-insert-explicit-reshards | FileCheck %s
+// RUN: sdy_opt %s -allow-unregistered-dialect  -sdy-insert-explicit-reshards='enable-full-version=false' | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2, "z"=4]>
 sdy.mesh @other_mesh = <["x"=2, "y"=2]>
@@ -533,6 +533,24 @@ func.func @different_arguments_to_multiple_named_computations_with_same_input_ou
 //===----------------------------------------------------------------------===//
 // Replicated and sharded to unreduced tests
 //===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: func @replicated_to_unreduced_result_without_reshard
+func.func @replicated_to_unreduced_result_without_reshard(
+    %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %0 = sdy.replicated_to_unreduced {"x"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_unreduced_result_without_reshard
+func.func @sharded_to_unreduced_result_without_reshard(
+    %arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %0 = sdy.sharded_to_unreduced [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  return %arg0 : tensor<16x8xf32>
+}
 
 // CHECK-LABEL: func @sharded_to_unreduced
 func.func @sharded_to_unreduced(

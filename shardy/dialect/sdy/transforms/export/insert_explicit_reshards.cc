@@ -71,6 +71,11 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
         opOperand, operandSharding, targetSharding, symbolTable, rewriter);
   }
 
+  if (TensorShardingAttr newSharding = insertUnreducedCollectives(
+          opOperand, targetSharding, symbolTable, rewriter)) {
+    operandSharding = newSharding;
+  }
+
   if (onFullVersion && !isEquivalent(operandSharding, targetSharding)) {
     operand = opOperand.get();
     auto reshardOp = ReshardOp::create(

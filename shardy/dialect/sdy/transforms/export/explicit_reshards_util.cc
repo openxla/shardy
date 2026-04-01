@@ -871,30 +871,26 @@ void insertAllReducesForReductionFactors(
   }
 }
 
-bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
-                                          const SymbolTable& symbolTable) {
-  ReshardOp reshardOp = dyn_cast<ReshardOp>(op);
-  if (!reshardOp) {
-    return false;
-  }
-
-  Value input = reshardOp.getInput();
+TensorShardingAttr insertUnreducedCollectives(OpOperand& use,
+                                              TensorShardingAttr outSharding,
+                                              const SymbolTable& symbolTable,
+                                              IRRewriter& rewriter) {
+  Value input = use.get();
   TensorShardingAttr inSharding = getSharding(input);
-  TensorShardingAttr outSharding = reshardOp.getSharding();
   if (!inSharding || !outSharding) {
-    return false;
+    return nullptr;
   }
 
   ArrayRef<AxisRefAttr> inUnreducedAxes = inSharding.getUnreducedAxes();
   ArrayRef<AxisRefAttr> outUnreducedAxes = outSharding.getUnreducedAxes();
   if (outUnreducedAxes.empty()) {
-    return false;
+    return nullptr;
   }
 
   MeshAttr inMesh = inSharding.getMesh(symbolTable);
   MeshAttr outMesh = outSharding.getMesh(symbolTable);
   SDY_CHECK(inMesh.equals(outMesh))
-      << "Reshard op has different meshes for input and output. The result has "
+      << "Input and output shardings have different meshes. The result has "
          "non-empty unreduced axes.";
 
   // The relationship of the unreduced axes is "out = in + r2u + s2u", where
@@ -903,16 +899,12 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
   SmallVector<AxisRefAttr> r2uAnds2uAxes =
       getAxisSetDiff(outUnreducedAxes, inUnreducedAxes, inMesh);
   if (r2uAnds2uAxes.empty()) {
-    return false;
+    return nullptr;
   }
 
   SDY_CHECK(getAxisSetDiff(inUnreducedAxes, outUnreducedAxes, inMesh).empty())
       << "Both input and output have unreduced axes that does not appear in "
          "the other.";
-  SDY_CHECK(isa<BlockArgument>(input) || input.getDefiningOp<ReshardOp>() ||
-            input.getDefiningOp<ManualComputationOp>())
-      << "Input of replicated-to-unreduced and sharded-to-unreduced must be a "
-         "block argument, a reshard op, or a manual computation op.";
 
   SmallVector<AxisRefAttr> s2uAxes;
   SmallVector<AxisRefListAttr> axesPerDim(
@@ -948,32 +940,54 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
     }
   }
 
-  rewriter.setInsertionPoint(reshardOp);
   Value result = input;
   if (needReshard) {
-    result = ReshardOp::create(rewriter, reshardOp.getLoc(), result,
+    result = ReshardOp::create(rewriter, input.getLoc(), result,
                                inSharding.replaceDimShardings(tmpDimShardings));
   }
 
+  TensorShardingAttr lastSharding = getSharding(result);
   SmallVector<AxisRefAttr> r2uAxes =
       getAxisSetDiff(r2uAnds2uAxes, s2uAxes, inMesh);
   if (!r2uAxes.empty()) {
     SmallVector<AxisRefAttr> inPlusR2uAxes = llvm::to_vector(inUnreducedAxes);
     inPlusR2uAxes.append(r2uAxes.begin(), r2uAxes.end());
     sortAndMergeAxes(inPlusR2uAxes, inMesh);
-    TensorShardingAttr r2uSharding = TensorShardingAttr::get(
+    lastSharding = TensorShardingAttr::get(
         rewriter.getContext(), inSharding.getMeshName(), tmpDimShardings,
         outSharding.getReplicatedAxes(), inPlusR2uAxes);
-    result = ReplicatedToUnreducedOp::create(rewriter, reshardOp.getLoc(),
-                                             result, r2uAxes, r2uSharding);
+    result = ReplicatedToUnreducedOp::create(rewriter, input.getLoc(), result,
+                                             r2uAxes, lastSharding);
   }
   if (!s2uAxes.empty()) {
-    result = ShardedToUnreducedOp::create(rewriter, reshardOp.getLoc(), result,
+    result = ShardedToUnreducedOp::create(rewriter, input.getLoc(), result,
                                           axesPerDim, outSharding);
+    lastSharding = outSharding;
   }
 
-  rewriter.replaceOp(reshardOp, result);
-  return true;
+  if (result != input) {
+    use.set(result);
+    return lastSharding;
+  }
+  return nullptr;
+}
+
+bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
+                                          const SymbolTable& symbolTable) {
+  ReshardOp reshardOp = dyn_cast<ReshardOp>(op);
+  if (!reshardOp) {
+    return false;
+  }
+
+  OpOperand& input = reshardOp->getOpOperand(0);
+  rewriter.setInsertionPoint(reshardOp);
+  if (insertUnreducedCollectives(input, reshardOp.getSharding(), symbolTable,
+                                 rewriter)) {
+    rewriter.replaceOp(reshardOp, input.get());
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace sdy

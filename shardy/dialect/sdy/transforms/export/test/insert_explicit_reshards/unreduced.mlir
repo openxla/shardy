@@ -249,8 +249,9 @@ func.func @all_reduce_target_unreduced_is_strict_subset_of_source_unreduced(
 func.func @all_reduce_source_and_target_has_different_shardings_and_different_unreduced_axes(
   %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x":(1)2}>})
      -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}], unreduced={"x"}>}) {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"y"}], unreduced={"x"}>
-  // CHECK-NEXT: return %[[RESHARD]]
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"y"}], unreduced={"x":(1)2}>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x":(2)2} %[[RESHARD]] out_sharding=<@mesh, [{}, {"y"}], unreduced={"x"}>
+  // CHECK-NEXT: return %[[R2U]]
   return %arg0 : tensor<4x8xf32>
 }
 
@@ -267,7 +268,8 @@ func.func @all_reduce_source_and_target_has_different_shardings_and_same_unreduc
 func.func @all_reduce_source_and_target_has_same_shardings_and_different_unreduced_axes(
   %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x":(1)2}>})
      -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x"}>}) {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x":(2)2} %arg0 out_sharding=<@mesh, [{"y"}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %[[R2U]]
   return %arg0 : tensor<4x8xf32>
 }
 
@@ -302,13 +304,21 @@ func.func @all_reduce_source_and_target_has_same_shardings_and_same_unreduced_ax
 func.func @all_reduce_source_and_target_fully_replicated_shardings_and_different_unreduced_axes(
   %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x":(1)2}>})
      -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x":(2)2} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %[[R2U]]
   return %arg0 : tensor<4x8xf32>
 }
 
 //===----------------------------------------------------------------------===//
 // Replicated and sharded to unreduced tests
 //===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: func @replicated_to_unreduced_result
+func.func @replicated_to_unreduced_result(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %0 = sdy.replicated_to_unreduced {"x"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
+  // CHECK-NEXT: return %0
+  return %arg0 : tensor<4x8xf32>
+}
 
 // CHECK-LABEL: func @sharded_to_unreduced
 func.func @sharded_to_unreduced(

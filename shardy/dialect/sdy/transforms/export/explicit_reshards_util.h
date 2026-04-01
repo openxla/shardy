@@ -147,6 +147,20 @@ AxesPerFactor findCommonAxes(const ShardingProjection& shardingProjection,
                              OpShardingRuleAttr shardingRule,
                              ArrayRef<int64_t> tensorSizes, MeshOp meshOp);
 
+// Converts `input` with `inSharding` to `outSharding` by inserting
+// `sdy.replicated-to-unreduced` and/or `sdy.sharded-to-unreduced` ops, if
+// `outSharding` contains unreduced axes that are replicated or sharded in
+// `inSharding`.
+//
+// May also insert an `sdy.reshard` op to align dimension shardings before
+// inserting `sdy.sharded-to-unreduced`.
+// Returns the sharding of the last inserted collective, or a null
+// `TensorShardingAttr` if none was inserted.
+TensorShardingAttr insertUnreducedCollectives(OpOperand& use,
+                                              TensorShardingAttr outSharding,
+                                              const SymbolTable& symbolTable,
+                                              IRRewriter& rewriter);
+
 // Converts a `sdy.reshard` op to an `sdy.replicated-to-unreduced` op and/or an
 // `sdy.sharded-to-unreduced` op. Returns true if the conversion is successful.
 //
