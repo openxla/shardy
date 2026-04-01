@@ -36,6 +36,7 @@ cc_library(
         "add_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
         "constant_or_scalar_splitter.cc",
+        "import_func_calls.cc",
         "import_pipeline.cc",
         "inline_meshes.cc",
         "lift_inlined_meshes.cc",
@@ -49,6 +50,7 @@ cc_library(
     deps = [
         ":passes_inc",
         "//shardy/common:file_utils",
+        "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
         "//shardy/dialect/sdy/transforms/common:propagation_options",
@@ -57,6 +59,7 @@ cc_library(
         "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Pass",

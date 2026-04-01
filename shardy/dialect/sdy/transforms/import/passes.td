@@ -15,6 +15,19 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
+def ImportFuncCallsPass : Pass<"sdy-import-func-calls", "ModuleOp"> {
+  let summary = "Inline calls into `NamedComputationOp`.";
+  let description = [{
+     Creates a pass to convert a CallOp to a NamedComputationOp with the
+     function body inlined and the name of the callee. Note that the func bodies
+     are cloned if the func is used by multiple calls.
+
+     In case there are multiple call ops for the same callee, we will clone the
+     function body for each call op and emit a warning.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
   let summary = "Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s.";
   let description = [{
