@@ -15,7 +15,7 @@ func.func @single_mesh(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 
   // Fragment only takes inputs from the function, no intermediates, so 0.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -25,7 +25,7 @@ func.func @single_mesh(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // Fragment takes one input from the function and one intermediates, so 128 due to
   // %arg0.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %1 = mpmd.fragment<mesh="m1", origin=["f2"]> (%0, %arg1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.multiply %arg2, %arg3 : tensor<4x8xf32>
@@ -34,7 +34,7 @@ func.func @single_mesh(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 
   // Fragment takes two intermediates, so 256 due to %arg0 and %arg1
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 256
+  // CHECK-SAME: reserved_hbm_bytes = 256
   %2 = mpmd.fragment<mesh="m1", origin=["f3"]> (%0, %1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -43,7 +43,7 @@ func.func @single_mesh(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 
   // Fragment takes an input and a intermediate %2. Note %0's and %1's last use
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %3 = mpmd.fragment<mesh="m1", origin=["f4"]> (%arg0, %2)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -63,7 +63,7 @@ func.func @duplicate_input(%arg0: !mesh_1_tensor)
 
   // Fragment only takes inputs from the function, no intermediates, so 0.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg0)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %1 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -81,7 +81,7 @@ func.func @offloaded_value(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 
   // Fragment only takes inputs from the function, no intermediates, so 0.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %0:2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1)
     {res_attrs = [{mhlo.memory_kind = "pinned_host"}, {}]}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
@@ -91,7 +91,7 @@ func.func @offloaded_value(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // Fragment takes one input from the function and one intermediates, so
   // 128 due to %arg0. The unused intermediate is on the host so it's ignored.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %1 = mpmd.fragment<mesh="m1", origin=["f2"]> (%0#1, %arg1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.multiply %arg2, %arg3 : tensor<4x8xf32>
@@ -102,7 +102,7 @@ func.func @offloaded_value(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // 128 due to %arg0. %0#1 had its last use removed so it's not tracked
   // anymore.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %2 = mpmd.fragment<mesh="m1", origin=["f3"]> (%0#0, %1, %arg1)
     {arg_attrs = [{mhlo.memory_kind = "pinned_host"}, {}, {}]}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>, %arg4: tensor<4x8xf32>) {
@@ -126,7 +126,7 @@ func.func @multiple_meshes(%arg0: !mesh_1_tensor, %arg1: !mesh_2_tensor)
 
   // On m2, only %arg1 and %0 exist, which are inputs to f1, so 0 bytes.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %2 = mpmd.fragment<mesh="m2", origin=["f1"]> (%0, %arg1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %8 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -137,7 +137,7 @@ func.func @multiple_meshes(%arg0: !mesh_1_tensor, %arg1: !mesh_2_tensor)
 
   // On m1, %3, %1 and %arg0 are still alive, so 128 bytes for %1.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %4 = mpmd.fragment<mesh="m1", origin=["f2"]> (%3, %arg0)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %8 = stablehlo.multiply %arg2, %arg3 : tensor<4x8xf32>
@@ -146,7 +146,7 @@ func.func @multiple_meshes(%arg0: !mesh_1_tensor, %arg1: !mesh_2_tensor)
 
   // On m1, %4, %1 and %arg0 are still alive, %3 is dead now, so 128 bytes.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %5 = mpmd.fragment<mesh="m1", origin=["f3"]> (%4, %1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %8 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -157,7 +157,7 @@ func.func @multiple_meshes(%arg0: !mesh_1_tensor, %arg1: !mesh_2_tensor)
 
   // On m2, %6 and %arg1 are still alive, %0 is dead now, so 0 bytes.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %7 = mpmd.fragment<mesh="m2", origin=["f4"]> (%6, %arg1)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %8 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -179,7 +179,7 @@ func.func @distributed_tensor(%arg0: !mesh_1_tensor)
 
   // Fragment takes all live values, so 0.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %0)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -188,7 +188,7 @@ func.func @distributed_tensor(%arg0: !mesh_1_tensor)
 
   // %1 and %0 are alive still, so 128+32=160 bytes.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 160
+  // CHECK-SAME: reserved_hbm_bytes = 160
   %2 = mpmd.fragment<mesh="m1", origin=["f2"]> (%arg0, %arg0)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
@@ -198,7 +198,7 @@ func.func @distributed_tensor(%arg0: !mesh_1_tensor)
   // Only input is unused. The input is still considered alive because it
   // has not been donated to the program, so 128 bytes.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %3 = mpmd.fragment<mesh="m1", origin=["f3"]> (%2, %1, %0)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>, %arg4: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg4 : tensor<4x8xf32>
@@ -222,7 +222,7 @@ func.func @unused_fragment_result_is_not_counted(
       attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["x"=2]>>>} {
 
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 256
+  // CHECK-SAME: reserved_hbm_bytes = 256
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %11 = stablehlo.abs %arg5 : tensor<4x8xf32>
@@ -230,7 +230,7 @@ func.func @unused_fragment_result_is_not_counted(
   } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
 
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 256
+  // CHECK-SAME: reserved_hbm_bytes = 256
   %1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg2, %arg3) (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>
@@ -254,7 +254,7 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
       attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["x"=2]>>>} {
 
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 256
+  // CHECK-SAME: reserved_hbm_bytes = 256
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg1, %arg0) (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %11 = stablehlo.abs %arg5 : tensor<4x8xf32>
@@ -264,7 +264,7 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
   // %arg3 and %arg0 are still alive. %arg1 is donated and not used anymore so
   // it's not accounted for.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %1 = mpmd.fragment<mesh="m1", origin=["f2"]> (%arg2, %arg3) (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>
@@ -273,7 +273,7 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
 
   // %arg3, %arg0, and %1 are still alive.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 384
+  // CHECK-SAME: reserved_hbm_bytes = 384
   %2 = mpmd.fragment<mesh="m1", origin=["f3"]> (%arg3, %arg3) (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>
@@ -296,7 +296,7 @@ func.func @offloaded_or_unused_donated_args_are_not_counted(
   // The program arguments that are on the host or donated and not be accounted
   // for.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 0
+  // CHECK-SAME: reserved_hbm_bytes = 0
   %0:2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg1, %arg2)
     (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     mpmd.return %arg4, %arg5 : tensor<4x8xf32>, tensor<4x8xf32>
@@ -304,7 +304,7 @@ func.func @offloaded_or_unused_donated_args_are_not_counted(
 
   // Account for %0#0 and %arg1 which are alive until the end of the program.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 256
+  // CHECK-SAME: reserved_hbm_bytes = 256
   %1:2 = mpmd.fragment<mesh="m1", origin=["f2"]> (%arg0, %arg2)
     {arg_attrs = [{mhlo.memory_kind = "pinned_host"}, {}]}
     (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
@@ -321,7 +321,7 @@ func.func @unused_input_not_donated(%arg0: !mesh_1_tensor, %unused_arg1: !mesh_1
       <"m1": <["x"=4]>>>} {
 
   // CHECK: mpmd.fragment
-  // CHECK-SAME: xla_tpu_user_reserved_hbm_bytes = 128
+  // CHECK-SAME: reserved_hbm_bytes = 128
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg0)
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %1 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>

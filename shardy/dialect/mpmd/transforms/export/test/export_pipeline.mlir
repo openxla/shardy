@@ -10,7 +10,7 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32 {tf.aliasing_output = 0: i32}, %ar
       <"m2": <["x"=2]>>
     >} {
 // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[CALLEE:.*]](%arg0, %arg1)
-// CHECK: func.func @[[CALLEE]](%arg0: tensor<4x8xf32> {tf.aliasing_output = 0 : i32}, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 0 : i64}
+// CHECK: func.func @[[CALLEE]](%arg0: tensor<4x8xf32> {tf.aliasing_output = 0 : i32}, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 0 : i64}
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %0 = stablehlo.add %arg2, %arg3: tensor<4x8xf32>
     mpmd.return %0 : tensor<4x8xf32>

@@ -5,7 +5,7 @@
 func.func @guid_printing(%arg0: !mesh_tensor) -> !mesh_tensor
   attributes {"topology"=#mpmd.topology<<"m": <["x"=4]>>>} {
   // CHECK: mpmd.fragment_call<mesh="m", origin=["block"]> @p0_block.main
-  %0 = mpmd.fragment<mesh="m", origin=["block"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m", origin=["block"]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   return %0 : !mesh_tensor
@@ -17,12 +17,12 @@ func.func @guid_printing(%arg0: !mesh_tensor) -> !mesh_tensor
 func.func @one_guid_multiple_call_sites(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
   attributes {"topology"=#mpmd.topology<<"m": <["x"=4]>>>} {
   // CHECK: mpmd.fragment_call<mesh="m", origin=["foo"]> @p0_foo.main
-  %0 = mpmd.fragment<mesh="m", origin=["foo"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m", origin=["foo"]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   // This is reusing the same fragment call as above.
   // CHECK: mpmd.fragment_call<mesh="m", origin=["bar"]> @p0_foo.main
-  %1 = mpmd.fragment<mesh="m", origin=["bar"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %1 = mpmd.fragment<mesh="m", origin=["bar"]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   return %0, %1 : !mesh_tensor, !mesh_tensor
@@ -34,12 +34,12 @@ func.func @one_guid_multiple_call_sites(%arg0: !mesh_tensor) -> (!mesh_tensor, !
 func.func @multiple_guids(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
   attributes {"topology"=#mpmd.topology<<"m": <["x"=4]>>>} {
   // CHECK: mpmd.fragment_call<mesh="m", origin=["foo"]> @p0_foo_fwd.main
-  %0 = mpmd.fragment<mesh="m", origin=["foo"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m", origin=["foo"]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   // CHECK: mpmd.fragment_call<mesh="m", origin=["bar"(1)]> @p1_bar_bwd.main
-  %1 = mpmd.fragment<mesh="m", origin=["bar"(1)]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %1 = mpmd.fragment<mesh="m", origin=["bar"(1)]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   return %0, %1 : !mesh_tensor, !mesh_tensor
@@ -55,7 +55,7 @@ module @jit_test_module {
 func.func @custom_module_name(%arg0: !mesh_tensor) -> !mesh_tensor
   attributes {"topology"=#mpmd.topology<<"m": <["x"=4]>>>} {
   // CHECK: mpmd.fragment_call<mesh="m", origin=["block"]> @p0_block.test_module
-  %0 = mpmd.fragment<mesh="m", origin=["block"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m", origin=["block"]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   return %0 : !mesh_tensor
@@ -68,11 +68,11 @@ func.func @custom_module_name(%arg0: !mesh_tensor) -> !mesh_tensor
 func.func @fwd_and_bwd(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
   attributes {"topology"=#mpmd.topology<<"m": <["x"=4]>>>} {
   // CHECK: mpmd.fragment_call<mesh="m", origin=["foo"]> @p0_foo_fwd.main
-  %0 = mpmd.fragment<mesh="m", origin=["foo"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m", origin=["foo"]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor
   // CHECK: mpmd.fragment_call<mesh="m", origin=["bar"(1)]> @p1_bar_bwd.main
-  %1 = mpmd.fragment<mesh="m", origin=["bar"(1)]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
+  %1 = mpmd.fragment<mesh="m", origin=["bar"(1)]> (%arg0) {reserved_hbm_bytes = 256 : i64} (%arg1: tensor<4x8xf32>) {
     %2 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %2 : tensor<4x8xf32>
   } : (!mesh_tensor) -> !mesh_tensor

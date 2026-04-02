@@ -42,7 +42,7 @@ constexpr StringRef kBufferDonationAttrName = "jax.buffer_donor";
 
 // Name of attribute that will tell XLA how much memory to reserve while
 // compiling each fragment.
-constexpr StringRef kReservedHbmBytes = "xla_tpu_user_reserved_hbm_bytes";
+constexpr StringRef kReservedHbmBytes = "reserved_hbm_bytes";
 
 // Returns the set of user marked block arguments to be aliased.
 DenseSet<BlockArgument> GetAliasedBlockArguments(

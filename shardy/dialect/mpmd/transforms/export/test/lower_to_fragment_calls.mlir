@@ -10,7 +10,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
     >} {
   // CHECK-NEXT: %[[FRAGMENT_CALL_0:.*]] = mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0, %arg1) {remat}
   // NB: just setting the remat flag on to see it preserved in the first (but only the first!) fragment call.
-  %f0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {xla_tpu_user_reserved_hbm_bytes = 256 : i64, remat}
+  %f0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {reserved_hbm_bytes = 256 : i64, remat}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -18,7 +18,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 
 
   // CHECK-NEXT: %[[FRAGMENT_CALL_1:.*]] = mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT1:.*]](%arg0, %arg1)
-  %f1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {xla_tpu_user_reserved_hbm_bytes = 128 : i64}
+  %f1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {reserved_hbm_bytes = 128 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.multiply %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -28,14 +28,14 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 }
 
 // CHECK:       func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 256 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 256 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1
 // CHECK-NEXT:    return %[[ADD]]
 // CHECK-NEXT:  }
 
 
 // CHECK:       func @[[FRAGMENT1]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %[[MUL:.*]] = stablehlo.multiply %arg0, %arg1
 // CHECK-NEXT:    return %[[MUL]]
 // CHECK-NEXT:  }
@@ -53,7 +53,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
       <"m3": <["x"=4]>>
     >} {
   // CHECK-NEXT: %[[FRAGMENT_CALL_0:.*]] = mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0, %arg1)
-  %f0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {xla_tpu_user_reserved_hbm_bytes = 256 : i64}
+  %f0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {reserved_hbm_bytes = 256 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -61,7 +61,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // This fragment has the same body and mesh as the fragment `%f0`,
   // therefore the two fragments will call the same function.
   // CHECK-NEXT: %[[FRAGMENT_CALL_2:.*]] = mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0, %arg1)
-  %f1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {xla_tpu_user_reserved_hbm_bytes = 256 : i64}
+  %f1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) {reserved_hbm_bytes = 256 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -71,7 +71,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 }
 
 // CHECK:       func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 256 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 256 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1
 // CHECK-NEXT:    return %[[ADD]]
 // CHECK-NEXT:  }
@@ -91,7 +91,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
     >} {
 
   // CHECK-NEXT: %[[FRAGMENT_CALL_0:.*]] = mpmd.fragment_call<mesh="m1", origin=["f0"]> @[[FRAGMENT0:.*]](%arg0, %arg1)
-  %f0 = mpmd.fragment<mesh="m1", origin=["f0"]> (%arg0, %arg1) {xla_tpu_user_reserved_hbm_bytes = 256 : i64}
+  %f0 = mpmd.fragment<mesh="m1", origin=["f0"]> (%arg0, %arg1) {reserved_hbm_bytes = 256 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -104,7 +104,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // different mesh shape, therefore the two fragments won't call the same
   // function.
   // CHECK-NEXT: %[[FRAGMENT_CALL_3:.*]] = mpmd.fragment_call<mesh="m2", origin=["f3"]> @[[FRAGMENT2:.*]](%[[TRANSFER_1]], %[[TRANSFER_1]])
-  %f4 = mpmd.fragment<mesh="m2", origin=["f3"]> (%transfer1, %transfer1) {xla_tpu_user_reserved_hbm_bytes = 384 : i64}
+  %f4 = mpmd.fragment<mesh="m2", origin=["f3"]> (%transfer1, %transfer1) {reserved_hbm_bytes = 384 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -114,13 +114,13 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 }
 
 // CHECK:       func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 256 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 256 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1
 // CHECK-NEXT:    return %[[ADD]]
 // CHECK-NEXT:  }
 
 // CHECK:       func @[[FRAGMENT2]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, xla_tpu_user_reserved_hbm_bytes = 384 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 384 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1
 // CHECK-NEXT:    return %[[ADD]]
 // CHECK-NEXT:  }
@@ -137,7 +137,7 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
       <"m2": <["x"=2, "y"=2]>>
     >} {
   // CHECK-NEXT: %[[FRAGMENT_CALL_4:.*]]:2 = mpmd.fragment_call<mesh="m2", origin=["f4"]> @[[FRAGMENT3:.*]](%arg0)
-  %f5:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 256 : i64}
+  %f5:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%arg0) {reserved_hbm_bytes = 256 : i64}
     (%arg2: tensor<4x8xf32>) {
     %13 = stablehlo.subtract %arg2, %arg2 : tensor<4x8xf32>
     %14 = stablehlo.divide %arg2, %arg2 : tensor<4x8xf32>
@@ -148,7 +148,7 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
   // terminator, which has a different order of operands, therefore the two
   // fragments won't call the same function.
   // CHECK-NEXT: %[[FRAGMENT_CALL_5:.*]]:2 = mpmd.fragment_call<mesh="m2", origin=["f4"]> @[[FRAGMENT4:.*]](%arg0)
-  %f6:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 128 : i64}
+  %f6:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%arg0) {reserved_hbm_bytes = 128 : i64}
     (%arg2: tensor<4x8xf32>) {
     %13 = stablehlo.subtract %arg2, %arg2 : tensor<4x8xf32>
     %14 = stablehlo.divide %arg2, %arg2 : tensor<4x8xf32>
@@ -160,14 +160,14 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
 }
 
 // CHECK:       func @[[FRAGMENT3]](%arg0: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, xla_tpu_user_reserved_hbm_bytes = 256 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 256 : i64} {
 // CHECK-NEXT:    %[[SUBTRACT:.*]] = stablehlo.subtract %arg0, %arg0
 // CHECK-NEXT:    %[[DIVIDE:.*]] = stablehlo.divide %arg0, %arg0
 // CHECK-NEXT:    return %[[DIVIDE]], %[[SUBTRACT]]
 // CHECK-NEXT:  }
 
 // CHECK:       func @[[FRAGMENT4]](%arg0: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %[[SUBTRACT:.*]] = stablehlo.subtract %arg0, %arg0
 // CHECK-NEXT:    %[[DIVIDE:.*]] = stablehlo.divide %arg0, %arg0
 // CHECK-NEXT:    return %[[SUBTRACT]], %[[DIVIDE]]
@@ -185,7 +185,7 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
     >} {
 
   // CHECK-NEXT: %[[FRAGMENT_CALL_5:.*]]:2 = mpmd.fragment_call<mesh="m2", origin=["f4"]> @[[FRAGMENT4:.*]](%arg0)
-  %f6:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 128 : i64}
+  %f6:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%arg0) {reserved_hbm_bytes = 128 : i64}
     (%arg2: tensor<4x8xf32>) {
     %13 = stablehlo.subtract %arg2, %arg2 : tensor<4x8xf32>
     %14 = stablehlo.divide %arg2, %arg2 : tensor<4x8xf32>
@@ -199,7 +199,7 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
   // different operand/result mesh types. Since the outer types aren't relevant
   // for the called function, the two fragments will call the same function.
   // CHECK-NEXT: %[[FRAGMENT_CALL_6:.*]]:2 = mpmd.fragment_call<mesh="m2", origin=["f4"]> @[[FRAGMENT4:.*]](%[[TRANSFER_2]])
-  %f7:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%transfer3) {xla_tpu_user_reserved_hbm_bytes = 0 : i64}
+  %f7:2 = mpmd.fragment<mesh="m2", origin=["f4"]> (%transfer3) {reserved_hbm_bytes = 0 : i64}
     (%arg2: tensor<4x8xf32>) {
     %13 = stablehlo.subtract %arg2, %arg2 : tensor<4x8xf32>
     %14 = stablehlo.divide %arg2, %arg2 : tensor<4x8xf32>
@@ -210,7 +210,7 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
 }
 
 // CHECK:       func @[[FRAGMENT4]](%arg0: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %[[SUBTRACT:.*]] = stablehlo.subtract %arg0, %arg0
 // CHECK-NEXT:    %[[DIVIDE:.*]] = stablehlo.divide %arg0, %arg0
 // CHECK-NEXT:    return %[[SUBTRACT]], %[[DIVIDE]]
@@ -234,7 +234,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
     >} {
 
   // CHECK-NEXT: %[[FRAGMENT_CALL_0:.*]] = mpmd.fragment_call<mesh="m1", origin=["f0"]> @[[FRAGMENT0:.*]](%arg0, %arg1)
-  %f0 = mpmd.fragment<mesh="m1", origin=["f0"]> (%arg0, %arg1) {xla_tpu_user_reserved_hbm_bytes = 256 : i64}
+  %f0 = mpmd.fragment<mesh="m1", origin=["f0"]> (%arg0, %arg1) {reserved_hbm_bytes = 256 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -247,7 +247,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // assigned to a different mesh, therefore the two fragments won't call the
   // same function.
   // CHECK-NEXT: %[[FRAGMENT_CALL_7:.*]] = mpmd.fragment_call<mesh="m3", origin=["f5"]> @[[FRAGMENT5:.*]](%[[TRANSFER_3]], %[[TRANSFER_3]])
-  %f8 = mpmd.fragment<mesh="m3", origin=["f5"]> (%transfer4, %transfer4) {xla_tpu_user_reserved_hbm_bytes = 0 : i64}
+  %f8 = mpmd.fragment<mesh="m3", origin=["f5"]> (%transfer4, %transfer4) {reserved_hbm_bytes = 0 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -257,7 +257,7 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
   // unused block argument, therefore the two fragments won't call the same
   // function.
   // CHECK-NEXT: %[[FRAGMENT_CALL_8:.*]] = mpmd.fragment_call<mesh="m3", origin=["f5"]> @[[FRAGMENT6:.*]](%[[FRAGMENT_CALL_7]], %[[FRAGMENT_CALL_7]], %[[FRAGMENT_CALL_7]])
-  %f9 = mpmd.fragment<mesh="m3", origin=["f5"]> (%f8, %f8, %f8) {xla_tpu_user_reserved_hbm_bytes = 128 : i64}
+  %f9 = mpmd.fragment<mesh="m3", origin=["f5"]> (%f8, %f8, %f8) {reserved_hbm_bytes = 128 : i64}
     (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>, %arg4: tensor<4x8xf32>) {
     %13 = stablehlo.add %arg2, %arg3 : tensor<4x8xf32>
     mpmd.return %13 : tensor<4x8xf32>
@@ -268,19 +268,19 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 }
 
 // CHECK:       func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 256 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 256 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1
 // CHECK-NEXT:    return %[[ADD]]
 // CHECK-NEXT:  }
 
 // CHECK:       func @[[FRAGMENT5]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 0 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 0 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1 : tensor<4x8xf32>
 // CHECK-NEXT:    return %[[ADD]] : tensor<4x8xf32>
 // CHECK-NEXT:  }
 
 // CHECK:       func @[[FRAGMENT6]](%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=4]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg1
 // CHECK-NEXT:    return %[[ADD]]
 // CHECK-NEXT:  }
@@ -296,12 +296,12 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
     >} {
   // This fragment and the next fragment are the same except for the arg_attr attributes. So there should be two fragment calls to different functions.
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0)
-  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {arg_attrs = [{tf.aliasing_output = 0 : i32}], xla_tpu_user_reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {arg_attrs = [{tf.aliasing_output = 0 : i32}], reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
     %1 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT1:.*]](%arg0)
-  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
+  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
     %3 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %3 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
@@ -311,14 +311,14 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
 
 // This fragment call function has the tf.aliasing_output arg attribute.
 // CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32> {tf.aliasing_output = 0 : i32})
-// CHECK-SAME: attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK-SAME: attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:  %0 = stablehlo.abs %arg0 : tensor<4x8xf32>
 // CHECK-NEXT:  return %0 : tensor<4x8xf32>
 // CHECK-NEXT:  }
 
 // This fragment call function does not have the tf.aliasing_output arg attribute.
 // CHECK: func @[[FRAGMENT1]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-SAME: attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK-SAME: attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %0 = stablehlo.abs %arg0 : tensor<4x8xf32>
 // CHECK-NEXT:  return %0 : tensor<4x8xf32>
 // CHECK-NEXT:  }
@@ -335,12 +335,12 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
   // This fragment and the next fragment are the same except for the res_attr attributes.
   // So there should be two fragment calls to different functions.
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0)
-  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {res_attrs = [{mhlo.memory_kind = "pinned_host"}], xla_tpu_user_reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {res_attrs = [{mhlo.memory_kind = "pinned_host"}], reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
     %1 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT1:.*]](%arg0)
-  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
+  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
     %3 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %3 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
@@ -364,12 +364,12 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
     >} {
   // This fragment and the next fragment are exactly the same. So there should be two fragment calls to the same function.
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0)
-  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {arg_attrs = [{tf.aliasing_output = 0 : i32}], xla_tpu_user_reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {arg_attrs = [{tf.aliasing_output = 0 : i32}], reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
     %1 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0)
-  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {arg_attrs = [{tf.aliasing_output = 0 : i32}], xla_tpu_user_reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
+  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {arg_attrs = [{tf.aliasing_output = 0 : i32}], reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
     %3 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %3 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
@@ -378,7 +378,7 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
 }
 
 // This fragment call has the tf.aliasing_output arg attribute.
-// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32> {tf.aliasing_output = 0 : i32}) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32> {tf.aliasing_output = 0 : i32}) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %0 = stablehlo.abs %arg0 : tensor<4x8xf32>
 // CHECK-NEXT:   return %0 : tensor<4x8xf32>
 // CHECK-NEXT:  }
@@ -396,12 +396,12 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
   // be two fragment calls to the same function. One of the calls is annotated
   // with `mpmd.is_gspmd_partitioned` and the other isn't.
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) {mpmd.is_gspmd_partitioned
-  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {mpmd.is_gspmd_partitioned, xla_tpu_user_reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {mpmd.is_gspmd_partitioned, reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
     %1 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %1 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) :
-  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
+  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
     %3 = stablehlo.abs %arg2: tensor<4x8xf32>
     mpmd.return %3 : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
@@ -409,7 +409,7 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
   func.return %2 : !mesh_1_tensor_4_8_f32
 }
 
-// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 0 : i64} {
+// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 0 : i64} {
 // CHECK-NEXT:    %0 = stablehlo.abs %arg0 : tensor<4x8xf32>
 // CHECK-NEXT:   return %0 : tensor<4x8xf32>
 // CHECK-NEXT:  }
@@ -442,10 +442,10 @@ func.func @no_reserved_memory(%arg0: !mesh_tensor)
 func.func @main(%arg0: !mesh_tensor)
   -> (!mesh_tensor) attributes {"topology"=#mpmd.topology< <"m1": <["x"=2]>>>} {
 
-  // Only the FIRST fragment has a xla_tpu_user_reserved_hbm_bytes annotation.
+  // Only the FIRST fragment has a reserved_hbm_bytes annotation.
   // hbm_bytes gets attached to fragment function.
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) :
-  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
+  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
     mpmd.return %arg2 : tensor<4x8xf32>
   } : (!mesh_tensor) -> (!mesh_tensor)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) :
@@ -456,7 +456,7 @@ func.func @main(%arg0: !mesh_tensor)
   func.return %2 : !mesh_tensor
 }
 
-// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:   return %arg0 : tensor<4x8xf32>
 // CHECK-NEXT:  }
 
@@ -468,21 +468,21 @@ func.func @main(%arg0: !mesh_tensor)
 func.func @main(%arg0: !mesh_tensor)
   -> (!mesh_tensor) attributes {"topology"=#mpmd.topology< <"m1": <["x"=2]>>>} {
 
-  // Only the SECOND fragment has a xla_tpu_user_reserved_hbm_bytes annotation.
+  // Only the SECOND fragment has a reserved_hbm_bytes annotation.
   // hbm_bytes gets attached to fragment function.
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) :
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0)  (%arg2: tensor<4x8xf32>) {
     mpmd.return %arg2 : tensor<4x8xf32>
   } : (!mesh_tensor) -> (!mesh_tensor)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) :
-  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {xla_tpu_user_reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
+  %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {reserved_hbm_bytes = 128 : i64} (%arg2: tensor<4x8xf32>) {
     mpmd.return %arg2 : tensor<4x8xf32>
   } : (!mesh_tensor) -> (!mesh_tensor)
 
   func.return %2 : !mesh_tensor
 }
 
-// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, xla_tpu_user_reserved_hbm_bytes = 128 : i64} {
+// CHECK: func @[[FRAGMENT0]](%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> attributes {mesh_shape = #sdy.mesh<["x"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:   return %arg0 : tensor<4x8xf32>
 // CHECK-NEXT:  }
 

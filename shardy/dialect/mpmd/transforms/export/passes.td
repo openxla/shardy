@@ -63,12 +63,12 @@ def MarkFragmentReservedMemoryPass :
   let summary = "Mark each fragment with the amount of memory that needs to be "
                 "reserved for compilation.";
   let description = [{
-    Assigns an `xla_tpu_user_reserved_hbm_bytes` attribute to each fragment
-    which will tell XLA how many bytes to keep around while compiling each
-    fragment. By keeping track of live tensors on a mesh, XLA will know of
-    actual minimum memory usage at the time of execution, and we can prevent
-    it from applying optimizations in the executable that would increase
-    memory usage beyond the device capacity.
+    Assigns an `reserved_hbm_bytes` attribute to each fragment which will tell
+    XLA how many bytes to keep around while compiling each fragment. By keeping
+    track of live tensors on a mesh, XLA will know of actual minimum memory
+    usage at the time of execution, and we can prevent it from applying
+    optimizations in the executable that would increase memory usage beyond the
+    device capacity.
     NOTE: this pass assumes that fragments are executed in program order.
   }];
 }
