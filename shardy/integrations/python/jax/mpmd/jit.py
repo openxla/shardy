@@ -26,6 +26,7 @@ from jax.interpreters import mlir
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
 from jaxlib import xla_client
 import jaxtyping
+from mlir import ir
 import numpy as np
 import typing_extensions
 
@@ -134,7 +135,7 @@ def _apply_partitioning(
   # TODO: b/483036036 - This check should be able to be removed once jaxlib and
   # openxla versions are properly synced
   if xla_client._version < _MIN_JAXLIB_VERSION_FOR_SCHEDULE_RULES:  # pylint: disable=protected-access
-    return jaxlib_mpmd.apply_mpmd_partitioning(
+    return jaxlib_mpmd.apply_mpmd_partitioning(  # type: ignore
         mlir_module,
         func_name=partitioning_args.func_name,
         named_meshes=partitioning_args.named_meshes,
@@ -347,7 +348,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
       self,
       mlir_module: mlir.ir.Module,
       partitioning_args: _MpmdPartitioningArgs,
-  ) -> tuple[jaxlib_mpmd.PartitioningResult, _MpmdPartitioningArgs]:
+  ) -> tuple[ir.Module, _MpmdPartitioningArgs]:
     if self._mpmd_config.pipeline_schedule is None:
       raise ValueError('Pipeline schedule is not defined')
 

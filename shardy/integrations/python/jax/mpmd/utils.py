@@ -68,7 +68,7 @@ def _sdy_spec_to_named_sharding(
 
 
 def meshes_and_sdy_specs_to_named_shardings(
-    meshes_and_specs: mpmd_utils.NamedSpmdShardingSpec,
+    meshes_and_specs: mpmd_utils.FunctionIOShardingSpecsAndMeshes,
     input_tree_def: jax.tree_util.PyTreeDef,
     output_tree_def: jax.tree_util.PyTreeDef,
     topology: Mapping[str, jax.sharding.Mesh],
