@@ -33,6 +33,7 @@ cc_library(
         "close_shardings.cc",
         "constant_or_scalar_merger.cc",
         "convert_global_to_local.cc",
+        "drop_sharding_and_mesh.cc",
         "drop_sharding_rules.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
