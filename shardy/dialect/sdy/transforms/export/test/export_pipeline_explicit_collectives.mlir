@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-export-pipeline='enable-insert-explicit-collectives=true remove-all-gather-reduce-scatter-for-cmv1=true' 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-export-pipeline='enable-insert-explicit-collectives=true remove-all-gather-reduce-scatter-for-cmv1=true' 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
 
@@ -94,5 +94,30 @@ func.func @dot_general_with_unreduced_result_partially_delayed(
   %1 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}], unreduced={"z"}>]>} : tensor<8x16xf32>
   return %1 : tensor<8x16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
+// CHECK-LABEL: func @named_computation_with_shardings
+func.func @named_computation_with_shardings(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> tensor<12x2xi32> {
+  // CHECK-NEXT: %0 = sdy.all_slice [{"a"}, {}] %arg0 out_sharding=<@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %1:2 = call @foo(%0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>, <@mesh, [{}, {}]>]>}
+  // CHECK-NEXT: %2 = sdy.all_to_all [{"a"}: 0->1] %1#0 out_sharding=<@mesh, [{}, {"a"}]>
+  // CHECK-NEXT: %3 = sdy.all_slice [{}, {"a"}] %1#1 out_sharding=<@mesh, [{}, {"a"}]> : tensor<4x2xi32>
+  // CHECK-NEXT: %4 = stablehlo.concatenate %2, %3, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
+  // CHECK-NEXT: %5 = sdy.all_gather [{}, {"a"}] %4 out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %5
+  %0:2 = sdy.named_computation<"foo">(%arg0, %arg1) in_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, [{?}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, [{?}, {}]>] (%arg2: tensor<8x2xi32>, %arg3: tensor<4x2xi32>)  {
+    sdy.return %arg2, %arg3 : tensor<8x2xi32>, tensor<4x2xi32>
+  } : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
+  %1 = stablehlo.concatenate %0#0, %0#1, dim=0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : (tensor<8x2xi32>, tensor<4x2xi32>) -> tensor<12x2xi32>
+  return %1 : tensor<12x2xi32>
+}
+
+// CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %arg1: tensor<4x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+// CHECK-SAME:       -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, tensor<4x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+// CHECK-SAME:       attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:    return %arg0, %arg1 : tensor<8x2xi32>, tensor<4x2xi32>
+// CHECK-NEXT:  }
 
 // TODO: Add more tests.

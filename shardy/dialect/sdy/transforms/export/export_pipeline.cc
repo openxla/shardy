@@ -43,7 +43,6 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   passOptions.avoidReshardsOnNamedComputations =
       options.avoidReshardsOnNamedComputations;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
@@ -54,6 +53,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
   }
+
   addCanonicalizerPass(pm, kCollectiveLabel);
   if (options.enableInsertExplicitCollectives &&
       options.removeAllGatherReduceScatterForCMV1) {
@@ -93,13 +93,13 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // itself and make the module more readable.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "after_propagation", dumpIndex++));
+  pm.addPass(createExportNamedComputationsPass());
 
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
   }
-
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
