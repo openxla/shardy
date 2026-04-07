@@ -1001,5 +1001,73 @@ bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
   return true;
 }
 
+Operation* getScatterReductionOp(stablehlo::ScatterOp scatter) {
+  Region& region = scatter.getUpdateComputation();
+  if (region.empty()) {
+    return nullptr;
+  }
+
+  Block& block = region.front();
+  int64_t numInputs = scatter.getInputs().size();
+
+  // A scatter with N inputs has 2*N block arguments in its scatter computation.
+  if (block.getNumArguments() != 2 * numInputs) {
+    return nullptr;
+  }
+
+  auto returnOp = dyn_cast<stablehlo::ReturnOp>(block.getTerminator());
+  if (!returnOp || returnOp.getOperands().size() != numInputs) {
+    return nullptr;
+  }
+
+  Operation* reductionOp = nullptr;
+  for (auto [index, retValue] : llvm::enumerate(returnOp.getOperands())) {
+    Operation* curOp = retValue.getDefiningOp();
+    if (!curOp || curOp->getNumOperands() != 2) {
+      return nullptr;
+    }
+
+    // Find known associative and commutative operations and allow logical
+    // And/Or only for predicate type i1.
+    auto tensorType = dyn_cast<RankedTensorType>(retValue.getType());
+    if (!tensorType) {
+      return nullptr;
+    }
+    Type elementType = tensorType.getElementType();
+    bool isLogical = elementType.isInteger(1) &&
+                     isa<stablehlo::AndOp, stablehlo::OrOp>(curOp);
+    if (!isLogical && !isa<stablehlo::AddOp, stablehlo::MulOp, stablehlo::MaxOp,
+                           stablehlo::MinOp>(curOp)) {
+      return nullptr;
+    }
+
+    // Ensure all variadic updates use the same operation kind.
+    if (!reductionOp) {
+      reductionOp = curOp;
+    } else if (reductionOp->getName() != curOp->getName()) {
+      return nullptr;
+    }
+
+    // Verify that the operand is the expected block argument.
+    auto isExpectedArg = [&](Value v, unsigned argIdx) {
+      auto arg = dyn_cast<BlockArgument>(v);
+      return arg && arg.getOwner() == &block && arg.getArgNumber() == argIdx;
+    };
+
+    Value lhs = curOp->getOperand(0);
+    Value rhs = curOp->getOperand(1);
+
+    // Binary ops can be commutative, so check both orders.
+    bool valid =
+        (isExpectedArg(lhs, index) && isExpectedArg(rhs, index + numInputs)) ||
+        (isExpectedArg(lhs, index + numInputs) && isExpectedArg(rhs, index));
+    if (!valid) {
+      return nullptr;
+    }
+  }
+
+  return reductionOp;
+}
+
 }  // namespace sdy
 }  // namespace mlir
