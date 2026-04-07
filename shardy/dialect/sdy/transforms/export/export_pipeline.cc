@@ -53,6 +53,9 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // which during the canonicalizer below may be converted to reduce scatters
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
+    pm.addPass(createExportNamedComputationsPass());
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
   addCanonicalizerPass(pm, kCollectiveLabel);
   if (options.enableInsertExplicitCollectives &&
@@ -98,12 +101,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
