@@ -1918,9 +1918,9 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
         rewriter);
     Value offsetConverted = stablehlo::ConvertOp::create(
         rewriter, loc, convertedOffsetType, offset);
-    Value broadcastOffset = stablehlo::BroadcastOp::create(
+    Value broadcastOffset = stablehlo::BroadcastInDimOp::create(
         rewriter, loc, localType, offsetConverted,
-        rewriter.getDenseI64ArrayAttr(localType.getShape()));
+        rewriter.getDenseI64ArrayAttr({}));
     rewriter.replaceOpWithNewOp<stablehlo::AddOp>(op, localIota,
                                                   broadcastOffset);
 

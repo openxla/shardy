@@ -31,7 +31,7 @@ func.func @iota_on_sharded_dim() -> (tensor<8x16xi32> {sdy.sharding = #sdy.shard
   // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID_I64]], sizes = [1] : (tensor<4xi64>, tensor<i64>) -> tensor<1xi64>
   // CHECK: %[[OFFSET_I64:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
   // CHECK: %[[OFFSET_I32:.*]] = stablehlo.convert %[[OFFSET_I64]] : (tensor<i64>) -> tensor<i32>
-  // CHECK: %[[BCAST:.*]] = stablehlo.broadcast %[[OFFSET_I32]], sizes = [8, 4] : (tensor<i32>) -> tensor<8x4xi32>
+  // CHECK: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET_I32]], dims = []  : (tensor<i32>) -> tensor<8x4xi32>
   // CHECK: %[[RES:.*]] = stablehlo.add %[[LOCAL_IOTA]], %[[BCAST]] : tensor<8x4xi32>
   %0 = stablehlo.iota dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {"x"}]>]>} : tensor<8x16xi32>
   // CHECK: return %[[RES]] : tensor<8x4xi32>
@@ -50,7 +50,7 @@ func.func @sharded_2d() -> (tensor<16x8xi32> {sdy.sharding = #sdy.sharding<@mesh
   // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 4, 0, 4, 0, 4, 0, 4]> : tensor<8xi64>
   // CHECK: %[[OFFSET_S:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID_I64]]
   // CHECK: %[[OFFSET_C:.*]] = stablehlo.convert %{{.*}} : (tensor<i64>) -> tensor<i32>
-  // CHECK: %[[BCAST:.*]] = stablehlo.broadcast %[[OFFSET_C]], sizes = [4, 4] : (tensor<i32>) -> tensor<4x4xi32>
+  // CHECK: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET_C]], dims = [] : (tensor<i32>) -> tensor<4x4xi32>
   // CHECK:  %[[RES:.*]] = stablehlo.add %[[LOCAL_IOTA]], %[[BCAST]]
   %0 = stablehlo.iota dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : tensor<16x8xi32>
   // CHECK: return %[[RES]] : tensor<4x4xi32>
