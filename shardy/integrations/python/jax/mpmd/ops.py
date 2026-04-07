@@ -25,6 +25,8 @@ from jax import api_util
 from jax import numpy as jnp
 from jax import tree
 from jax import tree_util
+from jax._src import core as jax_core
+from jax._src import pjit
 from jax._src import util
 from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
@@ -224,7 +226,16 @@ def named_computation_partir_lowering(
     return []
   mpmd.register_dialect(ctx.module_context.context)
 
-  input_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_in)
+  const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr)
+  const_args, const_avals = util.unzip2(const_args_and_avals)
+  in_avals = (*const_avals, *ctx.avals_in)
+  const_arg_values = tuple(
+      jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
+      for c, aval in const_args_and_avals
+  )
+  args = (*const_arg_values, *args)
+
+  input_types = util.safe_map(jax_mlir.aval_to_ir_types, in_avals)
   output_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_out)
   flat_input_types, _ = tree_util.tree_flatten(input_types)
   flat_output_types, _ = tree_util.tree_flatten(output_types)
@@ -240,20 +251,26 @@ def named_computation_partir_lowering(
   # Passing empty list as constants, as we expect call_jaxpr.constvars to be
   # empty.
   constants = []
+  assert not call_jaxpr.constvars
   with ir.InsertionPoint(block):
     sharded_args = [
         jex.mlir.lower_with_sharding_in_types(ctx, arg, aval)
-        for arg, aval in zip(block.arguments, ctx.avals_in)
+        for arg, aval in zip(block.arguments, in_avals)
     ]
+    const_lowering = {
+        (id(c), aval): c_arg
+        for (c, aval), c_arg in zip(const_args_and_avals,
+                                    sharded_args[:len(const_args)])
+    }
     outs, tokens = jax_mlir.jaxpr_subcomp(
         ctx.module_context,
         call_jaxpr,
         ctx.name_stack.extend(name),
         ctx.tokens_in,
         constants,
-        *sharded_args,
+        *sharded_args[len(const_args):],
         dim_var_values=ctx.dim_var_values,
-        const_lowering=ctx.const_lowering,
+        const_lowering=const_lowering,
         outer_traceback=ctx.traceback,
     )
     ctx.set_tokens_out(tokens)
@@ -435,11 +452,14 @@ def call_mpmd_jit_lowering(
   name = utils.get_func_name(orig_callable, prefix='shardy_mpmd')
   effects = list(ctx.tokens_in.effects())
 
-  # TODO(b/434270189): fix for hoisted constant args.
-  num_const_args = 0
-  in_avals = call_jaxpr.in_avals
+  const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr.jaxpr)
+  const_args, const_arg_avals = util.unzip2(const_args_and_avals)
+  in_avals = (*const_arg_avals, *call_jaxpr.in_avals)
   arg_shardings = tuple(a.sharding for a in in_avals)
-  input_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_in)
+  const_shardings = pjit.const_args_shardings(const_args)
+  arg_shardings = tuple(const_shardings) + arg_shardings
+
+  input_types = util.safe_map(jax_mlir.aval_to_ir_types, in_avals)
   output_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_out)
 
   # TODO(jupvfranco): Consider memoizing the lowering function instead of
@@ -454,12 +474,17 @@ def call_mpmd_jit_lowering(
         name,
         call_jaxpr,
         effects,
-        num_const_args=num_const_args,
+        num_const_args=len(const_args),
         in_avals=in_avals,
         arg_shardings=arg_shardings,
     )
     ctx.module_context.cached_primitive_lowerings[key] = func_declaration
 
+  hoisted_const_values = [
+      jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
+      for c, aval in const_args_and_avals
+  ]
+  args = tuple(hoisted_const_values) + args
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   call_op = mpmd.CallOp(
       flat_output_types,
