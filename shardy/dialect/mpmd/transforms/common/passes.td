@@ -235,9 +235,7 @@ def MergeInferredFragmentsPass :
   let description = [{
     Merges inferred with user-defined or other inferred fragments. This pass is
     useful to clean-up/simplify the module and can be useful after other
-    compiler passes that introduce inferred fragments, while
-    `-mpmd-transfer-aware-merge` above is more invasive and should be used for
-    optimization purposes only.
+    compiler passes that introduce inferred fragments.
 
     NOTE: We assume that merging an inferred fragment to any other fragment
     never delays transfers.
@@ -276,9 +274,7 @@ def MergeUserDefinedFragmentsIntoSchedulingUnitsPass :
     passes.
 
     NOTE: this pass requires every user-defined fragment to have one and only
-    one transpose count, meaning we cannot apply it after
-    `-mpmd-transfer-aware-merge`, which can result in fragments with multiple
-    transpose counts per fragment.
+    one transpose count.
   }];
 }
 
