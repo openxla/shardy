@@ -13,12 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <string>
+
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/export/passes.h"  // IWYU pragma: keep
@@ -43,48 +48,58 @@ class ValidateNoReshardsPass
         return;
       }
 
-      InFlightDiagnostic diag = failOnReshardOnlyFragments
-                                    ? callOp.emitError()
-                                    : callOp.emitWarning();
-      diag << "Detected reshard-only fragment '" << callOp.getCallee()
-           << "'. This usually indicates an "
-              "unexpected reshard. Operands: ";
+      std::string msg;
+      llvm::raw_string_ostream os(msg);
+      os << "Detected reshard-only fragment '" << callOp.getCallee()
+         << "'. This usually indicates an unexpected reshard. Operands: ";
 
-      auto printSharding = [](Type type, InFlightDiagnostic& diag) {
-        auto meshType = dyn_cast<MeshTensorType>(type);
+      auto printShardingAndShape = [](Type type, llvm::raw_ostream& stream) {
+        auto meshType = cast<MeshTensorType>(type);
         if (auto sharding = meshType ? meshType.getSharding() : nullptr) {
-          diag << sharding;
+          stream << sharding;
         } else {
-          diag << "Replicated";
+          stream << "Replicated";
         }
+
+        RankedTensorType rankedType = meshType.getRankedTensorType();
+
+        stream << " <";
+        llvm::interleave(rankedType.getShape(), stream, "x");
+        stream << "x" << rankedType.getElementType() << ">";
       };
 
       llvm::interleaveComma(
-          llvm::zip(callOp.getOperands(), callOp.getOperandTypes()), diag,
+          llvm::zip(callOp.getOperands(), callOp.getOperandTypes()), os,
           [&](auto pair) {
             auto [operand, type] = pair;
-            printSharding(type, diag);
-            diag << " " << operand.getLoc();
+            printShardingAndShape(type, os);
+            os << " " << operand.getLoc();
           });
-      diag << ". Results: ";
+      os << ". Results: ";
       bool first = true;
       for (auto [result, type] :
            llvm::zip(callOp.getResults(), callOp.getResultTypes())) {
         if (!first) {
-          diag << ", ";
+          os << ", ";
         }
         first = false;
-        printSharding(type, diag);
+        printShardingAndShape(type, os);
         for (OpOperand& use : result.getUses()) {
           auto returnOp = dyn_cast<func::ReturnOp>(use.getOwner());
           if (!returnOp) {
             continue;
           }
           if (auto loc = GetResultInfoLoc(func, use.getOperandNumber())) {
-            diag << " " << *loc;
+            os << " " << *loc;
           }
         }
       }
+
+      SDY_LOG(WARNING) << msg;
+      InFlightDiagnostic diag = failOnReshardOnlyFragments
+                                    ? callOp.emitError()
+                                    : callOp.emitWarning();
+      diag << msg;
 
       if (failOnReshardOnlyFragments) {
         signalPassFailure();

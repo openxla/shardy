@@ -13,12 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <string>
+
+#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/WalkResult.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/export/passes.h"  // IWYU pragma: keep
@@ -87,15 +91,20 @@ class ValidateNoBackwardDepsPass
         }
 
         if (producer.getMeshName() > consumer.getMeshName()) {
+          std::string msg;
+          llvm::raw_string_ostream os(msg);
+          os << "Detected backward dependency but expected forward-only "
+                "pipeline since there are no transpose fragments: "
+             << "fragment call on mesh \"" << producer.getMeshName()
+             << "\" produces a value consumed by fragment call on mesh \""
+             << consumer.getMeshName()
+             << "\". In a forward-only pipeline, dependencies must go from "
+             << "lexicographically earlier meshes to later meshes.";
+
+          SDY_LOG(WARNING) << msg;
           auto diag = failOnBackwardDeps ? consumer.emitError()
                                          : consumer.emitWarning();
-          diag << "Detected backward dependency but expected forward-only "
-                  "pipeline since there are no transpose fragments: "
-               << "fragment call on mesh \"" << producer.getMeshName()
-               << "\" produces a value consumed by fragment call on mesh \""
-               << consumer.getMeshName()
-               << "\". In a forward-only pipeline, dependencies must go from "
-               << "lexicographically earlier meshes to later meshes.";
+          diag << msg;
           if (failOnBackwardDeps) {
             signalPassFailure();
           }
