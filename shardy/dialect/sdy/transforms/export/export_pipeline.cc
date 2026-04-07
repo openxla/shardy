@@ -60,6 +60,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     pm.addNestedPass<func::FuncOp>(
         createRemoveAllGatherReduceScatterForCMV1Pass());
   }
+  pm.addPass(createExportNamedComputationsPass());
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory,
       options.enableInsertExplicitCollectives
@@ -98,12 +99,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
