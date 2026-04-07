@@ -1093,5 +1093,22 @@ Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter) {
   return reductionOp;
 }
 
+FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable) {
+  StringAttr originalFuncName = getOriginalFuncName(funcOp);
+  FuncOp clonedFuncOp =
+      symbolTable.lookup<FuncOp>(originalFuncName.getValue()).clone();
+  // TODO(enver): Have a MLIR native error handling, instead of CHECK.
+  CHECK(clonedFuncOp) << "Failed to lookup function: "
+                      << originalFuncName.str();
+  clonedFuncOp->setAttr(mlir::sdy::kOriginalFuncName, originalFuncName);
+  clonedFuncOp->walk([&](CallOp callOp) {
+    FuncOp funcOp = symbolTable.lookup<FuncOp>(callOp.getCallee());
+    CHECK(funcOp) << "Failed to lookup function: " << callOp.getCallee().str();
+    callOp.setCallee(
+        symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
+  });
+  return clonedFuncOp;
+}
+
 }  // namespace sdy
 }  // namespace mlir

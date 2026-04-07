@@ -35,6 +35,7 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createManualAxesCleanupPass());
+  pm.addPass(createImportFuncCallsPass());
 
   // We dump the module before propagation at this point, since the import
   // passes before are cleanup passes that make the module more readable, and
