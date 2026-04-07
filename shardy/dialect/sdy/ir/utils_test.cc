@@ -26,6 +26,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/WalkResult.h"
@@ -67,7 +68,6 @@ class UtilsTest : public ShardyTestBase {
         "}",
         &context);
   }
-
 
   TensorShardingAttr createTensorSharding(const std::string& meshName) {
     return TensorShardingAttr::get(
@@ -457,13 +457,13 @@ TEST_F(UtilsTest, AddAxisOrMergeInserterSingleAxisNoMerge) {
   AxisRefVector axes = {createSubAxis("a", 1, 2), createAxis("b")};
   AxisRefVector newAxes;
   std::transform(axes.begin(), axes.end(),
-                  AddAxisOrMergeInserter(&newAxes, &mesh),
-                  [&](AxisRefAttr axis) {
-                    if (axis.getName() == "b") {
-                      return createSubAxis("c", 4, 2);
-                    }
-                    return axis;
-                  });
+                 AddAxisOrMergeInserter(&newAxes, &mesh),
+                 [&](AxisRefAttr axis) {
+                   if (axis.getName() == "b") {
+                     return createSubAxis("c", 4, 2);
+                   }
+                   return axis;
+                 });
   EXPECT_THAT(newAxes,
               ElementsAre(SubAxisRefIs("a", 1, 2), SubAxisRefIs("c", 4, 2)));
 }
@@ -473,13 +473,13 @@ TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesNoMerge) {
   AxisRefVector axes = {createAxis("a"), createSubAxis("b", 1, 2)};
   AxisRefVector newAxes;
   std::transform(axes.begin(), axes.end(),
-                  AddAxisOrMergeInserter(&newAxes, &mesh),
-                  [&](AxisRefAttr axis) -> AxisRefVector {
-                    if (axis.getName() == "b") {
-                      return {createAxis("c"), createAxis("d")};
-                    }
-                    return {};
-                  });
+                 AddAxisOrMergeInserter(&newAxes, &mesh),
+                 [&](AxisRefAttr axis) -> AxisRefVector {
+                   if (axis.getName() == "b") {
+                     return {createAxis("c"), createAxis("d")};
+                   }
+                   return {};
+                 });
   EXPECT_THAT(newAxes, ElementsAre(AxisRefIs("c"), AxisRefIs("d")));
 }
 
@@ -488,13 +488,13 @@ TEST_F(UtilsTest, AddAxisOrMergeInserterSingleAxisMerge) {
   AxisRefVector axes = {createSubAxis("a", 1, 2), createAxis("b")};
   AxisRefVector newAxes;
   std::transform(axes.begin(), axes.end(),
-                  AddAxisOrMergeInserter(&newAxes, &mesh),
-                  [&](AxisRefAttr axis) {
-                    if (axis.getName() == "b") {
-                      return createSubAxis("a", 2, 2);
-                    }
-                    return axis;
-                  });
+                 AddAxisOrMergeInserter(&newAxes, &mesh),
+                 [&](AxisRefAttr axis) {
+                   if (axis.getName() == "b") {
+                     return createSubAxis("a", 2, 2);
+                   }
+                   return axis;
+                 });
   EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("a", 1, 4)));
 }
 
@@ -502,15 +502,14 @@ TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesMerge) {
   MeshAttr mesh = createMesh({{"a", 8}, {"b", 16}});
   AxisRefVector axes = {createAxis("a"), createSubAxis("b", 8, 2)};
   AxisRefVector newAxes;
-  std::transform(axes.begin(), axes.end(),
-                  AddAxisOrMergeInserter(&newAxes, &mesh),
-                  [&](AxisRefAttr axis) -> AxisRefVector {
-                    if (axis.getName() == "a") {
-                      return {createSubAxis("b", 2, 2),
-                              createSubAxis("b", 4, 2)};
-                    }
-                    return {axis};
-                  });
+  std::transform(
+      axes.begin(), axes.end(), AddAxisOrMergeInserter(&newAxes, &mesh),
+      [&](AxisRefAttr axis) -> AxisRefVector {
+        if (axis.getName() == "a") {
+          return {createSubAxis("b", 2, 2), createSubAxis("b", 4, 2)};
+        }
+        return {axis};
+      });
   EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("b", 2, 8)));
 }
 
@@ -646,6 +645,34 @@ TEST_F(UtilsTest, WalkCalls_Interrupted) {
     return WalkResult::interrupt();
   }));
   EXPECT_THAT(calledFuncs, ElementsAre("baz"));
+}
+
+TEST_F(UtilsTest, GetShardableValue_AsyncStartOp) {
+  OwningOpRef<ModuleOp> localModule =
+      mlir::parseSourceString<ModuleOp>(R"mlir(module {
+  func.func @main(%arg0: tensor<32xf64>) {
+    %0 = "stablehlo.async_start"(%arg0) ({
+    ^bb0(%arg1: tensor<32xf64>):
+      %1 = "stablehlo.all_gather"(%arg1) <{all_gather_dim = 0 : i64, channel_handle = #stablehlo.channel_handle<handle = 1, type = 0>, replica_groups = dense<[[0, 1]]> : tensor<1x2xi64>, use_global_device_ids}> : (tensor<32xf64>) -> tensor<64xf64>
+      "stablehlo.return"(%1) : (tensor<64xf64>) -> ()
+    }) {xla_shape = "(f64[32]{0}, f64[64]{0})"} : (tensor<32xf64>) -> !stablehlo.future<tensor<64xf64>>
+    return
+  }
+})mlir",
+                                        &context);
+  ASSERT_TRUE(localModule);
+
+  Value blockArg;  // %arg1
+  Value operand;   // %arg0
+  localModule->walk([&](Operation* op) {
+    if (op->getName().getStringRef() == "stablehlo.async_start") {
+      operand = op->getOperand(0);
+      blockArg = op->getRegion(0).front().getArgument(0);
+    }
+  });
+  ASSERT_TRUE(blockArg);
+  ASSERT_TRUE(operand);
+  EXPECT_EQ(getShardableValue(blockArg), operand);
 }
 
 }  // namespace

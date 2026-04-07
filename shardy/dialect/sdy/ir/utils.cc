@@ -55,6 +55,7 @@ limitations under the License.
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -353,6 +354,10 @@ Value getShardableValue(Value value) {
       .Case([&](FuncOp) { return value; })
       .Case([&](ShardableDataFlowOpInterface shardableRegionOp) {
         return shardableRegionOp.getEdgeOwnerFromTarget(value);
+      })
+      .Case([&](stablehlo::AsyncStartOp asyncStartOp) {
+        return asyncStartOp.getOperand(
+            cast<BlockArgument>(value).getArgNumber());
       })
       .Default([&](Operation* op) {
         // We only fail if the value isn't scalar. Scalar block arguments, such
@@ -678,7 +683,6 @@ bool isUsedBy(Value value, Operation* user) {
     return use.getOwner() == user;
   });
 }
-
 
 void truncateAxesByRemovingOverlaps(SmallVector<AxisRefAttr>& axes,
                                     ArrayRef<AxisRefAttr> otherAxisRefs) {
