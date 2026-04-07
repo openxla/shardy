@@ -678,6 +678,12 @@ Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter);
 mlir::func::FuncOp cloneFuncRecursively(func::FuncOp funcOp,
                                         SymbolTable& symbolTable);
 
+// Returns a `TensorShardingPerValueAttr` on the shardings of the `values`. If
+// the sharding of a value is null, it creates a fully closed sharding for it on
+// the given `meshOrRef` and the rank of the tensor corresponding to the value.
+TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
+                                              Attribute meshOrRef);
+
 }  // namespace sdy
 }  // namespace mlir
 

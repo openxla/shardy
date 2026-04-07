@@ -51,6 +51,9 @@ namespace sdy {
 
 namespace {
 
+using func::CallOp;
+using func::FuncOp;
+
 void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
                                             TensorShardingAttr targetSharding,
                                             IRRewriter& rewriter,
@@ -129,6 +132,33 @@ void insertExplicitReshardsOnDataFlowOp(
           /*targetSharding=*/ownerSharding, rewriter, symbolTable,
           /*insertAfterOperand=*/true, onFullVersion);
     }
+  }
+}
+
+void insertExplicitReshardsOnCallOp(CallOp callOp, IRRewriter& rewriter,
+                                    const SymbolTable& symbolTable,
+                                    const bool onFullVersion) {
+  FuncOp funcOp = symbolTable.lookup<FuncOp>(callOp.getCallee());
+  TensorShardingPerValueAttr funcArgShardings =
+      mlir::sdy::getFuncArgShardings(funcOp, symbolTable);
+  if (!funcArgShardings) {
+    mlir::Attribute meshOrRef = getMeshOrRef(
+        callOp.getNumOperands(), symbolTable,
+        [&](int64_t i) { return getSharding(callOp.getOperand(i)); });
+    // Return without inserting reshards as neither func arguments nor call
+    // operands have a sharding with non-maximal mesh.
+    if (!meshOrRef) {
+      return;
+    }
+    funcArgShardings = getFullyClosedLike(callOp.getOperands(), meshOrRef);
+  }
+  rewriter.setInsertionPoint(callOp);
+  for (auto [funcArgSharding, sourceOpOperand] : llvm::zip_equal(
+           funcArgShardings.getShardings(), callOp->getOpOperands())) {
+    insertExplicitReshardsToTargetSharding(
+        sourceOpOperand,
+        /*targetSharding=*/funcArgSharding, rewriter, symbolTable,
+        /*insertAfterOperand=*/true, onFullVersion);
   }
 }
 
@@ -382,7 +412,7 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   }
   // To avoid copies of the same functions with mismatching shardings on the
   // arguments onto multiple callsites.
-  if (isa<NamedComputationOp>(op)) {
+  if (isa<NamedComputationOp, func::CallOp>(op)) {
     return true;
   }
 
@@ -473,7 +503,15 @@ struct InsertExplicitReshardsPass
         // sharded in the same way.
         insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
                                            symbolTable, onFullVersion,
-                                           avoidReshardsOnNamedComputations);
+                                           avoidReshardsOnCalls);
+        return;
+      }
+
+      if (CallOp callOp = dyn_cast<CallOp>(op)) {
+        if (!avoidReshardsOnCalls) {
+          insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
+                                         onFullVersion);
+        }
         return;
       }
 

@@ -1108,5 +1108,18 @@ FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable) {
   return clonedFuncOp;
 }
 
+TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
+                                              Attribute meshOrRef) {
+  SmallVector<TensorShardingAttr> resultShardings;
+  resultShardings.reserve(values.size());
+  for (mlir::Value value : values) {
+    resultShardings.push_back(TensorShardingAttr::getFullyReplicated(
+        meshOrRef.getContext(), mlir::sdy::getTensorRank(value), meshOrRef,
+        /*isClosed=*/true));
+  }
+  return TensorShardingPerValueAttr::get(meshOrRef.getContext(),
+                                         resultShardings);
+}
+
 }  // namespace sdy
 }  // namespace mlir
