@@ -21,6 +21,7 @@ from typing import Any, TypeVar
 
 import jax
 from jaxlib import _sdy_mpmd as mpmd_utils
+from jax.typing import ArrayLike
 import jaxtyping
 
 PyTree = jaxtyping.PyTree
@@ -68,6 +69,7 @@ def _sdy_spec_to_named_sharding(
 
 
 def meshes_and_sdy_specs_to_named_shardings(
+    nr_const_args: int,
     meshes_and_specs: mpmd_utils.FunctionIOShardingSpecsAndMeshes,
     input_tree_def: jax.tree_util.PyTreeDef,
     output_tree_def: jax.tree_util.PyTreeDef,
@@ -81,7 +83,7 @@ def meshes_and_sdy_specs_to_named_shardings(
           unreduced_axes=set(input_spec.unreduced_axes),
           memory_kind=input_spec.memory_kind,
       )
-      for input_spec in meshes_and_specs.input_specs
+      for input_spec in meshes_and_specs.input_specs[nr_const_args:]
   ]
 
   flat_output_named_shardings = [
@@ -110,14 +112,19 @@ class JaxFunctionInfo:
   Attributes:
     func_name: the name of the function being partitioned.
     global_flat_input_abstract_values: a list of abstract values (one for each
-      input) that the user passed to partir.jit, which includes unused args.
+      input) that the user passed to partir.jit, which includes unused args, but
+      not the const_args.
     global_flat_output_abstract_values: a list of abstract values (one for each
       output).
     input_tree: the structure of input tree that the user passed to partir.jit,
-      which includes unused args.
-    output_tree: the structure of output tree.
+      which includes unused args, but not the const_args.
+    output_tree: the structure of input tree.
     kept_inputs_indices: Indices of the kept inputs of the Jax function after
-      removing unused args.
+      removing unused args. The indices are relative to the const args
+      followed by the user-passed args.
+    const_args: The closed-over constants in the Jax function.
+      This is empty unless JAX_USE_SIMPLIFIED_JAXPR_CONSTANTS is True.
+      See https://docs.jax.dev/en/latest/internals/constants.html.
   """
 
   func_name: str
@@ -126,6 +133,7 @@ class JaxFunctionInfo:
   input_tree: jax.tree_util.PyTreeDef
   output_tree: jax.tree_util.PyTreeDef
   kept_inputs_indices: Set[int]
+  const_args: list[ArrayLike]
 
   def with_placeholder_for_removed_inputs(
       self,
@@ -136,16 +144,18 @@ class JaxFunctionInfo:
 
     Args:
       data_with_unused_removed: Sequence of data where the unused arguments are
-        removed. It has length `len(self.kept_inputs_indices)`.
+        removed. It has length `len(self.kept_inputs_indices)` and it includes
+        closed-over constants if any.
       placeholder: Object to be inserted into the unused arguments positions.
 
     Raises:
       InvalidUnusedArgsInfoError: if data_with_unused_removed is inconsistent
         with self.kept_inputs_indices.
     """
-    data_with_all_inputs = [
-        placeholder for _ in range(len(self.global_flat_input_abstract_values))
-    ]
+    nr_all_inputs = (
+        len(self.const_args) + len(self.global_flat_input_abstract_values)
+    )
+    data_with_all_inputs = [placeholder for _ in range(nr_all_inputs)]
     if len(self.kept_inputs_indices) != len(data_with_unused_removed):
       raise InvalidUnusedArgsInfoError(
           'Invalid unused args info. Cannot map '

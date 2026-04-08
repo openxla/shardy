@@ -18,17 +18,20 @@
 from collections.abc import Callable, Sequence, Set
 import dataclasses
 import functools
-from typing import Any, Iterable, NamedTuple, cast
+from typing import Any, cast, Iterable, NamedTuple
 
 from absl import logging
 import jax
 from jax import tree_util
 from jax._src import core
+from jax._src import pjit
 from jax._src import stages
 from jax._src.interpreters import pxla
+from jax._src.lib import xla_client
 from jax.experimental import layout
 from jax.interpreters import mlir as jax_mlir
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
+from jax.typing import ArrayLike
 import jaxtyping
 import numpy as np
 
@@ -98,6 +101,7 @@ class MpmdExecutable(stages.Executable):
       *,
       module_ir: jax_mlir.ir.Module,
       func_name: str,
+      nr_const_args: int,
       flat_in_avals: Sequence[jax.core.ShapedArray],
       out_avals: Sequence[jax.core.ShapedArray],
       in_shardings: jaxtyping.PyTree[jax.sharding.Sharding],
@@ -109,6 +113,7 @@ class MpmdExecutable(stages.Executable):
     self._executable = executable
     self._module_ir = module_ir
     self._func_name = func_name
+    self.nr_const_args = nr_const_args
     self.in_avals = flat_in_avals
     self._in_shardings_tree = in_shardings
     self._kept_in_avals = []
@@ -120,7 +125,7 @@ class MpmdExecutable(stages.Executable):
     for i, (in_aval, (path, in_sharding)) in enumerate(
         zip(flat_in_avals, flat_in_shardings_with_paths, strict=True)
     ):
-      if i in kept_inputs_indices:
+      if i + nr_const_args in kept_inputs_indices:
         self._kept_in_avals.append(in_aval)
         self._kept_in_shardings.append(in_sharding)
         self._kept_in_shardings_paths.append(path)
@@ -154,7 +159,7 @@ class MpmdExecutable(stages.Executable):
     errors = [
         f'Got input {i} of type {type(arg)} instead of `jax.Array`'
         for i, arg in enumerate(args)
-        if not isinstance(arg, jax.Array)
+        if not (i < self.nr_const_args or isinstance(arg, jax.Array))
     ]
     if errors:
       str_errors = '\n'.join(errors)
@@ -162,10 +167,34 @@ class MpmdExecutable(stages.Executable):
           'MPMD Executable called with inputs that are not a `jax.Array`. '
           f'Errors: {str_errors}'
       )
+
+    if self.nr_const_args > 0:
+      const_args = args[:self.nr_const_args]
+      const_args_avals = [c.aval for c in const_args]
+      first_mesh = next(iter(self._topology.values()))
+      replicated_sharding = jax.sharding.NamedSharding(
+          first_mesh, jax.sharding.PartitionSpec())
+      const_shardings = [
+          getattr(c, 'sharding', replicated_sharding)
+          for c in const_args]
+      const_layouts = pjit.const_args_layouts(
+          const_args, const_args_avals, const_shardings)
+      const_args_sharded = pxla.shard_args(
+          const_shardings, const_layouts,
+          [xla_client.ArrayCopySemantics.REUSE_INPUT] * self.nr_const_args,
+          const_args)
+    else:
+      const_args_sharded = []
+
     arg_avals = []
     kept_args = {}
     for i, arg in enumerate(args):
-      if i in self._kept_var_idx:
+      if i < self.nr_const_args:
+        assert i in self._kept_var_idx
+        assert i not in self._donated_inputs_indices
+        arg_avals.append(arg.aval)
+        kept_args[i] = const_args_sharded[i]
+      elif i in self._kept_var_idx:
         arg_avals.append(arg.aval)
         kept_args[i] = arg
       elif i in self._donated_inputs_indices:
@@ -173,16 +202,19 @@ class MpmdExecutable(stages.Executable):
         # to delete the argument.
         arg.delete()
     pxla.check_arg_avals_for_call(
-        self._kept_in_avals, arg_avals, self._debug_info
+        self._kept_in_avals, arg_avals[self.nr_const_args:], self._debug_info
     )
     _verify_shardings_are_equivalent(
         self._func_name,
         self._kept_in_shardings,
         self._kept_in_shardings_paths,
-        tuple((idx, arg.sharding, arg.ndim) for idx, arg in kept_args.items()),
+        tuple((idx, arg.sharding, arg.ndim)
+              for idx, arg in kept_args.items()
+              if idx in self._kept_var_idx and idx >= self.nr_const_args),
         tuple((k, v) for k, v in self._topology.items()),
     )
-    return self._executable.execute(tuple(kept_args.values()))
+    kept_args_tuple = tuple(v for _, v in sorted(kept_args.items()))
+    return self._executable.execute(kept_args_tuple)
 
   def create_cpp_call(
       self, params: stages.CompiledCallParams
@@ -238,10 +270,11 @@ class MpmdExecutable(stages.Executable):
     input_xla_layouts = self._executable.input_layouts()
     input_shardings = self._in_shardings
     # Remove shardings for unused inputs.
-    if len(input_xla_layouts) < len(input_shardings):
+    if len(input_xla_layouts) < self.nr_const_args + len(input_shardings):
       iter_layouts = iter(input_xla_layouts)
       input_xla_layouts = [
-          next(iter_layouts) if i in self._kept_var_idx else None
+          next(iter_layouts)
+          if i + self.nr_const_args in self._kept_var_idx else None
           for i in range(len(input_shardings))
       ]
     return [
@@ -298,10 +331,9 @@ class MpmdCompiled(jax.stages.Compiled):
       executable: MpmdExecutable,
       args_info: Any,
       out_tree: jax.tree_util.PyTreeDef,
+      const_args: list[ArrayLike],
       no_kwargs: bool = False,
   ):
-    # TODO(b/434270189): handle const args
-    const_args = []
     super().__init__(executable, const_args, args_info, out_tree, no_kwargs)
     assert isinstance(executable, MpmdExecutable)
     self._mpmd_executable = executable
@@ -432,6 +464,7 @@ class MpmdLowered(stages.Lowered):
     self._stablehlo_mlir_module = stablehlo_mlir_module
     self.partitioning_result = partitioning_result
     self.args_info = args_info
+    self.const_args = jax_fn_info.const_args
     self.name = jax_fn_info.func_name
     self.topology = topology
     self.global_flat_input_abstract_values = (
@@ -446,8 +479,8 @@ class MpmdLowered(stages.Lowered):
     self.kept_inputs_indices = jax_fn_info.kept_inputs_indices
 
     meshes_and_specs = partitioning_result.module_io_sharding_specs_and_meshes
-
-    if len(jax_fn_info.kept_inputs_indices) != len(
+    nr_const_args = len(self.const_args)
+    if len(jax_fn_info.kept_inputs_indices) != nr_const_args + len(
         jax_fn_info.global_flat_input_abstract_values
     ):
       meshes_and_specs = _add_input_specs_for_removed_inputs(
@@ -460,7 +493,8 @@ class MpmdLowered(stages.Lowered):
     self.function_mesh_assignment = mpmd_types.FunctionIOMeshAssignment(
         jax.tree_util.tree_unflatten(
             jax_fn_info.input_tree,
-            [spec.mesh_name for spec in meshes_and_specs.input_specs],
+            [spec.mesh_name
+             for spec in meshes_and_specs.input_specs[nr_const_args:]],
         ),
         jax.tree_util.tree_unflatten(
             jax_fn_info.output_tree,
@@ -470,6 +504,7 @@ class MpmdLowered(stages.Lowered):
 
     self.function_named_shardings = (
         utils.meshes_and_sdy_specs_to_named_shardings(
+            nr_const_args,
             meshes_and_specs,
             jax_fn_info.input_tree,
             jax_fn_info.output_tree,
@@ -614,6 +649,7 @@ class MpmdLowered(stages.Lowered):
         program_executable,
         module_ir=compiled_ifrt_module,
         func_name=self.name,
+        nr_const_args=len(self.const_args),
         flat_in_avals=[x._aval for x in jax.tree.leaves(self.args_info)],  # pylint: disable=protected-access,
         out_avals=self.global_flat_output_abstract_values,
         in_shardings=in_shardings,
@@ -626,6 +662,7 @@ class MpmdLowered(stages.Lowered):
         executable=executable,
         args_info=self.args_info,
         out_tree=self.output_tree,
+        const_args=self.const_args,
         no_kwargs=self.no_kwargs,
     )
 
