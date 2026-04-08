@@ -42,6 +42,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/macros.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -661,6 +662,11 @@ TensorShardingPerValueAttr getFuncResultShardings(
 using ProcessCallOpFn = std::function<mlir::WalkResult(func::CallOp)>;
 bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
                bool preOrder = false);
+
+// Returns the reduction operation used in the scatter's update computation if
+// it is a recognized associative and commutative binary op applied to all
+// variadic inputs. Returns nullptr otherwise.
+Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter);
 
 }  // namespace sdy
 }  // namespace mlir
