@@ -111,8 +111,8 @@ func.func @scatter_multi_inputs(
   // CHECK-NEXT: return %[[ALL_REDUCE1]], %[[ALL_REDUCE2]] : tensor
   %0:2 = "stablehlo.scatter"(%arg0, %arg1, %arg2, %arg3, %arg4) ({
     ^bb0(%arg11: tensor<f32>, %arg12: tensor<f32>, %arg13: tensor<f32>, %arg14: tensor<f32>):
-      %1 = stablehlo.add %arg11, %arg12 : tensor<f32>
-      %2 = stablehlo.add %arg13, %arg14 : tensor<f32>
+      %1 = stablehlo.add %arg11, %arg13 : tensor<f32>
+      %2 = stablehlo.add %arg12, %arg14 : tensor<f32>
       stablehlo.return %1, %2 : tensor<f32>, tensor<f32>
   }) {
     scatter_dimension_numbers = #stablehlo.scatter<

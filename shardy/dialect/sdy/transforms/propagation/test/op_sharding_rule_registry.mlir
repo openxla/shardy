@@ -1035,6 +1035,33 @@ func.func @scatter_multiple_input(%arg0: tensor<3x4x2xi32>,
   return %0#0, %0#1 : tensor<3x4x2xi32>, tensor<3x4x2xf32>
 }
 
+// CHECK-LABEL: @scatter_unsupported_multi_reduction_op
+func.func @scatter_unsupported_multi_reduction_op(%arg0: tensor<3x4x2xi32>,
+                                                  %arg1: tensor<3x4x2xf32>,
+                                                  %arg2: tensor<2x3x2xi64>,
+                                                  %arg3: tensor<2x3x2x2xi32>,
+                                                  %arg4: tensor<2x3x2x2xf32>)
+    -> (tensor<3x4x2xi32>, tensor<3x4x2xf32>) {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [n, k, m], [i, j, o], [i, j, l, m], [i, j, l, m])->([n, k, m], [n, k, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=2} need_replication={i, j, l, o}>
+  %0:2 = "stablehlo.scatter"(%arg0, %arg1, %arg2, %arg3, %arg4) ({
+    ^bb0(%arg5: tensor<i32>, %arg6: tensor<f32>, %arg7: tensor<i32>, %arg8: tensor<f32>):
+      %1 = stablehlo.add %arg5, %arg7 : tensor<i32>
+      %2 = stablehlo.multiply %arg6, %arg8 : tensor<f32>
+      stablehlo.return %1, %2 : tensor<i32>, tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [2, 3],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [1, 0],
+      index_vector_dim = 2>,
+    indices_are_sorted = false,
+    unique_indices = false
+  } : (tensor<3x4x2xi32>, tensor<3x4x2xf32>, tensor<2x3x2xi64>,
+      tensor<2x3x2x2xi32>, tensor<2x3x2x2xf32>)
+      -> (tensor<3x4x2xi32>, tensor<3x4x2xf32>)
+  return %0#0, %0#1 : tensor<3x4x2xi32>, tensor<3x4x2xf32>
+}
+
 // CHECK-LABEL: func @select
 func.func @select(%arg0: tensor<4x8xi1>, %arg1: tensor<4x8xf32>, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [i, j])->([i, j]) {i=4, j=8}>

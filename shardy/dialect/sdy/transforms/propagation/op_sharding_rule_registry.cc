@@ -104,12 +104,16 @@ using GatherScatterAddFactorFn = std::function<void(
 
 // Adds factors for either a gather or scatter op, as they have a similar
 // structure.
-void addGatherScatterFactors(
-    bool isScatter, RankedTensorType inputType, RankedTensorType slicesType,
-    RankedTensorType startIndices, int64_t indexVectorDim,
-    ArrayRef<int64_t> offsetDims, ArrayRef<int64_t> collapsedSliceDims,
-    ArrayRef<int64_t> inputBatchingDims, ArrayRef<int64_t> indicesBatchingDims,
-    GatherScatterAddFactorFn addFactorFn) {
+void addGatherScatterFactors(mlir::Operation* op, RankedTensorType inputType,
+                             RankedTensorType slicesType,
+                             RankedTensorType startIndices,
+                             int64_t indexVectorDim,
+                             ArrayRef<int64_t> offsetDims,
+                             ArrayRef<int64_t> collapsedSliceDims,
+                             ArrayRef<int64_t> inputBatchingDims,
+                             ArrayRef<int64_t> indicesBatchingDims,
+                             GatherScatterAddFactorFn addFactorFn) {
+  bool isScatter = isa<stablehlo::ScatterOp>(op);
   auto addUnblockedFactorFn =
       [addFactorFn](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                     int64_t factorSize, FactorType factorType) {
@@ -177,9 +181,13 @@ void addGatherScatterFactors(
               : kNullDim;
       // If the dimension exists only in the indices and slices, we need to add
       // all-reduce on the scatter results.
-      FactorType factorType = (isScatter && !isExplicitBatchDim)
-                                  ? FactorType::kReduction
-                                  : FactorType::kPassThrough;
+      FactorType factorType = FactorType::kPassThrough;
+      if (isScatter && !isExplicitBatchDim) {
+        factorType = getCommonSupportedReductionOp(
+                         dyn_cast<stablehlo::ScatterOp>(op)) != nullptr
+                         ? FactorType::kReduction
+                         : FactorType::kNeedReplication;
+      }
       addUnblockedFactorFn(inputBatchDim, indicesDim, slicesDim, slicesDimSize,
                            factorType);
       ++batchDimPos;
@@ -879,10 +887,9 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             gather.getDimensionNumbers();
 
         addGatherScatterFactors(
-            /*isScatter=*/false, inputType, slicesType,
-            gather.getStartIndices().getType(), dimNums.getIndexVectorDim(),
-            dimNums.getOffsetDims(), dimNums.getCollapsedSliceDims(),
-            dimNums.getOperandBatchingDims(),
+            gather, inputType, slicesType, gather.getStartIndices().getType(),
+            dimNums.getIndexVectorDim(), dimNums.getOffsetDims(),
+            dimNums.getCollapsedSliceDims(), dimNums.getOperandBatchingDims(),
             dimNums.getStartIndicesBatchingDims(),
             [&](int64_t inputDim, int64_t indicesDim, int64_t slicesDim,
                 int64_t factorSize, FactorType factorType, bool isBlocked) {
@@ -1142,7 +1149,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             scatter.getScatterDimensionNumbers();
 
         addGatherScatterFactors(
-            /*isScatter=*/true, inputType, slicesType,
+            scatter, inputType, slicesType,
             scatter.getScatterIndices().getType(), dimNums.getIndexVectorDim(),
             /*offsetDims=*/dimNums.getUpdateWindowDims(),
             /*collapsedSliceDims=*/dimNums.getInsertedWindowDims(),
