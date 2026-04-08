@@ -51,6 +51,7 @@ void populateExportOptions(ExportOptions& options,
 
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
+  pm.addPass(createImportFuncCallsPass());
   addImportPipeline(pm, dumpIndex, options);
   {
     PropagationOptions optionsWithKeepShardingRules = options;
@@ -69,6 +70,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
+  pm.addPass(createExportNamedComputationsPass());
 }
 
 void addPropagationPipeline(OpPassManager& pm,
