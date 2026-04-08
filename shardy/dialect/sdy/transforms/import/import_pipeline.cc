@@ -30,7 +30,7 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
-  pm.addNestedPass<func::FuncOp>(createConstantOrScalarSplitterPass());
+  pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createManualAxesCleanupPass());
 
   // We dump the module before propagation at this point, since the import

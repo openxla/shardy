@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-constant-or-scalar-splitter 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -sdy-constant-or-scalar-splitter 2>&1 -split-input-file | FileCheck %s
 
 // CHECK-LABEL: func @constant_with_unregistered_attr
 func.func @constant_with_unregistered_attr() -> tensor<8x16xf32> {
@@ -7,6 +7,8 @@ func.func @constant_with_unregistered_attr() -> tensor<8x16xf32> {
   %0 = stablehlo.constant {foo} dense<1.000000e+00> : tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @func_arg_is_not_constant
 func.func @func_arg_is_not_constant(%arg0: tensor<8x16xf32>, %arg1: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -20,6 +22,8 @@ func.func @func_arg_is_not_constant(%arg0: tensor<8x16xf32>, %arg1: tensor<16x16
   return %1, %2 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_multiple_users_func_no_argument
 func.func @constant_multiple_users_func_no_argument() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
@@ -30,6 +34,8 @@ func.func @constant_multiple_users_func_no_argument() -> (tensor<8x16xf32>, tens
   %1 = stablehlo.negate %0 : tensor<8x16xf32>
   return %0, %1: tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_multiple_users
 func.func @constant_multiple_users(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -44,6 +50,8 @@ func.func @constant_multiple_users(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32
   %2 = stablehlo.add %0, %1 : tensor<8x16xf32>
   return %0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_multiple_users_within_named_computation
 func.func @constant_multiple_users_within_named_computation(%arg0: tensor<16x16xf32>) -> tensor<8x16xf32> {
@@ -66,6 +74,8 @@ func.func @constant_multiple_users_within_named_computation(%arg0: tensor<16x16x
   %4 = stablehlo.multiply %0#0, %0#1 : tensor<8x16xf32>
   return %4 : tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_multiple_users_within_named_computation_with_only_constant_ops
 func.func @constant_multiple_users_within_named_computation_with_only_constant_ops(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
@@ -93,6 +103,8 @@ func.func @constant_multiple_users_within_named_computation_with_only_constant_o
   return %6 : tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_to_named_computation_with_only_constant_ops
 func.func @constant_to_named_computation_with_only_constant_ops(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<1.000000e+00>
@@ -116,6 +128,8 @@ func.func @constant_to_named_computation_with_only_constant_ops(%arg0: tensor<8x
   %6 = stablehlo.abs %1 : tensor<8x16xf32>
   return %5, %6 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_multiple_users_within_named_computation_with_no_arguments_and_with_only_constant_ops
 func.func @constant_multiple_users_within_named_computation_with_no_arguments_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -141,6 +155,8 @@ func.func @constant_multiple_users_within_named_computation_with_no_arguments_an
   %4 = stablehlo.abs %0 : tensor<8x16xf32>
   return %3, %4 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_to_named_computation_with_one_argument_and_with_only_constant_ops
 func.func @constant_to_named_computation_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -169,6 +185,8 @@ func.func @constant_to_named_computation_with_one_argument_and_with_only_constan
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   return %4, %5 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_multiple_users_one_to_named_computation_with_one_argument_and_with_only_constant_ops
 func.func @constant_multiple_users_one_to_named_computation_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -199,6 +217,8 @@ func.func @constant_multiple_users_one_to_named_computation_with_one_argument_an
   return %0, %4, %5 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @scalar_constant_multiple_users_simple
 func.func @scalar_constant_multiple_users_simple(%arg0: tensor<f32>) -> (tensor<f32>, tensor<f32>) {
   // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<1.000000e+00>
@@ -208,6 +228,8 @@ func.func @scalar_constant_multiple_users_simple(%arg0: tensor<f32>) -> (tensor<
   %1 = stablehlo.add %0, %arg0 : tensor<f32>
   return %0, %1 : tensor<f32>, tensor<f32>
 }
+
+// -----
 
 // CHECK-LABEL: func @non_scalar_constant_multiple_users_simple
 func.func @non_scalar_constant_multiple_users_simple(%arg0: tensor<2xf32>) -> (tensor<2xf32>, tensor<2xf32>) {
@@ -219,6 +241,8 @@ func.func @non_scalar_constant_multiple_users_simple(%arg0: tensor<2xf32>) -> (t
   %1 = stablehlo.add %0, %arg0 : tensor<2xf32>
   return %0, %1 : tensor<2xf32>, tensor<2xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_sub_computation_multiple_users
 func.func @constant_sub_computation_multiple_users(%arg0: tensor<5x8xi32>) -> (tensor<4x5xi32>, tensor<4x8xi32>) {
@@ -240,6 +264,8 @@ func.func @constant_sub_computation_multiple_users(%arg0: tensor<5x8xi32>) -> (t
   return %3, %4 : tensor<4x5xi32>, tensor<4x8xi32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_multiple_uses_by_same_op
 func.func @constant_multiple_uses_by_same_op() -> (tensor<8x16xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
@@ -252,6 +278,8 @@ func.func @constant_multiple_uses_by_same_op() -> (tensor<8x16xf32>, tensor<8x8x
   return %0, %1 : tensor<8x16xf32>, tensor<8x8xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @non_constant_broadcast_multiple_users
 func.func @non_constant_broadcast_multiple_users(%arg0: tensor<4x5xf32>, %arg1: tensor<5xf32>) -> (tensor<5x8xf32>, tensor<4x8xf32>) {
   // CHECK-NEXT: %[[BROADCAST:.*]] = stablehlo.broadcast_in_dim %arg1
@@ -261,6 +289,8 @@ func.func @non_constant_broadcast_multiple_users(%arg0: tensor<4x5xf32>, %arg1: 
   %1 = stablehlo.dot_general %arg0, %0, contracting_dims = [1] x [0] : (tensor<4x5xf32>, tensor<5x8xf32>) -> tensor<4x8xf32>
   return %0, %1 : tensor<5x8xf32>, tensor<4x8xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_broadcast_multiple_users
 func.func @constant_broadcast_multiple_users(%arg0: tensor<5x8xi32>) -> (tensor<4x5xi32>, tensor<4x8xi32>) {
@@ -278,6 +308,8 @@ func.func @constant_broadcast_multiple_users(%arg0: tensor<5x8xi32>) -> (tensor<
   %3 = stablehlo.dot_general %2, %arg0, contracting_dims = [1] x [0] : (tensor<4x5xi32>, tensor<5x8xi32>) -> tensor<4x8xi32>
   return %2, %3 : tensor<4x5xi32>, tensor<4x8xi32>
 }
+
+// -----
 
 // CHECK-LABEL: func @multiple_broadcasts_using_the_same_const_sub_computation
 func.func @multiple_broadcasts_using_the_same_const_sub_computation(%arg0: tensor<5x8xi32>) -> (tensor<3x5xi32>, tensor<2x4xi32>) {
@@ -301,6 +333,8 @@ func.func @multiple_broadcasts_using_the_same_const_sub_computation(%arg0: tenso
   return %3, %5 : tensor<3x5xi32>, tensor<2x4xi32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_reshape_multiple_users
 func.func @constant_reshape_multiple_users() -> (tensor<5x2xi32>, tensor<5x2xi32>) {
   // CHECK-NEXT: %[[IOTA_0:.*]] = stablehlo.iota dim = 0
@@ -312,6 +346,8 @@ func.func @constant_reshape_multiple_users() -> (tensor<5x2xi32>, tensor<5x2xi32
   %1 = stablehlo.reshape %0 : (tensor<10xi32>) -> tensor<5x2xi32>
   return %1, %1 : tensor<5x2xi32>, tensor<5x2xi32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_slice_multiple_users
 func.func @constant_slice_multiple_users(%arg0: tensor<8xi32>) -> (tensor<8xi32>, tensor<8xi32>) {
@@ -333,6 +369,8 @@ func.func @constant_slice_multiple_users(%arg0: tensor<8xi32>) -> (tensor<8xi32>
   return %3, %4 : tensor<8xi32>, tensor<8xi32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_parts_of_const_sub_computation
 func.func @splits_parts_of_const_sub_computation(%arg0: tensor<5x8xi32>) -> (tensor<4x5xi32>, tensor<4x5xi32>, tensor<4x8xi32>) {
   // CHECK-NEXT: %[[IOTA_0:.*]] = stablehlo.iota dim = 0
@@ -352,6 +390,8 @@ func.func @splits_parts_of_const_sub_computation(%arg0: tensor<5x8xi32>) -> (ten
   return %0, %2, %4 : tensor<4x5xi32>, tensor<4x5xi32>, tensor<4x8xi32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_sdy_constants
 func.func @splits_sdy_constants(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
@@ -365,6 +405,8 @@ func.func @splits_sdy_constants(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, 
   %2 = stablehlo.add %0, %1 : tensor<8x16xf32>
   return %0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_sharding_groups
 func.func @splits_sharding_groups(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -391,6 +433,8 @@ func.func @splits_sharding_groups(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32>
   return %0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_const_subexpr_with_sharding_group
 func.func @splits_const_subexpr_with_sharding_group(%arg0: tensor<4x8xi32>) -> (tensor<4x8xi32>, tensor<4x8xi32>) {
   // CHECK-NEXT: sdy.sharding_group %arg0 group_id=0
@@ -411,6 +455,8 @@ func.func @splits_const_subexpr_with_sharding_group(%arg0: tensor<4x8xi32>) -> (
   return %2, %3 : tensor<4x8xi32>, tensor<4x8xi32>
 }
 
+// -----
+
 // CHECK-LABEL: func @does_not_split_broadcast_on_non_scalar_input
 func.func @does_not_split_broadcast_on_non_scalar_input(%arg0: tensor<2xf32>) -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<2xf32>) -> tensor<2x64xf32>
@@ -425,6 +471,8 @@ func.func @does_not_split_broadcast_on_non_scalar_input(%arg0: tensor<2xf32>) ->
   return %3 :  tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @does_not_split_broadcast_on_one_dimensional_input_of_size_one
 func.func @does_not_split_broadcast_on_one_dimensional_input_of_size_one(%arg0: tensor<1xf32>) -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<1xf32>) -> tensor<2x64xf32>
@@ -438,6 +486,8 @@ func.func @does_not_split_broadcast_on_one_dimensional_input_of_size_one(%arg0: 
   %3 = stablehlo.multiply %1, %2 : tensor<2x64xf32>
   return %3 :  tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_broadcast_on_scalar_simple
 func.func @splits_broadcast_on_scalar_simple(%arg0: tensor<f32>) -> tensor<2x64xf32> {
@@ -454,6 +504,8 @@ func.func @splits_broadcast_on_scalar_simple(%arg0: tensor<f32>) -> tensor<2x64x
   return %3 :  tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_multiple_broadcast_on_scalar_use_same_scalar
 func.func @splits_multiple_broadcast_on_scalar_use_same_scalar(%arg0: tensor<f32>) -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
@@ -465,6 +517,8 @@ func.func @splits_multiple_broadcast_on_scalar_use_same_scalar(%arg0: tensor<f32
   %2 = stablehlo.add %0, %1 : tensor<2x64xf32>
   return %2 :  tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_multiple_broadcasts_on_scalar_non_constant
 func.func @splits_multiple_broadcasts_on_scalar_non_constant(%arg0: tensor<f32>) -> tensor<2x64xf32> {
@@ -492,6 +546,8 @@ func.func @splits_multiple_broadcasts_on_scalar_non_constant(%arg0: tensor<f32>)
   return %8 :  tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_broadcast_on_scalar_non_constant_use_and_itself_on_same_op
 func.func @splits_broadcast_on_scalar_non_constant_use_and_itself_on_same_op(%arg0: tensor<f32>) -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
@@ -505,6 +561,8 @@ func.func @splits_broadcast_on_scalar_non_constant_use_and_itself_on_same_op(%ar
   return %2 :  tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_broadcast_on_scalar_non_constant_one_of_multiple_use_is_func_return
 func.func @splits_broadcast_on_scalar_non_constant_one_of_multiple_use_is_func_return(%arg0: tensor<f32>) -> (tensor<2x64xf32>, tensor<2x64xf32>) {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
@@ -515,6 +573,8 @@ func.func @splits_broadcast_on_scalar_non_constant_one_of_multiple_use_is_func_r
   %1 = stablehlo.negate %0 : tensor<2x64xf32>
   return %0, %1 : tensor<2x64xf32>, tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_broadcast_on_scalar_non_constant_all_uses_on_same_op
 func.func @splits_broadcast_on_scalar_non_constant_all_uses_on_same_op(%arg0: tensor<f32>) -> tensor<2x64xf32> {
@@ -527,6 +587,8 @@ func.func @splits_broadcast_on_scalar_non_constant_all_uses_on_same_op(%arg0: te
   return %1 :  tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @does_not_split_broadcast_single_use
 func.func @does_not_split_broadcast_single_use(%arg0: tensor<f32>) -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
@@ -536,6 +598,8 @@ func.func @does_not_split_broadcast_single_use(%arg0: tensor<f32>) -> tensor<2x6
   %1 = stablehlo.negate %0 : tensor<2x64xf32>
   return %1 :  tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_broadcast_on_scalar_non_constant_multiple_uses
 func.func @splits_broadcast_on_scalar_non_constant_multiple_uses(%arg0: tensor<f32>) -> tensor<2x64xf32> {
@@ -556,6 +620,8 @@ func.func @splits_broadcast_on_scalar_non_constant_multiple_uses(%arg0: tensor<f
   return %4 :  tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_both_constant_and_broadcast_on_scalar_op_result
 func.func @splits_both_constant_and_broadcast_on_scalar_op_result() -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = sdy.constant dense<0.000000e+00> : tensor<32xf32>
@@ -572,6 +638,8 @@ func.func @splits_both_constant_and_broadcast_on_scalar_op_result() -> tensor<2x
   return %3 : tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @does_not_split_broadcast_on_scalar_constant_diamond
 func.func @does_not_split_broadcast_on_scalar_constant_diamond() -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = sdy.constant dense<0.000000e+00> : tensor<f32>
@@ -587,6 +655,8 @@ func.func @does_not_split_broadcast_on_scalar_constant_diamond() -> tensor<2x64x
   %4 = stablehlo.multiply %2, %3 : tensor<2x64xf32>
   return %4 : tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_broadcast_on_scalar_constant_non_diamond
 func.func @splits_broadcast_on_scalar_constant_non_diamond() -> (tensor<2x64xf32>, tensor<2x64xf32>) {
@@ -606,6 +676,8 @@ func.func @splits_broadcast_on_scalar_constant_non_diamond() -> (tensor<2x64xf32
   return %3, %4 : tensor<2x64xf32>, tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @splits_broadcast_on_scalar_constant_diamond_also_used_outside_diamond
 func.func @splits_broadcast_on_scalar_constant_diamond_also_used_outside_diamond() -> (tensor<2x64xf32>, tensor<2x64xf32>) {
   // CHECK-NEXT: %0 = sdy.constant dense<0.000000e+00> : tensor<f32>
@@ -622,6 +694,8 @@ func.func @splits_broadcast_on_scalar_constant_diamond_also_used_outside_diamond
   %4 = stablehlo.multiply %2, %3 : tensor<2x64xf32>
   return %1, %4 : tensor<2x64xf32>, tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @splits_broadcast_on_non_scalar_constant
 func.func @splits_broadcast_on_non_scalar_constant() -> (tensor<2x64xf32>, tensor<2x64xf32>) {
@@ -641,6 +715,8 @@ func.func @splits_broadcast_on_non_scalar_constant() -> (tensor<2x64xf32>, tenso
   return %1, %4 : tensor<2x64xf32>, tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @broadcast_on_scalar_constant_propagates_constant_expansion
 func.func @broadcast_on_scalar_constant_propagates_constant_expansion() -> (tensor<2x64xf32>, tensor<2x64xf32>) {
   // CHECK-NEXT: %0 = sdy.constant dense<0.000000e+00> : tensor<f32>
@@ -658,6 +734,8 @@ func.func @broadcast_on_scalar_constant_propagates_constant_expansion() -> (tens
   return %3, %3 : tensor<2x64xf32>, tensor<2x64xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @broadcast_on_scalar_non_constant_does_not_propagate_constant_expansion
 func.func @broadcast_on_scalar_non_constant_does_not_propagate_constant_expansion(%arg0: tensor<f32>) -> (tensor<2x64xf32>, tensor<2x64xf32>) {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f32>) -> tensor<2x64xf32>
@@ -670,6 +748,8 @@ func.func @broadcast_on_scalar_non_constant_does_not_propagate_constant_expansio
   %2 = stablehlo.add %0, %1 : tensor<2x64xf32>
   return %2, %2 : tensor<2x64xf32>, tensor<2x64xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_not_constant
 func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_not_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -696,6 +776,8 @@ func.func @constant_both_to_named_computation_and_inside_named_computation_and_n
   %6 = stablehlo.negate %1: tensor<8x16xf32>
   return %0, %1, %6 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant
 func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -732,6 +814,8 @@ func.func @constant_both_to_named_computation_and_inside_named_computation_and_n
   return %0, %1, %6 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_to_named_computation_that_is_partially_constant_from_start
 func.func @constant_to_named_computation_that_is_partially_constant_from_start() -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00>
@@ -751,6 +835,8 @@ func.func @constant_to_named_computation_that_is_partially_constant_from_start()
   } : (tensor<8x8xf32>) -> tensor<8x8xf32>
   return %1, %1 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_to_while
 func.func @constant_to_while(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
@@ -785,6 +871,8 @@ func.func @constant_to_while(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
   return %1#0 : tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_completely_inside_named_computation_and_has_sharding_groups
 func.func @constant_completely_inside_named_computation_and_has_sharding_groups(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
   // CHECK: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0)
@@ -812,6 +900,8 @@ func.func @constant_completely_inside_named_computation_and_has_sharding_groups(
   %8 = stablehlo.negate %0: tensor<8x16xf32>
   return %8 : tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_to_and_inside_nested_named_computations
 func.func @constant_to_and_inside_nested_named_computations() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
@@ -850,6 +940,8 @@ func.func @constant_to_and_inside_nested_named_computations() -> (tensor<8x16xf3
   return %1, %5 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_to_multi_result_named_computation
 func.func @constant_to_multi_result_named_computation() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
@@ -870,6 +962,8 @@ func.func @constant_to_multi_result_named_computation() -> (tensor<8x16xf32>, te
   } : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
   return %1#0, %1#1 : tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// -----
 
 // CHECK-LABEL: func @constant_to_inner_named_computation_that_is_constant_expression
 func.func @constant_to_inner_named_computation_that_is_constant_expression() -> tensor<8x8xf32> {
@@ -902,6 +996,8 @@ func.func @constant_to_inner_named_computation_that_is_constant_expression() -> 
   return %0 : tensor<8x8xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_all_arguments_are_constants
 func.func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_all_arguments_are_constants(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
@@ -933,6 +1029,8 @@ func.func @constant_to_named_computation_with_multiple_arguments_and_with_only_c
   return %5, %6 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// -----
+
 // CHECK-LABEL: func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_some_arguments_are_constants_some_not
 func.func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_some_arguments_are_constants_some_not(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
@@ -956,4 +1054,19 @@ func.func @constant_to_named_computation_with_multiple_arguments_and_with_only_c
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   %6 = stablehlo.abs %1 : tensor<8x16xf32>
   return %5, %6 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @single_call
+func.func @single_call(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = call @foo(%arg0)
+  // CHECK-NEXT: return %0
+  %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @foo
+func.func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  return %arg0 : tensor<8xf32>
 }

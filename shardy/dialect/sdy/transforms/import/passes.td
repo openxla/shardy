@@ -141,7 +141,7 @@ def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "Modul
   ];
 }
 
-def ConstantOrScalarSplitterPass : Pass<"sdy-constant-or-scalar-splitter", "func::FuncOp"> {
+def ConstantOrScalarSplitterPass : Pass<"sdy-constant-or-scalar-splitter", "ModuleOp"> {
   let summary = "Splits constant and scalar expansions so each has a single use.";
   let description = [{
     Splits constant sub-computations and scalar expansions such that they have a

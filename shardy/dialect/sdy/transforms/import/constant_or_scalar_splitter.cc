@@ -21,6 +21,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -239,11 +240,11 @@ struct ConstantOrScalarSplitterPass
   }
 
   void runOnOperation() final {
-    FuncOp funcOp = getOperation();
+    ModuleOp moduleOp = getOperation();
 
     // We first convert any `stablehlo::ConstantOp` to an `sdy::ConstantOp`, so
     // that constants won't be deduped via folding.
-    if (failed(applyPartialConversion(funcOp, *target, patterns))) {
+    if (failed(applyPartialConversion(moduleOp, *target, patterns))) {
       signalPassFailure();
     }
 
@@ -252,7 +253,7 @@ struct ConstantOrScalarSplitterPass
     llvm::SetVector<Operation*> scalarExpansionOps;
     llvm::SmallDenseSet<StringRef> nonConstantNamedComputationOps;
     constantOps.emplace_back();
-    funcOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
+    moduleOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
       // Becuase it is a preorder walk, it visits the NamedComputationOp before
       // its operations inside. The set created on top of `constantOps` stack is
       // used for the top-level operations within the NamedComputationOp. This
