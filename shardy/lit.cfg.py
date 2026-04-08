@@ -37,9 +37,12 @@ tools = [
     'FileCheck',
     'mpmd_opt',
     'sdy_opt',
+    'split-file',
+    'stablehlo-translate',
 ]
 tool_dirs = [
     config.llvm_tools_dir,
     config.shardy_tools_dir,
+    config.stablehlo_tools_dir,
 ]
 llvm_config.add_tool_substitutions(tools, tool_dirs)

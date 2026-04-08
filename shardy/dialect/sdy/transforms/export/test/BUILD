@@ -10,6 +10,8 @@ filegroup(
     data = [
         "//shardy/tools:sdy_opt",
         "@llvm-project//llvm:FileCheck",
+        "@llvm-project//llvm:split-file",
+        "@stablehlo//:stablehlo-translate",
     ],
 )
 
