@@ -51,7 +51,6 @@ void populateExportOptions(ExportOptions& options,
 
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
-  pm.addPass(createImportFuncCallsPass());
   addImportPipeline(pm, dumpIndex, options);
   {
     PropagationOptions optionsWithKeepShardingRules = options;

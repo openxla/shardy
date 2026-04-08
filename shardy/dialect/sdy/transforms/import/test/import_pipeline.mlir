@@ -75,3 +75,24 @@ func.func @manual_axes_cleanup_before_adding_data_flow_edges(%arg0: tensor<8xf32
   // CHECK: sdy.data_flow_edge %0 sharding=<@mesh, [{?}], replicated={"a"}> : tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// CHECK-LABEL: func @single_call
+func.func @single_call(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"a"}]>] (%arg1: tensor<8xf32>) {
+  // CHECK-NEXT:   %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{"a"}]> : tensor<8xf32>
+  // CHECK-NEXT:   sdy.return %2 : tensor<8xf32>
+  // CHECK-NEXT:} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %1 = sdy.data_flow_edge %0 : tensor<8xf32>
+  // CHECK-NEXT: return %1 : tensor<8xf32>
+  %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-NOT: @foo
+func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
+  return %arg0 : tensor<8xf32>
+}

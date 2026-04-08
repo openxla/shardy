@@ -27,6 +27,7 @@ namespace sdy {
 
 void addImportPipeline(OpPassManager& pm, int& dumpIndex,
                        const PropagationOptions& options) {
+  pm.addPass(createImportFuncCallsPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
