@@ -53,20 +53,19 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // which during the canonicalizer below may be converted to reduce scatters
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
-    addCanonicalizerPass(pm, kCollectiveLabel);
-    if (options.removeAllGatherReduceScatterForCMV1) {
-      pm.addNestedPass<func::FuncOp>(
-          createRemoveAllGatherReduceScatterForCMV1Pass());
-    }
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "after_partitioner_with_global_shapes",
-        dumpIndex++));
-  } else {
-    addCanonicalizerPass(pm, kCollectiveLabel);
-    pm.addPass(mlir::sdy::createSaveModuleOpPass(
-        options.dumpDirectory, "after_minimal_partitioner_with_global_shapes",
-        dumpIndex++));
   }
+  addCanonicalizerPass(pm, kCollectiveLabel);
+  if (options.enableInsertExplicitCollectives &&
+      options.removeAllGatherReduceScatterForCMV1) {
+    pm.addNestedPass<func::FuncOp>(
+        createRemoveAllGatherReduceScatterForCMV1Pass());
+  }
+  pm.addPass(mlir::sdy::createSaveModuleOpPass(
+      options.dumpDirectory,
+      options.enableInsertExplicitCollectives
+          ? "after_partitioner_with_global_shapes"
+          : "after_minimal_partitioner_with_global_shapes",
+      dumpIndex++));
 }
 
 }  // namespace
