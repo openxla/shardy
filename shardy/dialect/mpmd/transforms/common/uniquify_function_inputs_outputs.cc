@@ -54,7 +54,23 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
     return it.second.empty();
   });
 
-  builder.setInsertionPoint(return_op);
+  // Insert the new fragment right after the latest operation that defines any
+  // of its operands, rather than at the end of the function. This places the
+  // fragment adjacent to its primary producer, enabling the subsequent
+  // MergeInferredFragmentsPass to merge them.
+  Operation* latest_producer = nullptr;
+  for (const auto& [value, return_indices] : value_to_return_indices) {
+    if (auto* def = value.getDefiningOp()) {
+      if (!latest_producer || latest_producer->isBeforeInBlock(def)) {
+        latest_producer = def;
+      }
+    }
+  }
+  if (latest_producer) {
+    builder.setInsertionPointAfter(latest_producer);
+  } else {
+    builder.setInsertionPoint(return_op);
+  }
   SmallVector<Value> fragment_operands;
   fragment_operands.reserve(value_to_return_indices.size());
   SmallVector<Type> fragment_return_types;
