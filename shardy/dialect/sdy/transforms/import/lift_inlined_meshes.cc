@@ -69,33 +69,15 @@ struct LiftInlinedMeshesPass
     ModuleOp moduleOp = getOperation();
     SymbolTable symbolTable(moduleOp);
 
-    // A map from both:
-    // 1. `FlatSymbolRefAttr` referencing a `MeshOp` that was deduped.
-    // 2. `MeshAttr` in an existing `MeshOp` or inlined in a
-    //    `TensorShardingAttr`.
-    // To the name of an existing or new `MeshOp` that should now be referenced
-    // instead.
+    // A map from a `MeshAttr` in an existing `MeshOp` or inlined in a
+    // `TensorShardingAttr`, to the name of an existing or new `MeshOp` that
+    // should now be referenced instead.
     llvm::SmallDenseMap<Attribute, StringAttr> meshOrRefToNewName;
 
     MeshOp lastMeshOp;
     for (auto meshOp : llvm::make_early_inc_range(moduleOp.getOps<MeshOp>())) {
-      if (auto insertedIt = meshOrRefToNewName.try_emplace(
-              meshOp.getMesh(), meshOp.getSymNameAttr());
-          !insertedIt.second) {
-        // This is a duplicate mesh, we map its name (as a FlatSymbolRefAttr) to
-        // the name of the identical mesh that was already inserted, so we can
-        // replace the former with the latter in any sharding in the module that
-        // referenced it. We can also erase the mesh because we know it won't be
-        // used after this pass.
-        // NOTE: assigning to a map entry a value that is read from the same map
-        // can lead to use-after-free (if rehash is triggered).
-        StringAttr newMeshName = insertedIt.first->second;
-        meshOrRefToNewName[FlatSymbolRefAttr::get(meshOp.getSymNameAttr())] =
-            newMeshName;
-        symbolTable.erase(meshOp);
-      } else {
-        lastMeshOp = meshOp;
-      }
+      meshOrRefToNewName.try_emplace(meshOp.getMesh(), meshOp.getSymNameAttr());
+      lastMeshOp = meshOp;
     }
 
     OpBuilder builder(moduleOp);
