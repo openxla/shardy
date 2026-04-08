@@ -264,7 +264,6 @@ class MpmdGspmdTraced(jax.stages.Traced):
         in_tree,
         out_tree,
         kept_inputs_indices=preserved_input_indices,
-        const_args=lowered_computation._lowering.const_args,  # type: ignore
     )
 
     # Flatten the input to mesh assignment pytree.
