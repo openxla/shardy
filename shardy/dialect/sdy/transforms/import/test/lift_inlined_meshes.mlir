@@ -178,10 +178,10 @@ func.func @manual_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>
 
 // -----
 
-// CHECK: sdy.mesh @mesh = <["x"=4]>
+// CHECK-DAG: sdy.mesh @mesh = <["x"=4]>
+// CHECK-DAG: sdy.mesh @mesh_0 = <["y"=8]>
+// CHECK-DAG: sdy.mesh @mesh_1 = <["z"=4]>
 sdy.mesh @mesh = <["x"=4]>
-
-// CHECK: sdy.mesh @mesh_0 = <["y"=8]>
 
 // CHECK-LABEL: func @named_computation
 func.func @named_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>) -> tensor<16x32xf32> {
@@ -196,6 +196,19 @@ func.func @named_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>)
     sdy.return %1 : tensor<16x32xf32>
   } : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<16x32xf32>
   func.return %0: tensor<16x32xf32>
+}
+// CHECK-LABEL: func @all_reduce_inlined_mesh
+func.func @all_reduce_inlined_mesh(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // CHECK-NEXT: %0 = "stablehlo.all_reduce"(%arg0)
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_1, axes = ["z"]>
+  %0 = "stablehlo.all_reduce"(%arg0) ({
+    ^bb0(%arg1: tensor<f32>, %arg2: tensor<f32>):
+      %1 = stablehlo.add %arg1, %arg2 : tensor<f32>
+      stablehlo.return %1 : tensor<f32>
+  }) {
+    replica_groups = #stablehlo.replica_group_mesh_axes<mesh = #stablehlo.mesh<axes = [#stablehlo.mesh_axis<name = "z", size = 4>]>, axes = ["z"]>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
 }
 
 // -----
