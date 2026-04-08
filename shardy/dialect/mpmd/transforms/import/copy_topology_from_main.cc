@@ -14,17 +14,11 @@ limitations under the License.
 ==============================================================================*/
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/Attributes.h"
-#include "mlir/IR/Builders.h"
-#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/import/passes.h"  // IWYU pragma: keep
-#include "shardy/dialect/sdy/ir/dialect.h"
 
 using ::mlir::func::FuncOp;
 
@@ -35,48 +29,12 @@ namespace mlir::mpmd {
 
 namespace {
 
-// If the module doesn't have an `sdy.mesh`, constructs a global mesh containing
-// all the axes in the main function's topology. Assumes all meshes in the
-// topology are homogeneous. If meshes are not homogenous, we will generate an
-// incorrect global mesh but this will be fixed in the
-// GenerateSdyMeshesFromTopologyPass.
-// (b/474009780): Merge this logic with GenerateSdyMeshesFromTopologyPass.
-void MaybeConstructSdyMesh(ModuleOp module_op) {
-  if (!module_op.getOps<sdy::MeshOp>().empty()) {
-    return;
-  }
-
-  FuncOp main_func = GetMainFunction(module_op);
-
-  // Create a global mesh containing all the axes.
-  auto current_topology_attr =
-      main_func->getAttrOfType<TopologyAttr>(kTopologyAttr);
-  SDY_CHECK(current_topology_attr);
-  sdy::MeshAttr named_mesh =
-      current_topology_attr.getMeshes().front().getMesh();
-
-  MLIRContext* ctx = module_op->getContext();
-  SmallVector<sdy::MeshAxisAttr> sdy_axes;
-  sdy_axes.reserve(named_mesh.getAxes().size());
-  for (sdy::MeshAxisAttr mesh_axis : named_mesh.getAxes()) {
-    sdy_axes.push_back(
-        sdy::MeshAxisAttr::get(ctx, mesh_axis.getName(), mesh_axis.getSize()));
-  }
-
-  auto builder = OpBuilder::atBlockBegin(module_op.getBody());
-  sdy::MeshOp::create(builder, module_op.getLoc(), kGlobalMeshName,
-                      sdy::MeshAttr::get(ctx, sdy_axes));
-}
-
 class CopyTopologyFromMainPass
     : public impl::CopyTopologyFromMainPassBase<CopyTopologyFromMainPass> {
   using CopyTopologyFromMainPassBase::CopyTopologyFromMainPassBase;
 
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
-
-    // TODO(b/428336749): remove gspmd specific logic when no longer needed.
-    MaybeConstructSdyMesh(module_op);
 
     for (FuncOp func_op : module_op.getOps<FuncOp>()) {
       auto main_topology_attr =

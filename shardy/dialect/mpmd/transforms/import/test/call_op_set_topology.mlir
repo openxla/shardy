@@ -1,6 +1,5 @@
 // RUN: mpmd_opt %s -mpmd-copy-topology-from-main -split-input-file 2>&1 | FileCheck %s
 
-// CHECK-LABEL: sdy.mesh @mesh = <["a"=4, "b"=2]>
 #topology = #mpmd.topology<<"mesh1": <["a"=4, "b"=2]>>, <"mesh2": <["a"=4, "b"=2]>>>
 
 // CHECK-LABEL: func.func public @main(%arg0: tensor<5xf32>, %arg1: tensor<5xf32>) -> (tensor<5xf32>, tensor<5xf32>, tensor<5xf32>) attributes {topology = #mpmd.topology<<"mesh1" : <["a"=4, "b"=2]>>, <"mesh2" : <["a"=4, "b"=2]>>>}
