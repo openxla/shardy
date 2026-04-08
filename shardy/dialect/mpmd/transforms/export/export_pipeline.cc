@@ -89,7 +89,13 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // The fragments created by the pass above maybe slowdown compilation (more
   // fragments to compile) and may cause performance regressions. Thus, we merge
   // them with other fragments.
-  pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
+  {
+    MergeInferredFragmentsPassOptions merge_options;
+    merge_options.mergeSidewaysIfForwardOnly =
+        options.mergeSidewaysIfForwardOnly;
+    pm.addNestedPass<FuncOp>(
+        createMergeInferredFragmentsPass(std::move(merge_options)));
+  }
 
   // Mark each fragment with the inputs and outputs which are offloaded to host
   // memory.
@@ -156,6 +162,12 @@ struct ExportPipelineOptions
           "Whether to emit an error when a backward dependency is detected "
           "in a forward-only program."),
       llvm::cl::init(false)};
+  Option<bool> mergeSidewaysIfForwardOnly{
+      *this, "merge-sideways-if-forward-only",
+      llvm::cl::desc(
+          "Whether to merge sideways inferred fragments if the program is "
+          "forward-only."),
+      llvm::cl::init(true)};
 };
 
 }  // namespace
@@ -169,6 +181,8 @@ void registerExportPipeline() {
         options.failOnReshardOnlyFragments =
             pipelineOptions.failOnReshardOnlyFragments;
         options.failOnBackwardDeps = pipelineOptions.failOnBackwardDeps;
+        options.mergeSidewaysIfForwardOnly =
+            pipelineOptions.mergeSidewaysIfForwardOnly;
         addExportPipeline(pm, options);
       });
 }
