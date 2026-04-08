@@ -1171,7 +1171,8 @@ LogicalResult UnassignOp::verify() {
 
 LogicalResult UnassignOp::inferReturnTypeComponents(
     MLIRContext*, std::optional<Location> location, ValueShapeRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    DictionaryAttr attributes, mlir::PropertyRef properties,
+    RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents>& inferredReturnShapes) {
   UnassignOp::Adaptor adaptor(operands, attributes, properties, regions);
   inferredReturnShapes.emplace_back(

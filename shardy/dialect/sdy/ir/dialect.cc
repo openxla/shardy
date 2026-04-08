@@ -1369,7 +1369,7 @@ bool ManualComputationOp::shouldKeepEdgeOwnerShardingsDivisible() {
 LogicalResult ShardingGroupOp::inferReturnTypes(MLIRContext*,
                                                 std::optional<Location>,
                                                 ValueRange, DictionaryAttr,
-                                                OpaqueProperties, RegionRange,
+                                                mlir::PropertyRef, RegionRange,
                                                 SmallVectorImpl<Type>&) {
   return success();
 }
@@ -1384,8 +1384,8 @@ bool ConstantOp::isCompatibleReturnTypes(TypeRange l, TypeRange r) {
 
 LogicalResult ConstantOp::inferReturnTypes(
     MLIRContext* context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    SmallVectorImpl<Type>& inferredReturnTypes) {
+    DictionaryAttr attributes, mlir::PropertyRef properties,
+    RegionRange regions, SmallVectorImpl<Type>& inferredReturnTypes) {
   ConstantOpAdaptor adaptor(operands, attributes, properties);
   inferredReturnTypes.push_back(adaptor.getValue().getType());
   return success();
@@ -1536,8 +1536,8 @@ Value NamedComputationOp::getEdgeOwnerFromSource(OpOperand& source) {
 
 LogicalResult NamedComputationOp::inferReturnTypes(
     MLIRContext*, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    SmallVectorImpl<Type>& inferredReturnTypes) {
+    DictionaryAttr attributes, mlir::PropertyRef properties,
+    RegionRange regions, SmallVectorImpl<Type>& inferredReturnTypes) {
   NamedComputationOpAdaptor adaptor(operands, attributes, properties, regions);
   llvm::copy(getBodyTerminatorOperands(adaptor).getTypes(),
              std::back_inserter(inferredReturnTypes));
