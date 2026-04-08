@@ -414,7 +414,6 @@ class LowerToFragmentCallsPass
       }
       rewriter.setInsertionPoint(fragment);
       bool is_remat = mpmd::IsRemat(fragment);
-      bool is_gspmd_partitioned = fragment->hasAttr(kIsGspmdPartitioned);
       auto fragment_call_op = rewriter.replaceOpWithNewOp<FragmentCallOp>(
           fragment, fragment.getResultTypes(), fragment.getOperands(),
           fragment.getOrigin(), fragment.getMeshName(), group_name);
@@ -422,12 +421,6 @@ class LowerToFragmentCallsPass
       // attribute of fragment calls.).
       if (is_remat) {
         mpmd::MarkAsRemat(fragment_call_op, rewriter);
-      }
-      if (is_gspmd_partitioned) {
-        fragment_call_op->setAttr(kIsGspmdPartitioned, rewriter.getUnitAttr());
-      }
-      if (is_sdy_partitioned) {
-        fragment_call_op->setAttr(kIsSdyPartitioned, rewriter.getUnitAttr());
       }
     }
   }
