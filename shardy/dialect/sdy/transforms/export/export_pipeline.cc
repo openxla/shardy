@@ -106,6 +106,7 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
+  pm.addPass(createExportNamedComputationsPass());
 }
 
 void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
