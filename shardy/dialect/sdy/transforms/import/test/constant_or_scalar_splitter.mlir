@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-constant-or-scalar-splitter 2>&1 -split-input-file | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-constant-or-scalar-splitter | FileCheck %s
 
 // CHECK-LABEL: func @constant_with_unregistered_attr
 func.func @constant_with_unregistered_attr() -> tensor<8x16xf32> {

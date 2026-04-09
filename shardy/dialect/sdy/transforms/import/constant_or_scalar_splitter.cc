@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/Rewrite/FrozenRewritePatternSet.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "mlir/Support/WalkResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -239,6 +240,31 @@ struct ConstantOrScalarSplitterPass
     }
   }
 
+  // Assumes that the `NamedComputationOp` of the region are already walked, and
+  // skips walking on them.
+  void walkOnRegion(
+      mlir::Region& region,
+      llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps) {
+    llvm::SetVector<Operation*> constantOps;
+    llvm::SetVector<Operation*> scalarExpansionOps;
+    region.walk<WalkOrder::PreOrder>([&](Operation* op) {
+      processOp(op, constantOps, scalarExpansionOps,
+                nonConstantNamedComputationOps);
+      // Skip walking on the `NamedComputationOp`.
+      if (isa<NamedComputationOp>(op)) {
+        return WalkResult::skip();
+      }
+      return WalkResult::advance();
+    });
+    // Since for every op in `constantOps` that has a use that isn't in
+    // `constantOps`, we replaced the use with a clone of the entire
+    // sub-computation, we can now erase all ops in `constantOps` as long as we
+    // iterate in reverse order. Note that we did not clone scalars so we keep
+    // the original.
+    eraseUnusedOpsAlongWithItsShardingGroupUsers(llvm::concat<Operation* const>(
+        scalarExpansionOps, llvm::reverse(constantOps)));
+  }
+
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
 
@@ -249,42 +275,17 @@ struct ConstantOrScalarSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    SmallVector<llvm::SetVector<Operation*>> constantOps;
-    llvm::SetVector<Operation*> scalarExpansionOps;
     llvm::SmallDenseSet<StringRef> nonConstantNamedComputationOps;
-    constantOps.emplace_back();
-    moduleOp.walk<WalkOrder::PreOrder>([&](Operation* op) {
-      // Becuase it is a preorder walk, it visits the NamedComputationOp before
-      // its operations inside. The set created on top of `constantOps` stack is
-      // used for the top-level operations within the NamedComputationOp. This
-      // way, after it visits all operations inside the NamedComputationOp, it
-      // can identify the ops within the NamedComputationOp that has redundant
-      // copies and hence need to be erased.
-      if (isa<NamedComputationOp>(op)) {
-        constantOps.emplace_back();
-        return;
-      }
-      processOp(op, constantOps.back(), scalarExpansionOps,
-                nonConstantNamedComputationOps);
-      if (isa<sdy::ReturnOp>(op) &&
-          isa<NamedComputationOp>(op->getParentOp())) {
-        eraseUnusedOpsAlongWithItsShardingGroupUsers(
-            llvm::reverse(constantOps.back()));
-        constantOps.pop_back();
-        processOp(op->getParentOp(), constantOps.back(), scalarExpansionOps,
-                  nonConstantNamedComputationOps);
-        return;
-      }
+    // Iterate on a post-order of NamedComputationOp blocks.
+    moduleOp.walk([&](NamedComputationOp namedComputationOp) {
+      walkOnRegion(namedComputationOp.getBody(),
+                   nonConstantNamedComputationOps);
     });
-
-    // Since for every op in `constantOps` that has a use that isn't in
-    // `constantOps`, we replaced the use with a clone of the entire
-    // sub-computation, we can now erase all ops in `constantOps` as long as we
-    // iterate in reverse order. Note that we did not clone scalars so we keep
-    // the original.
-    eraseUnusedOpsAlongWithItsShardingGroupUsers(llvm::concat<Operation* const>(
-        scalarExpansionOps, llvm::reverse(constantOps.back())));
-    constantOps.pop_back();
+    // Iterate order does not matter. Funcs do not call each other. The calls
+    // are inlined to NamedComputationOps.
+    moduleOp.walk([&](FuncOp funcOp) {
+      walkOnRegion(funcOp.getBody(), nonConstantNamedComputationOps);
+    });
   }
 
  private:
