@@ -1,5 +1,6 @@
 // RUN: sdy_opt %s -split-input-file -sdy-constant-or-scalar-splitter | FileCheck %s
 
+
 // CHECK-LABEL: func @constant_with_unregistered_attr
 func.func @constant_with_unregistered_attr() -> tensor<8x16xf32> {
   // CHECK-NEXT: %[[CONST:.*]] = sdy.constant {foo} dense<1.000000e+00>
@@ -53,169 +54,207 @@ func.func @constant_multiple_users(%arg0: tensor<16x16xf32>) -> (tensor<8x16xf32
 
 // -----
 
-// CHECK-LABEL: func @constant_multiple_users_within_named_computation
-func.func @constant_multiple_users_within_named_computation(%arg0: tensor<16x16xf32>) -> tensor<8x16xf32> {
-  // CHECK-NEXT: %[[NC:.*]]:2 = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<16x16xf32>) {
-  // CHECK-NEXT:   %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[CONST_2:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[CONST_0]], %arg1
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[CONST_1]], %[[DOT_GENERAL]]
-  // CHECK-NEXT:   sdy.return %[[CONST_2]], %[[ADD]]
-  // CHECK-NEXT: } : (tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+// CHECK-LABEL: func @constant_multiple_users_within_call
+func.func @constant_multiple_users_within_call(%arg0: tensor<16x16xf32>) -> tensor<8x16xf32> {
+  // CHECK-NEXT: %[[NC:.*]]:2 = call @foo(%arg0) : (tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
   // CHECK-NEXT: %[[MULTIPLY:.*]] = stablehlo.multiply %[[NC]]#0, %[[NC]]#1
   // CHECK-NEXT: return %[[MULTIPLY]]
-  %0:2 = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<16x16xf32>) {
-    %1 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-    %2 = stablehlo.dot_general %1, %arg1, contracting_dims = [1] x [0] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-    %3 = stablehlo.add %1, %2 : tensor<8x16xf32>
-    sdy.return %1, %3 : tensor<8x16xf32>, tensor<8x16xf32>
-  } : (tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+  %0:2 = call @foo(%arg0) : (tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
   %4 = stablehlo.multiply %0#0, %0#1 : tensor<8x16xf32>
   return %4 : tensor<8x16xf32>
 }
 
-// -----
-
-// CHECK-LABEL: func @constant_multiple_users_within_named_computation_with_only_constant_ops
-func.func @constant_multiple_users_within_named_computation_with_only_constant_ops(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
-  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %arg0
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[ABS]]) (%arg1: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[NEGATE_0:.*]] = stablehlo.negate %[[CONST_0]]
-  // CHECK-NEXT:   %[[NEGATE_1:.*]] = stablehlo.negate %[[CONST_1]]
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE_0]], %arg1
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE_1]], %[[ADD]]
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]]
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[NEGATE_2:.*]] = stablehlo.negate %[[NC]]
-  // CHECK-NEXT: return %[[NEGATE_2]]
-  %0 = stablehlo.abs %arg0 : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg1: tensor<8x16xf32>) {
-    %2 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-    %3 = stablehlo.negate %2 : tensor<8x16xf32>
-    %4 = stablehlo.add %3, %arg1 : tensor<8x16xf32>
-    %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
-    sdy.return %5 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  %6 = stablehlo.negate %1 : tensor<8x16xf32>
-  return %6 : tensor<8x16xf32>
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG:.*]]: tensor<16x16xf32>)
+// CHECK-NEXT:   %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
+// CHECK-NEXT:   %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
+// CHECK-NEXT:   %[[CONST_2:.*]] = sdy.constant dense<1.000000e+00>
+// CHECK-NEXT:   %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[CONST_0]], %[[ARG]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[CONST_1]], %[[DOT_GENERAL]]
+// CHECK-NEXT:   return %[[CONST_2]], %[[ADD]]
+func.func private @foo(%arg1: tensor<16x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  %1 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %2 = stablehlo.dot_general %1, %arg1, contracting_dims = [1] x [0] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  %3 = stablehlo.add %1, %2 : tensor<8x16xf32>
+  return %1, %3 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
 // -----
 
-// CHECK-LABEL: func @constant_to_named_computation_with_only_constant_ops
-func.func @constant_to_named_computation_with_only_constant_ops(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_multiple_users_within_call_with_only_constant_ops
+func.func @constant_multiple_users_within_call_with_only_constant_ops(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %arg0
+  // CHECK-NEXT: %[[NC:.*]] = call @foo(%[[ABS]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE_2:.*]] = stablehlo.negate %[[NC]]
+  // CHECK-NEXT: return %[[NEGATE_2]]
+  %0 = stablehlo.abs %arg0 : tensor<8x16xf32>
+  %1 = call @foo(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %6 = stablehlo.negate %1 : tensor<8x16xf32>
+  return %6 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
+// CHECK-NEXT:   %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
+// CHECK-NEXT:   %[[NEGATE_0:.*]] = stablehlo.negate %[[CONST_0]]
+// CHECK-NEXT:   %[[NEGATE_1:.*]] = stablehlo.negate %[[CONST_1]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE_0]], %[[ARG]]
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE_1]], %[[ADD]]
+// CHECK-NEXT:   return %[[MULTIPLY]]
+// CHECK-NEXT: }
+func.func private @foo(%arg1: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %3 = stablehlo.negate %2 : tensor<8x16xf32>
+  %4 = stablehlo.add %3, %arg1 : tensor<8x16xf32>
+  %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
+  return %5 : tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @constant_to_call_with_only_constant_ops
+func.func @constant_to_call_with_only_constant_ops(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST]], %arg0) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %arg1
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %arg2
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]]
-  // CHECK-NEXT: } : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC:.*]] = call @foo(%[[CONST]], %arg0) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC]]
   // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC]]
   // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0, %arg0) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) {
-    %2 = stablehlo.negate %arg1 : tensor<8x16xf32>
-    %3 = stablehlo.add %2, %arg2 : tensor<8x16xf32>
-    %4 = stablehlo.multiply %2, %3 : tensor<8x16xf32>
-    sdy.return %4 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0, %arg0) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   %6 = stablehlo.abs %1 : tensor<8x16xf32>
   return %5, %6 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
-// -----
-
-// CHECK-LABEL: func @constant_multiple_users_within_named_computation_with_no_arguments_and_with_only_constant_ops
-func.func @constant_multiple_users_within_named_computation_with_no_arguments_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
-  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">()
-  // CHECK-NEXT:   %[[CONST0:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %[[CONST0]]
-  // CHECK-NEXT:   sdy.return %[[NEGATE0]]
-  // CHECK-NEXT: } : () -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">()
-  // CHECK-NEXT:   %[[CONST1:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %[[CONST1]]
-  // CHECK-NEXT:   sdy.return %[[NEGATE1]]
-  // CHECK-NEXT: } : () -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
-  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
-  // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
-  %0 = sdy.named_computation<"foo">() () {
-    %1 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-    %2 = stablehlo.negate %1 : tensor<8x16xf32>
-    sdy.return %2 : tensor<8x16xf32>
-  } : () -> tensor<8x16xf32>
-  %3 = stablehlo.abs %0 : tensor<8x16xf32>
-  %4 = stablehlo.abs %0 : tensor<8x16xf32>
-  return %3, %4 : tensor<8x16xf32>, tensor<8x16xf32>
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>, %[[ARG2:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG1]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %[[ARG2]]
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
+// CHECK-NEXT:   return %[[MULTIPLY]]
+// CHECK-NEXT: }
+func.func private @foo(%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.negate %arg1 : tensor<8x16xf32>
+  %3 = stablehlo.add %2, %arg2 : tensor<8x16xf32>
+  %4 = stablehlo.multiply %2, %3 : tensor<8x16xf32>
+  return %4 : tensor<8x16xf32>
 }
 
 // -----
 
-// CHECK-LABEL: func @constant_to_named_computation_with_one_argument_and_with_only_constant_ops
-func.func @constant_to_named_computation_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops
+func.func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %0 = call @foo_0() : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %1 = call @foo_1() : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %2 = stablehlo.abs %0 : tensor<8x16xf32>
+  // CHECK-NEXT: %3 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+  %0 = call @foo() : () -> (tensor<8x16xf32>)
+  %1 = stablehlo.abs %0 : tensor<8x16xf32>
+  %2 = stablehlo.abs %0 : tensor<8x16xf32>
+  return %1, %2 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo() -> tensor<8x16xf32> {
+func.func private @foo() -> tensor<8x16xf32> {
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = stablehlo.negate %0 : tensor<8x16xf32>
+  return %1 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:    %0 = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:    %1 = stablehlo.negate %0 : tensor<8x16xf32>
+// CHECK-NEXT:    return %1 : tensor<8x16xf32>
+// CHECK-NEXT:  }
+
+// CHECK-LABEL: func.func private @foo_1() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:    %0 = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:    %1 = stablehlo.negate %0 : tensor<8x16xf32>
+// CHECK-NEXT:    return %1 : tensor<8x16xf32>
+// CHECK-NEXT:  }
+
+// -----
+
+// CHECK-LABEL: func @constant_to_call_with_one_argument_and_with_only_constant_ops
+func.func @constant_to_call_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00>
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[NEGATE0]]
-  // CHECK-NEXT:   sdy.return %[[ADD0]]
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST1]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[NEGATE1]]
-  // CHECK-NEXT:   sdy.return %[[ADD1]]
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC0:.*]] = call @foo_0(%[[CONST0]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC1:.*]] = call @foo_1(%[[CONST1]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
   // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
   // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
-    %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
-    %3 = stablehlo.add %arg0, %2: tensor<8x16xf32>
-    sdy.return %3 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   %4 = stablehlo.abs %1 : tensor<8x16xf32>
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   return %4, %5 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+func.func private @foo(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
+  %3 = stablehlo.add %arg0, %2: tensor<8x16xf32>
+  return %3 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0
+// CHECK-SAME: (%[[ARG:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[ARG]], %[[NEGATE]]
+// CHECK-NEXT:   return %[[ADD]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: (%[[ARG:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[ARG]], %[[NEGATE]]
+// CHECK-NEXT:   return %[[ADD]]
+// CHECK-NEXT: }
+
+
 // -----
 
-// CHECK-LABEL: func @constant_multiple_users_one_to_named_computation_with_one_argument_and_with_only_constant_ops
-func.func @constant_multiple_users_one_to_named_computation_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_multiple_users_one_to_call_with_one_argument_and_with_only_constant_ops
+func.func @constant_multiple_users_one_to_call_with_one_argument_and_with_only_constant_ops() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00>
   // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00>
   // CHECK-NEXT: %[[CONST_2:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST_1]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[NEGATE0]]
-  // CHECK-NEXT:   sdy.return %[[ADD0]]
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST_2]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[NEGATE1]]
-  // CHECK-NEXT:   sdy.return %[[ADD1]]
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC0:.*]] = call @foo_0(%[[CONST_1]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC1:.*]] = call @foo_1(%[[CONST_2]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
   // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
   // CHECK-NEXT: return %[[CONST_0]], %[[ABS_0]], %[[ABS_1]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
-    %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
-    %3 = stablehlo.add %arg0, %2: tensor<8x16xf32>
-    sdy.return %3 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   %4 = stablehlo.abs %1 : tensor<8x16xf32>
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   return %0, %4, %5 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func.func private @foo
+func.func private @foo(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
+  %3 = stablehlo.add %arg0, %2: tensor<8x16xf32>
+  return %3 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0
+// CHECK-SAME: (%[[ARG:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[ARG]], %[[NEGATE]]
+// CHECK-NEXT:   return %[[ADD]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: (%[[ARG:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[ARG]], %[[NEGATE]]
+// CHECK-NEXT:   return %[[ADD]]
+// CHECK-NEXT: }
+
 
 // -----
 
@@ -751,89 +790,106 @@ func.func @broadcast_on_scalar_non_constant_does_not_propagate_constant_expansio
 
 // -----
 
-// CHECK-LABEL: func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_not_constant
-func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_not_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_both_to_call_and_inside_call_and_call_is_not_constant
+func.func @constant_both_to_call_and_inside_call_and_call_is_not_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<16x16xf32>
-  // CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<16x16xf32>
-  // CHECK-NEXT:   %[[DOT0:.*]] = stablehlo.dot %arg0, %[[CONST2]] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT:   %[[DOT1:.*]] = stablehlo.dot %arg0, %[[CONST3]] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[DOT0]], %[[DOT1]] : tensor<8x16xf32>
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]] : tensor<8x16xf32>
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC:.*]] = call @foo(%[[CONST0]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[NC]] : tensor<8x16xf32>
   // CHECK-NEXT: return %[[CONST1]], %[[NC]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
-    %2 = stablehlo.constant dense<1.000000e+00> : tensor<16x16xf32>
-    %3 = stablehlo.dot %arg0, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-    %4 = stablehlo.dot %arg0, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-    %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
-    sdy.return %5 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   %6 = stablehlo.negate %1: tensor<8x16xf32>
   return %0, %1, %6 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<16x16xf32>
+// CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<16x16xf32>
+// CHECK-NEXT:   %[[DOT0:.*]] = stablehlo.dot %[[ARG0]], %[[CONST2]] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+// CHECK-NEXT:   %[[DOT1:.*]] = stablehlo.dot %[[ARG0]], %[[CONST3]] : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[DOT0]], %[[DOT1]] : tensor<8x16xf32>
+// CHECK-NEXT:   return %[[MULTIPLY]] : tensor<8x16xf32>
+// CHECK-NEXT: }
+func.func private @foo(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.constant dense<1.000000e+00> : tensor<16x16xf32>
+  %3 = stablehlo.dot %arg0, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  %4 = stablehlo.dot %arg0, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
+  return %5 : tensor<8x16xf32>
+}
+
 // -----
 
-// CHECK-LABEL: func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant
-func.func @constant_both_to_named_computation_and_inside_named_computation_and_named_computation_is_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_both_to_call_and_inside_call_and_call_is_constant
+func.func @constant_both_to_call_and_inside_call_and_call_is_constant() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
   // CHECK-NEXT: %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST1]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[CONST4:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %arg0, %[[CONST3]] : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %arg0, %[[CONST4]] : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[MULTIPLY0:.*]] = stablehlo.multiply %[[ADD0]], %[[ADD1]] : tensor<8x16xf32>
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY0]] : tensor<8x16xf32>
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
-  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST2]]) (%arg0: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[CONST5:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[CONST6:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[ADD2:.*]] = stablehlo.add %arg0, %[[CONST5]] : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[ADD3:.*]] = stablehlo.add %arg0, %[[CONST6]] : tensor<8x16xf32>
-  // CHECK-NEXT:   %[[MULTIPLY1:.*]] = stablehlo.multiply %[[ADD2]], %[[ADD3]] : tensor<8x16xf32>
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY1]] : tensor<8x16xf32>
-  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC0:.*]] = call @foo_0(%[[CONST1]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC1:.*]] = call @foo_1(%[[CONST2]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[NC1]] : tensor<8x16xf32>
   // CHECK-NEXT: return %[[CONST0]], %[[NC0]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
-    %2 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-    %3 = stablehlo.add %arg0, %2 : tensor<8x16xf32>
-    %4 = stablehlo.add %arg0, %2 : tensor<8x16xf32>
-    %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
-    sdy.return %5 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   %6 = stablehlo.negate %1: tensor<8x16xf32>
   return %0, %1, %6 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+func.func private @foo(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %3 = stablehlo.add %arg0, %2 : tensor<8x16xf32>
+  %4 = stablehlo.add %arg0, %2 : tensor<8x16xf32>
+  %5 = stablehlo.multiply %3, %4 : tensor<8x16xf32>
+  return %5 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[ARG0]], %[[CONST2]] : tensor<8x16xf32>
+// CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[ARG0]], %[[CONST3]] : tensor<8x16xf32>
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[ADD0]], %[[ADD1]] : tensor<8x16xf32>
+// CHECK-NEXT:   return %[[MULTIPLY]] : tensor<8x16xf32>
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[CONST2:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:   %[[CONST3:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[ARG0]], %[[CONST2]] : tensor<8x16xf32>
+// CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[ARG0]], %[[CONST3]] : tensor<8x16xf32>
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[ADD0]], %[[ADD1]] : tensor<8x16xf32>
+// CHECK-NEXT:   return %[[MULTIPLY]] : tensor<8x16xf32>
+// CHECK-NEXT: }
+
 // -----
 
-// CHECK-LABEL: func @constant_to_named_computation_that_is_partially_constant_from_start
-func.func @constant_to_named_computation_that_is_partially_constant_from_start() -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+// CHECK-LABEL: func @constant_to_call_that_is_partially_constant_from_start
+func.func @constant_to_call_that_is_partially_constant_from_start() -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant dense<1.000000e+00>
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0: tensor<8x8xf32>) {
-  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   %[[DOT:.*]] = stablehlo.dot %[[NEGATE0]], %[[NEGATE1]]
-  // CHECK-NEXT:   sdy.return %[[DOT]]
-  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[NC:.*]] = call @foo(%[[CONST0]]) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   // CHECK-NEXT: return %[[NC]], %[[NC]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x8xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x8xf32>) {
-    %2 = stablehlo.negate %arg0 : tensor<8x8xf32>
-    %3 = stablehlo.negate %arg0 : tensor<8x8xf32>
-    %4 = stablehlo.dot %2, %3 : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
-    sdy.return %4 : tensor<8x8xf32>
-  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = call @foo(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   return %1, %1 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32>)
+// CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %[[ARG0]]
+// CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %[[ARG0]]
+// CHECK-NEXT:   %[[DOT:.*]] = stablehlo.dot %[[NEGATE0]], %[[NEGATE1]]
+// CHECK-NEXT:   return %[[DOT]]
+// CHECK-NEXT: }
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %2 = stablehlo.negate %arg0 : tensor<8x8xf32>
+  %3 = stablehlo.negate %arg0 : tensor<8x8xf32>
+  %4 = stablehlo.dot %2, %3 : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %4 : tensor<8x8xf32>
 }
 
 // -----
@@ -873,187 +929,245 @@ func.func @constant_to_while(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
 
 // -----
 
-// CHECK-LABEL: func @constant_completely_inside_named_computation_and_has_sharding_groups
-func.func @constant_completely_inside_named_computation_and_has_sharding_groups(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
-  // CHECK: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0)
-  %0 = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<8x16xf32>) {
-    %1 = stablehlo.abs %arg1 : tensor<8x16xf32>
-    // CHECK:      %[[CONST0:.*]] = sdy.constant
-    // CHECK-NEXT: sdy.sharding_group %[[CONST0]] group_id=0
-    // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant
-    // CHECK-NEXT: sdy.sharding_group %[[CONST1]] group_id=0
-    // CHECK-NEXT: %[[DOT0:.*]] = stablehlo.dot %{{.*}}, %[[CONST0]]
-    // CHECK-NEXT: %[[DOT1:.*]] = stablehlo.dot %[[DOT0]], %[[CONST1]]
-    // CHECK-NEXT: sdy.sharding_group %[[DOT1]] group_id=0
-    // CHECK-NEXT: stablehlo.add %[[DOT0]], %[[DOT1]]
-    %2 = stablehlo.constant dense<1.000000e+00> : tensor<16x16xf32>
-    sdy.sharding_group %2 group_id=0 : tensor<16x16xf32>
-    %4 = stablehlo.dot %1, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-    %5 = stablehlo.dot %4, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
-    sdy.sharding_group %5 group_id=0 : tensor<8x16xf32>
-    %6 = stablehlo.add %4, %5 : tensor<8x16xf32>
-    %7 = stablehlo.abs %6 : tensor<8x16xf32>
-    sdy.return %7 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+// CHECK-LABEL: func @constant_completely_inside_call_and_has_sharding_groups
+func.func @constant_completely_inside_call_and_has_sharding_groups(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  // CHECK: %[[NC:.*]] = call @foo(%arg0)
+  %0 = call @foo(%arg0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK: %[[NEGATE:.*]] = stablehlo.negate %[[NC]]
   // CHECK-NEXT: return %[[NEGATE]]
   %8 = stablehlo.negate %0: tensor<8x16xf32>
   return %8 : tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[ABS:.*]] = stablehlo.abs
+// CHECK-NEXT:   %[[CONST0:.*]] = sdy.constant
+// CHECK-NEXT:   sdy.sharding_group %[[CONST0]] group_id=0
+// CHECK-NEXT:   %[[CONST1:.*]] = sdy.constant
+// CHECK-NEXT:   sdy.sharding_group %[[CONST1]] group_id=0
+// CHECK-NEXT:   %[[DOT0:.*]] = stablehlo.dot %[[ABS]], %[[CONST0]]
+// CHECK-NEXT:   %[[DOT1:.*]] = stablehlo.dot %[[DOT0]], %[[CONST1]]
+// CHECK-NEXT:   sdy.sharding_group %[[DOT1]] group_id=0
+// CHECK-NEXT:   stablehlo.add %[[DOT0]], %[[DOT1]]
+func.func private @foo(%arg1: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %1 = stablehlo.abs %arg1 : tensor<8x16xf32>
+  %2 = stablehlo.constant dense<1.000000e+00> : tensor<16x16xf32>
+  sdy.sharding_group %2 group_id=0 : tensor<16x16xf32>
+  %4 = stablehlo.dot %1, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  %5 = stablehlo.dot %4, %2 : (tensor<8x16xf32>, tensor<16x16xf32>) -> tensor<8x16xf32>
+  sdy.sharding_group %5 group_id=0 : tensor<8x16xf32>
+  %6 = stablehlo.add %4, %5 : tensor<8x16xf32>
+  %7 = stablehlo.abs %6 : tensor<8x16xf32>
+  return %7 : tensor<8x16xf32>
+}
+
 // -----
 
-// CHECK-LABEL: func @constant_to_and_inside_nested_named_computations
-func.func @constant_to_and_inside_nested_named_computations() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_to_and_inside_nested_calls
+func.func @constant_to_and_inside_nested_calls() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant
-  // CHECK-NEXT: %[[NC_OUTER0:.*]] = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0:
-  // CHECK-NEXT:   %[[NC_INNER0:.*]]:2 = sdy.named_computation<"bar">(%arg0) (%arg1:
-  // CHECK-NEXT:     %[[CONST20:.*]] = sdy.constant
-  // CHECK-NEXT:     %[[CONST30:.*]] = sdy.constant
-  // CHECK-NEXT:     sdy.return %[[CONST20]], %[[CONST30]]
-  // CHECK-NEXT:   }
-  // CHECK-NEXT:   %[[MULTIPLY0:.*]] = stablehlo.multiply %[[NC_INNER0:.*]]#0, %[[NC_INNER0:.*]]#1
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY0]]
-  // CHECK-NEXT: }
-  // CHECK-NEXT: %[[NC_OUTER1:.*]] = sdy.named_computation<"foo">(%[[CONST1]]) (%arg0:
-  // CHECK-NEXT:   %[[NC_INNER1:.*]]:2 = sdy.named_computation<"bar">(%arg0) (%arg1:
-  // CHECK-NEXT:     %[[CONST21:.*]] = sdy.constant
-  // CHECK-NEXT:     %[[CONST31:.*]] = sdy.constant
-  // CHECK-NEXT:     sdy.return %[[CONST21]], %[[CONST31]]
-  // CHECK-NEXT:   }
-  // CHECK-NEXT:   %[[MULTIPLY1:.*]] = stablehlo.multiply %[[NC_INNER1:.*]]#0, %[[NC_INNER1:.*]]#1
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY1]]
-  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[NC_OUTER0:.*]] = call @foo_1(%[[CONST0]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC_OUTER1:.*]] = call @foo_3(%[[CONST1]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CONST1]], %[[NC_OUTER1]]
   // CHECK-NEXT: return %[[NC_OUTER0]], %[[ADD]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
-    %2:2 = sdy.named_computation<"bar">(%arg0) (%arg1: tensor<8x16xf32>) {
-      %3 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-      sdy.return %3, %3 : tensor<8x16xf32>, tensor<8x16xf32>
-    } : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
-    %4 = stablehlo.multiply %2#0, %2#1 : tensor<8x16xf32>
-    sdy.return %4 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   %5 = stablehlo.add %0, %1: tensor<8x16xf32>
   return %1, %5 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+func.func private @foo(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2:2 = call @bar(%arg0) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+  %4 = stablehlo.multiply %2#0, %2#1 : tensor<8x16xf32>
+  return %4 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @bar
+func.func private @bar(%arg1: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  %3 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  return %3, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @bar_0
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) attributes {sdy.original_func_name = "bar"}
+// CHECK-NEXT:   %[[CONST21:.*]] = sdy.constant
+// CHECK-NEXT:   %[[CONST31:.*]] = sdy.constant
+// CHECK-NEXT:   return %[[CONST21]], %[[CONST31]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>) -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:   %[[NC_INNER1:.*]]:2 = call @bar_0(%[[ARG0]]) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+// CHECK-NEXT:   %[[MULTIPLY1:.*]] = stablehlo.multiply %[[NC_INNER1]]#0, %[[NC_INNER1]]#1
+// CHECK-NEXT:   return %[[MULTIPLY1]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @bar_2
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) attributes {sdy.original_func_name = "bar"}
+// CHECK-NEXT:   %[[CONST21:.*]] = sdy.constant
+// CHECK-NEXT:   %[[CONST31:.*]] = sdy.constant
+// CHECK-NEXT:   return %[[CONST21]], %[[CONST31]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_3
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>) -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:   %[[NC_INNER1:.*]]:2 = call @bar_2(%[[ARG0]]) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+// CHECK-NEXT:   %[[MULTIPLY1:.*]] = stablehlo.multiply %[[NC_INNER1]]#0, %[[NC_INNER1]]#1
+// CHECK-NEXT:   return %[[MULTIPLY1]]
+// CHECK-NEXT: }
+
 // -----
 
-// CHECK-LABEL: func @constant_to_multi_result_named_computation
-func.func @constant_to_multi_result_named_computation() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_to_multi_result_call
+func.func @constant_to_multi_result_call() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant
-  // CHECK-NEXT: %[[NC0:.*]]:2 = sdy.named_computation<"foo">(%[[CONST0]]) (%arg0:
-  // CHECK-NEXT:   %[[NEGATE0:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   sdy.return %arg0, %[[NEGATE0]]
-  // CHECK-NEXT: }
-  // CHECK-NEXT: %[[NC1:.*]]:2 = sdy.named_computation<"foo">(%[[CONST1]]) (%arg0:
-  // CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %arg0
-  // CHECK-NEXT:   sdy.return %arg0, %[[NEGATE1]]
-  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[NC0:.*]]:2 = call @foo_0(%[[CONST0]]) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+  // CHECK-NEXT: %[[NC1:.*]]:2 = call @foo_1(%[[CONST1]]) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
   // CHECK-NEXT: return %[[NC0]]#0, %[[NC1]]#1
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1:2 = sdy.named_computation<"foo">(%0) (%arg0: tensor<8x16xf32>) {
-    %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
-    sdy.return %arg0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
-  } : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
+  %1:2 = call @foo(%0) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>)
   return %1#0, %1#1 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+func.func private @foo(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  %2 = stablehlo.negate %arg0 : tensor<8x16xf32>
+  return %arg0, %2 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %[[ARG0]]
+// CHECK-NEXT:   return %[[ARG0]], %[[NEGATE1]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:   %[[NEGATE1:.*]] = stablehlo.negate %[[ARG0]]
+// CHECK-NEXT:   return %[[ARG0]], %[[NEGATE1]]
+// CHECK-NEXT: }
+
 // -----
 
-// CHECK-LABEL: func @constant_to_inner_named_computation_that_is_constant_expression
-func.func @constant_to_inner_named_computation_that_is_constant_expression() -> tensor<8x8xf32> {
-  // CHECK-NEXT: %[[NC_OUTER:.*]] = sdy.named_computation<"foo">() () {
-  // CHECK-NEXT:   %[[CONST0:.*]] = sdy.constant
-  // CHECK-NEXT:   %[[CONST1:.*]] = sdy.constant
-  // CHECK-NEXT:   %[[NC_INNER0:.*]]:2 = sdy.named_computation<"bar">(%[[CONST0]]) (%arg0:
-  // CHECK-NEXT:     %[[CONST2:.*]] = sdy.constant
-  // CHECK-NEXT:     %[[CONST3:.*]] = sdy.constant
-  // CHECK-NEXT:     sdy.return %[[CONST2]], %[[CONST3]]
-  // CHECK-NEXT:    }
-  // CHECK-NEXT:    %[[NC_INNER1:.*]]:2 = sdy.named_computation<"bar">(%[[CONST1]]) (%arg0:
-  // CHECK-NEXT:      %[[CONST4:.*]] = sdy.constant
-  // CHECK-NEXT:      %[[CONST5:.*]] = sdy.constant
-  // CHECK-NEXT:      sdy.return %[[CONST4]], %[[CONST5]]
-  // CHECK-NEXT:    }
-  // CHECK-NEXT:   %[[DOT:.*]] = stablehlo.dot %[[NC_INNER0]]#0, %[[NC_INNER1]]#1
-  // CHECK-NEXT:   sdy.return %[[DOT]]
-  // CHECK-NEXT: }
+// CHECK-LABEL: func @constant_to_inner_call_that_is_constant_expression
+func.func @constant_to_inner_call_that_is_constant_expression() -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[NC_OUTER:.*]] = call @foo() : () -> tensor<8x8xf32>
   // CHECK-NEXT: return %[[NC_OUTER]]
-  %0 = sdy.named_computation<"foo">() () {
-    %1 = stablehlo.constant dense<1.000000e+00> : tensor<8x8xf32>
-    %2:2 = sdy.named_computation<"bar">(%1) (%arg0: tensor<8x8xf32>) {
-      %3 = stablehlo.constant dense<1.000000e+00> : tensor<8x8xf32>
-      sdy.return %3, %3 : tensor<8x8xf32>, tensor<8x8xf32>
-    } : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
-    %4 = stablehlo.dot %2#0, %2#1 : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
-    sdy.return %4 : tensor<8x8xf32>
-  } : () -> tensor<8x8xf32>
+  %0 = call @foo() : () -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: ()
+// CHECK-NEXT:   %[[CONST0:.*]] = sdy.constant
+// CHECK-NEXT:   %[[CONST1:.*]] = sdy.constant
+// CHECK-NEXT:   %[[NC_INNER0:.*]]:2 = call @bar_0(%[[CONST0]]) : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+// CHECK-NEXT:   %[[NC_INNER1:.*]]:2 = call @bar_1(%[[CONST1]]) : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+// CHECK-NEXT:   %[[DOT:.*]] = stablehlo.dot %[[NC_INNER0]]#0, %[[NC_INNER1]]#1
+// CHECK-NEXT:   return %[[DOT]]
+// CHECK-NEXT: }
+func.func private @foo() -> tensor<8x8xf32> {
+  %1 = stablehlo.constant dense<1.000000e+00> : tensor<8x8xf32>
+  %2:2 = call @bar(%1) : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+  %4 = stablehlo.dot %2#0, %2#1 : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %4 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func.func private @bar
+func.func private @bar(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  %3 = stablehlo.constant dense<1.000000e+00> : tensor<8x8xf32>
+  return %3, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func.func private @bar_0
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) attributes {sdy.original_func_name = "bar"}
+// CHECK-NEXT:   %[[CONST4:.*]] = sdy.constant
+// CHECK-NEXT:   %[[CONST5:.*]] = sdy.constant
+// CHECK-NEXT:   return %[[CONST4]], %[[CONST5]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @bar_1
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) attributes {sdy.original_func_name = "bar"}
+// CHECK-NEXT:   %[[CONST4:.*]] = sdy.constant
+// CHECK-NEXT:   %[[CONST5:.*]] = sdy.constant
+// CHECK-NEXT:   return %[[CONST4]], %[[CONST5]]
+// CHECK-NEXT: }
+
 // -----
 
-// CHECK-LABEL: func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_all_arguments_are_constants
-func.func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_all_arguments_are_constants(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_to_call_with_multiple_arguments_and_with_only_constant_ops_all_arguments_are_constants
+func.func @constant_to_call_with_multiple_arguments_and_with_only_constant_ops_all_arguments_are_constants(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant
-  // CHECK-NEXT: %[[NC0:.*]] = sdy.named_computation<"foo">(%[[CONST0]], %[[CONST0]]) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %arg1
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %arg2
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]]
-  // CHECK-NEXT: }
-  // CHECK-NEXT: %[[NC1:.*]] = sdy.named_computation<"foo">(%[[CONST1]], %[[CONST1]]) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %arg1
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %arg2
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]]
-  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[NC0:.*]] = call @foo_0(%[[CONST0]], %[[CONST0]]) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC1:.*]] = call @foo_1(%[[CONST1]], %[[CONST1]]) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
   // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
   // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0, %0) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) {
-    %2 = stablehlo.negate %arg1 : tensor<8x16xf32>
-    %3 = stablehlo.add %2, %arg2 : tensor<8x16xf32>
-    %4 = stablehlo.multiply %2, %3 : tensor<8x16xf32>
-    sdy.return %4 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0, %0) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   %6 = stablehlo.abs %1 : tensor<8x16xf32>
   return %5, %6 : tensor<8x16xf32>, tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func.func private @foo
+func.func private @foo(%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.negate %arg1 : tensor<8x16xf32>
+  %3 = stablehlo.add %2, %arg2 : tensor<8x16xf32>
+  %4 = stablehlo.multiply %2, %3 : tensor<8x16xf32>
+  return %4 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>, %[[ARG2:.*]]: tensor<8x16xf32>) -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG1]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %[[ARG2]]
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
+// CHECK-NEXT:   return %[[MULTIPLY]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>, %[[ARG2:.*]]: tensor<8x16xf32>) -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG1]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %[[ARG2]]
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
+// CHECK-NEXT:   return %[[MULTIPLY]]
+// CHECK-NEXT: }
+
 // -----
 
-// CHECK-LABEL: func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_some_arguments_are_constants_some_not
-func.func @constant_to_named_computation_with_multiple_arguments_and_with_only_constant_ops_some_arguments_are_constants_some_not(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+// CHECK-LABEL: func @constant_to_call_with_multiple_arguments_and_with_only_constant_ops_some_arguments_are_constants_some_not
+func.func @constant_to_call_with_multiple_arguments_and_with_only_constant_ops_some_arguments_are_constants_some_not(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
   // CHECK-NEXT: %[[CONST0:.*]] = sdy.constant
   // CHECK-NEXT: %[[CONST1:.*]] = sdy.constant
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%[[CONST0]], %[[CONST1]], %arg0) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>, %arg3: tensor<8x16xf32>) {
-  // CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %arg1
-  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %arg2
-  // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
-  // CHECK-NEXT:   sdy.return %[[MULTIPLY]]
-  // CHECK-NEXT: }
+  // CHECK-NEXT: %[[NC:.*]] = call @foo(%[[CONST0]], %[[CONST1]], %arg0) : (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC]]
   // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC]]
   // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
-  %1 = sdy.named_computation<"foo">(%0, %0, %arg0) (%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>, %arg3: tensor<8x16xf32>) {
-    %2 = stablehlo.negate %arg1 : tensor<8x16xf32>
-    %3 = stablehlo.add %2, %arg2 : tensor<8x16xf32>
-    %4 = stablehlo.multiply %2, %3 : tensor<8x16xf32>
-    sdy.return %4 : tensor<8x16xf32>
-  } : (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = call @foo(%0, %0, %arg0) : (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   %5 = stablehlo.abs %1 : tensor<8x16xf32>
   %6 = stablehlo.abs %1 : tensor<8x16xf32>
   return %5, %6 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo
+// CHECK-SAME: (%[[ARG1:.*]]: tensor<8x16xf32>, %[[ARG2:.*]]: tensor<8x16xf32>, %[[ARG3:.*]]: tensor<8x16xf32>)
+// CHECK-NEXT:   %[[NEGATE:.*]] = stablehlo.negate %[[ARG1]]
+// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[NEGATE]], %[[ARG2]]
+// CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[NEGATE]], %[[ADD]]
+// CHECK-NEXT:   return %[[MULTIPLY]]
+// CHECK-NEXT: }
+func.func private @foo(%arg1: tensor<8x16xf32>, %arg2: tensor<8x16xf32>, %arg3: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %2 = stablehlo.negate %arg1 : tensor<8x16xf32>
+  %3 = stablehlo.add %2, %arg2 : tensor<8x16xf32>
+  %4 = stablehlo.multiply %2, %3 : tensor<8x16xf32>
+  return %4 : tensor<8x16xf32>
 }
 
 // -----
@@ -1069,4 +1183,113 @@ func.func @single_call(%arg0: tensor<8xf32>) -> tensor<8xf32> {
 // CHECK-LABEL: func private @foo
 func.func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   return %arg0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// CHECK-LABEL: func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops_with_sharding
+func.func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops_with_sharding() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[NC0:.*]] = call @foo_0() {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[NC1:.*]] = call @foo_1() {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS_0:.*]] = stablehlo.abs %[[NC0]]
+  // CHECK-NEXT: %[[ABS_1:.*]] = stablehlo.abs %[[NC1]]
+  // CHECK-NEXT: return %[[ABS_0]], %[[ABS_1]]
+  %0 = call @foo() {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} : () -> (tensor<8x16xf32>)
+  %1 = stablehlo.abs %0 : tensor<8x16xf32>
+  %2 = stablehlo.abs %0 : tensor<8x16xf32>
+  return %1, %2 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo
+func.func private @foo() -> tensor<8x16xf32> {
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = stablehlo.negate %0 : tensor<8x16xf32>
+  return %1 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0
+// CHECK-SAME: () -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:    %[[CONST1:.*]] = sdy.constant
+// CHECK-NEXT:    %[[NEGATE1:.*]] = stablehlo.negate %[[CONST1]]
+// CHECK-NEXT:    return %[[NEGATE1]]
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func private @foo_1
+// CHECK-SAME: () -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"}
+// CHECK-NEXT:    %[[CONST1:.*]] = sdy.constant
+// CHECK-NEXT:    %[[NEGATE1:.*]] = stablehlo.negate %[[CONST1]]
+// CHECK-NEXT:    return %[[NEGATE1]]
+// CHECK-NEXT: }
+
+// -----
+
+// CHECK-LABEL: func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops_foo_calls_bar
+func.func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops_foo_calls_bar() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %0 = call @foo_2() : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %1 = call @foo_4() : () -> tensor<8x16xf32>
+  // CHECK-NEXT: %2 = stablehlo.abs %0 : tensor<8x16xf32>
+  // CHECK-NEXT: %3 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+  %0 = call @foo() : () -> (tensor<8x16xf32>)
+  %1 = stablehlo.abs %0 : tensor<8x16xf32>
+  %2 = stablehlo.abs %0 : tensor<8x16xf32>
+  return %1, %2 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo() -> tensor<8x16xf32> {
+func.func private @foo() -> tensor<8x16xf32> {
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = call @bar(%0) : (tensor<8x16xf32>) -> (tensor<8x16xf32>)
+  return %1 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @bar(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+func.func private @bar(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> {
+  %0 = stablehlo.negate %arg0 : tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @bar_1(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> attributes {sdy.original_func_name = "bar"} {
+
+// CHECK-LABEL: func.func private @foo_2() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:    %0 = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:    %1 = call @bar_1(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+// CHECK-NEXT:    return %1 : tensor<8x16xf32>
+// CHECK-NEXT:  }
+
+// CHECK-LABEL: func.func private @bar_3(%arg0: tensor<8x16xf32>) -> tensor<8x16xf32> attributes {sdy.original_func_name = "bar"} {
+
+// CHECK-LABEL: func.func private @foo_4() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:    %0 = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+// CHECK-NEXT:    %1 = call @bar_3(%0) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+// CHECK-NEXT:    return %1 : tensor<8x16xf32>
+// CHECK-NEXT:  }
+
+// -----
+
+// CHECK-LABEL: func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops_foo_calls_bar_not_constant
+func.func @constant_multiple_users_within_call_with_no_arguments_and_with_only_constant_ops_foo_calls_bar_not_constant() -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %0 = call @foo() : () -> tensor<8x8xf32>
+  // CHECK-NEXT: %1 = stablehlo.abs %0 : tensor<8x8xf32>
+  // CHECK-NEXT: %2 = stablehlo.abs %0 : tensor<8x8xf32>
+  // CHECK-NEXT: return %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>
+  %0 = call @foo() : () -> (tensor<8x8xf32>)
+  %1 = stablehlo.abs %0 : tensor<8x8xf32>
+  %2 = stablehlo.abs %0 : tensor<8x8xf32>
+  return %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func.func private @foo() -> tensor<8x8xf32> {
+func.func private @foo() -> tensor<8x8xf32> {
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x8xf32>
+  %1 = call @bar(%0) : (tensor<8x8xf32>) -> (tensor<8x8xf32>)
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func.func private @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func private @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = stablehlo.dot %arg0, %arg0 : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
 }
