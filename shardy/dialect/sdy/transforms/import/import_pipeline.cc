@@ -28,10 +28,10 @@ namespace sdy {
 void addImportPipeline(OpPassManager& pm, int& dumpIndex,
                        const PropagationOptions& options) {
   pm.addPass(createSymbolDCEPass());
+  pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createImportFuncCallsPass());
   // Keep SymbolDCEPass after ImportFuncCallsPass.
   pm.addPass(createSymbolDCEPass());
-  pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createManualAxesCleanupPass());

@@ -183,19 +183,20 @@ sdy.mesh @mesh = <["x"=4]>
 
 // CHECK: sdy.mesh @mesh_0 = <["y"=8]>
 
-// CHECK-LABEL: func @named_computation
-func.func @named_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>) -> tensor<16x32xf32> {
-  // CHECK-NEXT: sdy.named_computation<"foo">(%arg0, %arg1)
-  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {}]>, <@mesh, [{?}, {?}]>]
-  // CHECK-SAME:   out_shardings=[<@mesh_0, [{}, {"y"}]>]
-  %0 = sdy.named_computation<"foo">(%arg0, %arg1)
-      in_shardings=[<@mesh, [{"x"}, {}]>, <mesh<["x"=4]>, [{?}, {?}]>]
-      out_shardings=[<mesh<["y"=8]>, [{}, {"y"}]>]
-      (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
-    %1 = stablehlo.add %arg2, %arg3 : tensor<16x32xf32>
-    sdy.return %1 : tensor<16x32xf32>
-  } : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<16x32xf32>
+// CHECK-LABEL: func @single_call
+func.func @single_call(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // CHECK-NEXT: call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_0, [{}, {"y"}]>]>}
+  %0 = call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<mesh<["y"=8]>, [{}, {"y"}]>]>} : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<16x32xf32>
   func.return %0: tensor<16x32xf32>
+}
+
+// CHECK-LABEL: func private @foo
+// CHECK-SAME: %arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}
+// CHECK-SAME: %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}]>}
+// CHECK-SAME: -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{}, {"y"}]>}
+func.func private @foo(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=4]>, [{?}, {?}]>}) -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<mesh<["y"=8]>, [{}, {"y"}]>}) {
+  %0 = stablehlo.add %arg0, %arg1 : tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
 }
 
 // -----
