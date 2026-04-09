@@ -1,8 +1,5 @@
-// RUN: split-file %s %t
-// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local --allow-unregistered-dialect | sdy_opt --sdy-drop-sharding-and-mesh --allow-unregistered-dialect > %t/part1_lowered.mlir
-// RUN: sed '1d; /^}/,$d' %t/part1_lowered.mlir > %t/combined.mlir
-// RUN: cat %t/part2.mlir >> %t/combined.mlir
-// RUN: stablehlo-translate --interpret %t/combined.mlir
+// RUN: %S/run_sdy_interpreter_test.sh %s %t
+
 
 //--- part1.mlir
 

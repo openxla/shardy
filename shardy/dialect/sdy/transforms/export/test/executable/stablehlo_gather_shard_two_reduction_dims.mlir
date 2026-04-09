@@ -1,15 +1,4 @@
-// RUN: split-file %s %t
-
-// Convert parallel_gather to a device function.
-// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local --sdy-drop-sharding-and-mesh \
-// RUN:         --allow-unregistered-dialect > %t/part1_processed.mlir
-
-// Assemble the final module for execution.
-// RUN: sed '1d; /^}/,$d' %t/part1_processed.mlir > %t/combined.mlir
-// RUN: cat %t/part2.mlir >> %t/combined.mlir
-
-// Execute via the interpreter.
-// RUN: stablehlo-translate --interpret %t/combined.mlir
+// RUN: %S/run_sdy_interpreter_test.sh %s %t
 
 //--- part1.mlir
 

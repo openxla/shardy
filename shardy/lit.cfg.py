@@ -41,8 +41,11 @@ tools = [
     'stablehlo-translate',
 ]
 tool_dirs = [
-    config.llvm_tools_dir,
-    config.shardy_tools_dir,
-    config.stablehlo_tools_dir,
+    os.path.abspath(config.llvm_tools_dir),
+    os.path.abspath(config.shardy_tools_dir),
+    os.path.abspath(config.stablehlo_tools_dir),
 ]
 llvm_config.add_tool_substitutions(tools, tool_dirs)
+config.environment['PATH'] = os.path.pathsep.join(
+    tool_dirs + [config.environment.get('PATH', '')]
+)
