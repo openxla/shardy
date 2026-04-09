@@ -1306,7 +1306,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       // (e.g., `stablehlo::WhileOp`) or don't require any propagation
       // (`stablehlo::ConstantOp`).
       // TODO(b/327191011): output unregistered op stats instead.
-      .Case<ModuleOp, func::FuncOp, ConstantOp, DataFlowEdgeOp,
+      .Case<ModuleOp, func::FuncOp, func::CallOp, ConstantOp, DataFlowEdgeOp,
             ManualComputationOp, MeshOp, PropagationBarrierOp,
             ShardableDataFlowOpInterface, ShardingGroupOp, ReshardOp,
             stablehlo::AfterAllOp, stablehlo::CaseOp, stablehlo::ConstantOp,
