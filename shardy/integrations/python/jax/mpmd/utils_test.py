@@ -75,7 +75,7 @@ class UtilsTest(parameterized.TestCase):
     )
 
     named_shardings = utils.meshes_and_sdy_specs_to_named_shardings(
-        meshes_and_specs, in_pytree, out_pytree, topology
+        0, meshes_and_specs, in_pytree, out_pytree, topology
     )
     expected_input_specs = (
         (
