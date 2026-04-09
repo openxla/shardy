@@ -69,7 +69,6 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
-  pm.addPass(createExportNamedComputationsPass());
 }
 
 void addPropagationPipeline(OpPassManager& pm,
