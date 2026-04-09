@@ -657,11 +657,16 @@ TensorShardingPerValueAttr getFuncResultShardings(
 // functions are processed before their callers, and child blocks are processed
 // before their parents. Iterates calls and blocks in pre order if `preOrder` is
 // true, that is, the functions are processed after their callers, and child
-// blocks are processed after their parents. Returns false if the walk was
-// interrupted, returns true otherwise.
+// blocks are processed after their parents. Returns nullopt if the walk was
+// interrupted, returns the main func otherwise.
 using ProcessCallOpFn = std::function<mlir::WalkResult(func::CallOp)>;
-bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
-               bool preOrder = false);
+std::optional<func::FuncOp> walkCalls(ModuleOp moduleOp,
+                                      ProcessCallOpFn processCallOp,
+                                      bool preOrder = false);
+// Walks calls as in `walkCalls` and returns the main func. Dies if the the walk
+// is interrupted, or otherwise it can not identify the main function.
+func::FuncOp walkCallsOrDie(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+                            bool preOrder = false);
 
 // Returns the reduction operation used in the scatter's update computation if
 // it is a recognized associative and commutative binary op applied to all

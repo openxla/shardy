@@ -973,8 +973,10 @@ TensorShardingPerValueAttr getFuncResultShardings(
   }
   return TensorShardingPerValueAttr::get(funcOp.getContext(), resultShardings);
 }
-bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
-               bool preOrder) {
+
+std::optional<FuncOp> walkCalls(ModuleOp moduleOp,
+                                ProcessCallOpFn processCallOp, bool preOrder) {
+  FuncOp mainFuncOp;
   CallGraph callGraph(moduleOp);
   llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
   if (preOrder) {  // Iterate pre-order.
@@ -982,27 +984,45 @@ bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
       if (node->isExternal()) {
         continue;
       }
-      if (node->getCallableRegion()
+      mlir::Region* region = node->getCallableRegion();
+      // The first func is the main one as it is in pre-order.
+      if (auto funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp());
+          !mainFuncOp && funcOp) {
+        mainFuncOp = funcOp;
+      }
+      if (region
               ->walk<WalkOrder::PreOrder>(
                   [&](CallOp callOp) { return processCallOp(callOp); })
               .wasInterrupted()) {
-        return false;
+        return std::nullopt;
       }
     }
-    return true;
-  }
-  // Iterate post-order.
-  for (CallGraphNode* node : llvm::reverse(rpo)) {
-    if (node->isExternal()) {
-      continue;
+  } else {
+    // Iterate post-order.
+    for (CallGraphNode* node : llvm::reverse(rpo)) {
+      if (node->isExternal()) {
+        continue;
+      }
+      mlir::Region* region = node->getCallableRegion();
+      // The last func is the main one as it is in post-order.
+      if (auto funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp());
+          funcOp) {
+        mainFuncOp = funcOp;
+      }
+      if (region->walk([&](CallOp callOp) { return processCallOp(callOp); })
+              .wasInterrupted()) {
+        return std::nullopt;
+      }
     }
-    if (node->getCallableRegion()
-            ->walk([&](CallOp callOp) { return processCallOp(callOp); })
-            .wasInterrupted()) {
-      return false;
-    }
   }
-  return true;
+  return mainFuncOp;
+}
+
+FuncOp walkCallsOrDie(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+                      bool preOrder) {
+  auto mainFuncOp = walkCalls(moduleOp, processCallOp, preOrder);
+  SDY_CHECK(mainFuncOp);
+  return *mainFuncOp;
 }
 
 Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter) {

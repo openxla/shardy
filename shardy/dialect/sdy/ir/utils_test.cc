@@ -647,6 +647,49 @@ TEST_F(UtilsTest, WalkCalls_Interrupted) {
   EXPECT_THAT(calledFuncs, ElementsAre("baz"));
 }
 
+TEST_F(UtilsTest, WalkCallsPostOrder_ReturnsMainFunc) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @bar()\n"
+      "  func.func private @foo() {\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @mymain() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  EXPECT_THAT(
+      walkCalls(localModule.get(),
+                [&](func::CallOp callOp) { return WalkResult::advance(); })
+          ->getName(),
+      "mymain");
+}
+
+TEST_F(UtilsTest, WalkCallsPreOrder_ReturnsMainFunc) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @bar()\n"
+      "  func.func private @foo() {\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @mymain() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  EXPECT_THAT(walkCalls(
+                  localModule.get(),
+                  [&](func::CallOp callOp) { return WalkResult::advance(); },
+                  /*preOrder=*/true)
+                  ->getName(),
+              "mymain");
+}
+
 TEST_F(UtilsTest, GetShardableValue_AsyncStartOp) {
   OwningOpRef<ModuleOp> localModule =
       mlir::parseSourceString<ModuleOp>(R"mlir(module {
