@@ -70,6 +70,10 @@ void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
 bool isConstantPreserving(
     Operation* op,
     const llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps) {
+  if (auto namedComputationOp = dyn_cast<NamedComputationOp>(op)) {
+    return !nonConstantNamedComputationOps.contains(
+        namedComputationOp.getName());
+  }
   if (!isPure(op)) {
     return false;
   }
@@ -79,10 +83,6 @@ bool isConstantPreserving(
   }
   if (isElementwise(op)) {
     return true;
-  }
-  if (auto namedComputationOp = dyn_cast<NamedComputationOp>(op)) {
-    return !nonConstantNamedComputationOps.contains(
-        namedComputationOp.getName());
   }
   return false;
 }
