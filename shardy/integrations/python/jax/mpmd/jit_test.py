@@ -77,7 +77,6 @@ class SdyPropagationTest(parameterized.TestCase):
         np.ones((10, 3), dtype=jnp.float32),
     )
 
-    self.assertIn('mpmd.sdy_lowered', lowered.as_text('mpmd'))
     self.assertIn('ifrt.Call', lowered.as_text('ifrt'))
     self.assertEqual(
         lowered.function_named_shardings.input_specs,
@@ -177,7 +176,6 @@ class SdyPropagationTest(parameterized.TestCase):
         np.ones((16, 10, 3), dtype=jnp.float32),
     )
 
-    self.assertIn('mpmd.sdy_lowered', lowered.as_text('mpmd'))
     self.assertEqual(
         lowered.function_named_shardings.input_specs,
         (

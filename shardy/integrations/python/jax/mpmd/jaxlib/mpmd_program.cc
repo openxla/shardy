@@ -255,7 +255,6 @@ void MpmdProgram::PropagateSharding(ModuleOp module) {
   pm.enableVerifier(kEnableVerifier);
 
   addShardingPropagationPipeline(pm, "");
-  module->setAttr(kIsSdyPartitioned, Builder(module).getBoolAttr(true));
 
   ErrorDiagnosticHandler diagnostic_handler(module.getContext());
   return diagnostic_handler.ConsumeStatus(pm.run(module));
