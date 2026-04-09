@@ -19,6 +19,9 @@ func.func @split_constants_different_sharding(
   return %0, %2 : tensor<8x16xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // This test checks that the propagation pipeline invokes the highest strategy
 // in the hierarchy, which is the user-priority propagation.
 // CHECK-LABEL: func @user_priorities(
@@ -39,6 +42,9 @@ func.func @user_priorities(
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @sharding_constraint_applied
 func.func @sharding_constraint_applied(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
     -> tensor<8x8xf32> {
@@ -48,6 +54,9 @@ func.func @sharding_constraint_applied(%arg0: tensor<8x8xf32> {sdy.sharding = #s
   return %1 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // This test verifies that there is no sharding_constraint in the result.
 // CHECK-LABEL: func @sharding_constraint_replaced_with_reshard
 func.func @sharding_constraint_replaced_with_reshard(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -56,6 +65,9 @@ func.func @sharding_constraint_replaced_with_reshard(%arg0: tensor<8x8xf32>) -> 
   // CHECK-NEXT: return %arg0, %0
   return %arg0, %0 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @size_zero_dim_sharded
 // CHECK-SAME: %arg0: tensor<8x0xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>}
@@ -228,6 +240,9 @@ func.func @manual_computation_with_tokens(
   return %0#0, %0#1 : !stablehlo.token, tensor<4x4xi64>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @do_not_propagate_manual_axes_to_manual_computation(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
 // CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b"}]>}) {
@@ -249,6 +264,8 @@ func.func @do_not_propagate_manual_axes_to_manual_computation(%arg0: tensor<8xf3
   return %1 : tensor<8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 sdy.mesh @mesh_a_2 = <["a"=2]>
 
 // TODO(b/412780544): Add another example this time without broadcast.
@@ -292,6 +309,9 @@ func.func @dot_general_with_unreduced_result(
   return %1 : tensor<8x16xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @dot_general_with_unreduced_result_fully_delayed(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b", "c"}]>},
 // CHECK-SAME:      %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "c"}, {}]>})
@@ -311,6 +331,9 @@ func.func @dot_general_with_unreduced_result_fully_delayed(
   %1 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {?}], unreduced={"b", "c"}>]>} : tensor<8x16xf32>
   return %1 : tensor<8x16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @dot_general_with_unreduced_result_partially_delayed(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b", "c"}]>},

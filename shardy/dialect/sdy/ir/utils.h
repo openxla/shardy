@@ -673,6 +673,11 @@ func::FuncOp walkCallsOrDie(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
 // variadic inputs. Returns nullptr otherwise.
 Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter);
 
+// TODO(enver): Combine `cloneFuncRecursively` with the one at xla utils.
+// Clones given `funcOp` recursively and returns the (top) cloned funcOp.
+mlir::func::FuncOp cloneFuncRecursively(func::FuncOp funcOp,
+                                        SymbolTable& symbolTable);
+
 }  // namespace sdy
 }  // namespace mlir
 

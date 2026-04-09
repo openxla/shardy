@@ -30,10 +30,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
-  pm.addPass(createImportFuncCallsPass());
-  // Keep SymbolDCEPass after ImportFuncCallsPass.
-  pm.addPass(createSymbolDCEPass());
   pm.addPass(createConstantOrScalarSplitterPass());
+  pm.addPass(createSymbolDCEPass());
+  pm.addPass(createImportFuncCallsPass());
   pm.addPass(createManualAxesCleanupPass());
 
   // We dump the module before propagation at this point, since the import
