@@ -109,3 +109,18 @@ func.func @manual_computation_inlined_mesh(%arg0: tensor<8x16xf32>, %arg1: tenso
   } : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func @single_call
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{"b"}, {?}]>}
+func.func @single_call(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{"a", "b"}, {"c", ?}]>}) -> tensor<8x8xf32> {
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func private @foo
+// CHECK-SAME: %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{"b"}, {?}]>}
+func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{"b", "a"}, {"c", ?}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh1, [{"b"}, {?}]>]>}
+  %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh1, [{"b", "a"}, {"c", ?}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
