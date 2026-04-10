@@ -392,14 +392,6 @@ func.func @main(%arg0: !mesh_1_tensor_4_8_f32)
       "topology"=#mpmd.topology<
       <"m1": <["x"=2]>>
     >} {
-  // This fragment and the next fragment are exactly the same. So there should
-  // be two fragment calls to the same function. One of the calls is annotated
-  // with `mpmd.is_gspmd_partitioned` and the other isn't.
-  // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) {mpmd.is_gspmd_partitioned
-  %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {mpmd.is_gspmd_partitioned, reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
-    %1 = stablehlo.abs %arg2: tensor<4x8xf32>
-    mpmd.return %1 : tensor<4x8xf32>
-  } : (!mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
   // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]> @[[FRAGMENT0:.*]](%arg0) :
   %2 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) {reserved_hbm_bytes = 0 : i64} (%arg2: tensor<4x8xf32>) {
     %3 = stablehlo.abs %arg2: tensor<4x8xf32>

@@ -48,18 +48,6 @@ constexpr StringRef kMeshShapeAttr = "mesh_shape";
 // The function attribute that holds the MPMD topology.
 constexpr StringRef kTopologyAttr = "topology";
 
-// TODO(b/428336749): Remove these attributes once gspmd path is gone.
-
-// When set in the module, it means that the module fragments have been SDY
-// sharded by Shardy.
-inline constexpr StringRef kIsSdyPartitioned = "mpmd.is_sdy_partitioned";
-
-// When set in the module, it means that the module fragments have been SPMD
-// sharded by GSPMD.
-// NOTE: once set, this attribute needs to be preserved throughout our lowering
-// pipelines, so that it survives lowering to IFRT-IR and can be used to build
-// compiling options.
-inline constexpr StringRef kIsGspmdPartitioned = "mpmd.is_gspmd_partitioned";
 
 // The suffix of the mesh name for a CPU mesh.
 // LINT.IfChange
