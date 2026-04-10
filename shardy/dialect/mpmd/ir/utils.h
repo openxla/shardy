@@ -48,18 +48,6 @@ constexpr StringRef kMeshShapeAttr = "mesh_shape";
 // The function attribute that holds the MPMD topology.
 constexpr StringRef kTopologyAttr = "topology";
 
-// TODO(b/428336749): Remove these attributes once gspmd path is gone.
-
-// When set in the module, it means that the module fragments have been SDY
-// sharded by Shardy.
-inline constexpr StringRef kIsSdyPartitioned = "mpmd.is_sdy_partitioned";
-
-// When set in the module, it means that the module fragments have been SPMD
-// sharded by GSPMD.
-// NOTE: once set, this attribute needs to be preserved throughout our lowering
-// pipelines, so that it survives lowering to IFRT-IR and can be used to build
-// compiling options.
-inline constexpr StringRef kIsGspmdPartitioned = "mpmd.is_gspmd_partitioned";
 
 // The suffix of the mesh name for a CPU mesh.
 // LINT.IfChange
@@ -83,10 +71,6 @@ inline constexpr StringRef kLayoutModeAttr = "mhlo.layout_mode";
 inline constexpr StringRef kLayoutModeDefault = "default";
 // Attr value to let compiler choose layout.
 inline constexpr StringRef kLayoutModeAuto = "auto";
-
-// A module attribute to indicate the module has been lowered with JAX using sdy
-// config. The dialect name prefix is needed.
-inline constexpr StringRef kIsSdyLowered = "mpmd.sdy_lowered";
 
 inline constexpr StringRef kRematAttributeName = "remat";
 
@@ -321,9 +305,6 @@ bool HasHomogeneousTopology(func::FuncOp func);
 // Returns the union of the origins of two different fragments.
 ArrayAttr GetFragmentOriginUnion(FragmentOp fragment1, FragmentOp fragment2,
                                  RewriterBase& rewriter);
-
-// Returns whether the module has been lowered with sdy config in JAX.
-bool IsLoweredWithSdy(ModuleOp module);
 
 // Checks if an operation is the result of rematerialization (e.g.,
 // created during during `mpmd-loop-remat`).
