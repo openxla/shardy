@@ -7,6 +7,8 @@
 !mesh_1_tensor_dist_x = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@m1, [{"x"}, {?}]>>
 !mesh_2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 
+sdy.mesh @m1 = <["x"=4, "y"=2]>
+
 // CHECK-LABEL: func @single_mesh
 func.func @single_mesh(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
     -> (!mesh_1_tensor) attributes {
