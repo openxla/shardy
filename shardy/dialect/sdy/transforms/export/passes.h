@@ -76,10 +76,10 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       llvm::cl::desc("Sink sdy.propagation_edges attr."),
       llvm::cl::init(false)};
 
-  Option<bool> avoidReshardsOnNamedComputations{
-      *this, "avoid-reshards-on-named-computations",
-      llvm::cl::desc("Avoid inserting explicit reshards/collectives for named "
-                     "computations."),
+  Option<bool> avoidReshardsOnCalls{
+      *this, "avoid-reshards-on-calls",
+      llvm::cl::desc(
+          "Avoid inserting explicit reshards/collectives for calls."),
       llvm::cl::init(false)};
 
   Option<bool> updateNonDivisibleInputOutputShardings{

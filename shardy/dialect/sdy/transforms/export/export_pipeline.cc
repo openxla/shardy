@@ -40,10 +40,9 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
-  passOptions.avoidReshardsOnNamedComputations =
-      options.avoidReshardsOnNamedComputations;
+  passOptions.avoidReshardsOnCalls = options.avoidReshardsOnCalls;
+  pm.addPass(createExportNamedComputationsPass());
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
@@ -98,12 +97,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
