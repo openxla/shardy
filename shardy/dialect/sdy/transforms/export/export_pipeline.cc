@@ -66,6 +66,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
           ? "after_partitioner_with_global_shapes"
           : "after_minimal_partitioner_with_global_shapes",
       dumpIndex++));
+  pm.addPass(createExportNamedComputationsPass());
 }
 
 }  // namespace
@@ -98,12 +99,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
