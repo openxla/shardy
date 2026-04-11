@@ -48,11 +48,14 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
     addCanonicalizerPass(pm, kReshardLabel);
+    pm.addPass(createExportNamedComputationsPass());
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     // NOTE: ReshardToCollectives pass above generates all-slice collectives,
     // which during the canonicalizer below may be converted to reduce scatters
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
   addCanonicalizerPass(pm, kCollectiveLabel);
   if (options.enableInsertExplicitCollectives &&
@@ -98,12 +101,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
