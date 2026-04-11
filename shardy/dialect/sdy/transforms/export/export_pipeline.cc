@@ -100,10 +100,10 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     runShardyPartitioner(pm, dumpIndex, options);
   }
 
+  pm.addPass(createExportNamedComputationsPass());
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
