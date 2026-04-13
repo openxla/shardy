@@ -47,8 +47,8 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
-    addCanonicalizerPass(pm, kReshardLabel);
     pm.addPass(createExportNamedComputationsPass());
+    addCanonicalizerPass(pm, kReshardLabel);
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     // NOTE: ReshardToCollectives pass above generates all-slice collectives,
     // which during the canonicalizer below may be converted to reduce scatters
