@@ -26,5 +26,15 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 "$SPLIT_FILE" "$SRC" "$TMP"
 "$SDY_OPT" "$TMP/part1.mlir" --sdy-convert-global-to-local --sdy-drop-sharding-and-mesh --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 sed '1d; /^}/,$d' "$TMP/part1_processed.mlir" > "$TMP/combined.mlir"
+
+# if part1.mlir doesn't contain routine @sequential_x, then remove sharding
+# from @parallel_x and rename it to @sequential_x.
+if ! grep -q "@sequential_" "$TMP/part1.mlir"; then
+  "$SDY_OPT" "$TMP/part1.mlir" --sdy-drop-sharding-and-mesh --allow-unregistered-dialect | \
+  sed 's/parallel_/sequential_/g' > "$TMP/part1_sequential.mlir"
+  sed '1d; /^}/,$d' "$TMP/part1_sequential.mlir" >> "$TMP/combined.mlir"
+fi
+
+
 cat "$TMP/part2.mlir" >> "$TMP/combined.mlir"
 "$STABLEHLO_TRANSLATE" --interpret "$TMP/combined.mlir"

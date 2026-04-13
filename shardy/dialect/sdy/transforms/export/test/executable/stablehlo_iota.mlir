@@ -1,22 +1,4 @@
-// RUN: split-file %s %t
-
-// 1. Generate the partitioned (localized) version of the function.
-// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local --allow-unregistered-dialect | \
-// RUN: sdy_opt --sdy-drop-sharding-and-mesh --allow-unregistered-dialect > %t/part1_lowered.mlir
-
-// 2. Generate the sequential reference by stripping shardings and renaming the function.
-// RUN: sdy_opt %t/part1.mlir --sdy-drop-sharding-and-mesh --allow-unregistered-dialect | \
-// RUN: sed 's/parallel_iota/sequential_iota/' > %t/part1_sequential.mlir
-
-// 3. Assemble the final module by unwrapping the bodies of both generated modules.
-// RUN: sed '1d; /^}/,$d' %t/part1_lowered.mlir > %t/combined.mlir
-// RUN: sed '1d; /^}/,$d' %t/part1_sequential.mlir >> %t/combined.mlir
-// RUN: cat %t/part2.mlir >> %t/combined.mlir
-// RUN: cat %t/combined.mlir
-
-// 4. Execute the combined test.
-// RUN: stablehlo-translate --interpret %t/combined.mlir
-
+// RUN: %S/run_sdy_interpreter_test.sh %s %t
 
 //--- part1.mlir
 
