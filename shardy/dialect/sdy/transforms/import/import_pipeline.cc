@@ -33,7 +33,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
-  pm.addPass(createImportFuncCallsPass());
 
   // We dump the module before propagation at this point, since the import
   // passes before are cleanup passes that make the module more readable, and
@@ -41,6 +40,7 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // of the propagation itself.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
+  pm.addPass(createImportFuncCallsPass());
 
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass(
       AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
