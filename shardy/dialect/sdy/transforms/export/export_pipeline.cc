@@ -55,12 +55,12 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // during InsertExplicitReshards pass.
   }
   addCanonicalizerPass(pm, kCollectiveLabel);
+  pm.addPass(createExportNamedComputationsPass());
   if (options.enableInsertExplicitCollectives &&
       options.removeAllGatherReduceScatterForCMV1) {
     pm.addNestedPass<func::FuncOp>(
         createRemoveAllGatherReduceScatterForCMV1Pass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory,
       options.enableInsertExplicitCollectives
