@@ -53,9 +53,11 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // which during the canonicalizer below may be converted to reduce scatters
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
+    pm.addPass(createExportNamedComputationsPass());
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
   addCanonicalizerPass(pm, kCollectiveLabel);
-  pm.addPass(createExportNamedComputationsPass());
   if (options.enableInsertExplicitCollectives &&
       options.removeAllGatherReduceScatterForCMV1) {
     pm.addNestedPass<func::FuncOp>(
