@@ -28,6 +28,17 @@ def ImportFuncCallsPass : Pass<"sdy-import-func-calls", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def EquiliseCallAndFuncResultShardingsPass : Pass<"sdy-equilise-call-and-func-result-shardings", "ModuleOp"> {
+  let summary = "Set call result shardings as the func result shardings, if empty.";
+  let description = [{
+     Creates a pass to equilise call and func result shardings if the call
+     result shardings are empty. Notably, it keeps call result sharding if the
+     call already has result shardings, even if all individual result shardings
+     are empty.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
   let summary = "Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s.";
   let description = [{
@@ -54,7 +65,7 @@ def InlineMeshesPass : Pass<"sdy-inline-meshes", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
-def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
+def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "ModuleOp"> {
   let summary = "Inserts `DataFlowEdgeOp` for every data-flow edge.";
   let description = [{
     Inserts `DataFlowEdgeOp` for every value that is the owner of a data-flow

@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/PatternMatch.h"
@@ -29,6 +30,9 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/import/passes.h.inc"
 
 namespace {
+
+using func::CallOp;
+using func::FuncOp;
 
 struct AddDataFlowEdgesPass
     : public impl::AddDataFlowEdgesPassBase<AddDataFlowEdgesPass> {
@@ -51,20 +55,25 @@ struct AddDataFlowEdgesPass
   }
 
   void runOnOperation() final {
-    func::FuncOp funcOp = getOperation();
-    IRRewriter rewriter(funcOp);
+    ModuleOp moduleOp = getOperation();
+    SymbolTable symbolTable(moduleOp);
+    IRRewriter rewriter(moduleOp);
 
-    funcOp.walk([&](ShardableDataFlowOpInterface op) {
+    moduleOp.walk([&](ShardableDataFlowOpInterface op) {
       // Add the data flow edges for result owners and block argument owners.
       addDataFlowEdges(op.getBlockArgumentEdgeOwners(), rewriter);
       addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
     });
+
+    llvm::SmallDenseSet<StringRef> funcNames;
     if (enableNativeNonFlatSupport) {
-      // TODO(enver): Do not create data flow edge if the func has no callers,
-      // such as the entry function.
-      addDataFlowEdges(funcOp.getArguments(), rewriter);
-      funcOp.walk([&](func::CallOp callOp) {
+      moduleOp.walk([&](CallOp callOp) {
         addDataFlowEdges(callOp.getResults(), rewriter);
+        StringRef funcName = callOp.getCallee();
+        if (auto [_, inserted] = funcNames.insert(funcName); inserted) {
+          FuncOp funcOp = getFuncOpOrDie(funcName, symbolTable);
+          addDataFlowEdges(funcOp.getArguments(), rewriter);
+        }
       });
     }
   }
