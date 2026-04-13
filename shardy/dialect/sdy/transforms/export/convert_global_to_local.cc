@@ -27,6 +27,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
@@ -2112,6 +2113,112 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
   ConversionState& conversionState;
 };
 
+// Collects axes sharding implicit batch dims in updates.
+SmallVector<AxisRefAttr> getScatterReductionAxes(
+    stablehlo::ScatterOp op, TensorShardingAttr updatesSharding,
+    TensorShardingAttr operandSharding, MeshAttr mesh) {
+  SmallVector<AxisRefAttr> reductionAxes;
+  if (isFullyReplicated(updatesSharding)) {
+    return reductionAxes;
+  }
+  stablehlo::ScatterDimensionNumbersAttr dnums =
+      op.getScatterDimensionNumbers();
+  ArrayRef<int64_t> updateWinDims = dnums.getUpdateWindowDims();
+
+  // Implicit/explicit batch dimensions in updates are those not in
+  // update_window_dims.
+  auto updateType = cast<RankedTensorType>(op.getUpdates().front().getType());
+  for (int64_t i = 0; i < updateType.getRank(); ++i) {
+    if (llvm::is_contained(updateWinDims, i)) {
+      continue;
+    }
+
+    // Collective sharding axes on implicit batch dimensions.
+    for (AxisRefAttr axis : updatesSharding.getDimShardings()[i].getAxes()) {
+      // If this axis is also used to shard the operand, it is an explicit not
+      // implicit batching dimension.
+      bool shardedInOperand =
+          !isFullyReplicated(operandSharding) &&
+          llvm::any_of(operandSharding.getDimShardings(),
+                       [&](DimensionShardingAttr dimSharding) {
+                         return llvm::is_contained(dimSharding.getAxes(), axis);
+                       });
+
+      if (!shardedInOperand) {
+        reductionAxes.push_back(axis);
+      }
+    }
+  }
+
+  return reductionAxes;
+}
+
+// Returns the identity constant (as a scalar) for the scatter reduction.
+Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
+  Operation* reductionOp = getCommonSupportedReductionOp(scatter);
+  if (!reductionOp) {
+    return nullptr;
+  }
+
+  Location loc = scatter.getLoc();
+  Type type = scatter.getInputs().front().getType();
+  Type elementType = cast<RankedTensorType>(type).getElementType();
+  auto scalarType = RankedTensorType::get({}, elementType);
+
+  return llvm::TypeSwitch<Operation*, Value>(reductionOp)
+      .Case([&](stablehlo::AddOp) {
+        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+      })
+      .Case([&](stablehlo::AndOp) {
+        return stablehlo::ConstantOp::create(
+            b, loc,
+            DenseElementsAttr::get(scalarType,
+                                   b.getIntegerAttr(elementType, 1)));
+      })
+      .Case([&](stablehlo::OrOp) {
+        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+      })
+      .Case([&](stablehlo::MulOp) {
+        if (isa<FloatType>(elementType)) {
+          return stablehlo::ConstantOp::create(
+              b, loc,
+              DenseElementsAttr::get(scalarType,
+                                     b.getFloatAttr(elementType, 1.0)));
+        }
+        return stablehlo::ConstantOp::create(
+            b, loc,
+            DenseElementsAttr::get(scalarType,
+                                   b.getIntegerAttr(elementType, 1)));
+      })
+      .Case([&](stablehlo::MaxOp) {
+        Attribute minAttr;
+        if (auto floatType = dyn_cast<FloatType>(elementType)) {
+          auto minFloat = APFloat::getLargest(floatType.getFloatSemantics(),
+                                              /*Negative=*/true);
+          minAttr = DenseElementsAttr::get(scalarType, minFloat);
+        } else if (auto intType = dyn_cast<IntegerType>(elementType)) {
+          auto minInt = APInt::getSignedMinValue(intType.getWidth());
+          minAttr = DenseElementsAttr::get(scalarType, minInt);
+        }
+        return minAttr ? stablehlo::ConstantOp::create(b, loc, minAttr)
+                       : nullptr;
+      })
+      .Case([&](stablehlo::MinOp) {
+        Attribute maxAttr;
+        if (auto floatType = dyn_cast<FloatType>(elementType)) {
+          auto maxFloat = APFloat::getLargest(floatType.getFloatSemantics(),
+                                              /*Negative=*/false);
+          maxAttr = DenseElementsAttr::get(scalarType, maxFloat);
+        } else if (auto intType = dyn_cast<IntegerType>(elementType)) {
+          auto maxInt = APInt::getSignedMaxValue(intType.getWidth());
+          maxAttr = DenseElementsAttr::get(scalarType, maxInt);
+        }
+        return maxAttr ? stablehlo::ConstantOp::create(b, loc, maxAttr)
+                       : nullptr;
+      })
+      .Default([](auto) { return nullptr; });
+}
+
 class StablehloScatterOpPattern
     : public OpConversionPattern<stablehlo::ScatterOp> {
  public:
@@ -2126,57 +2233,115 @@ class StablehloScatterOpPattern
     auto* converter =
         static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
     Value input = op.getInputs().front();
+    Value update = op.getUpdates().front();
     TensorShardingAttr inputSharding = converter->getSharding(input);
-    if (isFullyReplicated(inputSharding)) {
+    TensorShardingAttr updateSharding = converter->getSharding(update);
+    if (isFullyReplicated(inputSharding) && isFullyReplicated(updateSharding)) {
       return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
                                conversionState);
     }
 
     const SymbolTable& symbolTable = converter->getSymbolTable();
-    MeshAttr mesh = inputSharding.getMesh(symbolTable);
+    MeshAttr mesh = inputSharding ? inputSharding.getMesh(symbolTable)
+                                  : updateSharding.getMesh(symbolTable);
     if (!mesh) {
       return op.emitError("failed to resolve mesh.");
+    }
+
+    SmallVector<AxisRefAttr> reductionAxes =
+        getScatterReductionAxes(op, updateSharding, inputSharding, mesh);
+    if (reductionAxes.empty() && isFullyReplicated(inputSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    Location loc = op.getLoc();
+    SmallVector<Value> localInputs = adaptor.getInputs();
+    auto localInputType = cast<RankedTensorType>(localInputs.front().getType());
+    if (!reductionAxes.empty()) {
+      Value identity = getScatterReductionIdentity(op, rewriter);
+      if (!identity) {
+        return op.emitError("failed to get scatter reduction identity.");
+      }
+      // Generate leader mask: (shardIndex(reductionAxes) == 0).
+      int64_t numDevices = mesh.getTotalSize();
+      SmallVector<bool> leaderTable = llvm::map_to_vector(
+          llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
+            return getShardIndex(devId, mesh, reductionAxes) == 0;
+          });
+      Value partitionId = stablehlo::ConvertOp::create(
+          rewriter, loc, RankedTensorType::get({}, rewriter.getI64Type()),
+          stablehlo::PartitionIdOp::create(rewriter, loc));
+      auto tableConst = stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseElementsAttr::get(
+              RankedTensorType::get({numDevices}, rewriter.getI1Type()),
+              leaderTable));
+      Value isLeader =
+          stablehlo::DynamicSliceOp::create(
+              rewriter, loc, RankedTensorType::get({1}, rewriter.getI1Type()),
+              tableConst, {partitionId}, rewriter.getDenseI64ArrayAttr({1}))
+              .getResult();
+
+      isLeader = stablehlo::BroadcastInDimOp::create(
+          rewriter, loc,
+          RankedTensorType::get(localInputType.getShape(),
+                                rewriter.getI1Type()),
+          isLeader, rewriter.getDenseI64ArrayAttr({0}));
+      // Broadcast the scalar identity to the shape of the current local input.
+      Value broadcastIdentity = stablehlo::BroadcastInDimOp::create(
+          rewriter, loc, localInputs.front().getType(), identity,
+          rewriter.getDenseI64ArrayAttr({}));
+      llvm::transform(localInputs, localInputs.begin(), [&](Value input) {
+        return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
+                                           broadcastIdentity);
+      });
     }
 
     auto globalInputType = cast<RankedTensorType>(input.getType());
     auto dnums = op.getScatterDimensionNumbers();
     // Identify sharded indexed dimensions in the input.
     SmallVector<int64_t> indexedInputDims;
-    for (int64_t i = 0; i < globalInputType.getRank(); ++i) {
-      if (!inputSharding.getDimShardings()[i].getAxes().empty()) {
-        SDY_CHECK(getTotalAxesSize(inputSharding.getDimShardings()[i].getAxes(),
-                                   mesh) > 1)
-            << "We should have removed trivial sharding in a previous pass.";
-        if (llvm::is_contained(dnums.getScatterDimsToOperandDims(), i)) {
-          indexedInputDims.push_back(i);
-        } else if (llvm::is_contained(dnums.getInsertedWindowDims(), i)) {
-          // TODO(b/496605332): Support this case.
-          return op.emitOpError() << "sharding operand dimension " << i
-                                  << " that is not indexed but in inserted "
-                                     "window dimension is not supported.";
+    if (!isFullyReplicated(inputSharding)) {
+      for (int64_t i = 0; i < globalInputType.getRank(); ++i) {
+        if (!inputSharding.getDimShardings()[i].getAxes().empty()) {
+          SDY_CHECK(getTotalAxesSize(
+                        inputSharding.getDimShardings()[i].getAxes(), mesh) > 1)
+              << "We should have removed trivial sharding in a previous pass.";
+          if (llvm::is_contained(dnums.getScatterDimsToOperandDims(), i)) {
+            indexedInputDims.push_back(i);
+          } else if (llvm::is_contained(dnums.getInsertedWindowDims(), i)) {
+            // TODO(b/496605332): Support this case.
+            return op.emitOpError() << "sharding operand dimension " << i
+                                    << " that is not indexed but in inserted "
+                                       "window dimension is not supported.";
+          }
         }
       }
     }
 
-    // If no indexed dims are sharded, just localize the types.
-    if (indexedInputDims.empty()) {
+    // If no indexed dims are sharded and there is no reduction axes, just
+    // localize the types.
+    if (indexedInputDims.empty() && reductionAxes.empty()) {
       return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
                                conversionState);
     }
 
     // Adjust indices for sharded dimensions (Disjoint writes are parallel).
-    Location loc = op.getLoc();
-    auto localInputType =
-        cast<RankedTensorType>(adaptor.getInputs().front().getType());
-    auto [adjustedIndices, _] = computeLocalIndicesAndMask(
-        loc, adaptor.getScatterIndices(), mesh, inputSharding, globalInputType,
-        localInputType, dnums, indexedInputDims, rewriter,
-        /*computeMask=*/false);
+    Value adjustedIndices = adaptor.getScatterIndices();
+    if (!isFullyReplicated(inputSharding)) {
+      adjustedIndices =
+          computeLocalIndicesAndMask(loc, adjustedIndices, mesh, inputSharding,
+                                     globalInputType, localInputType, dnums,
+                                     indexedInputDims, rewriter,
+                                     /*computeMask=*/false)
+              .first;
+    }
 
     // Create the local scatter using adjusted indices and the original updates.
     auto localScatter = stablehlo::ScatterOp::create(
         rewriter, loc, converter->convertResultTypes(op.getResults()),
-        adaptor.getInputs(), adjustedIndices, adaptor.getUpdates(), dnums,
+        localInputs, adjustedIndices, adaptor.getUpdates(), dnums,
         op.getIndicesAreSorted(), op.getUniqueIndices());
     copyAttributes(
         op, localScatter, /*attributesToExclude=*/
