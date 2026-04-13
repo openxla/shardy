@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-manual-axes-cleanup | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-manual-axes-cleanup | FileCheck %s
 
 sdy.mesh @empty_mesh = <[]>
 
@@ -149,6 +149,27 @@ func.func @sub_axes_in_out_shardings(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-SAME{LITERAL}: out_shardings=[<@mesh_x_8_y_8, [{"y":(1)2}], replicated={"x", "y":(2)4}>]
   // CHECK-SAME{LITERAL}: manual_axes={"x", "y"} (%arg1: tensor<4xf32>) {
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh_x_8_y_8, [{"y":(2)2}]>] out_shardings=[<@mesh_x_8_y_8, [{"y":(1)2}], replicated={"x":(2)2}>] manual_axes={"x", "y"} (%arg1: tensor<4xf32>) {
+    sdy.return %arg1 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
+
+// CHECK-LABEL: func @manual_computation_in_foo
+func.func @manual_computation_in_foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+func.func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh, [{"c", ?}], replicated={"a"}>]
+  // CHECK-SAME{LITERAL}: out_shardings=[<@mesh, [{"c", ?}], replicated={"a"}>]
+  // CHECK-SAME{LITERAL}: manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c", ?}]>] out_shardings=[<@mesh, [{"c", ?}]>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
     sdy.return %arg1 : tensor<4xf32>
   } : (tensor<8xf32>) -> tensor<8xf32>
   return %0 : tensor<8xf32>
