@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-remove-propagation-debug-info | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-remove-propagation-debug-info | FileCheck %s
 
 sdy.mesh @mesh_a = <["a"=2]>
 sdy.mesh @mesh_c = <["c"=8]>
@@ -78,3 +78,35 @@ func.func @remove_origin_shardings_manual_computation_with_sharding_constraints(
   } {sdy.block_arg_sharding_origins = [{a = "self", b = "self"}, {a = "self", b = "self"}], sdy.result_sharding_origins = [{a = "self", b = "self"}], sdy.sharding_origin_name = "mc_1"} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   return %0, %2 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_abc = <["a"=2, "b"=2, "c"=8]>
+// CHECK-LABEL: func @single_call(
+// CHECK-SAME: %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>},
+// CHECK-SAME: %arg1: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}) -> (
+// CHECK-SAME: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}) {
+func.func @single_call(
+    %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>, sdy.sharding_origins = {a = "mc_1_input: 0", b = "mc_1_input: 0"}},
+    %arg1: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}) -> (
+      tensor<8x8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = result-0 -> [operand-0]}]}, {step-2 = [{"a" = operand-0 -> [result-0]}, {"c" = operand-0 -> [result-0]}]}]>, sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}) {
+  // CHECK-NEXT: %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>]>}
+  // CHECK-NEXT: %1 = call @foo(%0, %0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = operand-0 -> [operand-1, result-0]}, {"b" = result-0 -> [operand-0, operand-1]}, {"c" = operand-1 -> [operand-0, result-0]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>]>} : tensor<8x8x8xf32>
+  %1 = call @foo(%0,%0) {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = operand-0 -> [operand-1, result-0]}, {"b" = result-0 -> [operand-0, operand-1]}, {"c" = operand-1 -> [operand-0, result-0]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>]>} : (tensor<8x8x8xf32>, tensor<8x8x8xf32>) -> tensor<8x8x8xf32>
+  return %1 : tensor<8x8x8xf32>
+}
+
+// CHECK-LABEL: func private @foo(
+// CHECK-SAME: %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}
+// CHECK-SAME: %arg1: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}) -> (
+// CHECK-SAME: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}
+func.func private @foo(
+    %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>},
+    %arg1: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>, sdy.sharding_origins = {a = "mc_1_input: 0", b = "mc_1_input: 0"}}) -> (
+      tensor<8x8x8xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = result-0 -> [operand-0]}]}, {step-2 = [{"a" = operand-0 -> [result-0]}, {"c" = operand-0 -> [result-0]}]}]>, sdy.sharding = #sdy.sharding<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>}) {
+  // CHECK-NEXT: %0 = stablehlo.multiply %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>]>}
+  %0 = stablehlo.multiply %arg0, %arg1 {sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"a" = operand-0 -> [operand-1, result-0]}, {"b" = result-0 -> [operand-0, operand-1]}, {"c" = operand-1 -> [operand-0, result-0]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"a", ?}, {"b", ?}, {"c", ?}]>]>} : tensor<8x8x8xf32>
+  return %0 : tensor<8x8x8xf32>
+}
+
+
