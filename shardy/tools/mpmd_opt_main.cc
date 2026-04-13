@@ -26,6 +26,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/register.h"
 #include "shardy/dialect/sdy/transforms/passes.h"
 #include "shardy/dialect/mpmd/transforms/passes.h"
+#include "stablehlo/dialect/ChloOps.h"
 
 
 int main(int argc, char** argv) {
@@ -34,6 +35,7 @@ int main(int argc, char** argv) {
   mlir::DialectRegistry registry;
   mlir::mpmd::registerAllDialects(registry);
   registry.insert<mlir::quant::QuantDialect>();
+  registry.insert<mlir::chlo::ChloDialect>();
   mlir::func::registerAllExtensions(registry);
 
   // Register all SDY passes and pipelines.

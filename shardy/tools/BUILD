@@ -53,5 +53,6 @@ cc_binary(
         "@llvm-project//mlir:MlirOptLib",
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:RegisterAllPasses",
+        "@stablehlo//:chlo_ops",
     ],
 )
