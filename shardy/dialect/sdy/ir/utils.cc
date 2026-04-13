@@ -1108,5 +1108,11 @@ FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable) {
   return clonedFuncOp;
 }
 
+FuncOp getFuncOpOrDie(StringRef funcSymName, const SymbolTable& symbolTable) {
+  FuncOp funcOp = symbolTable.lookup<FuncOp>(funcSymName);
+  CHECK(funcOp) << "Failed to lookup function: " << funcSymName.str();
+  return funcOp;
+}
+
 }  // namespace sdy
 }  // namespace mlir

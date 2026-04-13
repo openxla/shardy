@@ -40,10 +40,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // of the propagation itself.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
+  pm.addPass(createEquiliseCallAndFuncResultShardingsPass());
+  pm.addPass(createAddDataFlowEdgesPass());
   pm.addPass(createImportFuncCallsPass());
-
-  pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass(
-      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));

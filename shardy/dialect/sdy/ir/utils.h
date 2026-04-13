@@ -678,6 +678,11 @@ Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter);
 mlir::func::FuncOp cloneFuncRecursively(func::FuncOp funcOp,
                                         SymbolTable& symbolTable);
 
+// Returns the funcOp on `funcSymName`. Dies if the func does not exist on the
+// `symbolTable`.
+func::FuncOp getFuncOpOrDie(StringRef funcSymName,
+                            const SymbolTable& symbolTable);
+
 }  // namespace sdy
 }  // namespace mlir
 
