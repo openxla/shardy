@@ -60,13 +60,13 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     pm.addNestedPass<func::FuncOp>(
         createRemoveAllGatherReduceScatterForCMV1Pass());
   }
+  pm.addPass(createExportNamedComputationsPass());
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory,
       options.enableInsertExplicitCollectives
           ? "after_partitioner_with_global_shapes"
           : "after_minimal_partitioner_with_global_shapes",
       dumpIndex++));
-  pm.addPass(createExportNamedComputationsPass());
 }
 
 }  // namespace
