@@ -72,10 +72,6 @@ inline constexpr StringRef kLayoutModeDefault = "default";
 // Attr value to let compiler choose layout.
 inline constexpr StringRef kLayoutModeAuto = "auto";
 
-// A module attribute to indicate the module has been lowered with JAX using sdy
-// config. The dialect name prefix is needed.
-inline constexpr StringRef kIsSdyLowered = "mpmd.sdy_lowered";
-
 inline constexpr StringRef kRematAttributeName = "remat";
 
 inline constexpr StringRef kJaxResultInfoAttr = "jax.result_info";
@@ -309,9 +305,6 @@ bool HasHomogeneousTopology(func::FuncOp func);
 // Returns the union of the origins of two different fragments.
 ArrayAttr GetFragmentOriginUnion(FragmentOp fragment1, FragmentOp fragment2,
                                  RewriterBase& rewriter);
-
-// Returns whether the module has been lowered with sdy config in JAX.
-bool IsLoweredWithSdy(ModuleOp module);
 
 // Checks if an operation is the result of rematerialization (e.g.,
 // created during during `mpmd-loop-remat`).

@@ -301,7 +301,6 @@ class LowerToFragmentCallsPass
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     MLIRContext& ctx = getContext();
-    bool is_sdy_partitioned = mpmd::IsLoweredWithSdy(module_op);
     bool is_all_forward = IsAllForward(module_op);
 
     IRRewriter rewriter(&ctx);
@@ -385,26 +384,24 @@ class LowerToFragmentCallsPass
         // Set the argument and result attr to include the sharding in the type.
         // This is needed for shardy XLA to read the sharding later when
         // importing.
-        if (is_sdy_partitioned) {
-          for (OpOperand& arg : fragment->getOpOperands()) {
-            auto arg_type = dyn_cast<MeshTensorType>(arg.get().getType());
-            if (!arg_type) {
-              continue;
-            }
-            if (sdy::TensorShardingAttr arg_sharding = arg_type.getSharding()) {
-              func_op.setArgAttr(arg.getOperandNumber(), sdy::kShardingAttr,
-                                 arg_sharding);
-            }
+        for (OpOperand& arg : fragment->getOpOperands()) {
+          auto arg_type = dyn_cast<MeshTensorType>(arg.get().getType());
+          if (!arg_type) {
+            continue;
           }
-          for (auto result : fragment->getResults()) {
-            auto res_type = dyn_cast<MeshTensorType>(result.getType());
-            if (!res_type) {
-              continue;
-            }
-            if (sdy::TensorShardingAttr res_sharding = res_type.getSharding()) {
-              sdy::setFuncResultSharding(func_op, result.getResultNumber(),
-                                         res_sharding);
-            }
+          if (sdy::TensorShardingAttr arg_sharding = arg_type.getSharding()) {
+            func_op.setArgAttr(arg.getOperandNumber(), sdy::kShardingAttr,
+                               arg_sharding);
+          }
+        }
+        for (auto result : fragment->getResults()) {
+          auto res_type = dyn_cast<MeshTensorType>(result.getType());
+          if (!res_type) {
+            continue;
+          }
+          if (sdy::TensorShardingAttr res_sharding = res_type.getSharding()) {
+            sdy::setFuncResultSharding(func_op, result.getResultNumber(),
+                                       res_sharding);
           }
         }
 

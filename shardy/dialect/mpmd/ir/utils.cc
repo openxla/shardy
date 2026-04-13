@@ -584,10 +584,6 @@ ArrayAttr GetFragmentOriginUnion(FragmentOp fragment1, FragmentOp fragment2,
   return rewriter.getArrayAttr(merged_origin);
 }
 
-bool IsLoweredWithSdy(ModuleOp module) {
-  return module->hasAttr(kIsSdyLowered);
-}
-
 bool IsRemat(Operation* op) { return op->hasAttr(kRematAttributeName); }
 
 void MarkAsRemat(Operation* op, RewriterBase& rewriter) {

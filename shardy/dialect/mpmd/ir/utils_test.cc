@@ -695,47 +695,6 @@ TEST(IsExecutedImmediatelyAfter,
   EXPECT_FALSE(IsExecutedImmediatelyAfter(fwd_fragment, bwd_fragment));
 }
 
-TEST(IsLoweredWithSdy, LoweredWithSdyIfModuleHasSdyLoweredAttr) {
-  const std::string kProgram = R"mlir(
-    module attributes {mpmd.sdy_lowered} {}
-  )mlir";
-
-  MLIRContext context;
-  loadAllRequiredDialects(&context);
-  OwningOpRef<ModuleOp> module =
-      parseSourceString<ModuleOp>(kProgram, &context);
-
-  EXPECT_TRUE(IsLoweredWithSdy(*module));
-}
-
-TEST(IsLoweredWithSdy, NotLoweredWithSdyIfModuleHasNoSdyLoweredAttr) {
-  const std::string kProgram = R"mlir(
-    module {}
-  )mlir";
-
-  MLIRContext context;
-  loadAllRequiredDialects(&context);
-  OwningOpRef<ModuleOp> module =
-      parseSourceString<ModuleOp>(kProgram, &context);
-
-  EXPECT_FALSE(IsLoweredWithSdy(*module));
-}
-
-TEST(IsLoweredWithSdy, NotLoweredWithSdyIfNoModuleAttr) {
-  const std::string kProgram = R"mlir(
-    func.func @main(%arg0: tensor<f32>) -> tensor<f32> {
-      return %arg0 : tensor<f32>
-    }
-  )mlir";
-
-  MLIRContext context;
-  loadAllRequiredDialects(&context);
-  OwningOpRef<ModuleOp> module =
-      parseSourceString<ModuleOp>(kProgram, &context);
-
-  EXPECT_FALSE(IsLoweredWithSdy(*module));
-}
-
 TEST(SdyGetSharding, ShouldGetCorrectFragmentArgsSharding) {
   const std::string kProgram = R"mlir(
    sdy.mesh @mesh = <["x"=4, "y"=2]>

@@ -305,9 +305,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
     assert (
         jax.config.jax_use_shardy_partitioner
     ), 'sdy.mpmd can only be used with Shardy partitioner.'
-    mlir_module = jaxlib_mpmd.clone_mlir_module(
-        stablehlo_mlir_module, ['mpmd.sdy_lowered']
-    )
+    mlir_module = jaxlib_mpmd.clone_mlir_module(stablehlo_mlir_module)
 
     args_info = lowered_computation.args_info
     flat_args_info, _ = jax.tree_util.tree_flatten(args_info)

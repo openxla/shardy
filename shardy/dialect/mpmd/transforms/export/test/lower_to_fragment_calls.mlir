@@ -130,6 +130,8 @@ func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
 
 !mesh_2_tensor_dist_x = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
 
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
 // CHECK-LABEL: func @main
 func.func @main(%arg0: !mesh_2_tensor_dist_x)
     -> (!mesh_2_tensor_dist_x, !mesh_2_tensor_dist_x) attributes {
@@ -159,14 +161,14 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
 
 }
 
-// CHECK:       func @[[FRAGMENT3]](%arg0: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
+// CHECK:       func @[[FRAGMENT3]](%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}) -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}, tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>})
 // CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 256 : i64} {
 // CHECK-NEXT:    %[[SUBTRACT:.*]] = stablehlo.subtract %arg0, %arg0
 // CHECK-NEXT:    %[[DIVIDE:.*]] = stablehlo.divide %arg0, %arg0
 // CHECK-NEXT:    return %[[DIVIDE]], %[[SUBTRACT]]
 // CHECK-NEXT:  }
 
-// CHECK:       func @[[FRAGMENT4]](%arg0: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
+// CHECK:       func @[[FRAGMENT4]](%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}) -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}, tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>})
 // CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %[[SUBTRACT:.*]] = stablehlo.subtract %arg0, %arg0
 // CHECK-NEXT:    %[[DIVIDE:.*]] = stablehlo.divide %arg0, %arg0
@@ -176,6 +178,8 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
 // -----
 
 !mesh_2_tensor_dist_x = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 // CHECK-LABEL: func @main
 func.func @main(%arg0: !mesh_2_tensor_dist_x)
@@ -209,7 +213,7 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
    func.return %f7#0, %f7#1 : !mesh_2_tensor_dist_x, !mesh_2_tensor_dist_x
 }
 
-// CHECK:       func @[[FRAGMENT4]](%arg0: tensor<4x8xf32>) -> (tensor<4x8xf32>, tensor<4x8xf32>)
+// CHECK:       func @[[FRAGMENT4]](%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}) -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}, tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>})
 // CHECK-SAME:      attributes {mesh_shape = #sdy.mesh<["x"=2, "y"=2]>, reserved_hbm_bytes = 128 : i64} {
 // CHECK-NEXT:    %[[SUBTRACT:.*]] = stablehlo.subtract %arg0, %arg0
 // CHECK-NEXT:    %[[DIVIDE:.*]] = stablehlo.divide %arg0, %arg0
@@ -223,6 +227,8 @@ func.func @main(%arg0: !mesh_2_tensor_dist_x)
 !mesh_2_tensor_dist_x = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
 !mesh_2_tensor_dist_y = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>, sharding=<@mesh, [{"y"}, {?}]>>
 !mesh_3_tensor = !mpmd.mesh_tensor<"m3", tensor<4x8xf32>>
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 // CHECK-LABEL: func @main
 func.func @main(%arg0: !mesh_1_tensor, %arg1: !mesh_1_tensor)
@@ -482,7 +488,7 @@ func.func @main(%arg0: !mesh_tensor)
 
 !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
 
-module attributes {mpmd.sdy_lowered} {
+module {
   sdy.mesh @mesh = <["x"=2]>
 
   // CHECK-LABEL: func @sdy_partitioned
