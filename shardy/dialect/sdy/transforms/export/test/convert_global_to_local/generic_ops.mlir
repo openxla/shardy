@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s
+// RUN: sdy_opt %s -sdy-convert-global-to-local -allow-unregistered-dialect | FileCheck %s
 
 // CHECK: sdy.mesh @mesh_2 = <["x"=2]>
 sdy.mesh @mesh_2 = <["x"=2]>
@@ -52,4 +52,16 @@ func.func @stablehlo_reduce(%arg0: tensor<32x8xi32>)
   }: (tensor<32x8xi32>, tensor<i32>) -> tensor<32xi32>
   // CHECK-NEXT: return %[[RES]] : tensor<32xi32>
   return %0 : tensor<32xi32>
+}
+
+// CHECK-LABEL: func.func @unknown_dialect_op
+// CHECK-SAME: %[[ARG0:.*]]: tensor<8xf32>
+// CHECK-SAME: tensor<8xf32>
+func.func @unknown_dialect_op(
+  %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+  -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) {
+  // CHECK-NEXT:  "interpreter.print"(%[[ARG0]]) : (tensor<8xf32>) -> ()
+  "interpreter.print"(%arg0) : (tensor<16xf32>) -> ()
+  // CHECK-NEXT:  return %[[ARG0]] : tensor<8xf32>
+  return %arg0 : tensor<16xf32>
 }

@@ -226,7 +226,8 @@ class GenericOpPattern : public ConversionPattern {
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
-    if ((op->getDialect()->getNamespace() != "stablehlo" &&
+    Dialect* dialect = op->getDialect();
+    if ((dialect && dialect->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
         isa<stablehlo::DotOp, stablehlo::DotGeneralOp, stablehlo::GatherOp,
             stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ScatterOp,
@@ -2312,7 +2313,8 @@ struct ConvertGlobalToLocalPass
     // We use the set to determine whether a given op is legal or not during
     // conversion.
     module.walk([&](Operation* op) {
-      if (isa<MeshOp>(op)) {
+      if (isa<MeshOp, ModuleOp>(op)) {
+        // Ops that are always legal do not need to be converted.
         return;
       }
       conversionState.addToConvertOp(op);
@@ -2349,7 +2351,9 @@ struct ConvertGlobalToLocalPass
 
     target.addDynamicallyLegalDialect<SdyDialect>(
         [&](Operation* op) { return !conversionState.needConversion(op); });
-    target.addLegalOp<MeshOp>();
+    // Enable type conversion for ops from unknown dialects.
+    target.markUnknownOpDynamicallyLegal(
+        [&](Operation* op) { return !conversionState.needConversion(op); });
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();
