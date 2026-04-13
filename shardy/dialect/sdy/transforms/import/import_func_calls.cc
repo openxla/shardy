@@ -63,19 +63,12 @@ void importCallOp(
   SDY_CHECK(funcOp) << "Failed to lookup function: " << calleeName.str();
 
   rewriter.setInsertionPoint(callOp);
-  TensorShardingPerValueAttr callOpResultShardings =
-      getShardingPerValue(callOp);
   auto namedCompOp = NamedComputationOp::create(
       rewriter, callOp->getLoc(), callOp->getResultTypes(),
       getOriginalFuncName(funcOp), callOp.getOperands(),
       /*inShardings=*/getFuncArgShardings(funcOp, symbolTable),
-      // TODO(b/439018088): Take func result shardings if call op result
-      // shardings are empty.
-      /*outShardings=*/
-      callOpResultShardings ? callOpResultShardings
-                            : getFuncResultShardings(funcOp, symbolTable));
+      /*outShardings=*/getShardingPerValue(callOp));
   namedCompOp->setAttrs(namedCompAttrs);
-
   Region& namedCompRegion = namedCompOp.getRegion();
   if (auto movedRegionIt = calleeNameToMovedRegion.find(calleeName);
       movedRegionIt != calleeNameToMovedRegion.end()) {
