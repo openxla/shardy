@@ -1108,5 +1108,12 @@ FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable) {
   return clonedFuncOp;
 }
 
+// Returns the main func. Dies if there is no main func.
+FuncOp getMainFuncOrDie(ModuleOp moduleOp, SymbolTable& symbolTable) {
+  FuncOp funcOp = symbolTable.lookup<FuncOp>(kMainFuncName);
+  SDY_CHECK(funcOp) << "Failed to lookup function: " << kMainFuncName.str();
+  return funcOp;
+}
+
 }  // namespace sdy
 }  // namespace mlir
