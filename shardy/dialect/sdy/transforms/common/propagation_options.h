@@ -56,6 +56,8 @@ struct PropagationOptions {
   // flattening it. The default is false, meaning it will flatten the graph and
   // then propagate.
   bool enableNativeNonFlatSupport = false;
+  // Whether to inline late within shardy.
+  bool enableLateInlining = true;
 };
 
 }  // namespace sdy
