@@ -30,6 +30,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
+  pm.addPass(createImportFuncCallsPass());
+  // Keep SymbolDCEPass after ImportFuncCallsPass.
+  pm.addPass(createSymbolDCEPass());
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
@@ -40,7 +43,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // of the propagation itself.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
-  pm.addPass(createImportFuncCallsPass());
 
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass(
       AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
