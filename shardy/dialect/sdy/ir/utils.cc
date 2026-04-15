@@ -912,6 +912,11 @@ StringAttr getOriginalFuncName(FuncOp funcOp) {
   return funcOp.getSymNameAttr();
 }
 
+StringAttr getOriginalFuncName(CallOp callOp, const SymbolTable& symbolTable) {
+  FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
+  return getOriginalFuncName(funcOp);
+}
+
 mlir::Attribute getMeshOrRef(
     int64_t numElements, const SymbolTable& symbolTable,
     std::function<TensorShardingAttr(int64_t)> getSharding) {
@@ -974,9 +979,8 @@ TensorShardingPerValueAttr getFuncResultShardings(
   return TensorShardingPerValueAttr::get(funcOp.getContext(), resultShardings);
 }
 
-std::optional<FuncOp> walkCalls(ModuleOp moduleOp,
-                                ProcessCallOpFn processCallOp, bool preOrder) {
-  FuncOp mainFuncOp;
+bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+               bool preOrder) {
   CallGraph callGraph(moduleOp);
   llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
   if (preOrder) {  // Iterate pre-order.
@@ -985,16 +989,11 @@ std::optional<FuncOp> walkCalls(ModuleOp moduleOp,
         continue;
       }
       mlir::Region* region = node->getCallableRegion();
-      // The first func is the main one as it is in pre-order.
-      if (auto funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp());
-          !mainFuncOp && funcOp) {
-        mainFuncOp = funcOp;
-      }
       if (region
               ->walk<WalkOrder::PreOrder>(
                   [&](CallOp callOp) { return processCallOp(callOp); })
               .wasInterrupted()) {
-        return std::nullopt;
+        return false;
       }
     }
   } else {
@@ -1004,25 +1003,27 @@ std::optional<FuncOp> walkCalls(ModuleOp moduleOp,
         continue;
       }
       mlir::Region* region = node->getCallableRegion();
-      // The last func is the main one as it is in post-order.
-      if (auto funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp());
-          funcOp) {
-        mainFuncOp = funcOp;
-      }
       if (region->walk([&](CallOp callOp) { return processCallOp(callOp); })
               .wasInterrupted()) {
-        return std::nullopt;
+        return false;
       }
     }
   }
-  return mainFuncOp;
+  return true;
 }
 
-FuncOp walkCallsOrDie(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
-                      bool preOrder) {
-  auto mainFuncOp = walkCalls(moduleOp, processCallOp, preOrder);
-  SDY_CHECK(mainFuncOp);
-  return *mainFuncOp;
+void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp) {
+  CallGraph callGraph(moduleOp);
+  llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
+  for (CallGraphNode* node : llvm::reverse(rpo)) {
+    if (node->isExternal()) {
+      continue;
+    }
+    mlir::Region* region = node->getCallableRegion();
+    if (FuncOp funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp())) {
+      processFuncOp(funcOp);
+    }
+  }
 }
 
 Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter) {
@@ -1106,6 +1107,12 @@ FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable) {
         symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
   });
   return clonedFuncOp;
+}
+
+FuncOp getFuncOpOrDie(StringRef funcSymName, const SymbolTable& symbolTable) {
+  FuncOp funcOp = symbolTable.lookup<FuncOp>(funcSymName);
+  SDY_CHECK(funcOp) << "Failed to lookup function: " << funcSymName.str();
+  return funcOp;
 }
 
 }  // namespace sdy

@@ -647,47 +647,59 @@ TEST_F(UtilsTest, WalkCalls_Interrupted) {
   EXPECT_THAT(calledFuncs, ElementsAre("baz"));
 }
 
-TEST_F(UtilsTest, WalkCallsPostOrder_ReturnsMainFunc) {
+TEST_F(UtilsTest, IterateFuncs_ThreeCalls) {
   auto localModule = mlir::parseSourceString<ModuleOp>(
       "module {\n"
-      "  func.func private @bar()\n"
+      "  func.func private @bar() {\n"
+      "    call @baz() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func private @baz() {\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
       "  func.func private @foo() {\n"
       "    call @bar() : () -> ()\n"
       "    return\n"
       "  }\n"
-      "  func.func @mymain() {\n"
-      "    call @foo() : () -> ()\n"
-      "    return\n"
-      "  }\n"
       "}",
       &context);
-  EXPECT_THAT(
-      walkCalls(localModule.get(),
-                [&](func::CallOp callOp) { return WalkResult::advance(); })
-          ->getName(),
-      "mymain");
+  std::vector<std::string> iteratedFuncs;
+  iterateFuncs(localModule.get(), [&](func::FuncOp funcOp) {
+    iteratedFuncs.push_back(funcOp.getName().str());
+  });
+  EXPECT_THAT(iteratedFuncs, ElementsAre("baz", "bar", "foo", "main"));
 }
 
-TEST_F(UtilsTest, WalkCallsPreOrder_ReturnsMainFunc) {
+TEST_F(UtilsTest, IterateFuncs_Triangle) {
   auto localModule = mlir::parseSourceString<ModuleOp>(
       "module {\n"
-      "  func.func private @bar()\n"
+      "  func.func private @bar() {\n"
+      "    call @baz() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func private @baz() {\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    call @bar() : () -> ()\n"
+      "    return\n"
+      "  }\n"
       "  func.func private @foo() {\n"
       "    call @bar() : () -> ()\n"
       "    return\n"
       "  }\n"
-      "  func.func @mymain() {\n"
-      "    call @foo() : () -> ()\n"
-      "    return\n"
-      "  }\n"
       "}",
       &context);
-  EXPECT_THAT(walkCalls(
-                  localModule.get(),
-                  [&](func::CallOp callOp) { return WalkResult::advance(); },
-                  /*preOrder=*/true)
-                  ->getName(),
-              "mymain");
+  std::vector<std::string> iteratedFuncs;
+  iterateFuncs(localModule.get(), [&](func::FuncOp funcOp) {
+    iteratedFuncs.push_back(funcOp.getName().str());
+  });
+  EXPECT_THAT(iteratedFuncs, ElementsAre("baz", "bar", "foo", "main"));
 }
 
 TEST_F(UtilsTest, GetShardableValue_AsyncStartOp) {

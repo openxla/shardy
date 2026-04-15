@@ -642,6 +642,11 @@ DenseIntElementsAttr getReplicaGroups(AxisRefListAttr reductionAxesAttr,
 // case there is no such attribute attached, create one on the name of `funcOp`.
 StringAttr getOriginalFuncName(func::FuncOp funcOp);
 
+// Gets `kOriginalFuncName` attribute attached to the func of `callOp`. In case
+// there is no such attribute attached, create one on the name of the func.
+StringAttr getOriginalFuncName(func::CallOp callOp,
+                               const SymbolTable& symbolTable);
+
 // Returns the shardings for the arguments of `funcOp`, with fully replicated
 // shardings for empty shardings on `funcOp`.
 TensorShardingPerValueAttr getFuncArgShardings(func::FuncOp funcOp,
@@ -657,16 +662,18 @@ TensorShardingPerValueAttr getFuncResultShardings(
 // functions are processed before their callers, and child blocks are processed
 // before their parents. Iterates calls and blocks in pre order if `preOrder` is
 // true, that is, the functions are processed after their callers, and child
-// blocks are processed after their parents. Returns nullopt if the walk was
-// interrupted, returns the main func otherwise.
+// blocks are processed after their parents. Returns false if the walk was
+// interrupted, returns true otherwise.
 using ProcessCallOpFn = std::function<mlir::WalkResult(func::CallOp)>;
-std::optional<func::FuncOp> walkCalls(ModuleOp moduleOp,
-                                      ProcessCallOpFn processCallOp,
-                                      bool preOrder = false);
-// Walks calls as in `walkCalls` and returns the main func. Dies if the the walk
-// is interrupted, or otherwise it can not identify the main function.
-func::FuncOp walkCallsOrDie(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
-                            bool preOrder = false);
+bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
+               bool preOrder = false);
+
+// Iterates on the funcs and performs `processFuncOp` on funcs. Iterates on the
+// funcs and blocks in post order of the call graph by default, that is, the
+// functions are processed before their callers, and child blocks are processed
+// before their parents.
+using ProcessFuncOpFn = std::function<void(func::FuncOp)>;
+void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp);
 
 // Returns the reduction operation used in the scatter's update computation if
 // it is a recognized associative and commutative binary op applied to all
@@ -677,6 +684,11 @@ Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter);
 // Clones given `funcOp` recursively and returns the (top) cloned funcOp.
 mlir::func::FuncOp cloneFuncRecursively(func::FuncOp funcOp,
                                         SymbolTable& symbolTable);
+
+// Returns the funcOp on `funcSymName`. Dies if the func does not exist on the
+// `symbolTable`.
+func::FuncOp getFuncOpOrDie(StringRef funcSymName,
+                            const SymbolTable& symbolTable);
 
 }  // namespace sdy
 }  // namespace mlir
