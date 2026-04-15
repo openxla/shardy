@@ -834,6 +834,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             SmallVector<int64_t> operandDims(
                 dynamicUpdateSlice->getNumOperands(), kNullDim);
             OpShardingRuleBuilder builder(dynamicUpdateSlice);
+
+            bool allIndicesConstant = llvm::all_of(dynamicUpdateSlice.getStartIndices(), [](Value v) {
+              Operation* defOp = v.getDefiningOp();
+              return defOp && (isa<sdy::ConstantOp>(defOp) || defOp->hasTrait<OpTrait::ConstantLike>());
+            });
+
             for (auto [dim, dimSizes] :
                  llvm::enumerate(llvm::zip_equal(operandShape, updateShape))) {
               auto [operandDimSize, updateDimSize] = dimSizes;
@@ -846,15 +852,20 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                 //
                 // Thus, we add a factor for the operand/result slicing
                 // dimension with kPassThrough type. We also add a unique factor
-                // for the update with kNeedReplication type.
+                // for the update with kNeedReplication type (unless all indices
+                // are constant and we can rely on Enzyme comms opt).
                 operandDims[0] = dim;
                 operandDims[1] = kNullDim;
                 builder.addFactor(operandDims, dim, operandDimSize);
 
                 operandDims[0] = kNullDim;
                 operandDims[1] = dim;
-                builder.addFactor(operandDims, kNullDim, updateDimSize,
-                                  FactorType::kNeedReplication);
+                if (!allIndicesConstant) {
+                  builder.addFactor(operandDims, kNullDim, updateDimSize,
+                                    FactorType::kNeedReplication);
+                } else {
+                  builder.addFactor(operandDims, kNullDim, updateDimSize);
+                }
               }
             }
             return builder.build();

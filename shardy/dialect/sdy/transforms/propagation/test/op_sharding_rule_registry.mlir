@@ -585,6 +585,15 @@ func.func @dynamic_update_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2x
   return %0 : tensor<32x4x8xf32>
 }
 
+// CHECK-LABEL: func @dynamic_update_slice_constant_indices
+func.func @dynamic_update_slice_constant_indices(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2xf32>) -> tensor<32x4x8xf32> {
+  %0 = stablehlo.constant dense<0> : tensor<i32>
+  %1 = sdy.constant dense<0> : tensor<i32>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, k, m], [], [], [])->([i, j, l]) {i=32, j=4, k=1, l=8, m=2}>
+  %2 = stablehlo.dynamic_update_slice %arg0, %arg1, %0, %0, %1 : (tensor<32x4x8xf32>, tensor<32x1x2xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x4x8xf32>
+  return %2 : tensor<32x4x8xf32>
+}
+
 // CHECK-LABEL: func @fft
 func.func @fft(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={j, k}>
