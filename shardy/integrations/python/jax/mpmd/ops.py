@@ -310,7 +310,7 @@ def _named_computation_default_lowering(
 
 def _register_named_computation_primitive():
   """Registers named_computation primitive and a JAX CallPrimitive."""
-  primitive = jax.core.CallPrimitive('named_computation')
+  primitive = jex.core.CallPrimitive('named_computation')
   # Makes it possible to execute eagerly.
   try:
     # JAX v0.10.0 and newer.

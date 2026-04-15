@@ -18,17 +18,17 @@
 from collections.abc import Callable, Sequence, Set
 import dataclasses
 import functools
-from typing import Any, cast, Iterable, NamedTuple
+from typing import Any, Iterable, NamedTuple, cast
 
 from absl import logging
 import jax
 from jax import tree_util
-from jax._src import core
 from jax._src import pjit
 from jax._src import stages
 from jax._src.interpreters import pxla
 from jax._src.lib import xla_client
 from jax.experimental import layout
+import jax.extend as jex
 from jax.interpreters import mlir as jax_mlir
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
 from jax.typing import ArrayLike
@@ -147,7 +147,7 @@ class MpmdExecutable(stages.Executable):
         out_avals, flat_out_shardings
     )
     # TODO(b/396086979): Carry the debug info from the lowered computation.
-    self._debug_info = core.DebugInfo(
+    self._debug_info = jex.core.DebugInfo(
         'mpmd_executable',
         self._func_name,
         tuple(f'arg[{i}]' for i in range(len(self._kept_in_avals))),
