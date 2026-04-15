@@ -31,9 +31,11 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createPropagateShardingFromFuncToCallPass());
-  pm.addPass(createImportFuncCallsPass());
-  // Keep SymbolDCEPass after ImportFuncCallsPass.
-  pm.addPass(createSymbolDCEPass());
+  if (!options.enableLateInlining) {
+    pm.addPass(createImportFuncCallsPass());
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
+  }
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
@@ -44,6 +46,11 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // of the propagation itself.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
+  if (options.enableLateInlining) {
+    pm.addPass(createImportFuncCallsPass());
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
+  }
 
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass(
       AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
@@ -61,14 +68,23 @@ void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
 }
 
+struct ImportPipelineOptions
+    : public PassPipelineOptions<ImportPipelineOptions> {
+  Option<bool> enableLateInlining{*this, "enable-late-inlining",
+                                  llvm::cl::desc("Whether to late inline."),
+                                  llvm::cl::init(true)};
+};
+
 void registerImportPipeline() {
-  PassPipelineRegistration<>(
+  PassPipelineRegistration<ImportPipelineOptions>(
       "sdy-import-pipeline",
       "Run a sequence of import passes needed as a pre-processing step for "
       "Shardy propagation",
-      [](OpPassManager& pm) {
+      [](OpPassManager& pm, const ImportPipelineOptions& options) {
         int dumpIndex = 0;
-        addImportPipeline(pm, dumpIndex, PropagationOptions());
+        addImportPipeline(pm, dumpIndex,
+                          PropagationOptions{.enableLateInlining =
+                                                 options.enableLateInlining});
       });
 }
 
