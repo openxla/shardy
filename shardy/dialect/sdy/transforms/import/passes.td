@@ -28,6 +28,17 @@ def ImportFuncCallsPass : Pass<"sdy-import-func-calls", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def PropagateShardingFromFuncToCallPass : Pass<"sdy-propagate-sharding-from-func-to-call", "ModuleOp"> {
+  let summary = "Set call result shardings as the func result shardings, if empty.";
+  let description = [{
+     Creates a pass to propagate func result sharding to call result sharding if
+     call does not have them and func does. Notably, it keeps call result
+     sharding if the call already has result shardings, even if all individual
+     result shardings are empty.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
   let summary = "Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s.";
   let description = [{

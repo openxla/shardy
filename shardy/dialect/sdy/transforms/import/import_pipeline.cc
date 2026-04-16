@@ -30,6 +30,7 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
+  pm.addPass(createPropagateShardingFromFuncToCallPass());
   pm.addPass(createImportFuncCallsPass());
   // Keep SymbolDCEPass after ImportFuncCallsPass.
   pm.addPass(createSymbolDCEPass());
