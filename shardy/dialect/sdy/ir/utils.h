@@ -690,6 +690,18 @@ mlir::func::FuncOp cloneFuncRecursively(func::FuncOp funcOp,
 func::FuncOp getFuncOpOrDie(StringRef funcSymName,
                             const SymbolTable& symbolTable);
 
+// Returns a `TensorShardingPerValueAttr` on the shardings of the `values`. If
+// the sharding of a value is null, it creates a fully closed sharding for it on
+// the given `meshOrRef` and the rank of the tensor corresponding to the value.
+TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
+                                              Attribute meshOrRef);
+
+// Returns the main func. Dies if there is no main func. If
+// `useTheOneIfSingleFunc` is true, then first check if the module has only one
+// func, and assume it as the main func. Useful for tests.
+mlir::func::FuncOp getMainFuncOrDie(ModuleOp moduleOp, SymbolTable& symbolTable,
+                                    bool useTheOneIfSingleFunc = false);
+
 }  // namespace sdy
 }  // namespace mlir
 

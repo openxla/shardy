@@ -1115,5 +1115,32 @@ FuncOp getFuncOpOrDie(StringRef funcSymName, const SymbolTable& symbolTable) {
   return funcOp;
 }
 
+TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
+                                              Attribute meshOrRef) {
+  SmallVector<TensorShardingAttr> resultShardings;
+  resultShardings.reserve(values.size());
+  for (mlir::Value value : values) {
+    resultShardings.push_back(TensorShardingAttr::getFullyReplicated(
+        meshOrRef.getContext(), mlir::sdy::getTensorRank(value), meshOrRef,
+        /*isClosed=*/true));
+  }
+  return TensorShardingPerValueAttr::get(meshOrRef.getContext(),
+                                         resultShardings);
+}
+
+// Returns the main func. Dies if there is no main func.
+FuncOp getMainFuncOrDie(ModuleOp moduleOp, SymbolTable& symbolTable,
+                        bool useTheOneIfSingleFunc) {
+  if (useTheOneIfSingleFunc) {
+    auto funcOps = moduleOp.getOps<FuncOp>();
+    if (std::distance(funcOps.begin(), funcOps.end()) == 1) {
+      return *funcOps.begin();
+    }
+  }
+  FuncOp funcOp = symbolTable.lookup<FuncOp>(kMainFuncName);
+  SDY_CHECK(funcOp) << "Failed to lookup function: " << kMainFuncName.str();
+  return funcOp;
+}
+
 }  // namespace sdy
 }  // namespace mlir

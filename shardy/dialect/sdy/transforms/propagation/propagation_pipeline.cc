@@ -16,6 +16,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
@@ -40,8 +41,7 @@ void populateExportOptions(ExportOptions& options,
       propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
-  options.avoidReshardsOnNamedComputations =
-      propOptions.avoidReshardsOnNamedComputations;
+  options.avoidReshardsOnCalls = propOptions.avoidReshardsOnNamedComputations;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
   options.enableNativeNonFlatSupport = propOptions.enableNativeNonFlatSupport;
@@ -52,6 +52,11 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
+  if (options.enableLateInlining) {
+    pm.addPass(createImportFuncCallsPass());
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
+  }
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
@@ -60,6 +65,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
+  pm.addPass(createExportNamedComputationsPass());
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",

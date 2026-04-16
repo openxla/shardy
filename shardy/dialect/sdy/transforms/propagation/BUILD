@@ -73,6 +73,7 @@ cc_library(
         "@llvm-project//mlir:SideEffectInterfaces",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
+        "@llvm-project//mlir:Transforms",
         "@stablehlo//:stablehlo_ops",
     ],
 )
@@ -181,6 +182,7 @@ cc_library(
     deps = [
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
     ],
 )

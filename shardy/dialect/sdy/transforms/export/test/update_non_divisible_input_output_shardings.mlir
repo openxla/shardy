@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-update-non-divisible-input-output-shardings | FileCheck %s
+// RUN: sdy_opt %s -sdy-update-non-divisible-input-output-shardings -split-input-file | FileCheck %s
 
 sdy.mesh @mesh_x_4_y_2 = <["x"=4, "y"=2]>
 sdy.mesh @mesh_x_8_y_3 = <["x"=8, "y"=3]>
@@ -129,4 +129,23 @@ func.func @optimization_barrier_non_divisible_shardings_unchanged(%arg0: tensor<
   // CHECK-NEXT: stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x_4_y_2, [{"x"}, {}]>]>}
   %1 = stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x_4_y_2, [{"x"}, {}]>]>} %arg0 : tensor<2x4xf32>
   return %1 : tensor<2x4xf32>
+}
+
+// -----
+sdy.mesh @mesh = <["x"=4, "y"=2]>
+
+// CHECK-LABEL: func @single_call
+// CHECK-SAME:    %arg0: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"y"}]>}
+func.func @single_call(%arg0: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<2x2xf32> {
+  // CHECK-NEXT: call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}, {"y"}]>]>}
+  %0 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<2x2xf32>) -> tensor<2x2xf32>
+  return %0 : tensor<2x2xf32>
+}
+
+// CHECK-LABEL: func private @foo
+// CHECK-SAME:    %arg0: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"y"}]>}
+func.func private @foo(%arg0: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<2x2xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>}
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : tensor<2x2xf32>
+  return %0 : tensor<2x2xf32>
 }

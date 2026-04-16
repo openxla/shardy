@@ -21,6 +21,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -33,22 +34,6 @@ namespace {
 struct AddDataFlowEdgesPass
     : public impl::AddDataFlowEdgesPassBase<AddDataFlowEdgesPass> {
   using AddDataFlowEdgesPassBase::AddDataFlowEdgesPassBase;
-
-  void addDataFlowEdges(ValueRange edgeOwners, IRRewriter& rewriter) {
-    // We are iterating the owners in a reversed order because we set the
-    // insertion point after each value and we would like to keep the data flow
-    // edges for the arguments/results in the same order as they appear.
-    for (Value edgeOwner : llvm::reverse(edgeOwners)) {
-      rewriter.setInsertionPointAfterValue(edgeOwner);
-      if (!isStaticShapedType(edgeOwner.getType())) {
-        // Skip non-static-shaped tensors, e.g., tokens.
-        continue;
-      }
-      auto dataFlowEdge = DataFlowEdgeOp::create(
-          rewriter, edgeOwner.getLoc(), edgeOwner, getSharding(edgeOwner));
-      rewriter.replaceAllUsesExcept(edgeOwner, dataFlowEdge, dataFlowEdge);
-    }
-  }
 
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();

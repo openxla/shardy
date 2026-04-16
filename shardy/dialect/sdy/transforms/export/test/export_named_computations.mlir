@@ -1235,3 +1235,29 @@ func.func @three_named_computations_same_origin_func_with_two_calls_results_no_o
 // CHECK-SAME:  attributes {sdy.original_func_name = "baz"}
 // CHECK-NEXT:  stablehlo.multiply %arg0, %arg0
 // CHECK-SAME:  sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x", ?}, {?}]>]>}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @single_call
+func.func @single_call(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+  // CHECK-NEXT: call @foo(%arg0)
+  // CHECK-NEXT: stablehlo.negate
+  // CHECK-NEXT: return
+  %0 = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<8x2xi32>) {
+    %1 = sdy.data_flow_edge %arg1 : tensor<8x2xi32>
+    %2 = stablehlo.abs %1 : tensor<8x2xi32>
+    sdy.return %2 : tensor<8x2xi32>
+  } : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %1 = sdy.data_flow_edge %0 : tensor<8x2xi32>
+  %2 = stablehlo.negate %1 : tensor<8x2xi32>
+  return %2 : tensor<8x2xi32>
+}
+
+// CHECK-LABEL: func private @foo(
+// CHECK-SAME:    %arg0: tensor<8x2xi32>
+// CHECK-SAME:    -> tensor<8x2xi32>
+// CHECK-SAME:  attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:  stablehlo.abs %arg0
+// CHECK-NEXT:  return

@@ -86,6 +86,9 @@ inline const std::string kEmptyMeshSymbol = "empty_mesh";
 // Attribute name for the original name of the func before flattening.
 inline constexpr llvm::StringRef kOriginalFuncName = "sdy.original_func_name";
 
+// Attribute name of the main func.
+inline constexpr llvm::StringRef kMainFuncName = "main";
+
 }  // namespace sdy
 }  // namespace mlir
 

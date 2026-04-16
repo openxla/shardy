@@ -35,6 +35,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -43,45 +44,6 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
-
-// Gets a vector of `TensorShardingAttr` for the given edge owner.
-//
-// Each value in `edgeOwners` is the owner of a data flow edge. If the data flow
-// edge already has a sharding, we will copy the sharding. Otherwise, if one
-// of the owners in `edgeOwners` has a sharding, we create a fully open sharding
-// with the mesh name of the first such sharding for all the other values that
-// don't have a sharding.
-SmallVector<TensorShardingAttr> getShardingsFromDataFlowEdges(
-    ValueRange edgeOwners) {
-  SmallVector<TensorShardingAttr> shardings;
-  shardings.reserve(edgeOwners.size());
-
-  StringRef meshName;
-  for (Value edgeOwner : edgeOwners) {
-    TensorShardingAttr sharding;
-    if (auto dataFlowEdgeOp = DataFlowEdgeOp::lookup(edgeOwner)) {
-      sharding = dataFlowEdgeOp.getShardingAttr();
-      if (sharding && meshName.empty()) {
-        meshName = sharding.getMeshName();
-      }
-    }
-    shardings.push_back(sharding);
-  }
-  if (meshName.empty()) {
-    return {};
-  }
-  // There is at least one `DataFlowEdgeOp` with a sharding.
-  // Replace all empty shardings with fully open shardings.
-  // NOTE: this will replace the existing edgeOwner's sharding, if any, though
-  // this shouldn't happen as as `sdy-add-data-flow-edges` would have copied it.
-  for (auto [sharding, edgeOwner] : llvm::zip_equal(shardings, edgeOwners)) {
-    if (!sharding) {
-      sharding = TensorShardingAttr::getFullyOpen(
-          edgeOwner.getContext(), getTensorRank(edgeOwner), meshName);
-    }
-  }
-  return shardings;
-}
 
 struct SinkDataFlowEdgesPass
     : public impl::SinkDataFlowEdgesPassBase<SinkDataFlowEdgesPass> {

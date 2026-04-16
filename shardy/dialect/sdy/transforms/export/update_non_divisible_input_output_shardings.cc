@@ -186,6 +186,15 @@ struct UpdateNonDivisibleInputOutputShardingsPass
           },
           symbolTable);
     }
+    moduleOp.walk([&](func::CallOp callOp) {
+      // Update call results.
+      updateValueShardings(
+          callOp->getResults(), getShardings(callOp),
+          [&](ArrayRef<TensorShardingAttr> shardings) {
+            setShardings(callOp, shardings);
+          },
+          symbolTable);
+    });
 
     // Update edge owner shardings for `ShardableDataFlowOp`s and
     // `ShardingRuleOp`s.

@@ -26,6 +26,11 @@ def ImportFuncCallsPass : Pass<"sdy-import-func-calls", "ModuleOp"> {
      function body for each call op and emit a warning.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let options = [
+    Option<"addDataFlowEdgesOnNamedComputations", "add-data-flow-edges-on-named-computations", "bool",
+           /*default=*/"true",
+           "Whether to add data flow edges on named computations.">
+  ];
 }
 
 def PropagateShardingFromFuncToCallPass : Pass<"sdy-propagate-sharding-from-func-to-call", "ModuleOp"> {
