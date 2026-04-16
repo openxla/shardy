@@ -53,8 +53,6 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
-  pm.addPass(createImportFuncCallsPass());
-  // Keep SymbolDCEPass after ImportFuncCallsPass.
   pm.addPass(createSymbolDCEPass());
   {
     PropagationOptions optionsWithKeepShardingRules = options;
@@ -65,7 +63,6 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
-  pm.addPass(createExportNamedComputationsPass());
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",

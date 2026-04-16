@@ -38,9 +38,10 @@ using func::FuncOp;
 
 // Adds func input and output data flow edges. Adds func input data flow edges
 // only for non-main funcs.
-void addFuncDataFlowEdges(ModuleOp moduleOp, const SymbolTable& symbolTable,
-                          IRRewriter& rewriter) {
-  FuncOp mainFuncOp = getMainFuncOrDie(moduleOp, symbolTable);
+void addFuncDataFlowEdgeOps(ModuleOp moduleOp, const SymbolTable& symbolTable,
+                            IRRewriter& rewriter) {
+  FuncOp mainFuncOp =
+      getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true);
   moduleOp.walk([&](FuncOp funcOp) {
     if (funcOp == mainFuncOp) {
       return;
@@ -84,8 +85,8 @@ struct AddDataFlowEdgesPass
       addDataFlowEdges(op.getBlockArgumentEdgeOwners(), rewriter);
       addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
     });
-    if (enableNativeNonFlatSupport) {
-      addFuncDataFlowEdges(moduleOp, symbolTable, rewriter);
+    if (addFuncDataFlowEdges) {
+      addFuncDataFlowEdgeOps(moduleOp, symbolTable, rewriter);
     }
   }
 };
