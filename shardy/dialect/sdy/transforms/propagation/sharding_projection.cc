@@ -469,19 +469,101 @@ UpdateTensorShardings ShardingProjection::tensorsContainOverflowAxes() const {
   for (const auto& [i, tensorFactorSharding] : llvm::enumerate(operands)) {
     for (const auto& [_, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      updateTensorShardings.updateOperands[i] =
-          !factorSharding.overflowAxes.empty();
+      if (!factorSharding.overflowAxes.empty()) {
+        updateTensorShardings.updateOperands[i] = true;
+        break;  // Found overflow for this operand.
+      }
     }
   }
   for (const auto& [i, tensorFactorSharding] : llvm::enumerate(results)) {
     for (const auto& [_, factorSharding] :
          tensorFactorSharding.factorIndexToSharding) {
-      updateTensorShardings.updateResults[i] =
-          !factorSharding.overflowAxes.empty();
+      if (!factorSharding.overflowAxes.empty()) {
+        updateTensorShardings.updateResults[i] = true;
+        break;  // Found overflow for this result
+      }
     }
   }
 
   return updateTensorShardings;
+}
+
+void distributeAxesAcrossFactors(MutableArrayRef<FactorSharding> shardings,
+                                 ArrayRef<int64_t> factorSizes,
+                                 ArrayRef<AxisRefAttr> allAxes, MeshAttr mesh,
+                                 bool isMinorMostDim) {
+  MLIRContext* ctx = mesh.getContext();
+  // Track the remaining sharding capacity needed for each factor.
+  SmallVector<int64_t> remainingFactorSizes = llvm::to_vector(factorSizes);
+
+  int64_t axisIndex = 0;
+  std::optional<AxisRefInfo> currentAxisInfo =
+      getAxisRefInfo(allAxes, axisIndex, mesh);
+
+  // Axis-First Greedy Distribution.
+  ///
+  // We iterate through available mesh axes and attempt to place each into the
+  // first available factor slot that can accept it (either fully or partially).
+  while (currentAxisInfo) {
+    bool axisUsed = false;
+    for (int i = 0; i < shardings.size(); ++i) {
+      if (remainingFactorSizes[i] <= 1) {
+        // This factor is already fully sharded; skip to the next factor.
+        continue;
+      }
+
+      // The minor-most factor in the minor-most dimension is allowed to take
+      // any remaining axes, even if they don't perfectly divide its size
+      // (requiring padding). This preserves Shardy's core padding invariant.
+      if (isMinorMostDim && shardings[i].isMinorMost) {
+        addRemainingAxes(shardings[i].axisRefs, currentAxisInfo, allAxes,
+                         axisIndex, mesh);
+        return;
+      }
+      int64_t axisSize = currentAxisInfo->size;
+      int64_t gcdSize = std::gcd(remainingFactorSizes[i], axisSize);
+
+      // A factor can accept a (sub-)axis only if it provides a common divisor
+      // greater than 1, ensuring the resulting local shard remains a contiguous
+      // block.
+      if (gcdSize == 1 && axisSize != 1) {
+        continue;
+      }
+
+      axisUsed = true;
+      StringRef name = allAxes[axisIndex].getName();
+      if (axisSize > gcdSize) {
+        // The factor takes a sub-axis part of size 'gcdSize'.
+        // The remainder of the axis is kept in 'currentAxisInfo' to be offered
+        // to subsequent factors.
+        auto sub = SubAxisInfoAttr::get(
+            ctx, currentAxisInfo->splitPreSize.value_or(1), gcdSize);
+        shardings[i].axisRefs.push_back(AxisRefAttr::get(ctx, name, sub));
+
+        currentAxisInfo->splitPreSize = sub.getNextPreSize();
+        currentAxisInfo->size /= gcdSize;
+        remainingFactorSizes[i] /= gcdSize;
+      } else {
+        // The factor consumes the entire (sub-)axis. We advance to the next
+        // axis in 'allAxes'.
+        shardings[i].axisRefs.push_back(
+            AxisRefAttr::get(ctx, name, currentAxisInfo->getSubAxisInfo(ctx)));
+
+        remainingFactorSizes[i] /= axisSize;
+        currentAxisInfo = getAxisRefInfo(allAxes, ++axisIndex, mesh);
+        break;  // Current axis exhausted; move to next outer loop iteration.
+      }
+    }
+
+    if (!axisUsed) {
+      // The axis was checked against every factor and none could
+      // accept it. We dump all remaining axes into the overflow bin of the
+      // dimension's minor-most factor and stop.
+      addRemainingAxes(shardings.back().overflowAxes, currentAxisInfo, allAxes,
+                       axisIndex, mesh);
+      break;
+    }
+  }
 }
 
 }  // namespace sdy
