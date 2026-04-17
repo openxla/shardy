@@ -2,32 +2,6 @@
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
 
-// CHECK-LABEL: func @named_computation
-func.func @named_computation(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
-  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{"x"}]> : tensor<210xf32>
-  // CHECK-NEXT: sdy.named_computation<"foo">(%[[RESHARD]])
-  %0 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"x"}]>] out_shardings=[<@mesh, [{"y"}]>] (%arg1: tensor<210xf32>) {
-    %2 = stablehlo.abs %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : tensor<210xf32>
-    // CHECK: %[[RESHARD:.*]] = sdy.reshard %{{.*}} <@mesh, [{"y"}]> : tensor<210xf32>
-    // CHECK-NEXT: sdy.return %[[RESHARD]] : tensor<210xf32>
-    sdy.return %2 : tensor<210xf32>
-  } : (tensor<210xf32>) -> (tensor<210xf32>)
-  %1 = stablehlo.negate %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
-  return %1 : tensor<210xf32>
-}
-
-// CHECK-LABEL: func @named_computation_empty_block
-func.func @named_computation_empty_block(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
-  // CHECK: sdy.named_computation<"foo">(%arg0)
-  %0 = sdy.named_computation<"foo">(%arg0) in_shardings=[<@mesh, [{"x"}]>] out_shardings=[<@mesh, [{"y"}]>] (%arg1: tensor<210xf32>) {
-    // CHECK: %[[RESHARD:.*]] = sdy.reshard %{{.*}} <@mesh, [{"y"}]> : tensor<210xf32>
-    // CHECK-NEXT: sdy.return %[[RESHARD]] : tensor<210xf32>
-    sdy.return %arg1 : tensor<210xf32>
-  } : (tensor<210xf32>) -> (tensor<210xf32>)
-  %1 = stablehlo.negate %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
-  return %1 : tensor<210xf32>
-}
-
 // CHECK-LABEL: func @case
 func.func @case(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}]>}, %arg1: tensor<i32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
   %0 = "stablehlo.case"(%arg1) ({

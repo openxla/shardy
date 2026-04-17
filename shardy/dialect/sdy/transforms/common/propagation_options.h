@@ -48,7 +48,8 @@ struct PropagationOptions {
   // auto-partitioner will be invoked after propagation of user-specified
   // shardings.
   bool enableAutoPartitioning = false;
-  // Whether to avoid explicit reshards/collectives on named computations.
+  // Whether to avoid explicit reshards/collectives on named computations/calls.
+  // TODO(enver): Rename to avoidReshardsOnCalls.
   bool avoidReshardsOnNamedComputations = false;
   // Whether to update axes with non-divisible input/output shardings.
   bool updateNonDivisibleInputOutputShardings = true;

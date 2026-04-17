@@ -40,8 +40,7 @@ void populateExportOptions(ExportOptions& options,
       propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
-  options.avoidReshardsOnNamedComputations =
-      propOptions.avoidReshardsOnNamedComputations;
+  options.avoidReshardsOnCalls = propOptions.avoidReshardsOnNamedComputations;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
   options.enableNativeNonFlatSupport = propOptions.enableNativeNonFlatSupport;

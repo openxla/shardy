@@ -38,12 +38,12 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
+  pm.addPass(createExportNamedComputationsPass());
+
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
-  passOptions.avoidReshardsOnNamedComputations =
-      options.avoidReshardsOnNamedComputations;
+  passOptions.avoidReshardsOnCalls = options.avoidReshardsOnCalls;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-  pm.addPass(createExportNamedComputationsPass());
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
