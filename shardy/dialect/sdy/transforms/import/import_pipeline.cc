@@ -40,12 +40,12 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   }
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
+  pm.addPass(createManualAxesCleanupPass());
   if (options.enableLateInlining) {
     pm.addPass(createImportFuncCallsPass());
     // Keep SymbolDCEPass after ImportFuncCallsPass.
     pm.addPass(createSymbolDCEPass());
   }
-  pm.addPass(createManualAxesCleanupPass());
 
   // We dump the module before propagation at this point, since the import
   // passes before are cleanup passes that make the module more readable, and
