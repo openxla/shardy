@@ -310,13 +310,14 @@ def _named_computation_default_lowering(
 
 def _register_named_computation_primitive():
   """Registers named_computation primitive and a JAX CallPrimitive."""
-  primitive = jax.core.CallPrimitive('named_computation')
   # Makes it possible to execute eagerly.
   try:
     # JAX v0.10.0 and newer.
+    primitive = jex.core.CallPrimitive('named_computation')
     primitive.def_impl(jex.core.call_impl)  # pytype: disable=module-attr
   except AttributeError:
     # JAX v0.9.2 and older.
+    primitive = jax.core.CallPrimitive('named_computation')
     primitive.def_impl(jax.core.call_impl)  # pytype: disable=module-attr
 
   def custom_call_transpose(params, *rest, primitive=primitive):
