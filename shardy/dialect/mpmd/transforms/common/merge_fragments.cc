@@ -395,6 +395,19 @@ void MergeFragmentBasePass::runOnFunc(FuncOp func_op) {
 
 namespace {
 
+// Returns true if all fragments with a transpose count have it set to 0,
+// i.e., the program is forward-only.
+bool IsForwardOnlyFunction(FuncOp func_op) {
+  bool forward_only = true;
+  func_op.walk([&](FragmentOp fragment) {
+    auto tc = TryToFindFragmentTransposeCount(fragment);
+    if (tc.has_value() && *tc != 0) {
+      forward_only = false;
+    }
+  });
+  return forward_only;
+}
+
 class MergeInferredFragmentsPass
     : public impl::MergeInferredFragmentsPassBase<MergeInferredFragmentsPass> {
   using MergeInferredFragmentsPassBase::MergeInferredFragmentsPassBase;
@@ -423,7 +436,12 @@ class MergeInferredFragmentsPass
 
   FailureOr<FragmentOp> GetMergeCandidate(FragmentOp producer_op,
                                           OpOrderMap& order) const final {
-    if (!mergeSideways) {
+    bool doSideways = mergeSideways;
+    if (!doSideways && mergeSidewaysIfForwardOnly) {
+      doSideways = IsForwardOnlyFunction(
+          producer_op->getParentOfType<FuncOp>());
+    }
+    if (!doSideways) {
       return MergeFragmentBasePass::GetMergeCandidate(producer_op, order);
     }
 

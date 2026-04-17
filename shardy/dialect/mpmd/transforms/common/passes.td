@@ -250,7 +250,11 @@ def MergeInferredFragmentsPass :
            "Whether to merge with any consumer or only the closest consumer.">,
     Option<"mergeSideways", "merge-sideways", "bool", /*default=*/"false",
            "Whether to merge with the next fragment in the same mesh "
-           "(neighbor), even if not a consumer.">
+           "(neighbor), even if not a consumer.">,
+    Option<"mergeSidewaysIfForwardOnly", "merge-sideways-if-forward-only",
+           "bool", /*default=*/"false",
+           "Whether to enable sideways merging if the program is forward-only "
+           "(all fragments with a transpose count have it set to 0).">
   ];
 }
 
