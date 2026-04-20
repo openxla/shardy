@@ -84,8 +84,8 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
   }
-  pm.addPass(createCloseShardingsPass());
   pm.addPass(createExportNamedComputationsPass());
+  pm.addPass(createCloseShardingsPass());
 
   // We dump the module after propagation at this point, since the export passes
   // before are removing internal implementation details of the propagation
