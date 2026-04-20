@@ -13,9 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "llvm/Support/CommandLine.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassOptions.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
@@ -51,6 +54,11 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
+  if (options.enableLateInlining) {
+    pm.addPass(createImportFuncCallsPass());
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
+  }
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
@@ -76,13 +84,22 @@ void addPropagationPipeline(OpPassManager& pm,
   addPropagationPipeline(pm, dumpIndex, options);
 }
 
+struct PropagationOptionsOptions
+    : public PassPipelineOptions<PropagationOptionsOptions> {
+  Option<bool> enableLateInlining{*this, "enable-late-inlining",
+                                  llvm::cl::desc("Whether to late inline."),
+                                  llvm::cl::init(true)};
+};
+
 void registerPropagationPipeline() {
-  PassPipelineRegistration<>(
+  PassPipelineRegistration<PropagationOptionsOptions>(
       "sdy-propagation-pipeline",
       "Runs the SDY propagation pass, preceded by a sequence of import passes "
       "needed as a pre-processing step for propagation",
-      [](OpPassManager& pm) {
-        return addPropagationPipeline(pm);
+      [](OpPassManager& pm, const PropagationOptionsOptions& options) {
+        PropagationOptions propOptions;
+        propOptions.enableLateInlining = options.enableLateInlining;
+        return addPropagationPipeline(pm, propOptions);
       });
 }
 

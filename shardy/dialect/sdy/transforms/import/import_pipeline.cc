@@ -57,11 +57,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
-  if (options.enableLateInlining) {
-    pm.addPass(createImportFuncCallsPass());
-    // Keep SymbolDCEPass after ImportFuncCallsPass.
-    pm.addPass(createSymbolDCEPass());
-  }
 }
 
 void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {

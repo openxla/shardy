@@ -73,6 +73,7 @@ cc_library(
         "@llvm-project//mlir:SideEffectInterfaces",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
+        "@llvm-project//mlir:Transforms",
         "@stablehlo//:stablehlo_ops",
     ],
 )
