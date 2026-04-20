@@ -38,8 +38,6 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
-  pm.addPass(createExportNamedComputationsPass());
-
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
   passOptions.avoidReshardsOnCalls = options.avoidReshardsOnCalls;
@@ -93,13 +91,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // itself and make the module more readable.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "after_propagation", dumpIndex++));
+  pm.addPass(createExportNamedComputationsPass());
 
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
-  } else {
-    pm.addPass(createExportNamedComputationsPass());
   }
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
