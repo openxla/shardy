@@ -36,6 +36,7 @@ cc_library(
         "add_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
         "constant_or_scalar_splitter.cc",
+        "flatten_call_graph.cc",
         "import_func_calls.cc",
         "import_pipeline.cc",
         "inline_meshes.cc",
