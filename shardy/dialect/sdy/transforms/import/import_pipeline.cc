@@ -33,12 +33,12 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createPropagateShardingFromFuncToCallPass());
+  pm.addPass(createConstantOrScalarSplitterPass());
   if (!options.enableLateInlining) {
     pm.addPass(createImportFuncCallsPass());
     // Keep SymbolDCEPass after ImportFuncCallsPass.
     pm.addPass(createSymbolDCEPass());
   }
-  pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
   if (options.enableLateInlining) {
