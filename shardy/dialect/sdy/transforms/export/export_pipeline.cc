@@ -85,13 +85,13 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
   }
   pm.addPass(createCloseShardingsPass());
+  pm.addPass(createExportNamedComputationsPass());
 
   // We dump the module after propagation at this point, since the export passes
   // before are removing internal implementation details of the propagation
   // itself and make the module more readable.
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "after_propagation", dumpIndex++));
-  pm.addPass(createExportNamedComputationsPass());
 
   // TODO(enver, tomnatan): Consider having a pipeline specifically for
   // reshards/collectives.
