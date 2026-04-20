@@ -21,8 +21,12 @@ limitations under the License.
 #include "llvm/ADT/BitVector.h"  // IWYU pragma: keep
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"  // IWYU pragma: keep
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -71,6 +75,22 @@ bool isEquivalent(TensorShardingAttr sharding,
     return isFullyReplicated(anotherSharding);
   }
   return sharding.isEquivalent(anotherSharding);
+}
+
+void addDataFlowEdges(ValueRange edgeOwners, IRRewriter& rewriter) {
+  // We are iterating the owners in a reversed order because we set the
+  // insertion point after each value and we would like to keep the data flow
+  // edges for the arguments/results in the same order as they appear.
+  for (Value edgeOwner : llvm::reverse(edgeOwners)) {
+    rewriter.setInsertionPointAfterValue(edgeOwner);
+    if (!isStaticShapedType(edgeOwner.getType())) {
+      // Skip non-static-shaped tensors, e.g., tokens.
+      continue;
+    }
+    auto dataFlowEdge = DataFlowEdgeOp::create(
+        rewriter, edgeOwner.getLoc(), edgeOwner, getSharding(edgeOwner));
+    rewriter.replaceAllUsesExcept(edgeOwner, dataFlowEdge, dataFlowEdge);
+  }
 }
 
 }  // namespace sdy

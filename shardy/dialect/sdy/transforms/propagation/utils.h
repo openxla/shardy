@@ -49,6 +49,9 @@ bool isFullyReplicated(TensorShardingAttr sharding);
 bool isEquivalent(TensorShardingAttr sharding,
                   TensorShardingAttr anotherSharding);
 
+// Adds data flow edges.
+void addDataFlowEdges(ValueRange edgeOwners, IRRewriter& rewriter);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -35,6 +35,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -116,6 +117,18 @@ struct ImportFuncCallsPass
     // Erase all func ops that now have no call ops.
     for (auto [calleeName, _] : calleeNameToMovedRegion) {
       symbolTable.erase(symbolTable.lookup(calleeName));
+    }
+
+    // Required for cases that AddDataFlowEdges runs before this pass.
+    // TODO(enver): Drop after the late inlining drops ImportFuncCalls pass
+    // altogether as long as early inlining is before AddDataFlowEdges pass.
+    if (addDataFlowEdgesOnNamedComputations) {
+      moduleOp.walk([&](NamedComputationOp namedComputationOp) {
+        // Add the data flow edges for result owners and block argument owners.
+        addDataFlowEdges(namedComputationOp.getBlockArgumentEdgeOwners(),
+                         rewriter);
+        addDataFlowEdges(namedComputationOp.getOpResultEdgeOwners(), rewriter);
+      });
     }
   }
 };

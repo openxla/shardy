@@ -181,6 +181,7 @@ cc_library(
     deps = [
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
     ],
 )

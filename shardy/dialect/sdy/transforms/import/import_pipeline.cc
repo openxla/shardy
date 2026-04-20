@@ -13,10 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "llvm/Support/CommandLine.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/Pass/PassOptions.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Passes.h"
@@ -35,17 +33,13 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createPropagateShardingFromFuncToCallPass());
   pm.addPass(createConstantOrScalarSplitterPass());
   if (!options.enableLateInlining) {
-    pm.addPass(createImportFuncCallsPass());
+    pm.addPass(createImportFuncCallsPass(ImportFuncCallsPassOptions{
+        /*addDataFlowEdgesOnNamedComputations=*/false}));
     // Keep SymbolDCEPass after ImportFuncCallsPass.
     pm.addPass(createSymbolDCEPass());
   }
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
-  if (options.enableLateInlining) {
-    pm.addPass(createImportFuncCallsPass());
-    // Keep SymbolDCEPass after ImportFuncCallsPass.
-    pm.addPass(createSymbolDCEPass());
-  }
 
   // We dump the module before propagation at this point, since the import
   // passes before are cleanup passes that make the module more readable, and
@@ -56,6 +50,11 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
 
   pm.addNestedPass<func::FuncOp>(createAddDataFlowEdgesPass(
       AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
+  if (options.enableLateInlining) {
+    pm.addPass(createImportFuncCallsPass());
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
+  }
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
