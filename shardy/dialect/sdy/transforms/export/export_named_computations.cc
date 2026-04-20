@@ -118,14 +118,8 @@ void exportNamedComputations(ModuleOp moduleOp, SymbolTable& symbolTable) {
         namedComputationOp, namedComputationOp.getResultTypes(), funcSymName,
         namedComputationOp.getOperands());
     callOp->setAttrs(callOpAttrs);
-    FuncOp funcOp = symbolTable.lookup<FuncOp>(funcSymName);
-    // Copy the func output shardings to the call op.
-    if (TensorShardingPerValueAttr funcResultShardings =
-            getFuncResultShardings(funcOp, symbolTable);
-        funcResultShardings || outShardings) {
-      setShardings(callOp, outShardings
-                               ? *outShardings
-                               : getFullyClosedLike(funcResultShardings));
+    if (outShardings) {
+      setShardings(callOp, *outShardings);
     }
   });
 }
