@@ -696,6 +696,13 @@ func::FuncOp getFuncOpOrDie(StringRef funcSymName,
 TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
                                               Attribute meshOrRef);
 
+// Returns the main func. Dies if there is no main func. The main func is the
+// one with name 'main'. If `useSingleFunc` is true, then first check if the
+// module has only one func, and assume it as the main func. Useful for tests.
+mlir::func::FuncOp getMainFuncOrDie(ModuleOp moduleOp,
+                                    const SymbolTable& symbolTable,
+                                    bool useSingleFunc = false);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -20,6 +20,10 @@ func.func @case_single_result_func_args_single_sharding(%arg0: tensor<i32>, %arg
   return %0 : tensor<4xi64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @case_token_result_skipped(
 // CHECK-SAME:      %arg0: tensor<i32>, %arg1: !stablehlo.token, %arg2: !stablehlo.token,
 // CHECK-SAME:      %arg3: tensor<4xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>}
@@ -36,6 +40,10 @@ func.func @case_token_result_skipped(%arg0: tensor<i32>, %arg1: !stablehlo.token
   }) : (tensor<i32>) -> (!stablehlo.token, tensor<4xi64>)
   return %0#0, %0#1 : !stablehlo.token, tensor<4xi64>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // This test makes sure we do not propagate any scalar value through the case op
 // (even though we try it), since the OpShardingRuleAttr on scalars has no
@@ -55,6 +63,10 @@ func.func @case_scalars(%arg0: tensor<i32>, %arg1: tensor<i64> {sdy.sharding = #
   return %0 : tensor<i64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @case_single_result_func_args_conflict(
 // CHECK-SAME:      %arg0: tensor<i32>,
 // CHECK-SAME:      %arg1: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", "b"}]>},
@@ -69,6 +81,10 @@ func.func @case_single_result_func_args_conflict(%arg0: tensor<i32>, %arg1: tens
   }) : (tensor<i32>) -> tensor<8xi64>
   return %0 : tensor<8xi64>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // We find the most compatible major sharding axes, so the fact the first
 // sharding is best shouldn't matter.
@@ -89,6 +105,10 @@ func.func @case_single_result_func_first_sharding_best_ignored(
   }) : (tensor<i32>) -> tensor<8xi64>
   return %0 : tensor<8xi64>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @case_multiple_results_different_sharding(
 // CHECK-SAME:      %arg0: tensor<i32>,
@@ -118,6 +138,10 @@ func.func @case_multiple_results_different_sharding(
   return %0#0, %0#1 : tensor<8xi64>, tensor<8xi64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // Make sure we account for when an axis is used in another dimension when
 // finding the most compatible major sharding axes.
 // In this case we prefer the sharding of %arg1, because both %arg1 and %arg2
@@ -140,6 +164,10 @@ func.func @case_multiple_dim_most_compatible(
   }) : (tensor<i32>) -> (tensor<8x8xi64>)
   return %0 : tensor<8x8xi64>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @case_multiple_results_different_sharding_conflicts(
 // CHECK-SAME:      %arg0: tensor<i32>,
@@ -169,6 +197,10 @@ func.func @case_multiple_results_different_sharding_conflicts(
   return %0#0, %0#1 : tensor<8xi64>, tensor<8xi64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @case_closed_sharding(
 // CHECK-SAME:      %arg0: tensor<i32>,
 // CHECK-SAME:      %arg1: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}]>},
@@ -187,6 +219,10 @@ func.func @case_closed_sharding(
   }) : (tensor<i32>) -> tensor<8xi64>
   return %0 : tensor<8xi64>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // Basic case where the shardings are read from an intermediate value and used
 // by another op.
@@ -216,6 +252,10 @@ func.func @case_not_func_args_or_directly_returned(
   return %3 : tensor<8xi64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @case_propagate_from_func_result(
 // CHECK-SAME:      %arg0: tensor<i32>,
 // CHECK-SAME:      %arg1: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
@@ -234,6 +274,10 @@ func.func @case_propagate_from_func_result(
   return %0 : tensor<8xi64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @case_propagate_from_case_op_result(
 // CHECK-SAME:      %arg0: tensor<i32>,
 // CHECK-SAME:      %arg1: tensor<8xi64> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
@@ -251,6 +295,10 @@ func.func @case_propagate_from_case_op_result(
   }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a", "b", ?}]>]>} : (tensor<i32>) -> tensor<8xi64>
   return %0 : tensor<8xi64>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @case_propagate_mulitple_uses(
 // CHECK-SAME:      %arg0: tensor<i32>,
@@ -277,6 +325,10 @@ func.func @case_propagate_mulitple_uses(
   return %3 : tensor<8xi64>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @optimization_barrier(
 // CHECK-SAME:      %arg0: tensor<32x96xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<32x96xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {}]>})
@@ -291,6 +343,10 @@ func.func @optimization_barrier(%arg0: tensor<32x96xf32> {sdy.sharding = #sdy.sh
   %1:2 = stablehlo.optimization_barrier %0, %arg1 : tensor<32x96xf32>, tensor<32x96xf32>
   return %1#0, %1#1 : tensor<32x96xf32>, tensor<32x96xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // Check propagation starting at a return can go through a WhileOp.
 // CHECK-LABEL: func @while_func_return(
@@ -315,6 +371,10 @@ func.func @while_func_return(%arg0: tensor<32x96xf32>) -> (tensor<32x96xf32> {sd
   }
   return %3#0 : tensor<32x96xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // Check propagation starting at a return can go through a WhileOp, but with it
 // being based purely on the func block arg.
@@ -343,6 +403,10 @@ func.func @while_func_return_directly_on_func_operand(
   return %3#0 : tensor<32x96xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // Check propagation starting at a use of the while result can go through the
 // WhileOp.
 // CHECK-LABEL: func @while_result_use(
@@ -369,6 +433,10 @@ func.func @while_result_use(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
   return %4 : tensor<32x96xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // Check propagation starting inside the body of the while can go out of the
 // body through the block argument of the body. We prevent forwards propagation
 // in the body by making the use of the sharded op be not partitionable.
@@ -393,6 +461,10 @@ func.func @while_body_propagate_block_arg(%arg0: tensor<32x96xf32>) -> tensor<32
   return %3#0 : tensor<32x96xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @while_body_token_block_arg_skipped(
 // CHECK-SAME:      %arg0: tensor<32x96xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: !stablehlo.token)
@@ -415,6 +487,10 @@ func.func @while_body_token_block_arg_skipped(%arg0: tensor<32x96xf32>, %arg1: !
   }
   return %3#1, %3#0 : tensor<32x96xf32>, !stablehlo.token
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // Similar test to while_body_propagate_block_arg, except this makes sure that
 // propagation flows to the WhileOp operand through the return op - and not
@@ -440,6 +516,10 @@ func.func @while_body_propagate_return_op(%arg0: tensor<32x96xf32>) -> tensor<32
   }
   return %3#0 : tensor<32x96xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // Same as above, except the use is not a func operand nor is the result of the
 // while directly returned from the func.
@@ -469,6 +549,10 @@ func.func @while_body_non_func_operand_result_use(%arg0: tensor<32x96xf32>) -> t
   return %5 : tensor<32x96xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // Check propagation starting from a func arg can go through the WhileOp.
 // CHECK-LABEL: func @while_func_operand(
 // CHECK-SAME:      %arg0: tensor<32x96xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>})
@@ -497,24 +581,25 @@ func.func @while_func_operand(%arg0: tensor<32x96xf32> {sdy.sharding = #sdy.shar
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 
 // Check we can propagate forward from outside into the call, then back out.
-// CHECK-LABEL: func @call_argument_sharding_propagation(
+// test: call_argument_sharding_propagation
+// CHECK-LABEL: func @main(
 // CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-func.func @call_argument_sharding_propagation(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) -> tensor<8x2xi32> {
+func.func @main(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) -> tensor<8x2xi32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : tensor<8x2xi32>
-  // CHECK-NEXT: %[[CALL:.*]] = call @my_func(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT: return %[[CALL]] : tensor<8x2xi32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
-  %1 = call @my_func(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %1 = call @foo(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
   return %1 : tensor<8x2xi32>
 }
 
-// CHECK-LABEL: func private @my_func(%arg0: tensor<8x2xi32>
+// CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "my_func"} {
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
 // CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
 // CHECK-NEXT:  }
-func.func private @my_func(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   return %arg0 : tensor<8x2xi32>
 }
 
@@ -522,25 +607,26 @@ func.func private @my_func(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 
 // Check we can propagate backwards from outside into the call, then back out.
-// CHECK-LABEL: func @call_result_sharding_propagation(
+// test: call_result_sharding_propagation
+// CHECK-LABEL: func @main(
 // CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-func.func @call_result_sharding_propagation(%arg0: tensor<8x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) {
+func.func @main(%arg0: tensor<8x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : tensor<8x2xi32>
-  // CHECK-NEXT: %[[CALL:.*]] = call @my_func(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT: return %[[CALL]] : tensor<8x2xi32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
-  %1 = call @my_func(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %1 = call @foo(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
   return %1 : tensor<8x2xi32>
 }
 
-// CHECK-LABEL: func private @my_func(%arg0: tensor<8x2xi32>
+// CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "my_func"} {
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
 // CHECK-NEXT:    %[[SUB:.*]] = stablehlo.subtract %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : tensor<8x2xi32>
 // CHECK-NEXT:    return %[[SUB]] : tensor<8x2xi32>
 // CHECK-NEXT:  }
-func.func private @my_func(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   %0 = stablehlo.subtract %arg0, %arg0 : tensor<8x2xi32>
   return %0 : tensor<8x2xi32>
 }
@@ -549,26 +635,27 @@ func.func private @my_func(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 
 // Check we can propagate in both directions from inside out.
-// CHECK-LABEL: func @call_inside_out_propagation(
+// test: call_inside_out_propagation
+// CHECK-LABEL: func @main(
 // CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {}]>})
-func.func @call_inside_out_propagation(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+func.func @main(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : tensor<8x2xi32>
-  // CHECK-NEXT: %[[CALL:.*]] = call @my_func(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT: return %[[CALL]] : tensor<8x2xi32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
-  %1 = call @my_func(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %1 = call @foo(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
   return %1 : tensor<8x2xi32>
 }
 
-// CHECK-LABEL: func private @my_func(%arg0: tensor<8x2xi32>
+// CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {}]>}) attributes {sdy.original_func_name = "my_func"} {
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
 // CHECK-NEXT:    %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
 // CHECK-NEXT:    %[[RESHARD1:.*]] = sdy.reshard %[[RESHARD0]] <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
 // CHECK-NEXT:    return %[[RESHARD1]] : tensor<8x2xi32>
 // CHECK-NEXT:  }
-func.func private @my_func(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   %0 = sdy.sharding_constraint %arg0 <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
   %1 = sdy.sharding_constraint %0 <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
   return %1 : tensor<8x2xi32>

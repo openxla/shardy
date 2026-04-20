@@ -1128,5 +1128,17 @@ TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
                                          resultShardings);
 }
 
+// Returns the main func. Dies if there is no main func.
+FuncOp getMainFuncOrDie(ModuleOp moduleOp, const SymbolTable& symbolTable,
+                        bool useSingleFunc) {
+  if (useSingleFunc) {
+    auto funcOps = moduleOp.getOps<FuncOp>();
+    if (std::distance(funcOps.begin(), funcOps.end()) == 1) {
+      return *funcOps.begin();
+    }
+  }
+  return getFuncOpOrDie(kMainFuncName, symbolTable);
+}
+
 }  // namespace sdy
 }  // namespace mlir

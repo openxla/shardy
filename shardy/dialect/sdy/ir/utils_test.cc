@@ -730,6 +730,99 @@ TEST_F(UtilsTest, GetShardableValue_AsyncStartOp) {
   EXPECT_EQ(getShardableValue(blockArg), operand);
 }
 
+TEST_F(UtilsTest, GetMainFuncOrDie_MainIsFirst) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "  func.func private @foo() {\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  SymbolTable symbolTable(localModule.get());
+  EXPECT_THAT(getMainFuncOrDie(localModule.get(), symbolTable).getName(),
+              "main");
+}
+
+TEST_F(UtilsTest, GetMainFuncOrDie_MainIsLast) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @foo() {\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @main() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  SymbolTable symbolTable(localModule.get());
+  EXPECT_THAT(getMainFuncOrDie(localModule.get(), symbolTable).getName(),
+              "main");
+}
+
+TEST_F(UtilsTest, GetMainFuncOrDie_MainIsOnly) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func @main() {\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  SymbolTable symbolTable(localModule.get());
+  EXPECT_THAT(getMainFuncOrDie(localModule.get(), symbolTable).getName(),
+              "main");
+}
+
+TEST_F(UtilsTest, GetMainFuncOrDie_SingleButNotMain) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func @some() {\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  SymbolTable symbolTable(localModule.get());
+  ASSERT_DEATH(getMainFuncOrDie(localModule.get(), symbolTable),
+               "Failed to lookup function: main");
+}
+
+TEST_F(UtilsTest, GetMainFuncOrDie_UseSingleFunc_SingleButNotMain) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func @some() {\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  SymbolTable symbolTable(localModule.get());
+  EXPECT_THAT(getMainFuncOrDie(localModule.get(), symbolTable,
+                               /*useSingleFunc=*/true)
+                  .getName(),
+              "some");
+}
+
+TEST_F(UtilsTest, GetMainFuncOrDie_UseSingleFunc_NoMain) {
+  auto localModule = mlir::parseSourceString<ModuleOp>(
+      "module {\n"
+      "  func.func private @foo() {\n"
+      "    return\n"
+      "  }\n"
+      "  func.func @some() {\n"
+      "    call @foo() : () -> ()\n"
+      "    return\n"
+      "  }\n"
+      "}",
+      &context);
+  SymbolTable symbolTable(localModule.get());
+  ASSERT_DEATH(getMainFuncOrDie(localModule.get(), symbolTable,
+                                /*UseSingleFunc=*/true),
+               "Failed to lookup function: main");
+}
+
 }  // namespace
 
 }  // namespace sdy

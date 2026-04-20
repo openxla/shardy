@@ -82,9 +82,11 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
       /*sinkEnableNativeNonFlatSupport=*/options.enableNativeNonFlatSupport}));
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
+    pm.addPass(createExportNamedComputationsPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   pm.addPass(createCloseShardingsPass());
 
   // We dump the module after propagation at this point, since the export passes

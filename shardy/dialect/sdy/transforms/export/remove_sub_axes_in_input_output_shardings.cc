@@ -23,6 +23,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -82,22 +83,24 @@ struct RemoveSubAxesInInputOutputShardingsPass
       RemoveSubAxesInInputOutputShardingsPassBase;
 
   void runOnOperation() final {
-    for (auto funcOp : getOperation().getOps<func::FuncOp>()) {
-      // Update arguments.
-      updateValueShardings(
-          funcOp.getNumArguments(),
-          [&](int64_t index) { return getSharding(funcOp.getArgument(index)); },
-          [&](int64_t index, TensorShardingAttr sharding) {
-            setSharding(funcOp.getArgument(index), sharding);
-          });
-      // Update results.
-      updateValueShardings(
-          funcOp.getNumResults(),
-          [&](int64_t index) { return getFuncResultSharding(funcOp, index); },
-          [&](int64_t index, TensorShardingAttr sharding) {
-            setFuncResultSharding(funcOp, index, sharding);
-          });
-    }
+    ModuleOp moduleOp = getOperation();
+    SymbolTable symbolTable(moduleOp);
+    func::FuncOp funcOp =
+        getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true);
+    // Update arguments.
+    updateValueShardings(
+        funcOp.getNumArguments(),
+        [&](int64_t index) { return getSharding(funcOp.getArgument(index)); },
+        [&](int64_t index, TensorShardingAttr sharding) {
+          setSharding(funcOp.getArgument(index), sharding);
+        });
+    // Update results.
+    updateValueShardings(
+        funcOp.getNumResults(),
+        [&](int64_t index) { return getFuncResultSharding(funcOp, index); },
+        [&](int64_t index, TensorShardingAttr sharding) {
+          setFuncResultSharding(funcOp, index, sharding);
+        });
   }
 };
 
