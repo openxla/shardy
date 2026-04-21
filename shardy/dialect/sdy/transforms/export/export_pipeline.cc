@@ -80,12 +80,10 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
       /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
       /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges,
       /*sinkEnableNativeNonFlatSupport=*/options.enableNativeNonFlatSupport}));
+  pm.addPass(createExportNamedComputationsPass());
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
-    pm.addPass(createExportNamedComputationsPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
-  } else {
-    pm.addPass(createExportNamedComputationsPass());
   }
   pm.addPass(createCloseShardingsPass());
 
