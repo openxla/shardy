@@ -15,6 +15,14 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
+def FlattenCallGraphPass : Pass<"sdy-flatten-call-graph", "ModuleOp"> {
+  let summary = "Flattens the call graph.";
+  let description = [{
+     Flattens the call graph.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def ImportFuncCallsPass : Pass<"sdy-import-func-calls", "ModuleOp"> {
   let summary = "Inline calls into `NamedComputationOp`.";
   let description = [{
