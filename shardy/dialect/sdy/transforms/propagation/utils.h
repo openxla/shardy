@@ -52,6 +52,16 @@ bool isEquivalent(TensorShardingAttr sharding,
 // Adds data flow edges.
 void addDataFlowEdges(ValueRange edgeOwners, IRRewriter& rewriter);
 
+// Gets a vector of `TensorShardingAttr` for the given edge owner.
+//
+// Each value in `edgeOwners` is the owner of a data flow edge. If the data flow
+// edge already has a sharding, we will copy the sharding. Otherwise, if one
+// of the owners in `edgeOwners` has a sharding, we create a fully open sharding
+// with the mesh name of the first such sharding for all the other values that
+// don't have a sharding.
+SmallVector<TensorShardingAttr> getShardingsFromDataFlowEdges(
+    ValueRange edgeOwners);
+
 }  // namespace sdy
 }  // namespace mlir
 

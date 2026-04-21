@@ -75,12 +75,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createRemoveShardingGroupsPass());
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   }
+  pm.addPass(createExportNamedComputationsPass());
   pm.addNestedPass<
       func::FuncOp>(createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{
       /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
       /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges,
       /*sinkEnableNativeNonFlatSupport=*/options.enableNativeNonFlatSupport}));
-  pm.addPass(createExportNamedComputationsPass());
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());

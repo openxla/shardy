@@ -27,6 +27,11 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
+#include "mlir/Support/LLVM.h"
+#include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -91,6 +96,38 @@ void addDataFlowEdges(ValueRange edgeOwners, IRRewriter& rewriter) {
         rewriter, edgeOwner.getLoc(), edgeOwner, getSharding(edgeOwner));
     rewriter.replaceAllUsesExcept(edgeOwner, dataFlowEdge, dataFlowEdge);
   }
+}
+
+SmallVector<TensorShardingAttr> getShardingsFromDataFlowEdges(
+    ValueRange edgeOwners) {
+  SmallVector<TensorShardingAttr> shardings;
+  shardings.reserve(edgeOwners.size());
+
+  StringRef meshName;
+  for (Value edgeOwner : edgeOwners) {
+    TensorShardingAttr sharding;
+    if (auto dataFlowEdgeOp = DataFlowEdgeOp::lookup(edgeOwner)) {
+      sharding = dataFlowEdgeOp.getShardingAttr();
+      if (sharding && meshName.empty()) {
+        meshName = sharding.getMeshName();
+      }
+    }
+    shardings.push_back(sharding);
+  }
+  if (meshName.empty()) {
+    return {};
+  }
+  // There is at least one `DataFlowEdgeOp` with a sharding.
+  // Replace all empty shardings with fully open shardings.
+  // NOTE: this will replace the existing edgeOwner's sharding, if any, though
+  // this shouldn't happen as as `sdy-add-data-flow-edges` would have copied it.
+  for (auto [sharding, edgeOwner] : llvm::zip_equal(shardings, edgeOwners)) {
+    if (!sharding) {
+      sharding = TensorShardingAttr::getFullyOpen(
+          edgeOwner.getContext(), getTensorRank(edgeOwner), meshName);
+    }
+  }
+  return shardings;
 }
 
 }  // namespace sdy
