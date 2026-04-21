@@ -69,3 +69,68 @@ func.func @interleaved(%arg0: !m1_4x8, %arg1: !m1_4x8)
 
   func.return %2, %1 : !m1_4x8, !m1_4x8
 }
+
+// This test verifies that fragments on the same mesh can be merged sideways
+// even if there is an intervening transfer on a different mesh, provided there
+// are no data dependencies between the fragments being merged.
+// CHECK-LABEL: func @merge_across_transfer
+func.func @merge_across_transfer(%arg0: !m1_4x8, %arg1: !m2_4x8)
+  -> (!m1_4x8, !m1_4x8) attributes {topology=#topo} {
+  // CHECK-NEXT: %[[TRANS:.*]] = mpmd.transfer %arg1 : (!mpmd.mesh_tensor<"m2", tensor<4x8xf32>>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  // CHECK-NEXT: %[[FRAG:.*]]:2 = mpmd.fragment<mesh="m1", origin=["f"]>
+  // CHECK-NEXT:   stablehlo.add
+  // CHECK-NEXT:   stablehlo.multiply
+  // CHECK-NEXT:   mpmd.return
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[FRAG]]#0, %[[FRAG]]#1
+
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+    (%arg2: tensor<4x8xf32>) {
+    %4 = stablehlo.add %arg2, %arg2 : tensor<4x8xf32>
+    mpmd.return %4 : tensor<4x8xf32>
+  } : (!m1_4x8) -> !m1_4x8
+
+  %1 = mpmd.transfer %arg1 : (!m2_4x8) -> !m1_4x8
+
+  %2 = mpmd.fragment<mesh="m1", origin=["f"]> (%arg0)
+    (%arg2: tensor<4x8xf32>) {
+    %4 = stablehlo.multiply %arg2, %arg2 : tensor<4x8xf32>
+    mpmd.return %4 : tensor<4x8xf32>
+  } : (!m1_4x8) -> !m1_4x8
+
+  func.return %0, %2 : !m1_4x8, !m1_4x8
+}
+
+// CHECK-LABEL: func @no_merge_at_consumer_due_to_intervening_use
+func.func @no_merge_at_consumer_due_to_intervening_use(%arg0: !m1_4x8)
+  -> (!m1_4x8, !m1_4x8) attributes {topology=#topo} {
+  // CHECK: mpmd.fragment<mesh="m1", origin=[]>
+  // CHECK: mpmd.transfer
+  // CHECK: mpmd.fragment<mesh="m2"
+  // CHECK: mpmd.transfer
+  // CHECK: mpmd.fragment<mesh="m1", origin=["f"]>
+
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+    (%arg2: tensor<4x8xf32>) {
+    %4 = stablehlo.add %arg2, %arg2 : tensor<4x8xf32>
+    mpmd.return %4 : tensor<4x8xf32>
+  } : (!m1_4x8) -> !m1_4x8
+
+  %1 = mpmd.transfer %0 : (!m1_4x8) -> !m2_4x8
+
+  %2 = mpmd.fragment<mesh="m2", origin=["g"]> (%1)
+    (%arg2: tensor<4x8xf32>) {
+    %4 = stablehlo.multiply %arg2, %arg2 : tensor<4x8xf32>
+    mpmd.return %4 : tensor<4x8xf32>
+  } : (!m2_4x8) -> !m2_4x8
+
+  %3 = mpmd.transfer %2 : (!m2_4x8) -> !m1_4x8
+
+  %4 = mpmd.fragment<mesh="m1", origin=["f"]> (%3)
+    (%arg2: tensor<4x8xf32>) {
+    %5 = stablehlo.subtract %arg2, %arg2 : tensor<4x8xf32>
+    mpmd.return %5 : tensor<4x8xf32>
+  } : (!m1_4x8) -> !m1_4x8
+
+  func.return %0, %4 : !m1_4x8, !m1_4x8
+}

@@ -437,16 +437,6 @@ class MergeInferredFragmentsPass
         current = fragment;
         break;
       }
-      if (auto transfer = dyn_cast<TransferOp>(current);
-          transfer &&
-          transfer.getType().getMeshName() == producer_op.getMeshName()) {
-        // If we transfer back into the same mesh, then abort, because the
-        // next node could have used the transferred value.
-        return mergeFailure(
-            "The closest fragment in the same mesh is a transfer. We do not "
-            "merge sideways for simplicity, to avoid having to check "
-            "dependencies.");
-      }
       current = current->getNextNode();
     }
 
