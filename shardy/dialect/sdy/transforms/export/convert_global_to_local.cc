@@ -230,9 +230,9 @@ class GenericOpPattern : public ConversionPattern {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
-        isa<stablehlo::DotOp, stablehlo::DotGeneralOp, stablehlo::GatherOp,
-            stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ScatterOp,
-            stablehlo::SliceOp>(op)) {
+        isa<stablehlo::ConvolutionOp, stablehlo::DotGeneralOp, stablehlo::DotOp,
+            stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp,
+            stablehlo::ScatterOp, stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(
@@ -1312,6 +1312,122 @@ class NamedComputationOpPattern
     }
 
     rewriter.replaceOp(op, newOp.getResults());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+// Returns the group count through dividing the global group count by the size
+// of the axes sharding the corresponding factor.
+int64_t getLocalGroupCount(int64_t globalCount, ArrayRef<AxisRefAttr> axes,
+                           MeshAttr mesh) {
+  if (globalCount <= 1 || axes.empty()) {
+    return globalCount;
+  }
+  int64_t totalAxesSize = getTotalAxesSize(axes, mesh);
+  // The 'divisor' is the sharding size applied to globalCount.
+  int64_t divisor = std::min(globalCount, totalAxesSize);
+  SDY_CHECK(globalCount % divisor == 0)
+      << "global group count is not divisible by total axes size";
+  return globalCount / divisor;
+}
+
+class StablehloConvolutionOpPattern
+    : public OpConversionPattern<stablehlo::ConvolutionOp> {
+ public:
+  StablehloConvolutionOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                                ConversionState& state)
+      : OpConversionPattern<stablehlo::ConvolutionOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::ConvolutionOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    TensorShardingAttr lhsSharding = converter->getSharding(op.getLhs());
+    TensorShardingAttr rhsSharding = converter->getSharding(op.getRhs());
+    TensorShardingAttr resultSharding = converter->getSharding(op.getResult());
+
+    if (isFullyReplicated(lhsSharding) && isFullyReplicated(rhsSharding) &&
+        isFullyReplicated(resultSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    MeshAttr mesh;
+    for (auto sharding : {lhsSharding, rhsSharding, resultSharding}) {
+      if (sharding && (mesh = sharding.getMesh(symbolTable))) break;
+    }
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    // Verify that sharding of reduction axes are handled by an sdy.all_reduce.
+    SmallVector<AxisRefAttr> reductionAxes;
+    auto addRhsReductionAxes = [&](int64_t dim) {
+      if (rhsSharding) {
+        for (auto axis : rhsSharding.getDimShardings()[dim].getAxes()) {
+          if (!llvm::is_contained(reductionAxes, axis)) {
+            reductionAxes.push_back(axis);
+          }
+        }
+      }
+    };
+
+    stablehlo::ConvDimensionNumbersAttr dimNums = op.getDimensionNumbers();
+    // Check Kernel Input Feature dimension (Contracting).
+    addRhsReductionAxes(dimNums.getKernelInputFeatureDimension());
+    // Check Kernel Spatial dimensions (Contracting).
+    for (int64_t spatialDim : dimNums.getKernelSpatialDimensions()) {
+      addRhsReductionAxes(spatialDim);
+    }
+
+    if (!reductionAxes.empty()) {
+      SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
+          << "Expected sharded contracting convolution to have one user and "
+             "the user is an sdy.all_reduce.";
+
+      auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
+      sortAndMergeAxes(reductionAxes, mesh);
+      SDY_CHECK(AxisRefListAttr::get(op->getContext(), reductionAxes) ==
+                allReduceOp.getReductionAxesAttr())
+          << "The axes of the sdy.all_reduce should match the sharded "
+             "reduction dimensions of the convolution.";
+    }
+
+    auto getAxes = [&](TensorShardingAttr sharding, int64_t dim) {
+      return (sharding && dim < sharding.getRank())
+                 ? sharding.getDimShardings()[dim].getAxes()
+                 : ArrayRef<AxisRefAttr>();
+    };
+
+    // feature_group_count constrains the input feature dimension (LHS) and the
+    // kernel output feature dimension (RHS). We only look at the kernel
+    // sharding here, as sdy-insert-explicit-reshards guarantees they are
+    // sharded the same way.
+    int64_t localFeatureGroupCount = getLocalGroupCount(
+        op.getFeatureGroupCount(),
+        getAxes(rhsSharding, dimNums.getKernelOutputFeatureDimension()), mesh);
+    // batch_group_count constrains the input batch dimension (LHS) and the
+    // kernel output feature dimension (RHS). We only inspect the LHS batch
+    // dimension for the same reason.
+    int64_t localBatchGroupCount = getLocalGroupCount(
+        op.getBatchGroupCount(),
+        getAxes(lhsSharding, dimNums.getInputBatchDimension()), mesh);
+
+    rewriter.replaceOpWithNewOp<stablehlo::ConvolutionOp>(
+        op, converter->convertType(op.getResult()), adaptor.getLhs(),
+        adaptor.getRhs(), op.getWindowStridesAttr(), op.getPaddingAttr(),
+        op.getLhsDilationAttr(), op.getRhsDilationAttr(),
+        op.getWindowReversalAttr(), dimNums, localFeatureGroupCount,
+        localBatchGroupCount, op.getPrecisionConfigAttr());
+
     conversionState.removeToConvertOp(op);
     return success();
   }
@@ -2495,7 +2611,8 @@ struct ConvertGlobalToLocalPass
         AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
         CollectivePermuteOpPattern, ConstantOpPattern, FuncOpSignaturePattern,
         GenericOpPattern, ManualComputationOpPattern, NamedComputationOpPattern,
-        ReturnOpPattern, StablehloDotOpPattern, StablehloDotGeneralOpPattern,
+        ReturnOpPattern, StablehloConvolutionOpPattern,
+        StablehloDotGeneralOpPattern, StablehloDotOpPattern,
         StablehloGatherOpPattern, StablehloIotaOpPattern, StablehloPadOpPattern,
         StablehloScatterOpPattern, StablehloSliceOpPattern>(
         typeConverter, &getContext(), conversionState);
