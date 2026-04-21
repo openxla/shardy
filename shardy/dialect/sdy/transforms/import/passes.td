@@ -70,7 +70,7 @@ def InlineMeshesPass : Pass<"sdy-inline-meshes", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
-def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "func::FuncOp"> {
+def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "ModuleOp"> {
   let summary = "Inserts `DataFlowEdgeOp` for every data-flow edge.";
   let description = [{
     Inserts `DataFlowEdgeOp` for every value that is the owner of a data-flow

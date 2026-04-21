@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -31,15 +32,18 @@ namespace sdy {
 
 namespace {
 
+using func::CallOp;
+using func::FuncOp;
+
 struct AddDataFlowEdgesPass
     : public impl::AddDataFlowEdgesPassBase<AddDataFlowEdgesPass> {
   using AddDataFlowEdgesPassBase::AddDataFlowEdgesPassBase;
 
   void runOnOperation() final {
-    func::FuncOp funcOp = getOperation();
-    IRRewriter rewriter(funcOp);
+    ModuleOp moduleOp = getOperation();
+    IRRewriter rewriter(moduleOp);
 
-    funcOp.walk([&](ShardableDataFlowOpInterface op) {
+    moduleOp.walk([&](ShardableDataFlowOpInterface op) {
       // Add the data flow edges for result owners and block argument owners.
       addDataFlowEdges(op.getBlockArgumentEdgeOwners(), rewriter);
       addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
@@ -47,10 +51,12 @@ struct AddDataFlowEdgesPass
     if (enableNativeNonFlatSupport) {
       // TODO(enver): Do not create data flow edge if the func has no callers,
       // such as the entry function.
-      addDataFlowEdges(funcOp.getArguments(), rewriter);
-      funcOp.walk([&](func::CallOp callOp) {
-        addDataFlowEdges(callOp.getResults(), rewriter);
-      });
+      for (FuncOp funcOp : moduleOp.getOps<FuncOp>()) {
+        addDataFlowEdges(funcOp.getArguments(), rewriter);
+        funcOp.walk([&](CallOp callOp) {
+          addDataFlowEdges(callOp.getResults(), rewriter);
+        });
+      }
     }
   }
 };
