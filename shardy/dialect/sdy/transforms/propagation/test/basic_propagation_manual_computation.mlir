@@ -1,10 +1,8 @@
-// RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-basic-propagate -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-basic-propagate -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
-// -----------------------------------------------------------------------------
 // Basic tests without manual axes
-// -----------------------------------------------------------------------------
 
 
 // Tests that a sharding on the out_shardings can enter the body, and propagate
@@ -21,6 +19,9 @@ func.func @manual_computation_output_sharding_annotation(%arg0: tensor<32x32xf32
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Tests that a sharding in the body can exit the body forward to out_shardings.
 // CHECK-LABEL: func @manual_computation_output_inside_body_forward_propagation(
@@ -39,6 +40,9 @@ func.func @manual_computation_output_inside_body_forward_propagation(%arg0: tens
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // CHECK-LABEL: func @manual_computation_directly_returned_body_arg(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
 // CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}) {
@@ -52,6 +56,9 @@ func.func @manual_computation_directly_returned_body_arg(%arg0: tensor<32x32xf32
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Same as `manual_computation_directly_returned_body_arg` except the
 // input/output shardings conflict.
@@ -69,6 +76,9 @@ func.func @manual_computation_directly_returned_body_arg_conflict(%arg0: tensor<
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // CHECK-LABEL: func @manual_computation_sharding_inside_body_propagation(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
 // CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}) {
@@ -84,9 +94,10 @@ func.func @manual_computation_sharding_inside_body_propagation(%arg0: tensor<32x
   func.return %0: tensor<32x32xf32>
 }
 
-// -----------------------------------------------------------------------------
 // Tests with manual axes
-// -----------------------------------------------------------------------------
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // The free axis lives inside the body. Make sure it propagates backwards out of
 // the body.
@@ -106,6 +117,9 @@ func.func @append_in_sharding_from_inside(%arg0: tensor<32x32xf32>) -> tensor<32
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // The free axis lives inside the body. Make sure it propagates forwards out of
 // the body.
 // CHECK-LABEL: func @append_out_sharding_from_inside(
@@ -123,6 +137,9 @@ func.func @append_out_sharding_from_inside(%arg0: tensor<32x32xf32>) -> tensor<3
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // The free axis lives outside the body on an operand of the ManualComputation.
 // Make sure it propagates forwards into the body.
@@ -144,6 +161,9 @@ func.func @append_in_sharding_from_outside(%arg0: tensor<32x32xf32>) -> tensor<3
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %1: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Make sure we can handle multiple values propagating between the
 // operands and block arguments. Here we propagate to the `in_sharding` at index
@@ -170,6 +190,9 @@ func.func @append_in_sharding_from_outside_multiple_operands(%arg0: tensor<32x32
   func.return %1: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // The free axis lives outside the body on an op using the result of the
 // ManualComputation. Make sure it propagates backwards into the body.
 // CHECK-LABEL: func @append_out_sharding_from_outside(
@@ -191,6 +214,9 @@ func.func @append_out_sharding_from_outside(%arg0: tensor<32x32xf32>) -> tensor<
   %3 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", "a", ?}, {?}]>]>} : tensor<32x32xf32>
   func.return %3: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Make sure we can handle multiple values propagating between the
 // the terminator of the body and `out_shardings`. Here we propagate to the
@@ -221,6 +247,9 @@ func.func @append_out_sharding_from_inside_multiple_results(%arg0: tensor<32x32x
   return %0#0, %0#1 : tensor<32x32xf32>, tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 
 // Make sure we remove any existing free axes on in_shardings before updating
 // it.
@@ -240,6 +269,9 @@ func.func @remove_existing_free_axes_in_shardings(%arg0: tensor<32x32xf32>) -> t
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // Make sure we remove any existing free axes on out_shardings before updating
 // it.
 // CHECK-LABEL: func @remove_existing_free_axes_out_shardings(
@@ -258,6 +290,9 @@ func.func @remove_existing_free_axes_out_shardings(%arg0: tensor<32x32xf32>) -> 
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // CHECK-LABEL: func @multiple_manual_axes_same_dim(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", "c", ?}, {?}]>})
 // CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", "c", ?}, {?}]>}) {
@@ -272,6 +307,9 @@ func.func @multiple_manual_axes_same_dim(%arg0: tensor<32x32xf32>) -> tensor<32x
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Now there are free and manual axes on multiple dimensions. An overall complex
 // test that makes sure everything works well together.
@@ -289,6 +327,9 @@ func.func @multiple_manual_axes_different_dim(%arg0: tensor<32x32xf32>) -> tenso
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Check we remove/add axes correctly when there are manual axes but a free axis
 // is in its own dimension.
@@ -308,6 +349,9 @@ func.func @free_axis_on_own_dim_from_inside(%arg0: tensor<32x32xf32>) -> tensor<
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // Check we remove/add axes correctly when there are manual axes but a free axis
 // is in its own dimension.
 // This specifically checks when propagating from the outside of the body in.
@@ -326,9 +370,11 @@ func.func @free_axis_on_own_dim_from_outside(%arg0: tensor<32x32x32xf32> {sdy.sh
   func.return %0: tensor<32x32x32xf32>
 }
 
-// -----------------------------------------------------------------------------
+
 // Tests with replicated axes (manual and free)
-// -----------------------------------------------------------------------------
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Make sure any replicated axes that are manual are preserved, and not
 // propagated to any `Value` inside of the `sdy.manual_computation` op.
@@ -351,6 +397,9 @@ func.func @replicated_manual_axes(%arg0: tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %3: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // For results of a ManualComputation that are directly returned, the replicated
 // axes are kept. Not for directly used func arguments.
 // CHECK-LABEL: func @replicated_manual_axes_directly_used_returned_from_func(
@@ -367,6 +416,9 @@ func.func @replicated_manual_axes_directly_used_returned_from_func(%arg0: tensor
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // Make sure any replicated axes that are free are preserved, and not
 // propagated to an intermediate.
@@ -389,6 +441,9 @@ func.func @replicated_free_axes(%arg0: tensor<32x32xf32>) -> tensor<32x32xf32> {
   func.return %3: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // For results of a ManualComputation that are directly returned, the replicated
 // axes are kept. Not for directly used func arguments.
 // CHECK-LABEL: func @replicated_free_axes_directly_used_returned_from_func(
@@ -406,6 +461,9 @@ func.func @replicated_free_axes_directly_used_returned_from_func(%arg0: tensor<3
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // Replicated axes inside the body shouldn't propagate to in/out shardings.
 // CHECK-LABEL: func @replicated_inside_body(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>})
@@ -422,9 +480,12 @@ func.func @replicated_inside_body(%arg0: tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
 
-// -----------------------------------------------------------------------------
+
 // Tests with closed dimensions (manual and free)
-// -----------------------------------------------------------------------------
+
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // CHECK-LABEL: func @preserve_untouched_closed_dim(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>})
@@ -441,6 +502,9 @@ func.func @preserve_untouched_closed_dim(%arg0: tensor<32x32xf32>) -> tensor<32x
   func.return %0: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // CHECK-LABEL: func @dont_propagate_into_closed_dim_from_inside(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {?}]>})
 // CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {?}]>}) {
@@ -455,6 +519,9 @@ func.func @dont_propagate_into_closed_dim_from_inside(%arg0: tensor<32x32xf32>) 
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %0: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // CHECK-LABEL: func @dont_propagate_into_out_sharding_closed_dim_from_outside(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {?}]>})
@@ -472,6 +539,9 @@ func.func @dont_propagate_into_out_sharding_closed_dim_from_outside(%arg0: tenso
   func.return %2: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
+
 // CHECK-LABEL: func @dont_propagate_into_in_sharding_closed_dim_from_outside(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>})
 // CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {?}]>}) {
@@ -488,6 +558,9 @@ func.func @dont_propagate_into_in_sharding_closed_dim_from_outside(%arg0: tensor
   } : (tensor<32x32xf32>) -> tensor<32x32xf32>
   func.return %1: tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2, "d"=2, "e"=2, "f"=2, "g"=2]>
 
 // CHECK-LABEL: func @manual_computation_with_tokens
 // CHECK-SAME:      %arg0: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>},

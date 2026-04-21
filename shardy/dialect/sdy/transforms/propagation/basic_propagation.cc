@@ -426,14 +426,13 @@ void propagateFuncResults(FuncOp funcOp, const SymbolTable& symbolTable,
 }
 
 // Overload of `propagateFuncResults` to propagate operand/result shardings of
-// every `FuncOp` in `moduleOp`.
+// every `FuncOp` in `moduleOp` for the main function.
 void propagateFuncResults(ModuleOp moduleOp, const SymbolTable& symbolTable,
                           const FactorPropagation& factorPropagation,
                           const ShardingGroupMap& shardingGroupMap) {
-  for (auto funcOp : moduleOp.getOps<FuncOp>()) {
-    propagateFuncResults(funcOp, symbolTable, factorPropagation,
-                         shardingGroupMap);
-  }
+  propagateFuncResults(
+      getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true),
+      symbolTable, factorPropagation, shardingGroupMap);
 }
 
 // Propagates the sharding of an operation (between operands and results) that
@@ -619,7 +618,8 @@ LogicalResult BasicPropagationPassImpl::propagate(
     const FactorPropagation& factorPropagation,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   // Pushes any shardings that exist on the `funcOp` result type attrs to the
-  // corresponding values returned in the terminator of the body of `funcOp`.
+  // corresponding values returned in the terminator of the body of `funcOp`,
+  // for the main function.
   propagateFuncResults(moduleOp, symbolTable, factorPropagation,
                        shardingGroupMap);
   MLIRContext* context = moduleOp.getContext();
@@ -655,7 +655,8 @@ LogicalResult BasicPropagationPassImpl::propagate(
   }
 
   // Pushes any shardings from the values returned in the terminator of the body
-  // of `funcOp` to the corresponding `funcOp` result type attrs.
+  // of `funcOp` to the corresponding `funcOp` result type attrs, for the main
+  // function.
   propagateFuncResults(moduleOp, symbolTable, factorPropagation,
                        shardingGroupMap);
   return success();

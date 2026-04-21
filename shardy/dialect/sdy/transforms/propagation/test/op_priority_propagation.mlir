@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-op-priority-propagate 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-op-priority-propagate 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
@@ -19,6 +19,9 @@ func.func @element_wise_host_offload_first(%arg0: tensor<8x8xf32> {sdy.sharding 
   return %3 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // Without prioritizing element-wise ops first, the sharding on dim 0 would
 // have been propagated first.
 // CHECK-LABEL: func @element_wise_over_dot_general(
@@ -36,6 +39,9 @@ func.func @element_wise_over_dot_general(%arg0: tensor<8x8xf32> {sdy.sharding = 
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // Same as `element_wise_over_dot_general` but the dot_general is the last op.
 // CHECK-LABEL: func @element_wise_over_dot_general_flipped_op_order(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
@@ -51,6 +57,9 @@ func.func @element_wise_over_dot_general_flipped_op_order(%arg0: tensor<8x8xf32>
   %2 = stablehlo.dot_general %0, %1, contracting_dims = [1] x [0] : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   return %2 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // If we propagated forward through element-wise ops with multiple uses in the
 // first iteration, the sharding on dim 0 would have been propagated to the two
@@ -76,6 +85,9 @@ func.func @defer_forward_propagation_for_multi_use_ops(
   return %4, %5 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // If we propagated forward through dynamic-slice op with multiple uses in the
 // first iteration, the sharding on dim 0 would have been propagated to the two
 // add ops.
@@ -98,6 +110,9 @@ func.func @defer_forward_propagation_for_multi_use_dynamic_slice(
   return %4 : tensor<8x2xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // If we propagated backwards through element-wise ops with a multi-use operand
 // in the first iteration, the sharding on dim 1 would have been propagated to
 // %arg0.
@@ -116,6 +131,9 @@ func.func @defer_backwards_propagation_for_op_with_multi_use_operand(%arg0: tens
   return %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @defer_backwards_propagation_dynamic_slice(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}
 func.func @defer_backwards_propagation_dynamic_slice(
@@ -129,6 +147,9 @@ func.func @defer_backwards_propagation_dynamic_slice(
   %2 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
   return %1, %2 : tensor<8x2xf32>, tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // Verify that the element-wise ops are sharded on dim 1 due to the
 // `sharding_constraint`. Without `sharding_constraint` haveing the
@@ -151,6 +172,9 @@ func.func @sharding_constraint_propagated(%arg0: tensor<8x8xf32> {sdy.sharding =
   return %3 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // Makes sure that dot_generals are propagated. If we were to accidentally only
 // propagate just element-wise ops, this test would fail.
 // CHECK-LABEL: func @chained_dot_generals(
@@ -170,6 +194,9 @@ func.func @chained_dot_generals(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shar
   return %3 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // For an unknown op that isn't in the list of op strategies, make sure we can
 // still propagate through it.
 // CHECK-LABEL: func @unknown_op(
@@ -181,6 +208,9 @@ func.func @unknown_op(%arg0: tensor<4x1x256xf32> {sdy.sharding = #sdy.sharding<@
  %0 = stablehlo.concatenate %arg0, %arg1, %arg2, dim = 1 : (tensor<4x1x256xf32>, tensor<4x1x256xf32>, tensor<4x1x256xf32>) -> tensor<4x3x256xf32>
  return %0 : tensor<4x3x256xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // Make sure that `DataFlowEdgeOp` can be propagated through. It isn't
 // registered as an op based strategy, but is handled in utility functions used
@@ -197,6 +227,9 @@ func.func @data_flow_edge(%arg0: tensor<32x96xf32> {sdy.sharding = #sdy.sharding
   %3 = sdy.data_flow_edge %1#1 : tensor<32x96xf32>
   return %2, %3 : tensor<32x96xf32>, tensor<32x96xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @manual_computation(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
@@ -226,6 +259,9 @@ func.func @manual_computation(%arg0: tensor<32x32xf32> {sdy.sharding = #sdy.shar
   func.return %4: tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @pass_through_factor_higher_priority_than_reduction_factor(
 // CHECK-SAME:      %arg0: tensor<32x1024xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
 // CHECK-SAME:      %arg1: tensor<1024x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
@@ -239,6 +275,9 @@ func.func @pass_through_factor_higher_priority_than_reduction_factor(
   %0 = stablehlo.dot %arg0, %arg1, precision = [DEFAULT, DEFAULT] : (tensor<32x1024xf32>, tensor<1024x16xf32>) -> tensor<32x16xf32>
   return %0 : tensor<32x16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @unreduced_axes_block_bwd_propagation(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
@@ -257,6 +296,9 @@ func.func @unreduced_axes_block_bwd_propagation(
   %1 = stablehlo.add %0, %0 : tensor<8x16xf32>
   return %1 : tensor<8x16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @broadcast_forward_higher_priority_than_backwards
 func.func @broadcast_forward_higher_priority_than_backwards(

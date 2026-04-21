@@ -1,7 +1,6 @@
-// RUN: sdy_opt %s -sdy-user-priority-propagate 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-user-priority-propagate 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
-sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 // CHECK-LABEL: func @no_priorities(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
@@ -17,6 +16,9 @@ func.func @no_priorities(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@m
   return %1 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @skipped_priorities(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"c", ?}]>},
@@ -30,6 +32,9 @@ func.func @skipped_priorities(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shardi
   %1 = stablehlo.divide %0, %arg2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"c", ?}p1]>]>} : tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @arg_lower_priority_than_return_value(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b"}]>},
@@ -48,6 +53,9 @@ func.func @arg_lower_priority_than_return_value(
   %2 = stablehlo.divide %1, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c"}p0, {?}]>]>} : tensor<8x8xf32>
   return %2 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @arg_lower_priority_than_return_value_with_replicated(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
@@ -68,6 +76,9 @@ func.func @arg_lower_priority_than_return_value_with_replicated(
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @arg_higher_priority_than_return_value(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
@@ -85,6 +96,9 @@ func.func @arg_higher_priority_than_return_value(
   %2 = stablehlo.divide %1, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c", ?}p1, {?}]>]>} : tensor<8x8xf32>
   return %2 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @result_lower_priority_than_arg(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
@@ -106,6 +120,9 @@ func.func @result_lower_priority_than_arg(
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @result_higher_priority_than_arg(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {"b", ?}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
@@ -125,6 +142,9 @@ func.func @result_higher_priority_than_arg(
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @dim_with_lower_priority_gets_further_sharded_by_higher(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}, {?}]>},
@@ -143,6 +163,9 @@ func.func @dim_with_lower_priority_gets_further_sharded_by_higher(
   return %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @different_priorities_with_closed_empty_dim(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>},
@@ -160,6 +183,9 @@ func.func @different_priorities_with_closed_empty_dim(
   %2 = stablehlo.divide %1, %arg3 : tensor<8x8xf32>
   return %2 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @open_empty_dim_with_priority(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
@@ -181,6 +207,9 @@ func.func @open_empty_dim_with_priority(
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // This test case simulates the benefit of using priorities for applying Batch Parallelism + ZeRO
 // CHECK-LABEL: func @different_priorities_from_args(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>},
@@ -197,6 +226,9 @@ func.func @different_priorities_from_args(
   %1 = stablehlo.dot_general %0, %arg2, contracting_dims = [1] x [0] : (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
   return %1 : tensor<8x16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @different_priorities_from_ops(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>},
@@ -215,6 +247,9 @@ func.func @different_priorities_from_ops(%arg0: tensor<8x8xf32>, %arg1: tensor<8
   return %2 : tensor<8x16xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @different_sharding_constraint_priorities(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>})
@@ -230,6 +265,9 @@ func.func @different_sharding_constraint_priorities(%arg0: tensor<8x8xf32>, %arg
   %3 = stablehlo.add %0, %2 : tensor<8x8xf32>
   return %3 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @propagate_to_multi_result_op_with_priorities
 func.func @propagate_to_multi_result_op_with_priorities(
@@ -252,6 +290,9 @@ func.func @propagate_to_multi_result_op_with_priorities(
   %2 = stablehlo.add %1#1, %arg2 : tensor<4x8xf32>
   return %1#0, %2 : tensor<4x8xf32>, tensor<4x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @propagate_from_multi_result_op_with_priorities(
 // CHECK-SAME:      %arg0: tensor<4x64x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}, {"b", ?}]>},
@@ -278,6 +319,9 @@ func.func @propagate_from_multi_result_op_with_priorities(
   %4 = stablehlo.add %2, %3 : tensor<4x8xf32>
   return %4 : tensor<4x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @manual_computation_shardings_with_priority(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {?}]>},
@@ -312,6 +356,9 @@ func.func @manual_computation_shardings_with_priority(
   func.return %2 : tensor<32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @manual_computation_sharding_with_low_priority(
 // CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {}]>},
 // CHECK-SAME:      %arg1: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>})
@@ -335,6 +382,9 @@ func.func @manual_computation_sharding_with_low_priority(
   %3 = stablehlo.add %2, %2 : tensor<32x32xf32>
   func.return %3 : tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // Tests user based priority propagation with op based priority propagation.
 // - For %arg0/%arg1 we make use of user based priorities. Since %arg0 is p1 but
@@ -365,6 +415,10 @@ func.func @user_based_and_op_based(
   %3 = stablehlo.add %2, %2 : tensor<8x8xf32>
   return %3 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 // Nothing should be propagated, but this verifies the `transformShardings`
 // sharding walker is able to handle a maximal sharding with no returned values.

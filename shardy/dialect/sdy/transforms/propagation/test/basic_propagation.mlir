@@ -1078,3 +1078,29 @@ func.func @propagate_to_empty_mesh_with_partially_open_sharding(%arg0: tensor<8x
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@empty_mesh, [{?}, {}]>]>} : tensor<8x8xf32>
   return %0: tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @main
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>}) {
+func.func @main(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+                  %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
+  %1 = call @foo(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK: stablehlo.abs %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>}
+  %2 = stablehlo.abs %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>} : tensor<8x8xf32>
+  return %2: tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func private @foo
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}
+// CHECK-SAME:  -> tensor<8x8xf32> {
+func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>}
+  %0 = stablehlo.abs %arg0 : tensor<8x8xf32>
+  return %0: tensor<8x8xf32>
+}

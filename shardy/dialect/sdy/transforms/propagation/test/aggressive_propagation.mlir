@@ -1,11 +1,7 @@
-// RUN: sdy_opt %s -sdy-aggressive-propagate="propagation-strategy=aggressive" -verify-diagnostics 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-aggressive-propagate="propagation-strategy=aggressive" -verify-diagnostics 2>&1 | FileCheck %s
 
-sdy.mesh @empty_mesh = <[]>
-sdy.mesh @mesh_a_4 = <["a"=4]>
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
-sdy.mesh @mesh_a_2_b_2_c_8 = <["a"=2, "b"=2, "c"=8]>
-sdy.mesh @mesh_a_2_b_2_c_2_d_2 = <["a"=2, "b"=2, "c"=2, "d"=2]>
 
 // CHECK-LABEL: func @no_conflict(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
@@ -23,6 +19,10 @@ func.func @no_conflict(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mes
   return %1 : tensor<8x16xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @fake_conflict_between_two_non_contracting_dims(
 // CHECK-SAME:      %arg0: tensor<256x512xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>},
 // CHECK-SAME:      %arg1: tensor<128x512xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {?}]>})
@@ -37,6 +37,10 @@ func.func @fake_conflict_between_two_non_contracting_dims(%arg0: tensor<256x512x
   return %0 : tensor<256x128xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @fake_conflict_between_contracting_and_non_contracting_dims(
 // CHECK-SAME:      %arg0: tensor<256x512xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}, {"b", "c"}]>},
 // CHECK-SAME:      %arg1: tensor<128x512xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"c", "b"}, {"a"}]>})
@@ -50,6 +54,10 @@ func.func @fake_conflict_between_contracting_and_non_contracting_dims(%arg0: ten
   return %0 : tensor<256x128xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @fake_conflict_closed_dims(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{}, {"b", "c", ?}]>})
@@ -61,6 +69,10 @@ func.func @fake_conflict_closed_dims(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @real_conflict_within_a_factor(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}, {}]>},
@@ -74,6 +86,10 @@ func.func @real_conflict_within_a_factor(%arg0: tensor<8x8xf32> {sdy.sharding = 
   return %0 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @real_conflict_within_a_factor2(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{}, {"a", "b", "c"}]>})
@@ -85,6 +101,10 @@ func.func @real_conflict_within_a_factor2(%arg0: tensor<8x8xf32> {sdy.sharding =
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @real_and_fake_conflicts(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", ?}, {?}]>},
@@ -98,6 +118,10 @@ func.func @real_and_fake_conflicts(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.s
   return %0 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @empty_mesh = <[]>
+
 // CHECK-LABEL: func @empty_mesh_replaced_closed_dim_respected(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
 // CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}, {}]>})
@@ -108,6 +132,10 @@ func.func @empty_mesh_replaced_closed_dim_respected(
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @real_conflict_across_factors_same_tensors_size(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}, {?}]>},
@@ -120,6 +148,10 @@ func.func @real_conflict_across_factors_same_tensors_size(
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @real_conflict_across_factors_diff_tensors_size(
 // CHECK-SAME:      %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a", "b"}, {?}]>},
@@ -134,6 +166,10 @@ func.func @real_conflict_across_factors_diff_tensors_size(
     (tensor<8x4xf32>, tensor<4x16xf32>) -> tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @partial_conflict_across_factors(
 // CHECK-SAME:      %arg0: tensor<2x8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2, [{"a"}, {"b"}, {}]>},
@@ -150,6 +186,9 @@ func.func @partial_conflict_across_factors(
   return %0 : tensor<2x8x16xf32>
 }
 
+// -----
+
+sdy.mesh @mesh_a_2_b_2_c_2_d_2 = <["a"=2, "b"=2, "c"=2, "d"=2]>
 // CHECK-LABEL: func @multiple_conflicts_across_factors(
 // CHECK-SAME:      %arg0: tensor<2x8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2_d_2, [{"d", ?}, {"a", "b"}, {?}]>},
 // CHECK-SAME:      %arg1: tensor<2x4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_2_d_2, [{?}, {"d", "c"}, {"b", "a"}]>})
@@ -165,6 +204,10 @@ func.func @multiple_conflicts_across_factors(
   return %0 : tensor<2x8x16xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @sideways_propagation_if_result_is_closed_empty(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
 // CHECK-SAME:      %arg1: tensor<8xf32>
@@ -177,6 +220,10 @@ func.func @sideways_propagation_if_result_is_closed_empty(
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>]>} : tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @allow_sideways_propagation_if_result_is_open_empty(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
@@ -191,6 +238,9 @@ func.func @allow_sideways_propagation_if_result_is_open_empty(
   return %0 : tensor<8xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_4 = <["a"=4]>
+
 // CHECK-LABEL: func @sideways_propagation_if_result_is_closed_sub_axis(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>},
 // CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a":(1)2, ?}]>})
@@ -203,6 +253,10 @@ func.func @sideways_propagation_if_result_is_closed_sub_axis(
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{"a":(1)2}]>]>} : tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @allow_partial_sideways_propagation_if_conflicting_with_result(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
@@ -217,6 +271,10 @@ func.func @allow_partial_sideways_propagation_if_conflicting_with_result(
   return %0 : tensor<8xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @allow_sideways_propagation_if_result_fully_matches(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b"}]>},
 // CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", "b", ?}]>})
@@ -230,6 +288,10 @@ func.func @allow_sideways_propagation_if_result_fully_matches(
   return %0 : tensor<8xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @allow_sideways_propagation_if_no_conflicting_with_one_of_multiple_results(
 // CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}]>},
 // CHECK-SAME:      %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a", ?}]>})
@@ -242,6 +304,10 @@ func.func @allow_sideways_propagation_if_no_conflicting_with_one_of_multiple_res
   %0:2 = stablehlo.custom_call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{}]>, <@mesh_a_2_b_2, [{?}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i], [i])->([i], [i]) {i=8}, custom>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
   return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @unreduced_axes_block_bwd_propagation(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
@@ -261,6 +327,10 @@ func.func @unreduced_axes_block_bwd_propagation(
   return %1 : tensor<8x16xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
+
 // CHECK-LABEL: func @prefer_most_sharded_factor_elementwise_op(
 // CHECK-SAME:       %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{}, {"a"}]>},
 // CHECK-SAME:       %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b", "a"}, {}]>})
@@ -273,6 +343,9 @@ func.func @prefer_most_sharded_factor_elementwise_op(
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2_c_8 = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: func @prefer_most_sharded_factor_elementwise_op2(
 // CHECK-SAME:       %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_8, [{}, {"a", "b"}]>},
@@ -287,6 +360,8 @@ func.func @prefer_most_sharded_factor_elementwise_op2(
   return %0 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh_a_2_b_2_c_8 = <["a"=2, "b"=2, "c"=8]>
 // CHECK-LABEL: func @prefer_most_sharded_factor_on_operand_elementwise_op(
 // CHECK-SAME:       %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_8, [{}, {"a", "b"}]>},
 // CHECK-SAME:       %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2_c_8, [{"a", "c", ?}, {?}]>})
@@ -299,6 +374,10 @@ func.func @prefer_most_sharded_factor_on_operand_elementwise_op(
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2_c_8, [{"a", "c"}, {}]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+sdy.mesh @mesh_a_2_b_2_c_2 = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @prefer_lhs_factor_non_elementwise(
 // CHECK-SAME:       %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>},

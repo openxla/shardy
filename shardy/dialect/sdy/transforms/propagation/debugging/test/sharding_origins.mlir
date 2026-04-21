@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-add-data-flow-edges -sdy-apply-sharding-constraints=debug-sharding-origins=true -sdy-aggressive-propagate=debug-sharding-origins=true -sdy-sink-data-flow-edges="sink-debug-sharding-origins=true" 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-apply-sharding-constraints=debug-sharding-origins=true -sdy-aggressive-propagate=debug-sharding-origins=true -sdy-sink-data-flow-edges="sink-debug-sharding-origins=true" 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
@@ -29,6 +29,9 @@ func.func @input_output_source_sharding(
   return %1 : tensor<8x16xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: partial_axes_match
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>,
 // CHECK-SAME:                            sdy.sharding_origins = {a = "self", b = "self"}},
@@ -47,6 +50,9 @@ func.func @partial_axes_match(
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: larger_prefix_match
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>,
@@ -67,6 +73,9 @@ func.func @larger_prefix_match(
   return %0 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // TODO(b/379627411): This should say the output sharding on axis `a` came from
 // self.
 // CHECK-LABEL: direct_returned_arg_new_axis_input
@@ -80,6 +89,9 @@ func.func @direct_returned_arg_new_axis_input(
   return %arg0 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // TODO(b/379627411): This should say the output sharding on axis `a` came from
 // self.
 // CHECK-LABEL: direct_returned_arg_new_axis_output
@@ -92,6 +104,9 @@ func.func @direct_returned_arg_new_axis_output(
   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>}) {
   return %arg0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: single_sharding_constraint
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>,
@@ -111,7 +126,8 @@ func.func @single_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
 
-
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: multiple_axes
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>,
@@ -126,6 +142,9 @@ func.func @multiple_axes(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@m
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // TODO(b/381870366): pick something smarter for merging sub axis. Below we are
 // saving intermediate shardings for the output, when it starts with c:(1)2 and
@@ -143,27 +162,33 @@ func.func @sub_axis_update(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<
   return %1 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: two_sharding_constraint
 // CHECK-SAME:    {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:     sdy.sharding_origins = {a = "constraint_1", b = "constraint_2"}})
+// CHECK-SAME:     sdy.sharding_origins = {a = "constraint_0", b = "constraint_1"}})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:                         sdy.sharding_origins = {a = "constraint_1", b = "constraint_2"}}) {
+// CHECK-SAME:                         sdy.sharding_origins = {a = "constraint_0", b = "constraint_1"}}) {
 func.func @two_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {"b", ?}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_1",
-  // CHECK-SAME:   sdy.sharding_origins = {a = "self", b = "constraint_2"}} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_0",
+  // CHECK-SAME:   sdy.sharding_origins = {a = "self", b = "constraint_1"}} : tensor<8x8xf32>
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SC_1]], %[[SC_1]] {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_1", b = "constraint_2"}]}
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_0", b = "constraint_1"}]}
   // CHECK-NEXT: %[[SC_2:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a", ?}, {"b"}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_2",
-  // CHECK-SAME:   sdy.sharding_origins = {a = "constraint_1", b = "self"}}
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_1",
+  // CHECK-SAME:   sdy.sharding_origins = {a = "constraint_0", b = "self"}}
   // CHECK-NEXT: return %[[SC_2]]
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {?}]> : tensor<8x8xf32>
   %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
   %2 = sdy.sharding_constraint %1 <@mesh, [{?}, {"b"}]> : tensor<8x8xf32>
   return %2 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: manual_computation_no_manual_axes
 // CHECK-SAME:    %arg0: tensor<32x32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}, {?}]>,
@@ -199,30 +224,33 @@ func.func @manual_computation_no_manual_axes(%arg0: tensor<32x32x32xf32>) -> ten
   return %2: tensor<32x32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: manual_computation_manual_axes
 // CHECK-SAME:    %arg0: tensor<32x32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}, {?}]>,
-// CHECK-SAME:                                 sdy.sharding_origins = {a = "mc_1_input: 0", b = "mc_1_input: 0"}}
+// CHECK-SAME:                                 sdy.sharding_origins = {a = "mc_0_input: 0", b = "mc_0_input: 0"}}
 // CHECK-SAME:    -> (tensor<32x32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}, {?}]>,
-// CHECK-SAME:                              sdy.sharding_origins = {a = "mc_1_output: 0", b = "mc_1_input: 0"}}) {
+// CHECK-SAME:                              sdy.sharding_origins = {a = "mc_0_output: 0", b = "mc_0_input: 0"}}) {
 func.func @manual_computation_manual_axes(%arg0: tensor<32x32x32xf32>) -> tensor<32x32x32xf32> {
   // CHECK-NEXT: %[[SUB:.*]] = stablehlo.subtract %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]>,
-  // CHECK-SAME:                                                sdy.sharding_origins = [{a = "mc_1_input: 0", b = "mc_1_input: 0"}]}
+  // CHECK-SAME:                                                sdy.sharding_origins = [{a = "mc_0_input: 0", b = "mc_0_input: 0"}]}
   // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[SUB]])
   // CHECK-SAME:   in_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]
   // CHECK-SAME:   manual_axes={"a"} (%arg1: tensor<16x32x32xf32>) {
   // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg1 {
   // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}, {?}]>]>,
-  // CHECK-SAME:     sdy.sharding_origins = [{b = "mc_1_input: 0"}]}
+  // CHECK-SAME:     sdy.sharding_origins = [{b = "mc_0_input: 0"}]}
   // CHECK-NEXT:   sdy.return %[[ADD]]
   // CHECK-NEXT: } {
   // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "self", b = "self"}],
-  // CHECK-SAME:   sdy.result_sharding_origins = [{a = "self", b = "mc_1_input: 0"}],
-  // CHECK-SAME:   sdy.sharding_origin_name = "mc_1"
+  // CHECK-SAME:   sdy.result_sharding_origins = [{a = "self", b = "mc_0_input: 0"}],
+  // CHECK-SAME:   sdy.sharding_origin_name = "mc_0"
   // CHECK-SAME: } : (tensor<32x32x32xf32>) -> tensor<32x32x32xf32>
   // CHECK-NEXT: %[[SUB_2:.*]] = stablehlo.subtract %[[MC]], %[[MC]] {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}, {?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_1_output: 0", b = "mc_1_input: 0"}]}
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_0_output: 0", b = "mc_0_input: 0"}]}
   // CHECK-NEXT: return %[[SUB_2]]
   %0 = stablehlo.subtract %arg0, %arg0 : tensor<32x32x32xf32>
   %1 = sdy.manual_computation(%0) in_shardings=[<@mesh, [{"a", ?}, {"b", ?}, {?}]>] out_shardings=[<@mesh, [{"a", ?}, {?}, {?}]>] manual_axes={"a"} (%arg1: tensor<16x32x32xf32>) {
@@ -233,23 +261,26 @@ func.func @manual_computation_manual_axes(%arg0: tensor<32x32x32xf32>) -> tensor
   return %2: tensor<32x32x32xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: manual_computation_multiple_results
 // CHECK-SAME:    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {"a", ?}]>,
-// CHECK-SAME:                              sdy.sharding_origins = {a = "mc_2_output: 1", b = "mc_2_input: 0"}})
+// CHECK-SAME:                              sdy.sharding_origins = {a = "mc_0_output: 1", b = "mc_0_input: 0"}})
 // CHECK-SAME:    -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_2_output: 1"}},
+// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_0_output: 1"}},
 // CHECK-SAME:        tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", ?}, {"a", ?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_2_output: 1", b = "mc_2_output: 1"}}) {
+// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_0_output: 1", b = "mc_0_output: 1"}}) {
 func.func @manual_computation_multiple_results(%arg0: tensor<32x32xf32>) -> (tensor<16x32xf32>, tensor<32x32xf32>) {
   // CHECK-NEXT: %[[MC:.*]]:2 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"b", ?}, {"a", ?}]>] out_shardings=[<@mesh, [{?}, {"a", ?}], replicated={"b"}>, <@mesh, [{"b", ?}, {"a", ?}]>] manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
   // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg1 {
   // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>,
-  // CHECK-SAME:     sdy.sharding_origins = [{a = "mc_2_output: 1"}]} : tensor<16x32xf32>
+  // CHECK-SAME:     sdy.sharding_origins = [{a = "mc_0_output: 1"}]} : tensor<16x32xf32>
   // CHECK-NEXT:   sdy.return %[[ADD]], %[[ADD]] : tensor<16x32xf32>, tensor<16x32xf32>
   // CHECK-NEXT: } {
-  // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "mc_2_output: 1", b = "self"}],
-  // CHECK-SAME:   sdy.result_sharding_origins = [{a = "mc_2_output: 1"}, {a = "self", b = "self"}],
-  // CHECK-SAME:   sdy.sharding_origin_name = "mc_2"
+  // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "mc_0_output: 1", b = "self"}],
+  // CHECK-SAME:   sdy.result_sharding_origins = [{a = "mc_0_output: 1"}, {a = "self", b = "self"}],
+  // CHECK-SAME:   sdy.sharding_origin_name = "mc_0"
   // CHECK-SAME: } : (tensor<32x32xf32>) -> (tensor<16x32xf32>, tensor<32x32xf32>)
   // CHECK-NEXT: return %[[MC]]#0, %[[MC]]#1 : tensor<16x32xf32>, tensor<32x32xf32>
   %0:2 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"b", ?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}], replicated={"b"}>, <@mesh, [{"b", ?}, {"a", ?}]>] manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
@@ -258,6 +289,9 @@ func.func @manual_computation_multiple_results(%arg0: tensor<32x32xf32>) -> (ten
   } : (tensor<32x32xf32>) -> (tensor<16x32xf32>, tensor<32x32xf32>)
   return %0#0, %0#1 : tensor<16x32xf32>, tensor<32x32xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 
 // Show that when an axis came from multiple sources, we just use the first we
@@ -268,16 +302,16 @@ func.func @manual_computation_multiple_results(%arg0: tensor<32x32xf32>) -> (ten
 // CHECK-SAME:    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>,
 // CHECK-SAME:                          sdy.sharding_origins = {a = "self"}}
 // CHECK-SAME:    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>,
-// CHECK-SAME:                       sdy.sharding_origins = {a = "constraint_3"}}) {
+// CHECK-SAME:                       sdy.sharding_origins = {a = "constraint_0"}}) {
 func.func @tie_across_operands_results(
   %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
   %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}
   ) -> (tensor<8xf32>) {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg1 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_3"}]} : tensor<8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_0"}]} : tensor<8xf32>
   // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_3",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {a = "self"}}
   // CHECK-NEXT: return %[[SC]]
   %0 = stablehlo.add %arg0, %arg1 : tensor<8xf32>
@@ -285,29 +319,35 @@ func.func @tie_across_operands_results(
   return %1 :tensor<8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: push_sharding_constraints_to_func_results
 // CHECK-SAME:   %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>,
-// CHECK-SAME:                         sdy.sharding_origins = {a = "constraint_4"}},
+// CHECK-SAME:                         sdy.sharding_origins = {a = "constraint_0"}},
 // CHECK-SAME:   %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>,
-// CHECK-SAME:                         sdy.sharding_origins = {a = "constraint_5"}})
+// CHECK-SAME:                         sdy.sharding_origins = {a = "constraint_1"}})
 // CHECK-SAME:   -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>,
-// CHECK-SAME:                      sdy.sharding_origins = {a = "constraint_4"}},
+// CHECK-SAME:                      sdy.sharding_origins = {a = "constraint_0"}},
 // CHECK-SAME:       tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}]>,
-// CHECK-SAME:                      sdy.sharding_origins = {a = "constraint_5"}}) {
+// CHECK-SAME:                      sdy.sharding_origins = {a = "constraint_1"}}) {
 func.func @push_sharding_constraints_to_func_results(
   %arg0: tensor<8xf32>, %arg1: tensor<8xf32>
   ) -> (tensor<8xf32>, tensor<8xf32>) {
   // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_4",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {a = "self"}}
   // CHECK-NEXT: %[[SC_2:.*]] = sdy.sharding_constraint %arg1 <@mesh, [{"a"}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_5",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_1",
   // CHECK-SAME:   sdy.sharding_origins = {a = "self"}}
   // CHECK-NEXT: return %[[SC_1]], %[[SC_2]] : tensor<8xf32>, tensor<8xf32>
   %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}]> : tensor<8xf32>
   %2 = sdy.sharding_constraint %arg1 <@mesh, [{"a"}]> : tensor<8xf32>
   return %1, %2 : tensor<8xf32>, tensor<8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: real_conflict_across_factors_diff_tensors_size
 func.func @real_conflict_across_factors_diff_tensors_size(
@@ -321,6 +361,9 @@ func.func @real_conflict_across_factors_diff_tensors_size(
     (tensor<8x4xf32>, tensor<4x16xf32>) -> tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: while_loop_with_multiple_results
 // CHECK-SAME:      %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>,
@@ -372,6 +415,9 @@ func.func @while_loop_with_multiple_results(
   return %0#0, %0#1 : tensor<8x4xf32>, tensor<8x4xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: sub_axes_splitting_reshape
 // CHECK-SAME:    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c", ?}]>,
 // CHECK-SAME:                           sdy.sharding_origins = {c = "self"}}
@@ -389,6 +435,9 @@ func.func @sub_axes_splitting_reshape(
   return %0 : tensor<4x4xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: sub_axes_merging_reshape
 // CHECK-SAME:    %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c":(1)4, ?}, {"c":(4)2, ?}]>,
 // CHECK-SAME:                            sdy.sharding_origins = {"c:(1)4" = "self", "c:(4)2" = "self"}}
@@ -404,6 +453,9 @@ func.func @sub_axes_merging_reshape(
   %0 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
   return %0 : tensor<16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // Here the func result axis `"c":(1)4` gets pushed onto the add first, and then
 // the func arg `"c":(1)4` which ends up getting merged.
@@ -422,6 +474,9 @@ func.func @sub_axes_merge_after_propagation_step(
   %0 = stablehlo.add %arg0, %arg0 : tensor<16xf32>
   return %0 : tensor<16xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: already_split_sub_axis_result_reshape
 // CHECK-SAME:    %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "c", ?}]>,
@@ -443,17 +498,20 @@ func.func @already_split_sub_axis_result_reshape(
   return %0 : tensor<4x4xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: apply_sharding_constraints_on_operands
 // CHECK-SAME:   %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {b = "constraint_6"}})
+// CHECK-SAME:                           sdy.sharding_origins = {b = "constraint_0"}})
 // CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {b = "constraint_6"}}) {
+// CHECK-SAME:                        sdy.sharding_origins = {b = "constraint_0"}}) {
 func.func @apply_sharding_constraints_on_operands(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{b = "constraint_6"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{b = "constraint_0"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_6",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   // CHECK-NEXT: return %[[SC]]
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
@@ -461,20 +519,23 @@ func.func @apply_sharding_constraints_on_operands(%arg0: tensor<8x8xf32>) -> ten
   return %1 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: apply_multiple_sharding_constraints_on_operands
 // CHECK-SAME:   %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:                          sdy.sharding_origins = {a = "constraint_8", b = "constraint_7"}})
+// CHECK-SAME:                          sdy.sharding_origins = {a = "constraint_1", b = "constraint_0"}})
 // CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {a = "constraint_8"}}) {
+// CHECK-SAME:                        sdy.sharding_origins = {a = "constraint_1"}}) {
 func.func @apply_multiple_sharding_constraints_on_operands(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_8", b = "constraint_7"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_1", b = "constraint_0"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_7",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_8",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_1",
   // CHECK-SAME:   sdy.sharding_origins = {a = "self"}} : tensor<8x8xf32>
   // CHECK-NEXT: return %[[SC_1]]
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
@@ -483,17 +544,20 @@ func.func @apply_multiple_sharding_constraints_on_operands(%arg0: tensor<8x8xf32
   return %2 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: open_sharding_constraint
 // CHECK-SAME:   %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {b = "constraint_9"}})
+// CHECK-SAME:                           sdy.sharding_origins = {b = "constraint_0"}})
 // CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {b = "constraint_9"}}) {
+// CHECK-SAME:                        sdy.sharding_origins = {b = "constraint_0"}}) {
 func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{b = "constraint_9"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{b = "constraint_0"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b", ?}]> {
-  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_9",
+  // CHECK-SAME:   sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   // CHECK-NEXT: return %[[SC]]
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
@@ -501,20 +565,23 @@ func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   return %1 : tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: apply_sharding_constraints_manual_computation
 // CHECK-SAME:   %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_3_input: 0", b = "mc_3_input: 0"}},
+// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_0_input: 0", b = "mc_0_input: 0"}},
 // CHECK-SAME:   %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_3_input: 1", b = "mc_3_input: 1"}})
+// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_0_input: 1", b = "mc_0_input: 1"}})
 // CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_3_output: 0", b = "mc_3_output: 0"}}) {
+// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_0_output: 0", b = "mc_0_output: 0"}}) {
 func.func @apply_sharding_constraints_manual_computation(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", ?}, {?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_3_input: 0", b = "mc_3_input: 0"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_0_input: 0", b = "mc_0_input: 0"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %arg1, %arg1 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b", "a"}, {}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_3_input: 1", b = "mc_3_input: 1"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_0_input: 1", b = "mc_0_input: 1"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD_0]], %[[ADD_1]])
   // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {?}]>, <@mesh, [{"b", "a"}, {}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"a", "b"}, {}]>]
@@ -524,7 +591,7 @@ func.func @apply_sharding_constraints_manual_computation(%arg0: tensor<8x8xf32>,
   // CHECK-NEXT: } {
   // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "self", b = "self"}, {a = "self", b = "self"}],
   // CHECK-SAME:   sdy.result_sharding_origins = [{a = "self", b = "self"}],
-  // CHECK-SAME:   sdy.sharding_origin_name = "mc_3"
+  // CHECK-SAME:   sdy.sharding_origin_name = "mc_0"
   // CHECK-SAME: } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   // CHECK-NEXT: return %[[ADD_0:.*]] %[[MC:.*]]
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
@@ -537,15 +604,18 @@ func.func @apply_sharding_constraints_manual_computation(%arg0: tensor<8x8xf32>,
   func.return %0, %2: tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: manual_computation_inconsistent_source_sharding
 // CHECK-SAME:   %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_4_input: 0", b = "mc_4_input: 0"}})
+// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_0_input: 0", b = "mc_0_input: 0"}})
 // CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_4_output: 0", b = "mc_4_output: 0"}}) {
+// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_0_output: 0", b = "mc_0_output: 0"}}) {
 func.func @manual_computation_inconsistent_source_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", "b", ?}, {?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_4_input: 0", b = "mc_4_input: 0"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_0_input: 0", b = "mc_0_input: 0"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD_0]], %[[ADD_0]])
   // CHECK-SAME:   in_shardings=[<@mesh, [{"a", "b"}, {}]>, <@mesh, [{"b", "a"}, {}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"a", "b"}, {}]>]
@@ -555,7 +625,7 @@ func.func @manual_computation_inconsistent_source_sharding(%arg0: tensor<8x8xf32
   // CHECK-NEXT: } {
   // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "self", b = "self"}, {a = "self", b = "self"}],
   // CHECK-SAME:   sdy.result_sharding_origins = [{a = "self", b = "self"}],
-  // CHECK-SAME:   sdy.sharding_origin_name = "mc_4"
+  // CHECK-SAME:   sdy.sharding_origin_name = "mc_0"
   // CHECK-SAME: } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   // CHECK-NEXT: return %[[ADD:.*]] %[[MC:.*]]
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
@@ -567,17 +637,20 @@ func.func @manual_computation_inconsistent_source_sharding(%arg0: tensor<8x8xf32
   func.return %0, %1: tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK-LABEL: manual_computation_open_sharding
 // CHECK-SAME:   %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_5_input: 0", b = "mc_5_input: 1"}})
+// CHECK-SAME:                           sdy.sharding_origins = {a = "mc_0_input: 0", b = "mc_0_input: 1"}})
 // CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_5_input: 0", b = "mc_5_input: 1"}},
+// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_0_input: 0", b = "mc_0_input: 1"}},
 // CHECK-SAME:      tensor<8x8xf32>  {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_5_input: 0", b = "mc_5_input: 1"}}) {
+// CHECK-SAME:                        sdy.sharding_origins = {a = "mc_0_input: 0", b = "mc_0_input: 1"}}) {
 func.func @manual_computation_open_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {
   // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_5_input: 0", b = "mc_5_input: 1"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "mc_0_input: 0", b = "mc_0_input: 1"}]} : tensor<8x8xf32>
   // CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ADD_0]], %[[ADD_0]])
   // CHECK-SAME:   in_shardings=[<@mesh, [{"a", ?}, {"b", ?}]>, <@mesh, [{"a", ?}, {"b", ?}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"a", ?}, {"b", ?}]>]
@@ -585,9 +658,9 @@ func.func @manual_computation_open_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8
   // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %arg1, %arg2
   // CHECK-NEXT:   sdy.return %[[ADD_:.*]]
   // CHECK-NEXT: } {
-  // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "self", b = "mc_5_input: 1"}, {a = "mc_5_input: 0", b = "self"}],
-  // CHECK-SAME:   sdy.result_sharding_origins = [{a = "mc_5_input: 0", b = "mc_5_input: 1"}],
-  // CHECK-SAME:   sdy.sharding_origin_name = "mc_5"
+  // CHECK-SAME:   sdy.block_arg_sharding_origins = [{a = "self", b = "mc_0_input: 1"}, {a = "mc_0_input: 0", b = "self"}],
+  // CHECK-SAME:   sdy.result_sharding_origins = [{a = "mc_0_input: 0", b = "mc_0_input: 1"}],
+  // CHECK-SAME:   sdy.sharding_origin_name = "mc_0"
   // CHECK-SAME: } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   // CHECK-NEXT: return %[[ADD:.*]] %[[MC:.*]]
   %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
@@ -599,76 +672,85 @@ func.func @manual_computation_open_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8
   func.return %0, %1: tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK: func.func @has_other_identical_sharding_constraint_user(%arg0: tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_10"}}) -> (tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_0"}}) -> (tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_10"}}, tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_0"}}, tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_10"}}, tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_0"}}, tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_11"}}) {
+// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_1"}}) {
 func.func @has_other_identical_sharding_constraint_user(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{b = "constraint_10"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{b = "constraint_0"}]} : tensor<8x8xf32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
   // CHECK: %[[SC1:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_10",
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
   // CHECK: %[[SC2:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_11",
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_1",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK: func.func @has_different_sharding_constraint_user(%arg0: tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_13", b = "constraint_12"}}) -> (tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_1", b = "constraint_0"}}) -> (tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_13", b = "constraint_12"}}, tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_1", b = "constraint_0"}}, tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_12"}}, tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {b = "constraint_0"}}, tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_13"}}) {
+// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_1"}}) {
 func.func @has_different_sharding_constraint_user(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {"b", ?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_13", b = "constraint_12"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_1", b = "constraint_0"}]} : tensor<8x8xf32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
   // CHECK: %[[SC1:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{}, {"b"}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_12",
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
   // CHECK: %[[SC2:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_13",
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_1",
   // CHECK-SAME:   sdy.sharding_origins = {a = "self"}} : tensor<8x8xf32>
   %2 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
 // CHECK: func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>,
-// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_14"}}, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>
+// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_0"}}, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>
 // CHECK-SAME:   {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>,
-// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_14"}}, tensor<8x8xf32>, tensor<8x8xf32>) {
+// CHECK-SAME:   sdy.sharding_origins = {a = "constraint_0"}}, tensor<8x8xf32>, tensor<8x8xf32>) {
 func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK: %[[SC0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_14",
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_0",
   // CHECK-SAME:   sdy.sharding_origins = {a = "self"}} : tensor<8x8xf32>
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
   // CHECK: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>,
-  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_14"}]} : tensor<8x8xf32>
+  // CHECK-SAME:   sdy.sharding_origins = [{a = "constraint_0"}]} : tensor<8x8xf32>
   %1 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
   // CHECK: %[[SC1:.*]] = sdy.sharding_constraint %[[SC0]] <@mesh, [{}, {"b"}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_15",
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_1",
   // CHECK-SAME:   sdy.sharding_origins = {b = "self"}} : tensor<8x8xf32>
   %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
   // CHECK: %[[SC2:.*]] = sdy.sharding_constraint %[[SC1]] <@mesh, [{}, {}]>
-  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_16"} : tensor<8x8xf32>
+  // CHECK-SAME:   {sdy.sharding_origin_name = "constraint_2"} : tensor<8x8xf32>
   %3 = sdy.sharding_constraint %2 <@mesh, [{}, {}]> : tensor<8x8xf32>
   // CHECK: %[[MUL:.*]] = stablehlo.multiply %[[SC2]], %[[SC2]] : tensor<8x8xf32>
   %4 = stablehlo.multiply %3, %3 : tensor<8x8xf32>
