@@ -73,12 +73,6 @@ StringAttr createFuncOp(
     }
   }
 
-  // Copy the output shardings to the func.
-  if (outShardings.has_value()) {
-    for (auto [i, sharding] : llvm::enumerate(outShardings->getShardings())) {
-      funcOp.setResultAttr(i, kShardingAttr, sharding);
-    }
-  }
   return symbolTable.insert(funcOp);
 }
 
