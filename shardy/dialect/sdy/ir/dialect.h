@@ -22,11 +22,13 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/Bytecode/BytecodeImplementation.h"
 #include "mlir/Bytecode/BytecodeOpInterface.h"
@@ -94,6 +96,46 @@ struct SdyDialectVersion : public mlir::DialectVersion {
 
   // Current version of Shardy dialect.
   static SdyDialectVersion getCurrentVersion() { return {0, 0, 1}; }
+
+  // Minimum supported version of Shardy dialect.
+  static SdyDialectVersion getMinimumVersion() { return {0, 0, 1}; }
+
+  std::string toString() const {
+    std::ostringstream os;
+    os << getMajor() << "." << getMinor() << "." << getPatch();
+    return os.str();
+  }
+
+  // CompatibilityRequirement is used to get a viable target version to use for
+  // `downgradeModule` given a compatibility requirement specified as a
+  // duration.
+  //
+  // Values represent a minimum requirement, i.e. WEEK_4 will return a >=4w
+  // old version, the specific implementation detail can be updated at any time
+  // by the community as long as it satisfies the requirement.
+  enum class CompatibilityRequirement {
+    NONE = 0,     // No compat requirement, use latest version.
+    WEEK_4 = 1,   // 1 month requirement
+    WEEK_12 = 2,  // 3 month requirement
+    MAX = 3,      // Maximum compat, use minimum supported version
+  };
+
+  // Get a viable target version to use for `downgradeModule` for a given
+  // compatibility requirement.
+  static SdyDialectVersion fromCompatibilityRequirement(
+      CompatibilityRequirement requirement) {
+    switch (requirement) {
+      case CompatibilityRequirement::NONE:
+        return getCurrentVersion();
+      case CompatibilityRequirement::WEEK_4:
+        return {0, 0, 1};  // WEEK_4 ANCHOR: DO NOT MODIFY
+      case CompatibilityRequirement::WEEK_12:
+        return {0, 0, 1};  // WEEK_12 ANCHOR: DO NOT MODIFY
+      case CompatibilityRequirement::MAX:
+        return getMinimumVersion();
+    }
+    llvm::report_fatal_error("Unhandled compatibility requirement");
+  }
 
   // Parse version in format "123.1235.13"
   // each number is 0-max(int64_t)
