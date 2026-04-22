@@ -240,4 +240,48 @@ diff --ruN a/stablehlo/stablehlo/tests/ops_chlo.mlir b/stablehlo/stablehlo/tests
  func.func @scan_size_mismatch(%arg0: tensor<2x3xf32>, %arg1: tensor<3xf32>) -> tensor<2x3xf32> {
    // expected-error @+1 {{'chlo.scan' op expects 1 arguments in the body, but got 2}}
    %0 = chlo.scan(%arg0) inits () dimension = 0 {
+diff --ruN a/stablehlo/stablehlo/transforms/VhloLegalizeToStablehlo.cpp b/stablehlo/stablehlo/transforms/VhloLegalizeToStablehlo.cpp
+--- stablehlo/stablehlo/transforms/VhloLegalizeToStablehlo.cpp
++++ stablehlo/stablehlo/transforms/VhloLegalizeToStablehlo.cpp
+@@ -25,6 +25,7 @@
+ #include "llvm/Support/Debug.h"
+ #include "llvm/Support/ErrorHandling.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
++#include "mlir/IR/AttrTypeSubElements.h"
+ #include "mlir/IR/Attributes.h"
+ #include "mlir/IR/BuiltinAttributes.h"
+ #include "mlir/IR/BuiltinOps.h"
+@@ -1158,10 +1159,28 @@
+   }
+ 
+   void runOnOperation() override {
+-    // Upgraded VHLO should always be convertible to StableHLO.
+-    // Arbitrary VHLO might not be convertible if it uses deprecated features
+-    // which are no longer available in StableHLO.
+-    if (failed(applyPartialConversion(getOperation(), *target, patterns))) {
++    // Upgraded VHLO types should always be convertible to StableHLO.
++    mlir::AttrTypeReplacer replacer;
++    replacer.addReplacement([&](Type type) -> std::optional<Type> {
++      Type newType = converter.convertType(type);
++      if (newType && newType != type) return newType;
++      return std::nullopt;
++    });
++    // Only types are updated here, as attribute creation with StableHLO types
++    // would trigger VHLO assertion. This is used to avoid need for signature
++    // conversion which results in invalidating the blocks and triggering
++    // recomputing the order of operations, as well as inserting many
++    // unrealized conversion casts.
++    replacer.recursivelyReplaceElementsIn(getOperation(),
++                                          /*replaceAttrs=*/false,
++                                          /*replaceLocs=*/false,
++                                          /*replaceTypes=*/true);
++
++    ConversionConfig config;
++    // TODO(jpienaar): Set to false once mhlo.broadcast folder is updated.
++    config.allowPatternRollback = true;
++    if (failed(applyPartialConversion(getOperation(), *target, patterns,
++                                      config))) {
+       return signalPassFailure();
+     }
+ 
 
