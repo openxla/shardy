@@ -25,10 +25,12 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -420,10 +422,201 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
+// A wrapper that iterates over all dimensions in a tensor mapping and calls
+// the generalized distributeAxesAcrossFactors utility for each.
+void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
+                      ArrayRef<int64_t> factorSizes, MeshAttr mesh,
+                      int64_t minorMostDimIdx) {
+  auto dimMappings = mapping.getDimMappings();
+
+  for (auto [dimIdx, dimMapping] : llvm::enumerate(dimMappings)) {
+    ArrayRef<int64_t> factorIndices = dimMapping.getFactorIndices();
+
+    // Only dimensions with multiple factors need redistribution to resolve
+    // overflows.
+    if (factorIndices.size() <= 1) continue;
+
+    // Collect all available axes and prepare the factor data.
+    SmallVector<AxisRefAttr> allAxes;
+    SmallVector<FactorSharding> dimShardings;
+    SmallVector<int64_t> dimFactorSizes;
+
+    for (int64_t factorIndex : factorIndices) {
+      FactorSharding& fs = tfs.factorIndexToSharding.at(factorIndex);
+
+      // Consolidate both valid and overflow axes into a single pool for
+      // redistribution.
+      allAxes.append(fs.axisRefs.begin(), fs.axisRefs.end());
+      allAxes.append(fs.overflowAxes.begin(), fs.overflowAxes.end());
+
+      // Preserve factor metadata (isMinorMost, isClosed) but clear current
+      // axes.
+      FactorSharding localFs = fs;
+      localFs.axisRefs.clear();
+      localFs.overflowAxes.clear();
+
+      dimShardings.push_back(localFs);
+      dimFactorSizes.push_back(factorSizes[factorIndex]);
+    }
+
+    // Call the new generalized Axis-First redistribution utility.
+    distributeAxesAcrossFactors(dimShardings, dimFactorSizes, allAxes, mesh,
+                                /*isMinorMostDim=*/dimIdx == minorMostDimIdx);
+
+    // Write the aligned factors back to the main tensor projection.
+    for (int i = 0; i < factorIndices.size(); ++i) {
+      tfs.factorIndexToSharding.at(factorIndices[i]) = dimShardings[i];
+    }
+  }
+}
+
+// Helper to get minor-most dimension index from a type, considering custom
+// layouts.
+int64_t getMinorMostDim(Operation* op, Type type, bool isResult) {
+  auto rankedType = cast<RankedTensorType>(type);
+  int64_t rank = rankedType.getRank();
+  if (rank <= 1) return rank - 1;
+
+  // StableHLO/XLA frontends often attach layout information as operation
+  // attributes.
+  if (isResult) {
+    if (auto layoutAttr =
+            op->getAttrOfType<DenseIntElementsAttr>("result_layout")) {
+      // In XLA minor-to-major notation, the FIRST element is the most minor.
+      return *layoutAttr.getValues<int64_t>().begin();
+    }
+  } else {
+    // For operands, we check 'operand_layouts' (an ArrayAttr of
+    // DenseIntElementsAttr).
+    if (auto layouts = op->getAttrOfType<ArrayAttr>("operand_layouts")) {
+      if (!layouts.empty()) {
+        if (auto layoutAttr = dyn_cast<DenseIntElementsAttr>(layouts[0])) {
+          return *layoutAttr.getValues<int64_t>().begin();
+        }
+      }
+    }
+  }
+
+  // Fallback: Default to row-major (last dimension is minor-most).
+  return rank - 1;
+}
+
+void processReshapeWithOverflowAxes(stablehlo::ReshapeOp op,
+                                    ShardingProjection& shardingProjection,
+                                    ArrayRef<TensorShardingAttr> outShardings,
+                                    IRRewriter& rewriter,
+                                    OpShardingRuleAttr shardingRule,
+                                    MeshOp meshOp) {
+  MeshAttr mesh = meshOp.getMesh();
+  MLIRContext* ctx = op.getContext();
+
+  // Redistribute axes on both sides.
+  redistributeAxes(
+      shardingProjection.getMutableOperand(0),
+      shardingRule.getOperandMapping(0), shardingRule.getFactorSizes(), mesh,
+      getMinorMostDim(op, op.getOperand().getType(), /*isResult=*/false));
+
+  redistributeAxes(
+      shardingProjection.getMutableResult(0), shardingRule.getResultMapping(0),
+      shardingRule.getFactorSizes(), mesh,
+      getMinorMostDim(op, op.getResult().getType(), /*isResult=*/true));
+
+  // Determine the preferred side.
+  int64_t inShardingSize =
+      shardingProjection.getOperand(0).getShardingSize(mesh);
+  int64_t outShardingSize =
+      shardingProjection.getResult(0).getShardingSize(mesh);
+  bool preferInputSharding = inShardingSize > outShardingSize;
+  if (inShardingSize == outShardingSize) {
+    // In sharding projection, dimensions with multiple factors (e.g., merged
+    // dimension 'ij') are processed sequentially from major to minor.
+    // If a major factor is replicated (sharded size 1) but the dimension's
+    // global size is not 1, the builder 'breaks' and truncates all subsequent
+    // sharding axes in that dimension to avoid unsupported strided views.
+    //
+    // To prevent this truncation which leads to massive tensor materialization
+    // during reshards—we prefer the side that shards the major factor (Factor
+    // 0), ensuring the sharding for the rest of the dimension is preserved.
+    auto inFactor0 =
+        shardingProjection.getOperand(0).factorIndexToSharding.find(0);
+    auto outFactor0 =
+        shardingProjection.getResult(0).factorIndexToSharding.find(0);
+    bool inSharded =
+        (inFactor0 !=
+             shardingProjection.getOperand(0).factorIndexToSharding.end() &&
+         !inFactor0->second.axisRefs.empty());
+    bool outSharded =
+        (outFactor0 !=
+             shardingProjection.getResult(0).factorIndexToSharding.end() &&
+         !outFactor0->second.axisRefs.empty());
+
+    // If the result side provides more sharding on major factors, prefer it.
+    preferInputSharding = inSharded || !outSharded;
+  }
+
+  // Build the new sharding using the preferred side.
+  TensorFactorShardings preferTfs = preferInputSharding
+                                        ? shardingProjection.getOperand(0)
+                                        : shardingProjection.getResult(0);
+  TensorMappingAttr preferMapping = preferInputSharding
+                                        ? shardingRule.getOperandMapping(0)
+                                        : shardingRule.getResultMapping(0);
+  TensorShardingAttr actualSharding = preferTfs.createTensorShardingAttr(
+      ctx, preferMapping, shardingRule.getFactorSizes(), meshOp.getName(),
+      mesh);
+
+  // Update shardingProjection to match this new sharding state.
+  SmallVector<TensorShardingAttr> inS = {
+      preferInputSharding ? actualSharding : TensorShardingAttr()};
+  SmallVector<TensorShardingAttr> outS = {
+      preferInputSharding ? TensorShardingAttr() : actualSharding};
+  ShardingProjection proj =
+      ShardingProjection::build(inS, outS, shardingRule, mesh);
+  const TensorFactorShardings& tfs =
+      preferInputSharding ? proj.getOperand(0) : proj.getResult(0);
+  for (int64_t f = 0; f < shardingRule.getNumFactors(); ++f) {
+    if (auto fs = tfs.factorIndexToSharding.find(f);
+        fs != tfs.factorIndexToSharding.end()) {
+      shardingProjection.updateSharding(f, fs->second.axisRefs, {});
+    } else {
+      shardingProjection.updateSharding(f, {}, {});
+    }
+  }
+
+  // Recalculate which tensors need reshards based on the updated projection.
+  UpdateTensorShardings finalUpdate(shardingRule.getNumOperands(),
+                                    shardingRule.getNumResults());
+  for (int64_t i = 0; i < op->getNumOperands(); ++i) {
+    if (!isEquivalent(
+            getSharding(op->getOperand(i)),
+            shardingProjection.getOperand(i).createTensorShardingAttr(
+                ctx, shardingRule.getOperandMapping(i),
+                shardingRule.getFactorSizes(), meshOp.getName(), mesh))) {
+      finalUpdate.updateOperands.set(i);
+    }
+  }
+
+  // Build the new result sharding.
+  TensorShardingAttr sharding =
+      shardingProjection.getResult(0).createTensorShardingAttr(
+          ctx, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+          meshOp.getName(), mesh);
+  if (!isEquivalent(sharding, outShardings[0])) {
+    finalUpdate.updateResults.set(0);
+  }
+
+  // Insert reshards using the finalUpdate.
+  insertExplicitReshards(op, getShardings(op->getOperands()), outShardings,
+                         shardingProjection, finalUpdate, rewriter,
+                         shardingRule,
+                         SymbolTable(op->getParentOfType<ModuleOp>()), meshOp);
+}
+
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
-// Refer to the documentation of `InsertExplicitReshardsPass` for more details.
+// Refer to the documentation of `InsertExplicitReshardsPass` for more
+// details.
 //
 // Assume the followings:
 // - All op results have the same unreduced axes.
@@ -445,6 +638,16 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   if (onFullVersion) {
     UpdateTensorShardings updateTensorShardings =
         shardingProjection.tensorsContainOverflowAxes();
+    if (updateTensorShardings.updateOperands.any() ||
+        updateTensorShardings.updateResults.any()) {
+      if (auto reshapeOp = dyn_cast<stablehlo::ReshapeOp>(op)) {
+        processReshapeWithOverflowAxes(reshapeOp, shardingProjection,
+                                       outShardings, rewriter, shardingRule,
+                                       meshOp);
+        return AxesPerFactor();
+      }
+    }
+
     AxesPerFactor commonAxesPerFactor = findCommonAxes(
         shardingProjection, shardingRule, getTensorSizes(op), meshOp);
     for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
@@ -537,7 +740,8 @@ struct InsertExplicitReshardsPass
       AxesPerFactor commonAxesPerFactor =
           processOp(op, shardingProjection, inShardings, outShardings, rewriter,
                     symbolTable, shardingRule, *meshOp, onFullVersion);
-      // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
+      // TODO(b/440055868): Insert a reshard from unreduced to replicated
+      // axes.
       insertAllReducesForReductionFactors(op, shardingProjection,
                                           commonAxesPerFactor, shardingRule,
                                           *meshOp, rewriter, onFullVersion);

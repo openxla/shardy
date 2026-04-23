@@ -275,6 +275,14 @@ class ShardingProjection {
   SmallVector<TensorFactorShardings> results;
 };
 
+// Redistributes a list of sharding axes among a set of factors within a single
+// dimension. This logic eliminates artificial overflows by allowing axes to
+// span factor boundaries or be skipped by factors they don't perfectly divide.
+void distributeAxesAcrossFactors(MutableArrayRef<FactorSharding> shardings,
+                                 ArrayRef<int64_t> factorSizes,
+                                 ArrayRef<AxisRefAttr> allAxes, MeshAttr mesh,
+                                 bool isMinorMostDim);
+
 }  // namespace sdy
 }  // namespace mlir
 
