@@ -29,6 +29,7 @@ limitations under the License.
 #include "nanobind/stl/string.h"    // IWYU pragma: keep
 #include "nanobind/stl/variant.h"   // IWYU pragma: keep
 #include "nanobind/stl/vector.h"    // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/integrations/c/attributes.h"
 #include "shardy/integrations/c/dialect.h"
 
@@ -88,6 +89,21 @@ NB_MODULE(_sdy, m) {
         }
       },
       nb::arg("context"), nb::arg("load") = true);
+
+  nb::enum_<SdyDialectVersion::CompatibilityRequirement>(
+      m, "CompatibilityRequirement")
+      .value("NONE", SdyDialectVersion::CompatibilityRequirement::NONE)
+      .value("WEEK_4", SdyDialectVersion::CompatibilityRequirement::WEEK_4)
+      .value("WEEK_12", SdyDialectVersion::CompatibilityRequirement::WEEK_12)
+      .value("MAX", SdyDialectVersion::CompatibilityRequirement::MAX);
+
+  m.def(
+      "get_version_from_compatibility_requirement",
+      [](SdyDialectVersion::CompatibilityRequirement requirement) {
+        return SdyDialectVersion::fromCompatibilityRequirement(requirement)
+            .toString();
+      },
+      nb::arg("requirement"));
 
   //
   // Attributes.
