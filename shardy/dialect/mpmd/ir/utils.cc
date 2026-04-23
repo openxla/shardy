@@ -379,7 +379,7 @@ SmallVector<MpmdDataflowEdge> GetMpmdDataflowEdges(FuncOp func_op) {
 
 FragmentOp WrapOpWithFragment(
     Operation* op, StringRef mesh_name, RewriterBase& rewriter,
-    std::function<bool(OpOperand&)> should_replace_use) {
+    StringRef inferred_by, std::function<bool(OpOperand&)> should_replace_use) {
   // We set the insertion point right before `op` so assigns of operands will be
   // in the right place regardless of previous insertion point.
   rewriter.setInsertionPoint(op);
@@ -436,6 +436,8 @@ FragmentOp WrapOpWithFragment(
         // populated IRMapping, and return the results of the cloned op..
         return block_builder.clone(*op, mapping)->getResults();
       });
+
+  fragment_op->setAttr("mpmd.inferred_by", rewriter.getStringAttr(inferred_by));
 
   // Unassign all fragment results and replace all uses of `op` with the
   // corresponding unassign op for which `should_replace_use` returns true.

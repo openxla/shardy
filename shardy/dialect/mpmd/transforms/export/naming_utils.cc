@@ -247,16 +247,23 @@ void GetPhasesFromUserOrigins(ArrayRef<Attribute> origins,
 }  // namespace
 
 // Note: unique id and function name aren't included.
-std::string GetFullNameFromMetadata(ArrayRef<Attribute> origins,
-                                    std::optional<int64_t> stage_id,
-                                    bool is_all_forward) {
+std::string GetFullNameFromFragment(FragmentOp fragment, bool is_all_forward) {
+  ArrayRef<Attribute> origins = fragment.getOrigin().getValue();
+  std::optional<int64_t> stage_id = fragment.getStageId();
+  StringAttr inferred_by =
+      fragment->getAttrOfType<StringAttr>("mpmd.inferred_by");
+
   std::vector<std::string> constructed;
 
   // Step 0. Find a name for the fragment.
   if (stage_id.has_value()) {
     constructed.push_back(StrCat("stage", *stage_id));
   } else if (origins.empty()) {
-    constructed.push_back("inferred");
+    if (inferred_by) {
+      constructed.push_back(StrCat("inferred_by_", inferred_by.getValue()));
+    } else {
+      constructed.push_back("inferred");
+    }
   } else {
     constructed.push_back(GetMostFrequentName(origins));
   }

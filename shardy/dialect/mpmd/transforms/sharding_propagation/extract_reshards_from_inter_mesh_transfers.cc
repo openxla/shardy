@@ -162,6 +162,8 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
       FragmentOp reshard = FragmentOp::createMeshFragmentWithGlobalBody(
           value.getLoc(), /*user_origin=*/{}, src_mesh_type.getMeshName(),
           value, new_operand_type, rewriter, reshard_body);
+      reshard->setAttr("mpmd.inferred_by",
+                       rewriter.getStringAttr("extract_reshards"));
       reshard.setUserSpecifiedResultSharding(0, dst_sharding_or_null);
       operand.set(reshard.getResult(0));
       return;
@@ -177,6 +179,8 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
       FragmentOp reshard = FragmentOp::createMeshFragmentWithGlobalBody(
           value.getLoc(), /*user_origin=*/{}, new_operand_type.getMeshName(),
           value, value.getType(), rewriter, reshard_body);
+      reshard->setAttr("mpmd.inferred_by",
+                       rewriter.getStringAttr("extract_reshards"));
       reshard.setUserSpecifiedResultSharding(0, src_sharding_or_null);
       rewriter.replaceUsesWithIf(
           value, reshard.getResult(0), [transfer](OpOperand& use) {
@@ -231,6 +235,8 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
         MeshTensorType::get(rewriter.getContext(), dst_mesh_type.getMeshName(),
                             dst_mesh_type.getRankedTensorType()),
         rewriter, reshard_body);
+    reshard->setAttr("mpmd.inferred_by",
+                     rewriter.getStringAttr("extract_reshards"));
     reshard.setUserSpecifiedResultSharding(0, dst_sharding_or_null);
     rewriter.replaceUsesWithIf(
         new_transfer.getResult(), reshard.getResult(0), [](OpOperand& use) {

@@ -20,6 +20,7 @@ limitations under the License.
 #include <string>
 
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LLVM.h"
@@ -36,6 +37,31 @@ using ::testing::EndsWith;
 UserOriginAttr GetUserOrigin(MLIRContext* ctx, StringRef name,
                              int64_t transpose_count) {
   return UserOriginAttr::get(ctx, StringAttr::get(ctx, name), transpose_count);
+}
+
+FragmentOp CreateMockFragment(MLIRContext* ctx, ArrayRef<Attribute> origins,
+                              std::optional<int64_t> stage_id = std::nullopt,
+                              StringRef inferred_by = "") {
+  OpBuilder builder(ctx);
+  Location loc = UnknownLoc::get(ctx);
+  ArrayAttr origins_attr = ArrayAttr::get(ctx, origins);
+  IntegerAttr stage_id_attr =
+      stage_id ? IntegerAttr::get(IntegerType::get(ctx, 64), *stage_id)
+               : nullptr;
+
+  auto fragment = FragmentOp::create(builder, loc, TypeRange(), ValueRange(),
+                                     origins_attr, "mock_mesh", stage_id_attr);
+  if (!inferred_by.empty()) {
+    fragment->setAttr("mpmd.inferred_by", StringAttr::get(ctx, inferred_by));
+  }
+  return fragment;
+}
+
+std::string GetFullNameFromMockFragment(FragmentOp fragment,
+                                        bool is_all_forward = false) {
+  std::string name = GetFullNameFromFragment(fragment, is_all_forward);
+  fragment->destroy();
+  return name;
 }
 
 TEST(InformativeFragmentNameTests, EmptyOrigin) {
@@ -165,39 +191,41 @@ TEST(TruncateTest, BigString) {
 TEST(GetFullNameFromMetadataTests, EmptyOriginStage) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({}, std::nullopt), "inferred");
+  EXPECT_EQ(GetFullNameFromMockFragment(CreateMockFragment(&ctx, {})),
+            "inferred");
 }
 
 TEST(GetFullNameFromMetadataTests, EmptyOriginWithStage) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({}, 3), "stage3");
+  EXPECT_EQ(GetFullNameFromMockFragment(CreateMockFragment(&ctx, {}, 3)),
+            "stage3");
 }
 
 TEST(GetFullNameFromMetadataTests, SingleOriginWithoutStage) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(
-      GetFullNameFromMetadata({GetUserOrigin(&ctx, "foo", 0)}, std::nullopt),
-      "foo_fwd");
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "foo", 0)})),
+            "foo_fwd");
 }
 
 TEST(GetFullNameFromMetadataTests, SingleOriginWithMultipleTransposes) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(
-      GetFullNameFromMetadata({GetUserOrigin(&ctx, "bar", 5)}, std::nullopt),
-      "bar_transpose5");
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "bar", 5)})),
+            "bar_transpose5");
 }
 
 TEST(GetFullNameFromMetadataTests,
      ManyOriginWithCommonNamesButSameBlockCounter) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({GetUserOrigin(&ctx, "block_6", 0),
-                                     GetUserOrigin(&ctx, "block_6", 0),
-                                     GetUserOrigin(&ctx, "block_6", 0)},
-                                    std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "block_6", 0),
+                                          GetUserOrigin(&ctx, "block_6", 0),
+                                          GetUserOrigin(&ctx, "block_6", 0)})),
             "block_6_fwd");
 }
 
@@ -205,10 +233,10 @@ TEST(GetFullNameFromMetadataTests,
      ManyOriginWithCommonNamesAndDifferentBlockCounters) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({GetUserOrigin(&ctx, "block_6", 0),
-                                     GetUserOrigin(&ctx, "block_7", 0),
-                                     GetUserOrigin(&ctx, "block_8", 0)},
-                                    std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "block_6", 0),
+                                          GetUserOrigin(&ctx, "block_7", 0),
+                                          GetUserOrigin(&ctx, "block_8", 0)})),
             "block_6:8_fwd");
 }
 
@@ -216,10 +244,10 @@ TEST(GetFullNameFromMetadataTests,
      ManyOriginWithCommonNamesWithReverseBlockCountersButFwd) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({GetUserOrigin(&ctx, "block_6", 0),
-                                     GetUserOrigin(&ctx, "block_5", 0),
-                                     GetUserOrigin(&ctx, "block_4", 0)},
-                                    std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "block_6", 0),
+                                          GetUserOrigin(&ctx, "block_5", 0),
+                                          GetUserOrigin(&ctx, "block_4", 0)})),
             "block_4:6_fwd");
 }
 
@@ -227,19 +255,19 @@ TEST(GetFullNameFromMetadataTests,
      ManyOriginWithCommonNamesAssumesContiguousBlockCounters) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({GetUserOrigin(&ctx, "block_6", 0),
-                                     GetUserOrigin(&ctx, "block_4", 0)},
-                                    std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "block_6", 0),
+                                          GetUserOrigin(&ctx, "block_4", 0)})),
             "block_4:6_fwd");
 }
 
 TEST(GetFullNameFromMetadataTests, ManyOriginWithCommonNamesAndBwd) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata({GetUserOrigin(&ctx, "block_6", 1),
-                                     GetUserOrigin(&ctx, "block_5", 1),
-                                     GetUserOrigin(&ctx, "block_4", 1)},
-                                    std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "block_6", 1),
+                                          GetUserOrigin(&ctx, "block_5", 1),
+                                          GetUserOrigin(&ctx, "block_4", 1)})),
             "block_6:4_bwd");
 }
 
@@ -247,10 +275,10 @@ TEST(GetFullNameFromMetadataTests, PickMostPopularNameandDropLeastPopular) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
   EXPECT_EQ(
-      GetFullNameFromMetadata(
+      GetFullNameFromMockFragment(CreateMockFragment(
+          &ctx,
           {GetUserOrigin(&ctx, "block_6", 1), GetUserOrigin(&ctx, "block_5", 1),
-           GetUserOrigin(&ctx, "block_4", 1), GetUserOrigin(&ctx, "scan", 1)},
-          std::nullopt),
+           GetUserOrigin(&ctx, "block_4", 1), GetUserOrigin(&ctx, "scan", 1)})),
       "block_6:4..._bwd");
 }
 
@@ -258,10 +286,10 @@ TEST(GetFullNameFromMetadataTests, PickMostPopularNameandDropLeastPopular2) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
   EXPECT_EQ(
-      GetFullNameFromMetadata(
+      GetFullNameFromMockFragment(CreateMockFragment(
+          &ctx,
           {GetUserOrigin(&ctx, "scan_6", 1), GetUserOrigin(&ctx, "scan_5", 1),
-           GetUserOrigin(&ctx, "scan_4", 1), GetUserOrigin(&ctx, "block", 1)},
-          std::nullopt),
+           GetUserOrigin(&ctx, "scan_4", 1), GetUserOrigin(&ctx, "block", 1)})),
       "scan_6:4..._bwd");
 }
 
@@ -270,28 +298,28 @@ TEST(GetFullNameFromMetadataTests, MixedFwdAndBwd) {
   ctx.loadDialect<MpmdDialect>();
   // The block numbers aren't reversed as this fragment isn't completely bwd
   // (i.e. the scan origin has transpose count = 0).
-  EXPECT_EQ(GetFullNameFromMetadata({GetUserOrigin(&ctx, "block_6", 1),
-                                     GetUserOrigin(&ctx, "block_5", 1),
-                                     GetUserOrigin(&ctx, "scan", 0)},
-                                    std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "block_6", 1),
+                                          GetUserOrigin(&ctx, "block_5", 1),
+                                          GetUserOrigin(&ctx, "scan", 0)})),
             "block_5:6..._fwd_bwd");
 }
 
 TEST(GetFullNameFromMetadataTests, SameNameFwdAndBwd) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata(
-                {GetUserOrigin(&ctx, "foo", 0), GetUserOrigin(&ctx, "foo", 1)},
-                std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "foo", 0),
+                                          GetUserOrigin(&ctx, "foo", 1)})),
             "foo_fwd_bwd");
 }
 
 TEST(GetFullNameFromMetadataTests, DifferentNamesFwdAndBwd) {
   MLIRContext ctx;
   ctx.loadDialect<MpmdDialect>();
-  EXPECT_EQ(GetFullNameFromMetadata(
-                {GetUserOrigin(&ctx, "foo", 0), GetUserOrigin(&ctx, "bar", 1)},
-                std::nullopt),
+  EXPECT_EQ(GetFullNameFromMockFragment(
+                CreateMockFragment(&ctx, {GetUserOrigin(&ctx, "foo", 0),
+                                          GetUserOrigin(&ctx, "bar", 1)})),
             "bar..._fwd_bwd");
 }
 

@@ -261,6 +261,7 @@ SmallVector<MpmdDataflowEdge> GetMpmdDataflowEdges(func::FuncOp func_op);
 // `should_replace_use` returns true.
 FragmentOp WrapOpWithFragment(
     Operation* op, StringRef mesh_name, RewriterBase& rewriter,
+    StringRef inferred_by,
     std::function<bool(OpOperand&)> should_replace_use = [](OpOperand&) {
       return true;
     });

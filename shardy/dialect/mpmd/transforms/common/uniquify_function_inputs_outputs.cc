@@ -74,6 +74,7 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
       builder, loc, fragment_return_types, fragment_operands,
       /*user_origin=*/ArrayAttr::get(builder.getContext(), {}),
       /*mesh_name=*/mesh_name, /*stage_id=*/IntegerAttr());
+  fragment_op->setAttr("mpmd.inferred_by", builder.getStringAttr("uniquify"));
   Block& fragment_block = fragment_op.getRegion().emplaceBlock();
 
   SmallVector<Value> returned_values;

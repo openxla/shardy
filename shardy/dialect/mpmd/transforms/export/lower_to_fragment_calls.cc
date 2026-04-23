@@ -253,9 +253,7 @@ std::vector<FragmentOp> GroupFragmentsAndMarkWithGroupName(
     fragment_group.hbm_bytes =
         std::max(fragment_group.hbm_bytes, hbm_reserved_bytes);
 
-    std::string name =
-        GetFullNameFromMetadata(fragment.getOrigin().getValue(),
-                                fragment.getStageId(), is_all_forward);
+    std::string name = GetFullNameFromFragment(fragment, is_all_forward);
     std::optional<uint32_t> call_counter = TryToFindCallCounter(fragment);
     fragment_group.mesh_call_sites[fragment.getMeshName()].emplace_back(
         std::move(name), call_counter);
