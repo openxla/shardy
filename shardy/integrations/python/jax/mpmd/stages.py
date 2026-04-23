@@ -38,6 +38,7 @@ import numpy as np
 from shardy.integrations.python.jax.mpmd import types as mpmd_types
 from shardy.integrations.python.jax.mpmd import utils
 
+
 PyTree = jaxtyping.PyTree
 FunctionNamedShardings = utils.FunctionNamedShardings
 
@@ -135,6 +136,16 @@ class MpmdExecutable(stages.Executable):
     self._kept_var_idx = kept_inputs_indices
     self._donated_inputs_indices = donated_inputs_indices
 
+    logging.info('XXX openxla MpmdExecutable.init func_name: %s', func_name)
+    logging.info('XXX MpmdExecutable.init nr_const_args: %s', nr_const_args)
+    logging.info('XXX MpmdExecutable.init kept_inputs_indices[%d]: %s',
+                 len(kept_inputs_indices), kept_inputs_indices)
+    logging.info('donated_inputs_indices[%d]: %s',
+                 len(donated_inputs_indices), donated_inputs_indices)
+    logging.info('flat_in_avals[%d]: %s', len(flat_in_avals), flat_in_avals)
+    logging.info('in_shardings[%d]: %s', len(in_shardings), in_shardings)
+    logging.info('module_ir: %s', module_ir)
+
     # Hacks for the export flow.
     unloaded_executable = NamedTuple(
         'MpmdUnloadedExecutableInfo',
@@ -167,6 +178,24 @@ class MpmdExecutable(stages.Executable):
           'MPMD Executable called with inputs that are not a `jax.Array`. '
           f'Errors: {str_errors}'
       )
+    logging.info('XXX openxla MpmdExecutable.call: args[%d]', len(args))
+    logging.info('MpmdExecutable.call: const_args[%d]',
+                 self.nr_const_args)
+    logging.info('MpmdExecutable.call: kept_var_idx[%d]: %s',
+                 len(self._kept_var_idx), self._kept_var_idx)
+    logging.info('MpmdExecutable.call: kept_in_avals[%d]: %s',
+                 len(self._kept_in_avals), self._kept_in_avals)
+    logging.info('MpmdExecutable.call: kept_in_shardings[%d]: %s',
+                 len(self._kept_in_shardings), self._kept_in_shardings)
+    logging.info('MpmdExecutable.call: kept_in_shardings_paths[%d]: %s',
+                 len(self._kept_in_shardings_paths),
+                 self._kept_in_shardings_paths)
+    logging.info('MpmdExecutable.call: donated_inputs_indices[%d]: %s',
+                 len(self._donated_inputs_indices),
+                 self._donated_inputs_indices)
+    logging.info('MpmdExecutable.call: topology: %s', self._topology)
+    logging.info('MpmdExecutable.call: avals[%d]: %s', len(args),
+                 [a.aval for a in args])
 
     if self.nr_const_args > 0:
       const_args = args[:self.nr_const_args]
@@ -177,12 +206,17 @@ class MpmdExecutable(stages.Executable):
       const_shardings = [
           getattr(c, 'sharding', replicated_sharding)
           for c in const_args]
+      logging.info('MpmdExecutable.call: const_shardings[%d]: %s',
+                   len(const_shardings), const_shardings)
       const_layouts = pjit.const_args_layouts(
           const_args, const_args_avals, const_shardings)
       const_args_sharded = pxla.shard_args(
           const_shardings, const_layouts,
           [xla_client.ArrayCopySemantics.REUSE_INPUT] * self.nr_const_args,
           const_args)
+      logging.info('MpmdExecutable.call: const_args_sharded[%d]: %s',
+                   len(const_args_sharded),
+                   [type(a) for a in const_args_sharded])
     else:
       const_args_sharded = []
 
@@ -201,6 +235,10 @@ class MpmdExecutable(stages.Executable):
         # The argument is donated and not used by the program. It is safe
         # to delete the argument.
         arg.delete()
+    logging.info('MpmdExecutable.call: kept_args[%d]: %s',
+                 len(kept_args), {i: v.aval for i, v in kept_args.items()})
+    logging.info('MpmdExecutable.call: arg_avals[%d]: %s',
+                 len(arg_avals), arg_avals)
     pxla.check_arg_avals_for_call(
         self._kept_in_avals, arg_avals[self.nr_const_args:], self._debug_info
     )
@@ -214,6 +252,8 @@ class MpmdExecutable(stages.Executable):
         tuple((k, v) for k, v in self._topology.items()),
     )
     kept_args_tuple = tuple(v for _, v in sorted(kept_args.items()))
+    logging.info('MpmdExecutable.call: execute args[%d]: %s',
+                 len(kept_args_tuple), [type(a) for a in kept_args_tuple])
     return self._executable.execute(kept_args_tuple)
 
   def create_cpp_call(
@@ -480,6 +520,9 @@ class MpmdLowered(stages.Lowered):
 
     meshes_and_specs = partitioning_result.module_io_sharding_specs_and_meshes
     nr_const_args = len(self.const_args)
+    logging.info('XXX openxla MpmdLowered.init nr_const_args: %s', nr_const_args)
+    logging.info('MpmdLowered.const_args[%d]: %s',
+                 len(self.const_args), self.const_args)
     if len(jax_fn_info.kept_inputs_indices) != nr_const_args + len(
         jax_fn_info.global_flat_input_abstract_values
     ):
@@ -582,6 +625,7 @@ class MpmdLowered(stages.Lowered):
     Raises:
       ValueError: if the function has already been compiled.
     """
+    logging.info('XXX openxla MpmdLowered.compile')
     if device_assignment is None:
       in_shardings = self.function_named_shardings.input_specs
       flat_out_shardings = jax.tree.leaves(
