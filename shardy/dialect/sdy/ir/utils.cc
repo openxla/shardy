@@ -33,6 +33,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Analysis/CallGraph.h"
@@ -360,13 +361,6 @@ Value getShardableValue(Value value) {
             cast<BlockArgument>(value).getArgNumber());
       })
       .Default([&](Operation* op) {
-        // We only fail if the value isn't scalar. Scalar block arguments, such
-        // as the arguments of a reduction function, don't have a shardable
-        // value. This is ok since they are scalars (rank 0) and therefore can't
-        // be sharded.
-        if (!isScalar(value)) {
-          unreachableFormatv("region op '{0}' not supported", op->getName());
-        }
         return nullptr;
       });
 }
@@ -426,7 +420,9 @@ TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
 
 void setSharding(Value value, TensorShardingAttr sharding) {
   value = getShardableValue(value);
-  assert(value && "value should exist if its sharding is updated");
+  SDY_CHECK(value)
+      << "value should be shardable if its sharding is updated, got: "
+      << llvm::to_string(value);
   TypeSwitch<Operation*>(getOwningOp(value))
       .Case([&](FuncOp funcOp) {
         funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
