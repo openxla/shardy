@@ -111,6 +111,26 @@ class ValidateNoBackwardDepsPass
         }
       }
     });
+
+    func.walk([&](TransferOp transfer) {
+      StringRef srcMesh = transfer.getTensor().getType().getMeshName();
+      StringRef dstMesh = transfer.getResult().getType().getMeshName();
+      if (srcMesh == dstMesh) {
+        return;
+      }
+      if (srcMesh > dstMesh) {
+        auto diag =
+            failOnBackwardDeps ? transfer.emitError() : transfer.emitWarning();
+        diag << "Detected backward transfer but expected forward-only "
+                "pipeline since there are no transpose fragments: "
+             << "transfer from mesh \"" << srcMesh << "\" to mesh \"" << dstMesh
+             << "\". In a forward-only pipeline, transfers must go from "
+             << "lexicographically earlier meshes to later meshes.";
+        if (failOnBackwardDeps) {
+          signalPassFailure();
+        }
+      }
+    });
   }
 };
 
