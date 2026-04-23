@@ -1067,7 +1067,12 @@ std::optional<StringRef> GetMeshForInputOutputAssignment(
       if (!output_use_set.empty()) {
         return *output_use_set.GetPrioritizedMeshName();
       }
-      if (!output_src_set.empty()) {
+
+      // Need has_meshes_specified() because empty() returns false for
+      // unspecified sets, so GetPrioritizedMeshName() would crash. When
+      // unspecified, we return nullopt and let the downstream pass assign
+      // the first mesh as fallback.
+      if (output_src_set.has_meshes_specified() && !output_src_set.empty()) {
         return *output_src_set.GetPrioritizedMeshName();
       }
       return std::nullopt;
