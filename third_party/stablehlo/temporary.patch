@@ -277,8 +277,8 @@ diff --ruN a/stablehlo/stablehlo/transforms/VhloLegalizeToStablehlo.cpp b/stable
 +                                          /*replaceTypes=*/true);
 +
 +    ConversionConfig config;
-+    // TODO(jpienaar): Set to false once mhlo.broadcast folder is updated.
-+    config.allowPatternRollback = true;
++    config.allowPatternRollback = false;
++    config.foldingMode = mlir::DialectConversionFoldingMode::Never;
 +    if (failed(applyPartialConversion(getOperation(), *target, patterns,
 +                                      config))) {
        return signalPassFailure();
