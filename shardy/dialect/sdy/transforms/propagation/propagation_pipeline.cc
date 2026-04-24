@@ -54,11 +54,9 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
-  if (options.enableLateInlining) {
-    pm.addPass(createImportFuncCallsPass());
-    // Keep SymbolDCEPass after ImportFuncCallsPass.
-    pm.addPass(createSymbolDCEPass());
-  }
+  pm.addPass(createImportFuncCallsPass());
+  // Keep SymbolDCEPass after ImportFuncCallsPass.
+  pm.addPass(createSymbolDCEPass());
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
