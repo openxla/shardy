@@ -73,9 +73,11 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
   if (!options.avoidExportForPartitioning) {
     pm.addPass(createRemoveShardingGroupsPass());
+    pm.addPass(createExportNamedComputationsPass());
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
+  } else {
+    pm.addPass(createExportNamedComputationsPass());
   }
-  pm.addPass(createExportNamedComputationsPass());
   pm.addNestedPass<
       func::FuncOp>(createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{
       /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
