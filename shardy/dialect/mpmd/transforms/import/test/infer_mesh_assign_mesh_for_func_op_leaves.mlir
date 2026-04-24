@@ -205,7 +205,7 @@ func.func @op_with_no_result_without_src_set(%arg0: tensor<4x8xf32>) -> tensor<4
     <"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>
   >} {
 // CHECK-NEXT:  %[[ASSIGN:.*]] = mpmd.assign %arg0
-// CHECK-NEXT:  mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN]]) (%arg1
+// CHECK-NEXT:  mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN]]) {mpmd.inferred_by = "assign_mesh_for_func_leaves"} (%arg1
 // CHECK-NEXT:    sdy.sharding_group %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }
@@ -221,7 +221,7 @@ func.func @op_with_no_result_with_src_set(%arg0: tensor<4x8xf32>) -> tensor<4x8x
     <"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>
   >} {
 // CHECK-NEXT:  %[[ASSIGN:.*]] = mpmd.assign %arg0
-// CHECK-NEXT:  mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN]]) (%arg1
+// CHECK-NEXT:  mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN]]) {mpmd.inferred_by = "assign_mesh_for_func_leaves"} (%arg1
 // CHECK-NEXT:    sdy.sharding_group %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }
@@ -237,12 +237,12 @@ func.func @op_with_no_result_with_multi_src_set(%arg0: tensor<4x8xf32>) -> tenso
     <"m1": <["x"=2]>>, <"m2": <["y"=2]>>, <"m3": <["z"=2]>>
   >} {
 // CHECK-NEXT:  %[[ASSIGN_2:.*]] = mpmd.assign %arg0
-// CHECK-NEXT:  mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_2]]) (%arg1
+// CHECK-NEXT:  mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_2]]) {mpmd.inferred_by = "assign_mesh_for_func_leaves"} (%arg1
 // CHECK-NEXT:    sdy.sharding_group %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }
 // CHECK-NEXT:  %[[ASSIGN_3:.*]] = mpmd.assign %arg0
-// CHECK-NEXT:  mpmd.fragment<mesh="m3", origin=[]> (%[[ASSIGN_3]]) (%arg1
+// CHECK-NEXT:  mpmd.fragment<mesh="m3", origin=[]> (%[[ASSIGN_3]]) {mpmd.inferred_by = "assign_mesh_for_func_leaves"} (%arg1
 // CHECK-NEXT:    sdy.sharding_group %arg1
 // CHECK-NEXT:    mpmd.return
 // CHECK-NEXT:  }

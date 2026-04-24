@@ -400,7 +400,7 @@ FragmentOp CreateReduceFragment(ArrayRef<Value> mesh_tensors,
                                 StringRef mesh_name,
                                 ReductionType reduction_type,
                                 RewriterBase& rewriter) {
-  return FragmentOp::createMeshFragmentWithGlobalBody(
+  FragmentOp fragment_op = FragmentOp::createMeshFragmentWithGlobalBody(
       mesh_tensors.front().getLoc(), /*user_origin=*/{}, mesh_name,
       mesh_tensors, mesh_tensors.front().getType(), rewriter,
       [reduction_type](ArrayRef<Value> args, OpBuilder& block_builder) {
@@ -413,6 +413,9 @@ FragmentOp CreateReduceFragment(ArrayRef<Value> mesh_tensors,
         }
         return SmallVector<Value>({accumulator});
       });
+  fragment_op->setAttr("mpmd.inferred_by",
+                       rewriter.getStringAttr("infer_mesh_convert_reduce_ops"));
+  return fragment_op;
 }
 
 // This pattern lowers mpmd.reduce to reductions and transfers.
@@ -1491,7 +1494,8 @@ class InferMeshAssignMeshForFuncLeavesPass
       return IsMeshBeforeOtherMesh(a, b);
     });
     for (StringRef mesh_name : mesh_names) {
-      WrapOpWithFragment(op, mesh_name, rewriter);
+      WrapOpWithFragment(op, mesh_name, rewriter,
+                         "assign_mesh_for_func_leaves");
       if (isPure(op)) {
         // For pure ops, we only need to wrap it in a fragment once. But for
         // non-pure ops, we need to keep them associated with each src.
@@ -2281,7 +2285,7 @@ void WrapBasedOnAssignUsers(Operation* op, RewriterBase& rewriter) {
   });
   for (StringRef mesh_name : user_mesh_types_vec) {
     WrapOpWithFragment(
-        op, mesh_name, rewriter,
+        op, mesh_name, rewriter, "rewrite_using_analysis",
         /*should_replace_use=*/[&mesh_name](OpOperand& use) {
           if (auto assign_user = dyn_cast<AssignOp>(use.getOwner())) {
             return assign_user.getType().getMeshName() == mesh_name;

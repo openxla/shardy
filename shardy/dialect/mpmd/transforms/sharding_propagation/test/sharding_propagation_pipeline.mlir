@@ -335,7 +335,7 @@ func.func @introduce_reshard_for_transfer_operand_and_result_with_different_shar
   } : (!mesh_1_tensor_8_2_f32, !mesh_1_tensor_8_2_f32) -> !mesh_1_tensor_8_2_f32
   // CHECK: %[[FRAG:.*]] = mpmd.fragment<mesh="mesh1", origin=["add"]> (%arg0, %arg1) (%arg2: tensor<8x2xf32>, %arg3: tensor<8x2xf32>) {
   // CHECK: %[[TRANSFER:.*]] = mpmd.transfer %0 : (!mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>) -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>
-  // CHECK: %[[RESHARD:.*]] = mpmd.fragment<mesh="mesh2", origin=[]> (%[[TRANSFER]]) (%arg2: tensor<8x2xf32>) {
+  // CHECK: %[[RESHARD:.*]] = mpmd.fragment<mesh="mesh2", origin=[]> (%[[TRANSFER]]) {mpmd.inferred_by = "extract_reshards"} (%arg2: tensor<8x2xf32>) {
   // CHECK: mpmd.return %arg2 : tensor<8x2xf32>
   // CHECK: } : (!mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>) -> !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
   // CHECK: return %[[FRAG]], %[[RESHARD]] : !mpmd.mesh_tensor<"mesh1", tensor<8x2xf32>, sharding=<@mesh, [{"devices"}, {}]>>, !mpmd.mesh_tensor<"mesh2", tensor<8x2xf32>, sharding=<@mesh, [{}, {}]>>
@@ -528,7 +528,7 @@ sdy.mesh @mesh = <["x"=8]>
 func.func @introduce_reshard_for_arg(
   %arg0: !mesh_1_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
   -> (!mesh_2_tensor_16_32_f32 {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) attributes {topology=#homogenous_topology} {
-  // CHECK:  %[[RESHARD:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%arg0) (%arg1: tensor<16x32xf32>) {
+  // CHECK:  %[[RESHARD:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = "extract_reshards"} (%arg1: tensor<16x32xf32>) {
   // CHECK-NEXT:    mpmd.return %arg1 : tensor<16x32xf32>
   // CHECK-NEXT:  } : (!mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{}, {}]>>) ->
   // CHECK-SAME: !mpmd.mesh_tensor<"m1", tensor<16x32xf32>, sharding=<@mesh, [{"x"}, {}]>>
@@ -717,7 +717,7 @@ func.func @return_value_used_in_another_fragment(%arg0: !mesh_1_tensor {sdy.shar
   // CHECK-SAME: (!mpmd.mesh_tensor<"m1", tensor<4xf32>, sharding=<@mesh, [{"y"}]>>)
   // CHECK-SAME: -> !mpmd.mesh_tensor<"m2", tensor<4xf32>, sharding=<@mesh, [{"y"}]>>
   %0 = mpmd.transfer %arg0 : (!mesh_1_tensor) -> !mesh_2_tensor // %arg0 is sharded by y axis
-  // CHECK: mpmd.fragment<mesh="m2", origin=[]> (%[[TRANSFER_RESULT]]) (%arg2: tensor<4xf32>) {
+  // CHECK: mpmd.fragment<mesh="m2", origin=[]> (%[[TRANSFER_RESULT]]) {mpmd.inferred_by = "extract_reshards"} (%arg2: tensor<4xf32>) {
   // CHECK-NEXT:     mpmd.return %arg2 : tensor<4xf32>
   // CHECK-NEXT:  } : (!mpmd.mesh_tensor<"m2", tensor<4xf32>, sharding=<@mesh, [{"y"}]>>)
   // CHECK-SAME: -> !mpmd.mesh_tensor<"m2", tensor<4xf32>, sharding=<@mesh, [{"x"}]>>
