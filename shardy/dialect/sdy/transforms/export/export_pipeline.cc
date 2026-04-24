@@ -71,12 +71,10 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
 void addExportPipeline(OpPassManager& pm, int& dumpIndex,
                        const ExportOptions& options) {
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
+  pm.addPass(createExportNamedComputationsPass());
   if (!options.avoidExportForPartitioning) {
     pm.addPass(createRemoveShardingGroupsPass());
-    pm.addPass(createExportNamedComputationsPass());
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
-  } else {
-    pm.addPass(createExportNamedComputationsPass());
   }
   pm.addNestedPass<
       func::FuncOp>(createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{
