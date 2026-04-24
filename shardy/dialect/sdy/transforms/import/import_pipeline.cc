@@ -42,14 +42,13 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
+  pm.addPass(createAddDataFlowEdgesPass(
+      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   if (!options.enableLateInlining) {
-    pm.addPass(createImportFuncCallsPass(ImportFuncCallsPassOptions{
-        /*addDataFlowEdgesOnNamedComputations=*/false}));
+    pm.addPass(createImportFuncCallsPass());
     // Keep SymbolDCEPass after ImportFuncCallsPass.
     pm.addPass(createSymbolDCEPass());
   }
-  pm.addPass(createAddDataFlowEdgesPass(
-      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
