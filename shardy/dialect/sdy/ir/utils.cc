@@ -1012,16 +1012,29 @@ bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
   return true;
 }
 
-void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp) {
+void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp,
+                  bool preOrder) {
   CallGraph callGraph(moduleOp);
   llvm::ReversePostOrderTraversal<const CallGraph*> rpo(&callGraph);
-  for (CallGraphNode* node : llvm::reverse(rpo)) {
-    if (node->isExternal()) {
-      continue;
+  if (preOrder) {
+    for (CallGraphNode* node : rpo) {
+      if (node->isExternal()) {
+        continue;
+      }
+      mlir::Region* region = node->getCallableRegion();
+      if (FuncOp funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp())) {
+        processFuncOp(funcOp);
+      }
     }
-    mlir::Region* region = node->getCallableRegion();
-    if (FuncOp funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp())) {
-      processFuncOp(funcOp);
+  } else {
+    for (CallGraphNode* node : llvm::reverse(rpo)) {
+      if (node->isExternal()) {
+        continue;
+      }
+      mlir::Region* region = node->getCallableRegion();
+      if (FuncOp funcOp = dyn_cast_or_null<FuncOp>(region->getParentOp())) {
+        processFuncOp(funcOp);
+      }
     }
   }
 }

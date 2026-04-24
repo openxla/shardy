@@ -42,6 +42,7 @@ cc_library(
         "inline_meshes.cc",
         "lift_inlined_meshes.cc",
         "manual_axes_cleanup.cc",
+        "pre_order_funcs.cc",
         "propagate_sharding_from_func_to_call.cc",
         "remove_size_one_axes.cc",
         "sharding_group_import.cc",

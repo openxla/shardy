@@ -671,9 +671,11 @@ bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
 // Iterates on the funcs and performs `processFuncOp` on funcs. Iterates on the
 // funcs and blocks in post order of the call graph by default, that is, the
 // functions are processed before their callers, and child blocks are processed
-// before their parents.
+// before their parents. Iterates funcs and blocks in pre order if `preOrder` is
+// true.
 using ProcessFuncOpFn = std::function<void(func::FuncOp)>;
-void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp);
+void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp,
+                  bool preOrder = false);
 
 // Returns the reduction operation used in the scatter's update computation if
 // it is a recognized associative and commutative binary op applied to all

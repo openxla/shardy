@@ -197,6 +197,16 @@ def ConstantOrScalarSplitterPass : Pass<"sdy-constant-or-scalar-splitter", "Modu
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def PreOrderFuncsPass : Pass<"sdy-pre-order-funcs", "ModuleOp"> {
+  let summary = "Reorders functions in the module in pre-order of the call graph.";
+  let description = [{
+    Reorders functions in the module in pre-order of the call graph.
+    This is useful when we inline func/calls, as propagation is top-down on blocks,
+    and a pre-order iteration on funcs will emulate it.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def ShardingGroupImportPass : Pass<"sdy-sharding-group-import", "ModuleOp"> {
   let summary = "Canonicalization and validation pass for sharding groups.";
   let description = [{

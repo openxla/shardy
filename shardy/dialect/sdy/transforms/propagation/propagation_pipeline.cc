@@ -64,6 +64,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     optionsWithKeepShardingRules.keepShardingRules = true;
     // We intentionally don't increment the dump index here, since this pass
     // might dump 0 to multiple files, and will use a nested dump index.
+    pm.addPass(createPreOrderFuncsPass());
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
