@@ -17,6 +17,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -35,12 +36,47 @@ namespace {
 using func::CallOp;
 using func::FuncOp;
 
+// Adds func input and output data flow edges. Adds func input data flow edges
+// only for non-main funcs.
+void addFuncDataFlowEdges(ModuleOp moduleOp, const SymbolTable& symbolTable,
+                          IRRewriter& rewriter) {
+  FuncOp mainFuncOp = getMainFuncOrDie(moduleOp, symbolTable);
+  moduleOp.walk([&](FuncOp funcOp) {
+    if (funcOp == mainFuncOp) {
+      return;
+    }
+    mlir::Block& entryBlock = funcOp.getBody().front();
+    rewriter.setInsertionPointToStart(&entryBlock);
+    for (Value argument : funcOp.getArguments()) {
+      auto edgeOp =
+          FuncDataFlowEdgeOp::create(rewriter, funcOp.getLoc(), argument);
+      rewriter.replaceAllUsesExcept(argument, edgeOp, edgeOp);
+      if (TensorShardingAttr sharding = getSharding(argument)) {
+        setShardings(edgeOp, {sharding});
+      }
+    }
+  });
+
+  moduleOp.walk([&](CallOp callOp) {
+    rewriter.setInsertionPointAfter(callOp);
+    for (Value result : callOp.getResults()) {
+      auto edgeOp =
+          FuncDataFlowEdgeOp::create(rewriter, callOp.getLoc(), result);
+      rewriter.replaceAllUsesExcept(result, edgeOp, edgeOp);
+      if (TensorShardingAttr sharding = getSharding(result)) {
+        setShardings(edgeOp, {sharding});
+      }
+    }
+  });
+}
+
 struct AddDataFlowEdgesPass
     : public impl::AddDataFlowEdgesPassBase<AddDataFlowEdgesPass> {
   using AddDataFlowEdgesPassBase::AddDataFlowEdgesPassBase;
 
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
+    SymbolTable symbolTable(moduleOp);
     IRRewriter rewriter(moduleOp);
 
     moduleOp.walk([&](ShardableDataFlowOpInterface op) {
@@ -49,14 +85,7 @@ struct AddDataFlowEdgesPass
       addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
     });
     if (enableNativeNonFlatSupport) {
-      // TODO(enver): Do not create data flow edge if the func has no callers,
-      // such as the entry function.
-      for (FuncOp funcOp : moduleOp.getOps<FuncOp>()) {
-        addDataFlowEdges(funcOp.getArguments(), rewriter);
-        funcOp.walk([&](CallOp callOp) {
-          addDataFlowEdges(callOp.getResults(), rewriter);
-        });
-      }
+      addFuncDataFlowEdges(moduleOp, symbolTable, rewriter);
     }
   }
 };

@@ -44,6 +44,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -800,6 +801,40 @@ LogicalResult ReshardOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   return verifyTensorShardingAttr(getSharding(), getType(), *this,
                                   symbolTableCollection, getEmitErrorFn(*this));
+}
+
+LogicalResult FuncDataFlowEdgeOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  if (!getType().hasStaticShape()) {
+    return emitOpError(
+               "expected sdy.func_data_flow_edge to have a static-shaped "
+               "result. ")
+           << "type: " << getType();
+  }
+  Value operand = getOperand();
+  if (!operand) {
+    return emitOpError(
+        "expected operand of sdy.func_data_flow_edge should be non-null.");
+  }
+  if (!operand.hasOneUse()) {
+    return emitOpError(
+        "expected operand of sdy.func_data_flow_edge to have a single user");
+  }
+  if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
+    if (!isa<FuncOp>(blockArg.getOwner()->getParentOp())) {
+      return emitOpError(
+          "expected operand of sdy.func_data_flow_edge to be a block argument "
+          "of a func op.");
+    }
+  } else {
+    OpResult opResult = cast<OpResult>(operand);
+    if (!isa_and_present<func::CallOp>(opResult.getDefiningOp())) {
+      return emitOpError(
+          "expected operand of sdy.func_data_flow_edge to be a result of call "
+          "op.");
+    }
+  }
+  return success();
 }
 
 LogicalResult DataFlowEdgeOp::verifySymbolUses(

@@ -777,4 +777,24 @@ def Sdy_ReplicatedToUnreducedOp : Sdy_Op<"replicated_to_unreduced",
   let assemblyFormat = "$axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
 }
 
+//===----------------------------------------------------------------------===//
+// FuncDataFlowEdgeOp
+//===----------------------------------------------------------------------===//
+def Sdy_FuncDataFlowEdgeOp : Sdy_Op<"func_data_flow_edge", [SameOperandsAndResultType,
+   DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
+  let summary = "func input/output data flow edge op.";
+
+  let description = [{A data flow edge op but for func arguments or call results.
+    When its operand is a BlockArgument; it is a bridge from the caller callOp's
+    argument to the users of the func argument. There is one func data flow edge
+    for each func argument. When its operand is an OpResult; it is a bridge
+    from the called funcOp's return value to the users of the call result. There
+    is one func data flow edge for each call result.
+  }];
+
+  let arguments = (ins AnyShaped:$operand);
+  let results = (outs AnyShaped:$result);
+  let assemblyFormat = "$operand attr-dict `:` type($result)";
+}
+
 #endif  // SDY_OPS
