@@ -32,12 +32,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createPropagateShardingFromFuncToCallPass());
   pm.addPass(createConstantOrScalarSplitterPass());
-  if (!options.enableLateInlining) {
-    pm.addPass(createImportFuncCallsPass(ImportFuncCallsPassOptions{
-        /*addDataFlowEdgesOnNamedComputations=*/false}));
-    // Keep SymbolDCEPass after ImportFuncCallsPass.
-    pm.addPass(createSymbolDCEPass());
-  }
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
 
@@ -48,6 +42,12 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
+  if (!options.enableLateInlining) {
+    pm.addPass(createImportFuncCallsPass(ImportFuncCallsPassOptions{
+        /*addDataFlowEdgesOnNamedComputations=*/false}));
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
+  }
   pm.addPass(createAddDataFlowEdgesPass(
       AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
