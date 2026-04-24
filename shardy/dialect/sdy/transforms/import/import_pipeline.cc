@@ -47,15 +47,15 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
+  // The sharding group import pass must run after applying sharding
+  // constraints. This ensures we can detect sharding conflicts between group
+  // members which have pre-propagation shardings due to sharding constraints.
+  pm.addPass(createShardingGroupImportPass());
   if (!options.enableLateInlining) {
     pm.addPass(createImportFuncCallsPass());
     // Keep SymbolDCEPass after ImportFuncCallsPass.
     pm.addPass(createSymbolDCEPass());
   }
-  // The sharding group import pass must run after applying sharding
-  // constraints. This ensures we can detect sharding conflicts between group
-  // members which have pre-propagation shardings due to sharding constraints.
-  pm.addPass(createShardingGroupImportPass());
 }
 
 void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
