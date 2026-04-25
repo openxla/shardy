@@ -70,7 +70,6 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
 
 void addExportPipeline(OpPassManager& pm, int& dumpIndex,
                        const ExportOptions& options) {
-  pm.addPass(createExportNamedComputationsPass());
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
   if (!options.avoidExportForPartitioning) {
     pm.addPass(createRemoveShardingGroupsPass());

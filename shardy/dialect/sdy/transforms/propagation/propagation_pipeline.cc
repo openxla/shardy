@@ -72,6 +72,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                                       dumpIndex++));
     AutoPartitionerRegistry::addPasses(pm);
   }
+  pm.addPass(createExportNamedComputationsPass());
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
