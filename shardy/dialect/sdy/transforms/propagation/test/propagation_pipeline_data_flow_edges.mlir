@@ -596,7 +596,7 @@ func.func @main(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b
 
 // CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) {
 // CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
 // CHECK-NEXT:  }
 func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
@@ -622,7 +622,7 @@ func.func @main(%arg0: tensor<8x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy
 
 // CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) {
 // CHECK-NEXT:    %[[SUB:.*]] = stablehlo.subtract %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : tensor<8x2xi32>
 // CHECK-NEXT:    return %[[SUB]] : tensor<8x2xi32>
 // CHECK-NEXT:  }
@@ -650,7 +650,7 @@ func.func @main(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
 
 // CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {}]>}) {
 // CHECK-NEXT:    %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
 // CHECK-NEXT:    %[[RESHARD1:.*]] = sdy.reshard %[[RESHARD0]] <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
 // CHECK-NEXT:    return %[[RESHARD1]] : tensor<8x2xi32>
@@ -659,4 +659,30 @@ func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   %0 = sdy.sharding_constraint %arg0 <@mesh_a_2_b_2, [{"a"}, {}]> : tensor<8x2xi32>
   %1 = sdy.sharding_constraint %0 <@mesh_a_2_b_2, [{"b"}, {}]> : tensor<8x2xi32>
   return %1 : tensor<8x2xi32>
+}
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+
+// Check we can propagate forward from outside into the call, then back out.
+// test: preserves the original func name.
+// CHECK-LABEL: func @main(
+// CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
+func.func @main(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo_1(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"a"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: return %[[CALL]] : tensor<8x2xi32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
+  %1 = call @foo_1(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  return %1 : tensor<8x2xi32>
+}
+
+// CHECK-LABEL: func private @foo_1(%arg0: tensor<8x2xi32>
+// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {}]>}) attributes {sdy.original_func_name = "foo"} {
+// CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
+// CHECK-NEXT:  }
+func.func private @foo_1(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> attributes {sdy.original_func_name = "foo"} {
+  return %arg0 : tensor<8x2xi32>
 }
