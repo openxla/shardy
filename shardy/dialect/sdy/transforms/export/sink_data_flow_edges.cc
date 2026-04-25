@@ -64,19 +64,21 @@ struct SinkDataFlowEdgesPass
       if (isa<DataFlowEdgeOp>(op)) {
         DataFlowEdgeOp dataFlowEdgeOp = cast<DataFlowEdgeOp>(op);
         Value input = dataFlowEdgeOp.getInput();
-        // TODO(enver): Drop enableNativeNonFlatSupport check and assume func
-        // arguments do not have data flow edges in the first place.
-        if (enableNativeNonFlatSupport) {
-          if (func::FuncOp funcOp =
-                  dyn_cast<func::FuncOp>(getOwningOp(input))) {
-            if (TensorShardingAttr sharding = dataFlowEdgeOp.getShardingAttr();
-                sharding) {
-              funcOp.setArgAttr(cast<BlockArgument>(input).getArgNumber(),
-                                kShardingAttr, sharding);
-            }
-          }
-        }
         rewriter.replaceOp(dataFlowEdgeOp, input);
+        return WalkResult::skip();
+      }
+      if (isa<FuncDataFlowEdgeOp>(op)) {
+        FuncDataFlowEdgeOp funcEdgeOp = cast<FuncDataFlowEdgeOp>(op);
+        Value operand = funcEdgeOp.getOperand();
+        Value result = funcEdgeOp.getResult();
+        TensorShardingAttr operandSharding = getSharding(operand);
+        if (TensorShardingAttr sharding = getSharding(result)) {
+          setSharding(operand, sharding);
+        } else if (operandSharding) {
+          setSharding(operand,
+                      TensorShardingAttr::getFullyOpenLike(operandSharding));
+        }
+        rewriter.replaceOp(funcEdgeOp, operand);
         return WalkResult::skip();
       }
       auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op);
