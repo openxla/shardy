@@ -43,16 +43,19 @@ struct FlattenCallGraphPass
     walkCalls(moduleOp, [&](CallOp callOp) {
       // TODO(enver): Should we special handle loops and conditionals?
       FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
-      TensorShardingPerValueAttr callOpResultShardings =
-          getShardingPerValue(callOp);
       if (auto [_, inserted] = funcNames.insert(funcOp.getName()); inserted) {
-        if (callOpResultShardings) {
-          setFuncResultShardings(funcOp, callOpResultShardings);
-        }
         return WalkResult::advance();
       }
-      callOp.setCallee(symbolTable.insert(
-          cloneFuncRecursively(funcOp, symbolTable, callOpResultShardings)));
+      callOp.setCallee(
+          symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
+      return WalkResult::advance();
+    });
+
+    walkCalls(moduleOp, [&](CallOp callOp) {
+      FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
+      if (auto callOpResultShardings = getShardingPerValue(callOp)) {
+        setFuncResultShardings(funcOp, callOpResultShardings);
+      }
       return WalkResult::advance();
     });
   }
