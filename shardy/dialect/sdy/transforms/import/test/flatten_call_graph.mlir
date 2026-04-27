@@ -373,3 +373,43 @@ func.func private @foo(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #
 // CHECK-SAME:  attributes {sdy.original_func_name = "foo"} {
 // CHECK-NEXT:    return
 
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// CHECK-LABEL: func @simple_non_flat_with_manual_computations(
+// CHECK-NEXT:    call @foo(
+// CHECK-NEXT:    sdy.manual_computation
+// CHECK-NEXT:      stablehlo.concatenate
+// CHECK-NEXT:      func.call @bar_0
+// CHECK-NEXT:      sdy.return
+// CHECK-NEXT:    }
+// CHECK-NEXT:    return
+func.func @simple_non_flat_with_manual_computations(%arg0: tensor<8xi32>) -> (tensor<8xi32>, tensor<8xi32>) {
+  %0 = call @foo(%arg0) : (tensor<8xi32>) -> tensor<8xi32>
+  %1 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}]>] out_shardings=[<@mesh, [{"a"}]>] manual_axes={"a"} (%arg2: tensor<4xi32>) {
+    %2 = stablehlo.concatenate %arg2, %arg2, dim=0 : (tensor<4xi32>, tensor<4xi32>) -> tensor<8xi32>
+    %3 = func.call @bar(%2) : (tensor<8xi32>) -> tensor<8xi32>
+    sdy.return %arg2 : tensor<4xi32>
+  } : (tensor<8xi32>) -> tensor<8xi32>
+  return %0, %1 : tensor<8xi32>, tensor<8xi32>
+}
+
+// CHECK-LABEL: func private @foo(%arg0: tensor<8xi32>) -> tensor<8xi32> {
+// CHECK-NEXT:    call @bar(
+// CHECK-NEXT:    return
+func.func private @foo(%arg0: tensor<8xi32>) -> tensor<8xi32> {
+  %0 = call @bar(%arg0) : (tensor<8xi32>) -> tensor<8xi32>
+  return %0 : tensor<8xi32>
+}
+
+// CHECK-LABEL: func private @bar(%arg0: tensor<8xi32>) -> tensor<8xi32> {
+// CHECK-NEXT:    return
+func.func private @bar(%arg0: tensor<8xi32>) -> tensor<8xi32> {
+  return %arg0 : tensor<8xi32>
+}
+
+// CHECK-LABEL: func private @bar_0(%arg0: tensor<8xi32>) -> tensor<8xi32>
+// CHECK-SAME:  attributes {sdy.original_func_name = "bar"} {
+// CHECK-NEXT:    return
+
