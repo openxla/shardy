@@ -705,6 +705,20 @@ mlir::func::FuncOp getMainFuncOrDie(ModuleOp moduleOp,
                                     const SymbolTable& symbolTable,
                                     bool useSingleFunc = false);
 
+// Adds reshard operations to resolve conflicts between call argument
+// sharding and func input sharding.
+void insertReshardsOnFuncArguments(func::FuncOp funcOp, func::CallOp callOp,
+                                   const SymbolTable& symbolTable,
+                                   IRRewriter& rewriter);
+
+// Adds reshard operations to resolve conflicts between call result
+// sharding and func result sharding. Sets the call result sharding to the func
+// result shardings. Assumes `callOp` has non-empty `TensorShardingPerValueAttr`
+// result-sharding if `funcOp` has non-empty result shardings.
+void insertReshardsOnFuncResults(func::FuncOp funcOp, func::CallOp callOp,
+                                 const SymbolTable& symbolTable,
+                                 IRRewriter& rewriter);
+
 }  // namespace sdy
 }  // namespace mlir
 
