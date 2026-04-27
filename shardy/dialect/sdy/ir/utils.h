@@ -683,12 +683,9 @@ void iterateFuncs(ModuleOp moduleOp, ProcessFuncOpFn processFuncOp,
 Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter);
 
 // TODO(enver): Combine `cloneFuncRecursively` with the one at xla utils.
-// Clones given `funcOp` recursively and returns the (top) cloned funcOp. In
-// case `callOpResultShardings` is non-null, it also recursively sets the call
-// op result shardings.
-mlir::func::FuncOp cloneFuncRecursively(
-    func::FuncOp funcOp, SymbolTable& symbolTable,
-    TensorShardingPerValueAttr callOpResultShardings = nullptr);
+// Clones given `funcOp` recursively and returns the (top) cloned funcOp.
+mlir::func::FuncOp cloneFuncRecursively(func::FuncOp funcOp,
+                                        SymbolTable& symbolTable);
 
 // Returns the funcOp on `funcSymName`. Dies if the func does not exist on the
 // `symbolTable`.
