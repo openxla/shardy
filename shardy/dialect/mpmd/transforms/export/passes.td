@@ -167,3 +167,19 @@ def ValidateNoBackwardDepsPass :
            "Whether to emit an error (and fail) instead of a warning.">
   ];
 }
+
+def SinkCreateTokenIntoFragmentsPass :
+    Pass<"mpmd-sink-create-token-into-fragments", "func::FuncOp"> {
+  let summary = "Sinks stablehlo.create_token ops into fragment bodies.";
+  let description = [{
+    The MPMD dialect doesn't support cross-fragment token passing yet. So
+    instead, this pass duplicates the tokens and sinks them into each fragment,
+    severing the token-mediated sequencing between fragments.
+
+    After this pass, no token ever crosses a fragment boundary.
+  }];
+  let dependentDialects = [
+    "mlir::mpmd::MpmdDialect",
+    "mlir::stablehlo::StablehloDialect",
+  ];
+}

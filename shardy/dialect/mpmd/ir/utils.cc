@@ -604,8 +604,9 @@ void UpdateValueTypeWithSharding(Value value,
   if (!sharding) {
     return;
   }
-  value.setType(
-      cast<MeshTensorType>(value.getType()).replaceSharding(sharding));
+  if (auto mesh_tensor_type = dyn_cast<MeshTensorType>(value.getType())) {
+    value.setType(mesh_tensor_type.replaceSharding(sharding));
+  }
 }
 
 std::optional<Location> GetResultInfoLoc(FuncOp func, int64_t result_index) {

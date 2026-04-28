@@ -110,6 +110,8 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // the amount of data in memory.
   pm.addNestedPass<FuncOp>(createDelayTransfersFromCpuPass());
 
+  pm.addNestedPass<FuncOp>(createSinkCreateTokenIntoFragmentsPass());
+
   // This pass marks input and output aliasing or donation. For each fragment op
   // whose input can be aliased with an output, it adds an XLA
   // `tf.aliasing_output` attribute. Otherwise, for each input that can be
