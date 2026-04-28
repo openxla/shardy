@@ -23,6 +23,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
@@ -33,9 +34,11 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Inliner.h"
 #include "mlir/Transforms/InliningUtils.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -360,13 +363,184 @@ class AllReduceOfShardedToUnreducedPattern
   }
 };
 
-// Pattern of common subexpression elimination (CSE) for sdy.reshard.
-//
-// Given:
-// B = sdy.reshard(A)
-// C = sdy.reshard(A)
-// This pattern replaces C with B if (1) B and C share the same sharding and
-// block, and (2) B is before C.
+// Returns true if the operation is a metadata-only transformation that we can
+// look through to find a redundant communication result.
+bool isMetadataOp(Operation* op) {
+  return isa<stablehlo::ReshapeOp, stablehlo::TransposeOp>(op);
+}
+
+// Helper to follow values upwards through metadata-only transformations to
+// find the original data source.
+Value unwrapMetadataOp(Value v) {
+  while (Operation* op = v.getDefiningOp()) {
+    if (!isMetadataOp(op)) {
+      break;
+    }
+    v = op->getOperand(0);
+  }
+  return v;
+}
+
+// Walks up the reshape input chain to account for the effect of reshape and
+// transpose operations on the sharding. This allows the re-use of a sharding
+// result on a path with transpose operations, as routine
+// isShardingEquivalentAcrossReshapes only accounts for the effect of reshape
+// operations on the linear data order.
+TensorShardingAttr getTargetSharding(TensorShardingAttr sharding, Value v) {
+  while (Operation* op = v.getDefiningOp()) {
+    if (auto transpose = dyn_cast<stablehlo::TransposeOp>(op)) {
+      ArrayRef<int64_t> perm = transpose.getPermutation();
+      SDY_CHECK(sharding.getDimShardings().size() == perm.size());
+
+      SmallVector<DimensionShardingAttr> newDims(perm.size());
+      for (auto [resDim, opDim] : llvm::enumerate(perm)) {
+        newDims[opDim] = sharding.getDimShardings()[resDim];
+      }
+      sharding = TensorShardingAttr::get(
+          sharding.getContext(), sharding.getMeshOrRef(), newDims,
+          sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+      v = transpose.getOperand();
+      continue;
+    }
+    if (auto reshape = dyn_cast<stablehlo::ReshapeOp>(op)) {
+      if (reshape.getOperand().getType().getRank() !=
+          reshape.getType().getRank()) {
+        break;
+      }
+      v = reshape.getOperand();
+      continue;
+    }
+    SDY_CHECK(!isMetadataOp(op));
+    break;
+  }
+  return sharding;
+}
+
+// Returns true if two shardings define the same physical linear distribution
+// of data across devices, accounting for t1 is a reshape of t2. It works by
+// verifying that every mesh axis in the sharding has the same linear stride,
+// assuming both tensors share a consistent row-major memory order.
+bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
+                                        TensorShardingAttr s2, Type t2,
+                                        Operation* op) {
+  if (s1 == s2 && t1 == t2) {
+    return true;
+  }
+  if (!s1 || !s2 || s1.getMeshName() != s2.getMeshName()) {
+    return false;
+  }
+  if (s1.getReplicatedAxes() != s2.getReplicatedAxes()) {
+    return false;
+  }
+
+  auto rt1 = dyn_cast<RankedTensorType>(t1);
+  auto rt2 = dyn_cast<RankedTensorType>(t2);
+  if (!rt1 || !rt2) {
+    return false;
+  }
+
+  // Skip optimization if there is an explicit layout in the tensors.
+  // The linear stride calculation below assumes a default row-major layout.
+  if (rt1.getEncoding() || rt2.getEncoding()) {
+    return false;
+  }
+
+  MeshAttr mesh = s1.getMesh(op);
+  if (!mesh) {
+    return false;
+  }
+
+  // Calculates linear stride for every axis in the sharding.
+  auto getAxisStrides = [&](TensorShardingAttr sharding,
+                            RankedTensorType type) {
+    SmallVector<std::pair<AxisRefAttr, int64_t>> axisStrides;
+    int64_t cumulativeDimSize = 1;
+    for (int64_t i = type.getRank() - 1; i >= 0; --i) {
+      ArrayRef<AxisRefAttr> axes = sharding.getDimShardings()[i].getAxes();
+      int64_t totalAxesSize = 1;
+      for (AxisRefAttr axis : axes) {
+        totalAxesSize *= axis.getSize(mesh);
+      }
+      // We use integer division here. If a dimension is not perfectly
+      // divisible by the sharding axes, this truncated stride calculation
+      // ensures we only identify shardings as equivalent if the mesh axes map
+      // to the exact same linear offsets in the global buffer. Since we also
+      // account for the sizes of each dimension and axis, if non-divisibility
+      // causes the data to be partitioned differently across a reshape, the
+      // strides will correctly mismatch.
+      int64_t currentAxisStride =
+          cumulativeDimSize *
+          llvm::divideCeil(type.getDimSize(i), totalAxesSize);
+      for (int64_t j = static_cast<int64_t>(axes.size()) - 1; j >= 0; --j) {
+        axisStrides.push_back({axes[j], currentAxisStride});
+        currentAxisStride *= axes[j].getSize(mesh);
+      }
+      cumulativeDimSize *= type.getDimSize(i);
+    }
+    llvm::stable_sort(axisStrides, [](const auto& a, const auto& b) {
+      return a.second < b.second;
+    });
+    return axisStrides;
+  };
+
+  return getAxisStrides(s1, rt1) == getAxisStrides(s2, rt2);
+}
+
+// Searches for a compatible reshard result reachable from the root and
+// excluding the current reshard. The current implementation only accepts a
+// reshard as a cache hit if the path from the root to that reshard contains no
+// transposes.
+Value findCompatibleReshard(Value root, TensorShardingAttr targetSharding,
+                            Type targetType, Block* block, ReshardOp current) {
+  // Use a worklist to explore only "safe" paths (reshapes only).
+  SmallVector<Value> worklist = {root};
+  llvm::DenseSet<Value> visited;
+  while (!worklist.empty()) {
+    Value v = worklist.pop_back_val();
+    if (!visited.insert(v).second) {
+      continue;
+    }
+    for (Operation* user : v.getUsers()) {
+      if (user == current) {
+        continue;
+      }
+      if (auto otherReshard = dyn_cast<ReshardOp>(user)) {
+        if (isShardingEquivalentAcrossReshapes(
+                otherReshard.getSharding(), otherReshard.getType(),
+                targetSharding, targetType, current) &&
+            otherReshard->getBlock() == block &&
+            otherReshard->isBeforeInBlock(current)) {
+          return otherReshard.getResult();
+        }
+      } else if (!isa<stablehlo::TransposeOp>(user) && isMetadataOp(user)) {
+        // Found a metadata-only op that is not a transpose. Follow it to find
+        // a compatible reshard.
+        worklist.push_back(user->getResult(0));
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Recursively clones the transformations from the root to the target.
+Value cloneTransformationPath(Value root, Value target, Value cachedResult,
+                              PatternRewriter& rewriter) {
+  if (target == root) {
+    return cachedResult;
+  }
+  Operation* op = target.getDefiningOp();
+  assert(isMetadataOp(op) && "Expected a supported metadata op.");
+
+  Value input = op->getOperand(0);
+  Value transformedInput =
+      cloneTransformationPath(root, input, cachedResult, rewriter);
+
+  rewriter.setInsertionPointAfterValue(transformedInput);
+  Operation* cloned = rewriter.clone(*op);
+  cloned->setOperand(0, transformedInput);
+  return cloned->getResult(0);
+}
+
 class ReshardCommonSubexpressionEliminationPattern
     : public OpRewritePattern<ReshardOp> {
  public:
@@ -374,20 +548,25 @@ class ReshardCommonSubexpressionEliminationPattern
 
   LogicalResult matchAndRewrite(ReshardOp reshardOp,
                                 PatternRewriter& rewriter) const override {
-    Value operand = reshardOp.getInput();
+    Value input = reshardOp.getInput();
+    Value root = unwrapMetadataOp(input);
 
-    for (Operation* user : operand.getUsers()) {
-      if (user == reshardOp) {
-        continue;
+    TensorShardingAttr targetSharding =
+        getTargetSharding(reshardOp.getSharding(), input);
+
+    Value cachedResult =
+        findCompatibleReshard(root, targetSharding, reshardOp.getType(),
+                              reshardOp->getBlock(), reshardOp);
+
+    if (cachedResult) {
+      if (cachedResult.getType() != root.getType()) {
+        rewriter.setInsertionPointAfterValue(cachedResult);
+        cachedResult = stablehlo::ReshapeOp::create(
+            rewriter, reshardOp.getLoc(), root.getType(), cachedResult);
       }
-      auto otherReshard = dyn_cast<ReshardOp>(user);
-      if (otherReshard &&
-          otherReshard.getSharding() == reshardOp.getSharding() &&
-          otherReshard->getBlock() == reshardOp->getBlock() &&
-          otherReshard->isBeforeInBlock(reshardOp)) {
-        rewriter.replaceOp(reshardOp, otherReshard.getResult());
-        return success();
-      }
+      rewriter.replaceOp(reshardOp, cloneTransformationPath(
+                                        root, input, cachedResult, rewriter));
+      return success();
     }
     return failure();
   }
