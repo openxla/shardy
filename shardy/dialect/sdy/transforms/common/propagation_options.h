@@ -51,6 +51,9 @@ struct PropagationOptions {
   // Whether to avoid explicit reshards/collectives on named computations/calls.
   // TODO(enver): Rename to avoidReshardsOnCalls.
   bool avoidReshardsOnNamedComputations = false;
+  // Whether to dedup functions fully regardless of the input/output shardings
+  // of the funcs.
+  bool dedupFunctionsFully = false;
   // Whether to update axes with non-divisible input/output shardings.
   bool updateNonDivisibleInputOutputShardings = true;
   // Whether to propagate shardings directly on a non-flat graph without
