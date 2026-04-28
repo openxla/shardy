@@ -540,6 +540,17 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
 // the device's position in the logical grid formed by the sharding axes.
 int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
                       ArrayRef<AxisRefAttr> axes) {
+  // Resolve the physical-to-logical mapping. The 'logicalDeviceId' is the index
+  // of the device ID in the mesh's device list. If the list is empty, it
+  // follows the iota order.
+  int64_t logicalDeviceId = deviceId;
+  ArrayRef<int64_t> deviceIds = mesh.getDeviceIds();
+  if (!deviceIds.empty()) {
+    const auto* it = llvm::find(deviceIds, deviceId);
+    SDY_CHECK(it != deviceIds.end()) << "Device ID not found in mesh";
+    logicalDeviceId = std::distance(deviceIds.begin(), it);
+  }
+
   int64_t shardIndex = 0;
   for (AxisRefAttr axis : axes) {
     int64_t axisSize = axis.getSize(mesh);
@@ -559,7 +570,7 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
 
     // Extract the coordinate component for the current (possibly sub-) axis.
     int64_t axisCoord =
-        (deviceId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
+        (logicalDeviceId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
 
     // Linearize the coordinates of all axes sharding this dimension.
     shardIndex = shardIndex * axisSize + axisCoord;
@@ -884,10 +895,16 @@ class CollectivePermuteOpPattern
     SDY_CHECK(outSharding != inSharding)
         << "Shardy canonicalizer should have removed no-op collective-permute.";
 
-    MeshAttr mesh = outSharding.getMesh(converter->getSymbolTable());
-    if (!mesh) {
+    // Previous passes guarantee that only sdy.collective_permute may have
+    // different meshes in input and output sharding.
+    MeshAttr outMesh = outSharding.getMesh(converter->getSymbolTable());
+    MeshAttr inMesh = inSharding.getMesh(converter->getSymbolTable());
+    if (!outMesh || !inMesh) {
       return op.emitOpError("failed to resolve mesh");
     }
+    SDY_CHECK(inMesh.getTotalSize() == outMesh.getTotalSize())
+        << "collective-permute between meshes of different sizes is not "
+           "supported.";
 
     // Collective all AxisRef to produce an ordered list of all sharding axes.
     SmallVector<AxisRefAttr> allAxisRefs;
@@ -897,8 +914,9 @@ class CollectivePermuteOpPattern
             [&](AxisRefAttr axis) { allAxisRefs.push_back(axis); });
       }
     }
+    // Use outMesh as the reference for axis ordering.
     SmallVector<AxisRefAttr> allOrderedAxes = getOrderedAxisRefs(
-        AxisRefListAttr::get(getContext(), allAxisRefs), mesh);
+        AxisRefListAttr::get(getContext(), allAxisRefs), outMesh);
 
     // Return the ordered list of axes for a given sharding that is a
     // permutation of allOrderedAxes. This ensures every device ID is mapped to
@@ -926,10 +944,10 @@ class CollectivePermuteOpPattern
     };
 
     SmallVector<AxisRefAttr> outShardingAxes = getShardingAxes(outSharding);
-    int64_t numDevices = mesh.getTotalSize();
+    int64_t numDevices = outMesh.getTotalSize();
     llvm::DenseMap<int64_t, int64_t> logicalIdToOutDevId;
     for (int64_t j = 0; j < numDevices; ++j) {
-      logicalIdToOutDevId[getShardIndex(j, mesh, outShardingAxes)] = j;
+      logicalIdToOutDevId[getShardIndex(j, outMesh, outShardingAxes)] = j;
     }
 
     SmallVector<AxisRefAttr> inShardingAxes = getShardingAxes(inSharding);
@@ -937,7 +955,7 @@ class CollectivePermuteOpPattern
     for (int64_t i = 0; i < numDevices; ++i) {
       pairs.push_back(i);
       pairs.push_back(
-          logicalIdToOutDevId[getShardIndex(i, mesh, inShardingAxes)]);
+          logicalIdToOutDevId[getShardIndex(i, inMesh, inShardingAxes)]);
     }
 
     auto pairsAttr = DenseIntElementsAttr::get(

@@ -4,6 +4,10 @@
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 // CHECK: sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
 sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
+// CHECK: sdy.mesh @mesh_a = <["x"=4]>
+sdy.mesh @mesh_a = <["x"=4]>
+// CHECK: sdy.mesh @mesh_b = <["x"=4], device_ids=[1, 2, 3, 0]>
+sdy.mesh @mesh_b = <["x"=4], device_ids=[1, 2, 3, 0]>
 
 // CHECK-LABEL: func @swap_two_dim_shardings
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y":(2)2}]>})
@@ -59,4 +63,34 @@ func.func @replica_axis_changed(%arg0: tensor<8x4xf32> {sdy.sharding = #sdy.shar
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_2_4_2, [{"y":(2)2, "z"}, {"y":(1)2}]> : tensor<8x4xf32>
   // CHECK:      return %[[RES]] : tensor<2x2xf32>
   return %0 : tensor<8x4xf32>
+}
+
+// CHECK-LABEL: func @mesh_change_iota_to_other
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_a, [{"x"}]>})
+// CHECK-SAME: -> (tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_b, [{"x"}]>})
+func.func @mesh_change_iota_to_other(
+  %arg0: tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_a, [{"x"}]>})
+  -> (tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_b, [{"x"}]>}) {
+  // CHECK: %[[RES:.*]] = "stablehlo.collective_permute"(%[[ARG0]]) <{
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 5, type = 1>,
+  // CHECK-SAME{LITERAL}:   source_target_pairs = dense<[[0, 1], [1, 2], [2, 3], [3, 0]]> : tensor<4x2xi64>
+  // CHECK-SAME: }> : (tensor<1xi32>) -> tensor<1xi32>
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_b, [{"x"}]> : tensor<4xi32>
+  // CHECK: return %[[RES]] : tensor<1xi32>
+  return %0 : tensor<4xi32>
+}
+
+// CHECK-LABEL: func @mesh_change_other_to_iota
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_b, [{"x"}]>})
+// CHECK-SAME: -> (tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_a, [{"x"}]>})
+func.func @mesh_change_other_to_iota(
+  %arg0: tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_b, [{"x"}]>})
+  -> (tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_a, [{"x"}]>}) {
+  // CHECK: %[[RES:.*]] = "stablehlo.collective_permute"(%[[ARG0]]) <{
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 6, type = 1>,
+  // CHECK-SAME{LITERAL}:   source_target_pairs = dense<[[0, 3], [1, 0], [2, 1], [3, 2]]> : tensor<4x2xi64>
+  // CHECK-SAME: }> : (tensor<1xi32>) -> tensor<1xi32>
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_a, [{"x"}]> : tensor<4xi32>
+  // CHECK: return %[[RES]] : tensor<1xi32>
+  return %0 : tensor<4xi32>
 }
