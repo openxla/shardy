@@ -38,7 +38,7 @@ cc_library(
         "export_named_computations.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
-        "propagate_call_sharding_to_func_results.cc",
+        "propagate_to_func_results.cc",
         "remove_ag_rs_for_cmv1.cc",
         "remove_propagation_debug_info.cc",
         "remove_sharding_groups.cc",

@@ -258,10 +258,11 @@ def ExportNamedComputationsPass : Pass<"sdy-export-named-computations", "ModuleO
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
-def PropagateCallShardingToFuncResultsPass : Pass<"sdy-propagate-call-sharding-to-func-results", "ModuleOp"> {
-  let summary = "Propagate sharding from call op to func results.";
+def PropagateToFuncResultsPass : Pass<"sdy-propagate-to-func-results", "ModuleOp"> {
+  let summary = "Propagate shardings from the func terminator to func results.";
   let description = [{
-    Copies the sharding of a `func.call` op results to the corresponding `func.func` results.
+    Copies the shardings of func terminator values to the corresponding `func.func` results,
+    except for the main func.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }

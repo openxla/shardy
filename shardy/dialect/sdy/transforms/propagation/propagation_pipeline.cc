@@ -66,6 +66,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                                                  dumpIndex));
   }
   pm.addPass(createExportNamedComputationsPass());
+  pm.addPass(createPropagateToFuncResultsPass());
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",

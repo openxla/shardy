@@ -14,10 +14,13 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
+#include <cstdint>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
+#include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -26,35 +29,41 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-#define GEN_PASS_DEF_PROPAGATECALLSHARDINGTOFUNCRESULTSPASS
+#define GEN_PASS_DEF_PROPAGATETOFUNCRESULTSPASS
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
 
-using func::CallOp;
-using func::FuncOp;
+void setFuncResultShardingOrClear(func::FuncOp funcOp,
+                                  const OpOperand& opOperand) {
+  int64_t resNum = opOperand.getOperandNumber();
+  if (auto sharding = getSharding(opOperand.get())) {
+    setFuncResultSharding(funcOp, resNum, sharding);
+    return;
+  }
+  funcOp.removeResultAttr(resNum, kShardingAttr);
+}
 
-struct PropagateCallShardingToFuncResultsPass
-    : public impl::PropagateCallShardingToFuncResultsPassBase<
-          PropagateCallShardingToFuncResultsPass> {
-  using PropagateCallShardingToFuncResultsPassBase::
-      PropagateCallShardingToFuncResultsPassBase;
+struct PropagateToFuncResultsPass
+    : public impl::PropagateToFuncResultsPassBase<PropagateToFuncResultsPass> {
+  using PropagateToFuncResultsPassBase::PropagateToFuncResultsPassBase;
 
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
     SymbolTable symbolTable(moduleOp);
 
-    moduleOp.walk([&](CallOp callOp) {
-      FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
-      TensorShardingPerValueAttr callOpShardings = getShardingPerValue(callOp);
-      if (!callOpShardings) {
-        for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
-          funcOp.removeResultAttr(resNum, kShardingAttr);
-        }
-        return;
+    func::FuncOp mainFuncOp =
+        getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true);
+    for (func::FuncOp funcOp : moduleOp.getOps<func::FuncOp>()) {
+      if (funcOp == mainFuncOp) {
+        continue;
       }
-      setFuncResultShardings(funcOp, callOpShardings);
-    });
+      func::ReturnOp returnOp =
+          cast<func::ReturnOp>(funcOp.getBody().front().getTerminator());
+      for (const OpOperand& opOperand : returnOp->getOpOperands()) {
+        setFuncResultShardingOrClear(funcOp, opOperand);
+      }
+    }
   }
 };
 
