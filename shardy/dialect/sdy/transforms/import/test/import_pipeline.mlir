@@ -32,12 +32,17 @@ func.func @main(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) {
 
 sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
 
-// CHECK-LABEL: @add_manual_axes_to_replicated
-func.func @add_manual_axes_to_replicated(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // CHECK-NEXT: sdy.manual_computation(%arg0)
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.manual_computation(%arg0)
   // CHECK-SAME{LITERAL}: in_shardings=[<@mesh, [{"c", ?}], replicated={"a"}>]
   // CHECK-SAME{LITERAL}:  out_shardings=[<@mesh, [{"c", ?}], replicated={"a"}>]
   // CHECK-SAME{LITERAL}: manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+  // CHECK-NEXT:   %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{?}]>
+  // CHECK-NEXT:   sdy.return %2
+  // CHECK-NEXT: }
+  // CHECK-NEXT: %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{"c", ?}], replicated={"a"}>
+  // CHECK-NEXT: return %1
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c", ?}]>] out_shardings=[<@mesh, [{"c", ?}]>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
     sdy.return %arg1 : tensor<4xf32>
   } : (tensor<8xf32>) -> tensor<8xf32>
@@ -50,10 +55,17 @@ sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
 
 // Due to the in_sharding being fully closed, the in_sharding is added to the
 // func arg but with the manual axis added as replicated.
-// CHECK-LABEL: @add_manual_axes_to_replicated_applied_constraint
+// CHECK-LABEL: func @main
 // CHECK-SAME     %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {}], replicated={"a"}>}
 // CHECK-SAME     -> tensor<16x16xf32> {
-func.func @add_manual_axes_to_replicated_applied_constraint(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c"}], replicated={"a"}>] out_shardings=[<@mesh, [{"c"}], replicated={"a"}>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+  // CHECK-NEXT:   %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{}]>
+  // CHECK-NEXT:   %3 = stablehlo.add %2, %2
+  // CHECK-NEXT:   sdy.return %3
+  // CHECK-NEXT: }
+  // CHECK-NEXT: %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{"c"}], replicated={"a"}>
+  // CHECK-NEXT: return %1
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c"}]>] out_shardings=[<@mesh, [{"c"}]>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<4xf32>
     sdy.return %1 : tensor<4xf32>
@@ -67,12 +79,19 @@ sdy.mesh @mesh = <["a"=2]>
 
 // This test verifies that the manual axes are cleaned up before adding data
 // flow edges.
-func.func @manual_axes_cleanup_before_adding_data_flow_edges(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}], replicated={"a"}>] out_shardings=[<@mesh, [{?}], replicated={"a"}>] manual_axes={"a"} (%arg1: tensor<8xf32>) {
+  // CHECK-NEXT:   %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{?}]>
+  // CHECK-NEXT:   %3 = stablehlo.add %2, %2
+  // CHECK-NEXT:   sdy.return %3
+  // CHECK-NEXT: }
+  // CHECK-NEXT: %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{?}], replicated={"a"}>
+  // CHECK-NEXT: return %1
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}]>] out_shardings=[<@mesh, [{?}]>] manual_axes={"a"} (%arg1: tensor<8xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<8xf32>
     sdy.return %1 : tensor<8xf32>
   } : (tensor<8xf32>) -> tensor<8xf32>
-  // CHECK: sdy.data_flow_edge %0 sharding=<@mesh, [{?}], replicated={"a"}> : tensor<8xf32>
   return %0 : tensor<8xf32>
 }
 
@@ -80,15 +99,19 @@ func.func @manual_axes_cleanup_before_adding_data_flow_edges(%arg0: tensor<8xf32
 
 sdy.mesh @mesh = <["a"=2]>
 
-// CHECK-LABEL: func @single_call
-func.func @single_call(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // CHECK-NEXT: %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
-  // CHECK-NEXT: return %0 : tensor<8xf32>
+// test: single_call
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[EDGE:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8xf32>
+  // CHECK-NEXT: return %[[EDGE]] : tensor<8xf32>
   %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
   return %0 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @foo
 func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}]>]>}
+  // CHECK-NEXT: return %0
   return %arg0 : tensor<8xf32>
 }
