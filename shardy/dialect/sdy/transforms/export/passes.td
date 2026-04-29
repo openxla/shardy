@@ -284,3 +284,11 @@ def UnflattenCallGraphPass : Pass<"sdy-unflatten-call-graph", "ModuleOp"> {
         "shardings are the same.">,
   ];
 }
+
+def InsertFuncCallReshardsPass : Pass<"sdy-insert-func-call-reshards", "ModuleOp"> {
+  let summary = "Inserts reshards for func and call sharding conflicts.";
+  let description = [{
+    Inserts reshards for func and call sharding conflicts on results.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}

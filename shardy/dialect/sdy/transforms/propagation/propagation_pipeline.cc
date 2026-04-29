@@ -76,6 +76,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   addExportPipeline(pm, dumpIndex, exportOptions);
   pm.addPass(createUnflattenCallGraphPass(
       UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  pm.addPass(createInsertFuncCallReshardsPass());
   pm.addPass(createSymbolDCEPass());
 }
 
