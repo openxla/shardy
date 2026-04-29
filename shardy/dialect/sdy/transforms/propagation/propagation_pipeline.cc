@@ -43,7 +43,7 @@ void populateExportOptions(ExportOptions& options,
       propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
-  options.avoidReshardsOnCalls = propOptions.avoidReshardsOnNamedComputations;
+  options.avoidReshardsOnCalls = propOptions.dedupFunctionsFully;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
 }
@@ -52,6 +52,7 @@ void populateExportOptions(ExportOptions& options,
 
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
+  pm.addPass(mlir::sdy::createFlattenCallGraphPass());
   addImportPipeline(pm, dumpIndex, options);
   pm.addPass(createSymbolDCEPass());
   {
@@ -73,6 +74,9 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  pm.addPass(createSymbolDCEPass());
 }
 
 void addPropagationPipeline(OpPassManager& pm,
@@ -86,6 +90,10 @@ struct PropagationOptionsOptions
   Option<bool> enableLateInlining{*this, "enable-late-inlining",
                                   llvm::cl::desc("Whether to late inline."),
                                   llvm::cl::init(true)};
+  Option<bool> dedupFunctionsFully{
+      *this, "dedup-functions-fully",
+      llvm::cl::desc("Whether to dedup functions fully."),
+      llvm::cl::init(false)};
 };
 
 void registerPropagationPipeline() {
@@ -96,6 +104,7 @@ void registerPropagationPipeline() {
       [](OpPassManager& pm, const PropagationOptionsOptions& options) {
         PropagationOptions propOptions;
         propOptions.enableLateInlining = options.enableLateInlining;
+        propOptions.dedupFunctionsFully = options.dedupFunctionsFully;
         return addPropagationPipeline(pm, propOptions);
       });
 }
