@@ -26,6 +26,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
@@ -399,6 +400,18 @@ class MergeInferredFragmentsPass
     : public impl::MergeInferredFragmentsPassBase<MergeInferredFragmentsPass> {
   using MergeInferredFragmentsPassBase::MergeInferredFragmentsPassBase;
 
+ public:
+  StringRef getName() const override {
+    if (name.empty()) {
+      name = llvm::formatv(
+                 "MergeInferredFragmentsPass(mergeSideways={0}, "
+                 "mergeAnyConsumer={1})",
+                 mergeSideways, mergeAnyConsumer)
+                 .str();
+    }
+    return name;
+  }
+
  protected:
   LogicalResult AllowMerging(FragmentOp producer_op, FragmentOp consumer_op,
                              bool log_failure) const final {
@@ -451,6 +464,9 @@ class MergeInferredFragmentsPass
     }
     return merge_candidate;
   }
+
+ private:
+  mutable std::string name;
 };
 
 class MergeForwardWithBackwardPass
