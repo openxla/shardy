@@ -49,7 +49,7 @@ struct PropagationOptions {
   // shardings.
   bool enableAutoPartitioning = false;
   // Whether to avoid explicit reshards/collectives on named computations/calls.
-  // TODO(enver): Deprecated. Remove avoidReshardsOnNamedComputations option.
+  // TODO(enver): Rename to avoidReshardsOnCalls.
   bool avoidReshardsOnNamedComputations = false;
   // Whether to dedup functions fully regardless of the input/output shardings
   // of the funcs.
