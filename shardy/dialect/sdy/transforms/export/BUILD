@@ -45,6 +45,7 @@ cc_library(
         "remove_sharding_groups.cc",
         "remove_sub_axes_in_input_output_shardings.cc",
         "reshard_to_collectives.cc",
+        "resolve_permutation_factors.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
         "unflatten_call_graph.cc",

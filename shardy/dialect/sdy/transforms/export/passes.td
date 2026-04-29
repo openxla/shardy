@@ -292,3 +292,23 @@ def InsertFuncCallReshardsPass : Pass<"sdy-insert-func-call-reshards", "ModuleOp
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors", "func::FuncOp"> {
+  let summary = "Resolves sharding on dimensions mapped to kPermutation factors.";
+  let description = [{
+    Sharding dimensions with `kPermutation` factors may require cross-device
+    communication (e.g., halo exchange for windows or collective permutes for
+    reverses).
+
+    If `enableHaloExchange` is true, the pass would use an available optimized
+    communication logic to resolve the permutation factors. Otherwise, the pass
+    would simply insert `sdy.reshard` ops to replicate those dimensions. The
+    default of `enableHaloExchange` is true.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+  let options = [
+      Option<"enableHaloExchange", "enable-halo-exchange",
+            "bool", /*default=*/"true",
+            "Implement halo exchange logic for windowed operations.">
+    ];
+}
