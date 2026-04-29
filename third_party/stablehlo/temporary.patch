@@ -167,6 +167,33 @@ diff --ruN a/stablehlo/stablehlo/dialect/ChloOps.td b/stablehlo/stablehlo/dialec
      DefaultValuedOptionalAttr<BoolAttr, "false">:$is_reverse,
      OptionalAttr<BoolAttr>:$is_associative
    );
+diff --ruN a/stablehlo/stablehlo/dialect/TypeInference.cpp b/stablehlo/stablehlo/dialect/TypeInference.cpp
+--- stablehlo/stablehlo/dialect/TypeInference.cpp
++++ stablehlo/stablehlo/dialect/TypeInference.cpp
+@@ -2110,11 +2110,22 @@
+       inferredBounds[dim] = inferredDimAndBound.second;
+     }
+   }
++  Attribute witnessEncoding;
++  for (auto inputType : inputTypes) {
++    if (auto rankedType = dyn_cast<RankedTensorType>(inputType)) {
++      if (rankedType.getEncoding()) {
++        witnessEncoding = rankedType.getEncoding();
++        break;
++      }
++    }
++  }
++  if (!witnessEncoding) witnessEncoding = witnessType.getEncoding();
++
+   // concatenate_c5, concatenate_c6
+   inferredReturnTypes.push_back(RankedTensorType::get(
+       inferredSizes, witnessType.getElementType(),
+       boundsToEncoding(
+-          witnessType.getEncoding(),
++          witnessEncoding,
+           // Empty array as argument is an indicator to boundsToEncoding()
+           // that there are no bounds at all in inputs, thus sparsity
+           // attributes will be included in the return type
 diff --ruN a/stablehlo/stablehlo/dialect/VhloAttrs.td b/stablehlo/stablehlo/dialect/VhloAttrs.td
 --- stablehlo/stablehlo/dialect/VhloAttrs.td
 +++ stablehlo/stablehlo/dialect/VhloAttrs.td
@@ -674,6 +701,25 @@ diff --ruN a/stablehlo/stablehlo/integrations/python/tests/stablehlo.py b/stable
  #  from jax.interpreters import mlir
  #  import jax.numpy as jnp
  #  """Tests that probe files are created for bf16 tensors."""
+diff --ruN a/stablehlo/stablehlo/tests/infer_stablehlo.mlir b/stablehlo/stablehlo/tests/infer_stablehlo.mlir
+--- stablehlo/stablehlo/tests/infer_stablehlo.mlir
++++ stablehlo/stablehlo/tests/infer_stablehlo.mlir
+@@ -2076,3 +2076,15 @@
+   %1 = "hlo_test_infer.reify_return_type_shapes"(%0) : (tensor<?x?x?x?xf32>) -> tensor<4xindex>
+   func.return %1 : tensor<4xindex>
+ }
++
++// CHECK-LABEL: @concat_bounds_mixed_static_first
++func.func @concat_bounds_mixed_static_first(
++  %arg0: tensor<5x2xi32>,
++  %arg1: tensor<5x?xi32, #stablehlo.bounds<?, 4>>)  -> tensor<?x?xindex> {
++  %result = "stablehlo.concatenate"(%arg0, %arg1) { dimension = 1 : i64 } : (
++    tensor<5x2xi32>,
++    tensor<5x?xi32, #stablehlo.bounds<?, 4>>) -> tensor<?x?xi32>
++  // CHECK: types0 = tensor<5x?xi32, #stablehlo.bounds<?, 6>>
++  %1 = "hlo_test_infer.get_return_types"(%result) : (tensor<?x?xi32>) -> tensor<?x?xindex>
++  func.return %1 : tensor<?x?xindex>
++}
 diff --ruN a/stablehlo/stablehlo/tests/ops_chlo.mlir b/stablehlo/stablehlo/tests/ops_chlo.mlir
 --- stablehlo/stablehlo/tests/ops_chlo.mlir
 +++ stablehlo/stablehlo/tests/ops_chlo.mlir
