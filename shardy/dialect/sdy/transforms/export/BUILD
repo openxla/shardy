@@ -46,6 +46,7 @@ cc_library(
         "reshard_to_collectives.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
+        "unflatten_call_graph.cc",
         "update_non_divisible_input_output_shardings.cc",
     ],
     hdrs = [
@@ -65,6 +66,7 @@ cc_library(
         "//shardy/dialect/sdy/transforms/propagation:utils",
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncTransforms",
         "@llvm-project//mlir:IR",

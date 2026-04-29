@@ -266,3 +266,21 @@ def PropagateToFuncResultsPass : Pass<"sdy-propagate-to-func-results", "ModuleOp
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def UnflattenCallGraphPass : Pass<"sdy-unflatten-call-graph", "ModuleOp"> {
+  let summary = "Unflattens the call graph.";
+  let description = [{
+    Unflattens the graph. It deduplicates functions with the same
+    input/output shardings *and* the same origin as desribed by the
+    'original_func_name' attribute attached to the functions.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let options = [
+    Option<"dedupFunctionsFully", "dedup-functions-fully",
+        "bool", /*default=*/"false",
+        "If true, regardless of the input and output shardings of functions, "
+        "it keeps one callee function for each caller function. The default "
+        "is false, meaning it will deduplicate only if the input and output "
+        "shardings are the same.">,
+  ];
+}

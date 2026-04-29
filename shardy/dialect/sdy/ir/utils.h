@@ -698,12 +698,34 @@ func::FuncOp getFuncOpOrDie(StringRef funcSymName,
 TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
                                               Attribute meshOrRef);
 
+// Returns `TensorShardingPerValueAttr` that is fully closed at each tensor
+// sharding and like the given `shardings`. Assumes `shardings` is non-empty. A
+// `TensorShardingAttr` is fully closed when all dim shardings being empty and
+// closed that is, cannot be further replicated/sharded.
+mlir::sdy::TensorShardingPerValueAttr getFullyClosedLike(
+    mlir::sdy::TensorShardingPerValueAttr shardings);
+
 // Returns the main func. Dies if there is no main func. The main func is the
 // one with name 'main'. If `useSingleFunc` is true, then first check if the
 // module has only one func, and assume it as the main func. Useful for tests.
 mlir::func::FuncOp getMainFuncOrDie(ModuleOp moduleOp,
                                     const SymbolTable& symbolTable,
                                     bool useSingleFunc = false);
+
+// Adds reshard operations to resolve conflicts between call argument
+// sharding and func input sharding.
+void insertReshardsOnFuncArguments(func::FuncOp funcOp, func::CallOp callOp,
+                                   const mlir::SymbolTable& symbolTable,
+                                   IRRewriter& rewriter);
+
+// Adds reshard operations to resolve conflicts between call result
+// sharding and func result sharding. Sets the call result sharding to the func
+// result shardings. Assumes `callOp` has non-empty
+// `TensorShardingPerValueAttr` result-sharding if `funcOp` has non-empty result
+// shardings.
+void insertReshardsOnFuncResults(func::FuncOp funcOp, func::CallOp callOp,
+                                 const mlir::SymbolTable& symbolTable,
+                                 mlir::IRRewriter& rewriter);
 
 }  // namespace sdy
 }  // namespace mlir

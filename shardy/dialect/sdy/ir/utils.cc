@@ -46,6 +46,7 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
@@ -1139,6 +1140,17 @@ TensorShardingPerValueAttr getFullyClosedLike(mlir::ValueRange values,
                                          resultShardings);
 }
 
+TensorShardingPerValueAttr getFullyClosedLike(
+    TensorShardingPerValueAttr shardings) {
+  SmallVector<TensorShardingAttr> resultShardings;
+  resultShardings.reserve(shardings.size());
+  for (TensorShardingAttr sharding : shardings.getShardings()) {
+    resultShardings.push_back(TensorShardingAttr::getFullyClosedLike(sharding));
+  }
+  return TensorShardingPerValueAttr::get(shardings.getContext(),
+                                         resultShardings);
+}
+
 // Returns the main func. Dies if there is no main func.
 FuncOp getMainFuncOrDie(ModuleOp moduleOp, const SymbolTable& symbolTable,
                         bool useSingleFunc) {
@@ -1149,6 +1161,71 @@ FuncOp getMainFuncOrDie(ModuleOp moduleOp, const SymbolTable& symbolTable,
     }
   }
   return getFuncOpOrDie(kMainFuncName, symbolTable);
+}
+
+void insertReshardsOnFuncArguments(FuncOp funcOp, CallOp callOp,
+                                   const SymbolTable& symbolTable,
+                                   IRRewriter& rewriter) {
+  TensorShardingPerValueAttr funcArgShardings =
+      getFuncArgShardings(funcOp, symbolTable);
+  if (!funcArgShardings) {
+    Attribute meshOrRef = getMeshOrRef(
+        callOp.getNumOperands(), symbolTable,
+        [&](int64_t i) { return getSharding(callOp.getOperand(i)); });
+    // Return without inserting reshards as neither func arguments nor call
+    // operands have a sharding with non-maximal mesh.
+    if (!meshOrRef) {
+      return;
+    }
+    funcArgShardings = getFullyClosedLike(callOp.getOperands(), meshOrRef);
+  }
+  rewriter.setInsertionPoint(callOp);
+  for (auto [funcArgSharding, operand] : llvm::zip_equal(
+           funcArgShardings.getShardings(), callOp->getOpOperands())) {
+    if (!funcArgSharding.isEquivalent(getSharding(operand.get()))) {
+      auto reshardOp = ReshardOp::create(rewriter, operand.get().getLoc(),
+                                         operand.get(), funcArgSharding);
+      operand.set(reshardOp);
+    }
+  }
+}
+
+namespace {
+void insertReshardsOnFuncResults(TensorShardingPerValueAttr funcResultShardings,
+                                 CallOp callOp, IRRewriter& rewriter) {
+  for (auto [funcResultSharding, result] : llvm::zip_equal(
+           funcResultShardings.getShardings(), callOp.getResults())) {
+    TensorShardingAttr callResultSharding = getSharding(result);
+    if (!funcResultSharding.isEquivalent(callResultSharding)) {
+      rewriter.setInsertionPointAfterValue(result);
+      auto reshardOp = ReshardOp::create(
+          rewriter, result.getLoc(), result,
+          callResultSharding
+              ? callResultSharding
+              : TensorShardingAttr::getFullyClosedLike(funcResultSharding));
+      rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
+    }
+  }
+  setShardings(callOp, funcResultShardings);
+}
+}  // namespace
+
+void insertReshardsOnFuncResults(FuncOp funcOp, CallOp callOp,
+                                 const SymbolTable& symbolTable,
+                                 IRRewriter& rewriter) {
+  TensorShardingPerValueAttr funcResultShardings =
+      getFuncResultShardings(funcOp, symbolTable);
+  if (!funcResultShardings) {
+    TensorShardingPerValueAttr callResultShardings =
+        getShardingPerValue(callOp);
+    // Return without inserting reshards as neither func arguments have a
+    // sharding with non-maximal mesh nor call has non-empty shardings.
+    if (!callResultShardings) {
+      return;
+    }
+    funcResultShardings = getFullyClosedLike(callResultShardings);
+  }
+  insertReshardsOnFuncResults(funcResultShardings, callOp, rewriter);
 }
 
 }  // namespace sdy
