@@ -36,5 +36,4 @@ if (grep -q "@parallel_" "$TMP/part1.mlir") && (! grep -q "@sequential_" "$TMP/p
 fi
 
 cat "$TMP/part2.mlir" >> "$TMP/combined.mlir"
-cat "$TMP/combined.mlir"
 "$STABLEHLO_TRANSLATE" --interpret "$TMP/combined.mlir"
