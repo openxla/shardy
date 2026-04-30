@@ -85,7 +85,7 @@ struct AddDataFlowEdgesPass
       addDataFlowEdges(op.getBlockArgumentEdgeOwners(), rewriter);
       addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
     });
-    if (addFuncDataFlowEdges) {
+    if (enableNativeNonFlatSupport) {
       addFuncDataFlowEdgeOps(moduleOp, symbolTable, rewriter);
     }
   }

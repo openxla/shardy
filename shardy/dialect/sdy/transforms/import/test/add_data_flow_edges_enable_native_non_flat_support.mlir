@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges='add-func-data-flow-edges=true'  | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges='enable-native-non-flat-support=true'  | FileCheck %s
 
 // CHECK-LABEL: @bar(%arg0: tensor<8xf32>)
 func.func @bar(%arg0: tensor<8xf32>) -> tensor<8xf32> {

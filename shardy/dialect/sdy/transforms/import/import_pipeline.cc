@@ -46,7 +46,7 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
   pm.addPass(createAddDataFlowEdgesPass(
-      AddDataFlowEdgesPassOptions{/*addFuncDataFlowEdges=*/true}));
+      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));

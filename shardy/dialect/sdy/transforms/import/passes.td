@@ -92,9 +92,11 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 
   let options = [
-    Option<"addFuncDataFlowEdges", "add-func-data-flow-edges", "bool",
+    Option<"enableNativeNonFlatSupport", "enable-native-non-flat-support", "bool",
            /*default=*/"false",
-           "Whether to add func data flow edges.">
+           "Whether to propagate shardings directly on a non-flat graph without "
+           "flattening it. The default is false, meaning it will flatten the "
+           "graph and then propagate.">
   ];
 }
 
