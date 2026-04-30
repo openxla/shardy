@@ -345,7 +345,7 @@ func.func private @foo(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #
   return %arg0 : tensor<8xi32>
 }
 
-// CHECK-LABEL: func private @foo_0(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>})
+// CHECK-LABEL: func private @foo_0(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
 // CHECK-SAME:  attributes {sdy.original_func_name = "foo"} {
 // CHECK-NEXT:    return
 
@@ -363,13 +363,13 @@ func.func @simple_non_flat_non_matching_sharding_on_func_results_and_both_call_r
   return %0, %1 : tensor<8xi32>, tensor<8xi32>
 }
 
-// CHECK-LABEL: func private @foo(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) {
+// CHECK-LABEL: func private @foo(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) {
 // CHECK-NEXT:    return
 func.func private @foo(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) {
   return %arg0 : tensor<8xi32>
 }
 
-// CHECK-LABEL: func private @foo_0(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}]>})
+// CHECK-LABEL: func private @foo_0(%arg0: tensor<8xi32>) -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
 // CHECK-SAME:  attributes {sdy.original_func_name = "foo"} {
 // CHECK-NEXT:    return
 

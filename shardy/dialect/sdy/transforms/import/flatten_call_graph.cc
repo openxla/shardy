@@ -50,14 +50,6 @@ struct FlattenCallGraphPass
           symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
       return WalkResult::advance();
     });
-
-    walkCalls(moduleOp, [&](CallOp callOp) {
-      FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
-      if (auto callOpResultShardings = getShardingPerValue(callOp)) {
-        setFuncResultShardings(funcOp, callOpResultShardings);
-      }
-      return WalkResult::advance();
-    });
   }
 };
 
