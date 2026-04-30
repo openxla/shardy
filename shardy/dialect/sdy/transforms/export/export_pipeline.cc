@@ -96,13 +96,13 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
   }
-  if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
-    pm.addPass(createRemovePropagationDebugInfoPass());
-  }
   pm.addPass(createUnflattenCallGraphPass(
       UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
   // Keep a SymbolDCE after UnflattenCallGraph.
   pm.addPass(createSymbolDCEPass());
+  if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
+    pm.addPass(createRemovePropagationDebugInfoPass());
+  }
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
