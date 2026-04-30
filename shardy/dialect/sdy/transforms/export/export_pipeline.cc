@@ -52,11 +52,11 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // by potentially fusing with preceeding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
   }
-  addCanonicalizerPass(pm, kCollectiveLabel);
   pm.addPass(createUnflattenCallGraphPass(
       UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
   // Keep a SymbolDCE after UnflattenCallGraph.
   pm.addPass(createSymbolDCEPass());
+  addCanonicalizerPass(pm, kCollectiveLabel);
 
   if (options.enableInsertExplicitCollectives &&
       options.removeAllGatherReduceScatterForCMV1) {
