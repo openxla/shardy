@@ -117,3 +117,35 @@ func.func @multiple_results_call_no_sharding_func_has_sharding_on_one_no_shardin
 func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}, tensor<4x2xi32>) {
   return %arg0, %arg1 : tensor<8x2xi32>, tensor<4x2xi32>
 }
+
+// -----
+sdy.mesh @mesh = #sdy.mesh<["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @simple_non_flat
+func.func @simple_non_flat(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %0 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %0 = call @foo(%arg0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %1 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %1 = call @foo(%arg0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  return %1 : tensor<8x2xi32>
+}
+
+func.func private @foo(%arg0: tensor<8x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) {
+  return %arg0 : tensor<8x2xi32>
+}
+
+// -----
+sdy.mesh @mesh = #sdy.mesh<["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @simple_non_flat_one_call_has_sharding_already
+func.func @simple_non_flat_one_call_has_sharding_already(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %0 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %0 = call @foo(%arg0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %1 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  %1 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  return %1 : tensor<8x2xi32>
+}
+
+func.func private @foo(%arg0: tensor<8x2xi32>) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) {
+  return %arg0 : tensor<8x2xi32>
+}

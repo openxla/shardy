@@ -30,10 +30,10 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
+  pm.addPass(createPropagateShardingFromFuncToCallPass());
   pm.addPass(createFlattenCallGraphPass());
   // Keep SymbolDCE after FlattenCallGraph.
   pm.addPass(createSymbolDCEPass());
-  pm.addPass(createPropagateShardingFromFuncToCallPass());
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
