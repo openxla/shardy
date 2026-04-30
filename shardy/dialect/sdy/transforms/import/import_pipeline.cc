@@ -34,7 +34,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // Keep SymbolDCE after FlattenCallGraph.
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createConstantOrScalarSplitterPass());
-  pm.addPass(createFlattenCallGraphPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
 
@@ -45,6 +44,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
+  pm.addPass(createFlattenCallGraphPass());
+  // Keep SymbolDCE after FlattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
   pm.addPass(createAddDataFlowEdgesPass(
       AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
