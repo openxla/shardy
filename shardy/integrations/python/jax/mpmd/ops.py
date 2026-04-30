@@ -235,8 +235,13 @@ def named_computation_partir_lowering(
   )
   args = (*const_arg_values, *args)
 
-  input_types = util.safe_map(jax_mlir.aval_to_ir_types, in_avals)
-  output_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_out)
+  if jax.__version_info__ >= (0, 10, 1):
+    _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
+  else:
+    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
+
+  input_types = util.safe_map(_aval_to_ir_types, in_avals)
+  output_types = util.safe_map(_aval_to_ir_types, ctx.avals_out)
   flat_input_types, _ = tree_util.tree_flatten(input_types)
   flat_output_types, _ = tree_util.tree_flatten(output_types)
 
@@ -460,8 +465,13 @@ def call_mpmd_jit_lowering(
   const_shardings = pjit.const_args_shardings(const_args)
   arg_shardings = tuple(const_shardings) + arg_shardings
 
-  input_types = util.safe_map(jax_mlir.aval_to_ir_types, in_avals)
-  output_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_out)
+  if jax.__version_info__ >= (0, 10, 1):
+    _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
+  else:
+    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
+
+  input_types = util.safe_map(_aval_to_ir_types, in_avals)
+  output_types = util.safe_map(_aval_to_ir_types, ctx.avals_out)
 
   # TODO(jupvfranco): Consider memoizing the lowering function instead of
   # caching in the context (similar to `_call_get_cached_jaxpr` below).
@@ -1049,10 +1059,15 @@ def fori_loop_mpmd_jit_lowering(
       arg_shardings=arg_shardings,
   )
 
-  input_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_in)
+  if jax.__version_info__ >= (0, 10, 1):
+    _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
+  else:
+    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
+
+  input_types = util.safe_map(_aval_to_ir_types, ctx.avals_in)
   flat_input_types, _ = tree_util.tree_flatten(input_types)
   const_types = flat_input_types[0:carried_arguments_start]
-  output_types = util.safe_map(jax_mlir.aval_to_ir_types, ctx.avals_out)
+  output_types = util.safe_map(_aval_to_ir_types, ctx.avals_out)
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   for_loop = mpmd.ForOp(
       const_types + flat_output_types,
