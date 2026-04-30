@@ -36,6 +36,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/fragment_arg_res_attrs.h"
@@ -46,7 +47,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "mlir/Support/WalkResult.h"
 
 namespace mlir::mpmd {
 
@@ -186,7 +186,8 @@ bool IsAllForward(ModuleOp module_op) {
   return is_all_forward;
 }
 
-std::string PrettyPrintUserOrigin(ArrayRef<Attribute> origins, bool all_forward) {
+std::string PrettyPrintUserOrigin(ArrayRef<Attribute> origins,
+                                  bool all_forward) {
   std::string result;
   llvm::raw_string_ostream stream(result);
   auto concat_origin = [&](UserOriginAttr origin) -> void {
@@ -253,9 +254,8 @@ std::vector<FragmentOp> GroupFragmentsAndMarkWithGroupName(
     fragment_group.hbm_bytes =
         std::max(fragment_group.hbm_bytes, hbm_reserved_bytes);
 
-    std::string name =
-        GetFullNameFromMetadata(fragment.getOrigin().getValue(),
-                                fragment.getStageId(), is_all_forward);
+    std::string name = GetFullNameFromMetadata(
+        fragment.getOrigin().getValue(), fragment.getStageId(), is_all_forward);
     std::optional<uint32_t> call_counter = TryToFindCallCounter(fragment);
     fragment_group.mesh_call_sites[fragment.getMeshName()].emplace_back(
         std::move(name), call_counter);

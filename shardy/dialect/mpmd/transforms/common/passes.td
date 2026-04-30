@@ -450,6 +450,10 @@ def UniquifyFunctionInputsOutputsPass :
     Similarly, if a function returns a block argument, this pass creates an
     identity fragment for that block argument, guaranteeing that values are
     passed by value to the function, not by reference.
+
+    Additionally, when not using transfers, the pass will attempt to merge
+    each newly created inferred fragment into an existing same-mesh fragment
+    to reduce the total number of fragments.
   }];
 
   let options = [
@@ -460,6 +464,8 @@ def UniquifyFunctionInputsOutputsPass :
 
   let dependentDialects = ["mlir::mpmd::MpmdDialect"];
 }
+
+
 
 def SchedulingUnitVerifierPass :
     PassBase<"mpmd-scheduling-units-verifier", "DistributedFunctionPass"> {
