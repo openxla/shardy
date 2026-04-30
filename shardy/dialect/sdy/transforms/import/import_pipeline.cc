@@ -31,8 +31,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createLiftInlinedMeshesPass());
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createPropagateShardingFromFuncToCallPass());
-  // Keep SymbolDCE after FlattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   pm.addPass(createConstantOrScalarSplitterPass());
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
@@ -44,11 +42,11 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
+  pm.addPass(createAddDataFlowEdgesPass(
+      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(createFlattenCallGraphPass());
   // Keep SymbolDCE after FlattenCallGraph.
   pm.addPass(createSymbolDCEPass());
-  pm.addPass(createAddDataFlowEdgesPass(
-      AddDataFlowEdgesPassOptions{options.enableNativeNonFlatSupport}));
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
