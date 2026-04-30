@@ -102,6 +102,10 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
   }
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  // Keep a SymbolDCE after UnflattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
 }
 
 void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {

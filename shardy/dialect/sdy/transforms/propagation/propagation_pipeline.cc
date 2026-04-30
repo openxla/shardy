@@ -43,7 +43,9 @@ void populateExportOptions(ExportOptions& options,
       propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
+  // TODO(enver): Drop avoidReshardsOnCalls in favor of dedupFunctionsFully.
   options.avoidReshardsOnCalls = propOptions.dedupFunctionsFully;
+  options.dedupFunctionsFully = propOptions.dedupFunctionsFully;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
 }
@@ -52,7 +54,6 @@ void populateExportOptions(ExportOptions& options,
 
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
-  pm.addPass(mlir::sdy::createFlattenCallGraphPass());
   addImportPipeline(pm, dumpIndex, options);
   pm.addPass(createSymbolDCEPass());
   {
@@ -74,10 +75,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
   pm.addPass(createInsertFuncCallReshardsPass());
-  pm.addPass(createSymbolDCEPass());
 }
 
 void addPropagationPipeline(OpPassManager& pm,
