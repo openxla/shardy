@@ -233,3 +233,26 @@ func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mes
   %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+
+// CHECK: sdy.mesh @mesh = <["x"=2, "y"=4]>
+sdy.mesh @mesh = <["x"=2, "y"=4]>
+
+// CHECK: sdy.mesh @mesh_0 = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @non_flat_graph_inlined_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @non_flat_graph_inlined_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_0, [{"x"}, {}]>]>}
+  %0 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {}]>]>} : (tensor<8x8xf32>) -> (tensor<8x8xf32>)
+  // CHECK-NEXT: call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_0, [{"x"}, {}]>]>}
+  %1 = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {}]>]>} : (tensor<8x8xf32>) -> (tensor<8x8xf32>)
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func private @foo
+func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
+  %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
