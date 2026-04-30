@@ -16,19 +16,14 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <iterator>
 #include <numeric>
 #include <optional>
 #include <utility>
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
-#include "llvm/ADT/TypeSwitch.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -230,9 +225,10 @@ class GenericOpPattern : public ConversionPattern {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
-        isa<stablehlo::ConvolutionOp, stablehlo::DotGeneralOp, stablehlo::DotOp,
-            stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp,
-            stablehlo::ScatterOp, stablehlo::SliceOp>(op)) {
+        isa<stablehlo::ConcatenateOp, stablehlo::ConvolutionOp,
+            stablehlo::DotGeneralOp, stablehlo::DotOp, stablehlo::GatherOp,
+            stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ScatterOp,
+            stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(
@@ -1332,6 +1328,76 @@ class NamedComputationOpPattern
     rewriter.replaceOp(op, newOp.getResults());
     conversionState.removeToConvertOp(op);
     return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+class StablehloConcatenateOpPattern
+    : public OpConversionPattern<stablehlo::ConcatenateOp> {
+ public:
+  StablehloConcatenateOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                                ConversionState& state)
+      : OpConversionPattern<stablehlo::ConcatenateOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::ConcatenateOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr outSharding = converter->getSharding(op.getResult());
+    int64_t concatDim = op.getDimension();
+
+    // While Shardy sharding rules make concatenating dims as kReduction
+    // in some cases, and allow such dimensions to be sharded, we expected
+    // previous passes to have resharded the operands to concatenate along a
+    // replicated dimension.
+    if (outSharding &&
+        !outSharding.getDimShardings()[concatDim].getAxes().empty()) {
+      return op.emitOpError()
+             << "dimension " << concatDim
+             << " is sharded but the concatenation is on this dimension.";
+    }
+
+    for (auto [index, operand] : llvm::enumerate(op.getOperands())) {
+      TensorShardingAttr inSharding = converter->getSharding(operand);
+      if (isFullyReplicated(inSharding)) {
+        continue;
+      }
+      if (!inSharding.getDimShardings()[concatDim].getAxes().empty()) {
+        return op.emitOpError() << "operand " << index
+                                << " is sharded on concatenation dimension "
+                                << concatDim << ". This is not supported.";
+      }
+
+      // Verify that sharding on all other dimensions is consistent across the
+      // op.
+      for (int64_t i = 0; i < inSharding.getRank(); ++i) {
+        if (i == concatDim) {
+          continue;
+        }
+        ArrayRef<AxisRefAttr> inAxes =
+            inSharding.getDimShardings()[i].getAxes();
+        ArrayRef<AxisRefAttr> outAxes =
+            outSharding ? outSharding.getDimShardings()[i].getAxes()
+                        : ArrayRef<AxisRefAttr>();
+        if (inAxes != outAxes) {
+          return op.emitOpError()
+                 << "dimension " << i << " has mismatched sharding axes ("
+                 << strippedAttrsString(inAxes) << " vs "
+                 << strippedAttrsString(outAxes)
+                 << "). This requires a reshard which should have been handled "
+                    "by previous passes.";
+        }
+      }
+    }
+
+    // Since the concat dimension is replicated and others are consistent,
+    // we can safely perform a local concatenation.
+    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                             conversionState);
   }
 
  private:
@@ -2625,14 +2691,15 @@ struct ConvertGlobalToLocalPass
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
-    patterns.add<
-        AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
-        CollectivePermuteOpPattern, ConstantOpPattern, FuncOpSignaturePattern,
-        GenericOpPattern, ManualComputationOpPattern, NamedComputationOpPattern,
-        ReturnOpPattern, StablehloConvolutionOpPattern,
-        StablehloDotGeneralOpPattern, StablehloDotOpPattern,
-        StablehloGatherOpPattern, StablehloIotaOpPattern, StablehloPadOpPattern,
-        StablehloScatterOpPattern, StablehloSliceOpPattern>(
+    patterns.add<AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
+                 CollectivePermuteOpPattern, ConstantOpPattern,
+                 FuncOpSignaturePattern, GenericOpPattern,
+                 ManualComputationOpPattern, NamedComputationOpPattern,
+                 ReturnOpPattern, StablehloConcatenateOpPattern,
+                 StablehloConvolutionOpPattern, StablehloDotGeneralOpPattern,
+                 StablehloDotOpPattern, StablehloGatherOpPattern,
+                 StablehloIotaOpPattern, StablehloPadOpPattern,
+                 StablehloScatterOpPattern, StablehloSliceOpPattern>(
         typeConverter, &getContext(), conversionState);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather);
