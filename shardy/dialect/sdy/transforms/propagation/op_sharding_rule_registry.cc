@@ -145,7 +145,7 @@ void addGatherScatterFactors(mlir::Operation* op, RankedTensorType inputType,
       } else if (isScatter) {
         addUnblockedFactorFn(inputDim, /*indicesDim=*/kNullDim,
                              /*slicesDim=*/kNullDim, inputDimSize,
-                             FactorType::kPassThrough);
+                             FactorType::kNeedReplication);
         addUnblockedFactorFn(/*inputDim=*/kNullDim, /*indicesDim=*/kNullDim,
                              slicesDim, slicesDimSize,
                              FactorType::kNeedReplication);

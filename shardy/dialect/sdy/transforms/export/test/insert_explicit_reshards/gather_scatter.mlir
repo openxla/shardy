@@ -67,14 +67,17 @@ func.func @scatter(
   %arg1: tensor<12x22x4x2x26xi64>   {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"x":(2)2}, {"t":(1)2}, {"t":(2)2}]>},
   %arg2: tensor<12x22x2x4x26x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"t":(4)2}, {"x":(2)2}, {"t":(2)2}, {"z":(1)2}]>}
 ) -> (tensor<6x4x10x12x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>}){
-  // COM: #sdy.op_sharding_rule<([k, m, q, i, o], [i, j, m, r, n], [i, j, l, m, n, p])->([k, m, q, i, o]) {...} reduction={j, n} need_replication={l, r}>
+  // COM: #sdy.op_sharding_rule<([k, m, q, i, o], [i, j, m, r, n], [i, j, l, m, n, p])->([k, m, q, i, o]) {...} reduction={j, n} need_replication={k, l, r}>
 
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]> : tensor
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"x":(2)2}, {}, {"t":(2)2}]> : tensor
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {}, {"x":(2)2}, {"t":(2)2}, {"z":(1)2}]> : tensor
-  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%arg0, %[[RESHARD1]], %[[RESHARD2]])
-  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>]>}
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]] out_sharding=<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
-  // CHECK-NEXT: return %[[ALL_REDUCE]] : tensor
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[RESHARD0]], %[[RESHARD1]], %[[RESHARD2]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>]>}
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]] out_sharding=<@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
+  // CHECK-NEXT: %[[RESHARD_RET:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]> : tensor
+  // CHECK-NEXT: return %[[RESHARD_RET]] : tensor
+
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
@@ -102,13 +105,17 @@ func.func @scatter_multi_inputs(
   %arg3: tensor<12x22x2x4x26x10xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"t":(4)2}, {"x":(2)2}, {"t":(2)2}, {"p":(1)2}]>},
   %arg4: tensor<12x22x2x4x26x10xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"t":(4)2}, {"x":(2)2}, {"t":(2)2}, {"p":(1)2}]>}
 ) -> (tensor<6x4x10x12x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>}, tensor<6x4x10x12x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>}){
-  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg2 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"x":(2)2}, {}, {"t":(2)2}]> : tensor
-  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg3 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {}, {"x":(2)2}, {"t":(2)2}, {}]> : tensor
-  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %arg4 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {}, {"x":(2)2}, {"t":(2)2}, {}]> : tensor
-  // CHECK-NEXT: %[[SCATTER:.*]]:2 = "stablehlo.scatter"(%arg0, %arg1, %[[RESHARD1]], %[[RESHARD2]], %[[RESHARD3]])
-  // CHECK: %[[ALL_REDUCE1:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]]#0 out_sharding=<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
-  // CHECK-NEXT: %[[ALL_REDUCE2:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]]#1 out_sharding=<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
-  // CHECK-NEXT: return %[[ALL_REDUCE1]], %[[ALL_REDUCE2]] : tensor
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]> : tensor
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]> : tensor
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"x":(2)2}, {}, {"t":(2)2}]> : tensor
+  // CHECK-NEXT: %[[RESHARD3:.*]] = sdy.reshard %arg3 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {}, {"x":(2)2}, {"t":(2)2}, {}]> : tensor
+  // CHECK-NEXT: %[[RESHARD4:.*]] = sdy.reshard %arg4 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {}, {"x":(2)2}, {"t":(2)2}, {}]> : tensor
+  // CHECK-NEXT: %[[SCATTER:.*]]:2 = "stablehlo.scatter"(%[[RESHARD0]], %[[RESHARD1]], %[[RESHARD2]], %[[RESHARD3]], %[[RESHARD4]])
+  // CHECK: %[[ALL_REDUCE1:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]]#0 out_sharding=<@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]>
+  // CHECK-NEXT: %[[ALL_REDUCE2:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]]#1 out_sharding=<@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]>
+  // CHECK-NEXT: %[[RESHARD_RET1:.*]] = sdy.reshard %[[ALL_REDUCE1]] <@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]> : tensor
+  // CHECK-NEXT: %[[RESHARD_RET2:.*]] = sdy.reshard %[[ALL_REDUCE2]] <@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]> : tensor
+  // CHECK-NEXT: return %[[RESHARD_RET1]], %[[RESHARD_RET2]] : tensor
   %0:2 = "stablehlo.scatter"(%arg0, %arg1, %arg2, %arg3, %arg4) ({
     ^bb0(%arg11: tensor<f32>, %arg12: tensor<f32>, %arg13: tensor<f32>, %arg14: tensor<f32>):
       %1 = stablehlo.add %arg11, %arg13 : tensor<f32>
@@ -135,12 +142,14 @@ func.func @scatter_implicit_dimension(
   %arg1: tensor<12x22x4x26xi64>   {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"x":(2)2}, {"t":(2)2}]>},
   %arg2: tensor<12x22x2x4x26x10xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {"t":(4)2}, {"x":(2)2}, {"t":(2)2}, {"p":(1)2}]>}
 ) -> (tensor<6x4x10x12x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>}){
-  // COM: #sdy.op_sharding_rule<([k, m, q, i, o], [i, j, m, n], [i, j, l, m, n, p])->([k, m, q, i, o]) {...} reduction={j, n} need_replication={l, p}>
+  // COM: #sdy.op_sharding_rule<([k, m, q, i, o], [i, j, m, n], [i, j, l, m, n, p])->([k, m, q, i, o]) {...} reduction={j, n} need_replication={k, l, p}>
 
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]> : tensor
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg2 <@mesh_xyztp, [{"y":(2)2}, {"z":(2)2}, {}, {"x":(2)2}, {"t":(2)2}, {}]> : tensor
-  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%arg0, %arg1, %[[RESHARD1]])
-  // CHECK: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]] out_sharding=<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>
-  // CHECK-NEXT: return %[[ALL_REDUCE]] : tensor
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[RESHARD0]], %arg1, %[[RESHARD1]])
+  // CHECK: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"z":(2)2, "t":(2)2} %[[SCATTER]] out_sharding=<@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]>
+  // CHECK-NEXT: %[[RESHARD_RET:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]> : tensor
+  // CHECK-NEXT: return %[[RESHARD_RET]] : tensor
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
@@ -166,13 +175,15 @@ func.func @scatter_no_reduction(
   %arg1: tensor<12x4x2xi64>   {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"x":(2)2}, {"t":(1)2}]>},
   %arg2: tensor<12x2x4x10xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"y":(2)2}, {"t":(4)2}, {"x":(2)2}, {"p":(1)2}]>}
 ) -> (tensor<6x4x10x12x14xf32> {sdy.sharding = #sdy.sharding<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>}){
-  // COM: #sdy.op_sharding_rule<([k, m, q, i, o], [i, j, m, r, n], [i, j, l, m, n, p])->([k, m, q, i, o]) {...} reduction={j, n} need_replication={l, p, r}>
+  // COM: #sdy.op_sharding_rule<([k, m, q, i, o], [i, j, m, r, n], [i, j, l, m, n, p])->([k, m, q, i, o]) {...} reduction={j, n} need_replication={k, l, p, r}>
 
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]> : tensor
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyztp, [{"y":(2)2}, {"x":(2)2}, {}]> : tensor
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %arg2 <@mesh_xyztp, [{"y":(2)2}, {}, {"x":(2)2}, {}]> : tensor
-  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%arg0, %[[RESHARD1]], %[[RESHARD2]])
-  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]>]>}
-  // CHECK-NEXT: return %[[SCATTER]] : tensor
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[RESHARD0]], %[[RESHARD1]], %[[RESHARD2]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyztp, [{}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD_RET:.*]] = sdy.reshard %[[SCATTER]] <@mesh_xyztp, [{"x":(1)2}, {"x":(2)2}, {"y":(1)2}, {"y":(2)2}, {"z":(1)2}]> : tensor
+  // CHECK-NEXT: return %[[RESHARD_RET]] : tensor
   %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
     ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
       %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
