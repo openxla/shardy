@@ -538,6 +538,15 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
 
   LogicalResult matchAndRewrite(DataFlowEdgeOp dataFlowEdgeOp,
                                 PatternRewriter& rewriter) const override {
+    // Skip non-shaped types (e.g., tokens), as we cannot create a sharding
+    // rule for them.
+    auto shapedType = dynCastStaticShapedType(dataFlowEdgeOp.getType());
+    if (!shapedType) {
+      return rewriter.notifyMatchFailure(dataFlowEdgeOp, [](Diagnostic& diag) {
+        diag << "non-shaped type (e.g., token)";
+      });
+    }
+
     SmallVector<Value> sources = dataFlowEdgeOp.getSources();
     SmallVector<TensorShardingAttr> operandShardingRef = getShardings(sources);
     PropagationTensorParams operandsParams = PropagationTensorParams(
@@ -567,8 +576,7 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
         getDirectionToPropagate, dataFlowEdgeOp, std::placeholders::_1);
     return propagateTensorShardings(
         operandsParams, resultsParams, userMap,
-        createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
-                                   sources.size()),
+        createIdentityShardingRule(shapedType, sources.size()),
         directionAlongFactor, factorPropagation,
         /*conservativePropagation=*/false, dataFlowEdgeOp, symbolTable,
         &rewriter, shardingGroupMap);
@@ -600,6 +608,15 @@ class PropagateFuncDataFlowEdgeOp
 
   LogicalResult matchAndRewrite(FuncDataFlowEdgeOp funcEdgeOp,
                                 PatternRewriter& rewriter) const override {
+    // Skip non-shaped types (e.g., tokens from cross-fragment token
+    // dependencies), as we cannot create a sharding rule for them.
+    auto shapedType = dynCastStaticShapedType(funcEdgeOp.getType());
+    if (!shapedType) {
+      return rewriter.notifyMatchFailure(funcEdgeOp, [](Diagnostic& diag) {
+        diag << "non-shaped type (e.g., token)";
+      });
+    }
+
     SmallVector<Value> sources;
     Value operand = funcEdgeOp.getOperand();
     if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
@@ -649,7 +666,7 @@ class PropagateFuncDataFlowEdgeOp
         std::bind(getDirectionToPropagate, funcEdgeOp, std::placeholders::_1);
     return propagateTensorShardings(
         operandsParams, resultsParams, userMap,
-        createIdentityShardingRule(funcEdgeOp.getType(), sources.size()),
+        createIdentityShardingRule(shapedType, sources.size()),
         directionAlongFactor, factorPropagation,
         /*conservativePropagation=*/false, funcEdgeOp, symbolTable, &rewriter,
         shardingGroupMap);
