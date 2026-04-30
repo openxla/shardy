@@ -127,6 +127,48 @@ SmallVector<T> FilterRange(RangeT range, const BitVector& erase) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Fragment query and positioning utilities.
+// ---------------------------------------------------------------------------
+
+// Returns the last FragmentOp on `mesh_name` in `block`, excluding ops in
+// `exclude`. Returns nullptr if none found.
+FragmentOp FindLastFragmentOnMesh(Block* block, StringRef mesh_name,
+                                  ArrayRef<Operation*> exclude = {});
+
+// Returns the first FragmentOp on `mesh_name` in `block`, excluding ops in
+// `exclude`. Returns nullptr if none found.
+FragmentOp FindFirstFragmentOnMesh(Block* block, StringRef mesh_name,
+                                   ArrayRef<Operation*> exclude = {});
+
+// Returns the latest (block-order) op that defines any operand of `op`.
+// Returns nullptr if all operands are block arguments.
+Operation* FindLatestOperandProducer(Operation* op);
+
+// Returns true if `op_to_move` can be repositioned after `target_op`
+// without breaking any use-def chains. Both must be in the same block
+// and `op_to_move` must precede `target_op`.
+bool CanMoveAfter(Operation* op_to_move, Operation* target_op);
+
+// Moves `op` after `target` if needed and possible. Returns false if the
+// move would break use-def chains. No-op (returns true) if `op` is already
+// at or after `target`.
+bool EnsureAfter(Operation* op, Operation* target);
+
+// Attributes saved from a fragment before MergeRegionOps erases it.
+struct SavedFragmentAttrs {
+  ArrayAttr inferred_by;
+  IntegerAttr call_counter;
+};
+
+// Saves the inferred_by and call_counter attributes from `fragment`.
+SavedFragmentAttrs SaveFragmentAttrs(FragmentOp fragment);
+
+// Restores saved attributes onto `fragment`, appending `pass_name` to the
+// inferred_by list.
+void RestoreFragmentAttrs(FragmentOp fragment, const SavedFragmentAttrs& saved,
+                          StringRef pass_name, OpBuilder& builder);
+
 namespace detail {
 
 // A non-templated version of MergeRegionOps<OpTy> that takes a callback for

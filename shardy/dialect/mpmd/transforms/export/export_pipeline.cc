@@ -86,11 +86,6 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // identity fragments, which would be canonicalized away.
   pm.addNestedPass<FuncOp>(createUniquifyFunctionInputsOutputsPass());
 
-  // The fragments created by the pass above maybe slowdown compilation (more
-  // fragments to compile) and may cause performance regressions. Thus, we merge
-  // them with other fragments.
-  pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
-
   // Mark each fragment with the inputs and outputs which are offloaded to host
   // memory.
   pm.addNestedPass<FuncOp>(createMarkOffloadedInputOutputPass());
