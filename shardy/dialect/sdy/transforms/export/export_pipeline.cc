@@ -53,6 +53,11 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     // during InsertExplicitReshards pass.
   }
   addCanonicalizerPass(pm, kCollectiveLabel);
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  // Keep a SymbolDCE after UnflattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
+
   if (options.enableInsertExplicitCollectives &&
       options.removeAllGatherReduceScatterForCMV1) {
     pm.addNestedPass<func::FuncOp>(
@@ -95,11 +100,12 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
+  } else {
+    pm.addPass(createUnflattenCallGraphPass(
+        UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+    // Keep a SymbolDCE after UnflattenCallGraph.
+    pm.addPass(createSymbolDCEPass());
   }
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());
   }
