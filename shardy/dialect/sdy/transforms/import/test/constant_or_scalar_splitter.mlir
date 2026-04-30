@@ -1752,3 +1752,31 @@ func.func @split_constants_different_sharding(
   %2 = stablehlo.add %1, %arg0 : tensor<8x8xf32>
   return %0, %2 : tensor<8x16xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+// CHECK-LABEL: func @simple_non_flat
+func.func @simple_non_flat() -> (tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %0 = call @foo_0()
+  // CHECK-NEXT: %1 = call @foo_1()
+  // CHECK-NEXT: %2 = stablehlo.abs %0
+  // CHECK-NEXT: %3 = stablehlo.abs %1
+  // CHECK-NEXT: %4 = call @foo_2()
+  // CHECK-NEXT: return %2, %3, %4
+  %0 = call @foo() : () -> (tensor<8x16xf32>)
+  %1 = stablehlo.abs %0 : tensor<8x16xf32>
+  %2 = stablehlo.abs %0 : tensor<8x16xf32>
+  %3 = call @foo() : () -> (tensor<8x16xf32>)
+  return %1, %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo
+func.func private @foo() -> tensor<8x16xf32> {
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = stablehlo.negate %0 : tensor<8x16xf32>
+  return %1 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @foo_0() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+// CHECK-LABEL: func.func private @foo_1() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+// CHECK-LABEL: func.func private @foo_2() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
