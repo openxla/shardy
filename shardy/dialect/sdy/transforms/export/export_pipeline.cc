@@ -40,12 +40,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
-  passOptions.avoidReshardsOnCalls = options.avoidReshardsOnCalls;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
@@ -90,6 +85,10 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
   }
   pm.addPass(createCloseShardingsPass());
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  // Keep a SymbolDCE after UnflattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
 
   // We dump the module after propagation at this point, since the export passes
   // before are removing internal implementation details of the propagation
@@ -101,11 +100,6 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   // reshards/collectives.
   if (!options.avoidExportForPartitioning) {
     runShardyPartitioner(pm, dumpIndex, options);
-  } else {
-    pm.addPass(createUnflattenCallGraphPass(
-        UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-    // Keep a SymbolDCE after UnflattenCallGraph.
-    pm.addPass(createSymbolDCEPass());
   }
   if (options.dumpPropagationEdges || options.dumpShardingOrigins) {
     pm.addPass(createRemovePropagationDebugInfoPass());

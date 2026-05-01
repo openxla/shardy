@@ -139,7 +139,6 @@ struct UnflattenCallGraphPass
           callOp, symbolTable, /*ignoreShardings=*/dedupFunctionsFully);
       FuncOp funcOp = funcCache[funcCacheKey];
       callOp.setCallee(funcOp.getName());
-      insertReshardsOnFuncArguments(funcOp, callOp, symbolTable, rewriter);
     });
 
     moduleOp.walk([&](FuncOp funcOp) {

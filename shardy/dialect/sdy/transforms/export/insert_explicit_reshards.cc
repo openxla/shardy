@@ -495,10 +495,8 @@ struct InsertExplicitReshardsPass
       }
 
       if (CallOp callOp = dyn_cast<CallOp>(op)) {
-        if (!avoidReshardsOnCalls) {
           insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
                                          onFullVersion);
-        }
         return;
       }
 
