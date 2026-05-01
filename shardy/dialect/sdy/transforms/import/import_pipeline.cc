@@ -56,6 +56,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createFlattenCallGraphPass());
   // Keep SymbolDCE after FlattenCallGraph.
   pm.addPass(createSymbolDCEPass());
+  if (options.enableNativeNonFlatSupport) {
+    pm.addPass(createAddFuncDataFlowEdgesPass());
+  }
 }
 
 void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
