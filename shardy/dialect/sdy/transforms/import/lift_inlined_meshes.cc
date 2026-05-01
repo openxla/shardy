@@ -114,6 +114,7 @@ struct LiftInlinedMeshesPass
     : public impl::LiftInlinedMeshesPassBase<LiftInlinedMeshesPass> {
   using LiftInlinedMeshesPassBase::LiftInlinedMeshesPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
     SymbolTable symbolTable(moduleOp);
@@ -196,6 +197,36 @@ struct LiftInlinedMeshesPass
     moduleOp.walk([&](stablehlo::CollectiveBroadcastOp op) {
       processMeshInReplicaGroups(op);
     });
+
+    // Attach discardable `stablehlo.mesh` attributes to all named meshes.
+    // Downgrading to older StableHLO versions before
+    // `MeshAxesReplicaGroups` was added requires the
+    // `StablehloCompatibilityExpander` pass to resolve symbol references to
+    // named meshes and extract a `stablehlo::MeshAttr` from them. Because
+    // Shardy's `sdy::MeshOp` stores its configuration as an `sdy::MeshAttr`
+    // and core StableHLO cannot depend on Shardy, attaching this discardable
+    // attribute ensures compatibility without violating dialect layering.
+    for (auto meshOp : llvm::make_early_inc_range(moduleOp.getOps<MeshOp>())) {
+      if (meshOp->hasAttr("stablehlo.mesh")) {
+        continue;
+      }
+      MeshAttr sdyMeshAttr = meshOp.getMesh();
+      SmallVector<mlir::stablehlo::MeshAxisAttr> shloAxes;
+      for (auto axisAttr : sdyMeshAttr.getAxes()) {
+        shloAxes.push_back(mlir::stablehlo::MeshAxisAttr::get(
+            meshOp.getContext(), axisAttr.getName(), axisAttr.getSize()));
+      }
+      DenseIntElementsAttr deviceIds;
+      if (!sdyMeshAttr.getDeviceIds().empty()) {
+        auto type = RankedTensorType::get(
+            {static_cast<int64_t>(sdyMeshAttr.getDeviceIds().size())},
+            builder.getI64Type());
+        deviceIds = DenseIntElementsAttr::get(type, sdyMeshAttr.getDeviceIds());
+      }
+      auto shloMeshAttr = mlir::stablehlo::MeshAttr::get(meshOp.getContext(),
+                                                         shloAxes, deviceIds);
+      meshOp->setAttr("stablehlo.mesh", shloMeshAttr);
+    }
   }
 };
 
