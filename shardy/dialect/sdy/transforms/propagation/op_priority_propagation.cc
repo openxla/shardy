@@ -90,7 +90,8 @@ bool isOffloadCustomCallOp(Operation* op) {
 PropagationDirection isPassThroughOp(Operation* op, int64_t factorIndex,
                                      bool allowMultiUse) {
   if (isElementwise(op) || isOffloadCustomCallOp(op) ||
-      isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp>(op)) {
+      isa<stablehlo::ReshapeOp, stablehlo::TransposeOp, DataFlowEdgeOp,
+          FuncDataFlowEdgeOp>(op)) {
     return getDirectionBasedOnUses(op, allowMultiUse);
   }
   if (isa<stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp>(op)) {
