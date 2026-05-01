@@ -43,6 +43,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/WalkResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -62,6 +63,7 @@ namespace sdy {
 
 namespace {
 
+using func::CallOp;
 using func::FuncOp;
 
 // Sets the sharding of a tensor at a given index to the given
@@ -535,6 +537,93 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
 
  private:
   const SymbolTable& symbolTable;
+  GetDirectionToPropagateFn getDirectionToPropagate;
+  const FactorPropagation& factorPropagation;
+  const ShardingGroupMap& shardingGroupMap;
+};
+
+// Propagates shardings between:
+// 1. The func arguments and values on the corresponding callers.
+// 2. The call results and their users.
+//
+// Operates through `sdy.func_data_flow_edge`s.
+// Assumes a flat call graph.
+class PropagateFuncDataFlowEdgeOp
+    : public OpRewritePattern<FuncDataFlowEdgeOp> {
+ public:
+  explicit PropagateFuncDataFlowEdgeOp(
+      MLIRContext* context, const SymbolTable& symbolTable,
+      const SymbolUserMap& userMap,
+      GetDirectionToPropagateFn getDirectionToPropagate,
+      const FactorPropagation& factorPropagation,
+      const ShardingGroupMap& shardingGroupMap)
+      : OpRewritePattern<FuncDataFlowEdgeOp>(context),
+        symbolTable(symbolTable),
+        userMap(userMap),
+        getDirectionToPropagate(getDirectionToPropagate),
+        factorPropagation(factorPropagation),
+        shardingGroupMap(shardingGroupMap) {}
+
+  LogicalResult matchAndRewrite(FuncDataFlowEdgeOp funcEdgeOp,
+                                PatternRewriter& rewriter) const override {
+    SmallVector<Value> sources;
+    Value operand = funcEdgeOp.getOperand();
+    if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
+      FuncOp funcOp = funcEdgeOp->getParentOfType<func::FuncOp>();
+      for (Operation* user : userMap.getUsers(funcOp)) {
+        if (CallOp callOp = dyn_cast<CallOp>(user)) {
+          sources.push_back(callOp.getOperand(blockArg.getArgNumber()));
+        }
+      }
+      // The sources can be empty if a func is never called, such as called
+      // computations on custom calls.
+      if (sources.empty()) {
+        return success();
+      }
+    } else {
+      OpResult callOpResult = cast<OpResult>(funcEdgeOp.getOperand());
+      CallOp callOp = callOpResult.getDefiningOp<CallOp>();
+      FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
+      SDY_CHECK(!funcOp.isExternal());
+      if (func::ReturnOp returnOp = dyn_cast<func::ReturnOp>(
+              funcOp.getBody().front().getTerminator())) {
+        sources.push_back(returnOp.getOperand(callOpResult.getResultNumber()));
+      }
+    }
+
+    SmallVector<TensorShardingAttr> operandShardingRef = getShardings(sources);
+    PropagationTensorParams operandsParams = PropagationTensorParams(
+        /*tensors=*/sources,
+        /*shardings=*/operandShardingRef,
+        /*setShardingCallback=*/
+        [&sources](TensorShardingAttr sharding, int64_t index) {
+          setSharding(sources[index], sharding);
+        });
+
+    Value result = funcEdgeOp.getResult();
+    // The sharding of `result` is the sharding of all targets.
+    TensorShardingAttr resultsShardingRef = getSharding(funcEdgeOp);
+    PropagationTensorParams resultsParams = PropagationTensorParams(
+        /*tensors=*/result,
+        /*shardings=*/resultsShardingRef,
+        /*setShardingCallback=*/
+        [&result](TensorShardingAttr sharding, int64_t) {
+          setSharding(result, sharding);
+        });
+
+    PropagationDirectionAlongFactor directionAlongFactor =
+        std::bind(getDirectionToPropagate, funcEdgeOp, std::placeholders::_1);
+    return propagateTensorShardings(
+        operandsParams, resultsParams,
+        createIdentityShardingRule(funcEdgeOp.getType(), sources.size()),
+        directionAlongFactor, factorPropagation,
+        /*conservativePropagation=*/false, funcEdgeOp, symbolTable, &rewriter,
+        shardingGroupMap);
+  }
+
+ private:
+  const SymbolTable& symbolTable;
+  const SymbolUserMap& userMap;
   GetDirectionToPropagateFn getDirectionToPropagate;
   const FactorPropagation& factorPropagation;
   const ShardingGroupMap& shardingGroupMap;
