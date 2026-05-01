@@ -43,9 +43,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
   pm.addPass(createAddDataFlowEdgesPass());
-  if (options.enableNativeNonFlatSupport) {
-    pm.addPass(createAddFuncDataFlowEdgesPass());
-  }
   pm.addPass(
       createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
           options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
@@ -53,6 +50,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   // constraints. This ensures we can detect sharding conflicts between group
   // members which have pre-propagation shardings due to sharding constraints.
   pm.addPass(createShardingGroupImportPass());
+  if (options.enableNativeNonFlatSupport) {
+    pm.addPass(createAddFuncDataFlowEdgesPass());
+  }
   pm.addPass(createFlattenCallGraphPass());
   // Keep SymbolDCE after FlattenCallGraph.
   pm.addPass(createSymbolDCEPass());
