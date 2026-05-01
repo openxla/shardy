@@ -82,12 +82,17 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
           /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges}));
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
+    pm.addPass(createUnflattenCallGraphPass(
+        UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+    // Keep a SymbolDCE after UnflattenCallGraph.
+    pm.addPass(createSymbolDCEPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
+  } else {
+    pm.addPass(createUnflattenCallGraphPass(
+        UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+    // Keep a SymbolDCE after UnflattenCallGraph.
+    pm.addPass(createSymbolDCEPass());
   }
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   pm.addPass(createCloseShardingsPass());
 
   // We dump the module after propagation at this point, since the export passes
