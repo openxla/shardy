@@ -497,6 +497,15 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
 
   LogicalResult matchAndRewrite(DataFlowEdgeOp dataFlowEdgeOp,
                                 PatternRewriter& rewriter) const override {
+    // Skip non-shaped types (e.g., tokens), as we cannot create a sharding
+    // rule for them.
+    auto shapedType = dynCastStaticShapedType(dataFlowEdgeOp.getType());
+    if (!shapedType) {
+      return rewriter.notifyMatchFailure(dataFlowEdgeOp, [](Diagnostic& diag) {
+        diag << "non-shaped type (e.g., token)";
+      });
+    }
+
     SmallVector<Value> sources = dataFlowEdgeOp.getSources();
     SmallVector<TensorShardingAttr> operandShardingRef = getShardings(sources);
     PropagationTensorParams operandsParams = PropagationTensorParams(
@@ -526,8 +535,7 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
         getDirectionToPropagate, dataFlowEdgeOp, std::placeholders::_1);
     return propagateTensorShardings(
         operandsParams, resultsParams,
-        createIdentityShardingRule(cast<ShapedType>(dataFlowEdgeOp.getType()),
-                                   sources.size()),
+        createIdentityShardingRule(shapedType, sources.size()),
         directionAlongFactor, factorPropagation,
         /*conservativePropagation=*/false, dataFlowEdgeOp, symbolTable,
         &rewriter, shardingGroupMap);

@@ -49,6 +49,10 @@ void addFuncDataFlowEdgeOps(ModuleOp moduleOp, const SymbolTable& symbolTable,
     mlir::Block& entryBlock = funcOp.getBody().front();
     rewriter.setInsertionPointToStart(&entryBlock);
     for (Value argument : funcOp.getArguments()) {
+      if (!isStaticShapedType(argument.getType())) {
+        // Skip non-static-shaped types, e.g., tokens.
+        continue;
+      }
       auto edgeOp =
           FuncDataFlowEdgeOp::create(rewriter, funcOp.getLoc(), argument);
       rewriter.replaceAllUsesExcept(argument, edgeOp, edgeOp);
@@ -61,6 +65,10 @@ void addFuncDataFlowEdgeOps(ModuleOp moduleOp, const SymbolTable& symbolTable,
   moduleOp.walk([&](CallOp callOp) {
     rewriter.setInsertionPointAfter(callOp);
     for (Value result : callOp.getResults()) {
+      if (!isStaticShapedType(result.getType())) {
+        // Skip non-static-shaped types, e.g., tokens.
+        continue;
+      }
       auto edgeOp =
           FuncDataFlowEdgeOp::create(rewriter, callOp.getLoc(), result);
       rewriter.replaceAllUsesExcept(result, edgeOp, edgeOp);

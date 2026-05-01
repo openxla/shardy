@@ -418,3 +418,54 @@ func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   return %0 : tensor<8xf32>
 }
 
+// -----
+
+// test: token_typed_func_argument_skipped
+// Tokens are not static-shaped types, so no func_data_flow_edge should be
+// created for them. Only the tensor argument gets an edge op.
+// CHECK-LABEL: @bar(%arg0: !stablehlo.token, %arg1: tensor<8xf32>)
+func.func @bar(%arg0: !stablehlo.token, %arg1: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[EDGE:.*]] = sdy.func_data_flow_edge %arg1
+  // CHECK-NEXT:                stablehlo.negate %[[EDGE]]
+  // CHECK-NOT:  sdy.func_data_flow_edge %arg0
+  %0 = stablehlo.negate %arg1 : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: @main
+func.func @main(%arg0: !stablehlo.token, %arg1: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @bar(%arg0, %arg1)
+  // CHECK-NEXT: %[[EDGE:.*]] = sdy.func_data_flow_edge %[[CALL]]
+  // CHECK-NEXT: stablehlo.abs %[[EDGE]]
+  %0 = call @bar(%arg0, %arg1) : (!stablehlo.token, tensor<8xf32>) -> (tensor<8xf32>)
+  %1 = stablehlo.abs %0 : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
+// -----
+
+// test: token_typed_call_result_skipped
+// Tokens are not static-shaped types, so no func_data_flow_edge should be
+// created for them. Only the tensor result gets an edge op.
+// CHECK-LABEL: @bar(%arg0: tensor<8xf32>)
+func.func @bar(%arg0: tensor<8xf32>) -> (!stablehlo.token, tensor<8xf32>) {
+  // CHECK-NEXT: %[[EDGE:.*]] = sdy.func_data_flow_edge %arg0
+  // CHECK-NEXT: %[[TOK:.*]] = stablehlo.create_token
+  // CHECK-NEXT: %[[NEG:.*]] = stablehlo.negate %[[EDGE]]
+  %tok = stablehlo.create_token : !stablehlo.token
+  %0 = stablehlo.negate %arg0 : tensor<8xf32>
+  return %tok, %0 : !stablehlo.token, tensor<8xf32>
+}
+
+// CHECK-LABEL: @main
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]]:2 = call @bar(%arg0)
+  // CHECK-NEXT: %[[EDGE:.*]] = sdy.func_data_flow_edge %[[CALL]]#1
+  // CHECK-NOT:  sdy.func_data_flow_edge %[[CALL]]#0
+  // CHECK-NEXT: stablehlo.abs %[[EDGE]]
+  %0:2 = call @bar(%arg0) : (tensor<8xf32>) -> (!stablehlo.token, tensor<8xf32>)
+  %1 = stablehlo.abs %0#1 : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
+
