@@ -80,18 +80,13 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
       createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{
           /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
           /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges}));
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  // Keep a SymbolDCE after UnflattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
-    pm.addPass(createUnflattenCallGraphPass(
-        UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-    // Keep a SymbolDCE after UnflattenCallGraph.
-    pm.addPass(createSymbolDCEPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
-  } else {
-    pm.addPass(createUnflattenCallGraphPass(
-        UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-    // Keep a SymbolDCE after UnflattenCallGraph.
-    pm.addPass(createSymbolDCEPass());
   }
   pm.addPass(createCloseShardingsPass());
 
