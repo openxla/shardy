@@ -461,6 +461,36 @@ def UniquifyFunctionInputsOutputsPass :
   let dependentDialects = ["mlir::mpmd::MpmdDialect"];
 }
 
+def UniquifyAndMergeReturnsPass :
+    PassBase<"mpmd-uniquify-and-merge-returns", "DistributedFunctionPass"> {
+  let summary = "Uniquifies any value returned multiple times or any block "
+                "argument directly returned by the function.";
+  let description = [{
+    If a function returns the same value multiple times, creates multiple
+    versions for that value, by creating a fragment assigned to that value's
+    mesh which returns the value multiple times. After this pass, each return
+    operand is unique. This is important to ensure that the respective results
+    are allocated in different buffers, as in the following `jax.jit` example:
+
+    ```python
+    def f(x):
+      y = x + x
+      return y, y
+
+    z1, z2 = f(5)
+    z1 += 1
+    print(z1) ~~> 6
+    print(z2) ~~> 5
+    ```
+
+    Similarly, if a function returns a block argument, this pass creates an
+    identity fragment for that block argument, guaranteeing that values are
+    passed by value to the function, not by reference.
+  }];
+
+  let dependentDialects = ["mlir::mpmd::MpmdDialect"];
+}
+
 def SchedulingUnitVerifierPass :
     PassBase<"mpmd-scheduling-units-verifier", "DistributedFunctionPass"> {
   let summary = "Verifies if the program contains the required scheduling units.";
