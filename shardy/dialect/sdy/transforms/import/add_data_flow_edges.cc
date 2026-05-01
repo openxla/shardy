@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include "llvm/ADT/STLExtras.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
@@ -33,44 +32,6 @@ namespace sdy {
 
 namespace {
 
-using func::CallOp;
-using func::FuncOp;
-
-// Adds func input and output data flow edges. Adds func input data flow edges
-// only for non-main funcs.
-void addFuncDataFlowEdgeOps(ModuleOp moduleOp, const SymbolTable& symbolTable,
-                            IRRewriter& rewriter) {
-  FuncOp mainFuncOp =
-      getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true);
-  moduleOp.walk([&](FuncOp funcOp) {
-    if (funcOp == mainFuncOp) {
-      return;
-    }
-    mlir::Block& entryBlock = funcOp.getBody().front();
-    rewriter.setInsertionPointToStart(&entryBlock);
-    for (Value argument : funcOp.getArguments()) {
-      auto edgeOp =
-          FuncDataFlowEdgeOp::create(rewriter, funcOp.getLoc(), argument);
-      rewriter.replaceAllUsesExcept(argument, edgeOp, edgeOp);
-      if (TensorShardingAttr sharding = getSharding(argument)) {
-        setShardings(edgeOp, {sharding});
-      }
-    }
-  });
-
-  moduleOp.walk([&](CallOp callOp) {
-    rewriter.setInsertionPointAfter(callOp);
-    for (Value result : callOp.getResults()) {
-      auto edgeOp =
-          FuncDataFlowEdgeOp::create(rewriter, callOp.getLoc(), result);
-      rewriter.replaceAllUsesExcept(result, edgeOp, edgeOp);
-      if (TensorShardingAttr sharding = getSharding(result)) {
-        setShardings(edgeOp, {sharding});
-      }
-    }
-  });
-}
-
 struct AddDataFlowEdgesPass
     : public impl::AddDataFlowEdgesPassBase<AddDataFlowEdgesPass> {
   using AddDataFlowEdgesPassBase::AddDataFlowEdgesPassBase;
@@ -85,9 +46,6 @@ struct AddDataFlowEdgesPass
       addDataFlowEdges(op.getBlockArgumentEdgeOwners(), rewriter);
       addDataFlowEdges(op.getOpResultEdgeOwners(), rewriter);
     });
-    if (enableNativeNonFlatSupport) {
-      addFuncDataFlowEdgeOps(moduleOp, symbolTable, rewriter);
-    }
   }
 };
 

@@ -34,6 +34,7 @@ cc_library(
     name = "passes",
     srcs = [
         "add_data_flow_edges.cc",
+        "add_func_data_flow_edges.cc",
         "apply_sharding_constraints.cc",
         "constant_or_scalar_splitter.cc",
         "flatten_call_graph.cc",

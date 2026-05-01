@@ -90,14 +90,14 @@ def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "ModuleOp"> {
     target if it exists.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
 
-  let options = [
-    Option<"enableNativeNonFlatSupport", "enable-native-non-flat-support", "bool",
-           /*default=*/"false",
-           "Whether to propagate shardings directly on a non-flat graph without "
-           "flattening it. The default is false, meaning it will flatten the "
-           "graph and then propagate.">
-  ];
+def AddFuncDataFlowEdgesPass : Pass<"sdy-add-func-data-flow-edges", "ModuleOp"> {
+  let summary = "Inserts `FuncDataFlowEdgeOp` for every func/call data-flow edge.";
+  let description = [{
+    Inserts `FuncDataFlowEdgeOp` for every func argument and call result.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
 def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "ModuleOp"> {
