@@ -57,6 +57,7 @@ cc_library(
         ":sharding_projection",
         ":utils",
         "//shardy/common:file_utils",
+        "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
         "//shardy/dialect/sdy/transforms/common:propagation_options",
