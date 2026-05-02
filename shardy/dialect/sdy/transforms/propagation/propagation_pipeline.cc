@@ -75,17 +75,19 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   }
   pm.addPass(createExportNamedComputationsPass());
   pm.addPass(createPropagateToFuncResultsPass());
+  if (options.enableNativeNonFlatSupport) {
+    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
+  }
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  // Keep a SymbolDCE after UnflattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",
                                       dumpIndex++));
     AutoPartitionerRegistry::addPasses(pm);
   }
-  pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
