@@ -55,15 +55,7 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
-  pm.addPass(createFlattenCallGraphPass());
-  // Keep SymbolDCE after FlattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
-  if (options.enableNativeNonFlatSupport) {
-    pm.addPass(createAddFuncDataFlowEdgesPass());
-  }
-  pm.addPass(createImportFuncCallsPass());
-  // Keep SymbolDCEPass after ImportFuncCallsPass.
-  pm.addPass(createSymbolDCEPass());
+  pm.addPass(createAddFuncDataFlowEdgesPass());
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
@@ -73,15 +65,8 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
-  pm.addPass(createExportNamedComputationsPass());
   pm.addPass(createPropagateToFuncResultsPass());
-  if (options.enableNativeNonFlatSupport) {
-    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-  }
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
+  pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",
@@ -108,6 +93,12 @@ struct PropagationOptionsOptions
   Option<bool> dedupFunctionsFully{
       *this, "dedup-functions-fully",
       llvm::cl::desc("Whether to dedup functions fully."),
+      llvm::cl::init(false)};
+
+  Option<bool> enableNativeNonFlatSupport{
+      *this, "enable-native-non-flat-support",
+      llvm::cl::desc("Whether to support non-flat call graph natively without "
+                     "flattening and unflattening."),
       llvm::cl::init(false)};
 };
 
