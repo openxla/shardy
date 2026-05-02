@@ -72,10 +72,6 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
 void addExportPipeline(OpPassManager& pm, int& dumpIndex,
                        const ExportOptions& options) {
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
-  if (!options.avoidExportForPartitioning) {
-    pm.addPass(createRemoveShardingGroupsPass());
-    pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
-  }
   pm.addNestedPass<func::FuncOp>(
       createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{
           /*sinkDebugShardingOrigins=*/options.dumpShardingOrigins,
@@ -84,6 +80,10 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
       UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
   // Keep a SymbolDCE after UnflattenCallGraph.
   pm.addPass(createSymbolDCEPass());
+  if (!options.avoidExportForPartitioning) {
+    pm.addPass(createRemoveShardingGroupsPass());
+    pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
+  }
   if (options.updateNonDivisibleInputOutputShardings) {
     pm.addPass(createUpdateNonDivisibleInputOutputShardingsPass());
     pm.addPass(createRemoveSubAxesInInputOutputShardingsPass());
