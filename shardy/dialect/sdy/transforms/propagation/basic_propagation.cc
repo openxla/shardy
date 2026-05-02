@@ -43,6 +43,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/WalkResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -62,6 +63,7 @@ namespace sdy {
 
 namespace {
 
+using func::CallOp;
 using func::FuncOp;
 
 // Sets the sharding of a tensor at a given index to the given
@@ -74,6 +76,43 @@ using SetTensorShardingCallback = std::function<void(TensorShardingAttr)>;
 
 using NotifyOpModifiedCallback = std::function<void(Operation*)>;
 
+void notifyUsersModified(Value value, const SymbolTable& symbolTable,
+                         const SymbolUserMap& userMap,
+                         NotifyOpModifiedCallback notifyOpModified);
+
+void notifyUsersModifiedOnTerminator(
+    Operation* user, const OpOperand& use, const SymbolTable& symbolTable,
+    const SymbolUserMap& userMap, NotifyOpModifiedCallback notifyOpModified) {
+  SDY_CHECK(user->hasTrait<OpTrait::IsTerminator>());
+  if (!isa<func::ReturnOp>(user)) {
+    notifyOpModified(user->getParentOp());
+    return;
+  }
+  FuncOp funcOp = user->getParentOfType<func::FuncOp>();
+  if (userMap.getUsers(funcOp).empty()) {
+    // Note the main func does not have any callers. As well as for the funcs
+    // that are not part of the call graph, such as called computations from
+    // custom calls.
+    notifyOpModified(user->getParentOp());
+    return;
+  }
+  // Iterates over all callers of given `funcOp`. Thus supports non-flat graphs.
+  for (mlir::Operation* funcUser : userMap.getUsers(funcOp)) {
+    if (CallOp callOp = dyn_cast<CallOp>(funcUser)) {
+      Value callOpResult = callOp.getResult(use.getOperandNumber());
+      notifyUsersModified(callOpResult, symbolTable, userMap, notifyOpModified);
+    }
+  }
+}
+
+void notifyFuncOpArgumentUsersModified(
+    CallOp callOp, const OpOperand& use, const SymbolTable& symbolTable,
+    const SymbolUserMap& userMap, NotifyOpModifiedCallback notifyOpModified) {
+  FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
+  Value funcOpArgument = funcOp.getArgument(use.getOperandNumber());
+  notifyUsersModified(funcOpArgument, symbolTable, userMap, notifyOpModified);
+}
+
 // Calls `notifyOpModified` on all users of `value`, so they will be added back
 // to the worklist.
 //
@@ -82,28 +121,38 @@ using NotifyOpModifiedCallback = std::function<void(Operation*)>;
 //   the latter back to the worklist.
 // - If a user is a terminator, the parent op will be added back to the worklist
 //   instead of the terminator.
-void notifyUsersModified(Value value,
+void notifyUsersModified(Value value, const SymbolTable& symbolTable,
+                         const SymbolUserMap& userMap,
                          NotifyOpModifiedCallback notifyOpModified) {
   for (OpOperand& use : value.getUses()) {
     Operation* user = use.getOwner();
-
     if (auto dataFlowEdge = DataFlowEdgeOp::lookup(use)) {
       notifyOpModified(dataFlowEdge);
-    } else if (user->hasTrait<OpTrait::IsTerminator>()) {
-      notifyOpModified(user->getParentOp());
-    } else {
-      notifyOpModified(user);
+      continue;
     }
+    if (user->hasTrait<OpTrait::IsTerminator>()) {
+      notifyUsersModifiedOnTerminator(user, use, symbolTable, userMap,
+                                      notifyOpModified);
+      continue;
+    }
+    if (CallOp callOp = dyn_cast<CallOp>(user)) {
+      notifyFuncOpArgumentUsersModified(callOp, use, symbolTable, userMap,
+                                        notifyOpModified);
+      continue;
+    }
+    notifyOpModified(user);
   }
 }
 
 // Calls `notifyOpModified` on all ops that are affected by changing the
 // sharding of `value`, so that they will be added back to the worklist.
-void notifyShardingModified(Value value,
+void notifyShardingModified(Value value, const SymbolTable& symbolTable,
+                            const SymbolUserMap& userMap,
                             NotifyOpModifiedCallback notifyOpModified) {
   if (auto dataFlowEdge = value.getDefiningOp<DataFlowEdgeOp>()) {
     for (Value nonEdgeOwnerTarget : dataFlowEdge.getNonOwnerTargets()) {
-      notifyUsersModified(nonEdgeOwnerTarget, notifyOpModified);
+      notifyUsersModified(nonEdgeOwnerTarget, symbolTable, userMap,
+                          notifyOpModified);
     }
   }
 
@@ -119,7 +168,7 @@ void notifyShardingModified(Value value,
 
   // Notify that all users of `value` are being modified, so they will be
   // added back to the worklist as well.
-  notifyUsersModified(value, notifyOpModified);
+  notifyUsersModified(value, symbolTable, userMap, notifyOpModified);
 }
 
 // Struct to hold common parameters for sharding propagation.
@@ -150,7 +199,8 @@ struct PropagationTensorParams {
 //
 // Returns true if it's possible to update the sharding, i.e., if strided view
 // isn't needed and all non-minor-most factors are divisible by sharding axes.
-bool updateTensorSharding(Value modifiedValue,
+bool updateTensorSharding(Value modifiedValue, const SymbolTable& symbolTable,
+                          const SymbolUserMap& userMap,
                           TensorShardingAttr oldTensorSharding,
                           SetTensorShardingCallback setTensorShardingCallback,
                           const TensorFactorShardings& tensorFactorShardings,
@@ -184,7 +234,8 @@ bool updateTensorSharding(Value modifiedValue,
   }
 
   if (params.notifyOpModified) {
-    notifyShardingModified(modifiedValue, *params.notifyOpModified);
+    notifyShardingModified(modifiedValue, symbolTable, userMap,
+                           *params.notifyOpModified);
   }
 
   // Set the sharding of all values in the same sharding group to be equivalent
@@ -196,7 +247,8 @@ bool updateTensorSharding(Value modifiedValue,
     }
     setSharding(groupValue, newSharding);
     if (params.notifyOpModified) {
-      notifyShardingModified(groupValue, *params.notifyOpModified);
+      notifyShardingModified(groupValue, symbolTable, userMap,
+                             *params.notifyOpModified);
     }
   }
 
@@ -211,18 +263,19 @@ bool updateTensorSharding(Value modifiedValue,
 // `tensorFactorShardings`, e.g., if strided view is required, sets the
 // respective bit in `updateTensor` or `updateResult` to false.
 void updateTensorShardings(
-    const PropagationTensorParams& tensorParams,
+    const PropagationTensorParams& tensorParams, const SymbolTable& symbolTable,
+    const SymbolUserMap& userMap,
     ArrayRef<TensorFactorShardings> tensorFactorShardings,
     ArrayRef<TensorMappingAttr> tensorMappings, ArrayRef<int64_t> factorSizes,
     BitVector& updateTensor, const PropagationSharedParams& params) {
   for (int64_t index : updateTensor.set_bits()) {
-    if (!updateTensorSharding(getShardableValue(tensorParams.tensors[index]),
-                              tensorParams.shardings[index],
-                              std::bind(tensorParams.setShardingCallback,
-                                        std::placeholders::_1, index),
-                              tensorFactorShardings[index],
-                              tensorMappings[index], factorSizes, params,
-                              tensorParams.isFuncResult)) {
+    if (!updateTensorSharding(
+            getShardableValue(tensorParams.tensors[index]), symbolTable,
+            userMap, tensorParams.shardings[index],
+            std::bind(tensorParams.setShardingCallback, std::placeholders::_1,
+                      index),
+            tensorFactorShardings[index], tensorMappings[index], factorSizes,
+            params, tensorParams.isFuncResult)) {
       updateTensor.reset(index);
     }
   }
@@ -231,14 +284,18 @@ void updateTensorShardings(
 // Same as the overload above, except operates on both operands and results.
 void updateTensorShardings(const PropagationTensorParams& operandsParams,
                            const PropagationTensorParams& resultsParams,
+                           const SymbolTable& symbolTable,
+                           const SymbolUserMap& userMap,
                            OpShardingRuleAttr shardingRule,
                            const ShardingProjection& shardingProjection,
                            BitVector& updateOperand, BitVector& updateResult,
                            const PropagationSharedParams& params) {
-  updateTensorShardings(operandsParams, shardingProjection.getOperands(),
+  updateTensorShardings(operandsParams, symbolTable, userMap,
+                        shardingProjection.getOperands(),
                         shardingRule.getOperandMappings(),
                         shardingRule.getFactorSizes(), updateOperand, params);
-  updateTensorShardings(resultsParams, shardingProjection.getResults(),
+  updateTensorShardings(resultsParams, symbolTable, userMap,
+                        shardingProjection.getResults(),
                         shardingRule.getResultMappings(),
                         shardingRule.getFactorSizes(), updateResult, params);
 }
@@ -251,7 +308,7 @@ void updateTensorShardings(const PropagationTensorParams& operandsParams,
 // with the return values of each branch/region.
 LogicalResult propagateTensorShardings(
     const PropagationTensorParams& operandsParams,
-    const PropagationTensorParams& resultsParams,
+    const PropagationTensorParams& resultsParams, const SymbolUserMap& userMap,
     OpShardingRuleAttr shardingRule,
     PropagationDirectionAlongFactor directionAlongFactor,
     const FactorPropagation& factorPropagation, bool conservativePropagation,
@@ -316,9 +373,9 @@ LogicalResult propagateTensorShardings(
     PropagationSharedParams params{shardingGroupMap, meshName.value(), mesh,
                                    notifyOpModified};
 
-    updateTensorShardings(operandsParams, resultsParams, shardingRule,
-                          shardingProjection, updateOperand, updateResult,
-                          params);
+    updateTensorShardings(operandsParams, resultsParams, symbolTable, userMap,
+                          shardingRule, shardingProjection, updateOperand,
+                          updateResult, params);
 
     anyUpdated = updateOperand.any() || updateResult.any();
   };
@@ -344,8 +401,9 @@ LogicalResult propagateTensorShardings(
 // Same as the overload above, except the operand and result shardings are
 // extracted using `getSharding` and set using `setSharding`.
 LogicalResult propagateTensorShardings(
-    ValueRange operands, ValueRange results, OpShardingRuleAttr shardingRule,
-    Operation* op, const SymbolTable& symbolTable, PatternRewriter& rewriter,
+    ValueRange operands, ValueRange results, const SymbolUserMap& userMap,
+    OpShardingRuleAttr shardingRule, Operation* op,
+    const SymbolTable& symbolTable, PatternRewriter& rewriter,
     PropagationDirectionAlongFactor directionAlongFactor,
     const FactorPropagation& factorPropagation,
     const ShardingGroupMap& shardingGroupMap,
@@ -365,15 +423,16 @@ LogicalResult propagateTensorShardings(
         setSharding(results[index], sharding);
       });
 
-  return propagateTensorShardings(operandsParams, resultsParams, shardingRule,
-                                  directionAlongFactor, factorPropagation,
-                                  conservativePropagation, op, symbolTable,
-                                  &rewriter, shardingGroupMap);
+  return propagateTensorShardings(operandsParams, resultsParams, userMap,
+                                  shardingRule, directionAlongFactor,
+                                  factorPropagation, conservativePropagation,
+                                  op, symbolTable, &rewriter, shardingGroupMap);
 }
 
 // Propagates the shardings between the operands of the `funcOp`'s terminator
 // and the `funcOp`'s result type attrs.
-void propagateFuncResults(FuncOp funcOp, const SymbolTable& symbolTable,
+void propagateFuncResults(FuncOp funcOp, const SymbolUserMap& userMap,
+                          const SymbolTable& symbolTable,
                           const FactorPropagation& factorPropagation,
                           const ShardingGroupMap& shardingGroupMap) {
   for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
@@ -414,7 +473,7 @@ void propagateFuncResults(FuncOp funcOp, const SymbolTable& symbolTable,
         /*isFuncResult=*/true);
 
     (void)propagateTensorShardings(
-        operandsParams, resultsParams,
+        operandsParams, resultsParams, userMap,
         // Treat the sharding data flow b/w the `funcOp` terminator and func
         // result attrs as an identity op. Create an equivalent sharding rule.
         createIdentityShardingRule(tensorType),
@@ -426,12 +485,13 @@ void propagateFuncResults(FuncOp funcOp, const SymbolTable& symbolTable,
 }
 
 // Overload of `propagateFuncResults` to propagate operand/result shardings of
-// every `FuncOp` in `moduleOp` for the main function.
-void propagateFuncResults(ModuleOp moduleOp, const SymbolTable& symbolTable,
+// every `FuncOp` in `moduleOp`.
+void propagateFuncResults(ModuleOp moduleOp, const SymbolUserMap& userMap,
+                          const SymbolTable& symbolTable,
                           const FactorPropagation& factorPropagation,
                           const ShardingGroupMap& shardingGroupMap) {
   propagateFuncResults(
-      getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true),
+      getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true), userMap,
       symbolTable, factorPropagation, shardingGroupMap);
 }
 
@@ -441,11 +501,13 @@ class PropagateRegisteredOp : public RewritePattern {
  public:
   explicit PropagateRegisteredOp(
       MLIRContext* context, const SymbolTable& symbolTable,
+      const SymbolUserMap& userMap,
       GetDirectionToPropagateFn getDirectionToPropagate,
       const FactorPropagation& factorPropagation, bool conservativePropagation,
       const ShardingGroupMap& shardingGroupMap)
       : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context),
         symbolTable(symbolTable),
+        userMap(userMap),
         getDirectionToPropagate(getDirectionToPropagate),
         factorPropagation(factorPropagation),
         conservativePropagation(conservativePropagation),
@@ -464,14 +526,15 @@ class PropagateRegisteredOp : public RewritePattern {
 
     PropagationDirectionAlongFactor directionAlongFactor =
         std::bind(getDirectionToPropagate, op, std::placeholders::_1);
-    return propagateTensorShardings(op->getOperands(), op->getResults(),
-                                    shardingRule, op, symbolTable, rewriter,
-                                    directionAlongFactor, factorPropagation,
-                                    shardingGroupMap, conservativePropagation);
+    return propagateTensorShardings(
+        op->getOperands(), op->getResults(), userMap, shardingRule, op,
+        symbolTable, rewriter, directionAlongFactor, factorPropagation,
+        shardingGroupMap, conservativePropagation);
   }
 
  private:
   const SymbolTable& symbolTable;
+  const SymbolUserMap& userMap;
   GetDirectionToPropagateFn getDirectionToPropagate;
   const FactorPropagation& factorPropagation;
   bool conservativePropagation;
@@ -486,11 +549,13 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
  public:
   explicit PropagateDataFlowEdgeOp(
       MLIRContext* context, const SymbolTable& symbolTable,
+      const SymbolUserMap& userMap,
       GetDirectionToPropagateFn getDirectionToPropagate,
       const FactorPropagation& factorPropagation,
       const ShardingGroupMap& shardingGroupMap)
       : OpRewritePattern<DataFlowEdgeOp>(context),
         symbolTable(symbolTable),
+        userMap(userMap),
         getDirectionToPropagate(getDirectionToPropagate),
         factorPropagation(factorPropagation),
         shardingGroupMap(shardingGroupMap) {}
@@ -534,7 +599,7 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
     PropagationDirectionAlongFactor directionAlongFactor = std::bind(
         getDirectionToPropagate, dataFlowEdgeOp, std::placeholders::_1);
     return propagateTensorShardings(
-        operandsParams, resultsParams,
+        operandsParams, resultsParams, userMap,
         createIdentityShardingRule(shapedType, sources.size()),
         directionAlongFactor, factorPropagation,
         /*conservativePropagation=*/false, dataFlowEdgeOp, symbolTable,
@@ -543,6 +608,103 @@ class PropagateDataFlowEdgeOp : public OpRewritePattern<DataFlowEdgeOp> {
 
  private:
   const SymbolTable& symbolTable;
+  const SymbolUserMap& userMap;
+  GetDirectionToPropagateFn getDirectionToPropagate;
+  const FactorPropagation& factorPropagation;
+  const ShardingGroupMap& shardingGroupMap;
+};
+
+// Propagates shardings between:
+// 1. The func arguments and values on the corresponding callers.
+// 2. The call results and their users.
+//
+// Operates through `sdy.func_data_flow_edge`s.
+// Assumes a flat call graph.
+class PropagateFuncDataFlowEdgeOp
+    : public OpRewritePattern<FuncDataFlowEdgeOp> {
+ public:
+  explicit PropagateFuncDataFlowEdgeOp(
+      MLIRContext* context, const SymbolTable& symbolTable,
+      const SymbolUserMap& userMap,
+      GetDirectionToPropagateFn getDirectionToPropagate,
+      const FactorPropagation& factorPropagation,
+      const ShardingGroupMap& shardingGroupMap)
+      : OpRewritePattern<FuncDataFlowEdgeOp>(context),
+        symbolTable(symbolTable),
+        userMap(userMap),
+        getDirectionToPropagate(getDirectionToPropagate),
+        factorPropagation(factorPropagation),
+        shardingGroupMap(shardingGroupMap) {}
+
+  LogicalResult matchAndRewrite(FuncDataFlowEdgeOp funcEdgeOp,
+                                PatternRewriter& rewriter) const override {
+    // Skip non-shaped types (e.g., tokens), as we cannot create a sharding
+    // rule for them.
+    auto shapedType = dynCastStaticShapedType(funcEdgeOp.getType());
+    if (!shapedType) {
+      return rewriter.notifyMatchFailure(funcEdgeOp, [](Diagnostic& diag) {
+        diag << "non-shaped type (e.g., token)";
+      });
+    }
+
+    SmallVector<Value> sources;
+    Value operand = funcEdgeOp.getOperand();
+    if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
+      FuncOp funcOp = funcEdgeOp->getParentOfType<func::FuncOp>();
+      for (Operation* user : userMap.getUsers(funcOp)) {
+        if (CallOp callOp = dyn_cast<CallOp>(user)) {
+          sources.push_back(callOp.getOperand(blockArg.getArgNumber()));
+        }
+      }
+      // The sources can be empty if a func is never called, such as called
+      // computations on custom calls.
+      if (sources.empty()) {
+        return success();
+      }
+    } else {
+      OpResult callOpResult = cast<OpResult>(funcEdgeOp.getOperand());
+      CallOp callOp = callOpResult.getDefiningOp<CallOp>();
+      FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
+      SDY_CHECK(!funcOp.isExternal());
+      if (func::ReturnOp returnOp = dyn_cast<func::ReturnOp>(
+              funcOp.getBody().front().getTerminator())) {
+        sources.push_back(returnOp.getOperand(callOpResult.getResultNumber()));
+      }
+    }
+
+    SmallVector<TensorShardingAttr> operandShardingRef = getShardings(sources);
+    PropagationTensorParams operandsParams = PropagationTensorParams(
+        /*tensors=*/sources,
+        /*shardings=*/operandShardingRef,
+        /*setShardingCallback=*/
+        [&sources](TensorShardingAttr sharding, int64_t index) {
+          setSharding(sources[index], sharding);
+        });
+
+    Value result = funcEdgeOp.getResult();
+    // The sharding of `result` is the sharding of all targets.
+    TensorShardingAttr resultsShardingRef = getSharding(funcEdgeOp);
+    PropagationTensorParams resultsParams = PropagationTensorParams(
+        /*tensors=*/result,
+        /*shardings=*/resultsShardingRef,
+        /*setShardingCallback=*/
+        [&result](TensorShardingAttr sharding, int64_t) {
+          setSharding(result, sharding);
+        });
+
+    PropagationDirectionAlongFactor directionAlongFactor =
+        std::bind(getDirectionToPropagate, funcEdgeOp, std::placeholders::_1);
+    return propagateTensorShardings(
+        operandsParams, resultsParams, userMap,
+        createIdentityShardingRule(funcEdgeOp.getType(), sources.size()),
+        directionAlongFactor, factorPropagation,
+        /*conservativePropagation=*/false, funcEdgeOp, symbolTable, &rewriter,
+        shardingGroupMap);
+  }
+
+ private:
+  const SymbolTable& symbolTable;
+  const SymbolUserMap& userMap;
   GetDirectionToPropagateFn getDirectionToPropagate;
   const FactorPropagation& factorPropagation;
   const ShardingGroupMap& shardingGroupMap;
@@ -555,10 +717,11 @@ class PropagatePropagationBarrier
  public:
   explicit PropagatePropagationBarrier(
       MLIRContext* context, const SymbolTable& symbolTable,
-      const FactorPropagation& factorPropagation,
+      const SymbolUserMap& userMap, const FactorPropagation& factorPropagation,
       const ShardingGroupMap& shardingGroupMap)
       : OpRewritePattern<PropagationBarrierOp>(context),
         symbolTable(symbolTable),
+        userMap(userMap),
         factorPropagation(factorPropagation),
         shardingGroupMap(shardingGroupMap) {}
 
@@ -566,6 +729,7 @@ class PropagatePropagationBarrier
                                 PatternRewriter& rewriter) const override {
     return propagateTensorShardings(
         propagationBarrierOp.getInput(), propagationBarrierOp.getResult(),
+        userMap,
         createIdentityShardingRule(
             cast<RankedTensorType>(propagationBarrierOp.getType())),
         propagationBarrierOp, symbolTable, rewriter,
@@ -575,6 +739,7 @@ class PropagatePropagationBarrier
 
  private:
   const SymbolTable& symbolTable;
+  const SymbolUserMap& userMap;
   const FactorPropagation& factorPropagation;
   const ShardingGroupMap& shardingGroupMap;
 };
@@ -625,20 +790,28 @@ LogicalResult BasicPropagationPassImpl::propagate(
     const ShardingGroupMap& shardingGroupMap,
     const FactorPropagation& factorPropagation,
     GetDirectionToPropagateFn getDirectionToPropagate) {
+  IRRewriter rewriter(moduleOp);
+  SymbolTableCollection symbolTableCollection;
+  SymbolUserMap userMap(symbolTableCollection, moduleOp);
+
   // Pushes any shardings that exist on the `funcOp` result type attrs to the
   // corresponding values returned in the terminator of the body of `funcOp`,
   // for the main function.
-  propagateFuncResults(moduleOp, symbolTable, factorPropagation,
+  propagateFuncResults(moduleOp, userMap, symbolTable, factorPropagation,
                        shardingGroupMap);
   MLIRContext* context = moduleOp.getContext();
+
   RewritePatternSet patterns(context);
   patterns.add<PropagatePropagationBarrier>(
-      context, symbolTable, factorPropagation, shardingGroupMap);
-  patterns.add<PropagateDataFlowEdgeOp>(context, symbolTable,
+      context, symbolTable, userMap, factorPropagation, shardingGroupMap);
+  patterns.add<PropagateDataFlowEdgeOp>(context, symbolTable, userMap,
                                         getDirectionToPropagate,
                                         factorPropagation, shardingGroupMap);
+  patterns.add<PropagateFuncDataFlowEdgeOp>(
+      context, symbolTable, userMap, getDirectionToPropagate, factorPropagation,
+      shardingGroupMap);
   patterns.add<PropagateRegisteredOp>(
-      context, symbolTable, getDirectionToPropagate, factorPropagation,
+      context, symbolTable, userMap, getDirectionToPropagate, factorPropagation,
       conservativePropagation, shardingGroupMap);
   // We only need a single iteration (and another to confirm convergence), since
   // we make sure ops whose sharding changes are added back to the worklist.
@@ -665,7 +838,7 @@ LogicalResult BasicPropagationPassImpl::propagate(
   // Pushes any shardings from the values returned in the terminator of the body
   // of `funcOp` to the corresponding `funcOp` result type attrs, for the main
   // function.
-  propagateFuncResults(moduleOp, symbolTable, factorPropagation,
+  propagateFuncResults(moduleOp, userMap, symbolTable, factorPropagation,
                        shardingGroupMap);
   return success();
 }
