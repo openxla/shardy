@@ -90,40 +90,26 @@ sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}]>
-  // CHECK-NEXT: %1 = sdy.reshard %arg0 <@mesh, [{"a"}]>
-  // CHECK-NEXT: call @foo(%1)
-  // CHECK-NEXT: call @bar_0(%0)
-  // CHECK-NEXT: return
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}]> : tensor<8xf32>
+  // CHECK-NEXT: %1 = sdy.reshard %arg0 <@mesh, [{"a"}]> : tensor<8xf32>
+  // CHECK-NEXT: %2 = call @foo(%1) : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %3 = call @bar_0(%0) : (tensor<8xf32>) -> tensor<8xf32>
   %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
-  %1 = sdy.func_data_flow_edge %0 : tensor<8xf32>
-  %2 = call @bar_0(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
-  %3 = sdy.func_data_flow_edge %2 : tensor<8xf32>
-  return %3 : tensor<8xf32>
+  %1 = call @bar_0(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %1 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
 func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}]>
-  // CHECK-NEXT: call @bar_0(%0)
-  // CHECK-NEXT: return
-  %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}]>]>} : tensor<8xf32>
-  %1 = call @bar(%0) : (tensor<8xf32>) -> tensor<8xf32>
-  %2 = sdy.func_data_flow_edge %1 : tensor<8xf32>
-  return %2 : tensor<8xf32>
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}]> : tensor<8xf32>
+  // CHECK-NEXT: %1 = call @bar_0(%0) : (tensor<8xf32>) -> tensor<8xf32>
+  %0 = call @bar_0(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
-func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> attributes {sdy.original_func_name = "bar"} {
-  // CHECK-NEXT: return
-  %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}]>]>} : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
-
-// CHECK-NOT: func private @bar(
-func.func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
-  %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}]>]>} : tensor<8xf32>
-  return %0 : tensor<8xf32>
+func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
+  return %arg0 : tensor<8xf32>
 }
 
 // -----
@@ -132,39 +118,29 @@ sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 
 // CHECK-LABEL: func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}]>
-  // CHECK-NEXT: %1 = sdy.reshard %arg0 <@mesh, [{"a"}]>
-  // CHECK-NEXT: call @foo(%1)
-  // CHECK-NEXT: call @bar_0(%0)
-  // CHECK-NEXT: return
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"b"}]> : tensor<8xf32>
+  // CHECK-NEXT: %1 = sdy.reshard %arg0 <@mesh, [{"a"}]> : tensor<8xf32>
+  // CHECK-NEXT: %2 = call @foo(%1) : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %3 = call @bar_0(%0) : (tensor<8xf32>) -> tensor<8xf32>
   %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
-  %1 = sdy.func_data_flow_edge %0 : tensor<8xf32>
-  %2 = call @bar_0(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
-  %3 = sdy.func_data_flow_edge %2 : tensor<8xf32>
-  return %3 : tensor<8xf32>
+  %1 = call @bar_0(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %1 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
 func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"c"}]>
-  // CHECK-NEXT: call @bar(%0)
-  // CHECK-NEXT: return
-  %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}]>]>} : tensor<8xf32>
-  %1 = call @bar(%0) : (tensor<8xf32>) -> tensor<8xf32>
-  %2 = sdy.func_data_flow_edge %1 : tensor<8xf32>
-  return %2 : tensor<8xf32>
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"c"}]> : tensor<8xf32>
+  // CHECK-NEXT: %1 = call @bar(%0) : (tensor<8xf32>) -> tensor<8xf32>
+  %0 = call @bar(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
-func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> attributes {sdy.original_func_name = "bar"} {
-  // CHECK-NEXT: return
-  %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}]>]>} : tensor<8xf32>
-  return %0 : tensor<8xf32>
+func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
+  return %arg0 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}]>}) -> tensor<8xf32> {
 func.func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}]>}) -> tensor<8xf32> {
-  // CHECK-NEXT: return
-  %0 = sdy.func_data_flow_edge %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"c"}]>]>} : tensor<8xf32>
-  return %0 : tensor<8xf32>
+  return %arg0 : tensor<8xf32>
 }

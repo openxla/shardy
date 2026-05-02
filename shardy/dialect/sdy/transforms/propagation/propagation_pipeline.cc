@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "llvm/Support/CommandLine.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassOptions.h"
 #include "mlir/Pass/PassRegistry.h"
@@ -45,7 +46,6 @@ void populateExportOptions(ExportOptions& options,
   options.dumpPropagationEdges = propOptions.debugPropagationEdgeSharding;
   // TODO(enver): Drop avoidReshardsOnCalls in favor of dedupFunctionsFully.
   options.avoidReshardsOnCalls = propOptions.dedupFunctionsFully;
-  options.dedupFunctionsFully = propOptions.dedupFunctionsFully;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
 }
@@ -55,6 +55,12 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
+  pm.addPass(createFlattenCallGraphPass());
+  // Keep SymbolDCE after FlattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
+  if (options.enableNativeNonFlatSupport) {
+    pm.addPass(createAddFuncDataFlowEdgesPass());
+  }
   pm.addPass(createImportFuncCallsPass());
   // Keep SymbolDCEPass after ImportFuncCallsPass.
   pm.addPass(createSymbolDCEPass());
@@ -75,6 +81,11 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                                       dumpIndex++));
     AutoPartitionerRegistry::addPasses(pm);
   }
+  pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
+  pm.addPass(createUnflattenCallGraphPass(
+      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
+  // Keep a SymbolDCE after UnflattenCallGraph.
+  pm.addPass(createSymbolDCEPass());
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);

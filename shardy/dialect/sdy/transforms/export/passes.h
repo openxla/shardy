@@ -82,11 +82,6 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
           "Avoid inserting explicit reshards/collectives for calls."),
       llvm::cl::init(false)};
 
-  Option<bool> dedupFunctionsFully{
-      *this, "dedup-functions-fully",
-      llvm::cl::desc("Whether to dedup functions fully."),
-      llvm::cl::init(false)};
-
   Option<bool> updateNonDivisibleInputOutputShardings{
       *this, "update-non-divisible-input-output-shardings",
       llvm::cl::desc("Update axes with non-divisible input/output shardings."),

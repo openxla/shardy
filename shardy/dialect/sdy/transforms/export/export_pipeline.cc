@@ -71,11 +71,6 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
 
 void addExportPipeline(OpPassManager& pm, int& dumpIndex,
                        const ExportOptions& options) {
-  pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   pm.addNestedPass<func::FuncOp>(createConstantOrScalarMergerPass());
   pm.addNestedPass<func::FuncOp>(
       createSinkDataFlowEdgesPass(SinkDataFlowEdgesPassOptions{

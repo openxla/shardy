@@ -120,7 +120,7 @@ sdy.mesh @mesh = <["a"=2]>
 // CHECK-LABEL: func @main
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: %[[CALL0:.*]] = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
-  // CHECK-NEXT: %[[CALL1:.*]] = call @foo_0(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[CALL1:.*]] = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
   // CHECK-NEXT: return
   %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
   %1 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
@@ -134,12 +134,6 @@ func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh,
   return %arg0 : tensor<8xf32>
 }
 
-// CHECK-LABEL: func private @foo_0(
-// CHECK-SAME:  %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32>
-// CHECK-SAME:  attributes {sdy.original_func_name = "foo"} {
-// CHECK-NEXT:    return
-// CHECK-NEXT:  }
-
 // -----
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
@@ -148,7 +142,7 @@ sdy.mesh @mesh = <["a"=2, "b"=2]>
 // CHECK-LABEL: func @main
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: %[[CALL0:.*]] = call @foo(
-  // CHECK-NEXT: %[[CALL1:.*]] = call @bar_0(
+  // CHECK-NEXT: %[[CALL1:.*]] = call @bar(
   // CHECK-NEXT: return
   %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
   %1 = call @bar(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
@@ -169,9 +163,3 @@ func.func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh,
   // CHECK-NEXT: return
   return %arg0 : tensor<8xf32>
 }
-
-// CHECK-LABEL: func private @bar_0(
-// CHECK-SAME:  %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32>
-// CHECK-SAME:  attributes {sdy.original_func_name = "bar"} {
-// CHECK-NEXT:    return
-// CHECK-NEXT:  }
