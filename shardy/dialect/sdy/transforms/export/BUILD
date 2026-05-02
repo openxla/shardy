@@ -48,6 +48,7 @@ cc_library(
         "resolve_permutation_factors.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
+        "sink_func_data_flow_edges.cc",
         "unflatten_call_graph.cc",
         "update_non_divisible_input_output_shardings.cc",
     ],

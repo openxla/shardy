@@ -40,14 +40,14 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
-#define GEN_PASS_DEF_SINKDATAFLOWEDGESPASS
+#define GEN_PASS_DEF_SINKFUNCDATAFLOWEDGESPASS
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
 
-struct SinkDataFlowEdgesPass
-    : public impl::SinkDataFlowEdgesPassBase<SinkDataFlowEdgesPass> {
-  using SinkDataFlowEdgesPassBase::SinkDataFlowEdgesPassBase;
+struct SinkFuncDataFlowEdgesPass
+    : public impl::SinkFuncDataFlowEdgesPassBase<SinkFuncDataFlowEdgesPass> {
+  using SinkFuncDataFlowEdgesPassBase::SinkFuncDataFlowEdgesPassBase;
 
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
@@ -58,40 +58,23 @@ struct SinkDataFlowEdgesPass
       // are walked before their users and regions. Since `DataFlowEdgeOp` can
       // only appear inside the data flow op's region or as its user, we always
       // encounter the data flow op before their data flow edges. This means it
-      // is safe to erase the `DataFlowEdgeOp` at this point. We need the skip
-      // at the end because it's a condition to erase the op. See the
+      // is safe to erase the `FuncDataFlowEdgeOp` at this point. We need the
+      // skip at the end because it's a condition to erase the op. See the
       // documentation for `Operation::walk` for more details.
-      if (isa<DataFlowEdgeOp>(op)) {
-        DataFlowEdgeOp dataFlowEdgeOp = cast<DataFlowEdgeOp>(op);
-        Value input = dataFlowEdgeOp.getInput();
-        rewriter.replaceOp(dataFlowEdgeOp, input);
+      if (isa<FuncDataFlowEdgeOp>(op)) {
+        FuncDataFlowEdgeOp funcEdgeOp = cast<FuncDataFlowEdgeOp>(op);
+        Value operand = funcEdgeOp.getOperand();
+        Value result = funcEdgeOp.getResult();
+        TensorShardingAttr operandSharding = getSharding(operand);
+        if (TensorShardingAttr sharding = getSharding(result)) {
+          setSharding(operand, sharding);
+        } else if (operandSharding) {
+          setSharding(operand,
+                      TensorShardingAttr::getFullyOpenLike(operandSharding));
+        }
+        rewriter.replaceOp(funcEdgeOp, operand);
         return WalkResult::skip();
       }
-      auto shardableDataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op);
-      if (!shardableDataFlowOp) {
-        return WalkResult::advance();
-      }
-      ArrayRef<BlockArgument> blockArgOwners =
-          shardableDataFlowOp.getBlockArgumentEdgeOwners();
-      if (SmallVector<TensorShardingAttr> blockArgShardings =
-              getShardingsFromDataFlowEdges(blockArgOwners);
-          !blockArgShardings.empty()) {
-        shardableDataFlowOp.setBlockArgumentEdgeOwnerShardings(
-            blockArgShardings);
-      }
-      saveDebugInfoDictsFromDataFlowEdges(
-          blockArgOwners, op, sinkDebugShardingOrigins,
-          sinkDebugPropagationEdgeSharding, EdgeNodeType::OPERAND, rewriter);
-
-      ResultRange resultOwners = shardableDataFlowOp.getOpResultEdgeOwners();
-      if (SmallVector<TensorShardingAttr> resultShardings =
-              getShardingsFromDataFlowEdges(resultOwners);
-          !resultShardings.empty()) {
-        shardableDataFlowOp.setOpResultEdgeOwnerShardings(resultShardings);
-      }
-      saveDebugInfoDictsFromDataFlowEdges(
-          resultOwners, op, sinkDebugShardingOrigins,
-          sinkDebugPropagationEdgeSharding, EdgeNodeType::RESULT, rewriter);
       return WalkResult::advance();
     });
   }

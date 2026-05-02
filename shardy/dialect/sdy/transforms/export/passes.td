@@ -43,6 +43,15 @@ def SinkDataFlowEdgesPass : Pass<"sdy-sink-data-flow-edges", "func::FuncOp"> {
   ];
 }
 
+def SinkFuncDataFlowEdgesPass : Pass<"sdy-sink-func-data-flow-edges", "func::FuncOp"> {
+  let summary = "Sinks all `FuncDataFlowEdgeOp` into their input.";
+  let description = [{
+    Moves the sharding of each `FuncDataFlowEdgeOp` to its input and replaces
+    the op with its input.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-input-output-shardings", "ModuleOp"> {
   let summary = "Makes FuncOp inputs/outputs evenly sharded, removing any need for padding due to non-divisible shardings.";
   let description = [{
