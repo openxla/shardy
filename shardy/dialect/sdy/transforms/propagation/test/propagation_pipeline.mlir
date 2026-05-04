@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-propagation-pipeline | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-propagation-pipeline 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
 

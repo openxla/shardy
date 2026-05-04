@@ -20,14 +20,12 @@ limitations under the License.
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Signals.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -74,24 +72,6 @@ MeshOp createNewMeshOp(Location loc, mlir::stablehlo::MeshAttr mesh,
   return createMesh("mesh", sdyMeshAttr);
 }
 
-mlir::stablehlo::MeshAttr addStablehloMeshToSdyMesh(MeshAttr sdyMeshAttr) {
-  MLIRContext* ctx = sdyMeshAttr.getContext();
-  auto shloAxes =
-      llvm::map_to_vector(sdyMeshAttr.getAxes(), [&](MeshAxisAttr axisAttr) {
-        return mlir::stablehlo::MeshAxisAttr::get(ctx, axisAttr.getName(),
-                                                  axisAttr.getSize());
-      });
-  DenseIntElementsAttr deviceIds;
-  if (!sdyMeshAttr.getDeviceIds().empty()) {
-    Builder builder(ctx);
-    auto type = RankedTensorType::get(
-        {static_cast<int64_t>(sdyMeshAttr.getDeviceIds().size())},
-        builder.getI64Type());
-    deviceIds = DenseIntElementsAttr::get(type, sdyMeshAttr.getDeviceIds());
-  }
-  return mlir::stablehlo::MeshAttr::get(ctx, shloAxes, deviceIds);
-}
-
 TensorShardingAttr replaceMesh(TensorShardingAttr sharding,
                                StringAttr meshName) {
   return TensorShardingAttr::get(
@@ -134,7 +114,6 @@ struct LiftInlinedMeshesPass
     : public impl::LiftInlinedMeshesPassBase<LiftInlinedMeshesPass> {
   using LiftInlinedMeshesPassBase::LiftInlinedMeshesPassBase;
 
- protected:
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
     SymbolTable symbolTable(moduleOp);
@@ -217,21 +196,6 @@ struct LiftInlinedMeshesPass
     moduleOp.walk([&](stablehlo::CollectiveBroadcastOp op) {
       processMeshInReplicaGroups(op);
     });
-
-    // Attach discardable `stablehlo.mesh` attributes to all named meshes.
-    // Downgrading to older StableHLO versions before
-    // `MeshAxesReplicaGroups` requires the
-    // `StablehloCompatibilityExpander` pass to resolve symbol references to
-    // named meshes and extract a `stablehlo::MeshAttr` from them. Because
-    // Shardy's `sdy::MeshOp` stores its configuration as an `sdy::MeshAttr`
-    // and core StableHLO cannot depend on Shardy, attaching this discardable
-    // attribute ensures compatibility without violating dialect layering.
-    for (auto meshOp : llvm::make_early_inc_range(moduleOp.getOps<MeshOp>())) {
-      if (!meshOp->hasAttr("stablehlo.mesh")) {
-        meshOp->setAttr("stablehlo.mesh",
-                        addStablehloMeshToSdyMesh(meshOp.getMesh()));
-      }
-    }
   }
 };
 
