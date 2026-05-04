@@ -2,6 +2,7 @@
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
 sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
+sdy.mesh @mesh_6_4k = <["x"=6, "y"=4096]>
 
 // CHECK-LABEL: func @reshape
 func.func @reshape(%arg0: tensor<16x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y", "x"}]>}) {
@@ -383,6 +384,43 @@ func.func @reshape_overflow_axes_merge_shape(
   // CHECK-NEXT: return %2 : tensor<12xf32>
   %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x", "y"}]>]>} : (tensor<6x2xf32>) -> tensor<12xf32>
   return %0 : tensor<12xf32>
+}
+
+// CHECK-LABEL: func @reshape_overflow_axes_split_and_merge_shape
+func.func @reshape_overflow_axes_split_and_merge_shape(
+    %arg0: tensor<24576x8192x16384xbf16> {sdy.sharding = #sdy.sharding<@mesh_6_4k, [{"x", "y"}, {}, {}]>})
+    -> (tensor<4x50331648x16384xbf16> {sdy.sharding = #sdy.sharding<@mesh_6_4k, [{}, {"x", "y"}, {}]>}) {
+  // CHECK: %[[ALIGNED_IN:.*]] = sdy.reshard %arg0 <@mesh_6_4k, [{"x":(1)2, "y":(1)2, "x":(2)3, "y":(2)2048}, {}, {}]> : tensor<24576x8192x16384xbf16>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[ALIGNED_IN]] {
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh_6_4k, [{"x":(1)2, "y":(1)2}, {"x":(2)3, "y":(2)2048}, {}]>]>
+  // CHECK-SAME:   sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k, l])->([i, jk, l]) {i=4, j=6144, k=8192, l=16384}>
+  // CHECK-SAME: } : (tensor<24576x8192x16384xbf16>) -> tensor<4x50331648x16384xbf16>
+  // CHECK-NEXT: %[[ALIGNED_OUT:.*]] = sdy.reshard %[[RESHAPE]] <@mesh_6_4k, [{}, {"x", "y"}, {}]> : tensor<4x50331648x16384xbf16>
+  // CHECK-NEXT: return %[[ALIGNED_OUT]] : tensor<4x50331648x16384xbf16>
+
+  %0 = stablehlo.reshape %arg0 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_6_4k, [{}, {"x", "y"}, {}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k, l])->([i, jk, l]) {i=4, j=6144, k=8192, l=16384}>
+  } : (tensor<24576x8192x16384xbf16>) -> tensor<4x50331648x16384xbf16>
+  return %0 : tensor<4x50331648x16384xbf16>
+}
+
+// CHECK-LABEL: func @reshape_overflow_axes_split_and_merge_2
+func.func @reshape_overflow_axes_split_and_merge_2(
+    %arg0: tensor<4x50331648x16384xbf16> {sdy.sharding = #sdy.sharding<@mesh_6_4k, [{}, {"x", "y"}, {}]>})
+    -> (tensor<24576x8192x16384xbf16> {sdy.sharding = #sdy.sharding<@mesh_6_4k, [{"x", "y"}, {}, {}]>}) {
+  // CHECK:      %[[ALIGNED_IN:.*]] = sdy.reshard %arg0 <@mesh_6_4k, [{"x":(1)2, "y":(1)2}, {"x":(2)3, "y":(2)2048}, {}]> : tensor<4x50331648x16384xbf16>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[ALIGNED_IN]] {
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh_6_4k, [{"x":(1)2, "y":(1)2, "x":(2)3, "y":(2)2048}, {}, {}]>]>
+  // CHECK-SAME:   sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, l])->([ij, k, l]) {i=4, j=6144, k=8192, l=16384}>
+  // CHECK-SAME: } : (tensor<4x50331648x16384xbf16>) -> tensor<24576x8192x16384xbf16>
+  // CHECK-NEXT: %[[ALIGNED_OUT:.*]] = sdy.reshard %[[RESHAPE]] <@mesh_6_4k, [{"x", "y"}, {}, {}]> : tensor<24576x8192x16384xbf16>
+  // CHECK-NEXT: return %[[ALIGNED_OUT]] : tensor<24576x8192x16384xbf16>
+  %0 = stablehlo.reshape %arg0 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_6_4k, [{"x", "y"}, {}, {}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, l])->([ij, k, l]) {i=4, j=6144, k=8192, l=16384}>
+  } : (tensor<4x50331648x16384xbf16>) -> tensor<24576x8192x16384xbf16>
+  return %0 : tensor<24576x8192x16384xbf16>
 }
 
 // CHECK-LABEL: func @reshape_no_overflow_axes

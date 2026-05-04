@@ -15,9 +15,11 @@ limitations under the License.
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <memory>  // IWYU pragma: keep
 #include <optional>
+#include <utility>
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -25,6 +27,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -420,10 +423,125 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
   return false;
 }
 
+// A wrapper that iterates over all dimensions in a tensor mapping and calls
+// the generalized distributeAxesAcrossFactors utility for each.
+void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
+                      ArrayRef<int64_t> factorSizes, MeshAttr mesh,
+                      ArrayRef<AxisRefAttr> allAxes) {
+  SmallVector<FactorSharding> flattenedShardings;
+  SmallVector<int64_t> flattenedFactorSizes;
+  SmallVector<int64_t> factorIndices;
+
+  // Flatten factors from all dimensions.
+  for (auto [dimIdx, dimMapping] : llvm::enumerate(mapping.getDimMappings())) {
+    for (int64_t fIdx : dimMapping.getFactorIndices()) {
+      FactorSharding& fs = tfs.factorIndexToSharding.at(fIdx);
+      FactorSharding localFs = fs;
+      localFs.axisRefs.clear();
+      localFs.overflowAxes.clear();
+
+      flattenedShardings.push_back(localFs);
+      flattenedFactorSizes.push_back(factorSizes[fIdx]);
+      factorIndices.push_back(fIdx);
+    }
+  }
+
+  // Perform Axis-First redistribution.
+  distributeAxesAcrossFactors(flattenedShardings, flattenedFactorSizes, allAxes,
+                              mesh);
+
+  // Map aligned results back to factors.
+  for (size_t i = 0; i < factorIndices.size(); ++i) {
+    FactorSharding& fs = tfs.factorIndexToSharding.at(factorIndices[i]);
+    fs.axisRefs = std::move(flattenedShardings[i].axisRefs);
+    fs.overflowAxes = std::move(flattenedShardings[i].overflowAxes);
+  }
+}
+
+AxesPerFactor processReshapeWithOverflowAxes(
+    stablehlo::ReshapeOp op, ShardingProjection& shardingProjection,
+    ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
+    OpShardingRuleAttr shardingRule, MeshOp meshOp) {
+  MeshAttr mesh = meshOp.getMesh();
+  MLIRContext* ctx = op.getContext();
+
+  // Determine preferred side.
+  int64_t inSize = shardingProjection.getOperand(0).getShardingSize(mesh);
+  int64_t outSize = shardingProjection.getResult(0).getShardingSize(mesh);
+  bool preferInput = inSize >= outSize;
+
+  // Collect all axes from the preferred side.
+  SmallVector<AxisRefAttr> allAxes;
+  const TensorFactorShardings& bestTfs = preferInput
+                                             ? shardingProjection.getOperand(0)
+                                             : shardingProjection.getResult(0);
+  for (int64_t f = 0; f < shardingRule.getNumFactors(); ++f) {
+    if (auto it = bestTfs.factorIndexToSharding.find(f);
+        it != bestTfs.factorIndexToSharding.end()) {
+      allAxes.append(it->second.axisRefs.begin(), it->second.axisRefs.end());
+      allAxes.append(it->second.overflowAxes.begin(),
+                     it->second.overflowAxes.end());
+    }
+  }
+
+  // Redistribute axes on both sides independently.
+  redistributeAxes(shardingProjection.getMutableOperand(0),
+                   shardingRule.getOperandMapping(0),
+                   shardingRule.getFactorSizes(), mesh, allAxes);
+  redistributeAxes(shardingProjection.getMutableResult(0),
+                   shardingRule.getResultMapping(0),
+                   shardingRule.getFactorSizes(), mesh, allAxes);
+
+  // Synchronize projection factors.
+  TensorShardingAttr inBuilt =
+      shardingProjection.getOperand(0).createTensorShardingAttr(
+          ctx, shardingRule.getOperandMapping(0), shardingRule.getFactorSizes(),
+          meshOp.getName(), mesh);
+  TensorShardingAttr outBuilt =
+      shardingProjection.getResult(0).createTensorShardingAttr(
+          ctx, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+          meshOp.getName(), mesh);
+  ShardingProjection legalProj =
+      ShardingProjection::build({inBuilt}, {outBuilt}, shardingRule, mesh);
+
+  // Find common axes supported by the sharding projection.
+  AxesPerFactor commonAxes =
+      legalProj.getGreatestCommonPrefixAxes(shardingRule.getNumFactors());
+  for (int64_t f = 0; f < shardingRule.getNumFactors(); ++f) {
+    shardingProjection.updateSharding(f, commonAxes[f], {});
+  }
+
+  // Calculate update bits and use it to insert reshards.
+  UpdateTensorShardings finalUpdate(shardingRule.getNumOperands(),
+                                    shardingRule.getNumResults());
+  if (!isEquivalent(
+          getSharding(op.getOperand()),
+          shardingProjection.getOperand(0).createTensorShardingAttr(
+              ctx, shardingRule.getOperandMapping(0),
+              shardingRule.getFactorSizes(), meshOp.getName(), mesh))) {
+    finalUpdate.updateOperands.set(0);
+  }
+  TensorShardingAttr resSharding =
+      shardingProjection.getResult(0).createTensorShardingAttr(
+          ctx, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+          meshOp.getName(), mesh);
+  if (!isEquivalent(resSharding, outShardings[0])) {
+    finalUpdate.updateResults.set(0);
+  }
+  insertExplicitReshards(op, getShardings(op->getOperands()), outShardings,
+                         shardingProjection, finalUpdate, rewriter,
+                         shardingRule,
+                         SymbolTable(op->getParentOfType<ModuleOp>()), meshOp);
+  // The contract of processOp requires returning AxesPerFactor representing the
+  // operation's sharding.
+  return commonAxes;
+}
+
 // Inserts explicit reshards on the operands and results of `op` such that the
 // sharding of `op` is compatible with its sharding rule.
 //
-// Refer to the documentation of `InsertExplicitReshardsPass` for more details.
+// Refer to the documentation of `InsertExplicitReshardsPass` for more
+// details.
 //
 // Assume the followings:
 // - All op results have the same unreduced axes.
@@ -445,6 +563,15 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   if (onFullVersion) {
     UpdateTensorShardings updateTensorShardings =
         shardingProjection.tensorsContainOverflowAxes();
+    if (updateTensorShardings.updateOperands.any() ||
+        updateTensorShardings.updateResults.any()) {
+      if (auto reshapeOp = dyn_cast<stablehlo::ReshapeOp>(op)) {
+        return processReshapeWithOverflowAxes(reshapeOp, shardingProjection,
+                                              outShardings, rewriter,
+                                              shardingRule, meshOp);
+      }
+    }
+
     AxesPerFactor commonAxesPerFactor = findCommonAxes(
         shardingProjection, shardingRule, getTensorSizes(op), meshOp);
     for (const auto& [index, axes] : llvm::enumerate(commonAxesPerFactor)) {
