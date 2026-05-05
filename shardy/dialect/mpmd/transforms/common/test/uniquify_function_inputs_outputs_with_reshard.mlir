@@ -28,7 +28,7 @@ func.func @single_mesh_one_return_operand(%arg0: !mesh_1_tensor) -> (!mesh_1_ten
 } {
   // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]>
   // CHECK:      %[[F2:.*]] = mpmd.fragment<mesh="m1", origin=["f2"]>
-  // CHECK:      %[[UF:.*]]:2 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]]) (%arg1: tensor<4xf32>) {
+  // CHECK:      %[[UF:.*]]:2 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]]) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xf32>) {
   // CHECK:         mpmd.return %arg1, %arg1 : tensor<4xf32>, tensor<4xf32>
   // CHECK:      %[[F2]], %[[UF]]#0, %[[UF]]#1
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4xf32>) {
@@ -49,7 +49,7 @@ func.func @needs_fragment_for_m1_with_many_values(%arg0: !mesh_1_tensor, %arg1: 
   // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]>
   // CHECK:      %[[F2:.*]] = mpmd.fragment<mesh="m2", origin=["f2"]>
   // CHECK:      %[[F3:.*]] = mpmd.fragment<mesh="m1", origin=["f3"]>
-  // CHECK:      %[[UF:.*]]:5 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]], %[[F3]]) (%[[A1:.*]]: tensor<4xf32>, %[[A2:.*]]: tensor<4xf32>)
+  // CHECK:      %[[UF:.*]]:5 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]], %[[F3]]) {mpmd.inferred_by = ["uniquify"]} (%[[A1:.*]]: tensor<4xf32>, %[[A2:.*]]: tensor<4xf32>)
   // CHECK-NEXT:   mpmd.return %[[A1]], %[[A1]], %[[A2]], %[[A2]], %[[A2]]
   // CHECK-NEXT: }
   // CHECK-NEXT: return %[[F2]], %[[UF]]#0, %[[UF]]#2, %[[UF]]#1, %[[UF]]#3, %[[UF]]#4
@@ -70,8 +70,8 @@ func.func @needs_fragment_for_m1_and_m2(%arg0: !mesh_1_tensor, %arg1: !mesh_2_te
 ) -> (!mesh_1_tensor, !mesh_2_tensor, !mesh_2_tensor, !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor) attributes {
   "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 } {
-  // CHECK: %[[UF1:.*]]:4 = mpmd.fragment<mesh="m1", origin=[]>
-  // CHECK: %[[UF2:.*]]:2 = mpmd.fragment<mesh="m2", origin=[]>
+  // CHECK: %[[UF1:.*]]:4 = mpmd.fragment<mesh="m1", origin=[]> ({{.*}}) {mpmd.inferred_by = ["uniquify"]}
+  // CHECK: %[[UF2:.*]]:2 = mpmd.fragment<mesh="m2", origin=[]> ({{.*}}) {mpmd.inferred_by = ["uniquify"]}
   // CHECK: return %[[UF1]]#0, %[[UF2]]#0, %[[UF2]]#1, %[[UF1]]#2, %[[UF1]]#1, %[[UF1]]#3
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg2: tensor<4xf32>) {
     mpmd.return %arg2 : tensor<4xf32>
@@ -97,7 +97,7 @@ func.func @single_mesh_one_return_operand_with_global_view(%arg0: !dist_mesh_ten
 } {
   // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]>
   // CHECK:      %[[F2:.*]] = mpmd.fragment<mesh="m1", origin=["f2"]>
-  // CHECK:      %[[UF:.*]]:2 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]]) (%arg1: tensor<4xf32>) {
+  // CHECK:      %[[UF:.*]]:2 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]]) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xf32>) {
   // CHECK:         mpmd.return %arg1, %arg1 : tensor<4xf32>, tensor<4xf32>
   // CHECK:      %[[F2]], %[[UF]]#0, %[[UF]]#1
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4xf32>) {
@@ -122,7 +122,7 @@ func.func @f(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor, !mesh_tensor)
   // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m", origin=["f"]> (%arg0) (%arg1: tensor<4xui32>) {
   // CHECK-NEXT:   return %arg1
   // CHECK-NEXT: }
-  // CHECK-NEXT: %[[F2:.*]]:2 = mpmd.fragment<mesh="m", origin=[]> (%arg0) (%arg1: tensor<4xui32>) {
+  // CHECK-NEXT: %[[F2:.*]]:2 = mpmd.fragment<mesh="m", origin=[]> (%arg0) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xui32>) {
   // CHECK-NEXT:   return %arg1, %arg1
   // CHECK-NEXT: }
   // CHECK-NEXT: return %[[F2]]#0, %[[F1]], %[[F2]]#1
@@ -140,9 +140,8 @@ func.func @f(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor, !mesh_tensor)
 func.func @identity_function(%arg0: !mesh_tensor) -> !mesh_tensor
   attributes {"topology"=#mpmd.topology<<"m": <["x"=2]>>>}
 {
-  // CHECK-NEXT: %[[F:.*]] = mpmd.fragment<mesh="m", origin=[]> (%arg0) (%arg1: tensor<4xui32>) {
-  // CHECK-NEXT:   return %arg1
-  // CHECK-NEXT: }
-  // CHECK-NEXT: return %[[F]]
+  // Block-arg wrapping is handled by a separate pass. The uniquify pass is a
+  // no-op here since %arg0 appears only once.
+  // CHECK-NEXT: return %arg0
   func.return %arg0 : !mesh_tensor
 }

@@ -44,6 +44,7 @@ cc_library(
         "split_bwd_fragments.cc",
         "uniquify_function_inputs_outputs.cc",
         "unroll_for_loops.cc",
+        "wrap_block_arg_returns.cc",
     ],
     hdrs = [
         "merge_fragments.h",

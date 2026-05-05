@@ -40,18 +40,16 @@ limitations under the License.
 
 namespace mlir::mpmd {
 
-// Globsl sdy mesh name.
-constexpr StringRef kGlobalMeshName = "mesh";
-
+// Global sdy mesh name.
+inline constexpr StringRef kGlobalMeshName = "mesh";
 // The function attribute that holds the SPMD mesh.
-constexpr StringRef kMeshShapeAttr = "mesh_shape";
+inline constexpr StringRef kMeshShapeAttr = "mesh_shape";
 // The function attribute that holds the MPMD topology.
-constexpr StringRef kTopologyAttr = "topology";
-
+inline constexpr StringRef kTopologyAttr = "topology";
 
 // The suffix of the mesh name for a CPU mesh.
 // LINT.IfChange
-constexpr StringRef kCpuMeshSuffix = "/cpu";
+inline constexpr StringRef kCpuMeshSuffix = "/cpu";
 // LINT.ThenChange(
 //   https://github.com/openxla/shardy/blob/main/shardy/integrations/python/jax/mpmd/types.py
 // )
@@ -75,6 +73,9 @@ inline constexpr StringRef kLayoutModeAuto = "auto";
 inline constexpr StringRef kRematAttributeName = "remat";
 
 inline constexpr StringRef kJaxResultInfoAttr = "jax.result_info";
+
+// The attribute that holds the list of pass names that inferred a fragment.
+inline constexpr StringRef kInferredByAttr = "mpmd.inferred_by";
 
 template <typename... Args>
 std::string StrCat(Args&&... args) {
@@ -261,6 +262,7 @@ SmallVector<MpmdDataflowEdge> GetMpmdDataflowEdges(func::FuncOp func_op);
 // `should_replace_use` returns true.
 FragmentOp WrapOpWithFragment(
     Operation* op, StringRef mesh_name, RewriterBase& rewriter,
+    StringRef inferred_by,
     std::function<bool(OpOperand&)> should_replace_use = [](OpOperand&) {
       return true;
     });

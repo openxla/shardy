@@ -14,15 +14,12 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
-#include <utility>
 
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -34,16 +31,27 @@ limitations under the License.
 
 namespace mlir::mpmd {
 
-#define GEN_PASS_DEF_UNIQUIFYFUNCTIONINPUTSOUTPUTSPASS
+#define GEN_PASS_DEF_WRAPBLOCKARGRETURNSPASS
 #include "shardy/dialect/mpmd/transforms/common/passes.h.inc"
 
 namespace {
 
 using ValueToReturnIndices = llvm::MapVector<Value, SmallVector<int64_t>>;
 
-void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
-                                 ValueToReturnIndices& value_to_return_indices,
-                                 OpBuilder& builder) {
+// Creates an identity fragment for block arguments returned by the function
+// on a given mesh. Each block argument gets a single fragment input and one
+// result per return position it appears in.
+void WrapBlockArgsForMesh(StringRef mesh_name, Operation* return_op,
+                          ValueToReturnIndices& value_to_return_indices,
+                          OpBuilder& builder) {
+  if (value_to_return_indices.empty()) {
+    return;
+  }
+
+  if (value_to_return_indices.empty()) {
+    return;
+  }
+
   builder.setInsertionPoint(return_op);
   SmallVector<Value> fragment_operands;
   fragment_operands.reserve(value_to_return_indices.size());
@@ -62,18 +70,14 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
       /*mesh_name=*/mesh_name, /*stage_id=*/IntegerAttr());
   fragment_op->setAttr(
       kInferredByAttr,
-      builder.getArrayAttr({builder.getStringAttr("uniquify")}));
+      builder.getArrayAttr({builder.getStringAttr("wrap_block_arg_returns")}));
   Block& fragment_block = fragment_op.getRegion().emplaceBlock();
 
   SmallVector<Value> returned_values;
   returned_values.reserve(fragment_return_types.size());
-  // The index of the fragment result that we should use to replace the
-  // function return op operand.
   int fragment_result_index = 0;
   sdy::MeshAttr mesh_attr = GetMeshOrFail(fragment_op, mesh_name);
   for (const auto& [value, return_indices] : value_to_return_indices) {
-    // Add a single block argument for this value and return it as many times
-    // as it's used.
     returned_values.insert(
         returned_values.end(), return_indices.size(),
         fragment_block.addArgument(
@@ -88,75 +92,21 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   ReturnOp::create(block_builder, loc, returned_values);
 }
 
-// Replaces the return values of the function with transfer ops.
-// If we have
-// func.func @func(%arg0: !mesh_1_tensor) ->
-// (!mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor) {
-//  return %arg0, %arg0, %arg0 : !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor
-// }
-// Then we would introduce 3 transfers:
-// func.func @func(%arg0: !mesh_1_tensor) -> (!mesh_1_tensor, !mesh_1_tensor,
-// !mesh_1_tensor) {
-//  %0 = transfer(%arg0) : !mesh_1_tensor -> !mesh_1_tensor
-//  %1 = transfer(%arg0) : !mesh_1_tensor -> !mesh_1_tensor
-//  %2 = transfer(%arg0) : !mesh_1_tensor -> !mesh_1_tensor
-//  return %0, %1, %2 : !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor
-// }
-// This is needed to ensure that each returned value can hold a different
-// sharding. If the same value is returned multiple times, each result position
-// could have a different sharding requirement. By inserting a TransferOp, we
-// create a new SSA value for each result position, allowing different
-// shardings to be applied.
-// We always insert a TransferOp for block arguments to ensure that sharding
-// constraints can be applied to an op result rather than a block argument.
-// For other values, if they are used in more than one return position, as an
-// optimization, we only insert a TransferOp for all but the first return
-// position.
-void uniquifyReturnsWithTransferOps(func::FuncOp func_op,
-                                    MLIRContext* context) {
-  Operation* return_op = func_op.getBody().front().getTerminator();
-  llvm::SmallDenseSet<Value> seen_values;
-  OpBuilder builder(context);
-  builder.setInsertionPoint(return_op);
-  for (OpOperand& operand : return_op->getOpOperands()) {
-    if (!seen_values.contains(operand.get())) {
-      seen_values.insert(operand.get());
-      if (!isa<BlockArgument>(operand.get())) {
-        continue;
-      }
-    }
-    auto transfer_op = TransferOp::create(
-        builder, return_op->getLoc(),
-        cast<MeshTensorType>(operand.get().getType()), operand.get());
-    operand.set(transfer_op->getResult(0));
-  }
-}
-
-class UniquifyFunctionInputOutputsPass
-    : public impl::UniquifyFunctionInputsOutputsPassBase<
-          UniquifyFunctionInputOutputsPass> {
-  using UniquifyFunctionInputsOutputsPassBase::
-      UniquifyFunctionInputsOutputsPassBase;
+class WrapBlockArgReturnsPass
+    : public impl::WrapBlockArgReturnsPassBase<WrapBlockArgReturnsPass> {
+  using WrapBlockArgReturnsPassBase::WrapBlockArgReturnsPassBase;
 
  protected:
   void runOnFunc(func::FuncOp func_op) override {
     if (!IsMpmdFunction(func_op)) {
-      // This is not the main function. Do nothing.
-      return;
-    }
-
-    if (this->useTransferInsteadOfFragment) {
-      uniquifyReturnsWithTransferOps(func_op, &getContext());
       return;
     }
 
     Operation* return_op = func_op.getBody().front().getTerminator();
-    // value_to_return_indices_per_mesh[mesh_name] = value_to_return_indices
-    // where value_to_return_indices[v] contains a sequence of the indices in
-    // return op where v is used.
     llvm::MapVector<StringRef, ValueToReturnIndices>
         value_to_return_indices_per_mesh;
     for (OpOperand& operand : return_op->getOpOperands()) {
+      if (!isa<BlockArgument>(operand.get())) continue;
       auto mesh_type = dyn_cast<MeshTensorType>(operand.get().getType());
       SDY_CHECK(mesh_type);
       StringRef mesh_name = mesh_type.getMeshName();
@@ -167,11 +117,8 @@ class UniquifyFunctionInputOutputsPass
     OpBuilder builder(&getContext());
     for (auto& [mesh_name, value_to_return_indices] :
          value_to_return_indices_per_mesh) {
-      // Only keep entries that are returned more than once (need uniquifying).
-      value_to_return_indices.remove_if(
-          [](const auto& it) { return it.second.size() <= 1; });
-      CreateReturnFragmentForMesh(mesh_name, return_op, value_to_return_indices,
-                                  builder);
+      WrapBlockArgsForMesh(mesh_name, return_op, value_to_return_indices,
+                           builder);
     }
   }
 };

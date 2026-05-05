@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -182,6 +183,31 @@ std::optional<int> MergeCallCounters(FragmentOp producer_op,
   return std::nullopt;
 }
 
+std::optional<ArrayAttr> MergeInferredByAttributes(FragmentOp producer_op,
+                                                   FragmentOp consumer_op) {
+  ArrayAttr producer_inferred_by =
+      producer_op->getAttrOfType<ArrayAttr>(kInferredByAttr);
+  ArrayAttr consumer_inferred_by =
+      consumer_op->getAttrOfType<ArrayAttr>(kInferredByAttr);
+
+  if (!producer_inferred_by && !consumer_inferred_by) {
+    return std::nullopt;
+  }
+
+  llvm::SetVector<Attribute> combined_inferred_by;
+  if (producer_inferred_by) {
+    combined_inferred_by.insert(producer_inferred_by.begin(),
+                                producer_inferred_by.end());
+  }
+  if (consumer_inferred_by) {
+    combined_inferred_by.insert(consumer_inferred_by.begin(),
+                                consumer_inferred_by.end());
+  }
+
+  IRRewriter rewriter(producer_op.getContext());
+  return rewriter.getArrayAttr(combined_inferred_by.takeVector());
+}
+
 // Returns a list of attributes that must be preserved in the merged fragment.
 // Note: origins are preserved by default and require no extra work.
 SmallVector<std::pair<StringRef, Attribute>> MergedAttributes(
@@ -194,6 +220,12 @@ SmallVector<std::pair<StringRef, Attribute>> MergedAttributes(
     attributes.emplace_back(kCallCounterAttrName,
                             rewriter.getUI32IntegerAttr(*merged_call_count));
   }
+
+  if (std::optional<ArrayAttr> merged_inferred_by =
+          MergeInferredByAttributes(producer_op, consumer_op)) {
+    attributes.emplace_back(kInferredByAttr, *merged_inferred_by);
+  }
+
   return attributes;
 }
 
