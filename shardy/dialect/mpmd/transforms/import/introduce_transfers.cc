@@ -200,7 +200,8 @@ class PushAssignBackwardThroughAdd : public OpRewritePattern<AssignOp> {
     if (failed(IsAddOfUnassigns(meshless_add, assign, rewriter))) {
       return failure();
     }
-    WrapOpWithFragment(meshless_add, assign.getType().getMeshName(), rewriter);
+    WrapOpWithFragment(meshless_add, assign.getType().getMeshName(), rewriter,
+                       "introduce_transfers");
     return success();
   }
 };

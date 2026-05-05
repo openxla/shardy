@@ -422,6 +422,22 @@ def RemoveTransferCyclesPass :
   }];
 }
 
+def WrapBlockArgReturnsPass :
+    PassBase<"mpmd-wrap-block-arg-returns", "DistributedFunctionPass"> {
+  let summary = "Wraps block arguments that are directly returned by the "
+                "function in identity fragments.";
+  let description = [{
+    If a function directly returns a block argument, this pass creates an
+    identity fragment for that block argument, ensuring that sharding
+    constraints can be applied to an op result rather than a block argument.
+
+    This guarantees that values are passed by value to the function, not by
+    reference.
+  }];
+
+  let dependentDialects = ["mlir::mpmd::MpmdDialect"];
+}
+
 // TODO(jupvfranco): we should create these copies using ifrt_ir reshard. We are
 // not ready for that yet as we need better support for donation in the
 // presence of reshards.
