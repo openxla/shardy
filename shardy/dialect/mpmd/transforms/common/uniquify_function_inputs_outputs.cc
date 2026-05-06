@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -30,7 +31,6 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/dialect.h"
-#include "mlir/IR/MLIRContext.h"
 
 namespace mlir::mpmd {
 
@@ -74,6 +74,7 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
       builder, loc, fragment_return_types, fragment_operands,
       /*user_origin=*/ArrayAttr::get(builder.getContext(), {}),
       /*mesh_name=*/mesh_name, /*stage_id=*/IntegerAttr());
+  SetInferredByAttr(fragment_op, "uniquify", builder);
   Block& fragment_block = fragment_op.getRegion().emplaceBlock();
 
   SmallVector<Value> returned_values;
@@ -88,8 +89,7 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
     returned_values.insert(
         returned_values.end(), return_indices.size(),
         fragment_block.addArgument(
-            GetGlobalTensorTypeFromMeshType(value, mesh_attr),
-            value.getLoc()));
+            GetGlobalTensorTypeFromMeshType(value, mesh_attr), value.getLoc()));
 
     for (int64_t index : return_indices) {
       return_op->setOperand(index,

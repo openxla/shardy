@@ -29,6 +29,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -400,7 +401,7 @@ FragmentOp CreateReduceFragment(ArrayRef<Value> mesh_tensors,
                                 StringRef mesh_name,
                                 ReductionType reduction_type,
                                 RewriterBase& rewriter) {
-  return FragmentOp::createMeshFragmentWithGlobalBody(
+  FragmentOp fragment_op = FragmentOp::createMeshFragmentWithGlobalBody(
       mesh_tensors.front().getLoc(), /*user_origin=*/{}, mesh_name,
       mesh_tensors, mesh_tensors.front().getType(), rewriter,
       [reduction_type](ArrayRef<Value> args, OpBuilder& block_builder) {
@@ -413,6 +414,8 @@ FragmentOp CreateReduceFragment(ArrayRef<Value> mesh_tensors,
         }
         return SmallVector<Value>({accumulator});
       });
+  SetInferredByAttr(fragment_op, "infer_mesh_convert_reduce_ops", rewriter);
+  return fragment_op;
 }
 
 // This pattern lowers mpmd.reduce to reductions and transfers.
@@ -1422,8 +1425,9 @@ class InferMeshAssignMeshForFuncLeavesPass
     if (MeshesWithOrigins src_set = GetSrcSet(op)) {
       if (src_set.empty()) {
         if (!inferTransfers) {
-          op->emitError("src_set must not be empty for this op. Try setting "
-                        "`mpmd_infer_transfers` in the partitioning options.");
+          op->emitError(
+              "src_set must not be empty for this op. Try setting "
+              "`mpmd_infer_transfers` in the partitioning options.");
           // In this case, we have to stop here, or otherwise we would crash
           // below.
           return signalPassFailure();
@@ -1491,7 +1495,8 @@ class InferMeshAssignMeshForFuncLeavesPass
       return IsMeshBeforeOtherMesh(a, b);
     });
     for (StringRef mesh_name : mesh_names) {
-      WrapOpWithFragment(op, mesh_name, rewriter);
+      WrapOpWithFragment(op, mesh_name, rewriter,
+                         "assign_mesh_for_func_leaves");
       if (isPure(op)) {
         // For pure ops, we only need to wrap it in a fragment once. But for
         // non-pure ops, we need to keep them associated with each src.
@@ -2281,7 +2286,7 @@ void WrapBasedOnAssignUsers(Operation* op, RewriterBase& rewriter) {
   });
   for (StringRef mesh_name : user_mesh_types_vec) {
     WrapOpWithFragment(
-        op, mesh_name, rewriter,
+        op, mesh_name, rewriter, "rewrite_using_analysis",
         /*should_replace_use=*/[&mesh_name](OpOperand& use) {
           if (auto assign_user = dyn_cast<AssignOp>(use.getOwner())) {
             return assign_user.getType().getMeshName() == mesh_name;
@@ -2313,8 +2318,8 @@ void AssignOpBasedOnConsumers(Operation* op, const int max_clones,
     // Non-tensor results (e.g., tokens) bypass AssignOp, so their users
     // will not be AssignOps. Skip them.
     if (!assign_op) {
-      SDY_CHECK(llvm::none_of(op->getResultTypes(),
-                               llvm::IsaPred<RankedTensorType>));
+      SDY_CHECK(
+          llvm::none_of(op->getResultTypes(), llvm::IsaPred<RankedTensorType>));
       continue;
     }
     for (Operation* assign_user : assign_op->getUsers()) {

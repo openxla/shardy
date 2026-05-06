@@ -497,3 +497,32 @@ func.func @call_counter_removed_if_both_inferred(%arg0: !mesh_1_tensor_4_8_f32)
 
   func.return %1 : !mesh_1_tensor_4_8_f32
 }
+
+// -----
+
+// CHECK-LABEL: func @merge_inferred_by
+func.func @merge_inferred_by(%arg0: !mesh_1_tensor_4_8_f32)
+  -> (!mesh_1_tensor_4_8_f32) attributes {
+    "topology"=#mpmd.topology<
+      <"m1": <["x"=2]>>
+    >} {
+  // CHECK-NEXT: %[[MERGED:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["pass1", "pass2"]}
+  // CHECK-NEXT:   stablehlo.add
+  // CHECK-NEXT:   stablehlo.multiply
+  // CHECK-NEXT:   mpmd.return
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[MERGED]]
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["pass1"]}
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  %1 = mpmd.fragment<mesh="m1", origin=[]> (%0) {mpmd.inferred_by = ["pass2"]}
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.multiply %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  func.return %1 : !mesh_1_tensor_4_8_f32
+}

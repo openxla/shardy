@@ -152,9 +152,9 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
     //   %t = transfer (%r) : (<M, D'>) -> <M', D'>
     OpOperand& operand = transfer->getOpOperand(0);
     Value value = operand.get();
-    MeshTensorType new_operand_type = MeshTensorType::get(
-        rewriter.getContext(), src_mesh_type.getMeshName(),
-        dst_mesh_type.getRankedTensorType());
+    MeshTensorType new_operand_type =
+        MeshTensorType::get(rewriter.getContext(), src_mesh_type.getMeshName(),
+                            dst_mesh_type.getRankedTensorType());
     if (isa<BlockArgument>(value) || isa<TransferOp>(value.getDefiningOp())) {
       // We do not want to update the type of the block argument, not to
       // interfere with the function signature (and its shardings).
@@ -162,6 +162,7 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
       FragmentOp reshard = FragmentOp::createMeshFragmentWithGlobalBody(
           value.getLoc(), /*user_origin=*/{}, src_mesh_type.getMeshName(),
           value, new_operand_type, rewriter, reshard_body);
+      SetInferredByAttr(reshard, "extract_reshards", rewriter);
       reshard.setUserSpecifiedResultSharding(0, dst_sharding_or_null);
       operand.set(reshard.getResult(0));
       return;
@@ -177,6 +178,7 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
       FragmentOp reshard = FragmentOp::createMeshFragmentWithGlobalBody(
           value.getLoc(), /*user_origin=*/{}, new_operand_type.getMeshName(),
           value, value.getType(), rewriter, reshard_body);
+      SetInferredByAttr(reshard, "extract_reshards", rewriter);
       reshard.setUserSpecifiedResultSharding(0, src_sharding_or_null);
       rewriter.replaceUsesWithIf(
           value, reshard.getResult(0), [transfer](OpOperand& use) {
@@ -231,6 +233,7 @@ void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
         MeshTensorType::get(rewriter.getContext(), dst_mesh_type.getMeshName(),
                             dst_mesh_type.getRankedTensorType()),
         rewriter, reshard_body);
+    SetInferredByAttr(reshard, "extract_reshards", rewriter);
     reshard.setUserSpecifiedResultSharding(0, dst_sharding_or_null);
     rewriter.replaceUsesWithIf(
         new_transfer.getResult(), reshard.getResult(0), [](OpOperand& use) {
