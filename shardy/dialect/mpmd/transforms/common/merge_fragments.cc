@@ -243,10 +243,9 @@ FailureOr<FragmentOp> MergeFragmentBasePass::GetMergeCandidate(
       sorted_fragment_users.push_back(fragment);
     }
   }
-  std::stable_sort(sorted_fragment_users.begin(), sorted_fragment_users.end(),
-                   [&](FragmentOp a, FragmentOp b) {
-                     return FastIsBeforeInBlock(a, b, order);
-                   });
+  llvm::stable_sort(sorted_fragment_users, [&](FragmentOp a, FragmentOp b) {
+    return FastIsBeforeInBlock(a, b, order);
+  });
 
   if (sorted_fragment_users.empty()) {
     return mergeFailure("Fragment is not used by any other fragment.");

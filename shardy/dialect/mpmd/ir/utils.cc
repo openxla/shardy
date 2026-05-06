@@ -471,8 +471,8 @@ std::vector<int64_t> GetTransposeCounts(FragmentOp fragment) {
 std::optional<int64_t> TryToFindSingleTransposeCount(FragmentOp fragment) {
   std::vector<int64_t> transpose_counts = GetTransposeCounts(fragment);
   if (!transpose_counts.empty() &&
-      std::adjacent_find(transpose_counts.begin(), transpose_counts.end(),
-                         std::not_equal_to<>()) == transpose_counts.end()) {
+      llvm::adjacent_find(transpose_counts, std::not_equal_to<>()) ==
+          transpose_counts.end()) {
     return transpose_counts.front();
   }
   return std::nullopt;
@@ -481,7 +481,7 @@ std::optional<int64_t> TryToFindSingleTransposeCount(FragmentOp fragment) {
 std::optional<int64_t> TryToFindMaxTransposeCount(FragmentOp fragment) {
   std::vector<int64_t> transpose_counts = GetTransposeCounts(fragment);
   if (!transpose_counts.empty()) {
-    return *std::max_element(transpose_counts.begin(), transpose_counts.end());
+    return *llvm::max_element(transpose_counts);
   }
   return std::nullopt;
 }

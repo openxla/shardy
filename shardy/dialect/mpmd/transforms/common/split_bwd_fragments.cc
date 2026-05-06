@@ -243,8 +243,8 @@ void PullResultsOutOf(IRRewriter& rewriter, FragmentOp fragment,
       transfer_fragment_types.push_back(result.getType());
     }
   }
-  std::transform(residuals.begin(), residuals.end(),
-                 std::back_inserter(transfer_fragment_types), make_mesh_type);
+  llvm::transform(residuals, std::back_inserter(transfer_fragment_types),
+                  make_mesh_type);
 
   // 1.2 Create the fragment.
   rewriter.setInsertionPointAfter(fragment);
