@@ -54,6 +54,10 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
     return it.second.empty();
   });
 
+  if (value_to_return_indices.empty()) {
+    return;
+  }
+
   builder.setInsertionPoint(return_op);
   SmallVector<Value> fragment_operands;
   fragment_operands.reserve(value_to_return_indices.size());
@@ -63,10 +67,6 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
     fragment_return_types.insert(fragment_return_types.end(),
                                  return_indices.size(),
                                  cast<MeshTensorType>(value.getType()));
-  }
-
-  if (fragment_operands.empty()) {
-    return;
   }
 
   auto loc = return_op->getLoc();
