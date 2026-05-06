@@ -1040,8 +1040,8 @@ StringAttr FindMemoryKindInAttributes(Value value, FuncOp func) {
 }  // namespace
 
 LogicalResult TransferOp::verify() {
-  auto mesh_type_in = cast<MeshTensorType>(getTensor().getType());
-  auto mesh_type_out = cast<MeshTensorType>(getResult().getType());
+  auto mesh_type_in = getTensor().getType();
+  auto mesh_type_out = getResult().getType();
 
   if (mesh_type_in.verifyForTopology(getOperation()).failed() ||
       mesh_type_out.verifyForTopology(getOperation()).failed()) {
@@ -1145,7 +1145,7 @@ LogicalResult VerifyAssignmentOpTypes(Operation* op,
 
 LogicalResult AssignOp::verify() {
   auto local_type_in = cast<RankedTensorType>(getTensor().getType());
-  auto mesh_type_out = cast<MeshTensorType>(getResult().getType());
+  auto mesh_type_out = getResult().getType();
 
   return VerifyAssignmentOpTypes(getOperation(), local_type_in, mesh_type_out);
 }
@@ -1155,7 +1155,7 @@ LogicalResult AssignOp::verify() {
 //===----------------------------------------------------------------------===//
 
 LogicalResult UnassignOp::verify() {
-  auto mesh_type_in = cast<MeshTensorType>(getTensor().getType());
+  auto mesh_type_in = getTensor().getType();
   auto local_type_out = cast<RankedTensorType>(getResult().getType());
 
   return VerifyAssignmentOpTypes(getOperation(), local_type_out, mesh_type_in);

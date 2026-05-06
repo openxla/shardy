@@ -91,9 +91,8 @@ bool ReshardAtProducerSite(MeshTensorType src_mesh_type,
 
 void HandleTransfer(TransferOp transfer, RewriterBase& rewriter,
                     sdy::MeshAttr mesh) {
-  auto src_mesh_type =
-      cast<mpmd::MeshTensorType>(transfer.getTensor().getType());
-  auto dst_mesh_type = cast<mpmd::MeshTensorType>(transfer.getType());
+  auto src_mesh_type = transfer.getTensor().getType();
+  auto dst_mesh_type = transfer.getType();
 
   // TODO: jupvfranco - We need a better way to handle resharding on host.
   if (src_mesh_type.isOnHost() && dst_mesh_type.isOnHost()) {
