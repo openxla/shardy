@@ -1,5 +1,9 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,CHECK-AR-DS
-// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true' | FileCheck %s --check-prefixes=CHECK,CHECK-COMBINED
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,AR-DS,V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true' | FileCheck %s --check-prefixes=CHECK,COMBINED,V1
+
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,AR-DS,V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true enable-rgv3=true'
+//| FileCheck %s --check-prefixes=CHECK,COMBINED,V3
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
@@ -12,7 +16,8 @@ func.func @one_dim_not_sharded(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shard
     -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {"x"}]>}) {
   // CHECK: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[ARG0]])
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#sdy<axis_ref"x">]>
   // CHECK-SAME: scatter_dimension = 1 : i64
   // CHECK-SAME: use_global_device_ids
   // CHECK: (%arg1: tensor<f32>, %arg2: tensor<f32>):
@@ -31,7 +36,8 @@ func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.shardin
   -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y":(2)2}, {}]>}) {
   // CHECK: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[ARG0]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7]]> : tensor<4x2xi64>
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#sdy<axis_ref"y":(2)2>]>
   // CHECK-SAME: scatter_dimension = 0 : i64
   // CHECK-SAME: use_global_device_ids
   // CHECK-SAME: }> ({
@@ -50,49 +56,51 @@ func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.shardin
 func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {}]>})
   -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {"x"}]>}) {
   // --- Use All-Reduce and Dynamic Slice (combine-multi-dimension-reduce-scatter=false) ---
-  // CHECK-AR-DS-NEXT: %[[ALL_REDUCE:.*]] = "stablehlo.all_reduce"(%[[ARG0]]) <{
-  // CHECK-AR-DS-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>
-  // CHECK-AR-DS-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]> : tensor<2x8xi64>
-  // CHECK-AR-DS-SAME: use_global_device_ids
-  // CHECK-AR-DS-SAME: }> ({
-  // CHECK-AR-DS-NEXT: ^bb0(%[[RS_ARG1:.*]]: tensor<f32>, %[[RS_ARG2:.*]]: tensor<f32>):
-  // CHECK-AR-DS-NEXT:   %[[ADD:.*]] = stablehlo.add %[[RS_ARG1]], %[[RS_ARG2]] : tensor<f32>
-  // CHECK-AR-DS-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
-  // CHECK-AR-DS: }) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // AR-DS-NEXT: %[[ALL_REDUCE:.*]] = "stablehlo.all_reduce"(%[[ARG0]]) <{
+  // AR-DS-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>
+  // AR-DS-V1-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]>
+  // AR-DS-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#sdy<axis_ref"y":(2)2>, #sdy<axis_ref"z">
+  // AR-DS-SAME: use_global_device_ids
+  // AR-DS-SAME: }> ({
+  // AR-DS-NEXT: ^bb0(%[[RS_ARG1:.*]]: tensor<f32>, %[[RS_ARG2:.*]]: tensor<f32>):
+  // AR-DS-NEXT:   %[[ADD:.*]] = stablehlo.add %[[RS_ARG1]], %[[RS_ARG2]] : tensor<f32>
+  // AR-DS-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // AR-DS: }) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   //
-  // CHECK-AR-DS: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-AR-DS: %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
+  // AR-DS: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // AR-DS: %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
   //
-  // CHECK-AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 4, 6, 4, 6, 0, 2, 0, 2, 4, 6, 4, 6]> : tensor<16xi64>
-  // CHECK-AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID_I64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
-  // CHECK-AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi64>) -> tensor<i64>
+  // AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 4, 6, 4, 6, 0, 2, 0, 2, 4, 6, 4, 6]> : tensor<16xi64>
+  // AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID_I64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
+  // AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi64>) -> tensor<i64>
   //
-  // CHECK-AR-DS: %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-AR-DS: %[[PID_I64_1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
+  // AR-DS: %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
+  // AR-DS: %[[PID_I64_1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
   //
-  // CHECK-AR-DS: %[[TABLE1:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4]> : tensor<16xi64>
-  // CHECK-AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID_I64_1]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
-  // CHECK-AR-DS: %[[IDX1:.*]] = stablehlo.reshape %[[OFF1]] : (tensor<1xi64>) -> tensor<i64>
+  // AR-DS: %[[TABLE1:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4]> : tensor<16xi64>
+  // AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID_I64_1]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
+  // AR-DS: %[[IDX1:.*]] = stablehlo.reshape %[[OFF1]] : (tensor<1xi64>) -> tensor<i64>
   //
-  // CHECK-AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i64>, tensor<i64>) -> tensor<2x4xf32>
+  // AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i64>, tensor<i64>) -> tensor<2x4xf32>
 
   // --- Combine Multi-Dimension Reduce Scatter (combine-multi-dimension-reduce-scatter=true) ---
-  // CHECK-COMBINED-NEXT: %[[RESHAPE0:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<8x8xf32>) -> tensor<4x2x2x4xf32>
-  // CHECK-COMBINED-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[RESHAPE0]], dims = [0, 2, 1, 3] : (tensor<4x2x2x4xf32>) -> tensor<4x2x2x4xf32>
-  // CHECK-COMBINED-NEXT: %[[RESHAPE1:.*]] = stablehlo.reshape %[[TRANSPOSE]] : (tensor<4x2x2x4xf32>) -> tensor<8x2x4xf32>
+  // COMBINED-NEXT: %[[RESHAPE0:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<8x8xf32>) -> tensor<4x2x2x4xf32>
+  // COMBINED-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[RESHAPE0]], dims = [0, 2, 1, 3] : (tensor<4x2x2x4xf32>) -> tensor<4x2x2x4xf32>
+  // COMBINED-NEXT: %[[RESHAPE1:.*]] = stablehlo.reshape %[[TRANSPOSE]] : (tensor<4x2x2x4xf32>) -> tensor<8x2x4xf32>
   //
-  // CHECK-COMBINED-NEXT: %[[RS:.*]] = "stablehlo.reduce_scatter"(%[[RESHAPE1]]) <{
-  // CHECK-COMBINED-SAME:   channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
-  // CHECK-COMBINED-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]> : tensor<2x8xi64>,
-  // CHECK-COMBINED-SAME:   scatter_dimension = 0 : i64,
-  // CHECK-COMBINED-SAME:   use_global_device_ids
-  // CHECK-COMBINED-SAME: }> ({
-  // CHECK-COMBINED-NEXT: ^bb0(%[[RED_ARG1:.*]]: tensor<f32>, %[[RED_ARG2:.*]]: tensor<f32>):
-  // CHECK-COMBINED-NEXT:   %[[SUM:.*]] = stablehlo.add %[[RED_ARG1]], %[[RED_ARG2]] : tensor<f32>
-  // CHECK-COMBINED-NEXT:   stablehlo.return %[[SUM]] : tensor<f32>
-  // CHECK-COMBINED-NEXT: }) : (tensor<8x2x4xf32>) -> tensor<1x2x4xf32>
+  // COMBINED-NEXT: %[[RS:.*]] = "stablehlo.reduce_scatter"(%[[RESHAPE1]]) <{
+  // COMBINED-SAME:   channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
+  // COMBINED-V1-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]>
+  // COMBINED-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#sdy<axis_ref"y":(2)2>, #sdy<axis_ref"z">, #sdy<axis_ref"x">]>
+  // COMBINED-SAME:   scatter_dimension = 0 : i64,
+  // COMBINED-SAME:   use_global_device_ids
+  // COMBINED-SAME: }> ({
+  // COMBINED-NEXT: ^bb0(%[[RED_ARG1:.*]]: tensor<f32>, %[[RED_ARG2:.*]]: tensor<f32>):
+  // COMBINED-NEXT:   %[[SUM:.*]] = stablehlo.add %[[RED_ARG1]], %[[RED_ARG2]] : tensor<f32>
+  // COMBINED-NEXT:   stablehlo.return %[[SUM]] : tensor<f32>
+  // COMBINED-NEXT: }) : (tensor<8x2x4xf32>) -> tensor<1x2x4xf32>
   //
-  // CHECK-COMBINED-NEXT: %[[RESULT:.*]] = stablehlo.reshape %[[RS]] : (tensor<1x2x4xf32>) -> tensor<2x4xf32>
+  // COMBINED-NEXT: %[[RESULT:.*]] = stablehlo.reshape %[[RS]] : (tensor<1x2x4xf32>) -> tensor<2x4xf32>
   %0 = sdy.reduce_scatter [{"y":(2)2, "z"}, {"x"}] %arg0 out_sharding=<@mesh_2_4_2, [{"y", "z"}, {"x"}]> : tensor<16x8xf32>
   // CHECK: return %[[RESULT]] : tensor<2x4xf32>
   return %0 : tensor<16x8xf32>

@@ -1,4 +1,5 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,V3
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
@@ -13,7 +14,8 @@ func.func @one_param_move_suffix(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sh
   // CHECK: %[[RESULT:.*]] = "stablehlo.all_to_all"(%[[ARG0]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>
   // CHECK-SAME: concat_dimension = 0 : i64
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]]> : tensor<4x4xi64>
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#sdy<axis_ref"y">]>
   // CHECK-SAME: split_count = 4 : i64
   // CHECK-SAME: split_dimension = 1 : i64
   // CHECK-SAME: }> : (tensor<1x32xf32>) -> tensor<4x8xf32>
@@ -30,7 +32,8 @@ func.func @one_param_move_all_axes(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.
   // CHECK: %[[RESULT:.*]] = "stablehlo.all_to_all"(%[[ARG0]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>
   // CHECK-SAME: concat_dimension = 1 : i64
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14, 15]]> : tensor<2x8xi64>
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14, 15]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#sdy<axis_ref"y">, #sdy<axis_ref"z">]>
   // CHECK-SAME: split_count = 8 : i64
   // CHECK-SAME: split_dimension = 0 : i64
   // CHECK-SAME: }> : (tensor<8x2xf32>) -> tensor<1x16xf32>
@@ -50,7 +53,8 @@ func.func @two_params_move_suffix(%arg0: tensor<2x8x2x4xf32> {sdy.sharding = #sd
   // CHECK: %[[A2A:.*]] = "stablehlo.all_to_all"(%[[RESHAPE1]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
   // CHECK-SAME: concat_dimension = 0 : i64,
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 2, 1, 3], [4, 6, 5, 7], [8, 10, 9, 11], [12, 14, 13, 15]]> : tensor<4x4xi64>,
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 1, 3], [4, 6, 5, 7], [8, 10, 9, 11], [12, 14, 13, 15]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#sdy<axis_ref"z">, #sdy<axis_ref"y":(2)2>]>
   // CHECK-SAME: split_count = 4 : i64,
   // CHECK-SAME: split_dimension = 0 : i64
   // CHECK-SAME: }> : (tensor<4x1x2x1x2xf32>) -> tensor<4x1x2x1x2xf32>
@@ -73,7 +77,8 @@ func.func @two_params_move_all_axes(%arg0: tensor<4x2x4x2xf32> {sdy.sharding = #
   // CHECK: %[[A2A:.*]] = "stablehlo.all_to_all"(%[[RESHAPE1]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 4, type = 1>,
   // CHECK-SAME: concat_dimension = 0 : i64,
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4, 1, 5, 2, 6, 3, 7]]> : tensor<1x8xi64>,
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 4, 1, 5, 2, 6, 3, 7]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#sdy<axis_ref"y">, #sdy<axis_ref"x">]>
   // CHECK-SAME: split_count = 8 : i64,
   // CHECK-SAME: split_dimension = 0 : i64
   // CHECK-SAME: }> : (tensor<8x1x1x1x1xf32>) -> tensor<8x1x1x1x1xf32>

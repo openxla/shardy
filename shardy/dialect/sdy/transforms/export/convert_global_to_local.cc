@@ -320,16 +320,55 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
   return maxChannelId + 1;
 }
 
+// Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
+Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
+                             OpBuilder& rewriter) {
+  return mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
+      meshOrRef.getContext(), meshOrRef,
+      rewriter.getArrayAttr(llvm::map_to_vector(
+          axes, [](AxisRefAttr attr) -> Attribute { return attr; })));
+}
+
+Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
+                           Attribute meshOrRef, bool enableRGV3,
+                           OpBuilder& rewriter) {
+  return enableRGV3 ? getReplicaGroupsV3(axes, meshOrRef, rewriter)
+                    : getReplicaGroups(
+                          AxisRefListAttr::get(rewriter.getContext(), axes),
+                          mesh, rewriter);
+}
+
+// Returns a pair containing the replica groups (as an Attribute) and the
+// total number of devices in each group.
+std::pair<Attribute, int64_t> getReplicaGroupsAndSize(
+    ArrayRef<AxisRefAttr> axes, MeshAttr mesh, Attribute meshOrRef,
+    bool enableRGV3, OpBuilder& rewriter) {
+  if (enableRGV3) {
+    Attribute replicaGroups = getReplicaGroupsV3(axes, meshOrRef, rewriter);
+    // Group size is the product of the sizes of the sharding axes.
+    int64_t groupSize = getTotalAxesSize(axes, mesh);
+    return {replicaGroups, groupSize};
+  }
+
+  DenseIntElementsAttr replicaGroups = getReplicaGroups(
+      AxisRefListAttr::get(rewriter.getContext(), axes), mesh, rewriter);
+  // Group size is the last dimension of the 2D dense tensor.
+  int64_t groupSize = replicaGroups.getShapedType().getShape().back();
+  return {replicaGroups, groupSize};
+}
+
 class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
  public:
   AllGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                     ConversionState& state, bool perDimAllGather)
+                     ConversionState& state, bool perDimAllGather,
+                     bool enableRGV3)
       : OpConversionPattern<AllGatherOp>(converter, ctx),
         conversionState(state),
-        perDimAllGather(perDimAllGather) {}
+        perDimAllGather(perDimAllGather),
+        enableRGV3(enableRGV3) {}
 
   LogicalResult rewriteAllGatherCombiningDims(
-      AllGatherOp op, MeshAttr mesh, Value input,
+      AllGatherOp op, MeshAttr mesh, Attribute meshOrRef, Value input,
       ConversionPatternRewriter& rewriter) const {
     MLIRContext* ctx = op->getContext();
     auto localType = cast<RankedTensorType>(input.getType());
@@ -366,12 +405,13 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
         RankedTensorType::get(tmpShape, localType.getElementType()), input);
 
     // Perform All-Gather on dim 0.
-    DenseIntElementsAttr replicaGroups = getReplicaGroups(
-        AxisRefListAttr::get(ctx, allGatheringAxes), mesh, rewriter);
+    Attribute replicaGroups;
+    std::tie(replicaGroups, tmpShape[0]) = getReplicaGroupsAndSize(
+        allGatheringAxes, mesh, meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         ctx, /*handle=*/conversionState.getNextChannelId(), kChannelHandleType);
     // Change tmpShape to represent the result of the All-Gather.
-    tmpShape[0] = replicaGroups.getShapedType().getShape().back();
+
     auto allGather = stablehlo::AllGatherOp::create(
         rewriter, op.getLoc(),
         TypeRange{RankedTensorType::get(tmpShape, localType.getElementType())},
@@ -418,7 +458,7 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
   }
 
   LogicalResult rewriteAllGatherPerDim(
-      AllGatherOp op, MeshAttr mesh, Value input,
+      AllGatherOp op, MeshAttr mesh, Attribute meshOrRef, Value input,
       ConversionPatternRewriter& rewriter) const {
     Value curInput = input;
     ::llvm::ArrayRef<AxisRefListAttr> gatheringAxes = op.getGatheringAxes();
@@ -430,10 +470,10 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
 
       auto inputType = cast<RankedTensorType>(curInput.getType());
       SmallVector<int64_t> curShape = llvm::to_vector(inputType.getShape());
-      DenseIntElementsAttr replicaGroups =
-          getReplicaGroups(axisList, mesh, rewriter);
-
-      int64_t groupSize = replicaGroups.getShapedType().getShape().back();
+      Attribute replicaGroups;
+      int64_t groupSize;
+      std::tie(replicaGroups, groupSize) = getReplicaGroupsAndSize(
+          axisList.getValue(), mesh, meshOrRef, enableRGV3, rewriter);
       if (curShape[dim] != ShapedType::kDynamic) {
         curShape[dim] *= groupSize;
       }
@@ -468,29 +508,33 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
            "canonicalization.";
 
     MeshAttr mesh = op.getOutSharding().getMesh(op);
+    Attribute meshOrRef = op.getOutSharding().getMeshOrRef();
     if (!mesh) {
       return op.emitOpError("failed to resolve mesh");
     }
 
     if (perDimAllGather || numGatheringDims == 1) {
-      return rewriteAllGatherPerDim(op, mesh, adaptor.getTensor(), rewriter);
+      return rewriteAllGatherPerDim(op, mesh, meshOrRef, adaptor.getTensor(),
+                                    rewriter);
     }
 
-    return rewriteAllGatherCombiningDims(op, mesh, adaptor.getTensor(),
-                                         rewriter);
+    return rewriteAllGatherCombiningDims(op, mesh, meshOrRef,
+                                         adaptor.getTensor(), rewriter);
   }
 
  private:
   ConversionState& conversionState;
   bool perDimAllGather;
+  bool enableRGV3;
 };
 
 class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
  public:
   AllReduceOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                     ConversionState& state)
+                     ConversionState& state, bool enableRGV3)
       : OpConversionPattern<sdy::AllReduceOp>(converter, ctx),
-        conversionState(state) {}
+        conversionState(state),
+        enableRGV3(enableRGV3) {}
 
   LogicalResult matchAndRewrite(
       sdy::AllReduceOp op, OpAdaptor adaptor,
@@ -505,8 +549,9 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
       return op.emitOpError("failed to resolve mesh");
     }
 
-    DenseIntElementsAttr replicaGroups =
-        getReplicaGroups(op.getReductionAxesAttr(), mesh, rewriter);
+    Attribute replicaGroups =
+        getReplicaGroups(op.getReductionAxesAttr(), mesh,
+                         outSharding.getMeshOrRef(), enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
         kChannelHandleType);
@@ -527,6 +572,7 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
 
  private:
   ConversionState& conversionState;
+  bool enableRGV3;
 };
 
 // Returns the logical index of the shard that the given device (`deviceId`)
@@ -671,23 +717,23 @@ class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
 class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
  public:
   AllToAllOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                    ConversionState& state)
+                    ConversionState& state, bool enableRGV3)
       : OpConversionPattern<AllToAllOp>(converter, ctx),
-        conversionState(state) {}
+        conversionState(state),
+        enableRGV3(enableRGV3) {}
 
   LogicalResult rewriteAllToAllOneParam(
-      AllToAllOp op, MeshAttr mesh, Value input,
+      AllToAllOp op, MeshAttr mesh, Attribute meshOrRef, Value input,
       ConversionPatternRewriter& rewriter) const {
     AllToAllParamAttr param = op.getParams()[0];
     auto axisList = AxisRefListAttr::get(op->getContext(), param.getAxes());
     if (axisList.empty()) {
       return op.emitOpError("failed to resolve axes");
     }
-
-    DenseIntElementsAttr replicaGroups =
-        getReplicaGroups(axisList, mesh, rewriter);
-    int64_t numDevicesPerGroup =
-        replicaGroups.getShapedType().getShape().back();
+    Attribute replicaGroups;
+    int64_t numDevicesPerGroup;
+    std::tie(replicaGroups, numDevicesPerGroup) = getReplicaGroupsAndSize(
+        axisList, mesh, meshOrRef, enableRGV3, rewriter);
     auto inputType = cast<RankedTensorType>(input.getType());
     SmallVector<int64_t> resultShape = llvm::to_vector(inputType.getShape());
     int64_t srcDim = param.getSrcDim();
@@ -721,7 +767,7 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
   }
 
   LogicalResult rewriteAllToAllMultipleParams(
-      AllToAllOp op, MeshAttr mesh, Value input,
+      AllToAllOp op, MeshAttr mesh, Attribute meshOrRef, Value input,
       ConversionPatternRewriter& rewriter) const {
     Location loc = op.getLoc();
     auto inputType = cast<RankedTensorType>(input.getType());
@@ -790,10 +836,10 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
         stablehlo::TransposeOp::create(rewriter, loc, reshape0, permutation0);
     SmallVector<int64_t> transpose0Shape = llvm::to_vector(
         cast<RankedTensorType>(transpose0.getType()).getShape());
-    DenseIntElementsAttr replicaGroups = getReplicaGroups(
-        AxisRefListAttr::get(rewriter.getContext(), allAxes), mesh, rewriter);
-    int64_t numDevicesPerGroup =
-        replicaGroups.getShapedType().getShape().back();
+    Attribute replicaGroups;
+    int64_t numDevicesPerGroup;
+    std::tie(replicaGroups, numDevicesPerGroup) =
+        getReplicaGroupsAndSize(allAxes, mesh, meshOrRef, enableRGV3, rewriter);
     // The size of dim 0 that contains all the splitted factors, which is the
     // the same as the number of devices in each replica group.
     SmallVector<int64_t> shape1 = {numDevicesPerGroup};
@@ -859,17 +905,19 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
     if (!mesh) {
       return op.emitOpError("failed to resolve mesh");
     }
-
+    Attribute meshOrRef = op.getOutSharding().getMeshOrRef();
     SDY_CHECK(!op.getParams().empty());
     if (op.getParams().size() == 1) {
-      return rewriteAllToAllOneParam(op, mesh, adaptor.getTensor(), rewriter);
+      return rewriteAllToAllOneParam(op, mesh, meshOrRef, adaptor.getTensor(),
+                                     rewriter);
     }
-    return rewriteAllToAllMultipleParams(op, mesh, adaptor.getTensor(),
-                                         rewriter);
+    return rewriteAllToAllMultipleParams(op, mesh, meshOrRef,
+                                         adaptor.getTensor(), rewriter);
   }
 
  private:
   ConversionState& conversionState;
+  bool enableRGV3;
 };
 
 class CollectivePermuteOpPattern
@@ -1079,15 +1127,17 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
  public:
   ReduceScatterOpPattern(TypeConverter& converter, MLIRContext* ctx,
                          ConversionState& state,
-                         bool combineMultiDimensionReduceScatter)
+                         bool combineMultiDimensionReduceScatter,
+                         bool enableRGV3)
       : OpConversionPattern<ReduceScatterOp>(converter, ctx),
         conversionState(state),
-        combineMultiDimensionReduceScatter(combineMultiDimensionReduceScatter) {
-  }
+        combineMultiDimensionReduceScatter(combineMultiDimensionReduceScatter),
+        enableRGV3(enableRGV3) {}
 
   LogicalResult rewriteReduceScatterOneDim(
       ReduceScatterOp op, Value input, int64_t scatterDim, AxisRefListAttr axes,
-      MeshAttr mesh, ConversionPatternRewriter& rewriter) const {
+      MeshAttr mesh, Attribute meshOrRef,
+      ConversionPatternRewriter& rewriter) const {
     Location loc = op.getLoc();
     auto inputType = cast<RankedTensorType>(input.getType());
     const auto* converter =
@@ -1097,8 +1147,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
         kChannelHandleType);
-    DenseIntElementsAttr replicaGroups = getReplicaGroups(axes, mesh, rewriter);
-
+    Attribute replicaGroups =
+        getReplicaGroups(axes, mesh, meshOrRef, enableRGV3, rewriter);
     auto reduceScatter = stablehlo::ReduceScatterOp::create(
         rewriter, loc, localResultType, input, scatterDim, replicaGroups,
         channelHandle, /*use_global_device_ids=*/true);
@@ -1111,7 +1161,7 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
   }
 
   LogicalResult rewriteReduceScatterCombiningMultipleDims(
-      ReduceScatterOp op, Value input, MeshAttr mesh,
+      ReduceScatterOp op, Value input, MeshAttr mesh, Attribute meshOrRef,
       ArrayRef<AxisRefListAttr> slicingAxesPerDim,
       ArrayRef<AxisRefAttr> allReduceAxes,
       ConversionPatternRewriter& rewriter) const {
@@ -1180,9 +1230,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
         curInput);
 
     // Perform one stablehlo.reduce_scatter on dimension 0.
-    DenseIntElementsAttr replicaGroups = getReplicaGroups(
-        AxisRefListAttr::get(rewriter.getContext(), allReduceAxes), mesh,
-        rewriter);
+    Attribute replicaGroups =
+        getReplicaGroups(allReduceAxes, mesh, meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
         kChannelHandleType);
@@ -1208,7 +1257,7 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
   }
 
   LogicalResult rewriteReduceScatterWithAllReduceAndDynamicSlice(
-      ReduceScatterOp op, Value input, MeshAttr mesh,
+      ReduceScatterOp op, Value input, MeshAttr mesh, Attribute meshOrRef,
       ArrayRef<AxisRefListAttr> slicingAxesPerDim,
       ArrayRef<AxisRefAttr> allReduceAxes,
       ConversionPatternRewriter& rewriter) const {
@@ -1222,9 +1271,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
         kChannelHandleType);
-    DenseIntElementsAttr replicaGroups = getReplicaGroups(
-        AxisRefListAttr::get(rewriter.getContext(), allReduceAxes), mesh,
-        rewriter);
+    Attribute replicaGroups =
+        getReplicaGroups(allReduceAxes, mesh, meshOrRef, enableRGV3, rewriter);
 
     auto allReduce = stablehlo::AllReduceOp::create(
         rewriter, loc, inputType, input, replicaGroups, channelHandle,
@@ -1248,7 +1296,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto* converter =
         static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
     const SymbolTable& symbolTable = converter->getSymbolTable();
-    MeshAttr mesh = converter->getSharding(op.getTensor()).getMesh(symbolTable);
+    TensorShardingAttr sharding = converter->getSharding(op.getTensor());
+    MeshAttr mesh = sharding.getMesh(symbolTable);
     if (!mesh) {
       return op.emitOpError("failed to resolve mesh");
     }
@@ -1273,21 +1322,22 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
       return rewriteReduceScatterOneDim(
           op, adaptor.getTensor(), lastSlicingDim,
           cast<AxisRefListAttr>(op.getReduceScatterAxes()[lastSlicingDim]),
-          mesh, rewriter);
+          mesh, sharding.getMeshOrRef(), rewriter);
     }
     if (combineMultiDimensionReduceScatter) {
       return rewriteReduceScatterCombiningMultipleDims(
-          op, adaptor.getTensor(), mesh, op.getReduceScatterAxesAttr(),
-          allReduceAxes, rewriter);
+          op, adaptor.getTensor(), mesh, sharding.getMeshOrRef(),
+          op.getReduceScatterAxesAttr(), allReduceAxes, rewriter);
     }
     return rewriteReduceScatterWithAllReduceAndDynamicSlice(
-        op, adaptor.getTensor(), mesh, op.getReduceScatterAxesAttr(),
-        allReduceAxes, rewriter);
+        op, adaptor.getTensor(), mesh, sharding.getMeshOrRef(),
+        op.getReduceScatterAxesAttr(), allReduceAxes, rewriter);
   }
 
  private:
   ConversionState& conversionState;
   bool combineMultiDimensionReduceScatter;
+  bool enableRGV3;
 };
 
 class NamedComputationOpPattern
@@ -2691,9 +2741,8 @@ struct ConvertGlobalToLocalPass
         patterns, typeConverter);
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
-    patterns.add<AllReduceOpPattern, AllSliceOpPattern, AllToAllOpPattern,
-                 CollectivePermuteOpPattern, ConstantOpPattern,
-                 FuncOpSignaturePattern, GenericOpPattern,
+    patterns.add<AllSliceOpPattern, CollectivePermuteOpPattern,
+                 ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
                  ManualComputationOpPattern, NamedComputationOpPattern,
                  ReturnOpPattern, StablehloConcatenateOpPattern,
                  StablehloConvolutionOpPattern, StablehloDotGeneralOpPattern,
@@ -2701,11 +2750,14 @@ struct ConvertGlobalToLocalPass
                  StablehloIotaOpPattern, StablehloPadOpPattern,
                  StablehloScatterOpPattern, StablehloSliceOpPattern>(
         typeConverter, &getContext(), conversionState);
+    patterns.add<AllReduceOpPattern, AllToAllOpPattern>(
+        typeConverter, &getContext(), conversionState, enableRGV3);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
-                                     conversionState, perDimAllGather);
-    patterns.add<ReduceScatterOpPattern>(typeConverter, &getContext(),
-                                         conversionState,
-                                         combineMultiDimensionReduceScatter);
+                                     conversionState, perDimAllGather,
+                                     enableRGV3);
+    patterns.add<ReduceScatterOpPattern>(
+        typeConverter, &getContext(), conversionState,
+        combineMultiDimensionReduceScatter, enableRGV3);
 
     ConversionTarget target(getContext());
     target.addDynamicallyLegalOp<func::FuncOp>(
