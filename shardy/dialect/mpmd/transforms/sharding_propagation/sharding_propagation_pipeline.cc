@@ -19,6 +19,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"
 #include "shardy/dialect/mpmd/transforms/sharding_propagation/passes.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/propagation/passes.h"
 #include "stablehlo/transforms/optimization/Passes.h"
 

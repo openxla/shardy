@@ -51,6 +51,7 @@ cc_library(
         "//shardy/dialect/mpmd/transforms/common:simplify_region_op_base",
         "//shardy/dialect/mpmd/transforms/common:utils",
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:propagation_options",
         "//shardy/dialect/sdy/transforms/export:explicit_reshards_util",
         "//shardy/dialect/sdy/transforms/propagation:passes",
         "//shardy/dialect/sdy/transforms/propagation:utils",

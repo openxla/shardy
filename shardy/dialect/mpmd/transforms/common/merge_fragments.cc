@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "shardy/dialect/mpmd/transforms/common/merge_fragments.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <optional>

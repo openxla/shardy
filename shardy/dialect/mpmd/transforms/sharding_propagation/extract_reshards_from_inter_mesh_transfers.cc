@@ -32,7 +32,6 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/sharding_propagation/utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
-#include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir::mpmd {

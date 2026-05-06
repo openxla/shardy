@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "shardy/dialect/mpmd/ir/utils.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
