@@ -103,7 +103,7 @@ class DelayTransfersFromCpuPass
       auto operand_type = cast<MeshTensorType>(transfer.getOperand().getType());
       if (IsOnCpuMesh(transfer.getOperand()) ||
       operand_type.isOnHost()) {
-        if (auto first_user = FindFirstUserInProgramOrder(transfer)) {
+        if (auto* first_user = FindFirstUserInProgramOrder(transfer)) {
           rewriter.moveOpBefore(transfer, first_user);
         }
       }

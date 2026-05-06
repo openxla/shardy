@@ -68,7 +68,7 @@ class CopyConstantsPass
     Block& block = func_op.getBody().front();
     for (FragmentOp fragment : llvm::reverse(block.getOps<FragmentOp>())) {
       for (OpOperand& operand : fragment->getOpOperands()) {
-        if (auto hlo_producer = FindHloProducer(operand.get());
+        if (auto* hlo_producer = FindHloProducer(operand.get());
             hlo_producer && hlo_producer->hasTrait<OpTrait::ConstantLike>()) {
           rewriter.setInsertionPoint(fragment.getBody(),
                                      fragment.getBody()->begin());

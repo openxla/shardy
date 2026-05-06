@@ -1915,7 +1915,7 @@ void AssignCalleeFuncArgsToAssignUsers(
     // multiple times, which may be problematic since we will be updating the
     // user list.
     DenseMap<StringRef, SmallVector<AssignOp>> assign_users_by_mesh_name;
-    for (auto user : arg.getUsers()) {
+    for (auto* user : arg.getUsers()) {
       if (auto assign_user = dyn_cast<AssignOp>(user)) {
         assign_users_by_mesh_name[assign_user.getType().getMeshName()]
             .push_back(assign_user);
@@ -2081,7 +2081,7 @@ bool AssignEntrypointFuncArgsToAssignUsers(FuncOp entrypoint_func,
     // Find the memory kind, if any, that should be used for the mesh tensor.
     llvm::SetVector<StringAttr> memory_kinds;
     bool has_user_with_undefined_memory_kind = false;
-    for (auto user : arg.getUsers()) {
+    for (auto* user : arg.getUsers()) {
       if (auto assign_user = dyn_cast<AssignOp>(user)) {
         StringAttr user_memory_kind = assign_user.getType().getMemoryKind();
         if (user_memory_kind) {
