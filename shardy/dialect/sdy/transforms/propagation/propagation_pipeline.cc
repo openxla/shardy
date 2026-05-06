@@ -55,15 +55,13 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
-  pm.addPass(createFlattenCallGraphPass());
-  // Keep SymbolDCE after FlattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
   if (options.dedupFunctionsFully) {  // Aggresive compilation mode.
     pm.addPass(createAddFuncDataFlowEdgesPass());
   } else {  // Conservative compilation mode.
+    pm.addPass(createFlattenCallGraphPass());
+    pm.addPass(createSymbolDCEPass());  // After FlattenCallGraphPass.
     pm.addPass(createImportFuncCallsPass());
-    // Keep SymbolDCEPass after ImportFuncCallsPass.
-    pm.addPass(createSymbolDCEPass());
+    pm.addPass(createSymbolDCEPass());  // After ImportFuncCallsPass.
   }
   {
     PropagationOptions optionsWithKeepShardingRules = options;
@@ -81,10 +79,8 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createExportNamedComputationsPass());
     pm.addPass(createPropagateToFuncResultsPass());
   }
-  pm.addPass(createUnflattenCallGraphPass(
-      UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
-  // Keep a SymbolDCE after UnflattenCallGraph.
-  pm.addPass(createSymbolDCEPass());
+  pm.addPass(createUnflattenCallGraphPass());
+  pm.addPass(createSymbolDCEPass());  // After UnflattenCallGraphPass.
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",
