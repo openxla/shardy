@@ -58,12 +58,13 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createFlattenCallGraphPass());
   // Keep SymbolDCE after FlattenCallGraph.
   pm.addPass(createSymbolDCEPass());
-  if (options.enableNativeNonFlatSupport) {
+  if (options.dedupFunctionsFully) {  // Aggresive compilation mode.
     pm.addPass(createAddFuncDataFlowEdgesPass());
+  } else {  // Conservative compilation mode.
+    pm.addPass(createImportFuncCallsPass());
+    // Keep SymbolDCEPass after ImportFuncCallsPass.
+    pm.addPass(createSymbolDCEPass());
   }
-  pm.addPass(createImportFuncCallsPass());
-  // Keep SymbolDCEPass after ImportFuncCallsPass.
-  pm.addPass(createSymbolDCEPass());
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
@@ -73,10 +74,12 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
-  pm.addPass(createExportNamedComputationsPass());
-  pm.addPass(createPropagateToFuncResultsPass());
-  if (options.enableNativeNonFlatSupport) {
+  if (options.dedupFunctionsFully) {  // Aggresive compilation mode.
+    pm.addPass(createPropagateToFuncResultsPass());
     pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
+  } else {  // Conservative compilation mode.
+    pm.addPass(createExportNamedComputationsPass());
+    pm.addPass(createPropagateToFuncResultsPass());
   }
   pm.addPass(createUnflattenCallGraphPass(
       UnflattenCallGraphPassOptions{options.dedupFunctionsFully}));
