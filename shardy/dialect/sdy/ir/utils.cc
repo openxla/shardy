@@ -360,14 +360,17 @@ Value getShardableValue(Value value) {
         return asyncStartOp.getOperand(
             cast<BlockArgument>(value).getArgNumber());
       })
-      .Default([&](Operation* op) {
-        // We only fail if the value isn't scalar. Scalar block arguments, such
-        // as the arguments of a reduction function, don't have a shardable
-        // value. This is ok since they are scalars (rank 0) and therefore can't
-        // be sharded.
-        if (!isScalar(value)) {
-          unreachableFormatv("region op '{0}' not supported", op->getName());
-        }
+      .Default([&](Operation*) {
+        // Block argument of a region op that doesn't implement
+        // `ShardableDataFlowOpInterface` and isn't otherwise handled above.
+        // There is no place to attach a sharding to such a value (no per-arg
+        // attribute mechanism), so treat it as unshardable: `getSharding`
+        // returns null sharding, `setSharding` is a no-op (see the matching
+        // null check there). This covers both the original scalar
+        // reduction-arg case (e.g. `stablehlo.reduce`) and non-scalar bodies
+        // such as `mhlo.scan`, where the body operates on per-iteration
+        // slices whose shardings don't directly correspond to any outer
+        // edge owner.
         return nullptr;
       });
 }
@@ -375,8 +378,9 @@ Value getShardableValue(Value value) {
 TensorShardingAttr getSharding(Value value) {
   value = getShardableValue(value);
   if (!value) {
-    // This means the value is a scalar block argument, in which case it can't
-    // be sharded.
+    // The value is a block argument of a region op that doesn't expose it as
+    // an outer-world edge owner (scalar reduction arg, `mhlo.scan` body arg,
+    // etc.). It can't be sharded.
     return TensorShardingAttr();
   }
   return TypeSwitch<Operation*, TensorShardingAttr>(getOwningOp(value))
@@ -427,7 +431,12 @@ TensorShardingAttr getOrCreateSharding(Value value, StringRef meshName,
 
 void setSharding(Value value, TensorShardingAttr sharding) {
   value = getShardableValue(value);
-  assert(value && "value should exist if its sharding is updated");
+  if (!value) {
+    // Block arg of a region op without an outer edge owner (see
+    // `getShardableValue`). There's no place to attach a sharding, so silently
+    // drop the update — the body arg stays unsharded, which is safe.
+    return;
+  }
   TypeSwitch<Operation*>(getOwningOp(value))
       .Case([&](FuncOp funcOp) {
         funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
