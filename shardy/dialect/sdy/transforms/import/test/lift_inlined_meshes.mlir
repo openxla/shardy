@@ -256,3 +256,17 @@ func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mes
   %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+
+// CHECK: sdy.mesh @mesh = <["a"=4]> {stablehlo.mesh = {axes = [{name = "a", size = 4 : i64}]}}
+sdy.mesh @mesh = <["a"=4]>
+
+// CHECK: sdy.mesh @mesh_0 = <["b"=2]> {stablehlo.mesh = {axes = [{name = "b", size = 2 : i64}]}}
+
+// CHECK-LABEL: func @tagged_stablehlo_mesh_attribute
+func.func @tagged_stablehlo_mesh_attribute(%arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %arg1: tensor<4x4xf32>) -> tensor<4x4xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_0, [{"b"}, {}]>]>}
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["b"=2]>, [{"b"}, {}]>]>} : tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}

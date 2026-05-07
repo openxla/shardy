@@ -26,6 +26,7 @@ limitations under the License.
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -70,6 +71,35 @@ MeshOp createNewMeshOp(Location loc, mlir::stablehlo::MeshAttr mesh,
   }
   auto sdyMeshAttr = MeshAttr::get(mesh.getContext(), sdyAxes);
   return createMesh("mesh", sdyMeshAttr);
+}
+
+DictionaryAttr getStablehloMeshAttrAsDict(MeshAttr sdyMeshAttr) {
+  MLIRContext* ctx = sdyMeshAttr.getContext();
+  Builder builder(ctx);
+
+  SmallVector<Attribute> axesAttrs;
+  for (MeshAxisAttr axisAttr : sdyMeshAttr.getAxes()) {
+    NamedAttribute nameAttr =
+        builder.getNamedAttr("name", builder.getStringAttr(axisAttr.getName()));
+    NamedAttribute sizeAttr = builder.getNamedAttr(
+        "size", builder.getI64IntegerAttr(axisAttr.getSize()));
+    axesAttrs.push_back(builder.getDictionaryAttr({nameAttr, sizeAttr}));
+  }
+  ArrayAttr axesArrayAttr = builder.getArrayAttr(axesAttrs);
+
+  SmallVector<NamedAttribute> dictFields;
+  dictFields.push_back(builder.getNamedAttr("axes", axesArrayAttr));
+
+  if (!sdyMeshAttr.getDeviceIds().empty()) {
+    auto type = RankedTensorType::get(
+        {static_cast<int64_t>(sdyMeshAttr.getDeviceIds().size())},
+        builder.getI64Type());
+    auto deviceIds =
+        DenseIntElementsAttr::get(type, sdyMeshAttr.getDeviceIds());
+    dictFields.push_back(builder.getNamedAttr("device_ids", deviceIds));
+  }
+
+  return builder.getDictionaryAttr(dictFields);
 }
 
 TensorShardingAttr replaceMesh(TensorShardingAttr sharding,
@@ -196,6 +226,14 @@ struct LiftInlinedMeshesPass
     moduleOp.walk([&](stablehlo::CollectiveBroadcastOp op) {
       processMeshInReplicaGroups(op);
     });
+
+    // Attach discardable `stablehlo.mesh` attributes to all named meshes.
+    for (auto meshOp : llvm::make_early_inc_range(moduleOp.getOps<MeshOp>())) {
+      if (!meshOp->hasAttr("stablehlo.mesh")) {
+        meshOp->setAttr("stablehlo.mesh",
+                        getStablehloMeshAttrAsDict(meshOp.getMesh()));
+      }
+    }
   }
 };
 
