@@ -91,6 +91,11 @@ ArrayRef<int64_t> getTensorShape(Value value);
 // Assumes the `ShapedType` has a rank.
 int64_t getTensorRank(Type type);
 
+// Returns if `type` has a total size of one.
+//
+// In case `type` is not a static shaped type, returns false.
+bool isSizeOfOne(Type type);
+
 // Returns the rank of the given `value` if its type is a `ShapeTensor`,
 // otherwise returns 0.
 //

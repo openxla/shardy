@@ -145,6 +145,18 @@ bool isScalar(Value value) {
   return false;
 }
 
+bool isSizeOfOne(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type)) {
+    for (int64_t dimSize : shapedType.getShape()) {
+      if (dimSize != 1) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 int64_t getTotalAxesSize(ArrayRef<MeshAxisAttr> axes) {
   return std::accumulate(
       axes.begin(), axes.end(), 1,
