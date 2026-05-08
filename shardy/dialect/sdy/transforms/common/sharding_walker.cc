@@ -135,8 +135,13 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
             processSharding(arg, transformShardings, callback);
           }
           for (int64_t resNum = 0; resNum < funcOp.getNumResults(); ++resNum) {
-            processSharding(FuncResult(funcOp, resNum), transformShardings,
-                            callback);
+            if (auto sharding = getFuncResultSharding(funcOp, resNum)) {
+              TensorShardingAttr newSharding =
+                  callback(sharding, FuncResult(funcOp, resNum));
+              if (transformShardings && newSharding != sharding) {
+                setFuncResultSharding(funcOp, resNum, newSharding);
+              }
+            }
           }
         })
         .Case(
