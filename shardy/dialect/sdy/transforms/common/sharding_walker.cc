@@ -23,14 +23,11 @@ limitations under the License.
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Operation.h"
-#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 
@@ -137,23 +134,15 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
           for (BlockArgument arg : funcOp.getArguments()) {
             processSharding(arg, transformShardings, callback);
           }
-          // TODO(b/510714593): Create a shardy utility to modify func result
-          // attributes as below but in a more general way and re-use it.
-          llvm::SmallVector<mlir::DictionaryAttr> newResultAttrs;
-          newResultAttrs.reserve(funcOp.getNumResults());
-          for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
-            mlir::NamedAttrList attrs(funcOp.getResultAttrDict(resNum));
-            if (auto sharding = mlir::dyn_cast_or_null<TensorShardingAttr>(
-                    attrs.get(kShardingAttr))) {
+          for (int64_t resNum = 0; resNum < funcOp.getNumResults(); ++resNum) {
+            if (auto sharding = getFuncResultSharding(funcOp, resNum)) {
               TensorShardingAttr newSharding =
                   callback(sharding, FuncResult(funcOp, resNum));
               if (transformShardings && newSharding != sharding) {
-                attrs.set(kShardingAttr, newSharding);
+                setFuncResultSharding(funcOp, resNum, newSharding);
               }
             }
-            newResultAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
           }
-          funcOp.setAllResultAttrs(newResultAttrs);
         })
         .Case(
             [&](ManualComputationOp manualComputationOp) {
