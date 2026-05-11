@@ -286,7 +286,9 @@ ShapedType MeshTensorType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
 }
 
 bool MeshTensorType::isOnHost() {
-  return getMemoryKind() && getMemoryKind().getValue() == kMemoryKindPinnedHost;
+  return getMemoryKind() &&
+         (getMemoryKind().getValue() == kMemoryKindPinnedHost ||
+          getMemoryKind().getValue() == kMemoryKindUnpinnedHost);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1034,6 +1036,11 @@ StringAttr FindMemoryKindInAttributes(Value value, FuncOp func) {
   return nullptr;
 }
 
+bool IsValidMemoryKind(StringRef memory_kind) {
+  return memory_kind == kMemoryKindPinnedHost ||
+         memory_kind == kMemoryKindUnpinnedHost ||
+         memory_kind == kMemoryKindDevice;
+}
 }  // namespace
 
 LogicalResult TransferOp::verify() {
@@ -1052,20 +1059,22 @@ LogicalResult TransferOp::verify() {
   }
 
   if (StringAttr in_memory_kind = mesh_type_in.getMemoryKind()) {
-    if (in_memory_kind.getValue() != kMemoryKindPinnedHost &&
-        in_memory_kind.getValue() != kMemoryKindDevice) {
+    StringRef in_memory_kind_value = in_memory_kind.getValue();
+    if (!IsValidMemoryKind(in_memory_kind_value)) {
       return emitError("memory kind must be either '")
-             << kMemoryKindPinnedHost << "' or '" << kMemoryKindDevice
-             << "'. Found '" << in_memory_kind.getValue() << "'.";
+             << kMemoryKindPinnedHost << "' or '" << kMemoryKindUnpinnedHost
+             << "' or '" << kMemoryKindDevice << "'. Found '"
+             << in_memory_kind.getValue() << "'.";
     }
   }
 
   if (StringAttr out_memory_kind = mesh_type_out.getMemoryKind()) {
-    if (out_memory_kind.getValue() != kMemoryKindPinnedHost &&
-        out_memory_kind.getValue() != kMemoryKindDevice) {
+    StringRef out_memory_kind_value = out_memory_kind.getValue();
+    if (!IsValidMemoryKind(out_memory_kind_value)) {
       return emitError("memory kind must be either '")
-             << kMemoryKindPinnedHost << "' or '" << kMemoryKindDevice
-             << "'. Found '" << out_memory_kind.getValue() << "'.";
+             << kMemoryKindPinnedHost << "' or '" << kMemoryKindUnpinnedHost
+             << "' or '" << kMemoryKindDevice << "'. Found '"
+             << out_memory_kind.getValue() << "'.";
     }
   }
 
