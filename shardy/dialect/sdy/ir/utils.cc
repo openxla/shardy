@@ -1117,15 +1117,21 @@ Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter) {
   return reductionOp;
 }
 
-FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable) {
+FuncOp cloneFuncRecursively(FuncOp funcOp, SymbolTable& symbolTable,
+                            TensorShardingPerValueAttr callOpResultShardings,
+                            const bool updateFuncResultSharding) {
   FuncOp clonedFuncOp = funcOp.clone();
   // TODO(enver): Have a MLIR native error handling, instead of SDY_CHECK.
   clonedFuncOp->setAttr(mlir::sdy::kOriginalFuncName,
                         getOriginalFuncName(funcOp));
+  if (updateFuncResultSharding && callOpResultShardings) {
+    mlir::sdy::setFuncResultShardings(clonedFuncOp, callOpResultShardings);
+  }
   clonedFuncOp->walk([&](CallOp callOp) {
     FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
-    callOp.setCallee(
-        symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
+    callOp.setCallee(symbolTable.insert(
+        cloneFuncRecursively(funcOp, symbolTable, getShardingPerValue(callOp),
+                             updateFuncResultSharding)));
   });
   return clonedFuncOp;
 }
