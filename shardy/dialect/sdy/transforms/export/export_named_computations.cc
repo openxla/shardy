@@ -85,10 +85,17 @@ StringAttr createFuncOp(
   removeDataFlowEdges(funcOp.getArguments(), rewriter);
 
   // Copy the input shardings to the func.
+  // TODO(b/510714593): Create and use a shardy utility for batch setting a
+  // named attribute on all arguments.
   if (inShardings.has_value()) {
+    llvm::SmallVector<mlir::DictionaryAttr> funcArgAttrs;
+    funcArgAttrs.reserve(funcOp.getNumArguments());
     for (auto [i, sharding] : llvm::enumerate(inShardings->getShardings())) {
-      funcOp.setArgAttr(i, kShardingAttr, sharding);
+      mlir::NamedAttrList attrs(funcOp.getArgAttrDict(i));
+      attrs.set(kShardingAttr, sharding);
+      funcArgAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
     }
+    funcOp.setAllArgAttrs(funcArgAttrs);
   }
 
   return symbolTable.insert(funcOp);
