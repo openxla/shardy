@@ -134,10 +134,17 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
         .Case([&](FuncOp funcOp) {
+          // TODO(b/511994873): Create a shardy utility to modify func argument
+          // attributes as below but in a more general way and re-use it.
           for (BlockArgument arg : funcOp.getArguments()) {
-            processSharding(arg, transformShardings, callback);
+            if (auto sharding = getSharding(arg)) {
+              TensorShardingAttr newSharding = callback(sharding, arg);
+              if (transformShardings && newSharding != sharding) {
+                setSharding(arg, newSharding);
+              }
+            }
           }
-          // TODO(b/510714593): Create a shardy utility to modify func result
+          // TODO(b/511994873): Create a shardy utility to modify func result
           // attributes as below but in a more general way and re-use it.
           llvm::SmallVector<mlir::DictionaryAttr> newResultAttrs;
           newResultAttrs.reserve(funcOp.getNumResults());
