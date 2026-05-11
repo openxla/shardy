@@ -46,6 +46,9 @@ struct ExportOptions {
   bool failOnBackwardDeps = false;
   // Whether to enable verbose logging.
   bool verboseLogging = false;
+  // Whether to merge sideways inferred fragments if the program is
+  // forward-only.
+  bool mergeSidewaysIfForwardOnly = true;
 };
 
 // Adds the standard set of passes to export an MPMD program.
