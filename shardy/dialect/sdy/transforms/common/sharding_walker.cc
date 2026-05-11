@@ -136,19 +136,30 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
         .Case([&](FuncOp funcOp) {
           // TODO(b/511994873): Create a shardy utility to modify func argument
           // attributes as below but in a more general way and re-use it.
+          llvm::SmallVector<mlir::DictionaryAttr> newArgAttrs;
+          newArgAttrs.reserve(funcOp.getNumArguments());
+          bool anyArgChanged = false;
           for (BlockArgument arg : funcOp.getArguments()) {
+            mlir::NamedAttrList attrs(
+                funcOp.getArgAttrDict(arg.getArgNumber()));
             if (auto sharding = getSharding(arg)) {
               TensorShardingAttr newSharding = callback(sharding, arg);
               if (transformShardings && newSharding != sharding) {
-                setSharding(arg, newSharding);
+                attrs.set(kShardingAttr, newSharding);
+                anyArgChanged = true;
               }
             }
+            newArgAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
           }
+          if (anyArgChanged) {
+            funcOp.setAllArgAttrs(newArgAttrs);
+          }
+
           // TODO(b/511994873): Create a shardy utility to modify func result
           // attributes as below but in a more general way and re-use it.
           llvm::SmallVector<mlir::DictionaryAttr> newResultAttrs;
           newResultAttrs.reserve(funcOp.getNumResults());
-          bool anyChanged = false;
+          bool anyResultChanged = false;
           for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
             mlir::NamedAttrList attrs(funcOp.getResultAttrDict(resNum));
             if (auto sharding = getFuncResultSharding(funcOp, resNum)) {
@@ -156,12 +167,12 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                   callback(sharding, FuncResult(funcOp, resNum));
               if (transformShardings && newSharding != sharding) {
                 attrs.set(kShardingAttr, newSharding);
-                anyChanged = true;
+                anyResultChanged = true;
               }
             }
             newResultAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
           }
-          if (anyChanged) {
+          if (anyResultChanged) {
             funcOp.setAllResultAttrs(newResultAttrs);
           }
         })
