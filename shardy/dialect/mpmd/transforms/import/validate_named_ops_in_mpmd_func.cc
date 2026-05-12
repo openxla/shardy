@@ -42,6 +42,7 @@ class ValidateNamedOpsInMpmdFuncPass
     return sdy::inDialect<mpmd::MpmdDialect>(parent_op);
   }
 
+ protected:
   void runOnOperation() final {
     // Check named computations and named tensors are only nested in mpmd
     // function (function with topology).

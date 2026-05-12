@@ -150,7 +150,7 @@ class UniquifyFunctionInputOutputsPass
   using UniquifyFunctionInputsOutputsPassBase::
       UniquifyFunctionInputsOutputsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     if (!IsMpmdFunction(func_op)) {
       // This is not the main function. Do nothing.

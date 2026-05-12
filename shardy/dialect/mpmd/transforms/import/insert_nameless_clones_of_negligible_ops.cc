@@ -49,7 +49,7 @@ class InsertNamelessCloneOfNeglibleOpsPass
   using InsertNamelessCloneOfNeglibleOpsPassBase::
       InsertNamelessCloneOfNeglibleOpsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) final {
     IRRewriter rewriter(func_op.getContext());
     func_op.walk([&rewriter](NamedComputationOp named_computation) {

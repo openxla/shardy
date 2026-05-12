@@ -195,7 +195,7 @@ class InlineNestedUserExposedOpsPass
   using InlineNestedUserExposedOpsPassBase::
       InlineNestedUserExposedOpsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
     bool pass_must_signal_failure = false;
@@ -280,7 +280,7 @@ class MapNamedOpsToMpmdOpsPass
     : public impl::MapNamedOpsToMpmdOpsPassBase<MapNamedOpsToMpmdOpsPass> {
   using MapNamedOpsToMpmdOpsPassBase::MapNamedOpsToMpmdOpsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
     bool pass_must_signal_failure = false;

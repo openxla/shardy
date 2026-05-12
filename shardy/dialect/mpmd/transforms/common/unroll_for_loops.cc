@@ -122,7 +122,7 @@ class UnrollForLoopsPass
     : public impl::UnrollForLoopsPassBase<UnrollForLoopsPass> {
   using UnrollForLoopsPassBase::UnrollForLoopsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
     int for_loop_counter = 0;

@@ -349,7 +349,7 @@ class AbsorbInferredFragmentsPass
           AbsorbInferredFragmentsPass> {
   using AbsorbInferredFragmentsPassBase::AbsorbInferredFragmentsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func) override {
     if (!IsMpmdFunction(func)) {
       return;

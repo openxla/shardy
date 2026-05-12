@@ -37,6 +37,7 @@ class EnforceEquishardingPass
     : public impl::EnforceEquishardingPassBase<EnforceEquishardingPass> {
   using EnforceEquishardingPassBase::EnforceEquishardingPassBase;
 
+ protected:
   void runOnOperation() final {
     func::FuncOp func_op = getOperation();
     if (!IsMpmdFunction(func_op) || !IsEntryPointFunction(func_op)) {

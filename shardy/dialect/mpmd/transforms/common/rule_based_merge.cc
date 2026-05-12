@@ -152,6 +152,7 @@ class RuleBasedMergePass
   FragmentMergeRuleMap fragment_merge_rule_map_;
   FrozenRewritePatternSet patterns;
 
+ protected:
   void runOnFunc(func::FuncOp func) override {
     if (!IsMpmdFunction(func)) {
       return;

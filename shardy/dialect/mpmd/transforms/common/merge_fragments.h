@@ -85,6 +85,7 @@ class MergeFragmentBasePass : public DistributedFunctionPass {
                                         RewriterBase& rewriter,
                                         OpOrderMap& order) const;
 
+ protected:
   void runOnFunc(func::FuncOp func_op) override;
 };
 

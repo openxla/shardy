@@ -54,7 +54,7 @@ class ConvertSdyShardingsToMpmdTypesPass
   using ConvertSdyShardingsToMpmdTypesPassBase::
       ConvertSdyShardingsToMpmdTypesPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     func_op->walk([&](Operation* op) {
       TypeSwitch<Operation*, void>(op)

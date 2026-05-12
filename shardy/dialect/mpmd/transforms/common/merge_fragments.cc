@@ -610,7 +610,7 @@ class VerifyStageMergingPass
     : public impl::VerifyStageMergingPassBase<VerifyStageMergingPass> {
   using VerifyStageMergingPassBase::VerifyStageMergingPassBase;
 
- private:
+ protected:
   void runOnFunc(FuncOp func_op) override {
     // We keep track of various attributes relevant to stage merging for every
     // fragment in the module. If we find any two equivalent fragments (see

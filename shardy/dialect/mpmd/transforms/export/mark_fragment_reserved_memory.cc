@@ -87,7 +87,7 @@ class MarkFragmentReservedMemoryPass
           MarkFragmentReservedMemoryPass> {
   using MarkFragmentReservedMemoryPassBase::MarkFragmentReservedMemoryPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp main_func) override {
     if (!mpmd::IsMpmdFunction(main_func)) {
       return;

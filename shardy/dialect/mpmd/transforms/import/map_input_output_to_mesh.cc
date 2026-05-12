@@ -96,7 +96,7 @@ class MapInputOutputToMeshPass
     : public impl::MapInputOutputToMeshPassBase<MapInputOutputToMeshPass> {
   using MapInputOutputToMeshPassBase::MapInputOutputToMeshPassBase;
 
- private:
+ protected:
   MeshTensorType GetMeshTensorType(Value value, StringRef mesh_name) {
     auto ranked_tensor_type = cast<RankedTensorType>(value.getType());
     std::pair<StringRef, std::optional<StringRef>> mesh_name_and_memory_kind =
