@@ -64,6 +64,11 @@ def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def PadForDivisibilityPass : Pass<"sdy-pad-for-divisibility", "func::FuncOp"> {
+  let summary = "Pads tensors with non-divisible shardings to divisible shapes.";
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+}
+
 def RemoveSubAxesInInputOutputShardingsPass : Pass<"sdy-remove-sub-axes-in-input-output-shardings", "ModuleOp"> {
   let summary = "Removes sub-axes in input/output shardings.";
   let description = [{
