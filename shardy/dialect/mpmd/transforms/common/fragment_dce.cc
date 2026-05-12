@@ -113,7 +113,7 @@ void EliminateUnusedArguments(FragmentOp fragment, RewriterBase& rewriter) {
 class FragmentDcePass : public impl::FragmentDcePassBase<FragmentDcePass> {
   using FragmentDcePassBase::FragmentDcePassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
     // Make sure we process users before producers.

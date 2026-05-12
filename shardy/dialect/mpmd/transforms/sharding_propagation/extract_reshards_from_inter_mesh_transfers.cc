@@ -249,7 +249,7 @@ class ExtractReshardsFromInterMeshTransfersPass
   using ExtractReshardsFromInterMeshTransfersPassBase::
       ExtractReshardsFromInterMeshTransfersPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) final {
     SDY_CHECK(mpmd::IsMpmdFunction(func_op))
         << "Expected pass to be applied on MPMD partitioning code path.";

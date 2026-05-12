@@ -467,6 +467,7 @@ class SplitBwdFragmentsPass
     : public impl::SplitBwdFragmentsPassBase<SplitBwdFragmentsPass> {
   using SplitBwdFragmentsPassBase::SplitBwdFragmentsPassBase;
 
+ protected:
   void runOnOperation() final {
     IRRewriter rewriter(&getContext());
     getOperation().walk([&](FragmentOp fragment) {
@@ -503,6 +504,7 @@ class SplitAndPrioritizeTransferIndependentComputationsPass
   using SplitAndPrioritizeTransferIndependentComputationsPassBase::
       SplitAndPrioritizeTransferIndependentComputationsPassBase;
 
+ protected:
   void runOnOperation() final {
     IRRewriter rewriter(&getContext());
     Block& func_body = getOperation().front();

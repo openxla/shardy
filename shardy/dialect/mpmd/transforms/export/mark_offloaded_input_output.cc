@@ -234,7 +234,7 @@ class MarkOffloadedInputOutputPass
           MarkOffloadedInputOutputPass> {
   using MarkOffloadedInputOutputPassBase::MarkOffloadedInputOutputPassBase;
 
- private:
+ protected:
   void runOnFunc(FuncOp func) final {
     bool has_error = false;
 

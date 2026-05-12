@@ -188,7 +188,7 @@ class MarkAliasingAndDonationPass
           MarkAliasingAndDonationPass> {
   using MarkAliasingAndDonationPassBase::MarkAliasingAndDonationPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp main_func) override {
     if (IsMpmdFunction(main_func)) {
       MarkOperandsForAliasingAndDonation(main_func, main_func.getContext());

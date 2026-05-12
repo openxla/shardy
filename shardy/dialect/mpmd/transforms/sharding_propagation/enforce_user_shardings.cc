@@ -169,7 +169,7 @@ class EnforceUserShardingsPass
     : public impl::EnforceUserShardingsPassBase<EnforceUserShardingsPass> {
   using EnforceUserShardingsPassBase::EnforceUserShardingsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func) final {
     if (!IsEntryPointFunction(func) || !IsMpmdFunction(func)) {
       return;

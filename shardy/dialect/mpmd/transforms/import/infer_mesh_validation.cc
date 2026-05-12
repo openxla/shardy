@@ -326,6 +326,7 @@ class InferMeshValidateSrcSetNotEmptyPass
   using InferMeshValidateSrcSetNotEmptyPassBase::
       InferMeshValidateSrcSetNotEmptyPassBase;
 
+ protected:
   void runOnOperation() override {
     error_count_ = 0;
     const int max_errors = GetValidatedMaxErrors(errorLimit);
@@ -596,6 +597,7 @@ class InferMeshValidateNoAdditionalTransfersNeededPass
   using InferMeshValidateNoAdditionalTransfersNeededPassBase::
       InferMeshValidateNoAdditionalTransfersNeededPassBase;
 
+ protected:
   void runOnOperation() override {
     error_count_ = 0;
     emitted_error_count_ = 0;

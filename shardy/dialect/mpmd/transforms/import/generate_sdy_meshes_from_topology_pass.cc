@@ -79,7 +79,7 @@ class GenerateSdyMeshesFromTopologyPass
   using GenerateSdyMeshesFromTopologyPassBase::
       GenerateSdyMeshesFromTopologyPassBase;
 
- private:
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     SymbolTable symbol_table(module_op);

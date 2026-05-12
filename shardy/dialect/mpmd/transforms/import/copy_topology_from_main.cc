@@ -33,6 +33,7 @@ class CopyTopologyFromMainPass
     : public impl::CopyTopologyFromMainPassBase<CopyTopologyFromMainPass> {
   using CopyTopologyFromMainPassBase::CopyTopologyFromMainPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
 

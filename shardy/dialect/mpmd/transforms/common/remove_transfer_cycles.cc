@@ -64,7 +64,7 @@ class RemoveTransferCyclesPass
     : public impl::RemoveTransferCyclesPassBase<RemoveTransferCyclesPass> {
   using RemoveTransferCyclesPassBase::RemoveTransferCyclesPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(&getContext());
     // Walk the func in reverse, so that we can delete user

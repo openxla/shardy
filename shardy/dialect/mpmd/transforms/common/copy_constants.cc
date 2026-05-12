@@ -62,7 +62,7 @@ class CopyConstantsPass
     : public impl::CopyConstantsPassBase<CopyConstantsPass> {
   using CopyConstantsPassBase::CopyConstantsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
     Block& block = func_op.getBody().front();

@@ -60,7 +60,6 @@ class CallOpInliner : public InlinerInterface {
   explicit CallOpInliner(MLIRContext* context, Operation* inlined_call)
       : InlinerInterface(context), inlined_call_(inlined_call) {}
 
- private:
   // Iterates over all inlined blocks and sets attributes passed as input to
   // this inliner.
   void processInlinedBlocks(
@@ -86,13 +85,14 @@ class CallOpInliner : public InlinerInterface {
     return isa<CallOp>(call);
   }
 
+ private:
   Operation* inlined_call_;
 };
 
 class CallInlinePass : public impl::CallInlinePassBase<CallInlinePass> {
   using CallInlinePassBase::CallInlinePassBase;
 
- private:
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     module_op.walk([](CallOp call_op) {
@@ -128,6 +128,7 @@ class SinkNegligibleOpsIntoCallOpPass
   using SinkNegligibleOpsIntoCallOpPassBase::
       SinkNegligibleOpsIntoCallOpPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     for (FuncOp func_op : GetMpmdFunctions(module_op)) {
@@ -179,6 +180,7 @@ class FromUnrollToCallCounterPass
           FromUnrollToCallCounterPass> {
   using FromUnrollToCallCounterPassBase::FromUnrollToCallCounterPassBase;
 
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     func_op->walk([](CallOp call_op) {
       if (auto unroll_counter =
@@ -196,6 +198,7 @@ class EraseUnusedCalleeBlockArgumentsPass
   using EraseUnusedCalleeBlockArgumentsPassBase::
       EraseUnusedCalleeBlockArgumentsPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     for (FuncOp func_op : GetMpmdFunctions(module_op)) {

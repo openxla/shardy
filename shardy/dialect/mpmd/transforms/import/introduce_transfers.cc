@@ -55,9 +55,9 @@ namespace {
 // sorted by mesh name suffix number or lexicographically if no suffix number
 // exists.
 class AssignOfUnassignPattern : public OpRewritePattern<AssignOp> {
+ public:
   using OpRewritePattern<AssignOp>::OpRewritePattern;
 
- public:
   LogicalResult matchAndRewrite(AssignOp op,
                                 PatternRewriter& rewriter) const override {
     auto unassign_op = op.getTensor().getDefiningOp<UnassignOp>();
@@ -186,9 +186,9 @@ LogicalResult IsAddOfUnassigns(stablehlo::AddOp add, Operation* user,
 // Note: we could support other operators, but at present there's only a use
 // case for the AddOp.
 class PushAssignBackwardThroughAdd : public OpRewritePattern<AssignOp> {
+ public:
   using OpRewritePattern<AssignOp>::OpRewritePattern;
 
- public:
   LogicalResult matchAndRewrite(AssignOp assign,
                                 PatternRewriter& rewriter) const override {
     auto meshless_add = assign.getTensor().getDefiningOp<stablehlo::AddOp>();
@@ -283,6 +283,7 @@ class IntroduceTransfersPass
     : public impl::IntroduceTransfersPassBase<IntroduceTransfersPass> {
   using IntroduceTransfersPassBase::IntroduceTransfersPassBase;
 
+ protected:
   LogicalResult initialize(MLIRContext* context) final {
     RewritePatternSet patternsInternal(context);
     patternsInternal.add<AssignOfUnassignPattern, PushAssignBackwardThroughAdd>(
