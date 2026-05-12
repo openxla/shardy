@@ -128,6 +128,15 @@ void processShardings(
                           });
 }
 
+TensorShardingAttr getValueOrFuncResultSharding(
+    const ValueOrFuncResult& valueOrFuncResult) {
+  if (const auto* value = std::get_if<Value>(&valueOrFuncResult)) {
+    return getSharding(*value);
+  }
+  const auto& funcResult = std::get<FuncResult>(valueOrFuncResult);
+  return getFuncResultSharding(funcResult.funcOp, funcResult.resNum);
+}
+
 void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                    ConsumeOpFn consumeOpFn, bool transformShardings) {
   rootOp->walk<WalkOrder::PreOrder>([&](Operation* op) {
@@ -142,7 +151,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
           for (BlockArgument arg : funcOp.getArguments()) {
             mlir::NamedAttrList attrs(
                 funcOp.getArgAttrDict(arg.getArgNumber()));
-            if (auto sharding = getSharding(arg)) {
+            if (auto sharding = getValueOrFuncResultSharding(arg)) {
               TensorShardingAttr newSharding = callback(sharding, arg);
               if (transformShardings && newSharding != sharding) {
                 attrs.set(kShardingAttr, newSharding);
@@ -162,9 +171,9 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
           bool anyResultChanged = false;
           for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
             mlir::NamedAttrList attrs(funcOp.getResultAttrDict(resNum));
-            if (auto sharding = getFuncResultSharding(funcOp, resNum)) {
-              TensorShardingAttr newSharding =
-                  callback(sharding, FuncResult(funcOp, resNum));
+            FuncResult funcResult(funcOp, resNum);
+            if (auto sharding = getValueOrFuncResultSharding(funcResult)) {
+              TensorShardingAttr newSharding = callback(sharding, funcResult);
               if (transformShardings && newSharding != sharding) {
                 attrs.set(kShardingAttr, newSharding);
                 anyResultChanged = true;
