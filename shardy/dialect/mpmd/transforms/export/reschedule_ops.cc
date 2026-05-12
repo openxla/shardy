@@ -49,7 +49,7 @@ class DelayInferredFragmentsPass
     : public impl::DelayInferredFragmentsPassBase<DelayInferredFragmentsPass> {
   using DelayInferredFragmentsPassBase::DelayInferredFragmentsPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp main_func) override {
     if (!IsMpmdFunction(main_func) || !IsEntryPointFunction(main_func)) {
       return;
@@ -86,7 +86,7 @@ class DelayTransfersFromCpuPass
     : public impl::DelayTransfersFromCpuPassBase<DelayTransfersFromCpuPass> {
   using DelayTransfersFromCpuPassBase::DelayTransfersFromCpuPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp main_func) override {
     if (!IsMpmdFunction(main_func) || !IsEntryPointFunction(main_func)) {
       return;

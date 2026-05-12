@@ -298,6 +298,7 @@ class LowerToFragmentCallsPass
     : public impl::LowerToFragmentCallsPassBase<LowerToFragmentCallsPass> {
   using LowerToFragmentCallsPassBase::LowerToFragmentCallsPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     MLIRContext& ctx = getContext();

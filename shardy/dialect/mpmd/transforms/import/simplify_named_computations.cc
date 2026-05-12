@@ -47,6 +47,7 @@ class SimplifyNamedComputationPattern
     : public SimplifyRegionOpPatternBase<NamedComputationOp> {
   using SimplifyRegionOpPatternBase::SimplifyRegionOpPatternBase;
 
+ protected:
   NamedComputationOp createNewOp(NamedComputationOp op,
                                  PatternRewriter& rewriter,
                                  TypeRange result_types, ValueRange operands,
@@ -130,6 +131,7 @@ class SimplifyNamedComputationsPass
           SimplifyNamedComputationsPass> {
   using SimplifyNamedComputationsPassBase::SimplifyNamedComputationsPassBase;
 
+ protected:
   LogicalResult initialize(MLIRContext* context) final {
     {
       RewritePatternSet patternsInternal(context);
@@ -146,7 +148,6 @@ class SimplifyNamedComputationsPass
     return success();
   }
 
- private:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
 
@@ -167,6 +168,7 @@ class SimplifyNamedComputationsPass
     }
   }
 
+ private:
   FrozenRewritePatternSet opt_barrier_patterns;
   FrozenRewritePatternSet named_computation_patterns;
 };

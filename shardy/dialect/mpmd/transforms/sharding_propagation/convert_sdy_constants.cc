@@ -34,6 +34,7 @@ namespace {
 
 // Converts sdy::ConstantOp to stablehlo::ConstantOp.
 class ConstantPattern : public OpConversionPattern<sdy::ConstantOp> {
+ public:
   using OpConversionPattern::OpConversionPattern;
 
   LogicalResult matchAndRewrite(
@@ -51,6 +52,7 @@ class ConvertSdyConstantsPass
     : public impl::ConvertSdyConstantsPassBase<ConvertSdyConstantsPass> {
   using ConvertSdyConstantsPassBase::ConvertSdyConstantsPassBase;
 
+ protected:
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
     target->addIllegalOp<sdy::ConstantOp>();

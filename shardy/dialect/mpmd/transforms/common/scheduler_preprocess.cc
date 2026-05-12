@@ -62,7 +62,7 @@ class SchedulingUnitVerifierPass
     : public impl::SchedulingUnitVerifierPassBase<SchedulingUnitVerifierPass> {
   using SchedulingUnitVerifierPassBase::SchedulingUnitVerifierPassBase;
 
- private:
+ protected:
   void runOnFunc(FuncOp func_op) override {
     if (!IsMpmdFunction(func_op)) {
       return;
@@ -116,7 +116,7 @@ class MoveTransfersToProducerPass
           MoveTransfersToProducerPass> {
   using MoveTransfersToProducerPassBase::MoveTransfersToProducerPassBase;
 
- private:
+ protected:
   void runOnFunc(FuncOp func) override {
     IRRewriter rewriter(func.getContext());
     func.walk([&](TransferOp transfer) {

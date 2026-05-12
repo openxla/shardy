@@ -192,6 +192,7 @@ LogicalResult VerifyMeshAssignment(FuncOp func_op) {
 // erased following this rewrite and will trigger other patterns.
 class AssignOfUnassignSameMeshPattern final
     : public OpRewritePattern<AssignOp> {
+ public:
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(AssignOp op,
@@ -242,6 +243,7 @@ class AssignOfUnassignSameMeshPattern final
 // erased following this rewrite and will trigger other patterns.
 class DedupAssignOfUnassignAndTransferPattern final
     : public OpRewritePattern<AssignOp> {
+ public:
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(AssignOp op,
@@ -320,6 +322,7 @@ class DedupAssignOfUnassignAndTransferPattern final
 // Note that the unassign can have additional users, in which case it won't be
 // erased following this rewrite and will trigger other patterns.
 class AssignOfUnassignFuncArgPattern final : public OpRewritePattern<AssignOp> {
+ public:
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(AssignOp op,
@@ -363,6 +366,7 @@ class AssignOfUnassignFuncArgPattern final : public OpRewritePattern<AssignOp> {
 // independent ones (m1->m2, m1->m3). Assigns are sorted lexicographically by
 // mesh name for deterministic chain order.
 class AssignOfUnassignPattern final : public OpRewritePattern<AssignOp> {
+ public:
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(AssignOp op,
@@ -431,6 +435,7 @@ FragmentOp CreateReduceFragment(ArrayRef<Value> mesh_tensors,
 // %v_m2 = R(...) # on mesh2
 // %v = R(transfer(%v_m1), transfer(%v_m2)) # on mesh3
 class LowerMpmdReducePattern final : public OpRewritePattern<ReduceOp> {
+ public:
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(ReduceOp mpmd_reduce,
@@ -669,6 +674,7 @@ class InferMeshPopulateUseSetPass
           InferMeshPopulateUseSetPass> {
   using InferMeshPopulateUseSetPassBase::InferMeshPopulateUseSetPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     OpBuilder builder(&getContext());
@@ -716,6 +722,7 @@ class InferMeshPopulateSrcSetPass
           InferMeshPopulateSrcSetPass> {
   using InferMeshPopulateSrcSetPassBase::InferMeshPopulateSrcSetPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     OpBuilder builder(&getContext());
@@ -1157,6 +1164,7 @@ class InferMeshAssignUsingInputOutputConstraintsPass
   using InferMeshAssignUsingInputOutputConstraintsPassBase::
       InferMeshAssignUsingInputOutputConstraintsPassBase;
 
+ protected:
   void runOnOperation() final {
     IRRewriter rewriter(&getContext());
     for (FuncOp func_op : GetMpmdFunctions(getOperation())) {
@@ -1200,6 +1208,7 @@ class InferMeshAssignMeshForFuncLeavesPass
   using InferMeshAssignMeshForFuncLeavesPassBase::
       InferMeshAssignMeshForFuncLeavesPassBase;
 
+ protected:
   void runOnOperation() final {
     IRRewriter rewriter(&getContext());
     for (FuncOp func_op : GetMpmdFunctions(getOperation())) {
@@ -1771,6 +1780,7 @@ class InferMeshConvertReduceOpsPass
           InferMeshConvertReduceOpsPass> {
   using InferMeshConvertReduceOpsPassBase::InferMeshConvertReduceOpsPassBase;
 
+ protected:
   void runOnOperation() final {
     FuncOp func = getOperation();
     IRRewriter rewriter(&getContext());
@@ -2610,6 +2620,7 @@ class InferMeshRewriteUsingAnalysisPass
   using InferMeshRewriteUsingAnalysisPassBase::
       InferMeshRewriteUsingAnalysisPassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     MLIRContext* context = module_op->getContext();
@@ -2656,6 +2667,7 @@ class InferMeshFinalizePass
     : public impl::InferMeshFinalizePassBase<InferMeshFinalizePass> {
   using InferMeshFinalizePassBase::InferMeshFinalizePassBase;
 
+ protected:
   void runOnOperation() final {
     ModuleOp module_op = getOperation();
     MLIRContext* context = module_op->getContext();

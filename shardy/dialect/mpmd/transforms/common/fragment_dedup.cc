@@ -145,7 +145,7 @@ class FragmentDedupPass
     : public impl::FragmentDedupPassBase<FragmentDedupPass> {
   using FragmentDedupPassBase::FragmentDedupPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func_op) override {
     IRRewriter rewriter(func_op.getContext());
     func_op.walk<WalkOrder::PreOrder>([&rewriter](FragmentOp fragment) {

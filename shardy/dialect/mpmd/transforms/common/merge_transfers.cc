@@ -415,7 +415,7 @@ class MergeTransfersPass
     : public impl::MergeTransfersPassBase<MergeTransfersPass> {
   using MergeTransfersPassBase::MergeTransfersPassBase;
 
- private:
+ protected:
   void runOnFunc(func::FuncOp func) override {
     if (!IsMpmdFunction(func)) {
       return;
