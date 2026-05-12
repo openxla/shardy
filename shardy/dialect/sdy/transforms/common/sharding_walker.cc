@@ -143,6 +143,20 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
         .Case([&](FuncOp funcOp) {
+          // TODO(b/511994873): Unify `transform` with `processSharding` apis.
+          auto transform = [&](mlir::NamedAttrList& attrs,
+                               const ValueOrFuncResult& valueOrFuncResult) {
+            if (auto sharding =
+                    getValueOrFuncResultSharding(valueOrFuncResult)) {
+              TensorShardingAttr newSharding =
+                  callback(sharding, valueOrFuncResult);
+              if (transformShardings && newSharding != sharding) {
+                attrs.set(kShardingAttr, newSharding);
+                return true;
+              }
+            }
+            return false;
+          };
           // TODO(b/511994873): Create a shardy utility to modify func argument
           // attributes as below but in a more general way and re-use it.
           llvm::SmallVector<mlir::DictionaryAttr> newArgAttrs;
@@ -151,13 +165,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
           for (BlockArgument arg : funcOp.getArguments()) {
             mlir::NamedAttrList attrs(
                 funcOp.getArgAttrDict(arg.getArgNumber()));
-            if (auto sharding = getValueOrFuncResultSharding(arg)) {
-              TensorShardingAttr newSharding = callback(sharding, arg);
-              if (transformShardings && newSharding != sharding) {
-                attrs.set(kShardingAttr, newSharding);
-                anyArgChanged = true;
-              }
-            }
+            anyArgChanged |= transform(attrs, arg);
             newArgAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
           }
           if (anyArgChanged) {
@@ -171,14 +179,7 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
           bool anyResultChanged = false;
           for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
             mlir::NamedAttrList attrs(funcOp.getResultAttrDict(resNum));
-            FuncResult funcResult(funcOp, resNum);
-            if (auto sharding = getValueOrFuncResultSharding(funcResult)) {
-              TensorShardingAttr newSharding = callback(sharding, funcResult);
-              if (transformShardings && newSharding != sharding) {
-                attrs.set(kShardingAttr, newSharding);
-                anyResultChanged = true;
-              }
-            }
+            anyResultChanged |= transform(attrs, FuncResult(funcOp, resNum));
             newResultAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
           }
           if (anyResultChanged) {
