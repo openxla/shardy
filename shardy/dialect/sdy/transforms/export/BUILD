@@ -65,6 +65,7 @@ cc_library(
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
         "//shardy/dialect/sdy/transforms/common:sharding_walker",
+        "//shardy/dialect/sdy/transforms/common:util",
         "//shardy/dialect/sdy/transforms/propagation:op_sharding_rule_registry",
         "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
         "//shardy/dialect/sdy/transforms/propagation:utils",

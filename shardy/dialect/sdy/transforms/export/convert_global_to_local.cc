@@ -41,6 +41,7 @@ limitations under the License.
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -167,17 +168,6 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   const SymbolTable& symbolTable;
   llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
-
-// Copies all attributes from 'op' to 'newOp', except those specified in
-// 'attributesToExclude'.
-void copyAttributes(Operation* op, Operation* newOp,
-                    ArrayRef<StringRef> attributesToExclude) {
-  for (auto attr : op->getAttrs()) {
-    if (!llvm::is_contained(attributesToExclude, attr.getName().getValue())) {
-      newOp->setAttr(attr.getName(), attr.getValue());
-    }
-  }
-}
 
 // Converts op to its local version by replacing its operands with the already
 // converted operands and removing the op from the toConvertOps list.
@@ -463,7 +453,7 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     Value curInput = input;
     ::llvm::ArrayRef<AxisRefListAttr> gatheringAxes = op.getGatheringAxes();
     for (int64_t dim = gatheringAxes.size() - 1; dim >= 0; --dim) {
-      auto axisList = cast<AxisRefListAttr>(gatheringAxes[dim]);
+      AxisRefListAttr axisList = gatheringAxes[dim];
       if (axisList.empty()) {
         continue;
       }
@@ -1321,8 +1311,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     if (numSlicingDims == 1) {
       return rewriteReduceScatterOneDim(
           op, adaptor.getTensor(), lastSlicingDim,
-          cast<AxisRefListAttr>(op.getReduceScatterAxes()[lastSlicingDim]),
-          mesh, sharding.getMeshOrRef(), rewriter);
+          op.getReduceScatterAxes()[lastSlicingDim], mesh,
+          sharding.getMeshOrRef(), rewriter);
     }
     if (combineMultiDimensionReduceScatter) {
       return rewriteReduceScatterCombiningMultipleDims(

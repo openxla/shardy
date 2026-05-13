@@ -53,3 +53,14 @@ cc_library(
         "@llvm-project//mlir:Support",
     ],
 )
+
+cc_library(
+    name = "util",
+    srcs = ["util.cc"],
+    hdrs = ["util.h"],
+    deps = [
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
