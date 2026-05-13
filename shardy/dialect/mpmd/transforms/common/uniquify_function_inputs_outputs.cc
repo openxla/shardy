@@ -23,6 +23,7 @@ limitations under the License.
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -30,6 +31,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir::mpmd {
@@ -41,24 +43,15 @@ namespace {
 
 using ValueToReturnIndices = llvm::MapVector<Value, SmallVector<int64_t>>;
 
-void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
-                                 ValueToReturnIndices& value_to_return_indices,
-                                 OpBuilder& builder) {
-  // We remove any entries that require no work, in order to avoid too many
-  // checks.
-  value_to_return_indices.remove_if([](const auto& it) {
-    if (it.second.size() == 1) {
-      Value v = it.first;
-      return !isa<BlockArgument>(v);
-    }
-    return it.second.empty();
-  });
-
+// Creates an identity FragmentOp. The caller sets the insertion point.
+// Returns nullptr if the map is empty.
+FragmentOp CreateIdentityFragment(StringRef mesh_name, Operation* return_op,
+                                  ValueToReturnIndices& value_to_return_indices,
+                                  OpBuilder& builder) {
   if (value_to_return_indices.empty()) {
-    return;
+    return nullptr;
   }
 
-  builder.setInsertionPoint(return_op);
   SmallVector<Value> fragment_operands;
   fragment_operands.reserve(value_to_return_indices.size());
   SmallVector<Type> fragment_return_types;
@@ -98,6 +91,34 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   }
   auto block_builder = OpBuilder::atBlockEnd(&fragment_block);
   ReturnOp::create(block_builder, loc, returned_values);
+  return fragment_op;
+}
+
+// Creates a uniquify fragment and merges it into the original using
+// MergeRegionOps.
+void CreateAndMergeUniquifyFragment(
+    FragmentOp fragment, Operation* func_return_op,
+    ValueToReturnIndices& value_to_return_indices, OpBuilder& builder) {
+  // Insert right after the fragment to preserve dominance.
+  builder.setInsertionPointAfter(fragment);
+  FragmentOp uniquify_fragment = CreateIdentityFragment(
+      fragment.getMeshName(), func_return_op, value_to_return_indices, builder);
+  if (!uniquify_fragment) {
+    return;
+  }
+
+  // Immediately merge the fragment into the uniquify fragment.
+  IRRewriter rewriter(fragment.getContext());
+  MergeRegionOps(
+      fragment, uniquify_fragment, rewriter,
+      /*num_static_args=*/0,
+      /*replace_producer_use_in_consumer_block=*/
+      [](OpOperand&, Value) {
+        SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
+      },
+      GetFragmentOriginUnion(fragment, uniquify_fragment, rewriter),
+      fragment.getMeshNameAttr(),
+      /*stage_id=*/fragment.getStageIdAttr());
 }
 
 // Replaces the return values of the function with transfer ops.
@@ -163,24 +184,52 @@ class UniquifyFunctionInputOutputsPass
     }
 
     Operation* return_op = func_op.getBody().front().getTerminator();
-    // value_to_return_indices_per_mesh[mesh_name] = value_to_return_indices
-    // where value_to_return_indices[v] contains a sequence of the indices in
-    // return op where v is used.
-    llvm::MapVector<StringRef, ValueToReturnIndices>
-        value_to_return_indices_per_mesh;
+    OpBuilder builder(&getContext());
+
+    // Linear scan of return operands.
+    // - For FragmentOp results: collect duplicate return positions per
+    // fragment.
+    // - For block arguments: collect into per-mesh map.
+    llvm::SmallDenseSet<Value> seen_values;
+    llvm::MapVector<FragmentOp, ValueToReturnIndices> fragments_to_uniquify;
+    llvm::MapVector<StringRef, ValueToReturnIndices> block_args_per_mesh;
+
     for (OpOperand& operand : return_op->getOpOperands()) {
-      auto mesh_type = dyn_cast<MeshTensorType>(operand.get().getType());
-      SDY_CHECK(mesh_type);
-      StringRef mesh_name = mesh_type.getMeshName();
-      value_to_return_indices_per_mesh[mesh_name][operand.get()].push_back(
-          operand.getOperandNumber());
+      Value v = operand.get();
+      bool first_occurrence = seen_values.insert(v).second;
+
+      // A value needs uniquification if:
+      // - It's a block argument (even first occurrence, since sharding
+      //   constraints need an op result).
+      // - It's a duplicate (any occurrence after the first).
+      bool is_block_arg = isa<BlockArgument>(v);
+      if (first_occurrence && !is_block_arg) {
+        continue;
+      }
+
+      if (auto fragment = dyn_cast_or_null<FragmentOp>(v.getDefiningOp())) {
+        // Value comes from a FragmentOp. Record duplicate return position.
+        fragments_to_uniquify[fragment][v].push_back(
+            operand.getOperandNumber());
+      } else {
+        // Block argument (or non-fragment op result). Collect per mesh.
+        auto mesh_type = cast<MeshTensorType>(v.getType());
+        block_args_per_mesh[mesh_type.getMeshName()][v].push_back(
+            operand.getOperandNumber());
+      }
     }
 
-    OpBuilder builder(&getContext());
-    for (auto& [mesh_name, value_to_return_indices] :
-         value_to_return_indices_per_mesh) {
-      CreateReturnFragmentForMesh(mesh_name, return_op, value_to_return_indices,
-                                  builder);
+    // Uniquify fragment returns by merging in identity fragments.
+    for (auto& [fragment, value_to_return_indices] : fragments_to_uniquify) {
+      CreateAndMergeUniquifyFragment(fragment, return_op,
+                                     value_to_return_indices, builder);
+    }
+
+    // Create identity fragments for block arguments.
+    builder.setInsertionPoint(return_op);
+    for (auto& [mesh_name, value_to_return_indices] : block_args_per_mesh) {
+      CreateIdentityFragment(mesh_name, return_op, value_to_return_indices,
+                             builder);
     }
   }
 };
