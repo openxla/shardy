@@ -53,11 +53,20 @@ struct FlattenCallGraphPass
       }
       // TODO(enver): Should we special handle loops and conditionals?
       FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
-      if (!flattenCallGraphUnder) {
-        if (auto [_, inserted] = funcNames.insert(funcOp.getName()); inserted) {
-          return WalkResult::advance();
+      if (auto [_, inserted] = funcNames.insert(funcOp.getName()); inserted) {
+        if (flattenCallGraphUnder) {
+          // This is the first call to the function. Clone fully and flatten.
+          // Because, unlike the case of full flattening it is *not* guaranteed
+          // that any other calls to the called functions to be cloned.
+          callOp.setCallee(
+              symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
         }
+        // In the case of full flatenning, it does not need to clone the called
+        // functions as it is guaranteed that any second call later to the
+        // called functions is guaranteed to be cloned.
+        return WalkResult::advance();
       }
+      // A second call the the function. Clone fully and flatten.
       callOp.setCallee(
           symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
       return WalkResult::advance();
