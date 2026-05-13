@@ -67,6 +67,12 @@ def UpdateNonDivisibleInputOutputShardingsPass : Pass<"sdy-update-non-divisible-
 def PadForDivisibilityPass : Pass<"sdy-pad-for-divisibility", "func::FuncOp"> {
   let summary = "Pads tensors with non-divisible shardings to divisible shapes.";
   let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+  let options = [
+    Option<"dumpPaddingCache", "dump-padding-cache", "bool",
+           /*default=*/"false",
+           "Whether to dump the padding cache content as attributes on the operations "
+           "producing the padded values. Only for testing and debugging.">
+  ];
 }
 
 def RemoveSubAxesInInputOutputShardingsPass : Pass<"sdy-remove-sub-axes-in-input-output-shardings", "ModuleOp"> {

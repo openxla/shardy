@@ -21,6 +21,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
@@ -108,8 +109,42 @@ class PaddedTypeConverter : public TypeConverter {
   const SymbolTable& symbolTable;
 };
 
-// Known padding value kinds for generated padding values.
-enum class PaddingValueKind { kZero, kOne };
+enum class PaddingValueKind { kZero, kOne, kUnknown };
+
+inline StringRef toString(PaddingValueKind kind) {
+  switch (kind) {
+    case PaddingValueKind::kZero:
+      return "kZero";
+    case PaddingValueKind::kOne:
+      return "kOne";
+    case PaddingValueKind::kUnknown:
+      return "kUnknown";
+  }
+}
+
+class PaddingCache {
+ public:
+  // Registers the padding kind for a value. The conversion pattern
+  // rewriter processes operations in topological order, so each value should
+  // only be registered once.
+  void setPadding(Value value, PaddingValueKind kind) {
+    if (!cache.insert({value, kind}).second) {
+      SDY_CHECK(false) << "Padding value already set for "
+                       << valueToString(value);
+    }
+  }
+
+  std::optional<PaddingValueKind> getPadding(Value value) const {
+    auto it = cache.find(value);
+    if (it != cache.end()) return it->second;
+    return std::nullopt;
+  }
+
+  const DenseMap<Value, PaddingValueKind>& getCache() const { return cache; }
+
+ private:
+  DenseMap<Value, PaddingValueKind> cache;
+};
 
 // Returns a constant for the given PaddingValueKind.
 Value createConstant(OpBuilder& b, Location loc, Type elementType,
@@ -127,21 +162,24 @@ Value createConstant(OpBuilder& b, Location loc, Type elementType,
       return stablehlo::ConstantOp::create(
           b, loc,
           DenseElementsAttr::get(type, b.getIntegerAttr(elementType, 1)));
+    case PaddingValueKind::kUnknown:
+      llvm_unreachable("Cannot create constant for kUnknown padding");
   }
   llvm_unreachable("invalid PaddingValueKind");
 }
 
 // Creates a padded value for 'value' with 'paddedType' and 'desiredKind'.
 Value createPaddedValue(RankedTensorType paddedType, Value value,
-                        PaddingValueKind desiredKind,
+                        PaddingValueKind paddingKind,
                         const SymbolTable& symbolTable,
-                        ConversionPatternRewriter& rewriter) {
+                        ConversionPatternRewriter& rewriter,
+                        PaddingCache& cache) {
   Location loc = value.getLoc();
   auto origType = cast<RankedTensorType>(value.getType());
   SDY_CHECK(paddedType != origType);
 
   Value padding =
-      createConstant(rewriter, loc, paddedType.getElementType(), desiredKind);
+      createConstant(rewriter, loc, paddedType.getElementType(), paddingKind);
 
   SmallVector<int64_t> edgePaddingHigh;
   for (int i = 0; i < origType.getRank(); ++i) {
@@ -149,20 +187,23 @@ Value createPaddedValue(RankedTensorType paddedType, Value value,
                               origType.getDimSize(i));
   }
 
-  return stablehlo::PadOp::create(
+  Value padOp = stablehlo::PadOp::create(
       rewriter, loc, paddedType, value, padding,
       rewriter.getDenseI64ArrayAttr(
           SmallVector<int64_t>(origType.getRank(), 0)),
       rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
       rewriter.getDenseI64ArrayAttr(
           SmallVector<int64_t>(origType.getRank(), 0)));
+  cache.setPadding(padOp, paddingKind);
+  return padOp;
 }
 
 // Converts op to its local version by replacing its operands with the already
 // converted operands.
 LogicalResult padGenericOp(Operation* op, ValueRange operands,
                            ConversionPatternRewriter& rewriter,
-                           const PaddedTypeConverter* typeConverter) {
+                           const PaddedTypeConverter* typeConverter,
+                           PaddingCache& cache) {
   SmallVector<Value> shardableOperands;
   for (Value operand : operands) {
     shardableOperands.push_back(getShardableValue(operand));
@@ -218,6 +259,10 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
     rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
   }
 
+  for (Value result : newOp->getResults()) {
+    cache.setPadding(result, PaddingValueKind::kUnknown);
+  }
+
   rewriter.replaceOp(op, newOp->getResults());
   return success();
 }
@@ -226,8 +271,10 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
 // match padded shape.
 class GenericOpPattern : public ConversionPattern {
  public:
-  GenericOpPattern(TypeConverter& converter, MLIRContext* ctx)
-      : ConversionPattern(converter, MatchAnyOpTypeTag(), 1, ctx) {}
+  GenericOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                   PaddingCache& cache)
+      : ConversionPattern(converter, MatchAnyOpTypeTag(), 1, ctx),
+        cache(cache) {}
 
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
@@ -239,13 +286,18 @@ class GenericOpPattern : public ConversionPattern {
       return failure();
     }
     return padGenericOp(op, operands, rewriter,
-                        static_cast<const PaddedTypeConverter*>(typeConverter));
+                        static_cast<const PaddedTypeConverter*>(typeConverter),
+                        cache);
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  FuncOpPattern(TypeConverter& converter, MLIRContext* ctx)
+      : OpConversionPattern(converter, ctx) {}
 
   LogicalResult matchAndRewrite(
       func::FuncOp op, OpAdaptor adaptor,
@@ -279,7 +331,9 @@ class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
 
 class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  AllGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                     PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       sdy::AllGatherOp op, OpAdaptor adaptor,
@@ -356,14 +410,21 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
         if (needsSlice) {
           SmallVector<int64_t> starts(origRanked.getRank(), 0);
           SmallVector<int64_t> strides(origRanked.getRank(), 1);
-          replacements.push_back(stablehlo::SliceOp::create(
+          auto sliceOp = stablehlo::SliceOp::create(
               rewriter, op.getLoc(),
               RankedTensorType::get(limitIndices, origRanked.getElementType()),
               res, rewriter.getDenseI64ArrayAttr(starts),
               rewriter.getDenseI64ArrayAttr(limitIndices),
-              rewriter.getDenseI64ArrayAttr(strides)));
+              rewriter.getDenseI64ArrayAttr(strides));
+          if (auto kind = cache.getPadding(adaptor.getTensor())) {
+            cache.setPadding(sliceOp.getResult(), *kind);
+          }
+          replacements.push_back(sliceOp);
           continue;
         }
+      }
+      if (auto kind = cache.getPadding(adaptor.getTensor())) {
+        cache.setPadding(res, *kind);
       }
       replacements.push_back(res);
     }
@@ -371,11 +432,16 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     rewriter.replaceOp(op, replacements);
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       sdy::AllSliceOp op, OpAdaptor adaptor,
@@ -384,7 +450,7 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
         static_cast<const PaddedTypeConverter*>(getTypeConverter());
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
-    Value input = op->getOperand(0);
+    Value input = adaptor.getOperands()[0];
     auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
     if (!rankedInputType) {
       return failure();
@@ -394,12 +460,13 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     Type paddedInputType =
         getPaddedType(rankedInputType, outSharding, symbolTable);
     if (paddedInputType == rankedInputType) {
-      return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
+      return padGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                          cache);
     }
 
-    Value padOp =
-        createPaddedValue(cast<RankedTensorType>(paddedInputType), input,
-                          PaddingValueKind::kZero, symbolTable, rewriter);
+    Value padOp = createPaddedValue(cast<RankedTensorType>(paddedInputType),
+                                    input, PaddingValueKind::kZero, symbolTable,
+                                    rewriter, cache);
     OperationState state(op->getLoc(), op->getName());
     state.addOperands({padOp});
     state.addTypes(
@@ -407,14 +474,23 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
 
+    if (auto kind = cache.getPadding(padOp)) {
+      cache.setPadding(newOp->getResult(0), *kind);
+    }
+
     rewriter.replaceOp(op, newOp->getResults());
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                          PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       stablehlo::SliceOp op, OpAdaptor adaptor,
@@ -427,7 +503,8 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
         getPaddedType(resultType, sharding, converter->getSymbolTable());
 
     if (paddedType == resultType) {
-      return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
+      return padGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                          cache);
     }
 
     auto paddedRankedType = cast<RankedTensorType>(paddedType);
@@ -450,24 +527,73 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
     // Copy sharding attribute to the new result.
     setSharding(newOp.getResult(), sharding);
 
+    if (auto kind = cache.getPadding(adaptor.getOperand())) {
+      cache.setPadding(newOp.getResult(), *kind);
+    }
+
     rewriter.replaceOp(op, newOp.getResult());
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
+
+// Dumps the padding cache content as `sdy.padding_kinds` array attributes on
+// the operations producing the padded values. This is used only for testing and
+// debugging.
+void dumpPaddingCacheAttributes(const PaddingCache& paddingCache) {
+  // Map from an operation to the padding kinds of its results.
+  DenseMap<Operation*, SmallVector<StringRef>> opToPaddingKinds;
+  for (auto [value, kind] : paddingCache.getCache()) {
+    // We only attach attributes to operations, so skip block/function
+    // arguments.
+    auto opResult = dyn_cast<OpResult>(value);
+    if (!opResult) continue;
+
+    Operation* op = opResult.getOwner();
+    auto& kinds = opToPaddingKinds[op];
+    if (kinds.empty()) {
+      kinds.resize(op->getNumResults(), "none");
+    }
+    kinds[opResult.getResultNumber()] = toString(kind);
+  }
+
+  // Attach the grouped result padding kinds as an array attribute on each
+  // operation.
+  for (const auto& [op, kinds] : opToPaddingKinds) {
+    Builder b(op->getContext());
+    auto attrElts =
+        llvm::map_to_vector(kinds, [&](StringRef kindStr) -> Attribute {
+          return b.getStringAttr(kindStr);
+        });
+    op->setAttr("sdy.padding_kinds", b.getArrayAttr(attrElts));
+  }
+}
 
 struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
+  using PadForDivisibilityPassBase::PadForDivisibilityPassBase;
+
  protected:
   void runOnOperation() final {
+    // FuncOpPattern enforces that function inputs and outputs are always fully
+    // divisible by sharding requirements. Consequently, padded values never
+    // escape the local function scope. This isolation guarantees the cache can
+    // be stack-allocated per function.
+    PaddingCache paddingCache;
     func::FuncOp funcOp = getOperation();
     ModuleOp module = funcOp->getParentOfType<ModuleOp>();
     SymbolTable symbolTable(module);
 
     PaddedTypeConverter typeConverter(symbolTable);
     RewritePatternSet patterns(&getContext());
-    patterns.add<AllSliceOpPattern, AllGatherOpPattern, FuncOpPattern,
-                 GenericOpPattern, StablehloSliceOpPattern>(typeConverter,
-                                                            &getContext());
+    patterns.add<FuncOpPattern>(typeConverter, &getContext());
+    // Sharing the padding cache reference across pattern instances is safe from
+    // data races because pattern application within a function is sequential.
+    patterns.add<AllSliceOpPattern, AllGatherOpPattern, GenericOpPattern,
+                 StablehloSliceOpPattern>(typeConverter, &getContext(),
+                                          paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
@@ -503,6 +629,10 @@ struct PadForDivisibilityPass
 
     if (failed(applyPartialConversion(funcOp, target, std::move(patterns)))) {
       return signalPassFailure();
+    }
+
+    if (this->dumpPaddingCache) {
+      dumpPaddingCacheAttributes(paddingCache);
     }
   }
 };
