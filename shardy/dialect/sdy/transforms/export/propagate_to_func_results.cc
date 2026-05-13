@@ -58,8 +58,9 @@ struct PropagateToFuncResultsPass
       if (funcOp == mainFuncOp) {
         continue;
       }
-      func::ReturnOp returnOp =
-          cast<func::ReturnOp>(funcOp.getBody().front().getTerminator());
+      auto returnOp =
+          dyn_cast<func::ReturnOp>(funcOp.getBody().front().getTerminator());
+      if (!returnOp) continue;
       for (const OpOperand& opOperand : returnOp->getOpOperands()) {
         setFuncResultShardingOrClear(funcOp, opOperand);
       }

@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-propagate-to-func-results -split-input-file | FileCheck %s
+// RUN: sdy_opt %s -allow-unregistered-dialect -sdy-propagate-to-func-results -split-input-file | FileCheck %s
 
 // test: simple
 sdy.mesh @mesh = <["x"=2]>
@@ -125,3 +125,27 @@ func.func private @foo(%arg0: tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>) {
   %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : tensor<8xf32>
   return %0, %0 : tensor<8xf32>, tensor<8xf32>
 }
+
+// -----
+
+// test: non-main func with non-ReturnOp terminator is skipped.
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = call @foo(%arg0) : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @foo
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+func.func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} :  tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @bar
+func.func private @bar(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  "test.terminator"() : () -> ()
+}
+
