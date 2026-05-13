@@ -1237,5 +1237,44 @@ void insertReshardsOnFuncResults(FuncOp funcOp, CallOp callOp,
   insertReshardsOnFuncResults(funcResultShardings, callOp, rewriter);
 }
 
+// Instead of modifying func argument attributes one by one, it first creates a
+// dictionary vector, and modifies attributes on the dictionary vector, and
+// batch-sets the argument attributes using `FuncOp`'s `setAllArgAttrs` api.
+// Given N arguments, modifying all argument attributes one-by-one creates N^2
+// pointers and potentially leads to a context bloat.
+void modifyAllArgAttrs(FuncOp funcOp, ModifyArgResultAttrsFn modifyArgAttrs) {
+  llvm::SmallVector<mlir::DictionaryAttr> funcArgAttrs;
+  funcArgAttrs.reserve(funcOp.getNumArguments());
+  bool anyChanged = false;
+  for (int argNum = 0; argNum < funcOp.getNumArguments(); argNum++) {
+    mlir::NamedAttrList attrs(funcOp.getArgAttrDict(argNum));
+    anyChanged |= modifyArgAttrs(attrs, argNum);
+    funcArgAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
+  }
+  if (anyChanged) {
+    funcOp.setAllArgAttrs(funcArgAttrs);
+  }
+}
+
+// Instead of modifying func result attributes one by one, it first creates a
+// dictionary vector, and modifies attributes on the dictionary vector, and
+// batch-sets the result attributes using `FuncOp`'s `setAllResultAttrs` api.
+// Given N results, modifying all result attributes one-by-one creates N^2
+// pointers and potentially leads to a context bloat.
+void modifyAllResultAttrs(FuncOp funcOp,
+                          ModifyArgResultAttrsFn modifyResultAttrs) {
+  llvm::SmallVector<mlir::DictionaryAttr> funcResultAttrs;
+  funcResultAttrs.reserve(funcOp.getNumResults());
+  bool anyChanged = false;
+  for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
+    mlir::NamedAttrList attrs(funcOp.getResultAttrDict(resNum));
+    anyChanged |= modifyResultAttrs(attrs, resNum);
+    funcResultAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
+  }
+  if (anyChanged) {
+    funcOp.setAllResultAttrs(funcResultAttrs);
+  }
+}
+
 }  // namespace sdy
 }  // namespace mlir

@@ -157,34 +157,14 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
             }
             return false;
           };
-          // TODO(b/511994873): Create a shardy utility to modify func argument
-          // attributes as below but in a more general way and re-use it.
-          llvm::SmallVector<mlir::DictionaryAttr> newArgAttrs;
-          newArgAttrs.reserve(funcOp.getNumArguments());
-          bool anyArgChanged = false;
-          for (BlockArgument arg : funcOp.getArguments()) {
-            mlir::NamedAttrList attrs(
-                funcOp.getArgAttrDict(arg.getArgNumber()));
-            anyArgChanged |= transform(attrs, arg);
-            newArgAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
-          }
-          if (anyArgChanged) {
-            funcOp.setAllArgAttrs(newArgAttrs);
-          }
-
-          // TODO(b/511994873): Create a shardy utility to modify func result
-          // attributes as below but in a more general way and re-use it.
-          llvm::SmallVector<mlir::DictionaryAttr> newResultAttrs;
-          newResultAttrs.reserve(funcOp.getNumResults());
-          bool anyResultChanged = false;
-          for (int resNum = 0; resNum < funcOp.getNumResults(); resNum++) {
-            mlir::NamedAttrList attrs(funcOp.getResultAttrDict(resNum));
-            anyResultChanged |= transform(attrs, FuncResult(funcOp, resNum));
-            newResultAttrs.push_back(attrs.getDictionary(funcOp.getContext()));
-          }
-          if (anyResultChanged) {
-            funcOp.setAllResultAttrs(newResultAttrs);
-          }
+          modifyAllArgAttrs(
+              funcOp, [&](mlir::NamedAttrList& attrs, int64_t argNum) {
+                return transform(attrs, funcOp.getArgument(argNum));
+              });
+          modifyAllResultAttrs(
+              funcOp, [&](mlir::NamedAttrList& attrs, int64_t resNum) {
+                return transform(attrs, FuncResult(funcOp, resNum));
+              });
         })
         .Case(
             [&](ManualComputationOp manualComputationOp) {

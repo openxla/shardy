@@ -23,6 +23,7 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
@@ -726,6 +727,15 @@ void insertReshardsOnFuncArguments(func::FuncOp funcOp, func::CallOp callOp,
 void insertReshardsOnFuncResults(func::FuncOp funcOp, func::CallOp callOp,
                                  const mlir::SymbolTable& symbolTable,
                                  mlir::IRRewriter& rewriter);
+
+using ModifyArgResultAttrsFn =
+    llvm::function_ref<bool(mlir::NamedAttrList&, int64_t)>;
+// Modifies all argument attributes of `funcOp` by `modifyArgAttrs`.
+void modifyAllArgAttrs(func::FuncOp funcOp,
+                       ModifyArgResultAttrsFn modifyArgAttrs);
+// Modifies all result attributes of `funcOp` by `modifyResultAttrs`.
+void modifyAllResultAttrs(func::FuncOp funcOp,
+                          ModifyArgResultAttrsFn modifyResultAttrs);
 
 }  // namespace sdy
 }  // namespace mlir
