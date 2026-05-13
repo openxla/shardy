@@ -8,7 +8,7 @@ filegroup(
     name = "test_data",
     testonly = True,
     data = [
-        "executable/run_sdy_interpreter_test.sh",
+        "executable_convert_global_to_local/run_sdy_interpreter_test.sh",
         "//shardy/tools:sdy_opt",
         "@llvm-project//llvm:FileCheck",
         "@llvm-project//llvm:split-file",
