@@ -18,11 +18,13 @@ limitations under the License.
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -30,6 +32,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir::mpmd {
@@ -41,6 +44,29 @@ namespace {
 
 using ValueToReturnIndices = llvm::MapVector<Value, SmallVector<int64_t>>;
 
+bool CanMoveAfter(Operation* op_to_move, Operation* target_op) {
+  if (op_to_move->getBlock() != target_op->getBlock()) return false;
+  if (!op_to_move->isBeforeInBlock(target_op)) return false;
+
+  Operation* current = op_to_move->getNextNode();
+  while (current) {
+    for (Value result : op_to_move->getResults()) {
+      if (llvm::is_contained(current->getOperands(), result)) {
+        return false;
+      }
+    }
+    for (Value operand : op_to_move->getOperands()) {
+      if (operand.getDefiningOp() == current) {
+        return false;
+      }
+    }
+
+    if (current == target_op) break;
+    current = current->getNextNode();
+  }
+  return true;
+}
+
 void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
                                  ValueToReturnIndices& value_to_return_indices,
                                  OpBuilder& builder) {
@@ -48,10 +74,9 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   // checks.
   value_to_return_indices.remove_if([](const auto& it) {
     if (it.second.size() == 1) {
-      Value v = it.first;
-      return !isa<BlockArgument>(v);
+      return !isa<BlockArgument>(it.first);
     }
-    return it.second.empty();
+    return false;
   });
 
   if (value_to_return_indices.empty()) {
@@ -98,6 +123,70 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   }
   auto block_builder = OpBuilder::atBlockEnd(&fragment_block);
   ReturnOp::create(block_builder, loc, returned_values);
+
+  // Try to find an existing same-mesh fragment to merge the newly created
+  // inferred fragment into. We track two things:
+  //   - latest_operand_producer: the latest op that produces any operand of
+  //     the inferred fragment (needed for positioning constraints).
+  //   - merge_target: the latest same-mesh fragment we can merge into.
+  FragmentOp merge_target = nullptr;
+  Operation* latest_operand_producer = nullptr;
+
+  // Updates merge_target if `op` is a same-mesh fragment that appears later
+  // in the block than the current candidate.
+  auto updateMergeTarget = [&](Operation* op) {
+    auto frag = dyn_cast<FragmentOp>(op);
+    if (frag && frag.getMeshName() == mesh_name &&
+        (!merge_target || merge_target->isBeforeInBlock(frag))) {
+      merge_target = frag;
+    }
+  };
+
+  // First, scan the operand producers for a merge candidate.
+  for (Value v : fragment_operands) {
+    Operation* op = v.getDefiningOp();
+    if (!op) continue;
+    if (!latest_operand_producer ||
+        latest_operand_producer->isBeforeInBlock(op)) {
+      latest_operand_producer = op;
+    }
+    updateMergeTarget(op);
+  }
+
+  // If no producer fragment on the same mesh was found among the operands,
+  // look for any fragment on the same mesh in the block (sideways merge).
+  // Only do this when there are actual producer ops (not just block arguments).
+  if (!merge_target && latest_operand_producer) {
+    for (Operation& op : *return_op->getBlock()) {
+      if (&op == return_op || &op == fragment_op) continue;
+      updateMergeTarget(&op);
+    }
+  }
+
+  // Give up if no merge candidate was found, or if the candidate can't be
+  // moved after the latest operand producer (which would break dominance).
+  if (!merge_target || (merge_target != latest_operand_producer &&
+                        !CanMoveAfter(merge_target, latest_operand_producer))) {
+    return;
+  }
+
+  // Position the merge target after the latest operand producer so all
+  // operands of the inferred fragment are available, then merge.
+  if (merge_target != latest_operand_producer) {
+    merge_target->moveAfter(latest_operand_producer);
+  }
+
+  fragment_op->moveAfter(merge_target);
+  IRRewriter rewriter(builder.getContext());
+  MergeRegionOps(
+      merge_target, fragment_op, rewriter,
+      /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
+      [](OpOperand&, Value) {
+        SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
+      },
+      GetFragmentOriginUnion(merge_target, fragment_op, rewriter),
+      merge_target.getMeshNameAttr(),
+      /*stage_id=*/merge_target.getStageIdAttr());
 }
 
 // Replaces the return values of the function with transfer ops.
