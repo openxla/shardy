@@ -12,8 +12,10 @@ limitations under the License.
 #include <memory>
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Support/WalkResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -34,6 +36,11 @@ struct FlattenCallGraphPass
     : public impl::FlattenCallGraphPassBase<FlattenCallGraphPass> {
   using FlattenCallGraphPassBase::FlattenCallGraphPassBase;
 
+  // A nullptr for `flattenCallGraphUnder` implies a full flattening.
+  FlattenCallGraphPass(llvm::function_ref<bool(func::CallOp)> predicate)
+      : flattenCallGraphUnder(predicate) {}
+  llvm::function_ref<bool(func::CallOp)> flattenCallGraphUnder = nullptr;
+
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
     SymbolTable symbolTable(moduleOp);
@@ -41,10 +48,15 @@ struct FlattenCallGraphPass
     llvm::SmallDenseSet<StringRef> funcNames;
 
     walkCalls(moduleOp, [&](CallOp callOp) {
+      if (flattenCallGraphUnder && !flattenCallGraphUnder(callOp)) {
+        return WalkResult::advance();
+      }
       // TODO(enver): Should we special handle loops and conditionals?
       FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
-      if (auto [_, inserted] = funcNames.insert(funcOp.getName()); inserted) {
-        return WalkResult::advance();
+      if (!flattenCallGraphUnder) {
+        if (auto [_, inserted] = funcNames.insert(funcOp.getName()); inserted) {
+          return WalkResult::advance();
+        }
       }
       callOp.setCallee(
           symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
@@ -54,6 +66,11 @@ struct FlattenCallGraphPass
 };
 
 }  // namespace
+
+std::unique_ptr<Pass> createFlattenCallGraphPass(
+    llvm::function_ref<bool(func::CallOp)> predicate) {
+  return std::make_unique<FlattenCallGraphPass>(predicate);
+}
 
 }  // namespace sdy
 }  // namespace mlir

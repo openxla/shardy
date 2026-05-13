@@ -36,6 +36,9 @@ namespace sdy {
 #define GEN_PASS_REGISTRATION
 #include "shardy/dialect/sdy/transforms/import/passes.h.inc"
 
+std::unique_ptr<Pass> createFlattenCallGraphPass(
+    llvm::function_ref<bool(func::CallOp)> predicate);
+
 // Adds a sequence of import passes needed as a pre-processing step for SDY
 // propagation.
 //
