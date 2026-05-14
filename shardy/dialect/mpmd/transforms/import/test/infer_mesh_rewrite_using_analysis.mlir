@@ -14,7 +14,7 @@
 func.func @simple_rewrite(%arg0: tensor<4x8xf32> {mpmd.src_set = #mpmd.meshes_with_origins<"m1">, mpmd.use_set = #mpmd.meshes_with_origins<"m1">}) -> !mesh_1_tensor_4_8_f32
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>} {
   // CHECK-NEXT:  %[[ASSIGN:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg1: tensor<4x8xf32>) {
+  // CHECK-NEXT:  %[[ADD_FRAG:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg1: tensor<4x8xf32>) {
   // CHECK-NEXT:    %[[CONST:.*]] = stablehlo.constant dense<1.000000e+00>
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg1, %[[CONST]]
   // CHECK-NEXT:    mpmd.return %[[ADD]]
@@ -34,7 +34,7 @@ func.func @rewrite_with_duplication(%arg0: tensor<4x8xf32> {mpmd.src_set = #mpmd
 
   // CHECK-DAG:  %[[ASSIGN_ARG0_1:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1",
 
-  // CHECK-DAG:   %[[ADD_FRAG_1:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0_1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg1: tensor<4x8xf32>) {
+  // CHECK-DAG:   %[[ADD_FRAG_1:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0_1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg1: tensor<4x8xf32>) {
   // CHECK-NEXT:    %[[CONST_1:.*]] = stablehlo.constant dense<1.000000e+00>
   // CHECK-NEXT:    %[[ADD_1:.*]] = stablehlo.add %arg1, %[[CONST_1]]
   // CHECK-NEXT:    mpmd.return %[[ADD_1]]
@@ -42,7 +42,7 @@ func.func @rewrite_with_duplication(%arg0: tensor<4x8xf32> {mpmd.src_set = #mpmd
   // CHECK-DAG:   %[[UNASSIGN_1:.*]] = mpmd.unassign %[[ADD_FRAG_1]] : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
   // CHECK-DAG:   %[[ASSIGN_ARG0_2:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2",
-  // CHECK-DAG:   %[[ADD_FRAG_2:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_ARG0_2]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg1: tensor<4x8xf32>) {
+  // CHECK-DAG:   %[[ADD_FRAG_2:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_ARG0_2]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg1: tensor<4x8xf32>) {
   // CHECK-NEXT:    %[[CONST_2:.*]] = stablehlo.constant dense<1.000000e+00>
   // CHECK-NEXT:    %[[ADD_2:.*]] = stablehlo.add %arg1, %[[CONST_2]]
   // CHECK-NEXT:    mpmd.return %[[ADD_2]]
@@ -66,14 +66,14 @@ func.func @call_op(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> (!mesh_1_t
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>}
 {
   // CHECK-NEXT:  %[[ARG0_ASSIGN:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
   // CHECK-NEXT:  %[[F0_UNASSIGN:.*]] = mpmd.unassign %1 : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
   // CHECK-NEXT:  %[[ARG1_ASSIGN:.*]] = mpmd.assign %arg1 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-NEXT:  %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
@@ -113,12 +113,12 @@ func.func private @call_op_f(
   // CHECK-DAG: %[[ASSIGN_ARG0:.*]] = mpmd.assign %[[UNASSIGN_ARG0]] : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
   // CHECK-DAG: %[[ASSIGN_ARG1:.*]] = mpmd.assign %[[UNASSIGN_ARG1]] : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 
-  // CHECK-DAG:   %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-DAG:   %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-DAG:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-DAG:    mpmd.return %[[ADD]]
   // CHECK-DAG:  }
 
-  // CHECK-DAG:   %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-DAG:   %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-DAG:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-DAG:    mpmd.return %[[ADD]]
   // CHECK-DAG:  }
@@ -140,13 +140,13 @@ func.func @call_op_multiple_calls(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>}
 {
   // CHECK-NEXT:  %[[ARG0_ASSIGN:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
   // CHECK-NEXT:  %[[F0_UNASSIGN:.*]] = mpmd.unassign %[[ADD_FRAG0]] : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
   // CHECK-NEXT:  %[[ARG1_ASSIGN:.*]] = mpmd.assign %arg1 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-NEXT:  %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
@@ -192,11 +192,11 @@ func.func private @call_op_multiple_calls_f(
 )
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>}
 {
-  // CHECK:       %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> ({{.*}}) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK:       %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> ({{.*}}) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
-  // CHECK:       %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> ({{.*}}) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK:       %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> ({{.*}}) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
@@ -211,14 +211,14 @@ func.func @call_op_unused_output(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>)
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>}
 {
   // CHECK-NEXT:  %[[ARG0_ASSIGN:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
   // CHECK-NEXT:  %[[F0_UNASSIGN:.*]] = mpmd.unassign %1 : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
   // CHECK-NEXT:  %[[ARG1_ASSIGN:.*]] = mpmd.assign %arg1 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
-  // CHECK-NEXT:  %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-NEXT:  %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg2, %arg2
   // CHECK-NEXT:    mpmd.return %[[ADD]]
   // CHECK-NEXT:  }
@@ -255,8 +255,8 @@ func.func private @call_op_unused_output_f(
   // CHECK-DAG: %[[ASSIGN_ARG0:.*]] = mpmd.assign %[[UNASSIGN_ARG0]] : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
   // CHECK-DAG: %[[ASSIGN_ARG1:.*]] = mpmd.assign %[[UNASSIGN_ARG1]] : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
 
-  // CHECK-DAG:   %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
-  // CHECK-DAG:   %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2
+  // CHECK-DAG:   %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
+  // CHECK-DAG:   %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2
 
   // CHECK-DAG: %[[F0_UNASSIGN:.*]] = mpmd.unassign %[[ADD_FRAG0]] : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
   // CHECK-DAG: %[[F1_UNASSIGN:.*]] = mpmd.unassign %[[ADD_FRAG1]] : (!mpmd.mesh_tensor<"m2", tensor<4x8xf32>>) -> tensor<4x8xf32>
@@ -388,17 +388,17 @@ func.func @call_op_with_multi_result_assignment(%arg0: tensor<4x8xf32>, %arg1: t
 {
 
   // CHECK-NEXT: %[[ARG0_ASSIGN_0:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-  // CHECK-NEXT: %[[MULT_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN_0]]) {mpmd.inferred_by = ["rewrite_using_analysis"]}
+  // CHECK-NEXT: %[[MULT_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN_0]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]}
   // CHECK-NEXT:   stablehlo.multiply
   // CHECK:      %[[MULT_FRAG0_UNASSIGN:.*]] = mpmd.unassign %[[MULT_FRAG0]] : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
   // CHECK-NEXT: %[[ARG0_ASSIGN_1:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
-  // CHECK-NEXT: %[[MULT_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG0_ASSIGN_1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2: tensor<4x8xf32>) {
+  // CHECK-NEXT: %[[MULT_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG0_ASSIGN_1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2: tensor<4x8xf32>) {
   // CHECK-NEXT:   stablehlo.multiply
   // CHECK:      %[[MULT_FRAG1_UNASSIGN:.*]] = mpmd.unassign %[[MULT_FRAG1]] : (!mpmd.mesh_tensor<"m2", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
   // CHECK-NEXT: %[[ARG1_ASSIGN:.*]] = mpmd.assign %arg1 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
-  // CHECK-NEXT: %[[ADD_FRAG:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2: tensor<4x8xf32>) {
+  // CHECK-NEXT: %[[ADD_FRAG:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG1_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2: tensor<4x8xf32>) {
   // CHECK-NEXT:   stablehlo.add
   // CHECK:      %[[ADD_FRAG_UNASSIGN:.*]] = mpmd.unassign %[[ADD_FRAG]] : (!mpmd.mesh_tensor<"m2", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
@@ -472,14 +472,14 @@ func.func @call_op_noop_return(%arg0: tensor<4x8xf32>) -> (!mesh_1_tensor_4_8_f3
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>}
 {
 // CHECK-NEXT: %[[ARG0_ASSIGN_0:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
-// CHECK-NEXT: %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN_0]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg1
+// CHECK-NEXT: %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN_0]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg1
 // CHECK-NEXT:   stablehlo.add %arg1, %arg1
 // CHECK-NEXT:   mpmd.return
 // CHECK-NEXT: }
 // CHECK-NEXT: %[[F0_UNASSIGN:.*]] = mpmd.unassign %[[ADD_FRAG0]] : (!mpmd.mesh_tensor<"m1", tensor<4x8xf32>>) -> tensor<4x8xf32>
 
 // CHECK-NEXT: %[[ARG0_ASSIGN_1:.*]] = mpmd.assign %arg0 : (tensor<4x8xf32>) -> !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
-// CHECK-NEXT: %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG0_ASSIGN_1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg1
+// CHECK-NEXT: %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[ARG0_ASSIGN_1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg1
 // CHECK-NEXT:   stablehlo.add %arg1, %arg1
 // CHECK-NEXT:   mpmd.return
 // CHECK-NEXT: }
@@ -660,7 +660,7 @@ func.func @single_fragment_consumer_but_used_by_return(%arg0: tensor<4x8xf32>) -
   attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=2]>>>} {
   // The constant cannot be inlined into the consumer fragment because it is
   // used by the return statement.
-  // CHECK-NEXT: mpmd.fragment<mesh="m1", origin=[]> () {mpmd.inferred_by = ["rewrite_using_analysis"]} ()
+  // CHECK-NEXT: mpmd.fragment<mesh="m1", origin=[]> () {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} ()
   // CHECK-NEXT:   constant
   // CHECK:      mpmd.fragment<mesh="m1", origin=[]>
   %0 = stablehlo.constant dense<1.0> : tensor<4x8xf32>
@@ -717,7 +717,7 @@ func.func @op_operands_used_by_consumer(%arg0: !mesh_1_tensor_4_8_f32) -> !mesh_
 func.func @fori_loop(%arg0: tensor<ui32> {mpmd.src_set = #mpmd.meshes_with_origins<"m1">, mpmd.use_set = #mpmd.meshes_with_origins<"m1">}) -> (tensor<ui32>, tensor<ui32>)
 attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["y"=2]>>>} {
   // CHECK-NEXT:  %[[ARG0_ASSIGN:.*]] = mpmd.assign %arg0 : (tensor<ui32>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>
-  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg1: tensor<ui32>) {
+  // CHECK-NEXT:  %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ARG0_ASSIGN]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg1: tensor<ui32>) {
   // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg1, %arg1 : tensor<ui32>
   // CHECK-NEXT:    mpmd.return %[[ADD]] : tensor<ui32>
   // CHECK-NEXT:  }
@@ -735,7 +735,7 @@ attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["y"=2]>>>} {
 
   // CHECK-DAG:     %[[ASSIGN_INDEX:.*]] = mpmd.assign %[[UNASSIGN_INDEX]] : (tensor<ui32>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>
   // CHECK-DAG:     %[[ASSIGN_ARG1:.*]] = mpmd.assign %[[UNASSIGN_ARG1]] : (tensor<ui32>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>
-  // CHECK-DAG:       %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_INDEX]], %[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg3: tensor<ui32>, %arg4: tensor<ui32>) {
+  // CHECK-DAG:       %[[ADD_FRAG1:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_INDEX]], %[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg3: tensor<ui32>, %arg4: tensor<ui32>) {
   // CHECK-NEXT:      %[[CONST:.*]] = stablehlo.constant dense<1> : tensor<ui32>
   // CHECK-NEXT:      %[[ADD0:.*]] = stablehlo.add %arg4, %[[CONST]] : tensor<ui32>
   // CHECK-NEXT:      %[[ADD1:.*]] = stablehlo.add %[[ADD0]], %arg3 : tensor<ui32>
@@ -744,7 +744,7 @@ attributes {topology = #mpmd.topology<<"m1" : <["x"=2]>>, <"m2" : <["y"=2]>>>} {
   // CHECK-DAG:     %[[F0_UNASSIGN:.*]] = mpmd.unassign %[[ADD_FRAG1]] : (!mpmd.mesh_tensor<"m1", tensor<ui32>>) -> tensor<ui32>
 
   // CHECK-DAG:     %[[ASSIGN_ARG2:.*]] = mpmd.assign %[[UNASSIGN_ARG2]] : (tensor<ui32>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>
-  // CHECK-DAG:       %[[ADD_FRAG2:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG2]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg3: tensor<ui32>) {
+  // CHECK-DAG:       %[[ADD_FRAG2:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG2]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg3: tensor<ui32>) {
   // CHECK-NEXT:      %[[CONST:.*]] = stablehlo.constant dense<1> : tensor<ui32>
   // CHECK-NEXT:      %[[ADD0:.*]] = stablehlo.add %arg3, %[[CONST]] : tensor<ui32>
   // CHECK-NEXT:      mpmd.return %[[ADD0]] : tensor<ui32>
@@ -800,7 +800,7 @@ attributes {topology = #mpmd.topology<<"m1" : <["x"=1]>>>} {
   // CHECK-DAG:   %[[UNASSIGN_ARG1:.*]] = mpmd.unassign %arg1 : (!mpmd.mesh_tensor<"m1", tensor<ui32>>) -> tensor<ui32>
   // CHECK-DAG:   %[[ASSIGN_ARG0:.*]] = mpmd.assign %[[UNASSIGN_ARG0]] : (tensor<ui32>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>
   // CHECK-DAG:   %[[ASSIGN_ARG1:.*]] = mpmd.assign %[[UNASSIGN_ARG1]] : (tensor<ui32>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>
-  // CHECK-DAG:   %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0]], %[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["rewrite_using_analysis"]} (%arg2: tensor<ui32>, %arg3: tensor<ui32>) {
+  // CHECK-DAG:   %[[ADD_FRAG0:.*]] = mpmd.fragment<mesh="m1", origin=[]> (%[[ASSIGN_ARG0]], %[[ASSIGN_ARG1]]) {mpmd.inferred_by = ["infer_mesh_wrap_meshless_ops"]} (%arg2: tensor<ui32>, %arg3: tensor<ui32>) {
   // CHECK-NEXT:    %[[ADD0:.*]] = stablehlo.add %arg2, %arg3 : tensor<ui32>
   // CHECK-NEXT:    mpmd.return %[[ADD0]] : tensor<ui32>
   // CHECK-NEXT:  } : (!mpmd.mesh_tensor<"m1", tensor<ui32>>, !mpmd.mesh_tensor<"m1", tensor<ui32>>) -> !mpmd.mesh_tensor<"m1", tensor<ui32>>

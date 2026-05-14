@@ -1507,7 +1507,7 @@ class InferMeshAssignMeshForFuncLeavesPass
     });
     for (StringRef mesh_name : mesh_names) {
       WrapOpWithFragment(op, mesh_name, rewriter,
-                         "assign_mesh_for_func_leaves");
+                         "infer_mesh_wrap_resultless_ops");
       if (isPure(op)) {
         // For pure ops, we only need to wrap it in a fragment once. But for
         // non-pure ops, we need to keep them associated with each src.
@@ -2298,7 +2298,7 @@ void WrapBasedOnAssignUsers(Operation* op, RewriterBase& rewriter) {
   });
   for (StringRef mesh_name : user_mesh_types_vec) {
     WrapOpWithFragment(
-        op, mesh_name, rewriter, "rewrite_using_analysis",
+        op, mesh_name, rewriter, "infer_mesh_wrap_meshless_ops",
         /*should_replace_use=*/[&mesh_name](OpOperand& use) {
           if (auto assign_user = dyn_cast<AssignOp>(use.getOwner())) {
             return assign_user.getType().getMeshName() == mesh_name;
