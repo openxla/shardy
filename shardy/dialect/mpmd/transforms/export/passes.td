@@ -190,12 +190,12 @@ def ValidateNoInferredFragmentsPass :
   let description = [{
     Checks that all inferred fragments have been merged.
 
-    By default, this pass emits a warning for each such fragment. If
-    `fail-on-inferred-fragments` is set, it emits an error and fails.
+    By default, this pass emits an error if any inferred fragment remains. If
+    `fail-on-inferred-fragments` is set to false, it emits a warning instead.
   }];
   let options = [
     Option<"failOnInferredFragments", "fail-on-inferred-fragments", "bool",
-           /*default=*/"false",
+           /*default=*/"true",
            "Whether to emit an error (and fail) instead of a warning.">
   ];
 }
