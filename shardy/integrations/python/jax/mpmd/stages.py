@@ -310,6 +310,11 @@ class MpmdExecutable(stages.Executable):
     return self._executable.get_ifrt_ir_program_memory_stats()
 
   @property
+  def out_avals(self) -> Sequence[jax.core.ShapedArray]:
+    """Return the output abstract values of the MPMD executable."""
+    return self._unloaded_executable.output_avals
+
+  @property
   def ifrt_ir_program_memory_xprof(self) -> str:
     """Return a XPROF url to a program memory trace."""
     return self._executable.get_ifrt_ir_program_xprof_url()
