@@ -13,7 +13,7 @@ func.func @assign_outputs_with_empty_src_set(%arg0: !m3_8x16, %arg1: !m2_8x16)
       <"m3": <["z"=2]>>
     >} {
 // CHECK:       %[[T0:.*]] = mpmd.transfer %arg0 {{.*}}m3{{.*}} -> {{.*}}m2
-// CHECK-NEXT:  %[[ADD:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%[[T0]], %arg1)
+// CHECK-NEXT:  %[[ADD:.*]] = mpmd.fragment<mesh="m2", origin=[]> (%arg1, %[[T0]])
 // CHECK:       return %[[ADD]]
   %4 = mpmd.unassign %arg0 : (!m3_8x16) -> tensor<8x16xf32>
   %5 = mpmd.unassign %arg1 : (!m2_8x16) -> tensor<8x16xf32>
