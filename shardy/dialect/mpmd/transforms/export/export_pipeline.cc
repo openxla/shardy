@@ -125,6 +125,13 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // offloading and aliasing passes.
   pm.addNestedPass<FuncOp>(createMarkFragmentReservedMemoryPass());
 
+  // Check that no inferred fragments exist before lowering to fragment calls.
+  ValidateNoInferredFragmentsPassOptions validateInferredOptions;
+  validateInferredOptions.failOnInferredFragments =
+      options.failOnInferredFragments;
+  pm.addNestedPass<FuncOp>(createValidateNoInferredFragmentsPass(
+      std::move(validateInferredOptions)));
+
   // This pass should be applied after all passes that operate on fragment ops.
   LowerToFragmentCallsPassOptions lower_to_fragment_calls_options;
   lower_to_fragment_calls_options.verboseLogging = options.verboseLogging;
@@ -158,6 +165,12 @@ struct ExportPipelineOptions
           "Whether to emit an error when a backward dependency is detected "
           "in a forward-only program."),
       llvm::cl::init(false)};
+  Option<bool> failOnInferredFragments{
+      *this, "fail-on-inferred-fragments",
+      llvm::cl::desc(
+          "Whether to emit an error when an inferred fragment is detected "
+          "before lowering to fragment calls."),
+      llvm::cl::init(false)};
 };
 
 }  // namespace
@@ -171,6 +184,8 @@ void registerExportPipeline() {
         options.failOnReshardOnlyFragments =
             pipelineOptions.failOnReshardOnlyFragments;
         options.failOnBackwardDeps = pipelineOptions.failOnBackwardDeps;
+        options.failOnInferredFragments =
+            pipelineOptions.failOnInferredFragments;
         addExportPipeline(pm, options);
       });
 }

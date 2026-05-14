@@ -44,6 +44,7 @@ struct ExportOptions {
   bool applyMergeTransfers = false;
   bool failOnReshardOnlyFragments = false;
   bool failOnBackwardDeps = false;
+  bool failOnInferredFragments = false;
   // Whether to enable verbose logging.
   bool verboseLogging = false;
 };

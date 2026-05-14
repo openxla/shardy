@@ -7,8 +7,9 @@ sdy.mesh @m1 = <["x"=2, "y"=2]>
 
 func.func @has_reshard_only_fragment(%arg0: !mesh_1_tensor) -> !mesh_1_tensor_sharded_x attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2, "y"=2]>>>} {
-  // expected-error@+1 {{Detected reshard-only fragment 'p0_inferred.main'. This usually indicates an unexpected reshard. Operands:}}
-  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) (%arg1: tensor<4x8xf32>) {
+  // expected-error@+2 {{Detected reshard-only fragment 'p0_inferred.main'. This usually indicates an unexpected reshard. Operands:}}
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     mpmd.return %arg1 : tensor<4x8xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor_sharded_x
   func.return %0 : !mesh_1_tensor_sharded_x
@@ -23,7 +24,8 @@ sdy.mesh @m1 = <["x"=2, "y"=2]>
 
 func.func @has_non_reshard_only_fragment(%arg0: !mesh_1_tensor) -> !mesh_1_tensor_sharded_x attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2, "y"=2]>>>} {
-  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) (%arg1: tensor<4x8xf32>) {
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %1 : tensor<4x8xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor_sharded_x
@@ -39,18 +41,21 @@ sdy.mesh @mesh = <["x"=2]>
 
 func.func @has_backward_dep(%arg0: !mesh_1_tensor) -> !mesh_1_tensor attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>} {
-  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) (%arg1: tensor<4x8xf32>) {
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %10 : tensor<4x8xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor
   %1 = mpmd.transfer %0 : (!mesh_1_tensor) -> !mesh_2_tensor
-  %2 = mpmd.fragment<mesh="m2", origin=[]> (%1) (%arg1: tensor<4x8xf32>) {
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %2 = mpmd.fragment<mesh="m2", origin=[]> (%1) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %10 : tensor<4x8xf32>
   } : (!mesh_2_tensor) -> !mesh_2_tensor
   %3 = mpmd.transfer %2 : (!mesh_2_tensor) -> !mesh_1_tensor
-  // expected-error@+1 {{Detected backward dependency but expected forward-only pipeline since there are no transpose fragments}}
-  %4 = mpmd.fragment<mesh="m1", origin=[]> (%3) (%arg1: tensor<4x8xf32>) {
+  // expected-error@+2 {{Detected backward dependency but expected forward-only pipeline since there are no transpose fragments}}
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %4 = mpmd.fragment<mesh="m1", origin=[]> (%3) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %10 : tensor<4x8xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor
@@ -66,12 +71,14 @@ sdy.mesh @mesh = <["x"=2]>
 
 func.func @has_forward_deps_only(%arg0: !mesh_1_tensor) -> !mesh_2_tensor attributes {
     "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>} {
-  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) (%arg1: tensor<4x8xf32>) {
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %10 : tensor<4x8xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor
   %1 = mpmd.transfer %0 : (!mesh_1_tensor) -> !mesh_2_tensor
-  %2 = mpmd.fragment<mesh="m2", origin=[]> (%1) (%arg1: tensor<4x8xf32>) {
+  // expected-warning@+1 {{Inferred fragment has not been merged (inferred by extract_reshards)}}
+  %2 = mpmd.fragment<mesh="m2", origin=[]> (%1) {mpmd.inferred_by = ["extract_reshards"]} (%arg1: tensor<4x8xf32>) {
     %10 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
     mpmd.return %10 : tensor<4x8xf32>
   } : (!mesh_2_tensor) -> !mesh_2_tensor
