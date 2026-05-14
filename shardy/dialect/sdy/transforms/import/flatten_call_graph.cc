@@ -55,11 +55,17 @@ struct FlattenCallGraphPass
       FuncOp funcOp = getFuncOpOrDie(callOp.getCallee(), symbolTable);
       if (auto [_, inserted] = funcNames.insert(funcOp.getName()); inserted) {
         if (flattenCallGraphUnder) {
-          // This is the first call to the function. Clone fully and flatten.
+          // This is the first call to the function. Keep the function itself
+          // uncloned (it will be cloned on a second call though) but clone the
+          // call graphs under it and during which flatten thos sub call graphs.
           // Because, unlike the case of full flattening it is *not* guaranteed
           // that any other calls to the called functions to be cloned.
-          callOp.setCallee(
-              symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
+          funcOp->walk([&](CallOp callOp) {
+            FuncOp calledFuncOp =
+                getFuncOpOrDie(callOp.getCallee(), symbolTable);
+            callOp.setCallee(symbolTable.insert(
+                cloneFuncRecursively(calledFuncOp, symbolTable)));
+          });
         }
         // In the case of full flatenning, it does not need to clone the called
         // functions as it is guaranteed that any second call later to the
