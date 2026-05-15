@@ -1280,12 +1280,14 @@ class InferMeshAssignMeshForFuncLeavesPass
               ClearUseSet(op);
             }
             return WalkResult::skip();
-          } else if (IsTerminalNodeInAnalysis(op)) {
+          }
+          if (IsTerminalNodeInAnalysis(op)) {
             AssignOperandsOfAnalysisTerminalNodes(op, meshes_by_name,
                                                   first_mesh_name, rewriter);
             ClearUseSet(op);
             return WalkResult::skip();
-          } else if (sdy::inDialect<MpmdDialect>(op)) {
+          }
+          if (sdy::inDialect<MpmdDialect>(op)) {
             // Don't skip the body of other MPMD ops.
             return WalkResult::advance();
           }
@@ -1798,7 +1800,8 @@ class InferMeshConvertReduceOpsPass
         [&rewriter, this](Operation* op) {
           if (auto fragment = dyn_cast<FragmentOp>(op)) {
             return WalkResult::skip();
-          } else if (IsMeshlessOp(op)) {
+          }
+          if (IsMeshlessOp(op)) {
             if (IsMpmdReduceAnnotated(op) &&
                 (inferCrossMeshReductions || CanConvertToReduce(op))) {
               ConvertAnnotatedReduceOp(op, rewriter);

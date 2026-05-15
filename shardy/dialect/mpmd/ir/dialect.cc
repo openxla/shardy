@@ -717,9 +717,8 @@ ParseResult parseOptionalShardings(OpAsmParser& parser, NamedAttrList& attrs,
   sdy::TensorShardingPerValueAttr shardingPerValue;
   if (sdy::parseStrippedTensorShardingPerValueAttr(parser, shardingPerValue)) {
     return failure();
-  } else {
-    attrs.set(sharding_attr_name, shardingPerValue);
   }
+  attrs.set(sharding_attr_name, shardingPerValue);
   return success();
 }
 
@@ -867,10 +866,9 @@ Value FragmentOp::getEdgeOwnerFromSource(OpOperand& source) {
   if (source_owner->hasTrait<OpTrait::IsTerminator>()) {
     SDY_CHECK_EQ(source_owner->getParentOp(), getOperation());
     return getResult(source.getOperandNumber());
-  } else {
-    SDY_CHECK_EQ(source_owner, getOperation());
-    return getBody()->getArgument(source.getOperandNumber());
   }
+  SDY_CHECK_EQ(source_owner, getOperation());
+  return getBody()->getArgument(source.getOperandNumber());
 }
 
 bool FragmentOp::shouldKeepEdgeOwnerShardingsDivisible() { return true; }
@@ -958,14 +956,14 @@ LogicalResult FragmentCallOp::verifySymbolUses(
   FailureOr<sdy::MeshAttr> func_mesh = GetMeshAttr(func_op);
   if (failed(func_mesh)) {
     return failure();
-  } else if (call_mesh != *func_mesh) {
+  }
+  if (call_mesh != *func_mesh) {
     return emitError(
                "Expected mesh of fragment call and callee function to "
                "match: ")
            << call_mesh << " vs " << *func_mesh;
-  } else {
-    return success();
   }
+  return success();
 }
 
 // mpmd.fragment_call<mesh="mesh_name", origin=[... origin ...]>
