@@ -95,9 +95,10 @@ class ValidateNoBackwardDepsPass
           llvm::raw_string_ostream os(msg);
           os << "Detected backward dependency but expected forward-only "
                 "pipeline since there are no transpose fragments: "
-             << "fragment call on mesh \"" << producer.getMeshName()
-             << "\" produces a value consumed by fragment call on mesh \""
-             << consumer.getMeshName()
+             << "fragment \"" << producer.getCallee() << "\" mesh=\""
+             << producer.getMeshName()
+             << "\" produces a value consumed by fragment \""
+             << consumer.getCallee() << "\" mesh=\"" << consumer.getMeshName()
              << "\". In a forward-only pipeline, dependencies must go from "
              << "lexicographically earlier meshes to later meshes.";
 
