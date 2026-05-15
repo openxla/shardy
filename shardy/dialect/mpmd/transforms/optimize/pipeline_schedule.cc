@@ -607,7 +607,7 @@ bool parser<FragmentComparatorOption>::parse(Option& opt, StringRef,
   if (auto schedule = mlir::mpmd::ParsePipelineSchedule(arg)) {
     value.value = mlir::mpmd::BuiltinFragmentComparator(*schedule);
     value.schedule = schedule;
-    return true;
+    return false;
   }
   return opt.error("unknown PropagationSchedule: " + arg);
 }
