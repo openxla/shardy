@@ -57,23 +57,14 @@ void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
 }
 
-struct ImportPipelineOptions
-    : public PassPipelineOptions<ImportPipelineOptions> {
-  Option<bool> enableLateInlining{*this, "enable-late-inlining",
-                                  llvm::cl::desc("Whether to late inline."),
-                                  llvm::cl::init(true)};
-};
-
 void registerImportPipeline() {
-  PassPipelineRegistration<ImportPipelineOptions>(
+  PassPipelineRegistration<>(
       "sdy-import-pipeline",
       "Run a sequence of import passes needed as a pre-processing step for "
       "Shardy propagation",
-      [](OpPassManager& pm, const ImportPipelineOptions& options) {
+      [](OpPassManager& pm) {
         int dumpIndex = 0;
-        PropagationOptions propOptions;
-        propOptions.enableLateInlining = options.enableLateInlining;
-        addImportPipeline(pm, dumpIndex, propOptions);
+        addImportPipeline(pm, dumpIndex, PropagationOptions{});
       });
 }
 
