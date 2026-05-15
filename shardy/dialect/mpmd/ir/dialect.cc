@@ -808,12 +808,12 @@ void FragmentOp::setInputSharding(unsigned input_index,
   std::optional<sdy::TensorShardingPerValueAttr> current_shardings =
       getInShardings();
 
-  // If none of the results have a sharding, create a new one. Otherwise,
-  // replace the sharding of the result at the specified index.
+  // If none of the inputs have a sharding, create a new one. Otherwise,
+  // replace the sharding of the input at the specified index.
   if (!current_shardings) {
     setInShardingsAttr(
         sdy::TensorShardingPerValueAttr::getOpenWithShardingAtIndex(
-            getContext(), getResultTypes(), input_index, sharding));
+            getContext(), getInputs().getTypes(), input_index, sharding));
   } else {
     setInShardingsAttr(
         current_shardings->replaceValueSharding(input_index, sharding));
