@@ -297,3 +297,44 @@ func.func @enforce_user_sharding_multiple_results(
     return %2, %0#1 : !mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32
   }
 }
+
+// -----
+
+// Verifies that enforcing a user result sharding correctly propagates to a
+// downstream consumer fragment that has no in_shardings and a different number
+// of inputs than results.
+
+!mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+#topology = #mpmd.topology<<"m1": <["x"=2]>>>
+
+module {
+  sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @enforce_result_sharding_mismatched_input_result_count
+func.func @enforce_result_sharding_mismatched_input_result_count(
+  %arg0: !mesh_1_tensor_4_8_f32,
+  %arg1: !mesh_1_tensor_4_8_f32) ->
+  (!mesh_1_tensor_4_8_f32 {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+  attributes {topology = #topology} {
+    // Producer: 1 input, 1 result. User specifies result sharding.
+    // CHECK: %[[PRODUCER:.*]] = mpmd.fragment
+    // CHECK-SAME: out_shardings=[<@mesh, [{"x"}, {}]>]
+    %0 = mpmd.fragment<mesh="m1", origin=["producer"]> (%arg0) (%arg2: tensor<4x8xf32>) {
+      %2 = stablehlo.add %arg2, %arg2 : tensor<4x8xf32>
+      mpmd.return %2 : tensor<4x8xf32>
+    } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+    // Consumer: 2 inputs, 1 result, NO in_shardings.
+    // setInputSharding should create in_shardings sized by the 2 inputs,
+    // not by the 1 result.
+    // CHECK: mpmd.fragment
+    // CHECK-SAME: in_shardings=[<@mesh, [{"x"}, {}]>, <@mesh, [{?}, {?}]>]
+    // CHECK-SAME: (%[[PRODUCER]], %arg1)
+    %1 = mpmd.fragment<mesh="m1", origin=["consumer"]> (%0, %arg1) (%arg3: tensor<4x8xf32>, %arg4: tensor<4x8xf32>) {
+      %3 = stablehlo.add %arg3, %arg4 : tensor<4x8xf32>
+      mpmd.return %3 : tensor<4x8xf32>
+    } : (!mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+    return %0 : !mesh_1_tensor_4_8_f32
+  }
+}
