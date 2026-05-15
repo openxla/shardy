@@ -1325,6 +1325,14 @@ bool isEquivalentOnMesh(TensorShardingAttr inSharding,
   return inMesh.equals(outMesh, /*ignoreDeviceOrder=*/true);
 }
 
+TensorShardingAttr getOrCreateShardingBypassingBarriers(
+    Value value, StringRef meshName, bool closedIfMissing = false) {
+  while (auto barrierOp = value.getDefiningOp<PropagationBarrierOp>()) {
+    value = barrierOp.getInput();
+  }
+  return getOrCreateSharding(value, meshName, closedIfMissing);
+}
+
 class ReshardPattern : public OpConversionPattern<ReshardOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
@@ -1334,8 +1342,14 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
       ReshardOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
     TensorShardingAttr outSharding = adaptor.getSharding();
-    TensorShardingAttr inSharding =
-        getOrCreateSharding(adaptor.getInput(), outSharding.getMeshName());
+    Value bypassedInput = adaptor.getInput();
+    while (auto barrierOp =
+               bypassedInput.getDefiningOp<PropagationBarrierOp>()) {
+      bypassedInput = barrierOp.getInput();
+    }
+
+    TensorShardingAttr inSharding = getOrCreateShardingBypassingBarriers(
+        bypassedInput, outSharding.getMeshName());
     // Here it's safe to assume that shardings' meshes have a name.
     if (inSharding.getRank() != outSharding.getRank()) {
       return rewriter.notifyMatchFailure(
@@ -1368,7 +1382,7 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
     // TODO(tomnatan): use a SymbolTable.
 
     CollectiveInserter collectiveInserter(inSharding, outSharding,
-                                          adaptor.getInput(), rewriter, op);
+                                          bypassedInput, rewriter, op);
     rewriter.replaceOp(op, collectiveInserter.insert());
 
     return success();
@@ -1384,7 +1398,8 @@ struct ReshardToCollectivesPass
     target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,
                        CollectivePermuteOp>();
     target->addDynamicallyLegalOp<ReshardOp>([&](ReshardOp op) {
-      TensorShardingAttr inSharding = getSharding(op.getInput());
+      TensorShardingAttr inSharding =
+          getShardingBypassingBarriers(op.getInput());
       TensorShardingAttr outSharding = op.getSharding();
       if (keepRedundantReshards && isEquivalent(inSharding, outSharding)) {
         return true;
