@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-export-pipeline='fail-on-reshard-only-fragments=true fail-on-backward-deps=true' -split-input-file -verify-diagnostics 2>&1
+// RUN: mpmd_opt %s -mpmd-export-pipeline='fail-on-reshard-only-fragments=true fail-on-backward-deps=true fail-on-inferred-fragments=false' -split-input-file -verify-diagnostics 2>&1
 
 !mesh_1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_1_tensor_sharded_x = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@m1, [{"x"}, {?}]>>
