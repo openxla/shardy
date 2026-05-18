@@ -52,6 +52,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/IR/Visitors.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -352,7 +353,7 @@ Value getShardableValue(Value value) {
   }
 
   return TypeSwitch<Operation*, Value>(getOwningOp(value))
-      .Case([&](FuncOp) { return value; })
+      .Case([&](FunctionOpInterface) { return value; })
       .Case([&](ShardableDataFlowOpInterface shardableRegionOp) {
         return shardableRegionOp.getEdgeOwnerFromTarget(value);
       })
@@ -384,7 +385,7 @@ TensorShardingAttr getSharding(Value value) {
     return TensorShardingAttr();
   }
   return TypeSwitch<Operation*, TensorShardingAttr>(getOwningOp(value))
-      .Case([value](FuncOp funcOp) {
+      .Case([value](FunctionOpInterface funcOp) {
         return funcOp.getArgAttrOfType<TensorShardingAttr>(
             cast<BlockArgument>(value).getArgNumber(), kShardingAttr);
       })
@@ -438,7 +439,7 @@ void setSharding(Value value, TensorShardingAttr sharding) {
     return;
   }
   TypeSwitch<Operation*>(getOwningOp(value))
-      .Case([&](FuncOp funcOp) {
+      .Case([&](FunctionOpInterface funcOp) {
         funcOp.setArgAttr(cast<BlockArgument>(value).getArgNumber(),
                           kShardingAttr, sharding);
       })
