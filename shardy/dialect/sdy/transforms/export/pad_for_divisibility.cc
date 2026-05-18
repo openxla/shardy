@@ -111,6 +111,30 @@ class PaddedTypeConverter : public TypeConverter {
 // Known padding value kinds for generated padding values.
 enum class PaddingValueKind { kZero, kOne };
 
+class PaddingCache {
+ public:
+  // Registers the padding kind for a value. The conversion pattern
+  // rewriter processes operations in topological order, so each value should
+  // only be registered once.
+  void setPadding(Value value, PaddingValueKind kind) {
+    if (!cache.insert({value, kind}).second) {
+      SDY_CHECK(false) << "Padding value already set for "
+                       << valueToString(value);
+    }
+  }
+
+  std::optional<PaddingValueKind> getPadding(Value value) const {
+    auto it = cache.find(value);
+    if (it != cache.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+ private:
+  DenseMap<Value, PaddingValueKind> cache;
+};
+
 // Returns a constant for the given PaddingValueKind.
 Value createConstant(OpBuilder& b, Location loc, Type elementType,
                      PaddingValueKind kind) {
@@ -131,17 +155,19 @@ Value createConstant(OpBuilder& b, Location loc, Type elementType,
   llvm_unreachable("invalid PaddingValueKind");
 }
 
-// Creates a padded value for 'value' with 'paddedType' and 'desiredKind'.
+// Creates a padded value for 'value' with 'paddedType' and 'paddingKind',
+// and adds the padded value to the PaddingCache.
 Value createPaddedValue(RankedTensorType paddedType, Value value,
-                        PaddingValueKind desiredKind,
+                        PaddingValueKind paddingKind,
                         const SymbolTable& symbolTable,
-                        ConversionPatternRewriter& rewriter) {
+                        ConversionPatternRewriter& rewriter,
+                        PaddingCache& cache) {
   Location loc = value.getLoc();
   auto origType = cast<RankedTensorType>(value.getType());
   SDY_CHECK(paddedType != origType);
 
   Value padding =
-      createConstant(rewriter, loc, paddedType.getElementType(), desiredKind);
+      createConstant(rewriter, loc, paddedType.getElementType(), paddingKind);
 
   SmallVector<int64_t> edgePaddingHigh;
   for (int i = 0; i < origType.getRank(); ++i) {
@@ -149,13 +175,15 @@ Value createPaddedValue(RankedTensorType paddedType, Value value,
                               origType.getDimSize(i));
   }
 
-  return stablehlo::PadOp::create(
+  Value padOp = stablehlo::PadOp::create(
       rewriter, loc, paddedType, value, padding,
       rewriter.getDenseI64ArrayAttr(
           SmallVector<int64_t>(origType.getRank(), 0)),
       rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
       rewriter.getDenseI64ArrayAttr(
           SmallVector<int64_t>(origType.getRank(), 0)));
+  cache.setPadding(padOp, paddingKind);
+  return padOp;
 }
 
 // Converts op to its local version by replacing its operands with the already
@@ -375,7 +403,9 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
 
 class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       sdy::AllSliceOp op, OpAdaptor adaptor,
@@ -384,7 +414,7 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
         static_cast<const PaddedTypeConverter*>(getTypeConverter());
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
-    Value input = op->getOperand(0);
+    Value input = adaptor.getOperands()[0];
     auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
     if (!rankedInputType) {
       return failure();
@@ -397,9 +427,9 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
       return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
     }
 
-    Value padOp =
-        createPaddedValue(cast<RankedTensorType>(paddedInputType), input,
-                          PaddingValueKind::kZero, symbolTable, rewriter);
+    Value padOp = createPaddedValue(cast<RankedTensorType>(paddedInputType),
+                                    input, PaddingValueKind::kZero, symbolTable,
+                                    rewriter, cache);
     OperationState state(op->getLoc(), op->getName());
     state.addOperands({padOp});
     state.addTypes(
@@ -410,11 +440,15 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     rewriter.replaceOp(op, newOp->getResults());
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx)
+      : OpConversionPattern(converter, ctx) {}
 
   LogicalResult matchAndRewrite(
       stablehlo::SliceOp op, OpAdaptor adaptor,
@@ -459,15 +493,22 @@ struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
  protected:
   void runOnOperation() final {
+    // FuncOpPattern enforces that function inputs and outputs are always fully
+    // divisible by sharding requirements. Consequently, padded values never
+    // escape the local function scope. This isolation guarantees the cache can
+    // be stack-allocated per function.
+    PaddingCache paddingCache;
     func::FuncOp funcOp = getOperation();
     ModuleOp module = funcOp->getParentOfType<ModuleOp>();
     SymbolTable symbolTable(module);
 
     PaddedTypeConverter typeConverter(symbolTable);
     RewritePatternSet patterns(&getContext());
-    patterns.add<AllSliceOpPattern, AllGatherOpPattern, FuncOpPattern,
-                 GenericOpPattern, StablehloSliceOpPattern>(typeConverter,
-                                                            &getContext());
+    patterns.add<FuncOpPattern, GenericOpPattern, StablehloSliceOpPattern,
+                 AllGatherOpPattern>(typeConverter, &getContext());
+    // Sharing the padding cache reference across pattern instances is safe from
+    // data races because pattern application within a function is sequential.
+    patterns.add<AllSliceOpPattern>(typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
