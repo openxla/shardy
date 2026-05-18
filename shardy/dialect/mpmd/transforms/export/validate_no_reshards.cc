@@ -48,6 +48,14 @@ class ValidateNoReshardsPass
         return;
       }
 
+      // Reshard-only fragments should always be inferred, never user-defined.
+      if (!callOp.getOrigin().empty()) {
+        callOp.emitError() << "Internal error: reshard-only fragment '"
+                           << callOp.getCallee()
+                           << "' is not an inferred fragment";
+        return signalPassFailure();
+      }
+
       std::string msg;
       llvm::raw_string_ostream os(msg);
       os << "Detected reshard-only fragment '" << callOp.getCallee()
