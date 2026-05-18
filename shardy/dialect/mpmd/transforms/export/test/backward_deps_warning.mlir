@@ -21,7 +21,7 @@ func.func @has_backward_dep_warning(%arg0: !mesh_1_tensor) -> !mesh_1_tensor att
   %1 = mpmd.transfer %0 : (!mesh_1_tensor) -> !mesh_2_tensor
   %2 = mpmd.fragment_call<mesh="m2", origin=["f2"(0)]> @fragment_m2(%1) : (!mesh_2_tensor) -> !mesh_2_tensor
   %3 = mpmd.transfer %2 : (!mesh_2_tensor) -> !mesh_1_tensor
-  // expected-warning@+1 {{Detected backward dependency but expected forward-only pipeline since there are no transpose fragments}}
+  // expected-warning@+1 {{Detected backward dependency but expected forward-only pipeline since there are no transpose fragments: fragment "fragment_m2" mesh="m2" produces a value consumed by fragment "fragment_m1" mesh="m1". In a forward-only pipeline, dependencies must go from lexicographically earlier meshes to later meshes.}}
   %4 = mpmd.fragment_call<mesh="m1", origin=["f1"(0)]> @fragment_m1(%3) : (!mesh_1_tensor) -> !mesh_1_tensor
   func.return %4 : !mesh_1_tensor
 }
