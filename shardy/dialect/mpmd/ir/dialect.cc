@@ -599,6 +599,8 @@ LogicalResult FragmentOp::verify() {
                      .succeeded());
 }
 
+namespace {
+
 template <typename OpT>
 void printStage(OpT op, llvm::raw_ostream& os) {
   if (op.getStageIdAttr()) {
@@ -627,6 +629,8 @@ void printMeshAndOrigin(OpT op, llvm::raw_ostream& os) {
   });
   os << "]";
 }
+
+}  // namespace
 
 void FragmentOp::printFragmentMetadata(llvm::raw_ostream& os) {
   printMeshAndOrigin<FragmentOp>(*this, os);

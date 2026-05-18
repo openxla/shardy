@@ -35,7 +35,12 @@ limitations under the License.
 
 namespace mlir::mpmd {
 
+#define GEN_PASS_DEF_GENERATESDYMESHESFROMTOPOLOGYPASS
+#include "shardy/dialect/mpmd/transforms/import/passes.h.inc"
+
 namespace {
+
+constexpr char kMeshAxisSeparator = '_';
 
 sdy::MeshOp GetOrCreateEmptyMesh(ModuleOp module_op) {
   if (sdy::MeshOp empty_mesh =
@@ -65,13 +70,6 @@ sdy::MeshOp GetOrCreateEmptyMesh(ModuleOp module_op) {
 
   return empty_mesh;
 }
-
-}  // namespace
-
-constexpr char kMeshAxisSeparator = '_';
-
-#define GEN_PASS_DEF_GENERATESDYMESHESFROMTOPOLOGYPASS
-#include "shardy/dialect/mpmd/transforms/import/passes.h.inc"
 
 class GenerateSdyMeshesFromTopologyPass
     : public impl::GenerateSdyMeshesFromTopologyPassBase<
@@ -147,4 +145,5 @@ class GenerateSdyMeshesFromTopologyPass
   }
 };
 
+}  // namespace
 }  // namespace mlir::mpmd
