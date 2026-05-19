@@ -441,6 +441,28 @@ func.func @dot_result_conflicting_sharding_mismatch_with_reduction_axes_3(
   return %0 : tensor<4x8xf32>
 }
 
+// CHECK-LABEL: func @reshard_dot_result_to_match_lhs_with_barrier
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<4x32xf32>
+// CHECK-SAME:    %[[ARG1:.*]]: tensor<32x8xf32>
+func.func @reshard_dot_result_to_match_lhs_with_barrier(
+    %arg0: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>},
+    %arg1: tensor<32x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+
+  // CHECK-NEXT: %[[BARRIER:.*]] = sdy.propagation_barrier %[[ARG0]]
+  %0 = sdy.propagation_barrier %arg0 allowed_direction=BACKWARD : tensor<4x32xf32>
+
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[BARRIER]], %[[ARG1]]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[DOT]] <@mesh, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[RESHARD]]
+  %1 = stablehlo.dot %0, %arg1
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} :
+      (tensor<4x32xf32>, tensor<32x8xf32>) -> tensor<4x8xf32>
+
+  return %1 : tensor<4x8xf32>
+}
+
 //===----------------------------------------------------------------------===//
 // Concatenate tests
 // More tests are in insert_explicit_reshards/concatenate.mlir
@@ -624,3 +646,4 @@ func.func @reshard_and_replicated_to_unreduced(
   %0 = sdy.reshard %arg0 <@mesh, [{"z"}, {}], unreduced={"x", "y"}> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+

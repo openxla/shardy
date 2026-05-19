@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -596,6 +597,12 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   return AxesPerFactor();
 }
 
+SmallVector<TensorShardingAttr> getShardingsBypassingBarriers(
+    ValueRange values) {
+  return llvm::map_to_vector(
+      values, [](Value value) { return getShardingBypassingBarriers(value); });
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -646,9 +653,9 @@ struct InsertExplicitReshardsPass
       }
 
       SmallVector<TensorShardingAttr> inShardings =
-          getShardings(op->getOperands());
+          getShardingsBypassingBarriers(op->getOperands());
       SmallVector<TensorShardingAttr> outShardings =
-          getShardings(op->getResults());
+          getShardingsBypassingBarriers(op->getResults());
 
       std::optional<MeshOp> meshOp =
           getMesh(inShardings, outShardings, symbolTable);

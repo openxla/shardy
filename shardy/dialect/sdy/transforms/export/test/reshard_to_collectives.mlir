@@ -918,3 +918,18 @@ func.func @out_unreduced_axes_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#
 //  %0 = sdy.reshard %arg0 <@mesh1d_6, [{}, {"x":(1)3}]> :  tensor<6x2xf32>
 //  return %0 : tensor<6x2xf32>
 // }
+
+// CHECK-LABEL: func @reshard_with_propagation_barrier
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<8x8x8xf32>
+func.func @reshard_with_propagation_barrier(
+    %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{"x"}, {"y"}, {"z"}]>})
+    -> tensor<8x8x8xf32> {
+  %0 = sdy.propagation_barrier %arg0 allowed_direction=BACKWARD : tensor<8x8x8xf32>
+
+  // CHECK-NEXT: %[[BARRIER:.*]] = sdy.propagation_barrier %[[ARG0]]
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {"y"}, {"z"}] %[[ARG0]] out_sharding=<@mesh3d, [{}, {}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %1 = sdy.reshard %0 <@mesh3d, [{}, {}, {}]> : tensor<8x8x8xf32>
+
+  return %1 : tensor<8x8x8xf32>
+}

@@ -306,6 +306,10 @@ Value getShardableValue(Value value);
 // sharding if `value` is a block argument of a `ManualComputationOp`.
 TensorShardingAttr getSharding(Value value);
 
+// Similar to `getSharding`, but bypasses propagation barriers when looking up
+// the sharding.
+TensorShardingAttr getShardingBypassingBarriers(Value value);
+
 // Returns the sharding of the given `value`, or a fully open (closed) empty
 // `TensorShardingAttr` if `value` doesn't have a sharding and `closedIfMissing`
 // is false (true).
