@@ -90,6 +90,12 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // fragments to compile) and may cause performance regressions. Thus, we merge
   // them with other fragments.
   pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
+  {
+    MergeInferredFragmentsPassOptions mergeInferredOptions;
+    mergeInferredOptions.mergeSideways = true;
+    pm.addNestedPass<FuncOp>(
+        createMergeInferredFragmentsPass(std::move(mergeInferredOptions)));
+  }
 
   // Mark each fragment with the inputs and outputs which are offloaded to host
   // memory.
