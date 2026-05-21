@@ -200,3 +200,25 @@ def ValidateNoInferredFragmentsPass :
   ];
 }
 
+def ValidateNoParamTransfersPass :
+        PassBase<"mpmd-validate-no-param-transfers", "DistributedFunctionPass"> {
+  let summary = "Validates that no parameter tensors are transferred across meshes.";
+  let description = [{
+    Checks that TransferOps do not transfer tensors whose JAX location info
+    matches a configurable pattern (default: "params['transformer"). Such
+    transfers typically indicate that model parameters are being erroneously
+    moved across meshes.
+
+    By default, this pass emits a warning. Set
+    `fail-on-param-transfers=true` to emit an error and fail instead.
+  }];
+  let options = [
+    Option<"failOnParamTransfers", "fail-on-param-transfers", "bool",
+           /*default=*/"false",
+           "Whether to emit an error (and fail) instead of a warning (default: false).">,
+    Option<"paramPattern", "param-pattern", "std::string",
+           /*default=*/"\"params['transformer\"",
+           "Pattern to match against the location info of transferred "
+           "tensors.">,
+  ];
+}

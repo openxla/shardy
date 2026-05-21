@@ -125,6 +125,13 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // offloading and aliasing passes.
   pm.addNestedPass<FuncOp>(createMarkFragmentReservedMemoryPass());
 
+  // Validate no parameter transfers across meshes (warning-only by default).
+  ValidateNoParamTransfersPassOptions paramTransfersOptions;
+  paramTransfersOptions.failOnParamTransfers = options.failOnParamTransfers;
+  paramTransfersOptions.paramPattern = options.paramTransferPattern;
+  pm.addNestedPass<FuncOp>(
+      createValidateNoParamTransfersPass(std::move(paramTransfersOptions)));
+
   // Check that no inferred fragments exist before lowering to fragment calls.
   ValidateNoInferredFragmentsPassOptions validateInferredOptions;
   validateInferredOptions.failOnInferredFragments =
@@ -171,6 +178,18 @@ struct ExportPipelineOptions
           "Whether to emit an error when an inferred fragment is detected "
           "before lowering to fragment calls."),
       llvm::cl::init(false)};
+  Option<bool> failOnParamTransfers{
+      *this, "fail-on-param-transfers",
+      llvm::cl::desc(
+          "Whether to emit an error (and fail) instead of a warning when a "
+          "parameter tensor is transferred across meshes."),
+      llvm::cl::init(false)};
+  Option<std::string> paramTransferPattern{
+      *this, "param-transfer-pattern",
+      llvm::cl::desc(
+          "Regex pattern to match against the location info of transferred "
+          "tensors."),
+      llvm::cl::init("params['transformer")};
 };
 
 }  // namespace
@@ -186,6 +205,8 @@ void registerExportPipeline() {
         options.failOnBackwardDeps = pipelineOptions.failOnBackwardDeps;
         options.failOnInferredFragments =
             pipelineOptions.failOnInferredFragments;
+        options.failOnParamTransfers = pipelineOptions.failOnParamTransfers;
+        options.paramTransferPattern = pipelineOptions.paramTransferPattern;
         addExportPipeline(pm, options);
       });
 }

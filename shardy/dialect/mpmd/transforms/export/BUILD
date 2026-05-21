@@ -41,6 +41,7 @@ cc_library(
         "sink_create_token_into_fragments.cc",
         "validate_no_backward_deps.cc",
         "validate_no_inferred_fragments.cc",
+        "validate_no_param_transfers.cc",
         "validate_no_reshards.cc",
     ],
     hdrs = [

@@ -19,6 +19,7 @@ limitations under the License.
 // IWYU pragma: begin_keep
 
 #include <memory>
+#include <string>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/Pass.h"
@@ -45,6 +46,9 @@ struct ExportOptions {
   bool failOnReshardOnlyFragments = false;
   bool failOnBackwardDeps = false;
   bool failOnInferredFragments = false;
+  // Whether to fail on parameter transfers (default: false, emits a warning).
+  bool failOnParamTransfers = false;
+  std::string paramTransferPattern = "params['transformer";
   // Whether to enable verbose logging.
   bool verboseLogging = false;
 };
