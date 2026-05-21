@@ -111,6 +111,12 @@ class PaddedTypeConverter : public TypeConverter {
 // Known padding value kinds for generated padding values.
 enum class PaddingValueKind { kZero, kOne };
 
+// Returns true if the operation has custom padding handling implemented in
+// this file and should be excluded from GenericOpPattern.
+bool hasCustomPadHandling(Operation* op) {
+  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp>(op);
+}
+
 class PaddingCache {
  public:
   // Registers the padding kind for a value. The conversion pattern
@@ -184,6 +190,75 @@ Value createPaddedValue(RankedTensorType paddedType, Value value,
           SmallVector<int64_t>(origType.getRank(), 0)));
   cache.setPadding(padOp, paddingKind);
   return padOp;
+}
+
+// Returns 'inputVal' if the value is not padded or the value already has
+// 'requiredKind' as PaddingValueKind. Otherwise, uses compare-and-select to
+// produce a new padded value from inputVal with the requiredKind padding and
+// returns the new value.
+//
+// We ensure all dimensions that require padding are padded with requireKind
+// unless dimsToEnforce is provided, in which case only the specified
+// dimensions are padded.
+Value ensurePadding(
+    Value inputVal, RankedTensorType origType, PaddingValueKind requiredKind,
+    OpBuilder& b, Location loc, PaddingCache& cache,
+    std::optional<ArrayRef<int64_t>> dimsToEnforce = std::nullopt) {
+  // Return early if no padding is applied or the cached padding already
+  // matches.
+  auto paddedType = cast<RankedTensorType>(inputVal.getType());
+  if (origType == paddedType) {
+    return inputVal;
+  }
+  std::optional<PaddingValueKind> currentKind = cache.getPadding(inputVal);
+  if (currentKind && *currentKind == requiredKind) {
+    return inputVal;
+  }
+
+  // Build a mask that is `true` for the original (unpadded) data region.
+  // An element is in the original region if its index along each padded
+  // dimension is less than the original unpadded size (index < original_size).
+  Value validDataMask;
+  for (auto [dim, origSize] : llvm::enumerate(origType.getShape())) {
+    if (origSize == paddedType.getDimSize(dim) ||
+        (dimsToEnforce && !llvm::is_contained(*dimsToEnforce, dim))) {
+      continue;
+    }
+    auto iotaType =
+        RankedTensorType::get(paddedType.getShape(), b.getI32Type());
+    Value iota = stablehlo::IotaOp::create(b, loc, iotaType, dim);
+    Value limit = stablehlo::ConstantOp::create(
+        b, loc,
+        DenseElementsAttr::get(RankedTensorType::get({}, b.getI32Type()),
+                               b.getI32IntegerAttr(origSize)));
+    Value broadcastLimit = stablehlo::BroadcastInDimOp::create(
+        b, loc, iotaType, limit, b.getDenseI64ArrayAttr({}));
+    Value mask = stablehlo::CompareOp::create(
+        b, loc, iota, broadcastLimit, stablehlo::ComparisonDirection::LT);
+    validDataMask = validDataMask
+                        ? stablehlo::AndOp::create(b, loc, validDataMask, mask)
+                        : mask;
+  }
+
+  if (!validDataMask) {
+    return inputVal;
+  }
+
+  // Create the constant with the new padding value and broadcast it to the
+  // same shape as 'inputVal'.
+  Value newPaddingScalar =
+      createConstant(b, loc, paddedType.getElementType(), requiredKind);
+  Value newPaddingValue = stablehlo::BroadcastInDimOp::create(
+      b, loc, paddedType, newPaddingScalar, b.getDenseI64ArrayAttr({}));
+
+  // Keep the original data from 'inputVal' (where mask is true), and replace
+  // the padded region with 'newPaddingValue' (where mask is false).
+  Value select = stablehlo::SelectOp::create(b, loc, validDataMask, inputVal,
+                                             newPaddingValue);
+  if (!dimsToEnforce) {
+    cache.setPadding(select, requiredKind);
+  }
+  return select;
 }
 
 // Converts op to its local version by replacing its operands with the already
@@ -263,7 +338,7 @@ class GenericOpPattern : public ConversionPattern {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
-        isa<stablehlo::SliceOp>(op)) {
+        hasCustomPadHandling(op)) {
       return failure();
     }
     return padGenericOp(op, operands, rewriter,
@@ -427,15 +502,17 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
       return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
     }
 
-    Value padOp = createPaddedValue(cast<RankedTensorType>(paddedInputType),
-                                    input, PaddingValueKind::kZero, symbolTable,
-                                    rewriter, cache);
+    PaddingValueKind paddingKind = PaddingValueKind::kZero;
+    Value padOp =
+        createPaddedValue(cast<RankedTensorType>(paddedInputType), input,
+                          paddingKind, symbolTable, rewriter, cache);
     OperationState state(op->getLoc(), op->getName());
     state.addOperands({padOp});
     state.addTypes(
         {getPaddedType(op.getResult().getType(), outSharding, symbolTable)});
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
+    cache.setPadding(newOp->getResult(0), paddingKind);
 
     rewriter.replaceOp(op, newOp->getResults());
     return success();
@@ -489,8 +566,51 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
   }
 };
 
+class StablehloDotGeneralOpPattern
+    : public OpConversionPattern<stablehlo::DotGeneralOp> {
+ public:
+  StablehloDotGeneralOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                               PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::DotGeneralOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+
+    Location loc = op.getLoc();
+    stablehlo::DotDimensionNumbersAttr dimNums = op.getDotDimensionNumbers();
+
+    Value lhs = adaptor.getOperands()[0];
+    auto lhsOrigType = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
+    if (!lhsOrigType) {
+      return failure();
+    }
+    Value paddedLhs =
+        ensurePadding(lhs, lhsOrigType, PaddingValueKind::kZero, rewriter, loc,
+                      cache, dimNums.getLhsContractingDimensions());
+
+    Value rhs = adaptor.getOperands()[1];
+    auto rhsOrigType = dyn_cast<RankedTensorType>(op->getOperand(1).getType());
+    if (!rhsOrigType) {
+      return failure();
+    }
+    Value paddedRhs =
+        ensurePadding(rhs, rhsOrigType, PaddingValueKind::kZero, rewriter, loc,
+                      cache, dimNums.getRhsContractingDimensions());
+
+    return padGenericOp(op, {paddedLhs, paddedRhs}, rewriter, converter);
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
 struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
+  using PadForDivisibilityPassBase::PadForDivisibilityPassBase;
+
  protected:
   void runOnOperation() final {
     // FuncOpPattern enforces that function inputs and outputs are always fully
@@ -508,7 +628,8 @@ struct PadForDivisibilityPass
                  AllGatherOpPattern>(typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
-    patterns.add<AllSliceOpPattern>(typeConverter, &getContext(), paddingCache);
+    patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern>(
+        typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
