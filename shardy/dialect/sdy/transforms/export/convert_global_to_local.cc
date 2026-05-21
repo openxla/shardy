@@ -217,7 +217,8 @@ class GenericOpPattern : public ConversionPattern {
          !isa<sdy::ReturnOp>(op)) ||
         isa<stablehlo::ConcatenateOp, stablehlo::ConvolutionOp,
             stablehlo::DotGeneralOp, stablehlo::DotOp, stablehlo::GatherOp,
-            stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ScatterOp,
+            stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ReduceWindowOp,
+            stablehlo::ScatterOp, stablehlo::SelectAndScatterOp,
             stablehlo::SliceOp>(op)) {
       return failure();
     }
@@ -2676,6 +2677,88 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
   ConversionState& conversionState;
 };
 
+template <typename OpTy>
+class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
+ public:
+  StablehloWindowedOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                             ConversionState& state)
+      : OpConversionPattern<OpTy>(converter, ctx), conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      OpTy op, typename OpTy::Adaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter = static_cast<const GlobalToLocalTypeConverter*>(
+        this->getTypeConverter());
+
+    // The tensor being windowed is the first operand (index 0).
+    Value input = op->getOperand(0);
+    TensorShardingAttr inSharding = converter->getSharding(input);
+
+    if (inSharding && !isFullyReplicated(inSharding)) {
+      const SymbolTable& symbolTable = converter->getSymbolTable();
+      MeshAttr mesh = inSharding.getMesh(symbolTable);
+      if (!mesh) {
+        return op.emitOpError("failed to resolve mesh");
+      }
+
+      auto operandType = cast<RankedTensorType>(input.getType());
+      std::optional<DenseIntElementsAttr> padding = op.getPadding();
+
+      // SelectAndScatter has optional window_dimensions in its ODS, while
+      // ReduceWindow has it required.
+      ArrayRef<int64_t> windowDimensions;
+      if constexpr (std::is_same_v<OpTy, stablehlo::SelectAndScatterOp>) {
+        windowDimensions =
+            op.getWindowDimensions().value_or(ArrayRef<int64_t>());
+      } else {
+        windowDimensions = op.getWindowDimensions();
+      }
+
+      ArrayRef<int64_t> windowStrides =
+          op.getWindowStrides().value_or(ArrayRef<int64_t>());
+
+      for (int64_t dim = 0; dim < operandType.getRank(); ++dim) {
+        ArrayRef<AxisRefAttr> axes =
+            inSharding.getDimShardings()[dim].getAxes();
+        if (axes.empty()) continue;
+
+        int64_t shardedSize = getTotalAxesSize(axes, mesh);
+        if (shardedSize > 1) {
+          bool isPassthrough = true;
+
+          if (padding.has_value()) {
+            // The padding attribute is conceptually a 2D tensor of shape
+            // [rank, 2], where each row contains the start and end padding for
+            // a dimension. As such, the start padding for dimension `dim` is
+            // at index 2 * dim in the flattened attribute.
+            mlir::DenseElementsAttr::ElementIterator<int64_t> paddingStart =
+                padding->getValues<int64_t>().begin() + 2 * dim;
+            if (*paddingStart != 0 || *std::next(paddingStart) != 0) {
+              isPassthrough = false;
+            }
+          }
+
+          if (isPassthrough) {
+            isPassthrough =
+                (windowStrides.empty() || windowStrides[dim] == 1) &&
+                (windowDimensions.empty() || windowDimensions[dim] == 1);
+          }
+
+          SDY_CHECK(isPassthrough)
+              << "In op " << op->getName().getStringRef().str() << " dimension "
+              << dim << " is sharded but is not a pass-through dimension.";
+        }
+      }
+    }
+
+    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                             conversionState);
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -2738,8 +2821,11 @@ struct ConvertGlobalToLocalPass
                  StablehloConvolutionOpPattern, StablehloDotGeneralOpPattern,
                  StablehloDotOpPattern, StablehloGatherOpPattern,
                  StablehloIotaOpPattern, StablehloPadOpPattern,
-                 StablehloScatterOpPattern, StablehloSliceOpPattern>(
-        typeConverter, &getContext(), conversionState);
+                 StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
+                 StablehloScatterOpPattern,
+                 StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
+                 StablehloSliceOpPattern>(typeConverter, &getContext(),
+                                          conversionState);
     patterns.add<AllReduceOpPattern, AllToAllOpPattern>(
         typeConverter, &getContext(), conversionState, enableRGV3);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
