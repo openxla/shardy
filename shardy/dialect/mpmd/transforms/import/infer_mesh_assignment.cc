@@ -2367,9 +2367,16 @@ void AssignOpBasedOnConsumers(Operation* op, const int max_clones,
   // cloned as it could be the root of a large tree, i.e., we would
   // replicate too much code, potentially slowing down this pass (and maybe
   // others) significantly.
+  // Exception: trivial pure ops (single operand, single result, no regions,
+  // no side effects) like sdy.sharding_constraint are always cheap to clone,
+  // so we bypass the max_clones limit for them to avoid creating millions of
+  // wrapper fragments that are expensive to merge later.
   // In any other case, we clone `op` into each of its fragment users.
+  bool is_trivial_op = op->getNumOperands() <= 1 && op->getNumResults() == 1 &&
+                       op->getNumRegions() == 0 && isPure(op);
   if (fragment_users.empty() || has_non_fragment_user ||
-      (fragment_users.size() > max_clones && op->getNumOperands() > 0)) {
+      (fragment_users.size() > max_clones && op->getNumOperands() > 0 &&
+       !is_trivial_op)) {
     WrapBasedOnAssignUsers(op, rewriter);
   } else {
     for (FragmentOp fragment_user : fragment_users) {

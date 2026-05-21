@@ -237,3 +237,99 @@ func.func @clone_op_with_free_vars(%arg0: tensor<4x16xf32>, %arg1: tensor<4x16xf
   func.return %consumer1, %consumer2 : !mpmd.mesh_tensor<"mesh1", tensor<4x16xf32>>, !mpmd.mesh_tensor<"mesh1", tensor<4x16xf32>>
 }
 
+// Trivial ops (single operand, single result, no regions) should be cloned
+// into their fragment users even when the number of users exceeds max-clones.
+// This avoids creating millions of wrapper fragments for ops like
+// sdy.sharding_constraint.
+// Here stablehlo.negate has 1 operand, 1 result, 0 regions, and 4 fragment
+// users (above max-clones=3). It should be cloned, not wrapped.
+// CHECK-LABEL: @trivial_op_above_limit_cloned_not_wrapped
+func.func @trivial_op_above_limit_cloned_not_wrapped(%arg0: tensor<8x16xi32>, %arg1: !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>)
+  -> (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>)
+  attributes {topology = #mpmd.topology<<"mesh1" : <["x"=4]>>>}
+{
+// The negate should be absorbed (cloned) into each fragment, not wrapped.
+// CHECK:      %[[USER1:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]>
+// CHECK-NEXT:    stablehlo.negate
+// CHECK-NEXT:    stablehlo.add
+
+// CHECK:      %[[USER2:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]>
+// CHECK-NEXT:    stablehlo.negate
+// CHECK-NEXT:    stablehlo.add
+
+// CHECK:      %[[USER3:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]>
+// CHECK-NEXT:    stablehlo.negate
+// CHECK-NEXT:    stablehlo.add
+
+// CHECK:      %[[USER4:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]>
+// CHECK-NEXT:    stablehlo.negate
+// CHECK-NEXT:    stablehlo.add
+
+// CHECK:      return %[[USER1]], %[[USER2]], %[[USER3]], %[[USER4]]
+  %n = stablehlo.negate %arg0 : tensor<8x16xi32>
+  %an = mpmd.assign %n : (tensor<8x16xi32>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user1 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %an) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user2 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %an) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user3 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %an) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user4 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %an) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  return %user1, %user2, %user3, %user4 : !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+}
+
+// Trivial ops that have side effects should NOT be cloned even though they
+// meet the shape criteria (1 operand, 1 result, 0 regions). Cloning an
+// impure op would duplicate side effects. Here stablehlo.custom_call with
+// has_side_effect=true has 1 operand, 1 result, 0 regions, and 4 fragment
+// users (above max-clones=3). It should be wrapped, not cloned.
+// CHECK-LABEL: @impure_trivial_op_above_limit_wrapped_not_cloned
+func.func @impure_trivial_op_above_limit_wrapped_not_cloned(%arg0: tensor<8x16xi32>, %arg1: !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>)
+  -> (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>)
+  attributes {topology = #mpmd.topology<<"mesh1" : <["x"=4]>>>}
+{
+// The custom_call should be wrapped in its own fragment, not cloned.
+// CHECK:      %[[INFERRED:.*]] = mpmd.fragment<mesh="mesh1", origin=[]>
+// CHECK-NEXT:    stablehlo.custom_call
+// CHECK-NEXT:    mpmd.return
+// CHECK-NEXT: }
+// CHECK-NEXT: %[[INF_UNASSIGN:.*]] = mpmd.unassign %[[INFERRED]]
+// CHECK-NEXT: %[[INF_ASSIGN:.*]] = mpmd.assign %[[INF_UNASSIGN]]
+// CHECK:      %[[USER1:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %[[INF_ASSIGN]])
+// CHECK-NEXT:    stablehlo.add
+// CHECK:      %[[USER2:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %[[INF_ASSIGN]])
+// CHECK-NEXT:    stablehlo.add
+// CHECK:      %[[USER3:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %[[INF_ASSIGN]])
+// CHECK-NEXT:    stablehlo.add
+// CHECK:      %[[USER4:.*]] = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %[[INF_ASSIGN]])
+// CHECK-NEXT:    stablehlo.add
+// CHECK:      return %[[USER1]], %[[USER2]], %[[USER3]], %[[USER4]]
+  %cc = stablehlo.custom_call @side_effecting_op(%arg0) {has_side_effect = true} : (tensor<8x16xi32>) -> tensor<8x16xi32>
+  %acc = mpmd.assign %cc : (tensor<8x16xi32>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user1 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %acc) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user2 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %acc) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user3 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %acc) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  %user4 = mpmd.fragment<mesh="mesh1", origin=["m1"]> (%arg1, %acc) (%arg2: tensor<8x16xi32>, %arg3: tensor<8x16xi32>) {
+    %2 = stablehlo.add %arg2, %arg3 : tensor<8x16xi32>
+    mpmd.return %2 : tensor<8x16xi32>
+  } : (!mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>) -> !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+  return %user1, %user2, %user3, %user4 : !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>, !mpmd.mesh_tensor<"mesh1", tensor<8x16xi32>>
+}
