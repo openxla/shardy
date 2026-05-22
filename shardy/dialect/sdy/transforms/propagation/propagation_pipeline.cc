@@ -101,9 +101,6 @@ void addPropagationPipeline(OpPassManager& pm,
 
 struct PropagationOptionsOptions
     : public PassPipelineOptions<PropagationOptionsOptions> {
-  Option<bool> enableLateInlining{*this, "enable-late-inlining",
-                                  llvm::cl::desc("Whether to late inline."),
-                                  llvm::cl::init(true)};
   Option<bool> dedupFunctionsFully{
       *this, "dedup-functions-fully",
       llvm::cl::desc("Whether to dedup functions fully."),
@@ -117,7 +114,6 @@ void registerPropagationPipeline() {
       "needed as a pre-processing step for propagation",
       [](OpPassManager& pm, const PropagationOptionsOptions& options) {
         PropagationOptions propOptions;
-        propOptions.enableLateInlining = options.enableLateInlining;
         propOptions.dedupFunctionsFully = options.dedupFunctionsFully;
         return addPropagationPipeline(pm, propOptions);
       });
