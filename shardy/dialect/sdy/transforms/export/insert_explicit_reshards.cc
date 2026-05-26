@@ -436,7 +436,15 @@ void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
   // Flatten factors from all dimensions.
   for (auto [dimIdx, dimMapping] : llvm::enumerate(mapping.getDimMappings())) {
     for (int64_t fIdx : dimMapping.getFactorIndices()) {
-      FactorSharding& fs = tfs.factorIndexToSharding.at(fIdx);
+      auto it = tfs.factorIndexToSharding.find(fIdx);
+      if (it == tfs.factorIndexToSharding.end()) {
+        // The presence of overflow axes causes all remaining factors not
+        // present in dimMapping in buildTensorFactorShardings. We can
+        // break from the dimMapping loop, but we continue to the next iteration
+        // instead to be more robust to potential future changes.
+        continue;
+      }
+      FactorSharding& fs = it->second;
       FactorSharding localFs = fs;
       localFs.axisRefs.clear();
       localFs.overflowAxes.clear();
@@ -484,7 +492,6 @@ AxesPerFactor processReshapeWithOverflowAxes(
                      it->second.overflowAxes.end());
     }
   }
-
   // Redistribute axes on both sides independently.
   redistributeAxes(shardingProjection.getMutableOperand(0),
                    shardingRule.getOperandMapping(0),

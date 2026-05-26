@@ -3,6 +3,7 @@
 sdy.mesh @mesh = <["x"=4, "y"=2]>
 sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh_6_4k = <["x"=6, "y"=4096]>
+sdy.mesh @mesh_seq = <["seq"=128]>
 
 // CHECK-LABEL: func @reshape
 func.func @reshape(%arg0: tensor<16x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y", "x"}]>}) {
@@ -421,6 +422,21 @@ func.func @reshape_overflow_axes_split_and_merge_2(
     sdy.sharding_rule = #sdy.op_sharding_rule<([i, jk, l])->([ij, k, l]) {i=4, j=6144, k=8192, l=16384}>
   } : (tensor<4x50331648x16384xbf16>) -> tensor<24576x8192x16384xbf16>
   return %0 : tensor<24576x8192x16384xbf16>
+}
+
+// CHECK-LABEL: func @reshape_with_overflow_axes_split_with_unmapped_factor
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<24x45x80xi32>
+func.func @reshape_with_overflow_axes_split_with_unmapped_factor(
+  %arg0: tensor<24x45x80xi32> {sdy.sharding = #sdy.sharding<@mesh_seq, [{}, {}, {}]>})
+  -> (tensor<86400xi32> {sdy.sharding = #sdy.sharding<@mesh_seq, [{"seq"}]>}) {
+  // CHECK:      %[[RESHARD_IN:.*]] = sdy.reshard %[[ARG0]] <@mesh_seq, [{"seq":(1)8}, {}, {}]> : tensor<24x45x80xi32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[RESHARD_IN]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_seq, [{"seq":(1)8}]>]>} : (tensor<24x45x80xi32>) -> tensor<86400xi32>
+  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[RESHAPE]] <@mesh_seq, [{"seq"}]> : tensor<86400xi32>
+  %0 = stablehlo.reshape %arg0 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_seq, [{"seq"}]>]>
+  } : (tensor<24x45x80xi32>) -> tensor<86400xi32>
+   // CHECK-NEXT: return %[[RESHARD_OUT]] : tensor<86400xi32>
+  return %0 : tensor<86400xi32>
 }
 
 // CHECK-LABEL: func @reshape_no_overflow_axes
