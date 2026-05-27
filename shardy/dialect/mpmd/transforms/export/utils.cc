@@ -27,11 +27,12 @@ using ::mlir::func::FuncOp;
 
 using OperandLastUseMap = DenseMap<Operation*, SmallVector<unsigned int>>;
 
-DenseSet<BlockArgument> GetAliasedBlockArguments(FuncOp main_func) {
-  DenseSet<BlockArgument> aliased_block_args;
+DenseMap<BlockArgument, unsigned> GetAliasedBlockArguments(FuncOp main_func) {
+  DenseMap<BlockArgument, unsigned> aliased_block_args;
   for (unsigned i = 0; i < main_func.getNumArguments(); ++i) {
-    if (main_func.getArgAttrOfType<IntegerAttr>(i, kAliasingAttrName)) {
-      aliased_block_args.insert(main_func.getArgument(i));
+    if (auto attr =
+            main_func.getArgAttrOfType<IntegerAttr>(i, kAliasingAttrName)) {
+      aliased_block_args[main_func.getArgument(i)] = attr.getInt();
     }
   }
   return aliased_block_args;

@@ -68,11 +68,14 @@ TEST(GetAliasedBlockArguments, ShouldReturnCorrectBlockArgsToAlias) {
       parseSourceString<ModuleOp>(kProgramWithUserMarkedDonation, &context);
   FuncOp func_op = GetMainFunction(*module);
 
-  DenseSet<BlockArgument> block_args_to_alias =
+  DenseMap<BlockArgument, unsigned> block_args_to_alias =
       GetAliasedBlockArguments(func_op);
 
   ASSERT_THAT(block_args_to_alias, SizeIs(1));
-  EXPECT_THAT(block_args_to_alias.begin()->getArgNumber(), 0);
+  EXPECT_THAT(block_args_to_alias.begin()->first.getArgNumber(), 0);
+  // The annotation is tf.aliasing_output = 1, so the target output index
+  // should be preserved.
+  EXPECT_THAT(block_args_to_alias.begin()->second, 1);
 }
 
 TEST(GetDonatedBlockArguments, ShouldReturnCorrectBlockArgsToDonate) {

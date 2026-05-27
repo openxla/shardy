@@ -44,8 +44,9 @@ constexpr StringRef kBufferDonationAttrName = "jax.buffer_donor";
 // compiling each fragment.
 constexpr StringRef kReservedHbmBytes = "reserved_hbm_bytes";
 
-// Returns the set of user marked block arguments to be aliased.
-DenseSet<BlockArgument> GetAliasedBlockArguments(
+// Returns a map from user-marked block arguments to their target output index
+// as specified by the tf.aliasing_output attribute.
+DenseMap<BlockArgument, unsigned> GetAliasedBlockArguments(
     func::FuncOp main_func);
 
 // Returns the set of user marked block arguments to donate.

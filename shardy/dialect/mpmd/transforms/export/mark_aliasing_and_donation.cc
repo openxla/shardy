@@ -45,6 +45,19 @@ namespace mlir::mpmd {
 
 namespace {
 
+// Checks if the given output index is a valid aliasing target for the given
+// input index in the fragment op: same type, not on host, same layout, and not
+// already aliased.
+bool CanAlias(FragmentOp op, unsigned int input_index,
+              unsigned int output_index,
+              const DenseSet<unsigned int>& aliased_outputs) {
+  Type input_type = op->getOperand(input_index).getType();
+  OpResult output = op->getResult(output_index);
+  return output.getType() == input_type && !IsResultOnHost(output) &&
+         IsInputOutputLayoutMatch(op, input_index, output_index) &&
+         !aliased_outputs.contains(output_index);
+}
+
 // If the input can be aliased with an output, then it returns the index of the
 // output it can be aliased with. An index cannot be aliased to an output if
 // the output index has already been used for aliasing (i.e., it is present in
@@ -52,23 +65,52 @@ namespace {
 std::optional<unsigned int> FindAliasingOutput(
     FragmentOp op, unsigned int input_index,
     const DenseSet<unsigned int>& aliased_outputs) {
-  Type input_type = op->getOperand(input_index).getType();
   for (OpResult output : op->getResults()) {
     unsigned output_index = output.getResultNumber();
-    // The input can only be aliased with an output if
-    // 1. They are the same type,
-    // 2. the output has not been aliased yet, and
-    // 3. the output is not on host memory.
-    // 4. the input and output have the same layout.
-    if (output.getType() != input_type || IsResultOnHost(output) ||
-        !IsInputOutputLayoutMatch(op, input_index, output_index)) {
-      continue;
-    }
-    if (!aliased_outputs.contains(output_index)) {
+    if (CanAlias(op, input_index, output_index, aliased_outputs)) {
       return output_index;
     }
   }
   return std::nullopt;
+}
+
+// Traces a value backward through single-operand ops (e.g., transpose,
+// sharding_constraint) to find a FragmentOp result. Returns the fragment
+// result index if the producing fragment matches |target_fragment|.
+std::optional<unsigned int> TraceToFragmentResult(
+    Value val, FragmentOp target_fragment) {
+  while (val) {
+    Operation* def_op = val.getDefiningOp();
+    if (!def_op) return std::nullopt;
+    if (auto fragment = dyn_cast<FragmentOp>(def_op)) {
+      if (fragment == target_fragment) {
+        return cast<OpResult>(val).getResultNumber();
+      }
+      return std::nullopt;
+    }
+    // Trace through single-input ops (e.g., transpose, sharding_constraint).
+    if (def_op->getNumOperands() == 1) {
+      val = def_op->getOperand(0);
+      continue;
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+// For a block arg annotated with `tf.aliasing_output = K`, translates the
+// func-level output index K to the corresponding result index of
+// |target_fragment| by tracing from the func return operand backward.
+std::optional<unsigned int> FindPreferredOutput(
+    func::FuncOp main_func, unsigned int func_output_idx,
+    FragmentOp target_fragment) {
+  auto return_op =
+      cast<func::ReturnOp>(main_func.getBody().back().getTerminator());
+  if (func_output_idx >= return_op->getNumOperands()) {
+    return std::nullopt;
+  }
+  return TraceToFragmentResult(return_op->getOperand(func_output_idx),
+                               target_fragment);
 }
 
 // Constructs a set of indices of donated inputs and a map between an input
@@ -80,8 +122,9 @@ std::optional<unsigned int> FindAliasingOutput(
 std::pair<DenseSet<unsigned int>, DenseMap<unsigned int, unsigned int>>
 ConstructDonationSetAndIOAliasingMap(
     FragmentOp op, ArrayRef<unsigned int> donatable_input_indices,
-    const DenseSet<BlockArgument>& aliased_block_args,
-    const DenseSet<BlockArgument>& donated_block_args) {
+    const DenseMap<BlockArgument, unsigned>& aliased_block_args,
+    const DenseSet<BlockArgument>& donated_block_args,
+    func::FuncOp main_func) {
   DenseSet<unsigned int> donated_input_indices_set;
   DenseMap<unsigned int, unsigned int> input_output_aliasing_map;
 
@@ -108,9 +151,22 @@ ConstructDonationSetAndIOAliasingMap(
       // be donated/aliased.
       if (donated_block_args.contains(block_arg)) {
         donated_input_indices_set.insert(input_index);
-      } else if (aliased_block_args.contains(block_arg)) {
-        if (auto aliased_output_idx =
-                FindAliasingOutput(op, input_index, aliased_outputs)) {
+      } else if (auto it = aliased_block_args.find(block_arg);
+                 it != aliased_block_args.end()) {
+        // Try to find the preferred fragment output by translating the
+        // user's func-level annotation to a fragment-level result index.
+        std::optional<unsigned int> aliased_output_idx;
+        if (auto preferred = FindPreferredOutput(main_func, it->second, op);
+            preferred && CanAlias(op, input_index, *preferred,
+                                  aliased_outputs)) {
+          aliased_output_idx = preferred;
+        }
+        // Fall back to greedy scan if preferred output didn't work.
+        if (!aliased_output_idx) {
+          aliased_output_idx =
+              FindAliasingOutput(op, input_index, aliased_outputs);
+        }
+        if (aliased_output_idx) {
           input_output_aliasing_map[input_index] = *aliased_output_idx;
           SDY_CHECK(aliased_outputs.insert(*aliased_output_idx).second);
         } else {
@@ -134,7 +190,7 @@ ConstructDonationSetAndIOAliasingMap(
 
 void MarkOperandsForAliasingAndDonation(func::FuncOp main_func,
                                         MLIRContext* ctx) {
-  DenseSet<BlockArgument> aliased_entrypoint_func_args =
+  DenseMap<BlockArgument, unsigned> aliased_entrypoint_func_args =
       GetAliasedBlockArguments(main_func);
   DenseSet<BlockArgument> donated_entrypoint_func_args =
       GetDonatedBlockArguments(main_func);
@@ -159,7 +215,8 @@ void MarkOperandsForAliasingAndDonation(func::FuncOp main_func,
         donated_idx_set_and_io_aliasing_map =
             ConstructDonationSetAndIOAliasingMap(
                 fragment_op, donatable_input_indices,
-                aliased_entrypoint_func_args, donated_entrypoint_func_args);
+                aliased_entrypoint_func_args, donated_entrypoint_func_args,
+                main_func);
 
     // Only set the donation and aliasing attributes if there is anything to
     // alias or donate.

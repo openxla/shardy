@@ -81,9 +81,11 @@ func.func @alias_to_multiple_output(%arg0: !mesh_1_tensor_4_8_f32 {tf.aliasing_o
       <"m1": <["x"=2]>>,
       <"m2": <["x"=2]>>
     >} {
-  // Both input can be aliased.
+  // Both inputs can be aliased. The user's annotations (arg0→output 1,
+  // arg1→output 0) are respected by tracing func return operands back to
+  // fragment results.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: {arg_attrs = [{tf.aliasing_output = 0 : i32}, {tf.aliasing_output = 1 : i32}]}
+  // CHECK-SAME: {arg_attrs = [{tf.aliasing_output = 1 : i32}, {tf.aliasing_output = 0 : i32}]}
   %0, %1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %0 = stablehlo.add %arg2, %arg3: tensor<4x8xf32>
     %1 = stablehlo.abs %arg3: tensor<4x8xf32>
@@ -170,8 +172,10 @@ func.func @one_argument_used_in_multiple_fragment_should_only_alias_in_last(%arg
     %1 = stablehlo.add %0, %arg3: tensor<4x8xf32>
     mpmd.return %0, %1 : tensor<4x8xf32>, tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32,!mesh_1_tensor_4_8_f32)
+  // The user annotated arg0 with tf.aliasing_output = 1. func output 1 = %3
+  // which is f2 result 1, so arg0 aliases with fragment output 1.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: {arg_attrs = [{tf.aliasing_output = 0 : i32}, {}]}
+  // CHECK-SAME: {arg_attrs = [{tf.aliasing_output = 1 : i32}, {}]}
   %2, %3 = mpmd.fragment<mesh="m1", origin=["f2"]> (%arg0, %arg1) (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
     %4 = stablehlo.add %arg2, %arg3: tensor<4x8xf32>
     %5 = stablehlo.abs %arg3: tensor<4x8xf32>
@@ -231,4 +235,34 @@ func.func @alias_intemediates_in_chain_of_fragments(%arg0: !mesh_1_tensor_4_8_f3
     mpmd.return %add : tensor<4x8xf32>
   } : (!mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32)
   func.return %arg0, %1 : !mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32
+}
+
+// -----
+
+// Test that aliasing respects annotations when func return order is reversed
+// relative to fragment output order. This is the KV-cache scenario: inputs are
+// [layer7, layer8] but func returns [layer8_new, layer7_new] (reversed).
+// CHECK-LABEL: func.func @reversed_outputs_in_return
+func.func @reversed_outputs_in_return(
+  %arg0: !mesh_1_tensor_4_8_f32 {tf.aliasing_output = 1 : i32},
+  %arg1: !mesh_1_tensor_4_8_f32 {tf.aliasing_output = 0 : i32})
+  -> (!mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32)
+  attributes {
+    "topology"=#mpmd.topology<
+      <"m1": <["x"=2]>>,
+      <"m2": <["x"=2]>>
+    >} {
+  // arg0 is annotated tf.aliasing_output = 1, and func output 1 = %0
+  // which is fragment result 0. So arg0 -> fragment output 0.
+  // arg1 is annotated tf.aliasing_output = 0, and func output 0 = %1
+  // which is fragment result 1. So arg1 -> fragment output 1.
+  // CHECK: mpmd.fragment
+  // CHECK-SAME: {arg_attrs = [{tf.aliasing_output = 0 : i32}, {tf.aliasing_output = 1 : i32}]}
+  %0, %1 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0, %arg1) (%arg2: tensor<4x8xf32>, %arg3: tensor<4x8xf32>) {
+    %0 = stablehlo.add %arg2, %arg3: tensor<4x8xf32>
+    %1 = stablehlo.abs %arg3: tensor<4x8xf32>
+    mpmd.return %0, %1 : tensor<4x8xf32>, tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32) -> (!mesh_1_tensor_4_8_f32,!mesh_1_tensor_4_8_f32)
+  // Reversed: func output 0 = fragment result 1, func output 1 = fragment result 0.
+  func.return %1, %0 : !mesh_1_tensor_4_8_f32, !mesh_1_tensor_4_8_f32
 }
