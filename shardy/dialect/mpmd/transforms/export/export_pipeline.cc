@@ -177,7 +177,7 @@ struct ExportPipelineOptions
       llvm::cl::desc(
           "Whether to emit an error when an inferred fragment is detected "
           "before lowering to fragment calls."),
-      llvm::cl::init(false)};
+      llvm::cl::init(true)};
   Option<bool> failOnParamTransfers{
       *this, "fail-on-param-transfers",
       llvm::cl::desc(

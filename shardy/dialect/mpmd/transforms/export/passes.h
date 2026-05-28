@@ -45,7 +45,7 @@ struct ExportOptions {
   bool applyMergeTransfers = false;
   bool failOnReshardOnlyFragments = false;
   bool failOnBackwardDeps = false;
-  bool failOnInferredFragments = false;
+  bool failOnInferredFragments = true;
   // Whether to fail on parameter transfers (default: false, emits a warning).
   bool failOnParamTransfers = false;
   std::string paramTransferPattern = "params['transformer";

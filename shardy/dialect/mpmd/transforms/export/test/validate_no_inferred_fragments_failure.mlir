@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-validate-no-inferred-fragments='fail-on-inferred-fragments=true' -split-input-file -verify-diagnostics 2>&1
+// RUN: mpmd_opt %s -mpmd-validate-no-inferred-fragments -split-input-file -verify-diagnostics 2>&1
 
 !mesh_1_tensor = !mpmd.mesh_tensor<"m1", tensor<4xf32>>
 

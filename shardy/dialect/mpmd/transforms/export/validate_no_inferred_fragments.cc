@@ -64,6 +64,24 @@ class ValidateNoInferredFragmentsPass
       });
       os << ")";
 
+      // TODO(b/495822074): Remove uniquify exception.
+      // TODO(b/513145099): Remove infer_mesh_wrap_meshless_ops exception.
+      // TODO(b/513153410): Remove extract_reshards exception.
+      // TODO(b/517436254): Remove remaining exceptions
+      if (llvm::any_of(inferredByAttr, [](Attribute attr) {
+            StringRef value = cast<StringAttr>(attr).getValue();
+            return value == "uniquify" ||
+                   value == "infer_mesh_wrap_meshless_ops" ||
+                   value == "extract_reshards" ||
+                   value == "infer_mesh_wrap_resultless_ops" ||
+                   value == "infer_mesh_convert_reduce_ops" ||
+                   value == "introduce_transfers";
+          })) {
+        SDY_LOG(WARNING) << msg;
+        fragment.emitWarning() << msg;
+        return;
+      }
+
       SDY_LOG(WARNING) << msg;
       InFlightDiagnostic diag = failOnInferredFragments
                                     ? fragment.emitError()
