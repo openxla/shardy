@@ -15,19 +15,15 @@ limitations under the License.
 
 #include <cstdint>
 #include <optional>
-#include <utility>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
-#include "mlir/Support/LogicalResult.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -35,6 +31,8 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "stablehlo/dialect/StablehloOps.h"
+#include "mlir/IR/OpDefinition.h"
 
 namespace mlir {
 namespace sdy {
@@ -43,71 +41,6 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
-
-struct ResolvePermutationFactorsPattern : public RewritePattern {
-  ResolvePermutationFactorsPattern(MLIRContext* ctx, bool enableHaloExchange)
-      : RewritePattern(MatchAnyOpTypeTag(), 1, ctx),
-        enableHaloExchange(enableHaloExchange) {}
-
-  LogicalResult matchAndRewrite(Operation* op,
-                                PatternRewriter& rewriter) const override {
-    OpShardingRuleAttr rule = getOrCreateShardingRule(op, false, false);
-    if (!rule || rule.isCustom()) {
-      return failure();
-    }
-
-    // Early exit if the rule does not define any permutation factors.
-    auto isPermutation = [&](int64_t i) {
-      return rule.getFactorType(i) == FactorType::kPermutation;
-    };
-    if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
-                      isPermutation)) {
-      return failure();
-    }
-
-    // Dispatch to HALO exchange if enabled and implemented for the op.
-
-    // Otherwise, use a generic resolution based on explicit reshards.
-    SymbolTable symbolTable(op->getParentOfType<ModuleOp>());
-    SmallVector<TensorShardingAttr> inShardings =
-        getShardings(op->getOperands());
-    SmallVector<TensorShardingAttr> outShardings =
-        getShardings(op->getResults());
-    std::optional<StringRef> meshName =
-        getCommonMeshName(inShardings, outShardings, symbolTable, true);
-    if (!meshName) {
-      return failure();
-    }
-    MeshOp meshOp = getMeshOp(symbolTable, *meshName);
-    if (!meshOp || meshOp.getMesh().isMaximal()) {
-      return failure();
-    }
-
-    ShardingProjection projection =
-        ShardingProjection::build(inShardings, outShardings, rule,
-                                  meshOp.getMesh(), /*closedIfMissing=*/true);
-    UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
-
-    for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
-      if (rule.getFactorType(i) == FactorType::kPermutation) {
-        if (!enableHaloExchange) {
-          update |=
-              projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
-        }
-      }
-    }
-    if (update.updateOperands.any() || update.updateResults.any()) {
-      IRRewriter sdyRewriter(rewriter);
-      insertExplicitReshards(op, inShardings, outShardings, projection, update,
-                             sdyRewriter, rule, symbolTable, meshOp);
-      return success();
-    }
-
-    return failure();
-  }
-
-  bool enableHaloExchange;
-};
 
 struct ShardyResolvePermutationFactorsPass
     : public impl::ShardyResolvePermutationFactorsPassBase<
@@ -118,15 +51,70 @@ struct ShardyResolvePermutationFactorsPass
  protected:
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
-    RewritePatternSet patterns(&getContext());
-    patterns.add<ResolvePermutationFactorsPattern>(&getContext(),
-                                                   enableHaloExchange);
+    IRRewriter rewriter(funcOp);
+    SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
-    if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
-      signalPassFailure();
-    }
+    // Walk the function to resolve permutation factors for each op.
+    funcOp.walk([&](Operation* op) {
+      // Skip terminators and any operations not in the StableHLO dialect.
+      // This prevents "unknown op" warnings for Shardy collectives or return
+      // ops.
+      if (op->hasTrait<OpTrait::IsTerminator>() ||
+          !inDialect<stablehlo::StablehloDialect>(op)) {
+        return;
+      }
+
+      OpShardingRuleAttr rule = getOrCreateShardingRule(op, false, false);
+      if (!rule || rule.isCustom()) {
+        return;
+      }
+
+      // Identify if the op defines any permutation factors.
+      auto isPermutation = [&](int64_t i) {
+        return rule.getFactorType(i) == FactorType::kPermutation;
+      };
+      if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
+                        isPermutation)) {
+        return;
+      }
+
+      // Dispatch to HALO exchange if enabled and implemented for the op.
+
+      // Otherwise, use a generic resolution based on explicit reshards.
+      SmallVector<TensorShardingAttr> inShardings =
+          getShardings(op->getOperands());
+      SmallVector<TensorShardingAttr> outShardings =
+          getShardings(op->getResults());
+      std::optional<StringRef> meshName =
+          getCommonMeshName(inShardings, outShardings, symbolTable, true);
+      if (!meshName) {
+        return;
+      }
+      MeshOp meshOp = getMeshOp(symbolTable, *meshName);
+      if (!meshOp || meshOp.getMesh().isMaximal()) {
+        return;
+      }
+
+      ShardingProjection projection =
+          ShardingProjection::build(inShardings, outShardings, rule,
+                                    meshOp.getMesh(), /*closedIfMissing=*/true);
+      UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
+
+      for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
+        if (rule.getFactorType(i) == FactorType::kPermutation) {
+          update |=
+              projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
+        }
+      }
+
+      if (update.updateOperands.any() || update.updateResults.any()) {
+        insertExplicitReshards(op, inShardings, outShardings, projection,
+                               update, rewriter, rule, symbolTable, meshOp);
+      }
+    });
   }
 };
+
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir
