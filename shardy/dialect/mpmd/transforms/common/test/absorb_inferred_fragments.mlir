@@ -459,3 +459,62 @@ func.func private @transfer_gets_removed_so_udf_absorbs_inferred_producer
 
   func.return %2 : !mesh_1_tensor_4_8_f32
 }
+
+// -----
+
+// When an inferred root absorbs an inferred producer, the merged result should
+// have the union of both fragments' inferred_by attributes.
+// CHECK-LABEL: func private @absorb_unions_inferred_by
+func.func private @absorb_unions_inferred_by(%arg0: !mesh_1_tensor_4_8_f32)
+  -> !mesh_1_tensor_4_8_f32
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>}
+{
+  // CHECK-NEXT: mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["pass2", "pass1"]}
+  // CHECK-NEXT:   multiply
+  // CHECK-NEXT:   add
+  // CHECK-NEXT:   return
+  // CHECK-NEXT: }
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["pass1"]}
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.multiply %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  %1 = mpmd.fragment<mesh="m1", origin=[]> (%0) {mpmd.inferred_by = ["pass2"]}
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  func.return %1 : !mesh_1_tensor_4_8_f32
+}
+
+// -----
+
+// When a user root absorbs an inferred fragment, the inferred_by attribute
+// should not appear on the merged user fragment.
+// CHECK-LABEL: func private @absorb_drops_inferred_by_on_user_fragment
+func.func private @absorb_drops_inferred_by_on_user_fragment(%arg0: !mesh_1_tensor_4_8_f32)
+  -> !mesh_1_tensor_4_8_f32
+  attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>}
+{
+  // CHECK-NEXT: mpmd.fragment<mesh="m1", origin=["user_frag"]> (%arg0)
+  // CHECK-NOT: inferred_by
+  // CHECK:     multiply
+  // CHECK-NEXT:   add
+  // CHECK-NEXT:   return
+  // CHECK-NEXT: }
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["some_pass"]}
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.multiply %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  %1 = mpmd.fragment<mesh="m1", origin=["user_frag"]> (%0)
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  func.return %1 : !mesh_1_tensor_4_8_f32
+}

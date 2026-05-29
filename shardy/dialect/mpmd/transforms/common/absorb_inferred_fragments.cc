@@ -16,11 +16,14 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/Value.h"
@@ -39,6 +42,25 @@ namespace mlir::mpmd {
 #include "shardy/dialect/mpmd/transforms/common/passes.h.inc"
 
 namespace {
+
+// Returns `root`'s discardable attrs with the absorbed fragment's inferred_by
+// unioned in. If root is a user fragment, inferred_by is not included.
+DictionaryAttr GetMergedDiscardableAttrs(FragmentOp root, FragmentOp absorbed,
+                                         OpBuilder& builder) {
+  DictionaryAttr root_attrs = root->getDiscardableAttrDictionary();
+  if (root.isUserFragment()) return root_attrs;
+  ArrayAttr absorbed_inferred_by =
+      absorbed->getAttrOfType<ArrayAttr>(kInferredByAttr);
+  if (!absorbed_inferred_by) return root_attrs;
+  llvm::SetVector<Attribute> combined;
+  if (ArrayAttr existing = root->getAttrOfType<ArrayAttr>(kInferredByAttr)) {
+    combined.insert(existing.begin(), existing.end());
+  }
+  combined.insert(absorbed_inferred_by.begin(), absorbed_inferred_by.end());
+  NamedAttrList attrs(root_attrs);
+  attrs.set(kInferredByAttr, builder.getArrayAttr(combined.takeVector()));
+  return attrs.getDictionary(builder.getContext());
+}
 
 // Checks if a fragment is a root fragment, i.e., if it is:
 // - a user fragment, or
@@ -208,7 +230,8 @@ class AbsorbClosestProducerPattern : public OpRewritePattern<FragmentOp> {
 
     // We now merge `inferred_producer` into `op`, at the location of `op` and
     // preserving its attributes.
-    DictionaryAttr discardable_attrs = op->getDiscardableAttrDictionary();
+    DictionaryAttr discardable_attrs =
+        GetMergedDiscardableAttrs(op, inferred_producer, rewriter);
     auto new_fragment = MergeRegionOps(
         inferred_producer, op, rewriter,
         /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
@@ -325,7 +348,8 @@ class AbsorbClosestConsumerPattern : public OpRewritePattern<FragmentOp> {
     FragmentOp inferred_consumer = mergeable_consumers.front();
     // We now merge `inferred_consumer` into `op`, at the location of `op` and
     // preserving its attributes.
-    DictionaryAttr discardable_attrs = op->getDiscardableAttrDictionary();
+    DictionaryAttr discardable_attrs =
+        GetMergedDiscardableAttrs(op, inferred_consumer, rewriter);
     Operation* new_fragment_dest = op->getNextNode();
     if (new_fragment_dest == inferred_consumer) {
       new_fragment_dest = new_fragment_dest->getNextNode();
@@ -372,13 +396,14 @@ class AbsorbInferredFragmentsPass
     }
 
     if (IsEntryPointFunction(func)) {
-      func.getBody().walk([](FragmentOp fragment) {
-        if (!fragment.isUserFragment()) {
-          SDY_LOG(WARNING)
-              << "Non entry-point MPMD function includes inferred "
-                 "fragments, which could cause performance issues.";
-        }
-      });
+      func.getBody().walk(
+          [](FragmentOp fragment) {
+            if (!fragment.isUserFragment()) {
+              SDY_LOG(WARNING)
+                  << "Non entry-point MPMD function includes inferred "
+                     "fragments, which could cause performance issues.";
+            }
+          });
     }
   }
 };
