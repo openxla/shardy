@@ -14,15 +14,14 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
-#include <utility>
 
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -30,6 +29,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir::mpmd {
@@ -41,17 +41,129 @@ namespace {
 
 using ValueToReturnIndices = llvm::MapVector<Value, SmallVector<int64_t>>;
 
+bool CanMoveAfter(Operation* op_to_move, Operation* target_op) {
+  if (op_to_move->getBlock() != target_op->getBlock()) return false;
+  if (!op_to_move->isBeforeInBlock(target_op)) return false;
+
+  for (Value result : op_to_move->getResults()) {
+    for (Operation* user : result.getUsers()) {
+      if (user->getBlock() == op_to_move->getBlock()) {
+        if (user == target_op || user->isBeforeInBlock(target_op)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// Tries to merge the newly created inferred fragment into an existing
+// same-mesh fragment in the block.
+void MergeInferredFragmentWithExisting(FragmentOp fragment_op,
+                                       StringRef mesh_name,
+                                       Operation* return_op,
+                                       OpBuilder& builder) {
+  // Try to find an existing same-mesh fragment to merge the newly created
+  // inferred fragment into. We track two things:
+  //   - latest_operand_producer: the latest op that produces any operand of
+  //     the inferred fragment (needed for positioning constraints).
+  //   - merge_target: the latest same-mesh fragment we can merge into.
+  FragmentOp merge_target = nullptr;
+  Operation* latest_operand_producer = nullptr;
+
+  // Updates merge_target if `op` is a same-mesh fragment that appears later
+  // in the block than the current candidate.
+  auto update_merge_target = [&](Operation* op) {
+    auto frag = dyn_cast<FragmentOp>(op);
+    if (frag && frag.getMeshName() == mesh_name &&
+        (!merge_target || merge_target->isBeforeInBlock(frag))) {
+      merge_target = frag;
+    }
+  };
+
+  // First, scan the operand producers for a merge candidate.
+  for (Value v : fragment_op.getOperands()) {
+    Operation* op = v.getDefiningOp();
+    if (!op) continue;
+    if (!latest_operand_producer ||
+        latest_operand_producer->isBeforeInBlock(op)) {
+      latest_operand_producer = op;
+    }
+    update_merge_target(op);
+  }
+
+  // If no producer fragment on the same mesh was found among the operands,
+  // look for any fragment on the same mesh in the block (sideways merge).
+  // Only do this when there are actual producer ops (not just block arguments).
+  // TODO(petebu): Consider supporting sideways merge when all operands are
+  // block arguments. Currently we bail out in that case since
+  // latest_operand_producer is null, but block args dominate everything so the
+  // merge would be safe.
+  if (!merge_target && latest_operand_producer) {
+    for (Operation& op : *return_op->getBlock()) {
+      if (&op == return_op || &op == fragment_op) continue;
+      update_merge_target(&op);
+    }
+  }
+
+  // Give up if no merge candidate was found, or if the candidate can't be
+  // moved after the latest operand producer (which would break dominance).
+  if (!merge_target) return;
+
+  // Position the merge target after the latest operand producer so all
+  // operands of the inferred fragment are available, then merge.
+  if (merge_target != latest_operand_producer) {
+    if (!CanMoveAfter(merge_target, latest_operand_producer)) return;
+    merge_target->moveAfter(latest_operand_producer);
+  }
+
+  fragment_op->moveAfter(merge_target);
+  IRRewriter rewriter(builder.getContext());
+
+  // Save the merge target's attributes before MergeRegionOps erases it.
+  // The inferred fragment never carries these attrs, so we just preserve
+  // the merge target's values (matching MergedAttributes/MergeCallCounters
+  // in merge_fragments.cc).
+  ArrayAttr existing_inferred_by =
+      merge_target->getAttrOfType<ArrayAttr>(kInferredByAttr);
+  auto existing_call_counter =
+      merge_target->getAttrOfType<IntegerAttr>(kCallCounterAttrName);
+
+  FragmentOp merged_fragment = MergeRegionOps(
+      merge_target, fragment_op, rewriter,
+      /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
+      [](OpOperand&, Value) {
+        SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
+      },
+      GetFragmentOriginUnion(merge_target, fragment_op, rewriter),
+      merge_target.getMeshNameAttr(),
+      // Uniquify-created fragments have no stage_id, so we preserve the
+      // merge target's stage_id directly.
+      /*stage_id=*/merge_target.getStageIdAttr());
+
+  // Restore preserved attrs on the merged fragment.
+  if (existing_call_counter) {
+    merged_fragment->setAttr(kCallCounterAttrName, existing_call_counter);
+  }
+  // Append "uniquify" to the merge target's inferred_by list.
+  SmallVector<Attribute> inferred_by;
+  if (existing_inferred_by) {
+    inferred_by.append(existing_inferred_by.begin(),
+                       existing_inferred_by.end());
+  }
+  inferred_by.push_back(builder.getStringAttr("uniquify"));
+  merged_fragment->setAttr(kInferredByAttr, builder.getArrayAttr(inferred_by));
+}
+
 void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
                                  ValueToReturnIndices& value_to_return_indices,
                                  OpBuilder& builder) {
-  // We remove any entries that require no work, in order to avoid too many
-  // checks.
+  // Remove entries that require no work: single-use non-block-arg values
+  // already have a unique return slot and don't need a fragment.
   value_to_return_indices.remove_if([](const auto& it) {
-    if (it.second.size() == 1) {
-      Value v = it.first;
-      return !isa<BlockArgument>(v);
-    }
-    return it.second.empty();
+    // Every entry has at least one index (populated via push_back).
+    SDY_CHECK(!it.second.empty());
+    return it.second.size() == 1 && !isa<BlockArgument>(it.first);
   });
 
   if (value_to_return_indices.empty()) {
@@ -98,6 +210,8 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   }
   auto block_builder = OpBuilder::atBlockEnd(&fragment_block);
   ReturnOp::create(block_builder, loc, returned_values);
+
+  MergeInferredFragmentWithExisting(fragment_op, mesh_name, return_op, builder);
 }
 
 // Replaces the return values of the function with transfer ops.
