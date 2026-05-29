@@ -203,9 +203,14 @@ SmallVector<std::pair<StringRef, Attribute>> MergedAttributes(
                             rewriter.getUI32IntegerAttr(*merged_call_count));
   }
 
-  if (std::optional<ArrayAttr> merged_inferred_by =
-          MergeInferredByAttributes(producer_op, consumer_op)) {
-    attributes.emplace_back(kInferredByAttr, *merged_inferred_by);
+  // Only track inferred_by when the merged result will still be an inferred
+  // fragment (i.e., both inputs are inferred). User fragments should not carry
+  // this attribute.
+  if (!producer_op.isUserFragment() && !consumer_op.isUserFragment()) {
+    if (std::optional<ArrayAttr> merged_inferred_by =
+            MergeInferredByAttributes(producer_op, consumer_op)) {
+      attributes.emplace_back(kInferredByAttr, *merged_inferred_by);
+    }
   }
 
   return attributes;

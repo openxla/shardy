@@ -526,3 +526,35 @@ func.func @merge_inferred_by(%arg0: !mesh_1_tensor_4_8_f32)
 
   func.return %1 : !mesh_1_tensor_4_8_f32
 }
+
+// -----
+
+// Merging an inferred fragment into a user fragment should not carry
+// inferred_by on the result, since user fragments should not have it.
+// CHECK-LABEL: func @inferred_by_dropped_on_user_fragment
+func.func @inferred_by_dropped_on_user_fragment(%arg0: !mesh_1_tensor_4_8_f32)
+  -> (!mesh_1_tensor_4_8_f32) attributes {
+    "topology"=#mpmd.topology<
+      <"m1": <["x"=2]>>
+    >} {
+  // CHECK-NEXT: %[[MERGED:.*]] = mpmd.fragment<mesh="m1", origin=["user_frag"]> (%arg0)
+  // CHECK-NOT: inferred_by
+  // CHECK:     stablehlo.add
+  // CHECK-NEXT:   stablehlo.multiply
+  // CHECK-NEXT:   mpmd.return
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[MERGED]]
+  %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0) {mpmd.inferred_by = ["some_pass"]}
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.add %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  %1 = mpmd.fragment<mesh="m1", origin=["user_frag"]> (%0)
+    (%arg1: tensor<4x8xf32>) {
+    %2 = stablehlo.multiply %arg1, %arg1 : tensor<4x8xf32>
+    mpmd.return %2 : tensor<4x8xf32>
+  } : (!mesh_1_tensor_4_8_f32) -> !mesh_1_tensor_4_8_f32
+
+  func.return %1 : !mesh_1_tensor_4_8_f32
+}
