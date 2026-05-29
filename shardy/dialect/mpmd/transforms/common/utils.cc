@@ -47,6 +47,7 @@ limitations under the License.
 #include "mlir/Transforms/RegionUtils.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
+#include "shardy/dialect/mpmd/ir/utils.h"
 
 namespace mlir::mpmd {
 
@@ -224,6 +225,92 @@ bool IsSplitDropTransferred(FragmentOp fragment) {
 
 bool IsSplitKeepTransferred(FragmentOp fragment) {
   return fragment->hasAttr(kSplitKeepTransferredAttrName);
+}
+
+// ---------------------------------------------------------------------------
+// Fragment query and positioning utilities.
+// ---------------------------------------------------------------------------
+
+FragmentOp FindLastFragmentOnMesh(Block* block, StringRef mesh_name,
+                                  ArrayRef<Operation*> exclude) {
+  FragmentOp result = nullptr;
+  for (Operation& op : *block) {
+    if (llvm::is_contained(exclude, &op)) continue;
+    auto frag = dyn_cast<FragmentOp>(&op);
+    if (frag && frag.getMeshName() == mesh_name) {
+      result = frag;
+    }
+  }
+  return result;
+}
+
+FragmentOp FindFirstFragmentOnMesh(Block* block, StringRef mesh_name,
+                                   ArrayRef<Operation*> exclude) {
+  for (Operation& op : *block) {
+    if (llvm::is_contained(exclude, &op)) continue;
+    auto frag = dyn_cast<FragmentOp>(&op);
+    if (frag && frag.getMeshName() == mesh_name) {
+      return frag;
+    }
+  }
+  return nullptr;
+}
+
+Operation* FindLatestOperandProducer(Operation* op) {
+  Operation* latest = nullptr;
+  for (Value v : op->getOperands()) {
+    Operation* def = v.getDefiningOp();
+    if (!def) continue;
+    if (!latest || latest->isBeforeInBlock(def)) {
+      latest = def;
+    }
+  }
+  return latest;
+}
+
+bool CanMoveAfter(Operation* op_to_move, Operation* target_op) {
+  if (op_to_move->getBlock() != target_op->getBlock()) return false;
+  if (!op_to_move->isBeforeInBlock(target_op)) return false;
+
+  for (Value result : op_to_move->getResults()) {
+    for (Operation* user : result.getUsers()) {
+      if (user->getBlock() == op_to_move->getBlock()) {
+        if (user == target_op || user->isBeforeInBlock(target_op)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool EnsureAfter(Operation* op, Operation* target) {
+  if (!target) return true;
+  if (op == target) return true;
+  if (!op->isBeforeInBlock(target)) return true;  // already after
+  if (!CanMoveAfter(op, target)) return false;
+  op->moveAfter(target);
+  return true;
+}
+
+SavedFragmentAttrs SaveFragmentAttrs(FragmentOp fragment) {
+  return {
+      fragment->getAttrOfType<ArrayAttr>(kInferredByAttr),
+      fragment->getAttrOfType<IntegerAttr>(kCallCounterAttrName),
+  };
+}
+
+void RestoreFragmentAttrs(FragmentOp fragment, const SavedFragmentAttrs& saved,
+                          StringRef pass_name, OpBuilder& builder) {
+  if (saved.call_counter) {
+    fragment->setAttr(kCallCounterAttrName, saved.call_counter);
+  }
+  SmallVector<Attribute> inferred_by;
+  if (saved.inferred_by) {
+    inferred_by.append(saved.inferred_by.begin(), saved.inferred_by.end());
+  }
+  inferred_by.push_back(builder.getStringAttr(pass_name));
+  fragment->setAttr(kInferredByAttr, builder.getArrayAttr(inferred_by));
 }
 
 namespace detail {
