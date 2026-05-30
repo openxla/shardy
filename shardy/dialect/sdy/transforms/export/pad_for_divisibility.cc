@@ -39,6 +39,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
@@ -548,8 +549,13 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
     ArrayRef<int64_t> limitIndices = op.getLimitIndices();
     SmallVector<int64_t> newLimits = llvm::to_vector(limitIndices);
 
+    TensorShardingAttr operandSharding = getSharding(adaptor.getOperand());
+    MeshAttr mesh = sharding.getMesh(converter->getSymbolTable());
+
     for (int i = 0; i < paddedShape.size(); ++i) {
       newLimits[i] = op.getStartIndices()[i] + paddedShape[i];
+      SDY_CHECK(newLimits[i] == limitIndices[i] ||
+                isCommunicationFreeSliceDim(i, op, operandSharding, mesh));
     }
 
     auto newOp = stablehlo::SliceOp::create(
