@@ -59,6 +59,7 @@ cc_library(
     deps = [
         ":explicit_reshards_util",
         ":passes_inc",
+        ":utils",
         "//shardy/common:file_utils",
         "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:axis_list_ref",
@@ -110,6 +111,19 @@ cc_library(
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
         "@llvm-project//mlir:Transforms",
+        "@stablehlo//:stablehlo_ops",
+    ],
+)
+
+cc_library(
+    name = "utils",
+    srcs = ["utils.cc"],
+    hdrs = ["utils.h"],
+    deps = [
+        "//shardy/dialect/sdy/ir:dialect",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
         "@stablehlo//:stablehlo_ops",
     ],
 )

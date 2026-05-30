@@ -21,18 +21,20 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "stablehlo/dialect/StablehloOps.h"
-#include "mlir/IR/OpDefinition.h"
 
 namespace mlir {
 namespace sdy {
@@ -101,10 +103,19 @@ struct ShardyResolvePermutationFactorsPass
       UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
 
       for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
-        if (rule.getFactorType(i) == FactorType::kPermutation) {
-          update |=
-              projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
+        if (rule.getFactorType(i) != FactorType::kPermutation) {
+          continue;
         }
+        if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(op)) {
+          SDY_CHECK(inShardings[0] == outShardings[0]);
+          if (isCommunicationFreeSliceDim(i, sliceOp, inShardings[0],
+                                          meshOp.getMesh())) {
+            continue;
+          }
+        }
+
+        update |=
+            projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
       }
 
       if (update.updateOperands.any() || update.updateResults.any()) {

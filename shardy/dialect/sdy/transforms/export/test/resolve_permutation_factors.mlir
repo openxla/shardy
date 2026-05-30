@@ -100,3 +100,35 @@ func.func @select_and_scatter_permutation(
   // CHECK: return %[[RES]] : tensor<1x16xi32>
   return %0 : tensor<1x16xi32>
 }
+
+// CHECK-LABEL: func @slice_partition_partial_dim_without_communication
+// CHECK-SAME:  (%[[ARG0:.*]]: tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+func.func @slice_partition_partial_dim_without_communication(
+  %arg0: tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+  -> tensor<3xi32> {
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %arg0 [0:3]
+  %0 = stablehlo.slice %arg0 [0:3] {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{"a"}]>]>
+  } : (tensor<4xi32>) -> tensor<3xi32>
+  // CHECK-NEXT: %[[RES:.*]] = sdy.all_gather [{"a"}] %[[SLICE]]
+  %1 = sdy.all_gather [{"a"}] %0 out_sharding=<@mesh, [{}]> : tensor<3xi32>
+  // CHECK-NEXT: return %[[RES]]
+  return %1 : tensor<3xi32>
+}
+
+// CHECK-LABEL: func @slice_partition_partial_dim_with_communication
+// CHECK-SAME:  (%[[ARG0:.*]]: tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+func.func @slice_partition_partial_dim_with_communication(
+  %arg0: tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+  -> tensor<3xi32> {
+  // CHECK-NEXT:  %[[RESHARD_0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[RESHARD_0]] [0:3]
+  // CHECK-NEXT:  %[[RESHARD_1:.*]] = sdy.reshard %[[SLICE]] <@mesh, [{"a"}]>
+  %0 = stablehlo.slice %arg0 [0:3] {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{"a"}]>]>
+  } : (tensor<8xi32>) -> tensor<3xi32>
+  // CHECK-NEXT: %[[RES:.*]] = sdy.all_gather [{"a"}] %[[RESHARD_1]]
+  %1 = sdy.all_gather [{"a"}] %0 out_sharding=<@mesh, [{}]> : tensor<3xi32>
+  // CHECK-NEXT: return %[[RES]]
+  return %1 : tensor<3xi32>
+}
