@@ -256,3 +256,15 @@ def RemoveSizeOneAxesPass : Pass<"sdy-remove-size-one-axes", "ModuleOp"> {
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
+
+def ExplicitGatherScatterBatchingPass
+    : Pass<"sdy-explicit-gather-scatter-batching", "func::FuncOp"> {
+  let summary = "Converts implicit batch dims in gather/scatter to "
+                "explicit batching dims.";
+  let description = [{
+    Identifies implicit batch dimensions in stablehlo.gather and
+    stablehlo.scatter operations and converts them to explicit
+    operand/start_indices batching dimensions.
+  }];
+  let dependentDialects = ["mlir::stablehlo::StablehloDialect"];
+}

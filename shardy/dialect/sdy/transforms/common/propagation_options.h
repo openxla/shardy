@@ -60,6 +60,11 @@ struct PropagationOptions {
   // flattening it. The default is false, meaning it will flatten the graph and
   // then propagate.
   bool enableNativeNonFlatSupport = false;
+  // Whether to enable the explicit gather/scatter batching pass, which
+  // converts implicit batch dimensions in gather/scatter ops to explicit
+  // batching dimensions. This helps Shardy recognize batch dims and avoid
+  // unnecessary collectives.
+  bool enableExplicitGatherScatterBatching = false;
 };
 
 }  // namespace sdy

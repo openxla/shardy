@@ -32,6 +32,9 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
   pm.addPass(createRemoveSizeOneAxesPass());
   pm.addPass(createPropagateShardingFromFuncToCallPass());
   pm.addPass(createConstantOrScalarSplitterPass());
+  if (options.enableExplicitGatherScatterBatching) {
+    pm.addNestedPass<func::FuncOp>(createExplicitGatherScatterBatchingPass());
+  }
   pm.addPass(createSymbolDCEPass());
   pm.addPass(createManualAxesCleanupPass());
 
