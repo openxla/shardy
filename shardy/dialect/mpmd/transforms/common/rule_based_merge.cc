@@ -96,15 +96,10 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
       if (new_fragment_dest == merge_candidate) {
         new_fragment_dest = new_fragment_dest->getNextNode();
       }
-      new_fragment = MergeRegionOps(
+      new_fragment = MergeFragments(
           new_fragment, merge_candidate, rewriter,
-          /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
-          [](OpOperand&, Value) {
-            SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
-          },
           GetFragmentOriginUnion(new_fragment, merge_candidate, rewriter),
-          new_fragment.getMeshNameAttr(),
-          /*stage_id=*/new_fragment.getStageIdAttr());
+          new_fragment.getMeshNameAttr(), new_fragment.getStageIdAttr());
     }
     SetFragmentInfo(new_fragment, rule->target, rewriter);
     // TODO(petebu): Consider making the position of the new fragment a

@@ -26,9 +26,7 @@ limitations under the License.
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Value.h"
-#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 
@@ -127,59 +125,10 @@ SmallVector<T> FilterRange(RangeT range, const BitVector& erase) {
   return result;
 }
 
-namespace detail {
-
-// A non-templated version of MergeRegionOps<OpTy> that takes a callback for
-// creating the merged op. Note that the `consumer_op` may have some (or even
-// none) uses of the `producer_op` results -- i.e. it is not guaranteed to be
-// a true consumer. This is implied in the templated version but not here.
-Operation* MergeRegionOps(
-    Operation* producer_op, Operation* consumer_op,
-    RewriterBase& rewriter, int num_static_args,
-    std::function<void(OpOperand&, Value)>
-        replace_producer_use_in_consumer_block,
-    std::function<Operation*(Location, TypeRange,
-                                   ValueRange)>
-        create_merged_op);
-
-}  // namespace detail
-
-// Merges `producer_op` and `consumer_op` into a single OpTy that returns all
-// the results of `producer_op` that are not just used by `consumer_op`, as
-// well as all the results of `consumer_op`. All uses of `producer_op` that
-// were by `consumer_op` directly (if any) will be replaced with the
-// corresponding producer return operands in the merged block, and any uses
-// that were nested within the region of `consumer_op` (if any) will be
-// replaced using the provided `replace_producer_use_in_consumer_block`.
-//
-// The merged op won't have duplicate operands.
-//
-// `num_static_args` specifies the number of static block arguments that both
-// `producer_op` and `consumer_op` have as the first arguments, whose types
-// are assumed to be identical for both ops, before any dynamic block
-// arguments, i.e. block arguments that correspond to operands.
-//
-// `builder_args` should include any builder argument that should be forwarded
-// to `OpTy::create(rewriter, ...)` in addition to result types and operands.
-//
-// NOTE: we assume OpTy is an op with a single region, that has
-// `num_static_args` static block arguments and an additional block argument
-// for each operand, and that all uses of `producer_op` are at or after
-// `consumer_op`.
-template <class OpTy, class... BuilderArgs>
-OpTy MergeRegionOps(OpTy producer_op, OpTy consumer_op,
-                    RewriterBase& rewriter, int num_static_args,
-                    std::function<void(OpOperand&, Value)>
-                        replace_producer_use_in_consumer_block,
-                    BuilderArgs&&... builder_args) {
-  return cast<OpTy>(detail::MergeRegionOps(
-      producer_op, consumer_op, rewriter, num_static_args,
-      replace_producer_use_in_consumer_block,
-      [&](Location loc, TypeRange result_types, ValueRange operands) {
-        return OpTy::create(rewriter, loc, result_types, operands,
-                            std::forward<BuilderArgs>(builder_args)...);
-      }));
-}
+// Merges two FragmentOps into one.
+FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
+                          RewriterBase& rewriter, ArrayAttr origin,
+                          StringAttr mesh_name, IntegerAttr stage_id);
 
 }  // namespace mlir::mpmd
 
