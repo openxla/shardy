@@ -92,114 +92,6 @@ FragmentOp FragmentOrNull(FailureOr<FragmentOp> merge_result) {
   return nullptr;
 }
 
-// Merges the call counters of the producer and consumer fragments.
-//
-// - If only one fragment has a call counter, we use that.
-// - If both fragments have the same call counter, we use that.
-// - If both fragments have different call counters but exactly one of them is
-// user-defined, then we return the user-defined fragment's call counter.
-// - Otherwise, we return std::nullopt. I.e. this information will be lost.
-std::optional<int> MergeCallCounters(FragmentOp producer_op,
-                                     FragmentOp consumer_op) {
-  std::optional<int> producer_call_count = TryToFindCallCounter(producer_op);
-  std::optional<int> consumer_call_count = TryToFindCallCounter(consumer_op);
-
-  if (producer_call_count && !consumer_call_count) {
-    return producer_call_count;
-  }
-  if (consumer_call_count && !producer_call_count) {
-    return consumer_call_count;
-  }
-
-  if (producer_call_count && consumer_call_count) {
-    if (producer_call_count == consumer_call_count) {
-      return producer_call_count;
-    }
-
-    std::string debug_info;
-    {
-      llvm::raw_string_ostream debug_stream(debug_info);
-      debug_stream << "producer counter=" << *producer_call_count
-                   << " vs consumer counter=" << *consumer_call_count
-                   << ". Producer origin=" << producer_op.getOrigin()
-                   << " Consumer origin=" << consumer_op.getOrigin();
-    }
-
-    // Both are either user-defined or inferred.
-    if (producer_op.isUserFragment() == consumer_op.isUserFragment()) {
-      SDY_LOG(INFO) << "[MpmdMergeFragments] Ignoring call_counter since "
-                       "different - "
-                    << debug_info;
-      return std::nullopt;
-    }
-
-    // Exactly one of the fragments is user-defined.
-    SDY_LOG(INFO) << "[MpmdMergeFragments] Preferring call_counter of "
-                     "user-defined fragment over inferred fragment - "
-                  << debug_info;
-    if (!producer_op.isUserFragment()) {
-      return consumer_call_count;
-    }
-    if (!consumer_op.isUserFragment()) {
-      return producer_call_count;
-    }
-    SDY_CHECK(false);
-  }
-
-  return std::nullopt;
-}
-
-std::optional<ArrayAttr> MergeInferredByAttributes(FragmentOp producer_op,
-                                                   FragmentOp consumer_op) {
-  ArrayAttr producer_inferred_by =
-      producer_op->getAttrOfType<ArrayAttr>(kInferredByAttr);
-  ArrayAttr consumer_inferred_by =
-      consumer_op->getAttrOfType<ArrayAttr>(kInferredByAttr);
-
-  if (!producer_inferred_by && !consumer_inferred_by) {
-    return std::nullopt;
-  }
-
-  llvm::SetVector<Attribute> combined_inferred_by;
-  if (producer_inferred_by) {
-    combined_inferred_by.insert(producer_inferred_by.begin(),
-                                producer_inferred_by.end());
-  }
-  if (consumer_inferred_by) {
-    combined_inferred_by.insert(consumer_inferred_by.begin(),
-                                consumer_inferred_by.end());
-  }
-
-  IRRewriter rewriter(producer_op.getContext());
-  return rewriter.getArrayAttr(combined_inferred_by.takeVector());
-}
-
-// Returns a list of attributes that must be preserved in the merged fragment.
-// Note: origins are preserved by default and require no extra work.
-SmallVector<std::pair<StringRef, Attribute>> MergedAttributes(
-    FragmentOp producer_op, FragmentOp consumer_op) {
-  SmallVector<std::pair<StringRef, Attribute>> attributes;
-
-  if (std::optional<int> merged_call_count =
-          MergeCallCounters(producer_op, consumer_op)) {
-    IRRewriter rewriter(producer_op.getContext());
-    attributes.emplace_back(kCallCounterAttrName,
-                            rewriter.getUI32IntegerAttr(*merged_call_count));
-  }
-
-  // Only track inferred_by when the merged result will still be an inferred
-  // fragment (i.e., both inputs are inferred). User fragments should not carry
-  // this attribute.
-  if (!producer_op.isUserFragment() && !consumer_op.isUserFragment()) {
-    if (std::optional<ArrayAttr> merged_inferred_by =
-            MergeInferredByAttributes(producer_op, consumer_op)) {
-      attributes.emplace_back(kInferredByAttr, *merged_inferred_by);
-    }
-  }
-
-  return attributes;
-}
-
 }  // namespace
 
 FailureOr<FragmentOp> MergeFragmentBasePass::GetMergeCandidate(
@@ -305,7 +197,7 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
   // depending on the definition of AllowMerging.
 
   SmallVector<std::pair<StringRef, Attribute>> merged_attributes =
-      MergedAttributes(producer_op, mergeable_user);
+      MergeAttributes(producer_op, mergeable_user);
 
   // Now we can merge `producer_op` with `consumer_op`.
   FragmentOp merged_fragment =

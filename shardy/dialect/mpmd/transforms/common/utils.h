@@ -159,6 +159,10 @@ bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op);
 FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
                           RewriterBase& rewriter);
 
+// Returns discardable attributes that must be preserved in the merged fragment.
+SmallVector<std::pair<StringRef, Attribute>> MergeAttributes(
+    FragmentOp producer_op, FragmentOp consumer_op);
+
 }  // namespace mlir::mpmd
 
 #endif  // SHARDY_DIALECT_MPMD_TRANSFORMS_COMMON_UTILS_H_

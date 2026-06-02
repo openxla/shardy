@@ -16,6 +16,7 @@ limitations under the License.
 #include "shardy/dialect/mpmd/transforms/common/utils.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -230,6 +231,230 @@ TEST(MergeFragments, PreservesControlOperands) {
   EXPECT_EQ(merged_fragment->getOperand(control_start_idx), f0->getResult(0));
   EXPECT_EQ(merged_fragment->getOperand(control_start_idx + 1),
             f2->getResult(0));
+}
+
+TEST(MergeAttributes, NoAttributes) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  auto attrs = MergeAttributes(f0, f1);
+  EXPECT_TRUE(attrs.empty());
+}
+
+TEST(MergeAttributes, MergesMatchingCallCounters) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+           {call_counter = 5 : ui32}
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           {call_counter = 5 : ui32}
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  auto attrs = MergeAttributes(f0, f1);
+  ASSERT_EQ(attrs.size(), 1);
+  EXPECT_EQ(attrs[0].first, kCallCounterAttrName);
+  EXPECT_EQ(mlir::cast<IntegerAttr>(attrs[0].second).getUInt(), 5);
+}
+
+TEST(MergeAttributes, OnlyProducerHasCallCounter) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+           {call_counter = 3 : ui32}
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  auto attrs = MergeAttributes(f0, f1);
+  ASSERT_EQ(attrs.size(), 1);
+  EXPECT_EQ(attrs[0].first, kCallCounterAttrName);
+  EXPECT_EQ(mlir::cast<IntegerAttr>(attrs[0].second).getUInt(), 3);
+}
+
+TEST(MergeAttributes, MergesInferredByForInferredFragments) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+           {mpmd.inferred_by = ["pass_a"]}
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+           {mpmd.inferred_by = ["pass_b"]}
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  auto attrs = MergeAttributes(f0, f1);
+  ASSERT_EQ(attrs.size(), 1);
+  EXPECT_EQ(attrs[0].first, kInferredByAttr);
+  auto merged_array = mlir::cast<ArrayAttr>(attrs[0].second);
+  ASSERT_EQ(merged_array.size(), 2);
+  EXPECT_EQ(mlir::cast<StringAttr>(merged_array[0]).getValue(), "pass_a");
+  EXPECT_EQ(mlir::cast<StringAttr>(merged_array[1]).getValue(), "pass_b");
+}
+
+TEST(MergeAttributes, SkipsInferredByForMixedUserAndInferredFragments) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+           {mpmd.inferred_by = ["pass_a"]}
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  // One user fragment and one inferred fragment — inferred_by should not be
+  // preserved since the merged result will be a user fragment.
+  auto attrs = MergeAttributes(f0, f1);
+  EXPECT_TRUE(attrs.empty());
+}
+
+TEST(MergeAttributes, BothCallCounterAndInferredBy) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+           {call_counter = 2 : ui32, mpmd.inferred_by = ["pass_a"]}
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=[]> (%arg0)
+           {call_counter = 2 : ui32, mpmd.inferred_by = ["pass_b"]}
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  auto attrs = MergeAttributes(f0, f1);
+  ASSERT_EQ(attrs.size(), 2);
+  ASSERT_EQ(attrs[0].first, kCallCounterAttrName);
+  EXPECT_EQ(mlir::cast<IntegerAttr>(attrs[0].second).getUInt(), 2);
+  ASSERT_EQ(attrs[1].first, kInferredByAttr);
+  auto merged_array = mlir::cast<ArrayAttr>(attrs[1].second);
+  ASSERT_EQ(merged_array.size(), 2);
+  EXPECT_EQ(mlir::cast<StringAttr>(merged_array[0]).getValue(), "pass_a");
+  EXPECT_EQ(mlir::cast<StringAttr>(merged_array[1]).getValue(), "pass_b");
 }
 
 }  // namespace
