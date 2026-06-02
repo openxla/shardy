@@ -47,6 +47,7 @@ limitations under the License.
 #include "mlir/Transforms/RegionUtils.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
+#include "shardy/dialect/mpmd/ir/utils.h"
 
 namespace mlir::mpmd {
 
@@ -226,7 +227,6 @@ bool IsSplitKeepTransferred(FragmentOp fragment) {
   return fragment->hasAttr(kSplitKeepTransferredAttrName);
 }
 
-namespace detail {
 namespace {
 
 // Verifies that the kControlOperandStartIdxAttrName attribute, if present,
@@ -423,9 +423,7 @@ SmallVector<Value> CollectControlOperands(Operation* lhs_op,
   return control_operands;
 }
 
-}  // namespace
-
-Operation* MergeRegionOps(
+Operation* MergeRegionOpsImpl(
     Operation* producer_op, Operation* consumer_op, RewriterBase& rewriter,
     int num_static_args,
     std::function<void(OpOperand&, Value)>
@@ -569,5 +567,58 @@ Operation* MergeRegionOps(
   return new_op;
 }
 
-}  // namespace detail
+// Merges `producer_op` and `consumer_op` into a single OpTy that returns all
+// the results of `producer_op` that are not just used by `consumer_op`, as
+// well as all the results of `consumer_op`. All uses of `producer_op` that
+// were by `consumer_op` directly (if any) will be replaced with the
+// corresponding producer return operands in the merged block, and any uses
+// that were nested within the region of `consumer_op` (if any) will be
+// replaced using the provided `replace_producer_use_in_consumer_block`.
+//
+// The merged op won't have duplicate operands.
+//
+// `num_static_args` specifies the number of static block arguments that both
+// `producer_op` and `consumer_op` have as the first arguments, whose types
+// are assumed to be identical for both ops, before any dynamic block
+// arguments, i.e. block arguments that correspond to operands.
+//
+// `builder_args` should include any builder argument that should be forwarded
+// to `OpTy::create(rewriter, ...)` in addition to result types and operands.
+//
+// NOTE: we assume OpTy is an op with a single region, that has
+// `num_static_args` static block arguments and an additional block argument
+// for each operand, and that all uses of `producer_op` are at or after
+// `consumer_op`.
+template <class OpTy, class... BuilderArgs>
+OpTy MergeRegionOps(OpTy producer_op, OpTy consumer_op, RewriterBase& rewriter,
+                    int num_static_args,
+                    std::function<void(OpOperand&, Value)>
+                        replace_producer_use_in_consumer_block,
+                    BuilderArgs&&... builder_args) {
+  return cast<OpTy>(MergeRegionOpsImpl(
+      producer_op, consumer_op, rewriter, num_static_args,
+      replace_producer_use_in_consumer_block,
+      [&](Location loc, TypeRange result_types, ValueRange operands) {
+        return OpTy::create(rewriter, loc, result_types, operands,
+                            std::forward<BuilderArgs>(builder_args)...);
+      }));
+}
+
+}  // namespace
+
+FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
+                          RewriterBase& rewriter, IntegerAttr stage_id) {
+  SDY_CHECK_EQ(producer.getMeshName(), consumer.getMeshName())
+      << "Expected both fragments to be on the same mesh.";
+  return MergeRegionOps(
+      producer, consumer, rewriter,
+      /*num_static_args=*/0,
+      /*replace_producer_use_in_consumer_block=*/
+      [](OpOperand&, Value) {
+        SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
+      },
+      GetFragmentOriginUnion(producer, consumer, rewriter),
+      producer.getMeshNameAttr(), stage_id);
+}
+
 }  // namespace mlir::mpmd

@@ -62,15 +62,9 @@ void RematFragment(IRRewriter& rewriter, FragmentOp forward_fragment,
   if (merge_remat_fragments) {
     std::optional<uint32_t> backward_fragment_call_counter =
         TryToFindCallCounter(backward_fragment);
-    FragmentOp merged_fragment = MergeRegionOps(
-        remat_fragment, backward_fragment, rewriter,
-        /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
-        [](OpOperand&, Value) {
-          SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
-        },
-        GetFragmentOriginUnion(remat_fragment, backward_fragment, rewriter),
-        backward_fragment.getMeshNameAttr(),
-        backward_fragment.getStageIdAttr());
+    FragmentOp merged_fragment =
+        MergeFragments(remat_fragment, backward_fragment, rewriter,
+                       backward_fragment.getStageIdAttr());
     // Set the call counter of the merged fragment to the call counter of the
     // backward fragment.
     if (backward_fragment_call_counter.has_value()) {

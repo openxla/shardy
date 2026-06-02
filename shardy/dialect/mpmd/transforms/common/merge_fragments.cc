@@ -324,15 +324,9 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
       MergedAttributes(producer_op, mergeable_user);
 
   // Now we can merge `producer_op` with `consumer_op`.
-  FragmentOp merged_fragment = MergeRegionOps(
-      producer_op, mergeable_user, rewriter,
-      /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
-      [](OpOperand&, Value) {
-        SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
-      },
-      GetFragmentOriginUnion(producer_op, mergeable_user, rewriter),
-      producer_op.getMeshNameAttr(),
-      /*stage_id=*/GetMergedStageIdAttribute(producer_op, mergeable_user));
+  FragmentOp merged_fragment =
+      MergeFragments(producer_op, mergeable_user, rewriter,
+                     GetMergedStageIdAttribute(producer_op, mergeable_user));
 
   for (const auto [attr_name, attr] : merged_attributes) {
     merged_fragment->setAttr(attr_name, attr);

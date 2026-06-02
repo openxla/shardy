@@ -23,7 +23,6 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/register.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
@@ -35,7 +34,141 @@ namespace {
 
 using ::mlir::func::FuncOp;
 
-TEST(MergeRegionOps, PreservesControlOperands) {
+TEST(MergeFragments, BasicMerge) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  IRRewriter rewriter(&context);
+  rewriter.setInsertionPoint(f1);
+
+  FragmentOp merged = MergeFragments(f0, f1, rewriter, f0.getStageIdAttr());
+
+  // Both fragments had 1 operand each but share %arg0, so the merged
+  // fragment should have 1 deduplicated operand.
+  EXPECT_EQ(merged.getNumOperands(), 1);
+  // The merged fragment should produce 2 results (one from each original).
+  EXPECT_EQ(merged.getNumResults(), 2);
+  // Original ops should have been erased — only the merged fragment + return
+  // should remain.
+  int num_ops = 0;
+  for (auto& op : func_op.getOps()) {
+    (void)op;
+    ++num_ops;
+  }
+  // merged fragment + return
+  EXPECT_EQ(num_ops, 2);
+}
+
+TEST(MergeFragments, SharedOperandsAreDeduplicated) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor, %arg1: !mesh_tensor)
+        -> (!mesh_tensor, !mesh_tensor)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0, %arg1)
+           (%a: tensor<4x8xf32>, %b: tensor<4x8xf32>) {
+        mpmd.return %a : tensor<4x8xf32>
+      } : (!mesh_tensor, !mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%arg0, %arg1)
+           (%c: tensor<4x8xf32>, %d: tensor<4x8xf32>) {
+        mpmd.return %d : tensor<4x8xf32>
+      } : (!mesh_tensor, !mesh_tensor) -> !mesh_tensor
+
+      return %0, %1 : !mesh_tensor, !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  IRRewriter rewriter(&context);
+  rewriter.setInsertionPoint(f1);
+
+  FragmentOp merged = MergeFragments(f0, f1, rewriter, f0.getStageIdAttr());
+
+  // Both fragments take (%arg0, %arg1). The shared operands should be
+  // deduplicated, so the merged fragment should have exactly 2 operands.
+  ASSERT_EQ(merged.getNumOperands(), 2);
+  EXPECT_EQ(merged->getOperand(0), func_op.getArgument(0));
+  EXPECT_EQ(merged->getOperand(1), func_op.getArgument(1));
+}
+
+TEST(MergeFragments, ProducerResultUsedByConsumer) {
+  const char kProgram[] = R"mlir(
+    !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+           (%arg1: tensor<4x8xf32>) {
+        mpmd.return %arg1 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      %1 = mpmd.fragment<mesh="m1", origin=["f1"(0)]> (%0)
+           (%arg2: tensor<4x8xf32>) {
+        mpmd.return %arg2 : tensor<4x8xf32>
+      } : (!mesh_tensor) -> !mesh_tensor
+
+      return %1 : !mesh_tensor
+    }
+  )mlir";
+
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  FragmentOp f0 = mlir::cast<FragmentOp>(*it++);
+  FragmentOp f1 = mlir::cast<FragmentOp>(*it);
+
+  IRRewriter rewriter(&context);
+  rewriter.setInsertionPoint(f1);
+
+  FragmentOp merged = MergeFragments(f0, f1, rewriter, f0.getStageIdAttr());
+
+  // The producer's result (%0) was the consumer's only operand. After merging,
+  // the merged fragment should only take %arg0 (the producer's input).
+  ASSERT_EQ(merged.getNumOperands(), 1);
+  EXPECT_EQ(merged->getOperand(0), func_op.getArgument(0));
+  // The merged fragment should produce 1 result (the consumer's output).
+  EXPECT_EQ(merged.getNumResults(), 1);
+}
+
+TEST(MergeFragments, PreservesControlOperands) {
   const char kProgram[] = R"mlir(
     !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
     func.func @main(%arg0: !mesh_tensor) -> !mesh_tensor
@@ -85,15 +218,8 @@ TEST(MergeRegionOps, PreservesControlOperands) {
   IRRewriter rewriter(&context);
   rewriter.setInsertionPoint(f3);
 
-  FragmentOp merged_fragment = MergeRegionOps(
-      f1, f3, rewriter,
-      /*num_static_args=*/0,
-      /*replace_producer_use_in_consumer_block=*/
-      [](OpOperand&, Value) {
-        SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
-      },
-      GetFragmentOriginUnion(f1, f3, rewriter), f1.getMeshNameAttr(),
-      /*stage_id=*/f1.getStageIdAttr());
+  FragmentOp merged_fragment =
+      MergeFragments(f1, f3, rewriter, f1.getStageIdAttr());
 
   ASSERT_TRUE(merged_fragment->hasAttr(kControlOperandStartIdxAttrName));
   int control_start_idx =
@@ -101,7 +227,7 @@ TEST(MergeRegionOps, PreservesControlOperands) {
           ->getAttrOfType<IntegerAttr>(kControlOperandStartIdxAttrName)
           .getInt();
 
-  EXPECT_EQ(merged_fragment.getNumOperands(), control_start_idx + 2);
+  ASSERT_EQ(merged_fragment.getNumOperands(), control_start_idx + 2);
   EXPECT_EQ(merged_fragment->getOperand(control_start_idx), f0->getResult(0));
   EXPECT_EQ(merged_fragment->getOperand(control_start_idx + 1),
             f2->getResult(0));

@@ -232,14 +232,8 @@ class AbsorbClosestProducerPattern : public OpRewritePattern<FragmentOp> {
     // preserving its attributes.
     DictionaryAttr discardable_attrs =
         GetMergedDiscardableAttrs(op, inferred_producer, rewriter);
-    auto new_fragment = MergeRegionOps(
-        inferred_producer, op, rewriter,
-        /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
-        [](OpOperand&, Value) {
-          SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
-        },
-        op.getOriginAttr(), op.getMeshNameAttr(),
-        /*stage_id=*/op.getStageIdAttr());
+    FragmentOp new_fragment =
+        MergeFragments(inferred_producer, op, rewriter, op.getStageIdAttr());
     new_fragment->setDiscardableAttrs(discardable_attrs);
     return success();
   }
@@ -346,6 +340,7 @@ class AbsorbClosestConsumerPattern : public OpRewritePattern<FragmentOp> {
     }
 
     FragmentOp inferred_consumer = mergeable_consumers.front();
+
     // We now merge `inferred_consumer` into `op`, at the location of `op` and
     // preserving its attributes.
     DictionaryAttr discardable_attrs =
@@ -354,14 +349,8 @@ class AbsorbClosestConsumerPattern : public OpRewritePattern<FragmentOp> {
     if (new_fragment_dest == inferred_consumer) {
       new_fragment_dest = new_fragment_dest->getNextNode();
     }
-    FragmentOp new_fragment = MergeRegionOps(
-        op, inferred_consumer, rewriter,
-        /*num_static_args=*/0, /*replace_producer_use_in_consumer_block=*/
-        [](OpOperand&, Value) {
-          SDY_CHECK(false) << "Fragment ops shouldn't have free variables";
-        },
-        op.getOriginAttr(), op.getMeshNameAttr(),
-        /*stage_id=*/op.getStageIdAttr());
+    FragmentOp new_fragment =
+        MergeFragments(op, inferred_consumer, rewriter, op.getStageIdAttr());
     rewriter.moveOpBefore(new_fragment, new_fragment_dest);
     new_fragment->setDiscardableAttrs(discardable_attrs);
     return success();
