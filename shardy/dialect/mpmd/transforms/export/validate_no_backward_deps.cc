@@ -90,7 +90,9 @@ class ValidateNoBackwardDepsPass
           continue;
         }
 
-        if (producer.getMeshName() > consumer.getMeshName()) {
+        if (!IsMeshBeforeOtherMesh(producer.getMeshName(),
+                                    consumer.getMeshName()) &&
+            producer.getMeshName() != consumer.getMeshName()) {
           std::string msg;
           llvm::raw_string_ostream os(msg);
           os << "Detected backward dependency but expected forward-only "
@@ -100,7 +102,7 @@ class ValidateNoBackwardDepsPass
              << "\" produces a value consumed by fragment \""
              << consumer.getCallee() << "\" mesh=\"" << consumer.getMeshName()
              << "\". In a forward-only pipeline, dependencies must go from "
-             << "lexicographically earlier meshes to later meshes.";
+             << "earlier meshes to later meshes.";
 
           SDY_LOG(WARNING) << msg;
           auto diag = failOnBackwardDeps ? consumer.emitError()
