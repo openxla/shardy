@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-import-pipeline 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-import-pipeline='dedup-functions-fully=true' 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2]>
 

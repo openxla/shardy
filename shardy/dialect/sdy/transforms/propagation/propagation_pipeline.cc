@@ -62,6 +62,16 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createSymbolDCEPass());  // After FlattenCallGraphPass.
     pm.addPass(createImportFuncCallsPass());
     pm.addPass(createSymbolDCEPass());  // After ImportFuncCallsPass.
+    // TODO(b/517993355): Move ApplyShardingConstraints and ShardingGroupImport
+    // passes back to the import pipeline and before inlining.
+    pm.addPass(
+        createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
+            options.debugShardingOrigins,
+            options.debugPropagationEdgeSharding}));
+    // The sharding group import pass must run after applying sharding
+    // constraints. This ensures we can detect sharding conflicts between group
+    // members which have pre-propagation shardings due to sharding constraints.
+    pm.addPass(createShardingGroupImportPass());
   }
   {
     PropagationOptions optionsWithKeepShardingRules = options;

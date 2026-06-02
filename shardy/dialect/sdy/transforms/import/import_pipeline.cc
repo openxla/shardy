@@ -13,8 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "llvm/Support/CommandLine.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassOptions.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Passes.h"
@@ -46,13 +48,16 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
   pm.addPass(createAddDataFlowEdgesPass());
-  pm.addPass(
-      createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
-          options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
-  // The sharding group import pass must run after applying sharding
-  // constraints. This ensures we can detect sharding conflicts between group
-  // members which have pre-propagation shardings due to sharding constraints.
-  pm.addPass(createShardingGroupImportPass());
+  if (options.dedupFunctionsFully) {
+    pm.addPass(
+        createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
+            options.debugShardingOrigins,
+            options.debugPropagationEdgeSharding}));
+    // The sharding group import pass must run after applying sharding
+    // constraints. This ensures we can detect sharding conflicts between group
+    // members which have pre-propagation shardings due to sharding constraints.
+    pm.addPass(createShardingGroupImportPass());
+  }
 }
 
 void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
@@ -60,14 +65,26 @@ void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
 }
 
+namespace {
+struct ImportPipelineOptions
+    : public PassPipelineOptions<ImportPipelineOptions> {
+  Option<bool> dedupFunctionsFully{
+      *this, "dedup-functions-fully",
+      llvm::cl::desc("Whether to dedup functions fully."),
+      llvm::cl::init(false)};
+};
+}  // namespace
+
 void registerImportPipeline() {
-  PassPipelineRegistration<>(
+  PassPipelineRegistration<ImportPipelineOptions>(
       "sdy-import-pipeline",
       "Run a sequence of import passes needed as a pre-processing step for "
       "Shardy propagation",
-      [](OpPassManager& pm) {
+      [](OpPassManager& pm, const ImportPipelineOptions& options) {
         int dumpIndex = 0;
-        addImportPipeline(pm, dumpIndex, PropagationOptions{});
+        PropagationOptions propOptions;
+        propOptions.dedupFunctionsFully = options.dedupFunctionsFully;
+        addImportPipeline(pm, dumpIndex, propOptions);
       });
 }
 
