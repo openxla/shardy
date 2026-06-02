@@ -44,6 +44,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -810,8 +811,8 @@ class CollectiveInserter {
         }
         // Out axis is available to slice.
 
-        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
-            outAxis, dimCapacity, mesh);
+        auto [withinAxis, remainderAxis] =
+            getAxisWithinCapacity(outAxis, dimCapacity, mesh);
         if (!withinAxis) {
           // We still want to add available axes in this dimension to
           // `availableOutAxes` so they can be added in the 2nd stage to another
@@ -851,7 +852,8 @@ class CollectiveInserter {
     // to capacity constraint.
     outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
 
-    return hasSlicingAxes? std::make_optional(slicingAxesPerDim) : std::nullopt;
+    return hasSlicingAxes ? std::make_optional(slicingAxesPerDim)
+                          : std::nullopt;
   }
 
   // Tries to insert an `sdy.all_slice`.
@@ -1333,6 +1335,187 @@ TensorShardingAttr getOrCreateShardingBypassingBarriers(
   return getOrCreateSharding(value, meshName, closedIfMissing);
 }
 
+// Finds the dimension in `sharding` that is sharded by `axis` as its first
+// axis, excluding `excludeDim`. Returns the dimension index, or std::nullopt
+// if not found.
+std::optional<int64_t> findTargetDimForAxis(TensorShardingAttr sharding,
+                                            AxisRefAttr axis,
+                                            int64_t excludeDim) {
+  for (int64_t j = 0; j < sharding.getRank(); ++j) {
+    if (j == excludeDim) {
+      continue;
+    }
+    ArrayRef<AxisRefAttr> outAxes = sharding.getDimSharding(j).getAxes();
+    if (!outAxes.empty() && outAxes.front() == axis) {
+      return j;
+    }
+  }
+  return std::nullopt;
+}
+
+// Checks if the dimension `dim` of `inSharding` is a splittable dimension,
+// i.e., its axes are mapped to distinct dimensions in `outSharding` (excluding
+// `dim`), and the dimension `dim` in `outSharding` is empty.
+bool isSplittableDim(TensorShardingAttr inSharding,
+                     TensorShardingAttr outSharding, int64_t dim) {
+  DimensionShardingAttr inDimSharding = inSharding.getDimSharding(dim);
+  ArrayRef<AxisRefAttr> axes = inDimSharding.getAxes();
+  if (axes.size() < 2) {
+    return false;
+  }
+  if (!outSharding.getDimSharding(dim).emptyAxes()) {
+    return false;
+  }
+  SmallVector<int64_t> targetDims;
+  targetDims.reserve(axes.size());
+  for (AxisRefAttr axis : axes) {
+    std::optional<int64_t> foundDim =
+        findTargetDimForAxis(outSharding, axis, /*excludeDim=*/dim);
+    if (!foundDim || llvm::is_contained(targetDims, *foundDim)) {
+      return false;
+    }
+    targetDims.push_back(*foundDim);
+  }
+  return true;
+}
+
+// Computes the physical shape after splitting `dimIn` by the axes sizes of
+// `axesToSplit`. Returns std::nullopt if the dimension size is dynamic or not
+// divisible by the split factor.
+std::optional<SmallVector<int64_t>> computeSplitShape(
+    ArrayRef<int64_t> shape, int64_t dimIn, ArrayRef<AxisRefAttr> axesToSplit,
+    MeshAttr mesh) {
+  SmallVector<int64_t> splitShape;
+  splitShape.reserve(shape.size() + axesToSplit.size() - 1);
+  splitShape.append(shape.begin(), shape.begin() + dimIn);
+
+  int64_t accumSize = 1;
+  for (int64_t r = 0; r < static_cast<int64_t>(axesToSplit.size()) - 1; ++r) {
+    int64_t axisSize = axesToSplit[r].getSize(mesh);
+    splitShape.push_back(axisSize);
+    accumSize *= axisSize;
+  }
+  int64_t d0 = shape[dimIn];
+  if (ShapedType::isDynamic(d0) || d0 % accumSize != 0) {
+    return std::nullopt;
+  }
+  // We only need to split the dimension if it is partially sharded (size >
+  // product of axes sizes). If it is fully sharded, it can be lowered directly
+  // without reshapes.
+  int64_t totalAxesSize = accumSize * axesToSplit.back().getSize(mesh);
+  if (d0 == totalAxesSize) {
+    return std::nullopt;
+  }
+  splitShape.push_back(d0 / accumSize);
+  splitShape.append(shape.begin() + dimIn + 1, shape.end());
+  return splitShape;
+}
+
+// Constructs a new `TensorShardingAttr` representing the input sharding split
+// by `axesToSplit` at dimension `dimIn`.
+TensorShardingAttr splitInputSharding(TensorShardingAttr inSharding,
+                                      int64_t dimIn,
+                                      ArrayRef<AxisRefAttr> axesToSplit,
+                                      MLIRContext* context) {
+  SmallVector<DimensionShardingAttr> inDimShardingsSplit;
+  inDimShardingsSplit.reserve(inSharding.getRank() + axesToSplit.size() - 1);
+  bool isClosed = inSharding.getDimSharding(dimIn).getIsClosed();
+  for (int64_t d = 0; d < inSharding.getRank(); ++d) {
+    if (d == dimIn) {
+      for (AxisRefAttr axis : axesToSplit) {
+        inDimShardingsSplit.push_back(
+            DimensionShardingAttr::get(context, {axis}, isClosed));
+      }
+    } else {
+      inDimShardingsSplit.push_back(inSharding.getDimSharding(d));
+    }
+  }
+  return TensorShardingAttr::get(
+      context, inSharding.getMeshOrRef(), inDimShardingsSplit,
+      inSharding.getReplicatedAxes(), inSharding.getUnreducedAxes());
+}
+
+// Constructs a new `TensorShardingAttr` representing the output sharding split
+// at dimension `dimIn` by `k` dimensions (which are kept empty).
+TensorShardingAttr splitOutputSharding(TensorShardingAttr outSharding,
+                                       int64_t dimIn, int64_t k,
+                                       MLIRContext* context) {
+  SmallVector<DimensionShardingAttr> outDimShardingsSplit(
+      outSharding.getRank() + k - 1);
+  auto mapDim = [&](int64_t d) { return d < dimIn ? d : d + k - 1; };
+  bool outDimInClosed = outSharding.getDimSharding(dimIn).getIsClosed();
+  for (int64_t r = 0; r < k; ++r) {
+    outDimShardingsSplit[dimIn + r] =
+        DimensionShardingAttr::get(context, {}, outDimInClosed);
+  }
+  for (int64_t d = 0; d < outSharding.getRank(); ++d) {
+    if (d == dimIn) {
+      continue;
+    }
+    outDimShardingsSplit[mapDim(d)] = outSharding.getDimSharding(d);
+  }
+  return TensorShardingAttr::get(
+      context, outSharding.getMeshOrRef(), outDimShardingsSplit,
+      outSharding.getReplicatedAxes(), outSharding.getUnreducedAxes());
+}
+
+// Handles resharding where a single input dimension is sharded by multiple
+// axes, and these axes map to distinct output dimensions.
+// E.g., [{A, B}] -> [{}, {A}, {B}].
+LogicalResult tryReshardWithDimensionSplit(
+    ReshardOp op, Value bypassedInput, TensorShardingAttr inSharding,
+    TensorShardingAttr outSharding, ConversionPatternRewriter& rewriter) {
+  if (inSharding.getMeshName() != outSharding.getMeshName()) {
+    return failure();
+  }
+
+  // Find the splittable dimension in the input sharding.
+  int64_t dimIn = -1;
+  for (int64_t i = 0; i < inSharding.getRank(); ++i) {
+    if (isSplittableDim(inSharding, outSharding, i)) {
+      dimIn = i;
+      break;
+    }
+  }
+  if (dimIn == -1) {
+    return failure();
+  }
+  ArrayRef<AxisRefAttr> axesToSplit =
+      inSharding.getDimSharding(dimIn).getAxes();
+  MeshAttr mesh = inSharding.getMesh(op);
+
+  // Calculate the shape after splitting `dimIn` into separate dimensions.
+  auto tensorType = mlir::cast<RankedTensorType>(bypassedInput.getType());
+  std::optional<SmallVector<int64_t>> splitShape =
+      computeSplitShape(tensorType.getShape(), dimIn, axesToSplit, mesh);
+  if (!splitShape) {
+    return failure();
+  }
+  auto splitTensorType =
+      RankedTensorType::get(*splitShape, tensorType.getElementType());
+
+  // Physically split the interleaved dimension via stablehlo.reshape.
+  Value splitInputVal = stablehlo::ReshapeOp::create(
+      rewriter, op->getLoc(), splitTensorType, bypassedInput);
+  TensorShardingAttr inShardingSplit =
+      splitInputSharding(inSharding, dimIn, axesToSplit, rewriter.getContext());
+  setSharding(splitInputVal, inShardingSplit);
+  TensorShardingAttr outShardingSplit = splitOutputSharding(
+      outSharding, dimIn, axesToSplit.size(), rewriter.getContext());
+
+  // Lower the reshard on the split dimensions using standard collectives.
+  CollectiveInserter collectiveInserter(inShardingSplit, outShardingSplit,
+                                        splitInputVal, rewriter, op);
+  Value reshardedSplitVal = collectiveInserter.insert();
+
+  // Reshape the split dimensions back to the original shape.
+  Value mergeOutputVal = stablehlo::ReshapeOp::create(
+      rewriter, op->getLoc(), tensorType, reshardedSplitVal);
+  setSharding(mergeOutputVal, outSharding);
+  rewriter.replaceOp(op, mergeOutputVal);
+  return success();
+}
+
 class ReshardPattern : public OpConversionPattern<ReshardOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
@@ -1381,6 +1564,11 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
     // sharding.
     // TODO(tomnatan): use a SymbolTable.
 
+    if (succeeded(tryReshardWithDimensionSplit(op, bypassedInput, inSharding,
+                                               outSharding, rewriter))) {
+      return success();
+    }
+
     CollectiveInserter collectiveInserter(inSharding, outSharding,
                                           bypassedInput, rewriter, op);
     rewriter.replaceOp(op, collectiveInserter.insert());
@@ -1395,8 +1583,8 @@ struct ReshardToCollectivesPass
 
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
-    target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,
-                       CollectivePermuteOp>();
+    target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp, CollectivePermuteOp,
+                       stablehlo::ReshapeOp>();
     target->addDynamicallyLegalOp<ReshardOp>([&](ReshardOp op) {
       TensorShardingAttr inSharding =
           getShardingBypassingBarriers(op.getInput());

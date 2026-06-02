@@ -278,10 +278,12 @@ func.func @slice_on_src_dim_then_two_all_to_alls_2(%arg0 : tensor<16x8x8xf32> {s
 
 // CHECK-LABEL: func @slice_on_src_dim_then_two_all_to_alls_diff_tgts
 func.func @slice_on_src_dim_then_two_all_to_alls_diff_tgts(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{}, {"x", "y"}, {}]>}) -> tensor<16x8x8xf32> {
-  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"z"}, {}] %arg0 out_sharding=<@mesh3d, [{}, {"x", "y", "z"}, {}]>
-  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"y", "z"}: 1->2] %[[ALL_SLICE]] out_sharding=<@mesh3d, [{}, {"x"}, {"y", "z"}]>
-  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"x"}: 1->0] %[[ALL_TO_ALL_0]] out_sharding=<@mesh3d, [{"x"}, {}, {"y", "z"}]>
-  // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
+  // CHECK-NEXT: %[[RESHAPE_0:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh3d, [{}, {"x"}, {"y"}, {}]>]>}
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {}, {"z"}, {}] %[[RESHAPE_0]] out_sharding=<@mesh3d, [{}, {"x"}, {"y", "z"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"x"}: 1->0] %[[ALL_SLICE]] out_sharding=<@mesh3d, [{"x"}, {}, {"y", "z"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"y", "z"}: 2->3] %[[ALL_TO_ALL_0]] out_sharding=<@mesh3d, [{"x"}, {}, {}, {"y", "z"}]>
+  // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[ALL_TO_ALL_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh3d, [{"x"}, {}, {"y", "z"}]>]>}
+  // CHECK-NEXT: return %[[RESHAPE_1]]
   %0 = sdy.reshard %arg0 <@mesh3d, [{"x"}, {}, {"y", "z"}]> : tensor<16x8x8xf32>
   return %0 : tensor<16x8x8xf32>
 }
@@ -933,3 +935,28 @@ func.func @reshard_with_propagation_barrier(
 
   return %1 : tensor<8x8x8xf32>
 }
+
+// CHECK-LABEL: func @reshard_one_src_dim_multiple_tgt_dims
+func.func @reshard_one_src_dim_multiple_tgt_dims(%arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{"x", "y"}, {}, {}]>}) -> tensor<8x8x8xf32> {
+  // CHECK-NEXT: %[[RESHAPE_0:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh2d, [{"x"}, {"y"}, {}, {}]>]>}
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"x"}: 0->2] %[[RESHAPE_0]] out_sharding=<@mesh2d, [{}, {"y"}, {"x"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"y"}: 1->3] %[[ALL_TO_ALL_0]] out_sharding=<@mesh2d, [{}, {}, {"x"}, {"y"}]>
+  // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[ALL_TO_ALL_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2d, [{}, {"x"}, {"y"}]>]>}
+  // CHECK-NEXT: return %[[RESHAPE_1]]
+  %0 = sdy.reshard %arg0 <@mesh2d, [{}, {"x"}, {"y"}]> : tensor<8x8x8xf32>
+  return %0 : tensor<8x8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_one_src_dim_multiple_tgt_dims_4d
+func.func @reshard_one_src_dim_multiple_tgt_dims_4d(%arg0: tensor<32x2x2x2x2xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{"x", "y", "z", "w"}, {}, {}, {}, {}]>}) -> tensor<32x2x2x2x2xf32> {
+  // CHECK-NEXT: %[[RESHAPE_0:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh4d, [{"x"}, {"y"}, {"z"}, {"w"}, {}, {}, {}, {}]>]>}
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"x"}: 0->4] %[[RESHAPE_0]] out_sharding=<@mesh4d, [{}, {"y"}, {"z"}, {"w"}, {"x"}, {}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"y"}: 1->5] %[[ALL_TO_ALL_0]] out_sharding=<@mesh4d, [{}, {}, {"z"}, {"w"}, {"x"}, {"y"}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_2:.*]] = sdy.all_to_all [{"z"}: 2->6] %[[ALL_TO_ALL_1]] out_sharding=<@mesh4d, [{}, {}, {}, {"w"}, {"x"}, {"y"}, {"z"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_3:.*]] = sdy.all_to_all [{"w"}: 3->7] %[[ALL_TO_ALL_2]] out_sharding=<@mesh4d, [{}, {}, {}, {}, {"x"}, {"y"}, {"z"}, {"w"}]>
+  // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[ALL_TO_ALL_3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh4d, [{}, {"x"}, {"y"}, {"z"}, {"w"}]>]>}
+  // CHECK-NEXT: return %[[RESHAPE_1]]
+  %0 = sdy.reshard %arg0 <@mesh4d, [{}, {"x"}, {"y"}, {"z"}, {"w"}]> : tensor<32x2x2x2x2xf32>
+  return %0 : tensor<32x2x2x2x2xf32>
+}
+
