@@ -125,6 +125,10 @@ SmallVector<T> FilterRange(RangeT range, const BitVector& erase) {
   return result;
 }
 
+// Returns true if the stage_ids of the producer and consumer fragments are
+// consistent (i.e., they are either identical, or one of them is undefined).
+bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op);
+
 // Merges two FragmentOps into a single FragmentOp.
 //
 // Prerequisites:
@@ -153,7 +157,7 @@ SmallVector<T> FilterRange(RangeT range, const BitVector& erase) {
 //
 // TODO(petebu): Restrict this to adjacent fragments.
 FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
-                          RewriterBase& rewriter, IntegerAttr stage_id);
+                          RewriterBase& rewriter);
 
 }  // namespace mlir::mpmd
 

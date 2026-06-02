@@ -66,7 +66,7 @@ TEST(MergeFragments, BasicMerge) {
   IRRewriter rewriter(&context);
   rewriter.setInsertionPoint(f1);
 
-  FragmentOp merged = MergeFragments(f0, f1, rewriter, f0.getStageIdAttr());
+  FragmentOp merged = MergeFragments(f0, f1, rewriter);
 
   // Both fragments had 1 operand each but share %arg0, so the merged
   // fragment should have 1 deduplicated operand.
@@ -117,7 +117,7 @@ TEST(MergeFragments, SharedOperandsAreDeduplicated) {
   IRRewriter rewriter(&context);
   rewriter.setInsertionPoint(f1);
 
-  FragmentOp merged = MergeFragments(f0, f1, rewriter, f0.getStageIdAttr());
+  FragmentOp merged = MergeFragments(f0, f1, rewriter);
 
   // Both fragments take (%arg0, %arg1). The shared operands should be
   // deduplicated, so the merged fragment should have exactly 2 operands.
@@ -158,7 +158,7 @@ TEST(MergeFragments, ProducerResultUsedByConsumer) {
   IRRewriter rewriter(&context);
   rewriter.setInsertionPoint(f1);
 
-  FragmentOp merged = MergeFragments(f0, f1, rewriter, f0.getStageIdAttr());
+  FragmentOp merged = MergeFragments(f0, f1, rewriter);
 
   // The producer's result (%0) was the consumer's only operand. After merging,
   // the merged fragment should only take %arg0 (the producer's input).
@@ -218,8 +218,7 @@ TEST(MergeFragments, PreservesControlOperands) {
   IRRewriter rewriter(&context);
   rewriter.setInsertionPoint(f3);
 
-  FragmentOp merged_fragment =
-      MergeFragments(f1, f3, rewriter, f1.getStageIdAttr());
+  FragmentOp merged_fragment = MergeFragments(f1, f3, rewriter);
 
   ASSERT_TRUE(merged_fragment->hasAttr(kControlOperandStartIdxAttrName));
   int control_start_idx =

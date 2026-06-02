@@ -96,8 +96,7 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
       if (new_fragment_dest == merge_candidate) {
         new_fragment_dest = new_fragment_dest->getNextNode();
       }
-      new_fragment = MergeFragments(new_fragment, merge_candidate, rewriter,
-                                    new_fragment.getStageIdAttr());
+      new_fragment = MergeFragments(new_fragment, merge_candidate, rewriter);
     }
     SetFragmentInfo(new_fragment, rule->target, rewriter);
     // TODO(petebu): Consider making the position of the new fragment a

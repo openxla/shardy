@@ -63,8 +63,7 @@ void RematFragment(IRRewriter& rewriter, FragmentOp forward_fragment,
     std::optional<uint32_t> backward_fragment_call_counter =
         TryToFindCallCounter(backward_fragment);
     FragmentOp merged_fragment =
-        MergeFragments(remat_fragment, backward_fragment, rewriter,
-                       backward_fragment.getStageIdAttr());
+        MergeFragments(remat_fragment, backward_fragment, rewriter);
     // Set the call counter of the merged fragment to the call counter of the
     // backward fragment.
     if (backward_fragment_call_counter.has_value()) {

@@ -232,8 +232,7 @@ class AbsorbClosestProducerPattern : public OpRewritePattern<FragmentOp> {
     // preserving its attributes.
     DictionaryAttr discardable_attrs =
         GetMergedDiscardableAttrs(op, inferred_producer, rewriter);
-    FragmentOp new_fragment =
-        MergeFragments(inferred_producer, op, rewriter, op.getStageIdAttr());
+    FragmentOp new_fragment = MergeFragments(inferred_producer, op, rewriter);
     new_fragment->setDiscardableAttrs(discardable_attrs);
     return success();
   }
@@ -349,8 +348,7 @@ class AbsorbClosestConsumerPattern : public OpRewritePattern<FragmentOp> {
     if (new_fragment_dest == inferred_consumer) {
       new_fragment_dest = new_fragment_dest->getNextNode();
     }
-    FragmentOp new_fragment =
-        MergeFragments(op, inferred_consumer, rewriter, op.getStageIdAttr());
+    FragmentOp new_fragment = MergeFragments(op, inferred_consumer, rewriter);
     rewriter.moveOpBefore(new_fragment, new_fragment_dest);
     new_fragment->setDiscardableAttrs(discardable_attrs);
     return success();

@@ -606,10 +606,23 @@ OpTy MergeRegionOps(OpTy producer_op, OpTy consumer_op, RewriterBase& rewriter,
 
 }  // namespace
 
+bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op) {
+  IntegerAttr producer_stage_id = producer_op.getStageIdAttr();
+  IntegerAttr consumer_stage_id = consumer_op.getStageIdAttr();
+  return !producer_stage_id || !consumer_stage_id ||
+         producer_stage_id == consumer_stage_id;
+}
+
 FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
-                          RewriterBase& rewriter, IntegerAttr stage_id) {
+                          RewriterBase& rewriter) {
   SDY_CHECK_EQ(producer.getMeshName(), consumer.getMeshName())
       << "Expected both fragments to be on the same mesh.";
+  SDY_CHECK(AreStageIdsConsistent(producer, consumer))
+      << "Merging requires both fragments to have the same stage id.";
+  IntegerAttr producer_stage = producer.getStageIdAttr();
+  IntegerAttr stage_id =
+      producer_stage ? producer_stage : consumer.getStageIdAttr();
+
   return MergeRegionOps(
       producer, consumer, rewriter,
       /*num_static_args=*/0,

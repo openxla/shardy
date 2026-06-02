@@ -63,22 +63,6 @@ namespace {
 
 using ::mlir::func::FuncOp;
 
-bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op) {
-  IntegerAttr producer_stage_id = producer_op.getStageIdAttr();
-  IntegerAttr consumer_stage_id = consumer_op.getStageIdAttr();
-  return !producer_stage_id || !consumer_stage_id ||
-         producer_stage_id == consumer_stage_id;
-}
-
-// Returns the stage_id integer attribute of the resulting merged fragment.
-IntegerAttr GetMergedStageIdAttribute(FragmentOp producer_op,
-                                      FragmentOp consumer_op) {
-  SDY_CHECK(AreStageIdsConsistent(producer_op, consumer_op))
-      << "Merging requires both fragments to have the same stage id.";
-  IntegerAttr producer_stage = producer_op.getStageIdAttr();
-  return producer_stage ? producer_stage : consumer_op.getStageIdAttr();
-}
-
 void PrintMergeDebug(FragmentOp producer_op) {
   LLVM_DEBUG({
     llvm::dbgs() << "\n\n=== Processing fragment: '"
@@ -325,8 +309,7 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
 
   // Now we can merge `producer_op` with `consumer_op`.
   FragmentOp merged_fragment =
-      MergeFragments(producer_op, mergeable_user, rewriter,
-                     GetMergedStageIdAttribute(producer_op, mergeable_user));
+      MergeFragments(producer_op, mergeable_user, rewriter);
 
   for (const auto [attr_name, attr] : merged_attributes) {
     merged_fragment->setAttr(attr_name, attr);
