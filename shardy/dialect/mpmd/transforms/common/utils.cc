@@ -473,7 +473,9 @@ Operation* MergeRegionOpsImpl(
     BlockArgument arg = fused_block.getArgument(operand_index);
     rewriter.replaceAllUsesWith(arg, yielded_value);
     arg.setType(producer_block.getArgument(0).getType());
-    rewriter.inlineBlockBefore(&producer_block, &fused_block.front(), arg);
+    rewriter.replaceAllUsesWith(producer_block.getArgument(0), arg);
+    fused_block.getOperations().splice(fused_block.begin(),
+                                       producer_block.getOperations());
     rewriter.eraseOp(terminator);
     rewriter.replaceOp(consumer_op, fused_op->getResults());
     rewriter.eraseOp(producer_op);
@@ -506,7 +508,12 @@ Operation* MergeRegionOpsImpl(
 
   // Inline the consumer block at the end of the producer block, to get a merged
   // block.
-  rewriter.mergeBlocks(&consumer_block, &producer_block, new_consumer_args);
+  for (auto [old_arg, new_arg] :
+       llvm::zip(consumer_block.getArguments(), new_consumer_args)) {
+    rewriter.replaceAllUsesWith(old_arg, new_arg);
+  }
+  producer_block.getOperations().splice(producer_block.end(),
+                                        consumer_block.getOperations());
 
   int max_num_results =
       producer_op->getNumResults() + consumer_op->getNumResults();
