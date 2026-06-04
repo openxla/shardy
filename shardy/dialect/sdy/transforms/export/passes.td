@@ -305,7 +305,7 @@ def InsertFuncCallReshardsPass : Pass<"sdy-insert-func-call-reshards", "ModuleOp
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
-def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors", "func::FuncOp"> {
+def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors", "ModuleOp"> {
   let summary = "Resolves sharding on dimensions mapped to kPermutation factors.";
   let description = [{
     Sharding dimensions with `kPermutation` factors may require cross-device
