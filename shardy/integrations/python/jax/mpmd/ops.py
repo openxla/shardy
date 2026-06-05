@@ -1209,7 +1209,7 @@ def _fori_loop_discharge_rule(
     **kwargs,
 ):
   num_outs = len(call_jaxpr.outvars)
-  discharged_jaxpr = state_discharge.discharge_state(call_jaxpr)
+  discharged_jaxpr = state_discharge.discharge_state2(call_jaxpr)
   if discharged_jaxpr.consts:
     raise NotImplementedError(
         'Cannot handle new consts created by state discharge'
