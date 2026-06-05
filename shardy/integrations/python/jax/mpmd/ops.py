@@ -32,6 +32,7 @@ from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
 from jax._src.interpreters import partial_eval as internal_pe
 from jax._src.state import discharge as state_discharge
+from jax._src.state import types as state_types
 import jax.extend as jex
 from jax.extend import linear_util as lu
 from jax.extend import source_info_util as siu
@@ -1199,46 +1200,64 @@ def fori_loop(
 
 
 def _fori_loop_discharge_rule(
-    in_avals, _, *args, call_jaxpr, num_iterations, carried_arguments_start,
-    **kwargs):
-  from jax._src.state.types import AbstractRef  # pylint: disable=g-import-not-at-top
+    in_avals,
+    _,
+    *args,
+    call_jaxpr,
+    num_iterations,
+    carried_arguments_start,
+    **kwargs,
+):
+  num_outs = len(call_jaxpr.outvars)
+  discharged_jaxpr = state_discharge.discharge_state2(call_jaxpr)
+  if discharged_jaxpr.consts:
+    raise NotImplementedError(
+        'Cannot handle new consts created by state discharge'
+    )
 
-  jaxpr_inner = call_jaxpr.jaxpr
-  num_outs = len(jaxpr_inner.outvars)
-
-  jaxpr_in_avals = [v.aval for v in jaxpr_inner.invars]
-  is_ref = [isinstance(aval, AbstractRef) for aval in jaxpr_in_avals]
-
-  discharged_jaxpr, discharged_consts = state_discharge.discharge_state(
-      jaxpr_inner, call_jaxpr.consts)
-  discharged_fn = jex.core.jaxpr_as_fun(
-      jex.core.ClosedJaxpr(discharged_jaxpr, discharged_consts))
-
-  consts = list(args[:carried_arguments_start])
-  carried = list(args[carried_arguments_start:])
-  for i in range(num_iterations):
-    all_inputs = consts + carried + [jnp.uint32(i)]
-    all_outputs = discharged_fn(*all_inputs)
-    carried = list(all_outputs[:num_outs])
-    ref_vals = list(all_outputs[num_outs:])
-
-    ref_iter = iter(ref_vals)
-    for j in range(len(consts)):
-      if is_ref[j]:
-        consts[j] = next(ref_iter)
-    for j in range(len(carried)):
-      if is_ref[carried_arguments_start + j]:
-        carried[j] = next(ref_iter)
-
-  new_invals = [None] * len(in_avals)
-  for i in range(len(in_avals)):
-    if isinstance(in_avals[i], AbstractRef):
-      if i < carried_arguments_start:
-        new_invals[i] = consts[i]
+  def new_body(*args_and_index):
+    *args, index = args_and_index
+    results = jax_core.eval_jaxpr(
+        discharged_jaxpr.jaxpr, discharged_jaxpr.consts, *args, index
+    )
+    carried_out = results[:num_outs]
+    ref_iter = iter(results[num_outs:])
+    out = []
+    for i, aval in enumerate(in_avals):
+      if isinstance(aval, state_types.AbstractRef):
+        out.append(next(ref_iter))
+      elif i < carried_arguments_start:
+        out.append(args[i])
       else:
-        new_invals[i] = carried[i - carried_arguments_start]
+        out.append(carried_out[i - carried_arguments_start])
+    return out
 
-  return tuple(new_invals), carried
+  body_in_avals = [
+      aval.inner_aval if isinstance(aval, state_types.AbstractRef) else aval
+      for aval in in_avals
+  ] + [jax_core.ShapedArray((), jnp.uint32)]
+  wrapped = lu.wrap_init(
+      new_body, debug_info=discharged_jaxpr.debug_info.with_unknown_names()
+  )
+  new_body_jaxpr, _, () = internal_pe.trace_to_jaxpr_dynamic(
+      wrapped, body_in_avals
+  )
+
+  out_flat = fori_loop_p.bind(
+      *args,
+      call_jaxpr=jex.core.ClosedJaxpr(new_body_jaxpr, ()),
+      num_iterations=num_iterations,
+      # Make everything carried so discharged ref updates persist across
+      # iterations.
+      carried_arguments_start=0,
+      **kwargs,
+  )
+
+  new_invals = tuple(
+      out_flat[i] if isinstance(aval, state_types.AbstractRef) else None
+      for i, aval in enumerate(in_avals)
+  )
+  return new_invals, list(out_flat[carried_arguments_start:])
 
 
 def _register_fori_loop_primitive():

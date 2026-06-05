@@ -332,6 +332,19 @@ class ForiLoopTest(absltest.TestCase):
           np.zeros((1, 1), dtype=np.float32),
       )
 
+  def test_discharge(self):
+    @jax.jit
+    def f():
+      x_ref = jax.new_ref(np.array(0, dtype=np.int32))
+
+      def body(i, _):
+        x_ref[...] += i
+
+      ops.fori_loop(3, body, None)
+      return x_ref[...]
+
+    self.assertEqual(f(), sum(range(3)))
+
 
 class EnumeratedForLoopTest(parameterized.TestCase):
 
