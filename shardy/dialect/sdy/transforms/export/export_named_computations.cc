@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include <cstdint>
+#include <iterator>
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
@@ -98,6 +99,11 @@ StringAttr createFuncOp(
     funcOp.setAllArgAttrs(funcArgAttrs);
   }
 
+  if (Attribute executionThread =
+          namedComputationOp->getAttr(kExecutionThreadAttr)) {
+    funcOp->setAttr(kExecutionThreadAttr, executionThread);
+  }
+
   return symbolTable.insert(funcOp);
 }
 
@@ -151,8 +157,12 @@ void exportNamedComputations(ModuleOp moduleOp, SymbolTable& symbolTable) {
 
     // Replace the `NamedComputationOp` with a `CallOp`.
     rewriter.setInsertionPoint(namedComputationOp);
-    SmallVector<NamedAttribute> callOpAttrs(
-        namedComputationOp->getDiscardableAttrs());
+    SmallVector<NamedAttribute> callOpAttrs;
+    llvm::copy_if(namedComputationOp->getDiscardableAttrs(),
+                  std::back_inserter(callOpAttrs),
+                  [](const NamedAttribute& attr) {
+                    return attr.getName() != kExecutionThreadAttr;
+                  });
     auto callOp = rewriter.replaceOpWithNewOp<CallOp>(
         namedComputationOp, namedComputationOp.getResultTypes(), funcSymName,
         namedComputationOp.getOperands());

@@ -73,6 +73,10 @@ void importCallOp(
       /*outShardings=*/getShardingPerValue(callOp));
   namedCompOp->setAttrs(namedCompAttrs);
 
+  if (Attribute executionThread = funcOp->getAttr(kExecutionThreadAttr)) {
+    namedCompOp->setAttr(kExecutionThreadAttr, executionThread);
+  }
+
   Region& namedCompRegion = namedCompOp.getRegion();
   if (auto movedRegionIt = calleeNameToMovedRegion.find(calleeName);
       movedRegionIt != calleeNameToMovedRegion.end()) {
