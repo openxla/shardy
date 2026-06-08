@@ -462,9 +462,9 @@ def call_mpmd_jit_lowering(
   const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr.jaxpr)
   const_args, const_arg_avals = util.unzip2(const_args_and_avals)
   in_avals = (*const_arg_avals, *call_jaxpr.in_avals)
-  arg_shardings = tuple(a.sharding for a in in_avals)
-  const_shardings = pjit.const_args_shardings(const_args)
-  arg_shardings = tuple(const_shardings) + arg_shardings
+  arg_shardings = (None,) * len(const_args) + tuple(
+      a.sharding for a in call_jaxpr.in_avals
+  )
 
   if jax.__version_info__ >= (0, 10, 1):
     _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)

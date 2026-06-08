@@ -28,6 +28,7 @@ class MpmdExecutableTest(absltest.TestCase):
         module_ir=mock.MagicMock(),
         func_name="mock_exexutable",
         nr_const_args=0,
+        const_shardings=[],
         flat_in_avals=[mock.MagicMock()] * 5,
         in_shardings=in_shardings,
         flat_out_shardings=[],

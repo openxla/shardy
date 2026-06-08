@@ -102,6 +102,7 @@ class MpmdExecutable(stages.Executable):
       module_ir: jax_mlir.ir.Module,
       func_name: str,
       nr_const_args: int,
+      const_shardings: Sequence[Any],
       flat_in_avals: Sequence[jax.core.ShapedArray],
       out_avals: Sequence[jax.core.ShapedArray],
       in_shardings: jaxtyping.PyTree[jax.sharding.Sharding],
@@ -114,6 +115,7 @@ class MpmdExecutable(stages.Executable):
     self._module_ir = module_ir
     self._func_name = func_name
     self.nr_const_args = nr_const_args
+    self.const_shardings = const_shardings
     self.in_avals = flat_in_avals
     self._in_shardings_tree = in_shardings
     self._kept_in_avals = []
@@ -171,12 +173,7 @@ class MpmdExecutable(stages.Executable):
     if self.nr_const_args > 0:
       const_args = args[:self.nr_const_args]
       const_args_avals = [c.aval for c in const_args]
-      first_mesh = next(iter(self._topology.values()))
-      replicated_sharding = jax.sharding.NamedSharding(
-          first_mesh, jax.sharding.PartitionSpec())
-      const_shardings = [
-          getattr(c, 'sharding', replicated_sharding)
-          for c in const_args]
+      const_shardings = self.const_shardings
       const_layouts = pjit.const_args_layouts(
           const_args, const_args_avals, const_shardings)
       const_args_sharded = pxla.shard_args(
@@ -495,6 +492,16 @@ class MpmdLowered(stages.Lowered):
           flat_input_mesh_assignment,
       )
 
+    self.const_shardings = [
+        utils._sdy_spec_to_named_sharding(
+            input_spec.tensor_spec,
+            topology[input_spec.mesh_name],
+            unreduced_axes=set(input_spec.unreduced_axes),
+            memory_kind=input_spec.memory_kind,
+        )
+        for input_spec in meshes_and_specs.input_specs[:nr_const_args]
+    ]
+
     self.function_mesh_assignment = mpmd_types.FunctionIOMeshAssignment(
         jax.tree_util.tree_unflatten(
             jax_fn_info.input_tree,
@@ -592,6 +599,7 @@ class MpmdLowered(stages.Lowered):
       flat_out_shardings = jax.tree.leaves(
           self.function_named_shardings.output_specs
       )
+      const_shardings = self.const_shardings
       topology = self.topology
       device_assignment = []
       for _, mesh in self.topology.items():
@@ -634,6 +642,14 @@ class MpmdLowered(stages.Lowered):
           ),
           self.function_named_shardings.input_specs,
       )
+      const_shardings = [
+          jax.sharding.NamedSharding(
+              lowered_mesh_to_compiled_mesh[s.mesh],
+              s.spec,
+              memory_kind=s.memory_kind,
+          )
+          for s in self.const_shardings
+      ]
 
     # Clone the IFRT IR module to avoid modifying in place the IFRT IR module.
     # This is necessary so that lowered.as_text(dialect='ifrt') returns the
@@ -655,6 +671,7 @@ class MpmdLowered(stages.Lowered):
         module_ir=compiled_ifrt_module,
         func_name=self.name,
         nr_const_args=len(self.const_args),
+        const_shardings=const_shardings,
         flat_in_avals=[x._aval for x in jax.tree.leaves(self.args_info)],  # pylint: disable=protected-access,
         out_avals=self.global_flat_output_abstract_values,
         in_shardings=in_shardings,
