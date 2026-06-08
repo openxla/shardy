@@ -67,6 +67,8 @@ struct PropagationOptions {
   bool enableExplicitGatherScatterBatching = false;
   // Whether to disable splitting of sharded dimensions in ReshardOps.
   bool disableSplitReshardingDimensions = false;
+  // Whether to clear reverse op sharding on export.
+  bool clearReverseOpSharding = false;
 };
 
 }  // namespace sdy
