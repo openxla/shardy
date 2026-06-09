@@ -14,12 +14,14 @@
 # ==============================================================================
 """Utils for MPMD partitioning."""
 
-from collections.abc import Callable, Mapping, Sequence, Set
+from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 import dataclasses
 import functools
 from typing import Any, TypeVar
 
 import jax
+from jax._src.lib import _jax
+from jax._src.lib import weakref_lru_cache as lib_weakref_lru_cache
 from jaxlib import _sdy_mpmd as mpmd_utils
 from jax.typing import ArrayLike
 import jaxtyping
@@ -176,3 +178,53 @@ def get_func_name(func: Callable[..., Any], prefix: str = 'mpmd_') -> str:
     return f'{prefix}{func.func.__name__}'
   else:
     return f'{prefix}fn'
+
+
+T1 = TypeVar('T1')
+T2 = TypeVar('T2')
+
+
+def unzip2(
+    xys: Iterable[tuple[T1, T2]]
+) -> tuple[tuple[T1, ...], tuple[T2, ...]]:
+  """Unzip sequence of length-2 tuples into two tuples."""
+  xs: list[T1] = []
+  ys: list[T2] = []
+  for x, y in xys:
+    xs.append(x)
+    ys.append(y)
+  return tuple(xs), tuple(ys)
+
+
+def merge_lists(
+    bs: Sequence[bool],
+    l0: Sequence[T1],
+    l1: Sequence[T2]
+) -> list[T1 | T2]:
+  """Merge the elements of two lists based on a mask."""
+  assert sum(bs) == len(l1) and len(bs) - sum(bs) == len(l0)
+  i0, i1 = iter(l0), iter(l1)
+  out: list[T1 | T2] = [next(i1) if b else next(i0) for b in bs]
+  sentinel = object()
+  assert next(i0, sentinel) is next(i1, sentinel) is sentinel
+  return out
+
+
+def subs_list2(
+    subs1: Sequence[int | None], subs2: Sequence[int | None],
+    src1: Sequence[T], src2: Sequence[T], base: Sequence[T],
+) -> list[T]:
+  assert len(subs1) == len(subs2)
+  base_ = iter(base)
+  out = [src1[f1] if f1 is not None else src2[f2] if f2 is not None else
+         next(base_) for f1, f2, in zip(subs1, subs2)]
+  sentinel = object()
+  assert next(base_, sentinel) is sentinel
+  return out
+
+
+def weakref_lru_cache(
+    f: Callable[..., Any] | None = None, *, maxsize: int | None = 2048,
+):
+  tc_fn = _jax.config.trace_context
+  return lib_weakref_lru_cache.weakref_lru_cache(tc_fn, f, maxsize=maxsize)

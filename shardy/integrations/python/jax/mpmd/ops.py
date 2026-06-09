@@ -26,8 +26,6 @@ from jax import numpy as jnp
 from jax import tree
 from jax import tree_util
 from jax._src import core as jax_core
-from jax._src import pjit
-from jax._src import util
 from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
 from jax._src.interpreters import partial_eval as internal_pe
@@ -228,7 +226,7 @@ def named_computation_partir_lowering(
   mpmd.register_dialect(ctx.module_context.context)
 
   const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr)
-  const_args, const_avals = util.unzip2(const_args_and_avals)
+  const_args, const_avals = utils.unzip2(const_args_and_avals)
   in_avals = (*const_avals, *ctx.avals_in)
   const_arg_values = tuple(
       jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
@@ -241,8 +239,8 @@ def named_computation_partir_lowering(
   else:
     _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
 
-  input_types = util.safe_map(_aval_to_ir_types, in_avals)
-  output_types = util.safe_map(_aval_to_ir_types, ctx.avals_out)
+  input_types = list(map(_aval_to_ir_types, in_avals))
+  output_types = list(map(_aval_to_ir_types, ctx.avals_out))
   flat_input_types, _ = tree_util.tree_flatten(input_types)
   flat_output_types, _ = tree_util.tree_flatten(output_types)
 
@@ -460,7 +458,7 @@ def call_mpmd_jit_lowering(
   effects = list(ctx.tokens_in.effects())
 
   const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr.jaxpr)
-  const_args, const_arg_avals = util.unzip2(const_args_and_avals)
+  const_args, const_arg_avals = utils.unzip2(const_args_and_avals)
   in_avals = (*const_arg_avals, *call_jaxpr.in_avals)
   arg_shardings = (None,) * len(const_args) + tuple(
       a.sharding for a in call_jaxpr.in_avals
@@ -471,8 +469,8 @@ def call_mpmd_jit_lowering(
   else:
     _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
 
-  input_types = util.safe_map(_aval_to_ir_types, in_avals)
-  output_types = util.safe_map(_aval_to_ir_types, ctx.avals_out)
+  input_types = list(map(_aval_to_ir_types, in_avals))
+  output_types = list(map(_aval_to_ir_types, ctx.avals_out))
 
   # TODO(jupvfranco): Consider memoizing the lowering function instead of
   # caching in the context (similar to `_call_get_cached_jaxpr` below).
@@ -528,7 +526,7 @@ def _call_default_lowering(
   return call_lowering(ctx, *args, call_jaxpr=call_jaxpr)
 
 
-@util.weakref_lru_cache
+@utils.weakref_lru_cache
 def _call_get_cached_jaxpr(fn, in_avals, in_tree):
   """Returns the (potentially cached) jaxpr of a function."""
   fun = lu.wrap_init(fn)
@@ -589,9 +587,9 @@ def _register_call_primitive():
         **other_kwargs,
     )
     # Split the primals and the tangents.
-    primals_out, tangents_out = util.split_list(
-        out_flat, [len(call_jaxpr.jaxpr.outvars)]
-    )
+    primals_out = out_flat[:len(call_jaxpr.jaxpr.outvars)]
+    tangents_out = out_flat[len(call_jaxpr.jaxpr.outvars):]
+
     # Some tangents may be zero, so we need to add zeros for them.
     tangents_out_it = iter(tangents_out)
     return primals_out, [
@@ -664,9 +662,9 @@ def _register_call_primitive():
     in_fwd = [None] * num_out_primals + in_fwd[num_out_primals:]
 
     # Compute which residuals are just primal outputs.
-    out_vars, res_vars = util.split_list(
-        known_jaxpr.jaxpr.outvars, [num_out_primals]
-    )
+    out_vars = known_jaxpr.jaxpr.outvars[:num_out_primals]
+    res_vars = known_jaxpr.jaxpr.outvars[num_out_primals:]
+
     idx_map = {id(v): i for i, v in enumerate(out_vars)}
     out_fwd = [None] * num_out_primals + [idx_map.get(id(v)) for v in res_vars]
 
@@ -683,14 +681,15 @@ def _register_call_primitive():
 
     known_inputs = [pv.get_known() for pv in in_pvals if pv.is_known()]
     all_known_outs = primitive.bind(*known_inputs, **known_params)
-    all_known_outs = util.subs_list2(
+    all_known_outs = utils.subs_list2(
         in_fwd, out_fwd, known_inputs, all_known_outs, all_known_outs
     )
     del known_inputs
 
-    known_out_vals, residual_vals = util.split_list(
-        all_known_outs, [len(all_known_outs) - num_residuals]
-    )
+    num_out_vals = len(all_known_outs) - num_residuals
+    known_out_vals = all_known_outs[:num_out_vals]
+    residual_vals = all_known_outs[num_out_vals:]
+
     residual_tracers = map(trace.new_instantiated_const, residual_vals)
 
     # The convention of partial_eval_jaxpr_nounits is to place residual binders
@@ -723,7 +722,7 @@ def _register_call_primitive():
     )
     for t in unknown_tracers_out:
       t.recipe = eqn
-    return util.merge_lists(unknown_outs, known_out_vals, unknown_tracers_out)
+    return utils.merge_lists(unknown_outs, known_out_vals, unknown_tracers_out)
 
   pe.custom_partial_eval_rules[primitive] = _call_partial_eval
 
@@ -1065,10 +1064,10 @@ def fori_loop_mpmd_jit_lowering(
   else:
     _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
 
-  input_types = util.safe_map(_aval_to_ir_types, ctx.avals_in)
+  input_types = list(map(_aval_to_ir_types, ctx.avals_in))
   flat_input_types, _ = tree_util.tree_flatten(input_types)
   const_types = flat_input_types[0:carried_arguments_start]
-  output_types = util.safe_map(_aval_to_ir_types, ctx.avals_out)
+  output_types = list(map(_aval_to_ir_types, ctx.avals_out))
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   for_loop = mpmd.ForOp(
       const_types + flat_output_types,
