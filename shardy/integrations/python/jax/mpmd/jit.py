@@ -239,8 +239,9 @@ class MpmdGspmdTraced(jax.stages.Traced):
     preserved_input_indices = lowered_computation._lowering.compile_args.get(
         'kept_var_idx'
     )
+    num_const_args = len(lowered_computation._lowering.const_args)
     erased_inputs_from_signature = [
-        i not in preserved_input_indices for i, _ in enumerate(flat_in_shaped)
+        (i + num_const_args) not in preserved_input_indices for i, _ in enumerate(flat_in_shaped)
     ]
     erased_input_tree = jax.tree.unflatten(
         in_tree, erased_inputs_from_signature
@@ -282,7 +283,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
       kept_inputs_mesh_assignment = [
           mesh_assignment
           for i, mesh_assignment in enumerate(flat_input_mesh_assignment)
-          if i in jax_fn_info.kept_inputs_indices
+          if (i + num_const_args) in jax_fn_info.kept_inputs_indices
       ]
     # Flatten the output to mesh assignment pytree.
     flat_output_mesh_assignment = ()
@@ -314,10 +315,10 @@ class MpmdGspmdTraced(jax.stages.Traced):
     kept_flat_args_info = [
         arg_info
         for i, arg_info in enumerate(flat_args_info)
-        if i in jax_fn_info.kept_inputs_indices
+        if (i + num_const_args) in jax_fn_info.kept_inputs_indices
     ]
     donate_argnums = [
-        argnum
+        argnum + num_const_args
         for argnum, arg_info in enumerate(kept_flat_args_info)
         if arg_info.donated
     ]
@@ -326,7 +327,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
         func_name=func_name,
         named_meshes=topology_shape,
         assignment=self._mpmd_config.mesh_and_stage_assignment,
-        input_meshes=kept_inputs_mesh_assignment,
+        input_meshes=[None] * num_const_args + list(kept_inputs_mesh_assignment),
         output_meshes=flat_output_mesh_assignment,
         donate_argnums=donate_argnums,
         partitioning_options=self._mpmd_config.partitioning_options,
