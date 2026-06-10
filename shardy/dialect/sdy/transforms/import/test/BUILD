@@ -8,8 +8,11 @@ filegroup(
     name = "test_data",
     testonly = True,
     data = [
+        "executable_explicit_gather_scatter_batching/run_sdy_interpreter_test.sh",
         "//shardy/tools:sdy_opt",
         "@llvm-project//llvm:FileCheck",
+        "@llvm-project//llvm:split-file",
+        "@stablehlo//:stablehlo-translate",
     ],
 )
 
