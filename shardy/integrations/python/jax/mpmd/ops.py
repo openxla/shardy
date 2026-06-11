@@ -247,8 +247,9 @@ def named_computation_partir_lowering(
   # There is no facility to construct the custom attribute other than parsing.
   origin = ir.Attribute.parse(f'#mpmd.user_origin<"{name}"({transpose_count})>')
 
+  flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   named_comp_op = mpmd.NamedComputationOp(
-      flat_output_types, jax_mlir.flatten_ir_values(args), origin  # pytype: disable=wrong-arg-types
+      flat_output_types, flat_args, origin  # pytype: disable=wrong-arg-types
   )
 
   block = named_comp_op.region.blocks.append(*flat_input_types)
@@ -279,7 +280,8 @@ def named_computation_partir_lowering(
     )
     ctx.set_tokens_out(tokens)
     # The return op expects a single flat list with all outputs.
-    mpmd.ReturnOp(jax_mlir.flatten_ir_values(outs))
+    flat_outs, _ = jax_mlir.ir_tree_registry.flatten(outs)
+    mpmd.ReturnOp(flat_outs)
   return named_comp_op.results
 
 
@@ -496,9 +498,10 @@ def call_mpmd_jit_lowering(
   ]
   args = tuple(hoisted_const_values) + args
   flat_output_types, _ = tree_util.tree_flatten(output_types)
+  flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   call_op = mpmd.CallOp(
       flat_output_types,
-      jax_mlir.flatten_ir_values(args),  # pytype: disable=wrong-arg-types
+      flat_args,  # pytype: disable=wrong-arg-types
       ir.FlatSymbolRefAttr.get(func_declaration.sym_name.value),
   )
 
@@ -1069,9 +1072,10 @@ def fori_loop_mpmd_jit_lowering(
   const_types = flat_input_types[0:carried_arguments_start]
   output_types = list(map(_aval_to_ir_types, ctx.avals_out))
   flat_output_types, _ = tree_util.tree_flatten(output_types)
+  flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   for_loop = mpmd.ForOp(
       const_types + flat_output_types,
-      jax_mlir.flatten_ir_values(args),  # pytype: disable=wrong-arg-types
+      flat_args,  # pytype: disable=wrong-arg-types
       num_iterations,
       unroll_factor=num_iterations,
   )
