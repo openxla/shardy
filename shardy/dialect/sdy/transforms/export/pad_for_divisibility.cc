@@ -189,6 +189,9 @@ Value createPaddedValue(RankedTensorType paddedType, Value value,
       rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
       rewriter.getDenseI64ArrayAttr(
           SmallVector<int64_t>(origType.getRank(), 0)));
+  if (auto sharding = getSharding(value)) {
+    setSharding(padOp, sharding);
+  }
   cache.setPadding(padOp, paddingKind);
   return padOp;
 }
@@ -383,7 +386,9 @@ class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
 
 class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  AllGatherOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                     PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       sdy::AllGatherOp op, OpAdaptor adaptor,
@@ -435,6 +440,15 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
 
+    std::optional<PaddingValueKind> paddingKind;
+    Value input = adaptor.getOperands()[0];
+    paddingKind = cache.getPadding(input);
+    if (paddingKind) {
+      for (Value res : newOp->getResults()) {
+        cache.setPadding(res, *paddingKind);
+      }
+    }
+
     SmallVector<Value> replacements;
     ::llvm::ArrayRef<AxisRefListAttr> gatheringAxes = op.getGatheringAxes();
 
@@ -460,12 +474,18 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
         if (needsSlice) {
           SmallVector<int64_t> starts(origRanked.getRank(), 0);
           SmallVector<int64_t> strides(origRanked.getRank(), 1);
-          replacements.push_back(stablehlo::SliceOp::create(
+          auto sliceOp = stablehlo::SliceOp::create(
               rewriter, op.getLoc(),
               RankedTensorType::get(limitIndices, origRanked.getElementType()),
               res, rewriter.getDenseI64ArrayAttr(starts),
               rewriter.getDenseI64ArrayAttr(limitIndices),
-              rewriter.getDenseI64ArrayAttr(strides)));
+              rewriter.getDenseI64ArrayAttr(strides));
+          setSharding(sliceOp.getResult(), getSharding(res));
+          Value sliceRes = sliceOp.getResult();
+          if (paddingKind) {
+            cache.setPadding(sliceRes, *paddingKind);
+          }
+          replacements.push_back(sliceRes);
           continue;
         }
       }
@@ -475,6 +495,9 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     rewriter.replaceOp(op, replacements);
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
@@ -630,12 +653,13 @@ struct PadForDivisibilityPass
 
     PaddedTypeConverter typeConverter(symbolTable);
     RewritePatternSet patterns(&getContext());
-    patterns.add<FuncOpPattern, GenericOpPattern, StablehloSliceOpPattern,
-                 AllGatherOpPattern>(typeConverter, &getContext());
+    patterns.add<FuncOpPattern, GenericOpPattern, StablehloSliceOpPattern>(
+        typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
-    patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern>(
-        typeConverter, &getContext(), paddingCache);
+    patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
+                 AllGatherOpPattern>(typeConverter, &getContext(),
+                                     paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {

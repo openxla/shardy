@@ -98,3 +98,33 @@ func.func @padded_non_contracting_dims_any(%arg0: tensor<3x8xf32>, %arg1: tensor
   %4 = stablehlo.slice %3 [0:3, 0:5] : (tensor<3x5xf32>) -> tensor<3x5xf32>
   return %4 : tensor<3x5xf32>
 }
+
+// CHECK-LABEL: func @padded_contracting_dims_reuse_with_all_gather
+func.func @padded_contracting_dims_reuse_with_all_gather(%arg0: tensor<4x7xf32>, %arg1: tensor<7x5xf32>) -> tensor<4x5xf32> {
+  // Pad LHS and do all_slice then all_gather on the non-contracting dim (dim 0).
+  // The contracting dim (dim 1) remains padded and its padding should be reused.
+  // CHECK: %[[CST0:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD0:.*]] = stablehlo.pad %arg0, %[[CST0]], low = [0, 0], high = [0, 1], interior = [0, 0] : (tensor<4x7xf32>, tensor<f32>) -> tensor<4x8xf32>
+  // CHECK: %[[SLICE0:.*]] = sdy.all_slice [{"y"}, {"x"}] %[[PAD0]] out_sharding=<@mesh_4_2, [{"y"}, {"x"}]> : tensor<4x8xf32>
+  // CHECK: %[[AG0:.*]] = sdy.all_gather [{"y"}, {}] %[[SLICE0]] out_sharding=<@mesh_4_2, [{}, {"x"}]> : tensor<4x8xf32>
+
+  // CHECK: %[[CST1:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD1:.*]] = stablehlo.pad %arg1, %[[CST1]], low = [0, 0], high = [1, 1], interior = [0, 0] : (tensor<7x5xf32>, tensor<f32>) -> tensor<8x6xf32>
+  // CHECK: %[[SLICE1:.*]] = sdy.all_slice [{"x"}, {"y"}] %[[PAD1]] out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<8x6xf32>
+
+  // Verify NO select/iota is generated for LHS contracting dim!
+  // CHECK-NOT: stablehlo.select
+  // CHECK-NOT: stablehlo.compare
+
+  // CHECK: %[[DOT:.*]] = stablehlo.dot_general %[[AG0]], %[[SLICE1]], contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}]>]>} : (tensor<4x8xf32>, tensor<8x6xf32>) -> tensor<4x6xf32>
+  // CHECK: %[[TRIM:.*]] = stablehlo.slice %[[DOT]] [0:4, 0:5] : (tensor<4x6xf32>) -> tensor<4x5xf32>
+  // CHECK: return %[[TRIM]] : tensor<4x5xf32>
+
+  %0 = sdy.all_slice [{"y"}, {"x"}] %arg0 out_sharding=<@mesh_4_2, [{"y"}, {"x"}]> : tensor<4x7xf32>
+  %1 = sdy.all_gather [{"y"}, {}] %0 out_sharding=<@mesh_4_2, [{}, {"x"}]> : tensor<4x7xf32>
+  %2 = sdy.all_slice [{"x"}, {"y"}] %arg1 out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<7x5xf32>
+  %3 = stablehlo.dot_general %1, %2, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}]>]>} : (tensor<4x7xf32>, tensor<7x5xf32>) -> tensor<4x5xf32>
+  %4 = stablehlo.slice %3 [0:4, 0:5] : (tensor<4x5xf32>) -> tensor<4x5xf32>
+  return %4 : tensor<4x5xf32>
+}
+

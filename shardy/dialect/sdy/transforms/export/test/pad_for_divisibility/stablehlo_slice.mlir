@@ -10,7 +10,7 @@ func.func @result_indivisible(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.shardi
   // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{"x"}, {}] %[[SLICE]] out_sharding=<@mesh_4_2, [{}, {}]> : tensor<4x8xf32>
   %1 = sdy.all_gather [{"x"}, {}] %0 out_sharding=<@mesh_4_2, [{}, {}]> : tensor<3x8xf32>
 
-  // CHECK-NEXT: %[[TRIM:.*]] = stablehlo.slice %[[AG]] [0:3, 0:8] : (tensor<4x8xf32>) -> tensor<3x8xf32>
+  // CHECK-NEXT: %[[TRIM:.*]] = stablehlo.slice %[[AG]] [0:3, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}]>]>} : (tensor<4x8xf32>) -> tensor<3x8xf32>
   // CHECK-NEXT: return %[[TRIM]] : tensor<3x8xf32>
   return %1 : tensor<3x8xf32>
 }
