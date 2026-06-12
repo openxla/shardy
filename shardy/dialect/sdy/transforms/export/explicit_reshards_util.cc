@@ -244,9 +244,6 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
 
   static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
 
-  static inline FactorAxesPair getTombstoneKey() {
-    return FactorAxesPair(FactorAxesPair::kTombstoneFactorIndex);
-  }
 };
 
 struct FactorAxesCandidate {

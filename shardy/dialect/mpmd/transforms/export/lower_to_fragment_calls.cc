@@ -121,8 +121,7 @@ struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
     if (lhs == rhs) {
       return true;
     }
-    if (lhs == getTombstoneKey() || lhs == getEmptyKey() ||
-        rhs == getTombstoneKey() || rhs == getEmptyKey()) {
+    if (lhs == getEmptyKey() || rhs == getEmptyKey()) {
       return false;
     }
 

@@ -470,12 +470,9 @@ TEST(FragmentInfoMapInfoTest, GetHashValue) {
 
 TEST(FragmentInfoMapInfoTest, SpecialKeys) {
   FragmentInfo emptyKey = FragmentInfoMapInfo::getEmptyKey();
-  FragmentInfo tombstoneKey = FragmentInfoMapInfo::getTombstoneKey();
   FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
 
   EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, info1));
-  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(tombstoneKey, info1));
-  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, tombstoneKey));
 }
 
 TEST(FragmentInfoMapInfoTest, DenseMapIntegration) {

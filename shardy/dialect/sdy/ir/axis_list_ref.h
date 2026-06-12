@@ -195,12 +195,6 @@ struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {
   }
 
   static inline AxisListRef getEmptyKey() { return AxisListRef(); }
-
-  static inline AxisListRef getTombstoneKey() {
-    return AxisListRef(
-        /*axisRefs=*/DenseMapInfo<ArrayRef<AxisRefAttr>>::getTombstoneKey(),
-        /*tailAxisRef=*/AxisRefAttr());
-  }
 };
 
 }  // namespace sdy

@@ -158,14 +158,6 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
                         /*split_type=*/std::nullopt,
                         /*mesh_name=*/""};
   }
-
-  static inline FragmentInfo getTombstoneKey() {
-    return FragmentInfo{/*origins=*/{},
-                        /*stage_id=*/DenseMapInfo<int>::getTombstoneKey(),
-                        /*call_counter=*/DenseMapInfo<int>::getTombstoneKey(),
-                        /*split_type=*/SplitFragmentType::kDropTransferred,
-                        /*mesh_name=*/"__tombstone__"};
-  }
 };
 
 // Describes a rule to merge fragments. A rule is defined by a list of sources
