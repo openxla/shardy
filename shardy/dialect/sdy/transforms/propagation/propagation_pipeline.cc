@@ -97,10 +97,10 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                                       dumpIndex++));
     AutoPartitionerRegistry::addPasses(pm);
   }
+  pm.addPass(createInsertFuncCallReshardsPass());
   ExportOptions exportOptions;
   populateExportOptions(exportOptions, options);
   addExportPipeline(pm, dumpIndex, exportOptions);
-  pm.addPass(createInsertFuncCallReshardsPass());
 }
 
 void addPropagationPipeline(OpPassManager& pm,
