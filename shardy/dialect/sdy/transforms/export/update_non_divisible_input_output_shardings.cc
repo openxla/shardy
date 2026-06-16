@@ -16,7 +16,6 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <functional>
-#include <numeric>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
@@ -44,89 +43,6 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
-
-// Gets the largest prefix sharding of the given `sharding` that evenly divides
-// the tensor `type`.
-//
-// Shardings are updated on a per dimension basis, so if one dimension requires
-// replication, other dimensions may not be.
-//
-// Examples:
-// - mesh = <"x"=4, "y"=2>
-//   - [{"x"}] : tensor<8xf32> -> [{"x"}] : tensor<8xf32>
-//   - [{"x",?}] : tensor<4xf32> -> [{"x",?}] : tensor<4xf32>
-//   - [{"x"}, {"y"}] : tensor<2x2xf32> -> [{"x":(1)2}, {"y"}] : tensor<2x2xf32>
-//   - [{"x"}] : tensor<3xf32> -> [{}] : tensor<3xf32>
-//   - [{"y"}] : tensor<3xf32> -> [{}] : tensor<3xf32>
-//   - [{"x","y"}] : tensor<4xf32> -> [{"x"}] : tensor<4xf32>
-//   - [{"y","x"}] : tensor<4xf32> -> [{"y","x":(1)2}] : tensor<4xf32>
-// See update_non_divisible_input_output_shardings.mlir for more examples.
-TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
-                                    ShapedType type,
-                                    const SymbolTable& symbolTable) {
-  MeshAttr mesh = sharding.getMesh(symbolTable);
-  assert(mesh && "unknown mesh");
-  MLIRContext* ctx = sharding.getContext();
-  llvm::SmallVector<DimensionShardingAttr> newDimShardings;
-  newDimShardings.reserve(sharding.getRank());
-  for (auto [dimSharding, dimSize] :
-       llvm::zip_equal(sharding.getDimShardings(), type.getShape())) {
-    if (dimSize % dimSharding.getShardedSize(mesh) == 0) {
-      // Exit early if we can divide the dimension evenly.
-      newDimShardings.push_back(dimSharding);
-      continue;
-    }
-    int64_t remainingDimSize = dimSize;
-    llvm::ArrayRef<AxisRefAttr> oldAxes = dimSharding.getAxes();
-    llvm::SmallVector<AxisRefAttr> newAxes;
-    newAxes.reserve(oldAxes.size());
-    int64_t newShardedSize = 1;
-    while (!oldAxes.empty()) {
-      AxisRefAttr currentAxis = oldAxes.front();
-      oldAxes = oldAxes.drop_front();
-      const int64_t gcd = std::gcd(currentAxis.getSize(mesh), remainingDimSize);
-      if (gcd == 1) {
-        // If there is no GCD with the current axis, we can't use any more axes.
-        // Return current built up sharding.
-        break;
-      }
-      newShardedSize *= gcd;
-      if (currentAxis.getSize(mesh) == gcd) {
-        // Get full axis. Move on to the next axis.
-        newAxes.push_back(currentAxis);
-        remainingDimSize /= gcd;
-      } else {
-        // `currentAxis` is larger than the `gcd`. Need to take a smaller chunk
-        // of the current axis.
-        newAxes.push_back(AxisRefAttr::get(
-            ctx, currentAxis.getName(),
-            SubAxisInfoAttr::get(ctx, currentAxis.getSubAxisPreSize(), gcd)));
-        // Since we took the largest chunk of the `currentAxis`, with some
-        // left over, we can't take anymore from it and thus can't also
-        // consider any further/minor axes. Return the current build up
-        // sharding.
-        break;
-      }
-    }
-    DimensionShardingAttr newDimSharding =
-        DimensionShardingAttr::get(ctx, newAxes, dimSharding.getIsClosed());
-    if (dimSize % newShardedSize != 0) {
-      unreachableFormatv(
-          "Failed to make input/output shardings evenly sharded. Started with "
-          "tensor sharding {0}, tensor shape {1}, mesh {2}, miscalculated dim "
-          "sharding {3}",
-          sharding, type, attributeToString(mesh), newDimSharding);
-    }
-    newDimShardings.push_back(newDimSharding);
-  }
-  // NOTE: no need to account for replicated/unreduced axes, since we end with
-  // a sharding that covers less-than-or-equal amount of axes than we started
-  // with. So no way the final sharding can use an axis/sub-axis from the
-  // replicated/unreduced axes.
-  return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), newDimShardings,
-                                 sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes());
-}
 
 void updateValueShardings(
     TypeRange types,

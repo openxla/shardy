@@ -115,7 +115,8 @@ enum class PaddingValueKind { kZero, kOne };
 // Returns true if the operation has custom padding handling implemented in
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
-  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp>(op);
+  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, sdy::AllGatherOp,
+             sdy::AllSliceOp, sdy::AllToAllOp>(op);
 }
 
 class PaddingCache {
@@ -339,10 +340,11 @@ class GenericOpPattern : public ConversionPattern {
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
+    if (hasCustomPadHandling(op)) {
+      return failure();
+    }
     Dialect* dialect = op->getDialect();
-    if ((dialect && dialect->getNamespace() != "stablehlo" &&
-         !isa<sdy::ReturnOp>(op)) ||
-        hasCustomPadHandling(op)) {
+    if (!dialect || dialect->getNamespace() != "stablehlo") {
       return failure();
     }
     return padGenericOp(op, operands, rewriter,
@@ -546,6 +548,101 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
   PaddingCache& cache;
 };
 
+class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
+ public:
+  AllToAllOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::AllToAllOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    Value input = adaptor.getOperands()[0];
+    auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
+    if (!rankedInputType) {
+      return failure();
+    }
+
+    TensorShardingAttr inSharding = getSharding(op.getOperand());
+    TensorShardingAttr outSharding = op.getOutSharding();
+
+    Type paddedFromInSharding =
+        getPaddedType(rankedInputType, inSharding, symbolTable);
+    Type paddedFromOutSharding =
+        getPaddedType(rankedInputType, outSharding, symbolTable);
+
+    auto rankedInPadded = cast<RankedTensorType>(paddedFromInSharding);
+    auto rankedOutPadded = cast<RankedTensorType>(paddedFromOutSharding);
+    auto paddedInputType = RankedTensorType::get(
+        llvm::map_to_vector(llvm::seq<int>(0, rankedInputType.getRank()),
+                            [&](int d) {
+                              return std::max(rankedInPadded.getDimSize(d),
+                                              rankedOutPadded.getDimSize(d));
+                            }),
+        rankedInputType.getElementType());
+
+    PaddingValueKind paddingKind = PaddingValueKind::kZero;
+    Value padOp = input;
+    if (paddedInputType != rankedInputType) {
+      padOp = createPaddedValue(paddedInputType, input, paddingKind,
+                                symbolTable, rewriter, cache);
+      setSharding(padOp, inSharding);
+    }
+
+    OperationState state(op->getLoc(), op->getName());
+    state.addOperands({padOp});
+    state.addTypes({paddedInputType});
+    state.addAttributes(op->getAttrs());
+    Operation* newOp = rewriter.create(state);
+
+    Value res = newOp->getResult(0);
+    auto origRanked = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+    auto newRanked = dyn_cast<RankedTensorType>(res.getType());
+
+    if (origRanked && newRanked) {
+      auto gatherDims = llvm::map_to_vector(
+          op.getParams(),
+          [](AllToAllParamAttr param) { return param.getSrcDim(); });
+
+      SmallVector<int64_t> limitIndices = llvm::map_to_vector(
+          llvm::seq<int>(0, origRanked.getRank()), [&](int d) {
+            int64_t origSize = origRanked.getDimSize(d);
+            int64_t newSize = newRanked.getDimSize(d);
+            return (llvm::is_contained(gatherDims, d) && newSize > origSize)
+                       ? origSize
+                       : newSize;
+          });
+
+      if (limitIndices != newRanked.getShape()) {
+        SmallVector<int64_t> starts(origRanked.getRank(), 0);
+        SmallVector<int64_t> strides(origRanked.getRank(), 1);
+        auto sliceOp = stablehlo::SliceOp::create(
+            rewriter, op.getLoc(),
+            RankedTensorType::get(limitIndices, origRanked.getElementType()),
+            res, rewriter.getDenseI64ArrayAttr(starts),
+            rewriter.getDenseI64ArrayAttr(limitIndices),
+            rewriter.getDenseI64ArrayAttr(strides));
+        setSharding(
+            sliceOp.getResult(),
+            getEvenlySharded(outSharding,
+                             cast<ShapedType>(sliceOp.getResult().getType()),
+                             symbolTable));
+        res = sliceOp.getResult();
+      }
+    }
+
+    rewriter.replaceOp(op, {res});
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
   StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx)
@@ -658,8 +755,8 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
-                 AllGatherOpPattern>(typeConverter, &getContext(),
-                                     paddingCache);
+                 AllToAllOpPattern, AllGatherOpPattern>(
+        typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
@@ -689,6 +786,10 @@ struct PadForDivisibilityPass
       }
       if (auto allGatherOp = dyn_cast<AllGatherOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue);
+      }
+      if (auto allToAllOp = dyn_cast<AllToAllOp>(op)) {
+        return llvm::all_of(op->getOperands(), isLegalValue) &&
+               llvm::all_of(op->getResults(), isLegalValue);
       }
       return true;
     });

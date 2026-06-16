@@ -67,6 +67,26 @@ void emitOpWarningOnce(llvm::once_flag& flag, Operation* op, StringRef msg);
 // Converts `attr` to string.
 std::string attributeToString(Attribute attr);
 
+// Gets the largest prefix sharding of the given `sharding` that evenly divides
+// the tensor `type`.
+//
+// Shardings are updated on a per dimension basis, so if one dimension requires
+// replication, other dimensions may not be.
+//
+// Examples:
+// - mesh = <"x"=4, "y"=2>
+//   - [{"x"}] : tensor<8xf32> -> [{"x"}] : tensor<8xf32>
+//   - [{"x",?}] : tensor<4xf32> -> [{"x",?}] : tensor<4xf32>
+//   - [{"x"}, {"y"}] : tensor<2x2xf32> -> [{"x":(1)2}, {"y"}] : tensor<2x2xf32>
+//   - [{"x"}] : tensor<3xf32> -> [{}] : tensor<3xf32>
+//   - [{"y"}] : tensor<3xf32> -> [{}] : tensor<3xf32>
+//   - [{"x","y"}] : tensor<4xf32> -> [{"x"}] : tensor<4xf32>
+//   - [{"y","x"}] : tensor<4xf32> -> [{"y","x":(1)2}] : tensor<4xf32>
+// See update_non_divisible_input_output_shardings.mlir for more examples.
+TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
+                                    ShapedType type,
+                                    const SymbolTable& symbolTable);
+
 // Converts `op` to string with location information.
 std::string operationToString(Operation* op);
 
