@@ -140,39 +140,10 @@ _Merges inferred fragments with user defined fragments._
 
 Merges inferred with user-defined or other inferred fragments. This pass is
 useful to clean-up/simplify the module and can be useful after other
-compiler passes that introduce inferred fragments, while
-`-mpmd-transfer-aware-merge` above is more invasive and should be used for
-optimization purposes only.
+compiler passes that introduce inferred fragments.
 
 NOTE: We assume that merging an inferred fragment to any other fragment
 never delays transfers.
-
-When `clone_inferred_fragments=true`, then this merging pass allows for
-certain fragments to be cloned. In particular, if we encounter a pair of
-fragments f1 and f2 such that:
-- f2 uses f1, and
-- f1 is inferred, pure, and sufficiently simple (single non-return op and
-  single result),
-then we merge a clone of f1 into f2, i.e., f1 itself (and other
-users) remain independent of f2. It may be undesirable to merge inferred
-producer fragments without cloning, because it can create unnecessary
-dependencies between fragments. E.g.,
-
-```mlir
-%inferred = frag m1 { return stablehlo.const … }
-%frag1 = frag m1 (%inferred, …)
-%frag2 = frag m1 (%inferred, …)
-
-~>
-
-%inferred_frag1 = frag m1 (…) { … return const_m1, … }
-%frag2 = frag m2 (inferred_frag1, …)
-```
-
-So frag2 now depends on inferred_frag1 and we create a dependency.
-
-However, sometimes we do want to merge in place, e.g., when the inferred
-fragment has collectives inside.
 
 NOTE: if the `mpmd.call` ops have been inlined, doing aggressive merging
 with `merge-any-consumer=true` may create dependencies between fragments of
@@ -181,9 +152,8 @@ different microbatches, preventing certain reschedulings.
 #### Options
 
 ```
--clone-inferred-fragments : Whether to clone inferred fragments. Chains of clonable fragments are merged one-by-one into their consumers and recursively.
--merge-any-consumer       : Whether to merge with any consumer or only the closest consumer.
--merge-sideways           : Whether to merge with the next fragment in the same mesh (neighbor), even if not a consumer.
+-merge-any-consumer : Whether to merge with any consumer or only the closest consumer.
+-merge-sideways     : Whether to merge with the next fragment in the same mesh (neighbor), even if not a consumer.
 ```
 
 ### `-mpmd-merge-transfers`
@@ -211,9 +181,7 @@ Merges pairs of user defined fragments to be used together with pipeline schedul
 passes.
 
 NOTE: this pass requires every user-defined fragment to have one and only
-one transpose count, meaning we cannot apply it after
-`-mpmd-transfer-aware-merge`, which can result in fragments with multiple
-transpose counts per fragment.
+one transpose count.
 
 ### `-mpmd-move-transfers-to-producer`
 

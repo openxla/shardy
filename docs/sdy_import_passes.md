@@ -5,11 +5,18 @@
 _Inserts `DataFlowEdgeOp` for every data-flow edge._
 
 Inserts `DataFlowEdgeOp` for every value that is the owner of a data-flow
-edge, i.e., all values returned by `getDataFlowEdgeOwners` on every op in
-the module.
+edge, i.e., all values returned by `getBlockArgumentEdgeOwners` and
+`getOpResultEdgeOwners` on every `ShardableDataFlowOpInterface` in the
+module.
 
 The inserted `DataFlowEdgeOp` will take the existing sharding of the owner
 target if it exists.
+
+### `-sdy-add-func-data-flow-edges`
+
+_Inserts `FuncDataFlowEdgeOp` for every func/call data-flow edge._
+
+Inserts `FuncDataFlowEdgeOp` for every func argument and call result.
 
 ### `-sdy-apply-sharding-constraints`
 
@@ -98,6 +105,37 @@ sharded (they have rank 0).
 NOTE: This pass covers the MLIR equivalent of `xla::HloConstantSplitter`,
 needed for the purpose of Shardy Propagation.
 
+### `-sdy-explicit-gather-scatter-batching`
+
+_Converts implicit batch dims in gather/scatter to explicit batching dims._
+
+Identifies implicit batch dimensions in stablehlo.gather and
+stablehlo.scatter operations and converts them to explicit
+operand/start_indices batching dimensions.
+
+### `-sdy-flatten-call-graph`
+
+_Flattens the call graph._
+
+Flattens the call graph.
+
+### `-sdy-import-func-calls`
+
+_Inline calls into `NamedComputationOp`._
+
+Creates a pass to convert a CallOp to a NamedComputationOp with the
+function body inlined and the name of the callee. Note that the func bodies
+are cloned if the func is used by multiple calls.
+
+In case there are multiple call ops for the same callee, we will clone the
+function body for each call op and emit a warning.
+
+#### Options
+
+```
+-add-data-flow-edges-on-named-computations : Whether to add data flow edges on named computations.
+```
+
 ### `-sdy-inline-meshes`
 
 _Inlines `MeshAttr`s into `TensorShardingAttr`s._
@@ -131,6 +169,23 @@ _Cleans up the use of manual axes in `ManualComputationOp`s_
 
 In addition, if a manual computation has no inputs or outputs and a
 non-empty body, this pass will fail.
+
+### `-sdy-pre-order-funcs`
+
+_Reorders functions in the module in pre-order of the call graph._
+
+Reorders functions in the module in pre-order of the call graph.
+This is useful when we inline func/calls, as propagation is top-down on blocks,
+and a pre-order iteration on funcs will emulate it.
+
+### `-sdy-propagate-sharding-from-func-to-call`
+
+_Set call result shardings as the func result shardings, if empty._
+
+Creates a pass to propagate func result sharding to call result sharding if
+call does not have them and func does. Notably, it keeps call result
+sharding if the call already has result shardings, even if all individual
+result shardings are empty.
 
 ### `-sdy-remove-size-one-axes`
 

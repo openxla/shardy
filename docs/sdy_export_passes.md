@@ -26,9 +26,33 @@ logical dimensions based on sharding attributes.
 This pass leverages a type converter to map RankedTensorType from global
 logical shapes to device-local physical shapes.
 
+#### Options
+
+```
+-per-dim-all-gather                     : Keep per-dimension all-gather without combining them into a single all-gather.
+-combine-multi-dimension-reduce-scatter : Combine multi-dimension reduce-scatter into a single reduce-scatter.
+-enable-rgv3                            : Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.
+```
+
+### `-sdy-drop-sharding-and-mesh`
+
+_Removes the mesh op and sharding notation from the program._
+
 ### `-sdy-drop-sharding-rules`
 
 _Drops `OpShardingRuleAttr` from all registered ops._
+
+### `-sdy-export-named-computations`
+
+_Outline calls from `NamedComputationOp`._
+
+Creates a pass that converts a `NamedComputationOp` to a `CallOp` with a new
+private function called the `NamedComputationOp`'s `name`. The new `FuncOp`
+and `CallOp` have the same shardings as the original `NamedComputationOp`s
+operands/results.
+
+If there is a function with the same name as the `NamedComputationOp` in the
+module, the MLIR symbol table will change it to `{name}_#`.
 
 ### `-sdy-insert-explicit-reshards`
 
@@ -82,9 +106,25 @@ operation has compatible shardings.
 #### Options
 
 ```
--enable-full-version                  : Enable full version.
--avoid-reshards-on-named-computations : Avoid explicit reshards/collectives on named computations.
+-enable-full-version : Enable full version.
 ```
+
+### `-sdy-insert-func-call-reshards`
+
+_Inserts reshards for func and call sharding conflicts._
+
+Inserts reshards for func and call sharding conflicts on results.
+
+### `-sdy-pad-for-divisibility`
+
+_Pads tensors with non-divisible shardings to divisible shapes._
+
+### `-sdy-propagate-to-func-results`
+
+_Propagate shardings from the func terminator to func results._
+
+Copies the shardings of func terminator values to the corresponding `func.func` results,
+except for the main func.
 
 ### `-sdy-remove-all-gather-reduce-scatter-for-cmv1`
 
@@ -108,7 +148,7 @@ _Removes sub-axes in input/output shardings._
 
 Some users of Shardy expect the function inputs/outputs to have shardings
 without sub-axes. This pass removes sub-axes and their trailing axes from
-input/output shardings. This pass is usually after
+input/output open dimension shardings. This pass is usually after
 `sdy-update-non-divisible-input-output-shardings` to ensure that the removal
 of sub-axes does not introduce any non-divisible shardings.
 
@@ -154,6 +194,25 @@ second dimension is not changed.
 -keep-redundant-reshards : Whether it keeps redundant reshards or removes.
 ```
 
+### `-sdy-resolve-permutation-factors`
+
+_Resolves sharding on dimensions mapped to kPermutation factors._
+
+Sharding dimensions with `kPermutation` factors may require cross-device
+communication (e.g., halo exchange for windows or collective permutes for
+reverses).
+
+If `enableHaloExchange` is true, the pass would use an available optimized
+communication logic to resolve the permutation factors. Otherwise, the pass
+would simply insert `sdy.reshard` ops to replicate those dimensions. The
+default of `enableHaloExchange` is true.
+
+#### Options
+
+```
+-enable-halo-exchange : Implement halo exchange logic for windowed operations.
+```
+
 ### `-sdy-sharding-constraint-to-reshard`
 
 _Converts ShardingConstraintOp into ReshardOp._
@@ -170,6 +229,27 @@ the edge), and replaces the op with its input.
 ```
 -sink-debug-sharding-origins          : Whether to sink the debug sharding origins info. See `debug-sharding-origins` option in propagation for more info.
 -sink-debug-propagation-edge-sharding : Whether to sink the debug propagation edge sharding info. See `debug-propagation-edge-sharding` option in propagation for more info.
+```
+
+### `-sdy-sink-func-data-flow-edges`
+
+_Sinks all `FuncDataFlowEdgeOp` into their input._
+
+Moves the sharding of each `FuncDataFlowEdgeOp` to its input and replaces
+the op with its input.
+
+### `-sdy-unflatten-call-graph`
+
+_Unflattens the call graph._
+
+Unflattens the graph. It deduplicates functions with the same
+input/output shardings *and* the same origin as desribed by the
+'original_func_name' attribute attached to the functions.
+
+#### Options
+
+```
+-dedup-functions-fully : If true, regardless of the input and output shardings of functions, it keeps one callee function for each caller function. The default is false, meaning it will deduplicate only if the input and output shardings are the same.
 ```
 
 ### `-sdy-update-non-divisible-input-output-shardings`

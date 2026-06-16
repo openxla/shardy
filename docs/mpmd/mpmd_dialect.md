@@ -45,7 +45,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | tensor of any non-token type values |
 
 #### Results:
 
@@ -79,13 +79,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | tensor of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | tensor of any non-token type values |
 
 
 
@@ -115,13 +115,13 @@ Interfaces: `ArgAndResultAttrsOpInterface`, `CallOpInterface`, `SymbolUserOpInte
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of tensor of any type values or mesh tensor type |
+| `tensors` | variadic of tensor of any non-token type values or mesh tensor type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| &laquo;unnamed&raquo; | variadic of tensor of any type values or mesh tensor type |
+| &laquo;unnamed&raquo; | variadic of tensor of any non-token type values or mesh tensor type |
 
 
 
@@ -161,13 +161,13 @@ Interfaces: `ConditionallySpeculatable`, `LoopLikeOpInterface`, `OpAsmOpInterfac
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of any type |
+| `tensors` | variadic of any non-token type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `results` | variadic of any type |
+| `results` | variadic of any non-token type |
 
 
 
@@ -214,13 +214,13 @@ Interfaces: `ConditionallySpeculatable`, `ShardableDataFlowOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `inputs` | variadic of mesh tensor type |
+| `inputs` | variadic of mesh tensor type or token |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `results` | variadic of mesh tensor type |
+| `results` | variadic of mesh tensor type or token |
 
 
 
@@ -350,13 +350,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | tensor of any type values |
+| `tensor` | tensor of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | tensor of any non-token type values |
 
 
 
@@ -390,13 +390,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of tensor of any type values |
+| `tensors` | variadic of tensor of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | tensor of any non-token type values |
 
 
 
@@ -423,7 +423,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `results` | variadic of any type |
+| `results` | variadic of any non-token type |
 
 
 
@@ -504,7 +504,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | tensor of any type values |
+| `result` | tensor of any non-token type values |
 
 
 

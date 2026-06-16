@@ -65,13 +65,13 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpIn
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -117,13 +117,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -179,13 +179,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -251,13 +251,13 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpIn
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -314,13 +314,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -361,7 +361,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Result | Description |
 | :----: | ----------- |
-| `output` | statically shaped tensor of any type values |
+| `output` | statically shaped tensor of any non-token type values |
 
 
 
@@ -443,13 +443,48 @@ Interfaces: `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | shaped of any type values |
+| `input` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
+
+
+
+### `sdy.func_data_flow_edge` (sdy::FuncDataFlowEdgeOp)
+
+_Func input/output data flow edge op._
+
+Syntax:
+
+```
+operation ::= `sdy.func_data_flow_edge` $operand attr-dict `:` type($result)
+```
+
+A data flow edge op but for func arguments or call results.
+    When its operand is a BlockArgument; it is a bridge from the caller callOp's
+    argument to the users of the func argument. There is one func data flow edge
+    for each func argument. When its operand is an OpResult; it is a bridge
+    from the called funcOp's return value to the users of the call result. There
+    is one func data flow edge for each call result.
+
+Traits: `SameOperandsAndResultType`
+
+Interfaces: `InferTypeOpInterface`, `SymbolUserOpInterface`
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `operand` | shaped of any non-token type values |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -505,13 +540,13 @@ Interfaces: `ShardableDataFlowOpInterface`, `SymbolUserOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of any type |
+| `tensors` | variadic of any non-token type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `results` | variadic of any type |
+| `results` | variadic of any non-token type |
 
 
 
@@ -595,13 +630,13 @@ Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `ShardableDataF
 
 | Operand | Description |
 | :-----: | ----------- |
-| `operands` | variadic of any type |
+| `operands` | variadic of any non-token type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| &laquo;unnamed&raquo; | variadic of any type |
+| &laquo;unnamed&raquo; | variadic of any non-token type |
 
 
 
@@ -644,13 +679,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | ranked tensor of any type values |
+| `input` | ranked tensor of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | ranked tensor of any type values |
+| `result` | ranked tensor of any non-token type values |
 
 
 
@@ -692,13 +727,13 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -749,13 +784,13 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpIn
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -798,13 +833,13 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | shaped of any type values |
+| `input` | any non-token type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | any non-token type |
 
 
 
@@ -832,7 +867,7 @@ Effects: `MemoryEffects::Effect{}`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `results` | variadic of any type |
+| `results` | variadic of any non-token type |
 
 
 
@@ -879,13 +914,13 @@ Interfaces: `InferTypeOpInterface`, `Sdy_CollectiveOpInterface`, `SymbolUserOpIn
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensor` | shaped of any type values |
+| `tensor` | shaped of any non-token type values |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | shaped of any non-token type values |
 
 
 
@@ -929,13 +964,13 @@ Interfaces: `InferTypeOpInterface`, `SymbolUserOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | shaped of any type values |
+| `input` | any non-token type |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | shaped of any type values |
+| `result` | any non-token type |
 
 
 
@@ -970,7 +1005,7 @@ Interfaces: `InferTypeOpInterface`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `input` | ranked tensor of any type values |
+| `input` | ranked tensor of any non-token type values |
 
 
 

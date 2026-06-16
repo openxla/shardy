@@ -39,7 +39,7 @@ ith function with name "some_name" for i > 0 will have the name
 #### Options
 
 ```
--verbose-logging     : Whether to enable verbose logging
+-verbose-logging : Whether to enable verbose logging
 ```
 
 ### `-mpmd-mark-aliasing-and-donation`
@@ -59,12 +59,12 @@ be aliased or donated.
 
 _Mark each fragment with the amount of memory that needs to be reserved for compilation._
 
-Assigns an `xla_tpu_user_reserved_hbm_bytes` attribute to each fragment
-which will tell XLA how many bytes to keep around while compiling each
-fragment. By keeping track of live tensors on a mesh, XLA will know of
-actual minimum memory usage at the time of execution, and we can prevent
-it from applying optimizations in the executable that would increase
-memory usage beyond the device capacity.
+Assigns an `reserved_hbm_bytes` attribute to each fragment which will tell
+XLA how many bytes to keep around while compiling each fragment. By keeping
+track of live tensors on a mesh, XLA will know of actual minimum memory
+usage at the time of execution, and we can prevent it from applying
+optimizations in the executable that would increase memory usage beyond the
+device capacity.
 NOTE: this pass assumes that fragments are executed in program order.
 
 ### `-mpmd-mark-input-output-with-layouts`
@@ -95,6 +95,71 @@ Marks fragment args and results with attributes to identify which values
 live in host memory, so that this information can be used by XLA. Also marks
 the entrypoint func args and results so that Pathways can use this
 information.
+
+### `-mpmd-sink-create-token-into-fragments`
+
+_Sinks stablehlo.create_token ops into fragment bodies._
+
+The MPMD dialect doesn't support cross-fragment token passing yet. So
+instead, this pass duplicates the tokens and sinks them into each fragment,
+severing the token-mediated sequencing between fragments.
+
+After this pass, no token ever crosses a fragment boundary.
+
+### `-mpmd-validate-no-backward-deps`
+
+_Validates no backward dependencies exist in forward-only programs._
+
+Checks that every data dependency between fragment calls goes from a
+lexicographically earlier mesh name to a later one. A backward dependency
+creates pipeline bubbles.
+
+By default, this pass emits a warning for each such dependency. If
+`fail-on-backward-deps` is set, it emits an error and fails.
+
+This pass only applies to forward-only programs, i.e., programs where all
+fragments have a transpose count of 0. Programs with backward fragments
+(transpose count != 0) are skipped.
+
+#### Options
+
+```
+-fail-on-backward-deps : Whether to emit an error (and fail) instead of a warning.
+```
+
+### `-mpmd-validate-no-inferred-fragments`
+
+_Validates that no inferred fragments exist._
+
+Checks that all inferred fragments have been merged.
+
+By default, this pass emits an error if any inferred fragment remains. If
+`fail-on-inferred-fragments` is set to false, it emits a warning instead.
+
+#### Options
+
+```
+-fail-on-inferred-fragments : Whether to emit an error (and fail) instead of a warning.
+```
+
+### `-mpmd-validate-no-param-transfers`
+
+_Validates that no parameter tensors are transferred across meshes._
+
+Checks that TransferOps do not transfer tensors whose JAX location info
+matches a configurable pattern (default: "params['transformer"). Such
+transfers typically indicate that model parameters are being erroneously
+moved across meshes.
+
+By default, this pass emits a warning. Set
+`fail-on-param-transfers=true` to emit an error and fail instead.
+
+#### Options
+
+```
+-fail-on-param-transfers : Whether to emit an error (and fail) instead of a warning (default: false).
+-param-pattern           : Pattern to match against the location info of transferred tensors.
+```
 
 ### `-mpmd-validate-no-reshards`
 
