@@ -150,14 +150,6 @@ struct FragmentInfoMapInfo : public DenseMapInfo<FragmentInfo> {
   static bool isEqual(const FragmentInfo& lhs, const FragmentInfo& rhs) {
     return lhs == rhs;
   }
-
-  static inline FragmentInfo getEmptyKey() {
-    return FragmentInfo{/*origins=*/{},
-                        /*stage_id=*/DenseMapInfo<int>::getEmptyKey(),
-                        /*call_counter=*/DenseMapInfo<int>::getEmptyKey(),
-                        /*split_type=*/std::nullopt,
-                        /*mesh_name=*/""};
-  }
 };
 
 // Describes a rule to merge fragments. A rule is defined by a list of sources

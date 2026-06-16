@@ -468,13 +468,6 @@ TEST(FragmentInfoMapInfoTest, GetHashValue) {
             FragmentInfoMapInfo::getHashValue(info3));
 }
 
-TEST(FragmentInfoMapInfoTest, SpecialKeys) {
-  FragmentInfo emptyKey = FragmentInfoMapInfo::getEmptyKey();
-  FragmentInfo info1 = MakeFragmentInfo({MakeFragmentOrigin("f1", 123)}, "m1");
-
-  EXPECT_FALSE(FragmentInfoMapInfo::isEqual(emptyKey, info1));
-}
-
 TEST(FragmentInfoMapInfoTest, DenseMapIntegration) {
   llvm::DenseMap<FragmentInfo, int, FragmentInfoMapInfo> map;
 

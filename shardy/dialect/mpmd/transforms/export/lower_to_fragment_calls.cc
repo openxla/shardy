@@ -121,9 +121,6 @@ struct FragmentBodyEquivalenceBaseInfo : public DenseMapInfo<FragmentOp> {
     if (lhs == rhs) {
       return true;
     }
-    if (lhs == getEmptyKey() || rhs == getEmptyKey()) {
-      return false;
-    }
 
     // Compare the mesh names to avoid deduping fragments executed on
     // different meshes (which may be unsafe in heterogeneous settings).
