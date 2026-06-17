@@ -1179,7 +1179,7 @@ Syntax:
 
 ```
 #sdy.edge_value_ref<
-  ::mlir::sdy::EdgeNodeType,   # type
+  `operand` | `result`,   # type
   int64_t   # index
 >
 ```

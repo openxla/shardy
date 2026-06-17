@@ -599,7 +599,7 @@ Syntax:
 
 ```
 #mpmd.reduction<
-  ::mlir::mpmd::ReductionType   # reduction_type
+  `none` | `add` | `max` | `min` | `mul` | `or` | `and`   # reduction_type
 >
 ```
 
