@@ -43,6 +43,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
 namespace mlir {
@@ -53,13 +54,7 @@ namespace sdy {
 
 namespace {
 
-using OptionalAxisRef = std::optional<AxisRefAttr>;
-
 using AxesPerDim = SmallVector<SmallVector<AxisRefAttr>>;
-
-// We use an std::list so we can pop from the front, back, and with a specific
-// iterator at constant time.
-using AxisList = std::list<AxisRefAttr>;
 
 using AxisSet = llvm::SmallDenseSet<AxisRefAttr>;
 
@@ -71,27 +66,6 @@ struct DimAndIndex {
 };
 
 using AxisToDimAndIndex = llvm::SmallDenseMap<AxisRefAttr, DimAndIndex>;
-
-// Returns a vector of `InnerAxisList` per dimension from the given `sharding`.
-template <class InnerAxisList>
-SmallVector<InnerAxisList> getAxesPerDim(TensorShardingAttr sharding) {
-  SmallVector<InnerAxisList> axesPerDim;
-  axesPerDim.reserve(sharding.getRank());
-  for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
-    axesPerDim.emplace_back(dimSharding.axis_begin(), dimSharding.axis_end());
-  }
-  return axesPerDim;
-}
-
-// Returns a sorted vector containing all axes in `axesPerDim`.
-SmallVector<AxisRefAttr> getOrderedAxes(ArrayRef<AxisList> axesPerDim) {
-  SmallVector<AxisRefAttr> result;
-  for (const AxisList& axes : axesPerDim) {
-    result.append(axes.begin(), axes.end());
-  }
-  llvm::sort(result);
-  return result;
-}
 
 // Returns a set containing all axes in `axesPerDim`.
 AxisSet getAxisSet(ArrayRef<AxisList> axesPerDim) {
@@ -134,79 +108,6 @@ void removeCommonPrefix(SmallVector<AxisList>& inAxesPerDim,
   }
 }
 
-// In case an axis A in `axes` overlaps but isn't equal to an axis B in
-// `orderedOtherAxes`, decomposes A into 1-3 sub-axes (overlap and
-// non-overlapping prefix and suffix), and replaces A with the decomposed
-// sub-axes that form it.
-void alignSubAxesByDecomposition(AxisList& axes,
-                                 ArrayRef<AxisRefAttr> orderedOtherAxes,
-                                 MeshAttr mesh) {
-  auto axisIt = axes.begin();
-  while (axisIt != axes.end()) {
-    AxisRefAttr axis = *axisIt;
-    auto* overlapIt = axis.getFirstOverlapping(orderedOtherAxes);
-    // There are two paths to complete the while loop below:
-    // 1. the while condition is not met from the start, in which case we need
-    //    to advance `axisIt`.
-    // 2. we enter the while until the condition isn't met, in which case we
-    //    only need to advance `axisIt` if it points to a created suffix.
-    bool axisAdvancedInWhile = false;
-    while (overlapIt != orderedOtherAxes.end() && overlapIt->canCoexist(axis) &&
-           !overlapIt->contains(axis) && overlapIt->overlaps(axis)) {
-      axisIt = axes.erase(axisIt);
-      if (OptionalAxisRef prefix = axis.getPrefixWithoutOverlap(*overlapIt)) {
-        axes.insert(axisIt, *prefix);
-      }
-      axes.insert(axisIt, *axis.getOverlap(*overlapIt));
-      if (OptionalAxisRef suffix =
-              axis.getSuffixWithoutOverlap(*overlapIt, mesh)) {
-        // If there is a suffix, that should be the next axis to process.
-        axisIt = axes.insert(axisIt, *suffix);
-        axis = *suffix;
-        ++overlapIt;
-        axisAdvancedInWhile = false;
-      } else {
-        // Otherwise, we're done with the current axis.
-        axisAdvancedInWhile = true;
-        break;
-      }
-    }
-    if (!axisAdvancedInWhile) {
-      ++axisIt;
-    }
-  }
-}
-
-// For every dimension d, calls
-// `alignSubAxesByDecomposition(axesPerDim[d], orderedOtherAxes, mesh)`.
-void alignSubAxesByDecomposition(SmallVector<AxisList>& axesPerDim,
-                                 ArrayRef<AxisRefAttr> orderedOtherAxes,
-                                 MeshAttr mesh) {
-  if (orderedOtherAxes.empty()) {
-    return;
-  }
-  for (AxisList& axes : axesPerDim) {
-    alignSubAxesByDecomposition(axes, orderedOtherAxes, mesh);
-  }
-}
-
-// In case two `AxisRefAttr` in `inAxesPerDim` and `outAxesPerDim` respectively
-// overlap but aren't equal, decomposes them into up to three sub-axes (overlap
-// and non-overlapping prefix and suffix), and replaces each original axis with
-// the decomposed sub-axes that form it (see overload above).
-//
-// For example, "a":(1)8 and "a":(4)4 are decomposed into "a":(1)4, "a":(4)2,
-// and "a":(8)2. Then "a":(1)8 is replaced with ["a":(1)4, "a":(4)2] and
-// "a":(4)4 is replaced with ["a":(4)2, "a":(8)2].
-void alignSubAxesByDecomposition(SmallVector<AxisList>& inAxesPerDim,
-                                 SmallVector<AxisList>& outAxesPerDim,
-                                 MeshAttr mesh) {
-  SmallVector<AxisRefAttr> orderedInAxes = getOrderedAxes(inAxesPerDim);
-  SmallVector<AxisRefAttr> orderedOutAxes = getOrderedAxes(outAxesPerDim);
-  alignSubAxesByDecomposition(inAxesPerDim, orderedOutAxes, mesh);
-  alignSubAxesByDecomposition(outAxesPerDim, orderedInAxes, mesh);
-}
-
 // Removes the axes in `axesToPop` from the back of `currentAxes`.
 //
 // Note that `axesToPop` can have decomposed sub-axes of an axis in
@@ -245,8 +146,8 @@ bool areSizesDivisible(AxisRefAttr a, AxisRefAttr b, MeshAttr mesh) {
 // it into two sub-axes, one that fits (`withinAxis`) and another that doesn't
 // (`remainderAxis`).
 struct AxisWithinCapacity {
-  std::optional<AxisRefAttr> withinAxis;
-  std::optional<AxisRefAttr> remainderAxis;
+  OptionalAxisRef withinAxis;
+  OptionalAxisRef remainderAxis;
 };
 
 // Returns an `AxisWithinCapacity` for the given `axis` w.r.t. to the given
@@ -810,8 +711,8 @@ class CollectiveInserter {
         }
         // Out axis is available to slice.
 
-        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
-            outAxis, dimCapacity, mesh);
+        auto [withinAxis, remainderAxis] =
+            getAxisWithinCapacity(outAxis, dimCapacity, mesh);
         if (!withinAxis) {
           // We still want to add available axes in this dimension to
           // `availableOutAxes` so they can be added in the 2nd stage to another
@@ -851,7 +752,8 @@ class CollectiveInserter {
     // to capacity constraint.
     outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
 
-    return hasSlicingAxes? std::make_optional(slicingAxesPerDim) : std::nullopt;
+    return hasSlicingAxes ? std::make_optional(slicingAxesPerDim)
+                          : std::nullopt;
   }
 
   // Tries to insert an `sdy.all_slice`.
@@ -899,8 +801,8 @@ class CollectiveInserter {
   //    that B is before A, and A can be moved to d2 via an all-to-all before B
   //    is all-gathered.
   bool shouldCollectivePermute() {
-    std::optional<AxisRefAttr> availableInAxis;
-    std::optional<AxisRefAttr> availableOutAxis;
+    OptionalAxisRef availableInAxis;
+    OptionalAxisRef availableOutAxis;
     for (auto [dim, inOutAxes] :
          llvm::enumerate(llvm::zip_equal(inAxesPerDim, outAxesPerDim))) {
       auto [inAxes, outAxes] = inOutAxes;

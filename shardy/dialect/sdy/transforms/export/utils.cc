@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/Support/LLVM.h"
@@ -26,6 +27,79 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
+
+namespace {
+
+// Returns a sorted vector containing all axes in `axesPerDim`.
+SmallVector<AxisRefAttr> getOrderedAxes(ArrayRef<AxisList> axesPerDim) {
+  SmallVector<AxisRefAttr> result;
+  for (const AxisList& axes : axesPerDim) {
+    result.append(axes.begin(), axes.end());
+  }
+  llvm::sort(result);
+  return result;
+}
+
+}  // namespace
+
+void alignSubAxesByDecomposition(AxisList& axes,
+                                 ArrayRef<AxisRefAttr> orderedOtherAxes,
+                                 MeshAttr mesh) {
+  auto axisIt = axes.begin();
+  while (axisIt != axes.end()) {
+    AxisRefAttr axis = *axisIt;
+    auto* overlapIt = axis.getFirstOverlapping(orderedOtherAxes);
+    // There are two paths to complete the while loop below:
+    // 1. the while condition is not met from the start, in which case we need
+    //    to advance `axisIt`.
+    // 2. we enter the while until the condition isn't met, in which case we
+    //    only need to advance `axisIt` if it points to a created suffix.
+    bool axisAdvancedInWhile = false;
+    while (overlapIt != orderedOtherAxes.end() && overlapIt->canCoexist(axis) &&
+           !overlapIt->contains(axis) && overlapIt->overlaps(axis)) {
+      axisIt = axes.erase(axisIt);
+      if (OptionalAxisRef prefix = axis.getPrefixWithoutOverlap(*overlapIt)) {
+        axes.insert(axisIt, *prefix);
+      }
+      axes.insert(axisIt, *axis.getOverlap(*overlapIt));
+      if (OptionalAxisRef suffix =
+              axis.getSuffixWithoutOverlap(*overlapIt, mesh)) {
+        // If there is a suffix, that should be the next axis to process.
+        axisIt = axes.insert(axisIt, *suffix);
+        axis = *suffix;
+        ++overlapIt;
+        axisAdvancedInWhile = false;
+      } else {
+        // Otherwise, we're done with the current axis.
+        axisAdvancedInWhile = true;
+        break;
+      }
+    }
+    if (!axisAdvancedInWhile) {
+      ++axisIt;
+    }
+  }
+}
+
+void alignSubAxesByDecomposition(SmallVector<AxisList>& axesPerDim,
+                                 ArrayRef<AxisRefAttr> orderedOtherAxes,
+                                 MeshAttr mesh) {
+  if (orderedOtherAxes.empty()) {
+    return;
+  }
+  for (AxisList& axes : axesPerDim) {
+    alignSubAxesByDecomposition(axes, orderedOtherAxes, mesh);
+  }
+}
+
+void alignSubAxesByDecomposition(SmallVector<AxisList>& inAxesPerDim,
+                                 SmallVector<AxisList>& outAxesPerDim,
+                                 MeshAttr mesh) {
+  SmallVector<AxisRefAttr> orderedInAxes = getOrderedAxes(inAxesPerDim);
+  SmallVector<AxisRefAttr> orderedOutAxes = getOrderedAxes(outAxesPerDim);
+  alignSubAxesByDecomposition(inAxesPerDim, orderedOutAxes, mesh);
+  alignSubAxesByDecomposition(outAxesPerDim, orderedInAxes, mesh);
+}
 
 bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
                                  TensorShardingAttr sharding, MeshAttr mesh) {
