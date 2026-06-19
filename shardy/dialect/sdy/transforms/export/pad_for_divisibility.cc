@@ -500,6 +500,10 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
   PaddingCache& cache;
 };
 
+// Pattern for sdy.all_slice. Slices the input along sharded dimensions. If a
+// sharded dimension is not divisible by its shard count, the input is padded.
+// The padding kind (e.g. kZero) is propagated to the output and registered in
+// the PaddingCache, allowing downstream operations to reuse the padding.
 class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
  public:
   AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -522,21 +526,28 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     TensorShardingAttr outSharding = op.getOutSharding();
     Type paddedInputType =
         getPaddedType(rankedInputType, outSharding, symbolTable);
-    if (paddedInputType == rankedInputType) {
-      return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
+
+    std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+    Value newInput = input;
+
+    if (paddedInputType != rankedInputType) {
+      paddingKind = PaddingValueKind::kZero;
+      newInput =
+          createPaddedValue(cast<RankedTensorType>(paddedInputType), input,
+                            *paddingKind, symbolTable, rewriter, cache);
     }
 
-    PaddingValueKind paddingKind = PaddingValueKind::kZero;
-    Value padOp =
-        createPaddedValue(cast<RankedTensorType>(paddedInputType), input,
-                          paddingKind, symbolTable, rewriter, cache);
     OperationState state(op->getLoc(), op->getName());
-    state.addOperands({padOp});
-    state.addTypes(
-        {getPaddedType(op.getResult().getType(), outSharding, symbolTable)});
+    state.addOperands({newInput});
+    // sdy.all_slice has the SameOperandsAndResultType trait, so the output
+    // will always have the same padded shape as the input.
+    state.addTypes({paddedInputType});
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
-    cache.setPadding(newOp->getResult(0), paddingKind);
+
+    if (paddingKind) {
+      cache.setPadding(newOp->getResult(0), *paddingKind);
+    }
 
     rewriter.replaceOp(op, newOp->getResults());
     return success();
