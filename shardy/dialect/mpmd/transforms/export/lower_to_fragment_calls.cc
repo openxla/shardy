@@ -404,6 +404,40 @@ class LowerToFragmentCallsPass
 
         sdy::inlineRegionAndConvertTerminatorOp<func::ReturnOp>(
             fragment.getRegion(), func_op.getBody());
+
+        // After inlining the fragment body, rewrite references to the global
+        // mesh inside sdy_manual_computation ops to use the fragment mesh.
+        sdy::MeshAttr fragmentMesh = *mpmd::GetMeshAttr(fragment);
+        StringRef fragmentMeshName = fragment.getMeshName();
+
+        // Create an sdy.MeshOp for the fragment mesh lazily.
+        auto ensureMeshOpExists = [&]() {
+          if (!module_op.lookupSymbol<sdy::MeshOp>(fragmentMeshName)) {
+            OpBuilder meshBuilder(&ctx);
+            meshBuilder.setInsertionPointToStart(module_op.getBody());
+            sdy::MeshOp::create(meshBuilder, module_op.getLoc(),
+                                fragmentMeshName, fragmentMesh);
+          }
+        };
+
+        func_op.walk([&](sdy::ManualComputationOp manualOp) {
+          auto replaceMeshSymbols = [&](sdy::TensorShardingPerValueAttr
+                                            shardings) {
+            for (sdy::TensorShardingAttr sharding : shardings.getShardings()) {
+              StringRef oldMeshName = sharding.getMeshName();
+              if (oldMeshName != fragmentMeshName) {
+                ensureMeshOpExists();
+                SDY_CHECK(succeeded(SymbolTable::replaceAllSymbolUses(
+                    StringAttr::get(&ctx, oldMeshName),
+                    StringAttr::get(&ctx, fragmentMeshName), func_op)))
+                    << "failed to rename mesh symbol in manual_computation";
+              }
+            }
+          };
+          replaceMeshSymbols(manualOp.getInShardings());
+          replaceMeshSymbols(manualOp.getOutShardings());
+        });
+
         symbol_table.insert(func_op);
       }
       rewriter.setInsertionPoint(fragment);
