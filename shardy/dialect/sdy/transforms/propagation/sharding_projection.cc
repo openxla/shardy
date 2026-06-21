@@ -492,6 +492,9 @@ UpdateTensorShardings ShardingProjection::tensorsContainOverflowAxes() const {
 void distributeAxesAcrossFactors(MutableArrayRef<FactorSharding> shardings,
                                  ArrayRef<int64_t> factorSizes,
                                  ArrayRef<AxisRefAttr> allAxes, MeshAttr mesh) {
+  if (shardings.empty()) {
+    return;
+  }
   MLIRContext* ctx = mesh.getContext();
   // Track the remaining sharding capacity for each factor.
   SmallVector<int64_t> remainingFactorSizes = llvm::to_vector(factorSizes);

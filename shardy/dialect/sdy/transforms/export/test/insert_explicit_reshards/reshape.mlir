@@ -448,3 +448,18 @@ func.func @reshape_no_overflow_axes(
   %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<16xf32>) -> tensor<4x4xf32>
   return %0 : tensor<4x4xf32>
 }
+
+// CHECK-LABEL: func @reshape_to_scalar_with_overflow
+func.func @reshape_to_scalar_with_overflow(
+    %arg0: tensor<1x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>})
+    -> (tensor<f32> {sdy.sharding = #sdy.sharding<@mesh, []>}) {
+  // CHECK:      %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}, {"x":(2)2}]> : tensor<1x1x1xf32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k, l])->([]) {i=3, j=2, k=1, l=1}>} : (tensor<1x1x1xf32>) -> tensor<f32>
+  // CHECK-NEXT: return %[[RESHAPE]] : tensor<f32>
+  %0 = stablehlo.reshape %arg0 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k, l])->([]) {i=3, j=2, k=1, l=1}>
+  } : (tensor<1x1x1xf32>) -> tensor<f32>
+  return %0 : tensor<f32>
+}
+
