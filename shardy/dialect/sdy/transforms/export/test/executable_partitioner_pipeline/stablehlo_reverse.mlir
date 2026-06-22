@@ -1,7 +1,5 @@
-// TODO(b/489770982): Currently this test fails due to missing functionality in pad-for-divisibility.
-// RdisabledUN: %S/run_sdy_interpreter_test.sh %s %t "true"
-// RdisabledUN: %S/run_sdy_interpreter_test.sh %s %t "false"
-// RUN: cat %s
+// RUN: %S/run_sdy_interpreter_test.sh %s %t "true"
+// RUN: %S/run_sdy_interpreter_test.sh %s %t "false"
 
 //--- part1.mlir
 
@@ -31,7 +29,7 @@ func.func @sequential_reverse(%arg0: tensor<4x6x8xi32>) -> tensor<4x6x5xi32> {
 //--- part2.mlir
 
 func.func @main() {
-  %input_seq = stablehlo.iota dims = [0] : tensor<192xi32>
+  %input_seq = stablehlo.iota dim = 0 : tensor<192xi32>
   %input = stablehlo.reshape %input_seq : (tensor<192xi32>) -> tensor<4x6x8xi32>
 
   %seq = func.call @sequential_reverse(%input) : (tensor<4x6x8xi32>) -> tensor<4x6x5xi32>
@@ -65,7 +63,14 @@ func.func @main() {
       @parallel_reverse, @parallel_reverse, @parallel_reverse, @parallel_reverse,
       @parallel_reverse, @parallel_reverse, @parallel_reverse, @parallel_reverse
     ]]
-  } : (tensor<2x3x2xi32>) -> (tensor<4x6x5xi32>)
+  } : (tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>,
+       tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>,
+       tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>,
+       tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>) ->
+      (tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>,
+       tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>,
+       tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>,
+       tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>, tensor<4x6x5xi32>)
 
   check.expect_eq %seq, %pars#0 : tensor<4x6x5xi32>
 
