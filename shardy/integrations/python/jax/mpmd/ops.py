@@ -544,7 +544,7 @@ def _call_get_cached_jaxpr(fn, in_avals, in_tree):
 def _call_abstract_eval(*args, call_jaxpr, **kwargs):
   """Abstract evaluation rule for the call op."""
   del args, kwargs
-  return call_jaxpr.out_avals, call_jaxpr.effects
+  return call_jaxpr.out_avals, jax_core.positional_effects(call_jaxpr)
 
 
 def _call_impl(*args, call_jaxpr, **kwargs):
