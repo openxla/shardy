@@ -59,6 +59,7 @@ cc_library(
         "//shardy/dialect/mpmd/transforms/common:utils",
         "//shardy/dialect/mpmd/transforms/import:passes",
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:FuncDialect",

@@ -46,7 +46,9 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "mlir/Support/WalkResult.h"
+#include "llvm/Support/Casting.h"
 
 namespace mlir::mpmd {
 
@@ -404,6 +406,42 @@ class LowerToFragmentCallsPass
 
         sdy::inlineRegionAndConvertTerminatorOp<func::ReturnOp>(
             fragment.getRegion(), func_op.getBody());
+
+        // After inlining the fragment body, rewrite references to the global
+        // mesh inside sdy_manual_computation ops to use the fragment mesh.
+        sdy::MeshAttr fragmentMesh = *mpmd::GetMeshAttr(fragment);
+        StringRef fragmentMeshName = fragment.getMeshName();
+
+        // Create an sdy.MeshOp for the fragment mesh lazily.
+        auto ensureMeshOpExists = [&]() {
+          if (!module_op.lookupSymbol<sdy::MeshOp>(fragmentMeshName)) {
+            OpBuilder meshBuilder(&ctx);
+            meshBuilder.setInsertionPointToStart(module_op.getBody());
+            sdy::MeshOp::create(meshBuilder, module_op.getLoc(),
+                                fragmentMeshName, fragmentMesh);
+          }
+        };
+
+        func_op.walk([&](sdy::ManualComputationOp manualOp) {
+          sdy::transformShardings(
+              manualOp,
+              [&](sdy::TensorShardingAttr sharding) -> sdy::TensorShardingAttr {
+                if (auto symbolRef = llvm::dyn_cast<FlatSymbolRefAttr>(
+                        sharding.getMeshOrRef())) {
+                  if (symbolRef.getValue() != fragmentMeshName) {
+                    ensureMeshOpExists();
+                    return sdy::TensorShardingAttr::get(
+                        sharding.getContext(),
+                        FlatSymbolRefAttr::get(&ctx, fragmentMeshName),
+                        sharding.getDimShardings(),
+                        sharding.getReplicatedAxes(),
+                        sharding.getUnreducedAxes());
+                  }
+                }
+                return sharding;
+              });
+        });
+
         symbol_table.insert(func_op);
       }
       rewriter.setInsertionPoint(fragment);
