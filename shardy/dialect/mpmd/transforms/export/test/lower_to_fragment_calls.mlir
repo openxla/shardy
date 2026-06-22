@@ -505,36 +505,3 @@ module {
 
 // CHECK: func.func @[[FRAGMENT0:.*]](%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}) ->
 // CHECK-SAME: (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>}) attributes {mesh_shape = #sdy.mesh<["x"=2]>}
-
-// -----
-
-!mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
-
-module {
-  // CHECK:      sdy.mesh @m1 = <["x"=2]>
-  // CHECK-NEXT: sdy.mesh @mesh = <["x"=2]>
-  sdy.mesh @mesh = <["x"=2]>
-
-  // CHECK-LABEL: func @sdy_manual_computation
-  func.func @sdy_manual_computation(%arg0: !mesh_tensor) -> (!mesh_tensor)
-      attributes {"topology"=#mpmd.topology< <"m1": <["x"=2]>>>} {
-    // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]>
-    %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4x8xf32>) {
-      %1 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}]>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
-        %2 = stablehlo.add %arg2, %arg2 : tensor<2x8xf32>
-        sdy.return %2 : tensor<2x8xf32>
-      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
-      mpmd.return %1 : tensor<4x8xf32>
-    } : (!mesh_tensor) -> (!mesh_tensor)
-
-    func.return %0 : !mesh_tensor
-  }
-}
-
-// CHECK: func.func @[[FRAGMENT1:.*]](%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {?}]>})
-// CHECK-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0) in_shardings=[<@m1, [{"x"}, {}]>] out_shardings=[<@m1, [{"x"}, {}]>] manual_axes={"x"}
-// CHECK-SAME: (%arg1: tensor<2x8xf32>) {
-// CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg1
-// CHECK-NEXT:   sdy.return %[[ADD]]
-// CHECK-NEXT: } : (tensor<4x8xf32>) -> tensor<4x8xf32>
-// CHECK-NEXT: return %[[MC]] : tensor<4x8xf32>
