@@ -990,16 +990,38 @@ RankedTensorType TensorShardingAttr::getGlobalTensorType(
                                localTensorType.getElementType());
 }
 
-bool TensorShardingAttr::isEquivalent(TensorShardingAttr otherSharding) const {
-  if (isFullyReplicated()) {
-    return !otherSharding || otherSharding.isFullyReplicated();
+bool TensorShardingAttr::isEquivalent(TensorShardingAttr otherSharding,
+                                      bool ignoreUnreducedAxes) const {
+  // Helper to check replication, optionally ignoring unreduced axes.
+  auto isReplicated = [](TensorShardingAttr s, bool ignoreUnreduced) {
+    if (!s) {
+      return true;
+    }
+    if (!ignoreUnreduced && !s.getUnreducedAxes().empty()) {
+      return false;
+    }
+    return llvm::all_of(
+        s.getDimShardings(),
+        [](const DimensionShardingAttr& dim) { return dim.emptyAxes(); });
+  };
+
+  // Fast path: if both are fully replicated (under our unreduced-axes policy),
+  // they are equivalent.
+  if (isReplicated(*this, ignoreUnreducedAxes)) {
+    return isReplicated(otherSharding, ignoreUnreducedAxes);
   }
+
   if (!otherSharding) {
     return false;
   }
   if (getMeshOrRef() != otherSharding.getMeshOrRef()) {
     return false;
   }
+  if (!ignoreUnreducedAxes &&
+      getUnreducedAxes() != otherSharding.getUnreducedAxes()) {
+    return false;
+  }
+
   ArrayRef<DimensionShardingAttr> left = getDimShardings();
   ArrayRef<DimensionShardingAttr> right = otherSharding.getDimShardings();
   return left.size() == right.size() &&

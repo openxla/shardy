@@ -1688,8 +1688,10 @@ LogicalResult AllReduceOp::verifySymbolUses(
       getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
   MeshAttr mesh = resultSharding.getMesh(symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>()));
-  // 1. Verify that the operand and result have equivalent shardings.
-  if (!operandSharding.isEquivalent(resultSharding)) {
+  // 1. Verify that the operand and result have equivalent shardings, ignoring
+  // unreduced axes.
+  if (!operandSharding.isEquivalent(resultSharding,
+                                    /*ignoreUnreducedAxes=*/true)) {
     return emitOpError("operand and result shardings are not equivalent");
   }
 

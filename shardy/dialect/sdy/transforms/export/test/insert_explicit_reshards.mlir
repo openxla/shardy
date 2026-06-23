@@ -647,3 +647,19 @@ func.func @reshard_and_replicated_to_unreduced(
   return %0 : tensor<16x8xf32>
 }
 
+
+// CHECK-LABEL: func @insert_reshard_unreduced_to_partial_replicated
+func.func @insert_reshard_unreduced_to_partial_replicated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @insert_reshard_unreduced_to_fully_replicated
+func.func @insert_reshard_unreduced_to_fully_replicated(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], replicated={"x", "y"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  return %arg0 : tensor<8x8xf32>
+}

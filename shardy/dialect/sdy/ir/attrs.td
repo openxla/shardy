@@ -897,7 +897,7 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
 
     // Returns true if all dimensions are sharded in the same way and with
     // equal meshes.
-    bool isEquivalent(TensorShardingAttr otherSharding) const;
+    bool isEquivalent(TensorShardingAttr otherSharding, bool ignoreUnreducedAxes = false) const;
     }];
 }
 // LINT.ThenChange(https://github.com/openxla/xla/blob/main/xla/hlo/ir/named_sharding.h)
