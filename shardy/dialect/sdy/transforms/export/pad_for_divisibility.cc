@@ -329,6 +329,82 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
   return success();
 }
 
+// Slices/trims `res` back to its original sizes on `trimDims`.
+Value trimOutputForDims(Value res, Type origType, ArrayRef<int64_t> trimDims,
+                        TensorShardingAttr outSharding,
+                        ConversionPatternRewriter& rewriter,
+                        std::optional<PaddingValueKind> paddingKind,
+                        PaddingCache& cache) {
+  auto origRanked = dyn_cast<RankedTensorType>(origType);
+  auto newRanked = dyn_cast<RankedTensorType>(res.getType());
+  if (!origRanked || !newRanked) {
+    return res;
+  }
+
+  SmallVector<int64_t> limitIndices;
+  limitIndices.reserve(origRanked.getRank());
+  bool needsSlice = false;
+  for (int d = 0; d < origRanked.getRank(); ++d) {
+    int64_t origSize = origRanked.getDimSize(d);
+    int64_t newSize = newRanked.getDimSize(d);
+    if (llvm::is_contained(trimDims, d) && newSize > origSize) {
+      limitIndices.push_back(origSize);
+      needsSlice = true;
+    } else {
+      limitIndices.push_back(newSize);
+    }
+  }
+
+  if (!needsSlice) {
+    return res;
+  }
+
+  SmallVector<int64_t> starts(origRanked.getRank(), 0);
+  SmallVector<int64_t> strides(origRanked.getRank(), 1);
+  auto sliceOp = stablehlo::SliceOp::create(
+      rewriter, res.getLoc(),
+      RankedTensorType::get(limitIndices, origRanked.getElementType()), res,
+      rewriter.getDenseI64ArrayAttr(starts),
+      rewriter.getDenseI64ArrayAttr(limitIndices),
+      rewriter.getDenseI64ArrayAttr(strides));
+  setSharding(sliceOp.getResult(), outSharding);
+  Value sliceRes = sliceOp.getResult();
+  if (paddingKind) {
+    cache.setPadding(sliceRes, *paddingKind);
+  }
+  return sliceRes;
+}
+
+// Pads `input` to `paddedInputType` with `paddingKind` if shapes differ,
+// creates a new collective operation with the padded shape, and registers its
+// result padding in the cache.
+Operation* padCollectiveOp(Operation* op, Value input,
+                           RankedTensorType paddedInputType,
+                           const SymbolTable& symbolTable,
+                           ConversionPatternRewriter& rewriter,
+                           PaddingCache& cache,
+                           std::optional<PaddingValueKind>& paddingKind) {
+  auto rankedInput = cast<RankedTensorType>(input.getType());
+  Value padOp = input;
+  if (paddedInputType != rankedInput) {
+    if (!paddingKind) {
+      paddingKind = PaddingValueKind::kZero;
+    }
+    padOp = createPaddedValue(paddedInputType, input, *paddingKind, symbolTable,
+                              rewriter, cache);
+  }
+
+  OperationState state(op->getLoc(), op->getName());
+  state.addOperands({padOp});
+  state.addTypes({paddedInputType});
+  state.addAttributes(op->getAttrs());
+  Operation* newOp = rewriter.create(state);
+  if (paddingKind) {
+    cache.setPadding(newOp->getResult(0), *paddingKind);
+  }
+  return newOp;
+}
+
 // Pattern for ops that just need operands updates and result type updates to
 // match padded shape.
 class GenericOpPattern : public ConversionPattern {
@@ -383,6 +459,18 @@ class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
     return failure();
   }
 };
+
+// Returns the dimension indices of `op` that are gathered across devices and
+// need to be trimmed (sliced back to their original size) after the op.
+SmallVector<int64_t> getTrimDims(sdy::AllGatherOp op) {
+  SmallVector<int64_t> trimDims;
+  for (auto [d, axes] : llvm::enumerate(op.getGatheringAxes())) {
+    if (!axes.empty()) {
+      trimDims.push_back(d);
+    }
+  }
+  return trimDims;
+}
 
 class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
  public:
@@ -450,46 +538,15 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     }
 
     SmallVector<Value> replacements;
-    ::llvm::ArrayRef<AxisRefListAttr> gatheringAxes = op.getGatheringAxes();
+    replacements.reserve(op->getNumResults());
+    SmallVector<int64_t> trimDims = getTrimDims(op);
 
     for (int i = 0; i < op->getNumResults(); ++i) {
       Value res = newOp->getResult(i);
-      Type origType = op->getResult(i).getType();
-      auto origRanked = dyn_cast<RankedTensorType>(origType);
-      auto newRanked = dyn_cast<RankedTensorType>(res.getType());
-
-      if (origRanked && newRanked) {
-        bool needsSlice = false;
-        SmallVector<int64_t> limitIndices;
-        for (int d = 0; d < origRanked.getRank(); ++d) {
-          if (!gatheringAxes[d].empty() &&
-              newRanked.getDimSize(d) > origRanked.getDimSize(d)) {
-            limitIndices.push_back(origRanked.getDimSize(d));
-            needsSlice = true;
-          } else {
-            limitIndices.push_back(newRanked.getDimSize(d));
-          }
-        }
-
-        if (needsSlice) {
-          SmallVector<int64_t> starts(origRanked.getRank(), 0);
-          SmallVector<int64_t> strides(origRanked.getRank(), 1);
-          auto sliceOp = stablehlo::SliceOp::create(
-              rewriter, op.getLoc(),
-              RankedTensorType::get(limitIndices, origRanked.getElementType()),
-              res, rewriter.getDenseI64ArrayAttr(starts),
-              rewriter.getDenseI64ArrayAttr(limitIndices),
-              rewriter.getDenseI64ArrayAttr(strides));
-          setSharding(sliceOp.getResult(), getSharding(res));
-          Value sliceRes = sliceOp.getResult();
-          if (paddingKind) {
-            cache.setPadding(sliceRes, *paddingKind);
-          }
-          replacements.push_back(sliceRes);
-          continue;
-        }
-      }
-      replacements.push_back(res);
+      Value trimmed =
+          trimOutputForDims(res, op->getResult(i).getType(), trimDims,
+                            getSharding(res), rewriter, paddingKind, cache);
+      replacements.push_back(trimmed);
     }
 
     rewriter.replaceOp(op, replacements);
@@ -528,28 +585,100 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
         getPaddedType(rankedInputType, outSharding, symbolTable);
 
     std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
-    Value newInput = input;
-
-    if (paddedInputType != rankedInputType) {
-      paddingKind = PaddingValueKind::kZero;
-      newInput =
-          createPaddedValue(cast<RankedTensorType>(paddedInputType), input,
-                            *paddingKind, symbolTable, rewriter, cache);
-    }
-
-    OperationState state(op->getLoc(), op->getName());
-    state.addOperands({newInput});
-    // sdy.all_slice has the SameOperandsAndResultType trait, so the output
-    // will always have the same padded shape as the input.
-    state.addTypes({paddedInputType});
-    state.addAttributes(op->getAttrs());
-    Operation* newOp = rewriter.create(state);
-
-    if (paddingKind) {
-      cache.setPadding(newOp->getResult(0), *paddingKind);
-    }
+    Operation* newOp =
+        padCollectiveOp(op, input, cast<RankedTensorType>(paddedInputType),
+                        symbolTable, rewriter, cache, paddingKind);
 
     rewriter.replaceOp(op, newOp->getResults());
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
+class ReduceScatterOpPattern
+    : public OpConversionPattern<sdy::ReduceScatterOp> {
+ public:
+  ReduceScatterOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                         PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::ReduceScatterOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    Value input = adaptor.getOperands()[0];
+    auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
+    if (!rankedInputType) {
+      return failure();
+    }
+
+    TensorShardingAttr outSharding = op.getOutSharding();
+    Type paddedInputType =
+        getPaddedType(rankedInputType, outSharding, symbolTable);
+
+    std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+    Operation* newOp =
+        padCollectiveOp(op, input, cast<RankedTensorType>(paddedInputType),
+                        symbolTable, rewriter, cache, paddingKind);
+
+    rewriter.replaceOp(op, newOp->getResults());
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
+// Returns the source dimensions (dims where input is gathered/combined).
+SmallVector<int64_t> getTrimDims(sdy::AllToAllOp op) {
+  SmallVector<int64_t> trimDims;
+  trimDims.reserve(op.getParams().size());
+  for (AllToAllParamAttr param : op.getParams()) {
+    trimDims.push_back(param.getSrcDim());
+  }
+  return trimDims;
+}
+
+class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
+ public:
+  AllToAllOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::AllToAllOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    Value input = adaptor.getOperands()[0];
+    auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
+    if (!rankedInputType) {
+      return failure();
+    }
+
+    TensorShardingAttr outSharding = op.getOutSharding();
+    Type paddedInputType =
+        getPaddedType(rankedInputType, outSharding, symbolTable);
+
+    std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+    Operation* newOp =
+        padCollectiveOp(op, input, cast<RankedTensorType>(paddedInputType),
+                        symbolTable, rewriter, cache, paddingKind);
+
+    Value res = newOp->getResult(0);
+
+    SmallVector<int64_t> trimDims = getTrimDims(op);
+    res = trimOutputForDims(res, op->getResult(0).getType(), trimDims,
+                            outSharding, rewriter, paddingKind, cache);
+
+    rewriter.replaceOp(op, {res});
     return success();
   }
 
@@ -669,8 +798,8 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
-                 AllGatherOpPattern>(typeConverter, &getContext(),
-                                     paddingCache);
+                 AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern>(
+        typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
@@ -698,8 +827,16 @@ struct PadForDivisibilityPass
         return isLegalType(allSliceOp.getOperand().getType(),
                            allSliceOp.getOutSharding());
       }
+      if (auto reduceScatterOp = dyn_cast<ReduceScatterOp>(op)) {
+        return isLegalType(reduceScatterOp.getOperand().getType(),
+                           reduceScatterOp.getOutSharding());
+      }
       if (auto allGatherOp = dyn_cast<AllGatherOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue);
+      }
+      if (auto allToAllOp = dyn_cast<AllToAllOp>(op)) {
+        return llvm::all_of(op->getOperands(), isLegalValue) &&
+               llvm::all_of(op->getResults(), isLegalValue);
       }
       return true;
     });
