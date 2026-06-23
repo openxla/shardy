@@ -1,6 +1,4 @@
-// TODO(b/507062957): Re-enable this test once the interpreter is fixed.
-// RUNDISABLED: %S/run_sdy_interpreter_test.sh %s %t
-// RUN: cat %s
+// RUN: %S/run_sdy_interpreter_test.sh %s %t
 
 //--- part1.mlir
 
