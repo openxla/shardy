@@ -34,7 +34,7 @@ ParseResult parseMeshOrRef(AsmParser& parser, Attribute& meshOrRef);
 // if multiple are present.
 ParseResult parseReplicatedAndUnreducedAxes(
     AsmParser& parser, SmallVector<AxisRefAttr>& replicatedAxes,
-    SmallVector<AxisRefAttr>& unreducedAxes);
+    SmallVector<AxisRefAttr>& unreducedAxes, ReductionOp& reductionOp);
 
 // Parses the factor sizes of an OpShardingRule. The keys in the list are the
 // indices in the factor mapping, with i=0, j=1, k=2,... z=17. For any index

@@ -351,3 +351,12 @@ func.func @null_reduce_scatter(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.shard
   %0 = sdy.reduce_scatter [{}, {}] %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @all_reduce_all_slice_fusion_max
+func.func @all_reduce_all_slice_fusion_max(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}], unreduced=max{"x"}>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter max [{"x"}, {}] %arg0 out_sharding=<@mesh, [{"y", "x"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %[[RS]]
+  %0 = sdy.all_reduce max {"x"} %arg0 out_sharding=<@mesh, [{"y"}, {}], replicated={"x"}> :  tensor<16x2xf32>
+  %1 = sdy.all_slice [{"x"}, {}] %0 out_sharding=<@mesh, [{"y", "x"}, {}]> :  tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}

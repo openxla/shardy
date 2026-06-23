@@ -150,3 +150,17 @@ func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mes
   %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh1, [{"b", "a"}, {"c", ?}]>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh1 = <["a"=1, "b"=2, "c"=1, "d"=4, "e"=1], device_ids=[0, 2, 1, 3, 4, 6, 5, 7]>
+
+// CHECK-LABEL: func @unreduced_axes_grouped
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{"b"}, {?}]>}
+// CHECK-SAME:  ) -> (
+// CHECK-SAME:    tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{}, {?}], unreduced=max{"d"}>}) {
+func.func @unreduced_axes_grouped(
+  %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{"a", "b"}, {"c", ?}]>}
+) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh1, [{}, {"c", ?}], unreduced=max{"a", "d"}>}) {
+  return %arg0 : tensor<8x8xf32>
+}

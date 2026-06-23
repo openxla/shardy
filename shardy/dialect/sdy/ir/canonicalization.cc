@@ -142,6 +142,7 @@ struct ReduceScatterFusionInfo {
   SmallVector<AxisRefListAttr> reduceScatterAxes;
   std::optional<SmallVector<AxisRefListAttr>> residualSlicingAxes;
   TensorShardingAttr reduceScatterOutSharding;
+  ReductionOp reductionOp;
 };
 
 // Helper function to check if the reduce scatter fusion is possible and compute
@@ -222,11 +223,13 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
   if (hasResidualSlicingAxes) {
     result.residualSlicingAxes = std::move(residualSlicingAxes);
   }
+  result.reductionOp = allReduceOp.getReductionOp();
   result.reduceScatterOutSharding = TensorShardingAttr::get(
       context, allReduceOp.getOutShardingAttr().getMeshOrRef(),
       reduceScatterOutDimShardings,
       allSliceOp.getOutSharding().getReplicatedAxes(),
-      allSliceOp.getOutSharding().getUnreducedAxes());
+      allSliceOp.getOutSharding().getUnreducedAxes(),
+      allSliceOp.getOutSharding().getReductionOp());
 
   return result;
 }
@@ -302,7 +305,7 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
     auto reduceScatterOp = ReduceScatterOp::create(
         rewriter, allReduceOp.getLoc(), allReduceOp.getTensor(),
         ListOfAxisRefListsAttr::get(context, fusionInfo->reduceScatterAxes),
-        fusionInfo->reduceScatterOutSharding);
+        fusionInfo->reductionOp, fusionInfo->reduceScatterOutSharding);
 
     Value finalResult = reduceScatterOp.getResult();
 

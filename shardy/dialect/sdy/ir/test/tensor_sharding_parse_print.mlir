@@ -1,7 +1,7 @@
 // RUN: sdy_opt %s 2>&1 | FileCheck %s
 
-// CHECK: sdy.mesh @foo = <["a"=2, "b"=4]>
-sdy.mesh @foo = <["a"=2, "b"=4]>
+// CHECK: sdy.mesh @foo = <["a"=2, "c"=2, "b"=4, "d"=2]>
+sdy.mesh @foo = <["a"=2, "c"=2, "b"=4, "d"=2]>
 
 // CHECK: sdy.mesh @bar = <["a"=4, "b"=2]>
 sdy.mesh @bar = <["a"=4, "b"=2]>
@@ -44,6 +44,16 @@ func.func @unreduced_axes(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> t
   // CHECK-NEXT: stablehlo.add
   // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced={"a", "b"}>]>
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced={"a", "b"}>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+
+
+// CHECK-LABEL: func @unreduced_axes_max
+func.func @unreduced_axes_max(%arg0 : tensor<8x8xf32>, %arg1 : tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add
+  // CHECK-SAME{LITERAL}: #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced=max{"a"}>]>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@foo, [{}, {}], unreduced=max{"a"}>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 

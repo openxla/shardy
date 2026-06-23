@@ -812,7 +812,7 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
       getAxisSetDiff(sourceUnreducedAxes, allReduceAxes, mesh));
   auto allReduceOp =
       AllReduceOp::create(rewriter, use.get().getLoc(), use.get(),
-                          allReduceAxes, allReduceSharding);
+                          allReduceAxes, ReductionOp::SUM, allReduceSharding);
   use.set(allReduceOp);
   return allReduceSharding;
 }
@@ -862,8 +862,9 @@ void insertAllReducesForReductionFactors(
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
-    auto allReduceOp = AllReduceOp::create(rewriter, result.getLoc(), result,
-                                           allReduceAxes, resultSharding);
+    auto allReduceOp =
+        AllReduceOp::create(rewriter, result.getLoc(), result, allReduceAxes,
+                            ReductionOp::SUM, resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }

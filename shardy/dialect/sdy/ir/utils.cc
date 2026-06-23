@@ -634,7 +634,8 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
                 std::back_inserter(newUnreducedAxes), isFreeAxis);
   return TensorShardingAttr::get(
       outerManualSharding.getContext(), outerManualSharding.getMeshOrRef(),
-      newDimShardings, newReplicatedAxes, newUnreducedAxes);
+      newDimShardings, newReplicatedAxes, newUnreducedAxes,
+      outerManualSharding.getReductionOp());
 }
 
 }  // namespace
