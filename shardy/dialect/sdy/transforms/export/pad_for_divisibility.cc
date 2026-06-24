@@ -597,6 +597,58 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
   PaddingCache& cache;
 };
 
+// Returns the source dimensions (dims where input is gathered/combined).
+SmallVector<int64_t> getTrimDims(sdy::AllToAllOp op) {
+  SmallVector<int64_t> trimDims;
+  trimDims.reserve(op.getParams().size());
+  for (AllToAllParamAttr param : op.getParams()) {
+    trimDims.push_back(param.getSrcDim());
+  }
+  return trimDims;
+}
+
+class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
+ public:
+  AllToAllOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::AllToAllOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    Value input = adaptor.getOperands()[0];
+    auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
+    if (!rankedInputType) {
+      return failure();
+    }
+
+    TensorShardingAttr outSharding = op.getOutSharding();
+    Type paddedInputType =
+        getPaddedType(rankedInputType, outSharding, symbolTable);
+
+    std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+    Operation* newOp =
+        padCollectiveOp(op, input, cast<RankedTensorType>(paddedInputType),
+                        symbolTable, rewriter, cache, paddingKind);
+
+    Value res = newOp->getResult(0);
+
+    SmallVector<int64_t> trimDims = getTrimDims(op);
+    res = trimOutputForDims(res, op->getResult(0).getType(), trimDims,
+                            outSharding, rewriter, paddingKind, cache);
+
+    rewriter.replaceOp(op, {res});
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
   StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx)
@@ -709,8 +761,8 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
-                 AllGatherOpPattern>(typeConverter, &getContext(),
-                                     paddingCache);
+                 AllToAllOpPattern, AllGatherOpPattern>(
+        typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
@@ -740,6 +792,10 @@ struct PadForDivisibilityPass
       }
       if (auto allGatherOp = dyn_cast<AllGatherOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue);
+      }
+      if (auto allToAllOp = dyn_cast<AllToAllOp>(op)) {
+        return llvm::all_of(op->getOperands(), isLegalValue) &&
+               llvm::all_of(op->getResults(), isLegalValue);
       }
       return true;
     });
