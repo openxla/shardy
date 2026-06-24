@@ -261,3 +261,11 @@ divisible/shardable to avoid requiring padding their tensors. Propagation
 may make inputs/outputs have non-divisible shardings, so this pass updates
 them to the largest dimension sharding prefix of the original sharding that
 is evenly sharded.
+
+### `-sdy-verify-unreduced-axes`
+
+_Verifies the consistency of unreduced axis usage._
+
+Verifies that for every operation, if its operands have unreduced axes, the
+operation either explicitly reduces them (e.g., via `sdy.reshard`) or passes
+them through to its results (or is a bounding operation like `func.call`).
