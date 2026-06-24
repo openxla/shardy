@@ -319,42 +319,38 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         }
         return builder.build();
       })
-      .Case(
-          [](stablehlo::BitcastConvertOp bitcastConvert) {
-            ArrayRef<int64_t> inShape =
-                getTensorShape(bitcastConvert.getOperand());
-            ArrayRef<int64_t> outShape =
-                getTensorShape(bitcastConvert.getResult());
-            // Can shard on any dimension other than the additional
-            // innermost dimension of the shape with the smaller element
-            // bitwidth.
-            ArrayRef<int64_t> shape =
-                inShape.size() < outShape.size() ? inShape : outShape;
-            OpShardingRuleBuilder builder(bitcastConvert);
-            builder.addPointwise(shape);
-            if (inShape.size() < outShape.size()) {
-              builder.addFactor(kNullDim, outShape.size() - 1, outShape.back(),
-                                FactorType::kNeedReplication);
-            } else if (inShape.size() > outShape.size()) {
-              builder.addFactor(inShape.size() - 1, kNullDim, inShape.back(),
-                                FactorType::kNeedReplication);
-            }
-            return builder.build();
-          })
-      .Case(
-          [](stablehlo::BatchNormInferenceOp batchNormInference) {
-            OpShardingRuleBuilder builder(batchNormInference);
-            uint64_t featureIndex = batchNormInference.getFeatureIndex();
-            for (auto [dim, dimSize] : llvm::enumerate(
-                     batchNormInference.getOperand().getType().getShape())) {
-              SmallVector<int64_t> opDims(
-                  batchNormInference.getNumOperands(),
-                  /*value=*/dim == featureIndex ? 0 : kNullDim);
-              opDims[0] = dim;
-              builder.addFactor(opDims, dim, dimSize);
-            }
-            return builder.build();
-          })
+      .Case([](stablehlo::BitcastConvertOp bitcastConvert) {
+        ArrayRef<int64_t> inShape = getTensorShape(bitcastConvert.getOperand());
+        ArrayRef<int64_t> outShape = getTensorShape(bitcastConvert.getResult());
+        // Can shard on any dimension other than the additional
+        // innermost dimension of the shape with the smaller element
+        // bitwidth.
+        ArrayRef<int64_t> shape =
+            inShape.size() < outShape.size() ? inShape : outShape;
+        OpShardingRuleBuilder builder(bitcastConvert);
+        builder.addPointwise(shape);
+        if (inShape.size() < outShape.size()) {
+          builder.addFactor(kNullDim, outShape.size() - 1, outShape.back(),
+                            FactorType::kNeedReplication);
+        } else if (inShape.size() > outShape.size()) {
+          builder.addFactor(inShape.size() - 1, kNullDim, inShape.back(),
+                            FactorType::kNeedReplication);
+        }
+        return builder.build();
+      })
+      .Case([](stablehlo::BatchNormInferenceOp batchNormInference) {
+        OpShardingRuleBuilder builder(batchNormInference);
+        uint64_t featureIndex = batchNormInference.getFeatureIndex();
+        for (auto [dim, dimSize] : llvm::enumerate(
+                 batchNormInference.getOperand().getType().getShape())) {
+          SmallVector<int64_t> opDims(
+              batchNormInference.getNumOperands(),
+              /*value=*/dim == featureIndex ? 0 : kNullDim);
+          opDims[0] = dim;
+          builder.addFactor(opDims, dim, dimSize);
+        }
+        return builder.build();
+      })
       .Case([](stablehlo::BroadcastInDimOp broadcast) {
         OpShardingRuleBuilder builder(broadcast);
 
@@ -564,7 +560,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "xla_python_cpu_callback" ||
             callTargetName == "xla_python_gpu_callback" ||
             callTargetName == "xla_ffi_python_cpu_callback" ||
-            callTargetName == "xla_ffi_python_gpu_callback") {
+            callTargetName == "xla_ffi_python_gpu_callback" ||
+            callTargetName == "xla.debug.Log") {
           return OpShardingRuleAttr();
         }
         if (callTargetName == "annotate_device_placement" ||
@@ -815,16 +812,15 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
 
         return builder.build();
       })
-      .Case(
-          [](stablehlo::DynamicSliceOp dynamicSlice) {
-            return OpShardingRuleBuilder(dynamicSlice)
-                .addPointwiseWithDiffTypeForMismatch(
-                    getTensorShape(dynamicSlice.getOperand()),
-                    getTensorShape(dynamicSlice.getResult()),
-                    FactorType::kNeedReplication,
-                    /*mismatchFactorIsBlocked=*/true)
-                .build();
-          })
+      .Case([](stablehlo::DynamicSliceOp dynamicSlice) {
+        return OpShardingRuleBuilder(dynamicSlice)
+            .addPointwiseWithDiffTypeForMismatch(
+                getTensorShape(dynamicSlice.getOperand()),
+                getTensorShape(dynamicSlice.getResult()),
+                FactorType::kNeedReplication,
+                /*mismatchFactorIsBlocked=*/true)
+            .build();
+      })
       .Case(
           [](stablehlo::DynamicUpdateSliceOp dynamicUpdateSlice) {
             ArrayRef<int64_t> operandShape =
@@ -962,53 +958,50 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         assert(outDim == resultType.getRank());
         return builder.build();
       })
-      .Case(
-          [](stablehlo::ReduceScatterOp reduceScatter) {
-            ArrayRef<int64_t> operandShape =
-                getTensorShape(reduceScatter.getOperand());
-            return OpShardingRuleBuilder(reduceScatter)
-                .addPointwiseIf(operandShape,
-                                [&](int64_t dim) {
-                                  return dim !=
-                                         reduceScatter.getScatterDimension();
-                                })
-                .addFactorSameForAllOperands(
-                    reduceScatter.getScatterDimension(),
-                    operandShape[reduceScatter.getScatterDimension()],
-                    FactorType::kNeedReplication)
-                .addFactorSameForAllResults(
-                    reduceScatter.getScatterDimension(),
-                    reduceScatter.getResult().getType().getDimSize(
-                        reduceScatter.getScatterDimension()),
-                    FactorType::kNeedReplication)
-                .build();
-          })
-      .Case(
-          [conservativePropagation](stablehlo::ReduceWindowOp reduceWindow) {
-            // Since all results have compatible shapes, we can look at the
-            // first. The size of each result dimension is the number of input
-            // windows reduced along that dimension. The corresponding input
-            // dimension size can be sharded along the number of windows,
-            // therefore we add a factor with that size.
-            return OpShardingRuleBuilder(reduceWindow)
-                .addPointwise(
-                    getTensorShape(reduceWindow.getResult(0)),
-                    [&](int64_t dim) {
-                      return isWindowPassthroughDim(
-                                 reduceWindow.getPadding(),
-                                 reduceWindow.getWindowDimensions(),
-                                 reduceWindow.getWindowStrides().value_or(
-                                     ArrayRef<int64_t>()),
-                                 dim)
-                                 ? FactorType::kPassThrough
-                                 : FactorType::kPermutation;
-                    },
-                    [&](FactorType factorType) {
-                      return conservativePropagation &&
-                             (factorType == FactorType::kPermutation);
-                    })
-                .build();
-          })
+      .Case([](stablehlo::ReduceScatterOp reduceScatter) {
+        ArrayRef<int64_t> operandShape =
+            getTensorShape(reduceScatter.getOperand());
+        return OpShardingRuleBuilder(reduceScatter)
+            .addPointwiseIf(operandShape,
+                            [&](int64_t dim) {
+                              return dim != reduceScatter.getScatterDimension();
+                            })
+            .addFactorSameForAllOperands(
+                reduceScatter.getScatterDimension(),
+                operandShape[reduceScatter.getScatterDimension()],
+                FactorType::kNeedReplication)
+            .addFactorSameForAllResults(
+                reduceScatter.getScatterDimension(),
+                reduceScatter.getResult().getType().getDimSize(
+                    reduceScatter.getScatterDimension()),
+                FactorType::kNeedReplication)
+            .build();
+      })
+      .Case([conservativePropagation](stablehlo::ReduceWindowOp reduceWindow) {
+        // Since all results have compatible shapes, we can look at the
+        // first. The size of each result dimension is the number of input
+        // windows reduced along that dimension. The corresponding input
+        // dimension size can be sharded along the number of windows,
+        // therefore we add a factor with that size.
+        return OpShardingRuleBuilder(reduceWindow)
+            .addPointwise(
+                getTensorShape(reduceWindow.getResult(0)),
+                [&](int64_t dim) {
+                  return isWindowPassthroughDim(
+                             reduceWindow.getPadding(),
+                             reduceWindow.getWindowDimensions(),
+                             reduceWindow.getWindowStrides().value_or(
+                                 ArrayRef<int64_t>()),
+                             dim)
+                             ? FactorType::kPassThrough
+                             : FactorType::kPermutation;
+                },
+                [&](FactorType factorType) {
+                  return conservativePropagation &&
+                         (factorType == FactorType::kPermutation);
+                })
+            .build();
+      })
       .Case([](stablehlo::ReshapeOp reshape) {
         RankedTensorType inType = reshape.getOperand().getType();
         RankedTensorType outType = reshape.getType();
@@ -1128,24 +1121,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             .addPointwise(getTensorShape(reverse.getResult()), getFactorType)
             .build();
       })
-      .Case(
-          [](stablehlo::RngBitGeneratorOp rngBitGenerator) {
-            OpShardingRuleBuilder builder(rngBitGenerator);
-            // Both the initial state and output state must be replicated, and
-            // we don't want to propagate shardings between them.
-            for (auto [dim, dimSize] : llvm::enumerate(
-                     getTensorShape(rngBitGenerator.getInitialState()))) {
-              builder.addFactor(dim, {static_cast<int64_t>(dim), kNullDim},
-                                dimSize, FactorType::kNeedReplication,
-                                /*isBlocked=*/true);
-            }
-            for (auto [dim, dimSize] :
-                 llvm::enumerate(getTensorShape(rngBitGenerator.getOutput()))) {
-              builder.addFactor(kNullDim, {kNullDim, static_cast<int64_t>(dim)},
-                                dimSize);
-            }
-            return builder.build();
-          })
+      .Case([](stablehlo::RngBitGeneratorOp rngBitGenerator) {
+        OpShardingRuleBuilder builder(rngBitGenerator);
+        // Both the initial state and output state must be replicated, and
+        // we don't want to propagate shardings between them.
+        for (auto [dim, dimSize] : llvm::enumerate(
+                 getTensorShape(rngBitGenerator.getInitialState()))) {
+          builder.addFactor(dim, {static_cast<int64_t>(dim), kNullDim}, dimSize,
+                            FactorType::kNeedReplication,
+                            /*isBlocked=*/true);
+        }
+        for (auto [dim, dimSize] :
+             llvm::enumerate(getTensorShape(rngBitGenerator.getOutput()))) {
+          builder.addFactor(kNullDim, {kNullDim, static_cast<int64_t>(dim)},
+                            dimSize);
+        }
+        return builder.build();
+      })
       .Case([](stablehlo::ScatterOp scatter) {
         OpShardingRuleBuilder builder(scatter);
 
@@ -1176,39 +1168,38 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             });
         return builder.build();
       })
-      .Case(
-          [conservativePropagation](
-              stablehlo::SelectAndScatterOp selectAndScatter) {
-            // The size of each source dimension is the number of input windows
-            // reduced along that dimension. The corresponding input dimension
-            // size can be sharded along the number of windows, therefore we add
-            // a factor with that size.
-            OpShardingRuleBuilder builder(selectAndScatter);
-            for (auto [dim, outDimSize] : llvm::enumerate(
-                     getTensorShape(selectAndScatter.getResult()))) {
-              if (isWindowPassthroughDim(
-                      selectAndScatter.getPadding(),
-                      selectAndScatter.getWindowDimensions().value_or(
-                          ArrayRef<int64_t>()),
-                      selectAndScatter.getWindowStrides().value_or(
-                          ArrayRef<int64_t>()),
-                      dim)) {
-                builder.addFactor(dim, outDimSize);
-                continue;
-              }
-              // replicate the factor from the source
-              builder.addFactor(
-                  {kNullDim, static_cast<int64_t>(dim), kNullDim}, kNullDim,
-                  selectAndScatter.getSource().getType().getDimSize(dim),
-                  FactorType::kNeedReplication,
-                  /*isBlocked=*/conservativePropagation);
-              // permute the factor from input to result
-              builder.addFactor({static_cast<int64_t>(dim), kNullDim, kNullDim},
-                                dim, outDimSize, FactorType::kPermutation,
-                                /*isBlocked=*/conservativePropagation);
-            }
-            return builder.build();
-          })
+      .Case([conservativePropagation](
+                stablehlo::SelectAndScatterOp selectAndScatter) {
+        // The size of each source dimension is the number of input windows
+        // reduced along that dimension. The corresponding input dimension
+        // size can be sharded along the number of windows, therefore we add
+        // a factor with that size.
+        OpShardingRuleBuilder builder(selectAndScatter);
+        for (auto [dim, outDimSize] :
+             llvm::enumerate(getTensorShape(selectAndScatter.getResult()))) {
+          if (isWindowPassthroughDim(
+                  selectAndScatter.getPadding(),
+                  selectAndScatter.getWindowDimensions().value_or(
+                      ArrayRef<int64_t>()),
+                  selectAndScatter.getWindowStrides().value_or(
+                      ArrayRef<int64_t>()),
+                  dim)) {
+            builder.addFactor(dim, outDimSize);
+            continue;
+          }
+          // replicate the factor from the source
+          builder.addFactor(
+              {kNullDim, static_cast<int64_t>(dim), kNullDim}, kNullDim,
+              selectAndScatter.getSource().getType().getDimSize(dim),
+              FactorType::kNeedReplication,
+              /*isBlocked=*/conservativePropagation);
+          // permute the factor from input to result
+          builder.addFactor({static_cast<int64_t>(dim), kNullDim, kNullDim},
+                            dim, outDimSize, FactorType::kPermutation,
+                            /*isBlocked=*/conservativePropagation);
+        }
+        return builder.build();
+      })
       .Case([](stablehlo::SelectOp select) {
         // Case 1: `pred` is a scalar in which case it is broadcasted and must
         //   therefore not be partitioned. The other two inputs behave like
@@ -1219,23 +1210,22 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             .addPointwise(getTensorShape(select.getResult()))
             .build();
       })
-      .Case(
-          [conservativePropagation](stablehlo::SliceOp slice) {
-            // If `conservativePropagation` is false, we propagate through
-            // sliced dimensions, even though that would require communication.
-            //
-            // This is different from `DynamicSliceOp`, where we don't
-            // propagate through sliced dimensions regardless of
-            // `conservativePropagation`, and the reason is that for `SliceOp`
-            // the start indices are static, so we know how to shift the data
-            // to keep the sliced dimension sharded.
-            return OpShardingRuleBuilder(slice)
-                .addPointwiseWithDiffTypeForMismatch(
-                    getTensorShape(slice.getOperand()),
-                    getTensorShape(slice.getResult()), FactorType::kPermutation,
-                    /*mismatchFactorIsBlocked=*/conservativePropagation)
-                .build();
-          })
+      .Case([conservativePropagation](stablehlo::SliceOp slice) {
+        // If `conservativePropagation` is false, we propagate through
+        // sliced dimensions, even though that would require communication.
+        //
+        // This is different from `DynamicSliceOp`, where we don't
+        // propagate through sliced dimensions regardless of
+        // `conservativePropagation`, and the reason is that for `SliceOp`
+        // the start indices are static, so we know how to shift the data
+        // to keep the sliced dimension sharded.
+        return OpShardingRuleBuilder(slice)
+            .addPointwiseWithDiffTypeForMismatch(
+                getTensorShape(slice.getOperand()),
+                getTensorShape(slice.getResult()), FactorType::kPermutation,
+                /*mismatchFactorIsBlocked=*/conservativePropagation)
+            .build();
+      })
       .Case([](stablehlo::SortOp sort) {
         ArrayRef<int64_t> shape = getTensorShape(sort.getInputs().front());
         bool blockedPropagationAlongSortDim =
@@ -1265,54 +1255,51 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         }
         return builder.build();
       })
-      .Case(
-          [](stablehlo::TriangularSolveOp triangularSolve) {
-            OpShardingRuleBuilder builder(triangularSolve);
-            ArrayRef<int64_t> aShape = getTensorShape(triangularSolve.getA());
-            ArrayRef<int64_t> bShape = getTensorShape(triangularSolve.getB());
-            // All dimensions except the last two are batch dimensions.
-            builder.addPointwise(aShape.drop_back(2));
+      .Case([](stablehlo::TriangularSolveOp triangularSolve) {
+        OpShardingRuleBuilder builder(triangularSolve);
+        ArrayRef<int64_t> aShape = getTensorShape(triangularSolve.getA());
+        ArrayRef<int64_t> bShape = getTensorShape(triangularSolve.getB());
+        // All dimensions except the last two are batch dimensions.
+        builder.addPointwise(aShape.drop_back(2));
 
-            int64_t dim1 = aShape.size() - 2;
-            int64_t dim2 = aShape.size() - 1;
-            bool isATransposed = isTranspose(triangularSolve.getTransposeA());
-            if (triangularSolve.getLeftSide()) {
-              // The equation is `op(a) @ result = b`, where op(a) is determined
-              // by `isATransposed`.
-              int64_t aNonContractingDim = isATransposed ? dim2 : dim1;
-              int64_t aContractingDim = isATransposed ? dim1 : dim2;
-              builder
-                  // A non-contracting dim
-                  .addFactor({aNonContractingDim, dim1}, kNullDim,
-                             aShape[aNonContractingDim],
-                             FactorType::kNeedReplication)
-                  // Result non-contracting dim
-                  .addFactor({kNullDim, dim2}, dim2, bShape[dim2],
-                             FactorType::kNeedReplication)
-                  // Contracting dim
-                  .addFactor({aContractingDim, kNullDim}, dim1,
-                             aShape[aContractingDim],
-                             FactorType::kNeedReplication);
-            } else {
-              // The equation is `result @ op(a) = b`, where op(a) is determined
-              // by `isATransposed`.
-              int64_t aNonContractingDim = isATransposed ? dim1 : dim2;
-              int64_t aContractingDim = isATransposed ? dim2 : dim1;
-              builder
-                  // Result non-contracting dim
-                  .addFactor({kNullDim, dim1}, dim1, bShape[dim1],
-                             FactorType::kNeedReplication)
-                  // A non-contracting dim
-                  .addFactor({aNonContractingDim, dim2}, kNullDim,
-                             aShape[aNonContractingDim],
-                             FactorType::kNeedReplication)
-                  // Contracting dim
-                  .addFactor({aContractingDim, kNullDim}, dim2,
-                             aShape[aContractingDim],
-                             FactorType::kNeedReplication);
-            }
-            return builder.build();
-          })
+        int64_t dim1 = aShape.size() - 2;
+        int64_t dim2 = aShape.size() - 1;
+        bool isATransposed = isTranspose(triangularSolve.getTransposeA());
+        if (triangularSolve.getLeftSide()) {
+          // The equation is `op(a) @ result = b`, where op(a) is determined
+          // by `isATransposed`.
+          int64_t aNonContractingDim = isATransposed ? dim2 : dim1;
+          int64_t aContractingDim = isATransposed ? dim1 : dim2;
+          builder
+              // A non-contracting dim
+              .addFactor({aNonContractingDim, dim1}, kNullDim,
+                         aShape[aNonContractingDim],
+                         FactorType::kNeedReplication)
+              // Result non-contracting dim
+              .addFactor({kNullDim, dim2}, dim2, bShape[dim2],
+                         FactorType::kNeedReplication)
+              // Contracting dim
+              .addFactor({aContractingDim, kNullDim}, dim1,
+                         aShape[aContractingDim], FactorType::kNeedReplication);
+        } else {
+          // The equation is `result @ op(a) = b`, where op(a) is determined
+          // by `isATransposed`.
+          int64_t aNonContractingDim = isATransposed ? dim1 : dim2;
+          int64_t aContractingDim = isATransposed ? dim2 : dim1;
+          builder
+              // Result non-contracting dim
+              .addFactor({kNullDim, dim1}, dim1, bShape[dim1],
+                         FactorType::kNeedReplication)
+              // A non-contracting dim
+              .addFactor({aNonContractingDim, dim2}, kNullDim,
+                         aShape[aNonContractingDim],
+                         FactorType::kNeedReplication)
+              // Contracting dim
+              .addFactor({aContractingDim, kNullDim}, dim2,
+                         aShape[aContractingDim], FactorType::kNeedReplication);
+        }
+        return builder.build();
+      })
       // Ops that shouldn't be registered as they are either handled separately
       // (e.g., `stablehlo::WhileOp`) or don't require any propagation
       // (`stablehlo::ConstantOp`).
