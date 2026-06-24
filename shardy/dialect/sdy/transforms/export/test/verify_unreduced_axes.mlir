@@ -12,6 +12,16 @@ func.func @dropped_by_add(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
+func.func @dropped_by_add_blessed(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> tensor<8x8xf32> {
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"x"}, {}]> : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
 func.func private @callee_without_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
   return %arg0 : tensor<8x8xf32>
 }
@@ -20,6 +30,20 @@ func.func @call_argument_drops_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = 
   // expected-error@+1 {{'func.call' op has unreduced axes mismatch for 'y' at call argument 0.}}
   %0 = func.call @callee_without_unreduced(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func private @callee_without_unreduced_blessed(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
+  return %arg0 : tensor<8x8xf32>
+}
+
+func.func @call_argument_drops_unreduced_blessed(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> tensor<8x8xf32> {
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{"x"}, {}]> : tensor<8x8xf32>
+  %1 = func.call @callee_without_unreduced_blessed(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
 }
 
 // -----
@@ -41,21 +65,6 @@ func.func @call_result_drops_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #s
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
-func.func private @callee_expects_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> tensor<8x8xf32> {
-  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}
-
-func.func @call_operand_missing_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
-  // expected-error@+1 {{'func.call' op has unreduced axes mismatch for 'y' at call argument 0.}}
-  %0 = func.call @callee_expects_unreduced(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
-  return %0 : tensor<8x8xf32>
-}
-
-// -----
-
-sdy.mesh @mesh = <["x"=2, "y"=2]>
-
 func.func private @callee_returns_reduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
   return %arg0 : tensor<8x8xf32>
 }
@@ -63,6 +72,21 @@ func.func private @callee_returns_reduced(%arg0: tensor<8x8xf32> {sdy.sharding =
 func.func @call_result_extra_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
   // expected-error@+1 {{'func.call' op has unreduced axes mismatch for 'y' at call result 0.}}
   %0 = func.call @callee_returns_reduced(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}], unreduced={"y"}>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func private @callee_expects_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> tensor<8x8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{"x"}, {}]> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+func.func @call_operand_missing_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<8x8xf32> {
+  // expected-error@+1 {{'func.call' op has unreduced axes mismatch for 'y' at call argument 0.}}
+  %0 = func.call @callee_expects_unreduced(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 

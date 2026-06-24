@@ -58,17 +58,10 @@ func.func @main() {
   %seq = func.call @sequential_scatter(%input, %indices, %updates)
     : (tensor<4x2xf32>, tensor<2x1xi64>, tensor<2x2xf32>) -> tensor<4x2xf32>
 
-  // TODO(b/500779239): Remove this once the bug is fixed.
-  //
-  // The interpreter currently has an unexpected side effect of modifying the
-  // input tensor. To work around this, we define a new input tensor for the
-  // parallel run.
-  %input_par = stablehlo.constant dense<1.0> : tensor<4x2xf32>
-
-  %s0 = "stablehlo.slice"(%input_par) {
+  %s0 = "stablehlo.slice"(%input) {
     start_indices = array<i64: 0,0>, limit_indices = array<i64: 2,2>, strides = array<i64: 1,1>
   } : (tensor<4x2xf32>) -> tensor<2x2xf32>
-  %s1 = "stablehlo.slice"(%input_par) {
+  %s1 = "stablehlo.slice"(%input) {
     start_indices = array<i64: 2,0>, limit_indices = array<i64: 4,2>, strides = array<i64: 1,1>
   } : (tensor<4x2xf32>) -> tensor<2x2xf32>
 
