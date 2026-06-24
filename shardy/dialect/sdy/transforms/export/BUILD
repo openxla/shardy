@@ -52,6 +52,7 @@ cc_library(
         "sink_func_data_flow_edges.cc",
         "unflatten_call_graph.cc",
         "update_non_divisible_input_output_shardings.cc",
+        "verify_unreduced_axes.cc",
     ],
     hdrs = [
         "passes.h",
@@ -73,6 +74,7 @@ cc_library(
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Analysis",
+        "@llvm-project//mlir:ControlFlowInterfaces",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncTransforms",
         "@llvm-project//mlir:IR",

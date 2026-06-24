@@ -41,6 +41,8 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
+  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
+  pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));

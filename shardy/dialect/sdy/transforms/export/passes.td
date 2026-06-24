@@ -140,6 +140,16 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     ];
 }
 
+def VerifyUnreducedAxesPass : Pass<"sdy-verify-unreduced-axes", "func::FuncOp"> {
+  let summary = "Verifies the consistency of unreduced axis usage.";
+  let description = [{
+    Verifies that for every operation, if its operands have unreduced axes, the
+    operation either explicitly reduces them (e.g., via `sdy.reshard`) or passes
+    them through to its results (or is a bounding operation like `func.call`).
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"> {
   let summary = "Converts ReshardOp into various Shardy collective ops.";
   let description = [{
