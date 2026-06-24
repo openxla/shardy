@@ -91,6 +91,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   }
   pm.addPass(createUnflattenCallGraphPass());
   pm.addPass(createSymbolDCEPass());  // After UnflattenCallGraphPass.
+  pm.addPass(createPropagateUnreducedAcrossCallBoundariesPass());
   if (options.enableAutoPartitioning) {
     pm.addPass(createSaveModuleOpPass(options.dumpDirectory,
                                       "propagation_before_auto_partitioning",

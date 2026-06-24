@@ -100,6 +100,17 @@ def AddFuncDataFlowEdgesPass : Pass<"sdy-add-func-data-flow-edges", "ModuleOp"> 
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def PropagateUnreducedAcrossCallBoundariesPass : Pass<"sdy-propagate-unreduced-across-call-boundaries", "ModuleOp"> {
+  let summary = "Propagates unreduced shardings across call boundaries (bidirectionally).";
+  let description = [{
+    Copies unreduced shardings from caller operands to callee arguments (forward)
+    and from callee return values back to caller results (backward).
+    If a destination already has a sharding, we remove any conflicting axes (axes
+    that are now unreduced) from its dimension shardings.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def ApplyShardingConstraintsPass : Pass<"sdy-apply-sharding-constraints", "ModuleOp"> {
   let summary = "Applies constraints that dictate the sharding of their input.";
   let description = [{

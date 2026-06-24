@@ -46,6 +46,7 @@ cc_library(
         "manual_axes_cleanup.cc",
         "pre_order_funcs.cc",
         "propagate_sharding_from_func_to_call.cc",
+        "propagate_unreduced_across_call_boundaries.cc",
         "remove_size_one_axes.cc",
         "sharding_group_import.cc",
     ],
