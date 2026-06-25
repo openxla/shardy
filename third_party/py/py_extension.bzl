@@ -13,8 +13,8 @@
 # limitations under the License.
 """Supports writing Python modules in C++."""
 
-# load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
-# load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 # buildifier: disable=unused-variable
 def py_extension(
