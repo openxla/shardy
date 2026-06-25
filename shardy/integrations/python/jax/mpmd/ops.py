@@ -18,6 +18,7 @@
 from collections.abc import Callable, Sequence
 import functools
 import inspect
+import itertools as it
 from typing import Any, TypeVar
 
 import jax
@@ -26,6 +27,7 @@ from jax import numpy as jnp
 from jax import tree
 from jax import tree_util
 from jax._src import core as jax_core
+from jax._src import linear_util as internal_lu
 from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
 from jax._src.interpreters import partial_eval as internal_pe
@@ -314,6 +316,50 @@ def _named_computation_default_lowering(
   )
 
 
+def _named_computation_to_lojax(*hi_args, call_jaxpr, name, transpose_count):
+  """Lowers the named_computation primitive to lojax."""
+  closed_jaxpr = internal_pe.close_jaxpr(call_jaxpr)
+  if any(aval.has_qdd for aval in closed_jaxpr.in_aval_qdds):
+    raise NotImplementedError(
+        'named_computation does not support qdd on inputs'
+    )
+  if any(aval.has_qdd for aval in closed_jaxpr.final_aval_qdds):
+    raise NotImplementedError(
+        'named_computation does not support qdd on outputs'
+    )
+  lo_closed_jaxpr = internal_pe.lower_jaxpr2(closed_jaxpr)
+
+  # pylint: disable=g-complex-comprehension
+  lo_args = [
+      lo_val
+      for aval, x in zip(closed_jaxpr.in_avals, hi_args)
+      for lo_val in aval.lower_val(x)
+  ]
+  # pylint: enable=g-complex-comprehension
+
+  subfun = internal_lu.hashable_partial(
+      lu.wrap_init(
+          jax_core.eval_jaxpr, debug_info=lo_closed_jaxpr.jaxpr.debug_info
+      ),
+      lo_closed_jaxpr.jaxpr,
+      tuple(lo_closed_jaxpr.consts),
+  )
+
+  lo_outs = named_computation_p.bind(
+      *lo_args,
+      subfuns=(subfun,),
+      name=name,
+      transpose_count=transpose_count,
+  )
+
+  lo_outs_ = iter(lo_outs)
+  hi_outs = [
+      t.raise_val(*it.islice(lo_outs_, len(t.lo_ty())))
+      for t in closed_jaxpr.out_avals
+  ]
+  return hi_outs
+
+
 def _register_named_computation_primitive():
   """Registers named_computation primitive and a JAX CallPrimitive."""
   # Makes it possible to execute eagerly.
@@ -339,6 +385,7 @@ def _register_named_computation_primitive():
   # Introduces the rule to lower this primitive as a call_primitive, so that
   # jax.jit users can still lower named_computations.
   jax_mlir.register_lowering(primitive, _named_computation_default_lowering)
+  primitive.to_lojax = _named_computation_to_lojax
   # Allows a jax.remat(mpmd.named_computation(...))
   pe.partial_eval_jaxpr_custom_rules[primitive] = (
       pe.partial_eval_jaxpr_custom_rules[primitives.call_p]
@@ -488,6 +535,7 @@ def call_mpmd_jit_lowering(
         effects,
         num_const_args=len(const_args),
         in_avals=in_avals,
+        out_avals=call_jaxpr.out_avals,
         arg_shardings=arg_shardings,
     )
     ctx.module_context.cached_primitive_lowerings[key] = func_declaration
@@ -1059,6 +1107,7 @@ def fori_loop_mpmd_jit_lowering(
       effects,
       num_const_args=num_const_args,
       in_avals=in_avals,
+      out_avals=call_jaxpr.out_avals,
       arg_shardings=arg_shardings,
   )
 
