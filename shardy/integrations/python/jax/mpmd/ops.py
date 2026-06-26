@@ -488,6 +488,7 @@ def call_mpmd_jit_lowering(
         effects,
         num_const_args=len(const_args),
         in_avals=in_avals,
+        out_avals=call_jaxpr.out_avals,
         arg_shardings=arg_shardings,
     )
     ctx.module_context.cached_primitive_lowerings[key] = func_declaration
@@ -1059,6 +1060,7 @@ def fori_loop_mpmd_jit_lowering(
       effects,
       num_const_args=num_const_args,
       in_avals=in_avals,
+      out_avals=call_jaxpr.out_avals,
       arg_shardings=arg_shardings,
   )
 
