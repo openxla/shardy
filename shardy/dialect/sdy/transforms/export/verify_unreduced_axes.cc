@@ -18,6 +18,7 @@ limitations under the License.
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -25,6 +26,7 @@ limitations under the License.
 #include "mlir/Support/WalkResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -94,8 +96,14 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
 
   // Verify call operands against callee arguments.
   for (int64_t i = 0; i < callOp.getNumOperands(); ++i) {
-    TensorShardingAttr operandSharding = getSharding(callOp.getOperand(i));
-    TensorShardingAttr argSharding = getSharding(callee.getArgument(i));
+    Value operand = callOp.getOperand(i);
+    if (operand.getDefiningOp<sdy::ReshardOp>() ||
+        operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+      continue;
+    }
+    TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
+    TensorShardingAttr argSharding =
+        getShardingBypassingBarriers(callee.getArgument(i));
     ArrayRef<AxisRefAttr> operandAxes = operandSharding
                                             ? operandSharding.getUnreducedAxes()
                                             : ArrayRef<AxisRefAttr>{};
@@ -111,7 +119,8 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
   // Verify callee results against call results.
   for (int64_t i = 0; i < callOp.getNumResults(); ++i) {
     TensorShardingAttr funcResultSharding = getFuncResultSharding(callee, i);
-    TensorShardingAttr resultSharding = getSharding(callOp.getResult(i));
+    TensorShardingAttr resultSharding =
+        getShardingBypassingBarriers(callOp.getResult(i));
     ArrayRef<AxisRefAttr> funcResultAxes =
         funcResultSharding ? funcResultSharding.getUnreducedAxes()
                            : ArrayRef<AxisRefAttr>{};
@@ -132,23 +141,58 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
 // or introduce unreduced axes.
 LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
   SmallVector<AxisRefAttr> operandUnreducedAxes;
-  for (Value operand : op->getOperands()) {
-    appendUnreducedAxes(getSharding(operand), operandUnreducedAxes);
+  SmallVector<AxisRefAttr> resultUnreducedAxes;
+
+  if (op->hasTrait<OpTrait::ReturnLike>() &&
+      isa<func::FuncOp>(op->getParentOp())) {
+    auto parentFuncOp = cast<func::FuncOp>(op->getParentOp());
+    for (int64_t i = 0; i < op->getNumOperands(); ++i) {
+      Value operand = op->getOperand(i);
+      if (operand.getDefiningOp<sdy::ReshardOp>() ||
+          operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+        continue;
+      }
+      TensorShardingAttr resultSharding =
+          getFuncResultSharding(parentFuncOp, i);
+      if (!resultSharding) {
+        continue;
+      }
+      appendUnreducedAxes(getShardingBypassingBarriers(operand),
+                          operandUnreducedAxes);
+      appendUnreducedAxes(resultSharding, resultUnreducedAxes);
+    }
+
+    if (operandUnreducedAxes.empty() && resultUnreducedAxes.empty()) {
+      return success();
+    }
+    return verifyEqual(
+        operandUnreducedAxes, resultUnreducedAxes, op,
+        "' without a blessed operation (e.g., sdy.reshard). "
+        "This is an invalid transition from unreduced to reduced.");
   }
 
-  SmallVector<AxisRefAttr> resultUnreducedAxes;
+  for (Value operand : op->getOperands()) {
+    if (operand.getDefiningOp<sdy::ReshardOp>() ||
+        operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+      continue;
+    }
+    appendUnreducedAxes(getShardingBypassingBarriers(operand),
+                        operandUnreducedAxes);
+  }
+
   if (op->hasTrait<OpTrait::ReturnLike>()) {
     Operation* parentOp = op->getParentOp();
-    if (auto parentFuncOp = dyn_cast<func::FuncOp>(parentOp)) {
-      for (int64_t i = 0; i < op->getNumOperands(); ++i) {
-        appendUnreducedAxes(getFuncResultSharding(parentFuncOp, i),
-                            resultUnreducedAxes);
-      }
-    } else if (parentOp->getNumResults() > 0) {
+    if (parentOp->getNumResults() > 0) {
       for (int64_t i = 0; i < op->getNumOperands(); ++i) {
         if (i < parentOp->getNumResults()) {
-          appendUnreducedAxes(getSharding(parentOp->getResult(i)),
-                              resultUnreducedAxes);
+          TensorShardingAttr resultSharding =
+              getShardingBypassingBarriers(parentOp->getResult(i));
+          if (auto manualCompOp =
+                  dyn_cast<sdy::ManualComputationOp>(parentOp)) {
+            resultSharding =
+                eraseManualAxes(resultSharding, manualCompOp.getManualAxes());
+          }
+          appendUnreducedAxes(resultSharding, resultUnreducedAxes);
         }
       }
     }
@@ -163,7 +207,8 @@ LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
   }
 
   for (Value result : op->getResults()) {
-    appendUnreducedAxes(getSharding(result), resultUnreducedAxes);
+    appendUnreducedAxes(getShardingBypassingBarriers(result),
+                        resultUnreducedAxes);
   }
 
   if (operandUnreducedAxes.empty()) {
@@ -180,6 +225,25 @@ LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
       "This is an invalid transition from unreduced to reduced.");
 }
 
+bool isSumReduction(stablehlo::ReduceOp reduceOp) {
+  if (reduceOp.getBody().empty()) {
+    return false;
+  }
+  Block& body = reduceOp.getBody().front();
+  auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
+  if (!returnOp ||
+      returnOp.getOperands().size() != reduceOp.getInputs().size()) {
+    return false;
+  }
+  for (Value retValue : returnOp.getOperands()) {
+    Operation* curOp = retValue.getDefiningOp();
+    if (!curOp || !isa<stablehlo::AddOp>(curOp)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct VerifyUnreducedAxesPass
     : public impl::VerifyUnreducedAxesPassBase<VerifyUnreducedAxesPass> {
   using VerifyUnreducedAxesPassBase::VerifyUnreducedAxesPassBase;
@@ -189,8 +253,15 @@ struct VerifyUnreducedAxesPass
     func::FuncOp funcOp = getOperation();
 
     auto walkResult = funcOp.walk([&](Operation* op) {
-      if (op->getDialect()->getNamespace() == "sdy") {
+      if (isa<sdy::ReshardOp, sdy::ShardingConstraintOp,
+              stablehlo::DotGeneralOp>(op)) {
         return WalkResult::advance();
+      }
+
+      if (auto reduceOp = dyn_cast<stablehlo::ReduceOp>(op)) {
+        if (isSumReduction(reduceOp)) {
+          return WalkResult::advance();
+        }
       }
 
       if (op->hasTrait<OpTrait::IsTerminator>() &&

@@ -152,3 +152,13 @@ module {
     return %1, %0#1 : tensor<32x96xf32>, tensor<?x?xf32>
   }
 }
+
+// -----
+
+module {
+  sdy.mesh @mesh = <["z"=4]>
+  func.func @func_data_flow_edge_out_of_bounds_operand_ok(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>) {
+    %0 = sdy.func_data_flow_edge %arg0 {sdy.propagation_edges = #sdy.propagation_edges<[{step-22 = [{"z" = result-0 -> [operand-3]}]}]>, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"z", ?}]>]>} : tensor<8x8xf32>
+    return %0 : tensor<8x8xf32>
+  }
+}
