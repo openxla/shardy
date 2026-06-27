@@ -1,7 +1,7 @@
 # The SDY export passes and pipeline.
 
-# load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -50,6 +50,7 @@ cc_library(
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
         "sink_func_data_flow_edges.cc",
+        "split_resharding_dimensions.cc",
         "unflatten_call_graph.cc",
         "update_non_divisible_input_output_shardings.cc",
         "verify_unreduced_axes.cc",

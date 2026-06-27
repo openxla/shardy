@@ -114,6 +114,7 @@ class MpmdLoweredArgs:
   topology: types.Topology
   name_to_mesh_map: types.NameToMeshAssignment
   flat_input_mesh_assignment: Sequence[str] | None = None
+  _lowering: Any = None
 
 
 def _get_fragment_info(
@@ -213,6 +214,8 @@ class MpmdGspmdTraced(jax.stages.Traced):
     logging.info('Lowering function %s via jax.jit completed.', func_name)
 
     def _shaped_abstractify(x):
+      if isinstance(x, jax.core.ShapedArray):
+        return x
       if isinstance(x, (jax.ShapeDtypeStruct, np.ndarray)):
         return jax.core.ShapedArray(x.shape, x.dtype)
       if isinstance(x, jax.Array):
@@ -340,6 +343,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
         topology=self._mpmd_config.topology,
         name_to_mesh_map=self._mpmd_config.mesh_and_stage_assignment,
         flat_input_mesh_assignment=flat_input_mesh_assignment,
+        _lowering=getattr(lowered_computation, '_lowering', None),
     )
     return mlir_module, partitioning_args, lowered_args
 
@@ -426,6 +430,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
   def lower(
       self,
       _private_parameters: mlir.LoweringParameters | None = None,  # pytype: disable=signature-mismatch  # pylint: disable=invalid-name
+      _run_mpmd_partitioning: bool = True,
   ) -> stages.MpmdLowered:
     """Lowers the Jax function wrapped in this object to MLIR.
 
@@ -441,6 +446,26 @@ class MpmdGspmdTraced(jax.stages.Traced):
     mlir_module, partitioning_args, lowered_args = (
         self._prepare_partitioning_args(_private_parameters)
     )
+
+    if not _run_mpmd_partitioning:
+      return stages.MpmdLowered(
+          stablehlo_mlir_module=lowered_args.stablehlo_mlir_module,
+          partitioning_result=None,
+          jax_fn_info=lowered_args.jax_fn_info,
+          args_info=lowered_args.args_info,
+          lowering_metadata={},
+          topology=lowered_args.topology,
+          name_to_mesh_map=lowered_args.name_to_mesh_map,
+          flat_input_mesh_assignment=lowered_args.flat_input_mesh_assignment,
+          _unpartitioned_mlir_module=mlir_module,
+          _partitioning_args=partitioning_args,
+          _lowered_args=lowered_args,
+          _mpmd_config=self._mpmd_config,
+          _apply_partitioning_fn=lambda mod, args: _apply_partitioning(
+              mod, args, jaxlib_mpmd.PartitioningPhase.ALL
+          ),
+          _partition_with_pipeline_schedule_fn=self._partition_with_pipeline_schedule,
+      )
 
     if self._mpmd_config.pipeline_schedule:
       partitioning_result = self._partition_with_pipeline_schedule(
