@@ -18,6 +18,7 @@ limitations under the License.
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -94,8 +95,14 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
 
   // Verify call operands against callee arguments.
   for (int64_t i = 0; i < callOp.getNumOperands(); ++i) {
-    TensorShardingAttr operandSharding = getSharding(callOp.getOperand(i));
-    TensorShardingAttr argSharding = getSharding(callee.getArgument(i));
+    Value operand = callOp.getOperand(i);
+    if (operand.getDefiningOp<sdy::ReshardOp>() ||
+        operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+      continue;
+    }
+    TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
+    TensorShardingAttr argSharding =
+        getShardingBypassingBarriers(callee.getArgument(i));
     ArrayRef<AxisRefAttr> operandAxes = operandSharding
                                             ? operandSharding.getUnreducedAxes()
                                             : ArrayRef<AxisRefAttr>{};
@@ -111,7 +118,8 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
   // Verify callee results against call results.
   for (int64_t i = 0; i < callOp.getNumResults(); ++i) {
     TensorShardingAttr funcResultSharding = getFuncResultSharding(callee, i);
-    TensorShardingAttr resultSharding = getSharding(callOp.getResult(i));
+    TensorShardingAttr resultSharding =
+        getShardingBypassingBarriers(callOp.getResult(i));
     ArrayRef<AxisRefAttr> funcResultAxes =
         funcResultSharding ? funcResultSharding.getUnreducedAxes()
                            : ArrayRef<AxisRefAttr>{};
@@ -133,7 +141,12 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
 LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
   SmallVector<AxisRefAttr> operandUnreducedAxes;
   for (Value operand : op->getOperands()) {
-    appendUnreducedAxes(getSharding(operand), operandUnreducedAxes);
+    if (operand.getDefiningOp<sdy::ReshardOp>() ||
+        operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+      continue;
+    }
+    appendUnreducedAxes(getShardingBypassingBarriers(operand),
+                        operandUnreducedAxes);
   }
 
   SmallVector<AxisRefAttr> resultUnreducedAxes;
@@ -141,14 +154,20 @@ LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
     Operation* parentOp = op->getParentOp();
     if (auto parentFuncOp = dyn_cast<func::FuncOp>(parentOp)) {
       for (int64_t i = 0; i < op->getNumOperands(); ++i) {
+        Value operand = op->getOperand(i);
+        if (operand.getDefiningOp<sdy::ReshardOp>() ||
+            operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+          continue;
+        }
         appendUnreducedAxes(getFuncResultSharding(parentFuncOp, i),
                             resultUnreducedAxes);
       }
     } else if (parentOp->getNumResults() > 0) {
       for (int64_t i = 0; i < op->getNumOperands(); ++i) {
         if (i < parentOp->getNumResults()) {
-          appendUnreducedAxes(getSharding(parentOp->getResult(i)),
-                              resultUnreducedAxes);
+          appendUnreducedAxes(
+              getShardingBypassingBarriers(parentOp->getResult(i)),
+              resultUnreducedAxes);
         }
       }
     }
@@ -163,7 +182,8 @@ LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
   }
 
   for (Value result : op->getResults()) {
-    appendUnreducedAxes(getSharding(result), resultUnreducedAxes);
+    appendUnreducedAxes(getShardingBypassingBarriers(result),
+                        resultUnreducedAxes);
   }
 
   if (operandUnreducedAxes.empty()) {
@@ -189,7 +209,7 @@ struct VerifyUnreducedAxesPass
     func::FuncOp funcOp = getOperation();
 
     auto walkResult = funcOp.walk([&](Operation* op) {
-      if (op->getDialect()->getNamespace() == "sdy") {
+      if (isa<sdy::ReshardOp, sdy::ShardingConstraintOp>(op)) {
         return WalkResult::advance();
       }
 

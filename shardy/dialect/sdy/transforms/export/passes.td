@@ -140,6 +140,23 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     ];
 }
 
+def SplitReshardingDimensionsPass : Pass<"sdy-split-resharding-dimensions", "func::FuncOp"> {
+  let summary = "Splits sharded dimensions of ReshardOps to prepare for reshard-to-collectives.";
+  let description = [{
+    Splits tensor dimensions (via stablehlo.reshape) to isolate sharding axes
+    mapping to different target dimensions.
+
+    For example, `\[{"x", "y"}, {} \] -> \[{"x"}, {"y"} \]` is split into
+    `\[{"x"}, {"y"}, {} \] -> \[{"x"}, {"y"}, {} \]` (via a reshape to 3D) before resharding.
+
+    This ensures each dimension maps to at most one target dimension, allowing
+    `sdy-reshard-to-collectives` to lower them to optimized collectives (e.g.,
+    All-to-All) without landing order conflicts. We only split when axes can
+    be aligned using logical reshapes alone without transposes.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+}
+
 def VerifyUnreducedAxesPass : Pass<"sdy-verify-unreduced-axes", "func::FuncOp"> {
   let summary = "Verifies the consistency of unreduced axis usage.";
   let description = [{

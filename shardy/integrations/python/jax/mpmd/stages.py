@@ -439,7 +439,7 @@ class MpmdLowered(stages.Lowered):
   def __init__(
       self,
       stablehlo_mlir_module: jax_mlir.ir.Module,
-      partitioning_result: PartitioningResult,
+      partitioning_result: PartitioningResult | None,
       *,
       jax_fn_info: utils.JaxFunctionInfo,
       args_info: jaxtyping.PyTree[stages.ArgInfo],
@@ -447,6 +447,12 @@ class MpmdLowered(stages.Lowered):
       topology: mpmd_types.Topology,
       name_to_mesh_map: mpmd_types.NameToMeshAssignment,
       flat_input_mesh_assignment: Sequence[str] | None = None,
+      _unpartitioned_mlir_module: jax_mlir.ir.Module | None = None,
+      _partitioning_args: Any = None,
+      _lowered_args: Any = None,
+      _mpmd_config: Any = None,
+      _apply_partitioning_fn: Any = None,
+      _partition_with_pipeline_schedule_fn: Any = None,
   ):
     """Initializes an MpmdLowered object.
 
@@ -479,6 +485,31 @@ class MpmdLowered(stages.Lowered):
     self.input_tree = jax_fn_info.input_tree
     self.output_tree = jax_fn_info.output_tree
     self.kept_inputs_indices = jax_fn_info.kept_inputs_indices
+
+    self._unpartitioned_mlir_module = _unpartitioned_mlir_module
+    self._partitioning_args = _partitioning_args
+    self._lowered_args = _lowered_args
+    self._mpmd_config = _mpmd_config
+    self._apply_partitioning_fn = _apply_partitioning_fn
+    self._partition_with_pipeline_schedule_fn = (
+        _partition_with_pipeline_schedule_fn
+    )
+
+    if partitioning_result is None:
+      self.const_shardings = []
+      self.function_mesh_assignment = mpmd_types.FunctionIOMeshAssignment(
+          (), ()
+      )
+      self.function_named_shardings = utils.FunctionNamedShardings((), ())
+      self.sharding_info = MpmdJitShardingInfo(
+          self.function_named_shardings,
+          self.function_mesh_assignment,
+          topology,
+          name_to_mesh_map,
+      )
+      self.no_kwargs = True
+      self.mpmd_module = None
+      return
 
     meshes_and_specs = partitioning_result.module_io_sharding_specs_and_meshes
     nr_const_args = len(self.const_args)
@@ -535,12 +566,44 @@ class MpmdLowered(stages.Lowered):
 
     self.mpmd_module = partitioning_result.mpmd_module
 
+  def run_mpmd_partitioning(self) -> 'MpmdLowered':
+    if self.partitioning_result is not None:
+      return self
+    mlir_module = jaxlib_mpmd.clone_mlir_module(self._unpartitioned_mlir_module)
+    if self._mpmd_config.pipeline_schedule:
+      partitioning_result = self._partition_with_pipeline_schedule_fn(
+          mlir_module, self._partitioning_args
+      )
+    else:
+      partitioning_result = self._apply_partitioning_fn(
+          mlir_module, self._partitioning_args
+      )
+    ifrt_ir_module = jaxlib_mpmd.clone_mlir_module(
+        partitioning_result.mpmd_module
+    )
+    jaxlib_mpmd.lower_to_ifrt(ifrt_ir_module)
+    return self.__class__(
+        stablehlo_mlir_module=self._lowered_args.stablehlo_mlir_module,
+        partitioning_result=PartitioningResult(
+            partitioning_result.module_io_sharding_specs_and_meshes,
+            ifrt_ir_module,
+            partitioning_result.mpmd_module,
+        ),
+        jax_fn_info=self._lowered_args.jax_fn_info,
+        args_info=self._lowered_args.args_info,
+        lowering_metadata={},
+        topology=self._lowered_args.topology,
+        name_to_mesh_map=self._lowered_args.name_to_mesh_map,
+        flat_input_mesh_assignment=self._lowered_args.flat_input_mesh_assignment,
+    )
+
   def _get_compile_options(
       self,
       compiler_options: (
           stages.CompilerOptions | mpmd_types.MeshToCompileOptions | None
       ) = None,
   ) -> dict[str, jax.stages.CompilerOptions]:
+    assert self.partitioning_result is not None
     option_overrides = {}
     if compiler_options:
       if any(isinstance(v, dict) for v in compiler_options.values()):
@@ -594,6 +657,14 @@ class MpmdLowered(stages.Lowered):
     Raises:
       ValueError: if the function has already been compiled.
     """
+    if self.partitioning_result is None:
+      return self.run_mpmd_partitioning().compile(
+          compiler_options=compiler_options,
+          ifrt_ir_compile_options=ifrt_ir_compile_options,
+          device_assignment=device_assignment,
+      )
+    assert self.partitioning_result is not None
+    assert self.function_named_shardings is not None
     if device_assignment is None:
       in_shardings = self.function_named_shardings.input_specs
       flat_out_shardings = jax.tree.leaves(
@@ -691,6 +762,7 @@ class MpmdLowered(stages.Lowered):
   def as_text(
       self, dialect: str | None = None, *, debug_info: bool = False
   ) -> str:
+    assert self.partitioning_result is not None
     # Return IFRT IR by default.
     if dialect is None or dialect == 'ifrt':
       return jax_mlir.module_to_string(
@@ -709,6 +781,7 @@ class MpmdLowered(stages.Lowered):
     raise ValueError(f'Unsupported dialect: {dialect}')
 
   def compiler_ir(self, dialect: str | None = None) -> jax_mlir.ir.Module:
+    assert self.partitioning_result is not None
     # Return IFRT IR by default.
     if dialect is None or dialect == 'ifrt':
       return self.partitioning_result.ifrt_ir_module

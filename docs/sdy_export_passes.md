@@ -238,6 +238,21 @@ _Sinks all `FuncDataFlowEdgeOp` into their input._
 Moves the sharding of each `FuncDataFlowEdgeOp` to its input and replaces
 the op with its input.
 
+### `-sdy-split-resharding-dimensions`
+
+_Splits sharded dimensions of ReshardOps to prepare for reshard-to-collectives._
+
+Splits tensor dimensions (via stablehlo.reshape) to isolate sharding axes
+mapping to different target dimensions.
+
+For example, `\[{"x", "y"}, {} \] -> \[{"x"}, {"y"} \]` is split into
+`\[{"x"}, {"y"}, {} \] -> \[{"x"}, {"y"}, {} \]` (via a reshape to 3D) before resharding.
+
+This ensures each dimension maps to at most one target dimension, allowing
+`sdy-reshard-to-collectives` to lower them to optimized collectives (e.g.,
+All-to-All) without landing order conflicts. We only split when axes can
+be aligned using logical reshapes alone without transposes.
+
 ### `-sdy-unflatten-call-graph`
 
 _Unflattens the call graph._
