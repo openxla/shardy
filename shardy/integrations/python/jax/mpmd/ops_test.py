@@ -18,10 +18,40 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
+from jax._src import core
+from jax.experimental import hijax
 import jax.numpy as jnp
 import numpy as np
 
 from shardy.integrations.python.jax.mpmd import ops
+
+
+class Square(hijax.VJPHiPrimitive):
+  """Simple parameterless hijax primitive for use in tests."""
+
+  def __init__(self, in_aval):
+    self.in_avals = (in_aval,)
+    self.out_aval = in_aval
+    self.params = {}
+    super().__init__()
+
+  def expand(self, x):
+    return x**2
+
+  def jvp(self, primals, tangents):
+    (x,), (t,) = primals, tangents
+    return self(x), t * 2.0 * x
+
+  def vjp_fwd(self, nzs_in, x):
+    return (self(x), x)
+
+  def vjp_bwd_retval(self, res, t):
+    return (t * 2.0 * res,)
+
+
+def square(x):
+  """Bind a hijax primitive that returns the square of x."""
+  return Square(core.typeof(x))(x)
 
 
 class NamedComputationTest(absltest.TestCase):
@@ -94,6 +124,28 @@ class NamedComputationTest(absltest.TestCase):
     # named_comp has only one arg, because second arg is static
     self.assertRegex(static_l.as_text(), r'func.*named_computation.*arg0')
     self.assertNotRegex(static_l.as_text(), r'func.*named_computation.*arg1')
+
+  def test_named_computation_with_hijax(self):
+    x = jnp.ones((2, 3), dtype=jnp.float32)
+
+    def f(arr):
+      return square(arr)
+
+    @jax.jit
+    def test_fn(arr):
+      return ops.named_computation(f, name='my_named_comp')(arr)
+
+    res = test_fn(x)
+    np.testing.assert_array_equal(res, x**2)
+
+    traced = test_fn.trace(x)
+    self.assertTrue(
+        traced.jaxpr.is_high, 'Initial jaxpr should contain hi-primitives'
+    )
+    lojaxpr = traced.lojax.jaxpr
+    self.assertFalse(
+        lojaxpr.is_high, 'Lowered jaxpr should not contain hi-primitives'
+    )
 
 
 class NamedTensorTest(absltest.TestCase):

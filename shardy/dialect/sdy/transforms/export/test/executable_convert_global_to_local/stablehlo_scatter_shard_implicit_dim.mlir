@@ -60,19 +60,12 @@ func.func @main() {
   %seq = func.call @sequential_scatter(%input, %indices, %updates)
     : (tensor<4x2xf32>, tensor<2x1xi64>, tensor<2x2xf32>) -> tensor<4x2xf32>
 
-  // TODO(b/500779239): Remove this once the bug is fixed.
-  //
-  // The interpreter currently has an unexpected side effect of modifying the
-  // input tensor. To work around this, we define a new input tensor for the
-  // parallel run.
-  %input_par = stablehlo.constant dense<1.0> : tensor<4x2xf32>
-
   %idx0 = "stablehlo.slice"(%indices) {start_indices=array<i64: 0,0>, limit_indices=array<i64: 1,1>, strides=array<i64: 1,1>} : (tensor<2x1xi64>) -> tensor<1x1xi64>
   %upd0 = "stablehlo.slice"(%updates) {start_indices=array<i64: 0,0>, limit_indices=array<i64: 1,2>, strides=array<i64: 1,1>} : (tensor<2x2xf32>) -> tensor<1x2xf32>
   %idx1 = "stablehlo.slice"(%indices) {start_indices=array<i64: 1,0>, limit_indices=array<i64: 2,1>, strides=array<i64: 1,1>} : (tensor<2x1xi64>) -> tensor<1x1xi64>
   %upd1 = "stablehlo.slice"(%updates) {start_indices=array<i64: 1,0>, limit_indices=array<i64: 2,2>, strides=array<i64: 1,1>} : (tensor<2x2xf32>) -> tensor<1x2xf32>
 
-  %pars:2 = "interpreter.run_parallel"(%input_par, %idx0, %upd0, %input_par, %idx1, %upd1) {
+  %pars:2 = "interpreter.run_parallel"(%input, %idx0, %upd0, %input, %idx1, %upd1) {
     programs = [[@parallel_scatter, @parallel_scatter]]
   } : (tensor<4x2xf32>, tensor<1x1xi64>, tensor<1x2xf32>, tensor<4x2xf32>, tensor<1x1xi64>, tensor<1x2xf32>)
     -> (tensor<4x2xf32>, tensor<4x2xf32>)

@@ -86,6 +86,11 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       *this, "update-non-divisible-input-output-shardings",
       llvm::cl::desc("Update axes with non-divisible input/output shardings."),
       llvm::cl::init(true)};
+
+  Option<bool> disableSplitReshardingDimensions{
+      *this, "disable-split-resharding-dimensions",
+      llvm::cl::desc("Disable splitting sharded dimensions in ReshardOps."),
+      llvm::cl::init(false)};
 };
 
 // Adds a sequence of export passes needed as a post-processing step for SDY
