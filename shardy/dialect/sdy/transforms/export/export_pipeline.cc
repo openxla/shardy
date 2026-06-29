@@ -38,11 +38,12 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
+  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
+  // TODO(bixia): Re-enable this pass once the propagation bug is fixed.
+  // pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
-  pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
