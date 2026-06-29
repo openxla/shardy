@@ -38,15 +38,19 @@ void addCanonicalizerPass(OpPassManager& pm,
 
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
+  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
+  pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
-  pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
     addCanonicalizerPass(pm, kReshardLabel);
+    SplitReshardingDimensionsPassOptions splitOptions;
+    splitOptions.disable = options.disableSplitReshardingDimensions;
+    pm.addNestedPass<func::FuncOp>(
+        createSplitReshardingDimensionsPass(splitOptions));
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     // NOTE: ReshardToCollectives pass above generates all-slice collectives,
     // which during the canonicalizer below may be converted to reduce scatters
