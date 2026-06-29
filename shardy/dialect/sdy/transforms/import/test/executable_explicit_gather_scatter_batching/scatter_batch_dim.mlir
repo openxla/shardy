@@ -33,9 +33,7 @@ func.func @main() {
   %transformed = func.call @transformed_scatter(%operand, %offset, %updates)
       : (tensor<4x8xi32>, tensor<4x1xi32>, tensor<4xi32>) -> tensor<4x8xi32>
 
-  // Separate operand due to interpreter scatter side effect (b/500779239).
-  %operand2 = stablehlo.constant dense<0> : tensor<4x8xi32>
-  %original = func.call @original_scatter(%operand2, %offset, %updates)
+  %original = func.call @original_scatter(%operand, %offset, %updates)
       : (tensor<4x8xi32>, tensor<4x1xi32>, tensor<4xi32>) -> tensor<4x8xi32>
 
   "check.expect_eq"(%transformed, %original)
