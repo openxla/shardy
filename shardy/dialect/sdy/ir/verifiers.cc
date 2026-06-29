@@ -1090,6 +1090,10 @@ LogicalResult PropagationBarrierOp::verify() {
 namespace {
 
 LogicalResult verifyEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
+  if (isa<FuncDataFlowEdgeOp>(op)) {
+    return success();
+  }
+
   if (edgeValueRef.getType() == EdgeNodeType::RESULT) {
     int64_t index = edgeValueRef.getIndex();
     if (index < 0 || index >= op->getNumResults()) {
