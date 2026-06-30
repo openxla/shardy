@@ -77,9 +77,22 @@ void printOptionalNamedAxisList(AsmPrinter& printer, StringRef keyword,
 
 void printReplicatedAndUnreducedAxes(AsmPrinter& printer,
                                      ArrayRef<AxisRefAttr> replicatedAxes,
-                                     ArrayRef<AxisRefAttr> unreducedAxes) {
+                                     ArrayRef<AxisRefAttr> unreducedAxes,
+                                     ReductionOp reductionOp) {
   printOptionalNamedAxisList(printer, "replicated", replicatedAxes);
-  printOptionalNamedAxisList(printer, "unreduced", unreducedAxes);
+  if (!unreducedAxes.empty()) {
+    printer << ", unreduced=";
+    if (reductionOp != ReductionOp::SUM) {
+      if (reductionOp == ReductionOp::MAX) {
+        printer << "max";
+      } else if (reductionOp == ReductionOp::MIN) {
+        printer << "min";
+      }
+    }
+    printer << "{";
+    printer.printStrippedAttrOrType(unreducedAxes);
+    printer << "}";
+  }
 }
 
 void printFactorSizes(AsmPrinter& printer, ArrayRef<int64_t> factorSizes) {

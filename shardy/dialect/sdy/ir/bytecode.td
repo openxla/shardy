@@ -125,6 +125,12 @@ def Sdy_TensorShardingAttrV1Bc : DialectAttribute<(attr
 //===----------------------------------------------------------------------===//
 // TensorShardingAttr V2 - assigned index 15
 //===----------------------------------------------------------------------===//
+def Sdy_ReductionOpBc :
+  WithParser <"succeeded(([&]() -> LogicalResult { int64_t val = 0; if (failed($_reader.readSignedVarInt(val))) return failure(); $_var = static_cast<ReductionOp>(val); return success(); })())",
+  WithBuilder<"$_args",
+  WithPrinter<"$_writer.writeSignedVarInt(static_cast<int64_t>($_getter))",
+  WithType   <"ReductionOp">>>>;
+
 def Sdy_TensorShardingAttrV2Bc : DialectAttribute<(attr
   Attribute:$mesh_or_ref,
   Array<Sdy_DimensionShardingAttrBc>:$dim_shardings,
@@ -132,7 +138,21 @@ def Sdy_TensorShardingAttrV2Bc : DialectAttribute<(attr
   Array<Sdy_AxisRefAttrBc>:$unreduced_axes
 )> {
   let cType = "TensorShardingAttr";
-  let printerPredicate = "!$_val.getUnreducedAxes().empty()";
+  let cBuilder = [{
+    $_resultType::get(context, mesh_or_ref, dim_shardings, replicated_axes, unreduced_axes, ReductionOp::SUM)
+  }];
+  let printerPredicate = "!$_val.getUnreducedAxes().empty() && $_val.getReductionOp() == ReductionOp::SUM";
+}
+
+def Sdy_TensorShardingAttrV3Bc : DialectAttribute<(attr
+  Attribute:$mesh_or_ref,
+  Array<Sdy_DimensionShardingAttrBc>:$dim_shardings,
+  Array<Sdy_AxisRefAttrBc>:$replicated_axes,
+  Array<Sdy_AxisRefAttrBc>:$unreduced_axes,
+  Sdy_ReductionOpBc:$reduction_op
+)> {
+  let cType = "TensorShardingAttr";
+  let printerPredicate = "!$_val.getUnreducedAxes().empty() && $_val.getReductionOp() != ReductionOp::SUM";
 }
 
 //===----------------------------------------------------------------------===//
@@ -252,6 +272,7 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
     /*index 14*/ Sdy_AllToAllParamListAttrBc,
     /*index 15*/ Sdy_TensorShardingAttrV2Bc,
     /*index 16*/ Sdy_TensorShardingPerValueAttrV2Bc,
+    /*index 17*/ Sdy_TensorShardingAttrV3Bc
   ];
 }
 #endif // SDY_BYTECODE

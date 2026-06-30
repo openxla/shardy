@@ -829,7 +829,7 @@ TensorShardingAttr TensorShardingAttr::replaceUnreducedAxes(
     ArrayRef<AxisRefAttr> unreducedAxes) const {
   return TensorShardingAttr::get(getContext(), getMeshOrRef(),
                                  getDimShardings(), getReplicatedAxes(),
-                                 unreducedAxes);
+                                 unreducedAxes, getReductionOp());
 }
 
 TensorShardingAttr TensorShardingAttr::getSharded(int64_t dim,

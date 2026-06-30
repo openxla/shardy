@@ -38,7 +38,7 @@ def AllGatherNoopPattern : Pat<(Sdy_AllGatherOp $tensor, Sdy_EmptyAxesPerDim:$ga
 def AllSliceNoopPattern : Pat<(Sdy_AllSliceOp $tensor, Sdy_EmptyAxesPerDim:$slicingAxes, $outSharding),
                                (replaceWithValue $tensor)>;
 
-def AllReduceNoopPattern : Pat<(Sdy_AllReduceOp $tensor, Sdy_EmptyAxisList:$reductionAxes, $resultSharding),
+def AllReduceNoopPattern : Pat<(Sdy_AllReduceOp $tensor, Sdy_EmptyAxisList:$reductionAxes, $reductionOp, $resultSharding),
                                (replaceWithValue $tensor)>;
 
 def CollectivePermuteNoopPattern : Pat<
@@ -47,7 +47,7 @@ def CollectivePermuteNoopPattern : Pat<
   [(TensorShardingEquivalent $tensor, $out_sharding)]>;
 
 def ReduceScatterNoopPattern : Pat<
-  (Sdy_ReduceScatterOp $tensor, Sdy_EmptyAxesPerDim:$reduceScatterAxes, $outSharding),
+  (Sdy_ReduceScatterOp $tensor, Sdy_EmptyAxesPerDim:$reduceScatterAxes, $reductionOp, $outSharding),
   (replaceWithValue $tensor)>;
 
 def AllSliceOfAllGatherPattern : Pat<
@@ -56,7 +56,7 @@ def AllSliceOfAllGatherPattern : Pat<
   [(Constraint<AllMatchPred<["gatheringAxes", "slicingAxes"]>, "axes match">)]>;
 
 def AllReduceOfReplicatedToUnreducedPattern : Pat<
-  (Sdy_AllReduceOp (Sdy_ReplicatedToUnreducedOp $tensor, $r2u_axes, $_), $u2r_axes, $_),
+  (Sdy_AllReduceOp (Sdy_ReplicatedToUnreducedOp $tensor, $r2u_axes, $_), $u2r_axes, $reductionOp, $_),
   (replaceWithValue $tensor),
   [(Constraint<AllMatchPred<["r2u_axes", "u2r_axes"]>, "axes match">)]>;
 

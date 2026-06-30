@@ -46,6 +46,38 @@ using namespace mlir::sdy;
 
 namespace {
 
+SmallVector<AxisRefAttr> getUnreducedAxesV2(TensorShardingAttr attr) {
+  if (attr.getReductionOp() != ReductionOp::SUM) {
+    return {};
+  }
+  return SmallVector<AxisRefAttr>(attr.getUnreducedAxes().begin(),
+                                  attr.getUnreducedAxes().end());
+}
+
+void writeTensorShardingAttrV2(TensorShardingAttr attr,
+                               DialectBytecodeWriter& writer) {
+  writer.writeVarInt(15);
+  writer.writeAttribute(attr.getMeshOrRef());
+  writer.writeList(attr.getDimShardings(),
+                   [&](DimensionShardingAttr dimSharding) {
+                     writer.writeAttribute(dimSharding);
+                   });
+  writer.writeList(attr.getReplicatedAxes(), [&](AxisRefAttr replicatedAxis) {
+    writer.writeAttribute(replicatedAxis);
+  });
+  writer.writeList(getUnreducedAxesV2(attr), [&](AxisRefAttr unreducedAxis) {
+    writer.writeAttribute(unreducedAxis);
+  });
+}
+
+void writeTensorShardingPerValueAttrV2(TensorShardingPerValueAttr attr,
+                                       DialectBytecodeWriter& writer) {
+  writer.writeVarInt(16);
+  writer.writeList(attr.getShardings(), [&](TensorShardingAttr sharding) {
+    writer.writeAttribute(sharding);
+  });
+}
+
 #include "shardy/dialect/sdy/ir/bytecode.cc.inc"
 
 /// This class implements the bytecode interface for the SDY dialect.
@@ -62,6 +94,26 @@ struct SdyDialectBytecodeInterface : public BytecodeDialectInterface {
 
   LogicalResult writeAttribute(Attribute attr,
                                DialectBytecodeWriter &writer) const override {
+    auto versionOrFailed = writer.getDialectVersion("sdy");
+    if (succeeded(versionOrFailed)) {
+      const auto* sdyVersion =
+          static_cast<const SdyDialectVersion*>(*versionOrFailed);
+      if (sdyVersion->getMajor() == 0 && sdyVersion->getMinor() == 0 &&
+          sdyVersion->getPatch() == 1) {
+        if (auto shardingAttr = dyn_cast<TensorShardingAttr>(attr)) {
+          if (!shardingAttr.getUnreducedAxes().empty()) {
+            writeTensorShardingAttrV2(shardingAttr, writer);
+            return success();
+          }
+        } else if (auto perValueAttr =
+                       dyn_cast<TensorShardingPerValueAttr>(attr)) {
+          if (perValueAttr.anyShardingHasUnreducedAxes()) {
+            writeTensorShardingPerValueAttrV2(perValueAttr, writer);
+            return success();
+          }
+        }
+      }
+    }
     auto result = ::writeAttribute(attr, writer);
     if (failed(result)) {
       LOG_NOT_IMPLEMENTED(attr);

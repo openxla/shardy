@@ -670,10 +670,11 @@ def Sdy_AllReduceOp: Sdy_Op<"all_reduce",
   let arguments = (ins
     AnyShaped:$tensor,
     Sdy_AxisRefList:$reduction_axes,
+    DefaultValuedAttr<Sdy_ReductionOp, "::mlir::sdy::ReductionOp::SUM">:$reduction_op,
     Sdy_TensorSharding:$out_sharding
   );
   let results = (outs AnyShaped:$result);
-  let assemblyFormat = "$reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "($reduction_op^)? $reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasCanonicalizer = 1;
 }
 
@@ -700,10 +701,11 @@ def Sdy_ReduceScatterOp: Sdy_Op<"reduce_scatter",
   let arguments = (ins
     AnyShaped:$tensor,
     Sdy_ListOfAxisRefLists:$reduce_scatter_axes,
+    DefaultValuedAttr<Sdy_ReductionOp, "::mlir::sdy::ReductionOp::SUM">:$reduction_op,
     Sdy_TensorSharding:$out_sharding
   );
   let results = (outs AnyShaped:$result);
-  let assemblyFormat = "$reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
+  let assemblyFormat = "($reduction_op^)? $reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)";
   let hasCanonicalizer = 1;
 }
 

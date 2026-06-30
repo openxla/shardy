@@ -109,7 +109,13 @@ NB_MODULE(_sdy, m) {
   // Attributes.
   //
 
+  nb::enum_<sdy::ReductionOp>(m, "ReductionOp")
+      .value("SUM", sdy::ReductionOp::SUM)
+      .value("MAX", sdy::ReductionOp::MAX)
+      .value("MIN", sdy::ReductionOp::MIN);
+
   mlir::python::nanobind_adaptors::mlir_attribute_subclass(
+
       m, "MeshAxisAttr", sdyAttributeIsAMeshAxisAttr)
       .def_classmethod(
           "get",
@@ -232,17 +238,19 @@ NB_MODULE(_sdy, m) {
              const std::variant<std::string, MlirAttribute>& meshOrRef,
              const std::vector<MlirAttribute>& dimensionShardings,
              const std::vector<MlirAttribute>& replicatedAxes,
-             const std::vector<MlirAttribute>& unreducedAxes, MlirContext ctx) {
+             const std::vector<MlirAttribute>& unreducedAxes,
+             sdy::ReductionOp reductionOp, MlirContext ctx) {
             return cls(sdyTensorShardingAttrGet(
                 ctx, toMeshOrRefAttr(ctx, meshOrRef), dimensionShardings.size(),
                 dimensionShardings.data(), replicatedAxes.size(),
                 replicatedAxes.data(), unreducedAxes.size(),
-                unreducedAxes.data()));
+                unreducedAxes.data(), static_cast<uint32_t>(reductionOp)));
           },
           nb::arg("cls"), nb::arg("mesh_or_ref"),
           nb::arg("dimension_shardings"),
           nb::arg("replicated_axes") = std::vector<MlirAttribute>(),
           nb::arg("unreduced_axes") = std::vector<MlirAttribute>(),
+          nb::arg("reduction_op") = sdy::ReductionOp::SUM,
           nb::arg("context").none() = nb::none(),
           "Creates a TensorShardingAttr with either an inlined mesh or mesh "
           "name, dimension shardings, and replicated axes.")
@@ -264,10 +272,16 @@ NB_MODULE(_sdy, m) {
                                    sdyTensorShardingAttrGetReplicatedAxesSize,
                                    sdyTensorShardingAttrGetReplicatedAxesElem);
                              })
-      .def_property_readonly("unreduced_axes", [](MlirAttribute self) {
-        return propertyVector<MlirAttribute>(
-            self, sdyTensorShardingAttrGetUnreducedAxesSize,
-            sdyTensorShardingAttrGetUnreducedAxesElem);
+      .def_property_readonly("unreduced_axes",
+                             [](MlirAttribute self) {
+                               return propertyVector<MlirAttribute>(
+                                   self,
+                                   sdyTensorShardingAttrGetUnreducedAxesSize,
+                                   sdyTensorShardingAttrGetUnreducedAxesElem);
+                             })
+      .def_property_readonly("reduction_op", [](MlirAttribute self) {
+        return static_cast<sdy::ReductionOp>(
+            sdyTensorShardingAttrGetReductionOp(self));
       });
 
   mlir::python::nanobind_adaptors::mlir_attribute_subclass(

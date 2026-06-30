@@ -184,24 +184,29 @@ int64_t sdyDimensionShardingAttrGetPriority(MlirAttribute attr) {
 
 //===----------------------------------------------------------------------===//
 // TensorShardingAttr
+
 //===----------------------------------------------------------------------===//
 
 bool sdyAttributeIsATensorShardingAttr(MlirAttribute attr) {
   return mlir::isa<sdy::TensorShardingAttr>(unwrap(attr));
 }
 
-MlirAttribute sdyTensorShardingAttrGet(MlirContext ctx, MlirAttribute meshOrRef,
-                                       intptr_t nDimShardings,
-                                       const MlirAttribute* dimShardings,
-                                       intptr_t nReplicatedAxes,
-                                       const MlirAttribute* replicatedAxes,
-                                       intptr_t nunreducedAxes,
-                                       const MlirAttribute* unreducedAxes) {
+MlirAttribute sdyTensorShardingAttrGet(
+    MlirContext ctx, MlirAttribute meshOrRef, intptr_t nDimShardings,
+    const MlirAttribute* dimShardings, intptr_t nReplicatedAxes,
+    const MlirAttribute* replicatedAxes, intptr_t nunreducedAxes,
+    const MlirAttribute* unreducedAxes, uint32_t reductionOp) {
   return wrap(sdy::TensorShardingAttr::get(
       unwrap(ctx), unwrap(meshOrRef),
       unwrapAttrs<sdy::DimensionShardingAttr>(dimShardings, nDimShardings),
       unwrapAttrs<sdy::AxisRefAttr>(replicatedAxes, nReplicatedAxes),
-      unwrapAttrs<sdy::AxisRefAttr>(unreducedAxes, nunreducedAxes)));
+      unwrapAttrs<sdy::AxisRefAttr>(unreducedAxes, nunreducedAxes),
+      static_cast<sdy::ReductionOp>(reductionOp)));
+}
+
+uint32_t sdyTensorShardingAttrGetReductionOp(MlirAttribute attr) {
+  return static_cast<uint32_t>(
+      unwrapAttr<sdy::TensorShardingAttr>(attr).getReductionOp());
 }
 
 MlirAttribute sdyTensorShardingAttrGetMeshOrRef(MlirAttribute attr) {

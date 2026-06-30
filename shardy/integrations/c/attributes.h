@@ -27,6 +27,8 @@ extern "C" {
 #endif
 
 //===----------------------------------------------------------------------===//
+// TensorShardingAttr
+//===----------------------------------------------------------------------===//
 // MeshAxisAttr
 //===----------------------------------------------------------------------===//
 
@@ -126,7 +128,10 @@ MLIR_CAPI_EXPORTED MlirAttribute sdyTensorShardingAttrGet(
     MlirContext ctx, MlirAttribute meshOrRef, intptr_t nDimShardings,
     const MlirAttribute* dimShardings, intptr_t nReplicatedAxes,
     const MlirAttribute* replicatedAxes, intptr_t nUnreducedAxes,
-    const MlirAttribute* unreducedAxes);
+    const MlirAttribute* unreducedAxes, uint32_t reductionOp);
+
+MLIR_CAPI_EXPORTED uint32_t
+sdyTensorShardingAttrGetReductionOp(MlirAttribute attr);
 
 MLIR_CAPI_EXPORTED MlirAttribute
 sdyTensorShardingAttrGetMeshOrRef(MlirAttribute attr);

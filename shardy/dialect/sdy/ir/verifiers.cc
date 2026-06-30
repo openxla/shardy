@@ -1429,8 +1429,9 @@ LogicalResult ShardedToUnreducedOp::verifySymbolUses(
   }
 
   // out_unreduced_axes should be in_unreduced_axes + sharded_to_unreduced_axes.
-  SmallVector<AxisRefAttr> expectedUnreducedAxes =
-      llvm::to_vector(getSharding(getOperand()).getUnreducedAxes());
+  SmallVector<AxisRefAttr> expectedUnreducedAxes(
+      getSharding(getOperand()).getUnreducedAxes().begin(),
+      getSharding(getOperand()).getUnreducedAxes().end());
   for (AxisRefListAttr shardedToUnreducedAxes : getAxes()) {
     expectedUnreducedAxes.append(shardedToUnreducedAxes.getValue().begin(),
                                  shardedToUnreducedAxes.getValue().end());
@@ -1438,7 +1439,12 @@ LogicalResult ShardedToUnreducedOp::verifySymbolUses(
   MeshAttr mesh = getOutSharding().getMesh(symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>()));
   sortAndMergeAxes(expectedUnreducedAxes, mesh);
-  if (expectedUnreducedAxes != getOutSharding().getUnreducedAxes()) {
+
+  SmallVector<AxisRefAttr> outUnreducedAxes(
+      getOutSharding().getUnreducedAxes().begin(),
+      getOutSharding().getUnreducedAxes().end());
+
+  if (expectedUnreducedAxes != outUnreducedAxes) {
     return emitOpError(
         "out_unreduced_axes should be in_unreduced_axes + "
         "sharded_to_unreduced_axes");
@@ -1499,8 +1505,12 @@ LogicalResult ReplicatedToUnreducedOp::verifySymbolUses(
     }
   }
 
-  ArrayRef<AxisRefAttr> inUnreducedAxes = operandSharding.getUnreducedAxes();
-  ArrayRef<AxisRefAttr> outUnreducedAxes = resultSharding.getUnreducedAxes();
+  SmallVector<AxisRefAttr> inUnreducedAxes(
+      operandSharding.getUnreducedAxes().begin(),
+      operandSharding.getUnreducedAxes().end());
+  SmallVector<AxisRefAttr> outUnreducedAxes(
+      resultSharding.getUnreducedAxes().begin(),
+      resultSharding.getUnreducedAxes().end());
   SmallVector<AxisRefAttr> expectedOutUnreducedAxes =
       llvm::to_vector(inUnreducedAxes);
   expectedOutUnreducedAxes.append(r2uAxes.begin(), r2uAxes.end());
