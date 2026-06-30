@@ -48,6 +48,8 @@ void populateExportOptions(ExportOptions& options,
   options.avoidReshardsOnCalls = propOptions.dedupFunctionsFully;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
+  options.disableSplitReshardingDimensions =
+      propOptions.disableSplitReshardingDimensions;
 }
 
 }  // namespace
@@ -115,6 +117,11 @@ struct PropagationOptionsOptions
       *this, "dedup-functions-fully",
       llvm::cl::desc("Whether to dedup functions fully."),
       llvm::cl::init(false)};
+
+  Option<bool> disableSplitReshardingDimensions{
+      *this, "disable-split-resharding-dimensions",
+      llvm::cl::desc("Disable splitting sharded dimensions."),
+      llvm::cl::init(false)};
 };
 
 void registerPropagationPipeline() {
@@ -125,6 +132,8 @@ void registerPropagationPipeline() {
       [](OpPassManager& pm, const PropagationOptionsOptions& options) {
         PropagationOptions propOptions;
         propOptions.dedupFunctionsFully = options.dedupFunctionsFully;
+        propOptions.disableSplitReshardingDimensions =
+            options.disableSplitReshardingDimensions;
         return addPropagationPipeline(pm, propOptions);
       });
 }
