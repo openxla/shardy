@@ -31,6 +31,7 @@ jobs:
     strategy:
       fail-fast: false
     runs-on: ${{ github.repository == 'openxla/shardy' && 'ubuntu-22.04-64core' ||  'ubuntu-22.04'  }}
+    container: "us-docker.pkg.dev/ml-oss-artifacts-published/ml-public-container/ml-build:latest"
     defaults:
       run:
         shell: bash
