@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
+#include <cstdint>
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/IR/Attributes.h"
@@ -26,6 +27,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -44,6 +46,41 @@ struct InlineMeshesPass : public impl::InlineMeshesPassBase<InlineMeshesPass> {
 
     transformShardings(moduleOp, [&](TensorShardingAttr sharding) {
       return inlineMesh(symbolTable, sharding);
+    });
+
+    moduleOp.walk([&](Operation* op) {
+      if (auto attr = op->getAttr("replica_groups")) {
+        if (auto replicaGroupsAttr =
+                mlir::dyn_cast<mlir::stablehlo::ReplicaGroupMeshAxesAttr>(
+                    attr)) {
+          if (auto symbolRef = mlir::dyn_cast<FlatSymbolRefAttr>(
+                  replicaGroupsAttr.getMesh())) {
+            MeshAttr sdyMesh = getMeshAttr(symbolTable, symbolRef);
+            if (sdyMesh) {
+              SmallVector<mlir::stablehlo::MeshAxisAttr> shloAxes;
+              for (MeshAxisAttr axisAttr : sdyMesh.getAxes()) {
+                shloAxes.push_back(mlir::stablehlo::MeshAxisAttr::get(
+                    axisAttr.getContext(), axisAttr.getName(),
+                    axisAttr.getSize()));
+              }
+              DenseIntElementsAttr deviceIds;
+              if (!sdyMesh.getDeviceIds().empty()) {
+                auto type = RankedTensorType::get(
+                    {static_cast<int64_t>(sdyMesh.getDeviceIds().size())},
+                    Builder(sdyMesh.getContext()).getI64Type());
+                deviceIds =
+                    DenseIntElementsAttr::get(type, sdyMesh.getDeviceIds());
+              }
+              auto shloMeshAttr = mlir::stablehlo::MeshAttr::get(
+                  sdyMesh.getContext(), shloAxes, deviceIds);
+              op->setAttr("replica_groups",
+                          mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
+                              replicaGroupsAttr.getContext(), shloMeshAttr,
+                              replicaGroupsAttr.getAxes()));
+            }
+          }
+        }
+      }
     });
 
     // Remove all MeshOps.
