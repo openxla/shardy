@@ -83,7 +83,8 @@ TensorShardingAttr removeSizeOneAxes(TensorShardingAttr sharding,
   }
 
   return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
-                                 dimShardings, replicatedAxes, unreducedAxes);
+                                 dimShardings, replicatedAxes, unreducedAxes,
+                                 sharding.getReductionOp());
 }
 
 struct RemoveSizeOneAxesPass

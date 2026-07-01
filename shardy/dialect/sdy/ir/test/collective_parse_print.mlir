@@ -296,6 +296,13 @@ func.func @all_reduce(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh
   return %0 : tensor<16x2xf32>
 }
 
+// CHECK-LABEL: func @all_reduce_max
+func.func @all_reduce_max(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: sdy.all_reduce max {"y"} %arg0 out_sharding=<@mesh1, [{}, {"x"}]> :  tensor<16x2xf32>
+  %0 = sdy.all_reduce max {"y"} %arg0 out_sharding=<@mesh1, [{}, {"x"}]> :  tensor<16x2xf32>
+  return %0 : tensor<16x2xf32>
+}
+
 // CHECK-LABEL: func @all_reduce_unreduced_in_sharding
 func.func @all_reduce_unreduced_in_sharding(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {"x"}], unreduced={"y", "z"}>}) -> tensor<16x2xf32> {
   // CHECK-NEXT: sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh2, [{}, {"x"}], replicated={"y"}, unreduced={"z"}> :  tensor<16x2xf32>
@@ -310,7 +317,7 @@ func.func @all_reduce_missing_in_sharding(%arg0 : tensor<16x2xf32>) -> tensor<16
   return %0 : tensor<16x2xf32>
 }
 
-sdy.mesh @mesh_xyzw = <["x"=2, "y"=2, "z"=2, "w"=2]>
+sdy.mesh @mesh_xyzw = <["x"=2, "y"=2, "z"=2, "v"=2, "w"=2, "u"=2]>
 
 // CHECK-LABEL: func @all_reduce_many_axes
 func.func @all_reduce_many_axes(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh_xyzw, [{"y"}, {"x"}]>}) -> tensor<16x2xf32> {
@@ -344,6 +351,13 @@ func.func @all_reduce_output_is_explicitly_replicated(%arg0 : tensor<16x2xf32> {
 func.func @reduce_scatter1(%arg0 : tensor<16xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}]>}) -> tensor<16xf32> {
   // CHECK-NEXT: sdy.reduce_scatter [{"y"}] %arg0 out_sharding=<@mesh1, [{"x", "y"}]> : tensor<16xf32>
   %0 = sdy.reduce_scatter [{"y"}] %arg0 out_sharding=<@mesh1, [{"x", "y"}]> : tensor<16xf32>
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_max
+func.func @reduce_scatter_max(%arg0 : tensor<16xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"x"}]>}) -> tensor<16xf32> {
+  // CHECK-NEXT: sdy.reduce_scatter max [{"y"}] %arg0 out_sharding=<@mesh1, [{"x", "y"}]> : tensor<16xf32>
+  %0 = sdy.reduce_scatter max [{"y"}] %arg0 out_sharding=<@mesh1, [{"x", "y"}]> : tensor<16xf32>
   return %0 : tensor<16xf32>
 }
 

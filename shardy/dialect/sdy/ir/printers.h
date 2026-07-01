@@ -35,7 +35,8 @@ void printMeshOrRef(AsmPrinter& printer, Attribute meshOrRef);
 // order if multiple are present.
 void printReplicatedAndUnreducedAxes(AsmPrinter& printer,
                                      ArrayRef<AxisRefAttr> replicatedAxes,
-                                     ArrayRef<AxisRefAttr> unreducedAxes);
+                                     ArrayRef<AxisRefAttr> unreducedAxes,
+                                     ReductionOp reductionOp);
 
 // Prints the factor sizes of an OpShardingRule. The keys in the list are the
 // indices in the factor mapping, with i=0, j=1, k=2,... z=17. For any index

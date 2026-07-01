@@ -95,7 +95,7 @@ struct SdyDialectVersion : public mlir::DialectVersion {
   }
 
   // Current version of Shardy dialect.
-  static SdyDialectVersion getCurrentVersion() { return {0, 0, 1}; }
+  static SdyDialectVersion getCurrentVersion() { return {0, 0, 2}; }
 
   // Minimum supported version of Shardy dialect.
   static SdyDialectVersion getMinimumVersion() { return {0, 0, 1}; }

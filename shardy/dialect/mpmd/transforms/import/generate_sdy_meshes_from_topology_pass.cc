@@ -131,7 +131,8 @@ class GenerateSdyMeshesFromTopologyPass
           << "Invalid mesh name: " << mesh_name.str();
       return sdy::TensorShardingAttr::get(
           sharding.getContext(), mesh_name, sharding.getDimShardings(),
-          sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+          sharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
+          sharding.getReductionOp());
     });
 
     for (StringRef mesh_name : old_meshes) {

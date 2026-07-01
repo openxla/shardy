@@ -145,11 +145,29 @@ ParseResult parseEqualsAxisList(AsmParser& parser,
   return success();
 }
 
+ParseResult parseAxisList(AsmParser& parser, SmallVector<AxisRefAttr>& axes) {
+  if (parser.parseLBrace()) {
+    return failure();
+  }
+  auto parsedAxes = FieldParser<SmallVector<AxisRefAttr>>::parse(parser);
+  if (failed(parsedAxes)) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "failed to parse axis list which is expected to "
+                            "be an `ArrayRef<AxisRefAttr>`");
+  }
+  if (parser.parseRBrace()) {
+    return failure();
+  }
+  axes = std::move(*parsedAxes);
+  return success();
+}
+
 }  // namespace
 
 ParseResult parseReplicatedAndUnreducedAxes(
     AsmParser& parser, SmallVector<AxisRefAttr>& replicatedAxes,
-    SmallVector<AxisRefAttr>& unreducedAxes) {
+    SmallVector<AxisRefAttr>& unreducedAxes, ReductionOp& reductionOp) {
+  reductionOp = ReductionOp::SUM;
   while (!parser.parseOptionalComma()) {
     if (replicatedAxes.empty() && !parser.parseOptionalKeyword("replicated")) {
       if (parseEqualsAxisList(parser, replicatedAxes)) {
@@ -159,10 +177,27 @@ ParseResult parseReplicatedAndUnreducedAxes(
       }
     } else if (unreducedAxes.empty() &&
                !parser.parseOptionalKeyword("unreduced")) {
-      if (parseEqualsAxisList(parser, unreducedAxes)) {
-        return parser.emitError(
-            parser.getCurrentLocation(),
-            "failed to parse Sdy_TensorSharding parameter 'unreduced_axes'");
+      if (failed(parser.parseOptionalEqual())) {
+        if (parseAxisList(parser, unreducedAxes)) {
+          return parser.emitError(
+              parser.getCurrentLocation(),
+              "failed to parse Sdy_TensorSharding parameter 'unreduced_axes'");
+        }
+      } else {
+        if (succeeded(parser.parseOptionalKeyword("sum"))) {
+          reductionOp = ReductionOp::SUM;
+        } else if (succeeded(parser.parseOptionalKeyword("max"))) {
+          reductionOp = ReductionOp::MAX;
+        } else if (succeeded(parser.parseOptionalKeyword("min"))) {
+          reductionOp = ReductionOp::MIN;
+        } else {
+          reductionOp = ReductionOp::SUM;
+        }
+        if (parseAxisList(parser, unreducedAxes)) {
+          return parser.emitError(
+              parser.getCurrentLocation(),
+              "failed to parse Sdy_TensorSharding parameter 'unreduced_axes'");
+        }
       }
     } else {
       return parser.emitError(parser.getCurrentLocation(),

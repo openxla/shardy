@@ -51,4 +51,16 @@ def Sdy_EdgeNodeType :
   let cppNamespace = Sdy_Dialect.cppNamespace;
 }
 
+def Sdy_ReductionOp :
+    I32EnumAttr<"ReductionOp",
+        "reduction op enum", [
+        I32EnumAttrCase<"SUM", 0, "sum">,
+        I32EnumAttrCase<"MAX", 1, "max">,
+        I32EnumAttrCase<"MIN", 2, "min">]> {
+  let genSpecializedAttr = 1;
+  let cppNamespace = Sdy_Dialect.cppNamespace;
+}
+
 #endif  // SDY_ENUMS
+
+

@@ -636,30 +636,56 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
       OptionalArrayRefParameter<"DimensionShardingAttr",
           "dimension shardings">:$dim_shardings,
       Sdy_AxisRefs:$replicated_axes,
-      Sdy_AxisRefs:$unreduced_axes
+      Sdy_AxisRefs:$unreduced_axes,
+      EnumParameter<Sdy_ReductionOp>:$reduction_op
   );
   let assemblyFormat = [{
     `<` custom<MeshOrRef>($mesh_or_ref) `,` `[` (`]`):($dim_shardings^ `]`)? ``
-        custom<ReplicatedAndUnreducedAxes>($replicated_axes, $unreduced_axes)
+        custom<ReplicatedAndUnreducedAxes>($replicated_axes, $unreduced_axes, $reduction_op)
     `>`
   }];
 
   let builders = [
+    AttrBuilder<(ins "Attribute":$mesh_or_ref,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes,
+                     "ArrayRef<AxisRefAttr>":$unreduced_axes), [{
+      return $_get($_ctxt, mesh_or_ref, dim_shardings, replicated_axes,
+                   unreduced_axes, ReductionOp::SUM);
+    }]>,
+    AttrBuilder<(ins "StringAttr":$mesh_name,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes,
+                     "ArrayRef<AxisRefAttr>":$unreduced_axes,
+                     "ReductionOp":$reduction_op), [{
+      return $_get($_ctxt, FlatSymbolRefAttr::get(mesh_name),
+                   dim_shardings, replicated_axes, unreduced_axes, reduction_op);
+    }]>,
     AttrBuilder<(ins "StringAttr":$mesh_name,
                      "ArrayRef<DimensionShardingAttr>":$dim_shardings,
                      "ArrayRef<AxisRefAttr>":$replicated_axes,
                      "ArrayRef<AxisRefAttr>":$unreduced_axes), [{
       return $_get($_ctxt, FlatSymbolRefAttr::get(mesh_name),
-                   dim_shardings, replicated_axes, unreduced_axes);
+                   dim_shardings, replicated_axes, unreduced_axes, ReductionOp::SUM);
+    }]>,
+    AttrBuilder<(ins "StringRef":$mesh_name,
+                     "ArrayRef<DimensionShardingAttr>":$dim_shardings,
+                     "ArrayRef<AxisRefAttr>":$replicated_axes,
+                     "ArrayRef<AxisRefAttr>":$unreduced_axes,
+                     "ReductionOp":$reduction_op), [{
+      return $_get($_ctxt, FlatSymbolRefAttr::get($_ctxt, mesh_name),
+                   dim_shardings, replicated_axes, unreduced_axes, reduction_op);
     }]>,
     AttrBuilder<(ins "StringRef":$mesh_name,
                      "ArrayRef<DimensionShardingAttr>":$dim_shardings,
                      "ArrayRef<AxisRefAttr>":$replicated_axes,
                      "ArrayRef<AxisRefAttr>":$unreduced_axes), [{
       return $_get($_ctxt, FlatSymbolRefAttr::get($_ctxt, mesh_name),
-                   dim_shardings, replicated_axes, unreduced_axes);
+                   dim_shardings, replicated_axes, unreduced_axes, ReductionOp::SUM);
     }]>,
   ];
+
+
 
   let extraClassDeclaration = [{
     int64_t getRank() const {
