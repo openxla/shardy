@@ -709,3 +709,15 @@ _Propagation direction enum_
 | FORWARD | `1` | FORWARD |
 | BACKWARD | `2` | BACKWARD |
 | BOTH | `3` | BOTH |
+
+### ReductionOp
+
+_Reduction op enum_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| SUM | `0` | sum |
+| MAX | `1` | max |
+| MIN | `2` | min |

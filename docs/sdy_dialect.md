@@ -82,7 +82,7 @@ _Perform an all-reduce comunication along axes_
 Syntax:
 
 ```
-operation ::= `sdy.all_reduce` $reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.all_reduce` ($reduction_op^)? $reduction_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
 ```
 
 Reduces chunks of a tensor along axes specified in `reduction_axes`.
@@ -110,6 +110,7 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
 <tr><td><code>reduction_axes</code></td><td>::mlir::sdy::AxisRefListAttr</td><td>List of axis refs</td></tr>
+<tr><td><code>reduction_op</code></td><td>::mlir::sdy::ReductionOpAttr</td><td>reduction op enum</td></tr>
 <tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
@@ -696,7 +697,7 @@ _Performs a reduce-scatter communication along axes_
 Syntax:
 
 ```
-operation ::= `sdy.reduce_scatter` $reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
+operation ::= `sdy.reduce_scatter` ($reduction_op^)? $reduce_scatter_axes $tensor `out_sharding````=```$out_sharding attr-dict `:` type($result)
 ```
 
 Reduces chunks of a tensor along axes specified in `reduce_scatter_axes`,
@@ -720,6 +721,7 @@ Interfaces: `CollectiveOpInterface`, `InferTypeOpInterface`, `SymbolUserOpInterf
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
 <tr><td><code>reduce_scatter_axes</code></td><td>::mlir::sdy::ListOfAxisRefListsAttr</td><td>List of axis ref lists</td></tr>
+<tr><td><code>reduction_op</code></td><td>::mlir::sdy::ReductionOpAttr</td><td>reduction op enum</td></tr>
 <tr><td><code>out_sharding</code></td><td>::mlir::sdy::TensorShardingAttr</td><td>Tensor sharding</td></tr>
 </table>
 
@@ -1504,7 +1506,8 @@ Syntax:
   ::mlir::Attribute,   # mesh_or_ref
   ::llvm::ArrayRef<DimensionShardingAttr>,   # dim_shardings
   ::llvm::ArrayRef<AxisRefAttr>,   # replicated_axes
-  ::llvm::ArrayRef<AxisRefAttr>   # unreduced_axes
+  ::llvm::ArrayRef<AxisRefAttr>,   # unreduced_axes
+  `sum` | `max` | `min`   # reduction_op
 >
 ```
 
@@ -1557,6 +1560,7 @@ supported in the future.
 | dim_shardings | `::llvm::ArrayRef<DimensionShardingAttr>` | dimension shardings |
 | replicated_axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
 | unreduced_axes | `::llvm::ArrayRef<AxisRefAttr>` | axis refs |
+| reduction_op | `::mlir::sdy::ReductionOp` | an enum of type ReductionOp |
 
 ### TensorShardingPerValueAttr
 
@@ -1606,3 +1610,15 @@ _Propagation direction enum_
 | FORWARD | `1` | FORWARD |
 | BACKWARD | `2` | BACKWARD |
 | BOTH | `3` | BOTH |
+
+### ReductionOp
+
+_Reduction op enum_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| SUM | `0` | sum |
+| MAX | `1` | max |
+| MIN | `2` | min |
