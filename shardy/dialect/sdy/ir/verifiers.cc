@@ -1116,10 +1116,12 @@ LogicalResult verifyEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
 // Returns nullptr if the index is out of bounds.
 Value getValueFromEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
   if (edgeValueRef.getType() == EdgeNodeType::RESULT &&
+      edgeValueRef.getIndex() >= 0 &&
       edgeValueRef.getIndex() < op->getNumResults()) {
     return op->getResult(edgeValueRef.getIndex());
   }
   if (edgeValueRef.getType() == EdgeNodeType::OPERAND &&
+      edgeValueRef.getIndex() >= 0 &&
       edgeValueRef.getIndex() < op->getNumOperands()) {
     return op->getOperand(edgeValueRef.getIndex());
   }
