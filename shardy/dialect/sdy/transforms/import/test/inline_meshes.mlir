@@ -117,3 +117,22 @@ func.func @named_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>)
   } : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<16x32xf32>
   func.return %0: tensor<16x32xf32>
 }
+
+// -----
+
+// CHECK-NOT: sdy.mesh @mesh_0 = <["x"=2]>
+sdy.mesh @mesh_0 = <["x"=2]>
+// CHECK-NOT: sdy.mesh @mesh_1 = <["x"=2], device_ids=[1, 0]>
+sdy.mesh @mesh_1 = <["x"=2], device_ids=[1, 0]>
+
+// CHECK-LABEL: func @lifted_replica_groups(
+// CHECK-SAME: %arg0: tensor<4xf32>)
+func.func @lifted_replica_groups(%arg0: tensor<4xf32>) -> (tensor<4xf32>, tensor<4xf32>) {
+  // CHECK-DAG: return %[[RESULT_0:[^ ]+]], %[[RESULT_1:[^ ]+]] : tensor<4xf32>, tensor<4xf32>
+  // CHECK-DAG: %[[RESULT_0]] = "stablehlo.all_to_all"(%arg0) <{concat_dimension = 0 : i64, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = #stablehlo.mesh<axes=[<name = "x", size = 2>]>, axes = [#stablehlo.axis_ref<name = "x">]>, split_count = 1 : i64, split_dimension = 0 : i64}>
+  // CHECK-DAG: %[[RESULT_1]] = "stablehlo.all_to_all"(%arg0) <{concat_dimension = 0 : i64, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = #stablehlo.mesh<axes=[<name = "x", size = 2>], device_ids=dense<[1, 0]> : tensor<2xi64>>, axes = [#stablehlo.axis_ref<name = "x">]>, split_count = 1 : i64, split_dimension = 0 : i64}>
+  %0 = "stablehlo.all_to_all"(%arg0) <{concat_dimension = 0 : i64, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_0, axes = [#stablehlo.axis_ref<name = "x">]>, split_count = 1 : i64, split_dimension = 0 : i64}> : (tensor<4xf32>) -> tensor<4xf32>
+  %1 = "stablehlo.all_to_all"(%arg0) <{concat_dimension = 0 : i64, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_1, axes = [#stablehlo.axis_ref<name = "x">]>, split_count = 1 : i64, split_dimension = 0 : i64}> : (tensor<4xf32>) -> tensor<4xf32>
+  return %0, %1 : tensor<4xf32>, tensor<4xf32>
+}
+
