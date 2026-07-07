@@ -365,11 +365,11 @@ def _register_named_computation_primitive():
   # Makes it possible to execute eagerly.
   try:
     # JAX v0.10.0 and newer.
-    primitive = jex.core.CallPrimitive('named_computation')
+    primitive = jex.core.CallPrimitive('named_computation')  # pytype: disable=module-attr
     primitive.def_impl(jex.core.call_impl)  # pytype: disable=module-attr
   except AttributeError:
     # JAX v0.9.2 and older.
-    primitive = jax.core.CallPrimitive('named_computation')
+    primitive = jax.core.CallPrimitive('named_computation')  # pytype: disable=module-attr
     primitive.def_impl(jax.core.call_impl)  # pytype: disable=module-attr
 
   def custom_call_transpose(params, *rest, primitive=primitive):
