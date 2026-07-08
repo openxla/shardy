@@ -24,6 +24,7 @@ from ._sdy import (
     DimensionShardingAttr as DimensionShardingAttr,
     TensorShardingAttr as TensorShardingAttr,
     TensorShardingPerValueAttr as TensorShardingPerValueAttr,
+    ReductionOp as ReductionOp,
 )
 
 from ._sdy_enums_gen import PropagationDirection as PropagationDirection
