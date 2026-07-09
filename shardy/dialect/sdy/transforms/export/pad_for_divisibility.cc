@@ -112,6 +112,8 @@ class PaddedTypeConverter : public TypeConverter {
 // Known padding value kinds for generated padding values.
 enum class PaddingValueKind { kZero, kOne };
 
+constexpr PaddingValueKind kDefaultPaddingValueKind = PaddingValueKind::kZero;
+
 // Returns true if the operation has custom padding handling implemented in
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
@@ -163,9 +165,10 @@ Value createConstant(OpBuilder& b, Location loc, Type elementType,
 }
 
 // Creates a padded value for 'value' with 'paddedType' and 'paddingKind',
-// and adds the padded value to the PaddingCache.
+// and adds the padded value to the PaddingCache if registeredKind is present.
 Value createPaddedValue(RankedTensorType paddedType, Value value,
                         PaddingValueKind paddingKind,
+                        std::optional<PaddingValueKind> registeredKind,
                         const SymbolTable& symbolTable,
                         ConversionPatternRewriter& rewriter,
                         PaddingCache& cache) {
@@ -192,7 +195,9 @@ Value createPaddedValue(RankedTensorType paddedType, Value value,
   if (auto sharding = getSharding(value)) {
     setSharding(padOp, sharding);
   }
-  cache.setPadding(padOp, paddingKind);
+  if (registeredKind) {
+    cache.setPadding(padOp, *registeredKind);
+  }
   return padOp;
 }
 
@@ -325,6 +330,9 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
     rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
   }
 
+  // For now, generic ops do not propagate padding kinds, so they remain
+  // unregistered in the cache.
+
   rewriter.replaceOp(op, newOp->getResults());
   return success();
 }
@@ -375,23 +383,32 @@ Value trimOutputForDims(Value res, Type origType, ArrayRef<int64_t> trimDims,
   return sliceRes;
 }
 
-// Pads `input` to `paddedInputType` with `paddingKind` if shapes differ,
-// creates a new collective operation with the padded shape, and registers its
-// result padding in the cache.
-Operation* padCollectiveOp(Operation* op, Value input,
+// Pads `input` to `paddedInputType` if shapes differ, creates a new collective
+// operation with the padded shape, and registers its result padding in the
+// cache.
+Operation* padCollectiveOp(Operation* op, Value input, Value inputOrig,
                            RankedTensorType paddedInputType,
                            const SymbolTable& symbolTable,
                            ConversionPatternRewriter& rewriter,
-                           PaddingCache& cache,
-                           std::optional<PaddingValueKind>& paddingKind) {
+                           PaddingCache& cache) {
   auto rankedInput = cast<RankedTensorType>(input.getType());
   Value padOp = input;
+  std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+  bool isPaddedBefore = input.getType() != inputOrig.getType();
+
   if (paddedInputType != rankedInput) {
-    if (!paddingKind) {
-      paddingKind = PaddingValueKind::kZero;
+    PaddingValueKind constantKind = (isPaddedBefore && paddingKind)
+                                        ? *paddingKind
+                                        : kDefaultPaddingValueKind;
+    std::optional<PaddingValueKind> registeredKind = std::nullopt;
+    if (!isPaddedBefore) {
+      registeredKind = kDefaultPaddingValueKind;
+    } else if (paddingKind) {
+      registeredKind = paddingKind;
     }
-    padOp = createPaddedValue(paddedInputType, input, *paddingKind, symbolTable,
-                              rewriter, cache);
+    padOp = createPaddedValue(paddedInputType, input, constantKind,
+                              registeredKind, symbolTable, rewriter, cache);
+    paddingKind = registeredKind;
   }
 
   OperationState state(op->getLoc(), op->getName());
@@ -528,9 +545,8 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
 
-    std::optional<PaddingValueKind> paddingKind;
     Value input = adaptor.getOperands()[0];
-    paddingKind = cache.getPadding(input);
+    std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
     if (paddingKind) {
       for (Value res : newOp->getResults()) {
         cache.setPadding(res, *paddingKind);
@@ -575,6 +591,7 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
     Value input = adaptor.getOperands()[0];
+    Value inputOrig = op->getOperand(0);
     auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
     if (!rankedInputType) {
       return failure();
@@ -584,10 +601,9 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     Type paddedInputType =
         getPaddedType(rankedInputType, outSharding, symbolTable);
 
-    std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
-    Operation* newOp =
-        padCollectiveOp(op, input, cast<RankedTensorType>(paddedInputType),
-                        symbolTable, rewriter, cache, paddingKind);
+    Operation* newOp = padCollectiveOp(
+        op, input, inputOrig, cast<RankedTensorType>(paddedInputType),
+        symbolTable, rewriter, cache);
 
     rewriter.replaceOp(op, newOp->getResults());
     return success();
@@ -596,6 +612,7 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
  private:
   PaddingCache& cache;
 };
+
 
 // Returns the source dimensions (dims where input is gathered/combined).
 SmallVector<int64_t> getTrimDims(sdy::AllToAllOp op) {
@@ -621,6 +638,7 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
     Value input = adaptor.getOperands()[0];
+    Value inputOrig = op->getOperand(0);
     auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
     if (!rankedInputType) {
       return failure();
@@ -631,15 +649,15 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
         getPaddedType(rankedInputType, outSharding, symbolTable);
 
     std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
-    Operation* newOp =
-        padCollectiveOp(op, input, cast<RankedTensorType>(paddedInputType),
-                        symbolTable, rewriter, cache, paddingKind);
+    Operation* newOp = padCollectiveOp(
+        op, input, inputOrig, cast<RankedTensorType>(paddedInputType),
+        symbolTable, rewriter, cache);
 
     Value res = newOp->getResult(0);
 
     SmallVector<int64_t> trimDims = getTrimDims(op);
-    res = trimOutputForDims(res, op->getResult(0).getType(), trimDims,
-                            outSharding, rewriter, paddingKind, cache);
+    res = trimOutputForDims(res, inputOrig.getType(), trimDims, outSharding,
+                            rewriter, paddingKind, cache);
 
     rewriter.replaceOp(op, {res});
     return success();
@@ -715,19 +733,17 @@ class StablehloDotGeneralOpPattern
     stablehlo::DotDimensionNumbersAttr dimNums = op.getDotDimensionNumbers();
 
     Value lhs = adaptor.getOperands()[0];
-    auto lhsOrigType = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
-    if (!lhsOrigType) {
+    Value rhs = adaptor.getOperands()[1];
+    Value lhsOrig = op->getOperand(0);
+    Value rhsOrig = op->getOperand(1);
+    auto lhsOrigType = dyn_cast<RankedTensorType>(lhsOrig.getType());
+    auto rhsOrigType = dyn_cast<RankedTensorType>(rhsOrig.getType());
+    if (!lhsOrigType || !rhsOrigType) {
       return failure();
     }
     Value paddedLhs =
         ensurePadding(lhs, lhsOrigType, PaddingValueKind::kZero, rewriter, loc,
                       cache, dimNums.getLhsContractingDimensions());
-
-    Value rhs = adaptor.getOperands()[1];
-    auto rhsOrigType = dyn_cast<RankedTensorType>(op->getOperand(1).getType());
-    if (!rhsOrigType) {
-      return failure();
-    }
     Value paddedRhs =
         ensurePadding(rhs, rhsOrigType, PaddingValueKind::kZero, rewriter, loc,
                       cache, dimNums.getRhsContractingDimensions());
@@ -756,8 +772,9 @@ struct PadForDivisibilityPass
 
     PaddedTypeConverter typeConverter(symbolTable);
     RewritePatternSet patterns(&getContext());
-    patterns.add<FuncOpPattern, GenericOpPattern, StablehloSliceOpPattern>(
+    patterns.add<GenericOpPattern, StablehloSliceOpPattern>(
         typeConverter, &getContext());
+    patterns.add<FuncOpPattern>(typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,

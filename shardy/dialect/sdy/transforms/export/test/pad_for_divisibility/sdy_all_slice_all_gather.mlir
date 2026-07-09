@@ -66,3 +66,39 @@ func.func @propagate_zero_pad_through_all_slice(%arg0: tensor<7x7xi32>, %arg1: t
   return %2 : tensor<7x5xi32>
 }
 
+// Tests that we don't insert a select if the padding kind is already known (kZero).
+// CHECK-LABEL: func @known_padding_no_select
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<7x7xf32>, %[[ARG1:.*]]: tensor<7x5xf32>
+// CHECK-NOT:     stablehlo.select
+// CHECK:         stablehlo.dot_general
+func.func @known_padding_no_select(%arg0: tensor<7x7xf32>, %arg1: tensor<7x5xf32>) -> tensor<7x5xf32> {
+  %0 = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x7xf32>
+  %1 = sdy.all_slice [{}, {"y"}] %0 out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<7x7xf32>
+  %2 = sdy.all_gather [{}, {"y"}] %1 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x7xf32>
+  %arg1_sharded = sdy.all_slice [{"x"}, {}] %arg1 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x5xf32>
+  %3 = stablehlo.dot_general %2, %arg1_sharded, contracting_dims = [0] x [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{}, {}]>]>} : (tensor<7x7xf32>, tensor<7x5xf32>) -> tensor<7x5xf32>
+  return %3 : tensor<7x5xf32>
+}
+
+// Tests that we insert a select to enforce kZero if the padding kind is unknown.
+// CHECK-LABEL: func @unknown_padding_requires_select
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<7x7xf32>, %[[ARG1:.*]]: tensor<7x7xf32>, %[[ARG2:.*]]: tensor<7x5xf32>
+// CHECK:         %[[ADD:.*]] = stablehlo.add
+// CHECK:         %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+// CHECK:         %[[PAD:.*]] = stablehlo.pad %[[ADD]], %[[CST]]
+// CHECK:         %[[ALL_SLICE:.*]] = sdy.all_slice
+// CHECK:         %[[ALL_GATHER:.*]] = sdy.all_gather
+// CHECK:         %[[SELECT:.*]] = stablehlo.select
+// CHECK:         stablehlo.dot_general %[[SELECT]]
+func.func @unknown_padding_requires_select(%arg0: tensor<7x7xf32>, %arg1: tensor<7x7xf32>, %arg2: tensor<7x5xf32>) -> tensor<7x5xf32> {
+  %0 = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x7xf32>
+  %arg1_sharded = sdy.all_slice [{"x"}, {}] %arg1 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x7xf32>
+  %1 = stablehlo.add %0, %arg1_sharded {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{"x"}, {}]>]>} : tensor<7x7xf32>
+  %2 = sdy.all_slice [{}, {"y"}] %1 out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<7x7xf32>
+  %3 = sdy.all_gather [{}, {"y"}] %2 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x7xf32>
+  %arg2_sharded = sdy.all_slice [{"x"}, {}] %arg2 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x5xf32>
+  %4 = stablehlo.dot_general %3, %arg2_sharded, contracting_dims = [0] x [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{}, {}]>]>} : (tensor<7x7xf32>, tensor<7x5xf32>) -> tensor<7x5xf32>
+  return %4 : tensor<7x5xf32>
+}
+
+
