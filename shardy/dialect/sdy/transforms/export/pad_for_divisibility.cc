@@ -51,6 +51,7 @@ namespace sdy {
 
 namespace {
 
+
 // Computes the padded type for a given type with sharding.
 Type getPaddedType(Type type, TensorShardingAttr sharding,
                    const SymbolTable& symbolTable) {
@@ -613,6 +614,42 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
   PaddingCache& cache;
 };
 
+class ReduceScatterOpPattern
+    : public OpConversionPattern<sdy::ReduceScatterOp> {
+ public:
+  ReduceScatterOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                         PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      sdy::ReduceScatterOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    Value input = adaptor.getOperands()[0];
+    Value inputOrig = op->getOperand(0);
+    auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
+    if (!rankedInputType) {
+      return failure();
+    }
+
+    TensorShardingAttr outSharding = op.getOutSharding();
+    Type paddedInputType =
+        getPaddedType(rankedInputType, outSharding, symbolTable);
+
+    Operation* newOp = padCollectiveOp(op, input, inputOrig,
+                                       cast<RankedTensorType>(paddedInputType),
+                                       symbolTable, rewriter, cache);
+
+    rewriter.replaceOp(op, newOp->getResults());
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
 
 // Returns the source dimensions (dims where input is gathered/combined).
 SmallVector<int64_t> getTrimDims(sdy::AllToAllOp op) {
@@ -778,7 +815,7 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
-                 AllToAllOpPattern, AllGatherOpPattern>(
+                 AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern>(
         typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
@@ -806,6 +843,10 @@ struct PadForDivisibilityPass
       if (auto allSliceOp = dyn_cast<AllSliceOp>(op)) {
         return isLegalType(allSliceOp.getOperand().getType(),
                            allSliceOp.getOutSharding());
+      }
+      if (auto reduceScatterOp = dyn_cast<ReduceScatterOp>(op)) {
+        return isLegalType(reduceScatterOp.getOperand().getType(),
+                           reduceScatterOp.getOutSharding());
       }
       if (auto allGatherOp = dyn_cast<AllGatherOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue);
