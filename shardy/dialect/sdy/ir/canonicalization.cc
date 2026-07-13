@@ -112,11 +112,31 @@ class RedundantManualComputationPattern
         manualAxesProduct *= mesh.getAxisSize(manualAxis);
       }
     }
+    bool isTrivial = manualAxesProduct == 1;
+    if (!isTrivial) {
+      // Check whether operands are trivially-manual by shapes.
+      isTrivial = llvm::all_of(
+          llvm::zip(manualComputationOp.getOperands(),
+                    manualComputationOp.getRegion().getArgumentTypes()),
+          [](auto pair) {
+            return std::get<0>(pair).getType() == std::get<1>(pair);
+          });
+      if (isTrivial) {
+        Operation* terminator =
+            manualComputationOp.getBody().front().getTerminator();
+        // Check whether results are trivially-manual by shapes.
+        isTrivial = llvm::all_of(
+            llvm::zip(terminator->getOperandTypes(),
+                      manualComputationOp.getResultTypes()),
+            [](auto pair) { return std::get<0>(pair) == std::get<1>(pair); });
+      }
+    }
 
-    if (manualAxesProduct != 1) {
+    if (!isTrivial) {
       return rewriter.notifyMatchFailure(
           manualComputationOp, [](Diagnostic& diag) {
-            diag << "product of manual axis sizes is not 1";
+            diag << "manual computation is not trivial and product of manual "
+                    "axis sizes is not 1";
           });
     }
 
