@@ -239,18 +239,30 @@ NB_MODULE(_sdy, m) {
              const std::vector<MlirAttribute>& dimensionShardings,
              const std::vector<MlirAttribute>& replicatedAxes,
              const std::vector<MlirAttribute>& unreducedAxes,
-             sdy::ReductionOp reductionOp, MlirContext ctx) {
+             std::optional<sdy::ReductionOp> reductionOp, MlirContext ctx) {
+            if (reductionOp == std::nullopt) {
+              // If unreduced_axes is empty, reduction_op is not used, so we
+              // set it to the default SUM op. Otherwise, assert that
+              // reduction_op is specified.
+              if (unreducedAxes.empty()) {
+                reductionOp = sdy::ReductionOp::SUM;
+              } else {
+                throw nb::value_error(
+                    "reduction_op must be specified when unreduced_axes is not "
+                    "empty.");
+              }
+            }
             return cls(sdyTensorShardingAttrGet(
                 ctx, toMeshOrRefAttr(ctx, meshOrRef), dimensionShardings.size(),
                 dimensionShardings.data(), replicatedAxes.size(),
                 replicatedAxes.data(), unreducedAxes.size(),
-                unreducedAxes.data(), static_cast<uint32_t>(reductionOp)));
+                unreducedAxes.data(), static_cast<uint32_t>(*reductionOp)));
           },
           nb::arg("cls"), nb::arg("mesh_or_ref"),
           nb::arg("dimension_shardings"),
           nb::arg("replicated_axes") = std::vector<MlirAttribute>(),
           nb::arg("unreduced_axes") = std::vector<MlirAttribute>(),
-          nb::arg("reduction_op") = sdy::ReductionOp::SUM,
+          nb::arg("reduction_op").none() = sdy::ReductionOp::SUM,
           nb::arg("context").none() = nb::none(),
           "Creates a TensorShardingAttr with either an inlined mesh or mesh "
           "name, dimension shardings, and replicated axes.")
