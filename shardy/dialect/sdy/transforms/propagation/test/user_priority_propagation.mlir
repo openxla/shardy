@@ -430,3 +430,22 @@ func.func @maximal_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32
   stablehlo.custom_call @xla_python_cpu_callback(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
   return %arg0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=2]>
+
+// CHECK-LABEL: func @unreduced_custom_reduction_op(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>})
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>}) {
+func.func @unreduced_custom_reduction_op(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}p1, {?}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}p0, {"b", ?}p0]>})
+    -> tensor<8x8xf32> {
+  // CHECK:      %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[ADD_0]], %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}], unreduced=max{"c"}>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[DOT]] : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.dot_general %0, %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}p0, {?}], unreduced=max{"c"}>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}

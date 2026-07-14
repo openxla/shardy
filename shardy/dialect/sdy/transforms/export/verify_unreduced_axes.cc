@@ -85,6 +85,23 @@ LogicalResult verifyEqual(ArrayRef<AxisRefAttr> sourceAxes,
   return success();
 }
 
+bool isDefiningOpBlessedOrDot(Value value) {
+  if (!value) {
+    return false;
+  }
+  Operation* defOp = value.getDefiningOp();
+  if (!defOp) {
+    return false;
+  }
+  if (isa<sdy::ReshardOp, sdy::ShardingConstraintOp, stablehlo::DotGeneralOp,
+          stablehlo::DotOp>(defOp)) {
+    return true;
+  }
+  StringRef opName = defOp->getName().getStringRef();
+  return opName == "mhlo.dot_general" || opName == "mhlo.dot" ||
+         opName == "stablehlo.copy" || opName == "mhlo.copy";
+}
+
 // Verifies that a call operation has the exact same unreduced axes at its
 // operand-argument boundary and callee-caller result boundary.
 LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
@@ -97,8 +114,7 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
   // Verify call operands against callee arguments.
   for (int64_t i = 0; i < callOp.getNumOperands(); ++i) {
     Value operand = callOp.getOperand(i);
-    if (operand.getDefiningOp<sdy::ReshardOp>() ||
-        operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+    if (isDefiningOpBlessedOrDot(operand)) {
       continue;
     }
     TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
@@ -148,8 +164,7 @@ LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
     auto parentFuncOp = cast<func::FuncOp>(op->getParentOp());
     for (int64_t i = 0; i < op->getNumOperands(); ++i) {
       Value operand = op->getOperand(i);
-      if (operand.getDefiningOp<sdy::ReshardOp>() ||
-          operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+      if (isDefiningOpBlessedOrDot(operand)) {
         continue;
       }
       TensorShardingAttr resultSharding =
@@ -172,8 +187,7 @@ LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
   }
 
   for (Value operand : op->getOperands()) {
-    if (operand.getDefiningOp<sdy::ReshardOp>() ||
-        operand.getDefiningOp<sdy::ShardingConstraintOp>()) {
+    if (isDefiningOpBlessedOrDot(operand)) {
       continue;
     }
     appendUnreducedAxes(getShardingBypassingBarriers(operand),
@@ -254,7 +268,9 @@ struct VerifyUnreducedAxesPass
 
     auto walkResult = funcOp.walk([&](Operation* op) {
       if (isa<sdy::ReshardOp, sdy::ShardingConstraintOp,
-              stablehlo::DotGeneralOp, sdy::ManualComputationOp>(op)) {
+              stablehlo::DotGeneralOp, stablehlo::DotOp,
+              sdy::ManualComputationOp, sdy::AllReduceOp, sdy::ReduceScatterOp>(
+              op)) {
         return WalkResult::advance();
       }
 

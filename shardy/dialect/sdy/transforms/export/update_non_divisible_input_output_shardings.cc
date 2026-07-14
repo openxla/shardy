@@ -125,7 +125,8 @@ TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
   // replicated/unreduced axes.
   return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), newDimShardings,
                                  sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes());
+                                 sharding.getUnreducedAxes(),
+                                 sharding.getReductionOp());
 }
 
 void updateValueShardings(

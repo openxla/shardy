@@ -217,7 +217,8 @@ TensorShardingAttr inlineMesh(const SymbolTable& symbolTable,
     assert(mesh && "unknown mesh");
     return TensorShardingAttr::get(
         sharding.getContext(), mesh, sharding.getDimShardings(),
-        sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+        sharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
+        sharding.getReductionOp());
   }
   return sharding;
 }
