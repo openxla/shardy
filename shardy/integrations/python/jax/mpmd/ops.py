@@ -27,6 +27,7 @@ from jax import numpy as jnp
 from jax import tree
 from jax import tree_util
 from jax._src import core as jax_core
+from jax._src import flattree as ft
 from jax._src import linear_util as internal_lu
 from jax._src.interpreters import ad as internal_ad
 from jax._src.interpreters import batching as internal_batching
@@ -1312,6 +1313,64 @@ def _fori_loop_discharge_rule(
   return new_invals, list(out_flat[carried_arguments_start:])
 
 
+def _fori_loop_is_high(*args, call_jaxpr, **kwargs):
+  del args, kwargs
+  return call_jaxpr.is_high
+
+
+def _fori_loop_to_lojax(
+    *hi_args,
+    call_jaxpr,
+    num_iterations,
+    carried_arguments_start,
+    wrap_with_mpmd_call,
+    **kwargs,
+):
+  """Hijax lowering rule for fori_loop primitive."""
+  hi_consts = hi_args[:carried_arguments_start]
+  hi_carry = hi_args[carried_arguments_start:]
+
+  qdds = call_jaxpr.in_aval_qdds
+
+  loval = lambda a, x: a.read_loval(x) if a.has_qdd else a.lower_val(x)
+
+  lo_consts = list(it.chain.from_iterable(
+      loval(a, x) for a, x in zip(qdds[:carried_arguments_start], hi_consts)
+  ))
+  lo_carry = list(it.chain.from_iterable(
+      loval(a, x) for a, x in zip(qdds[carried_arguments_start:-1], hi_carry)
+  ))
+
+  new_carried_arguments_start = len(lo_consts)
+
+  in_avals = ft.flatten(([a.lo_ty() for a in qdds], {}))
+
+  lo_jaxpr, out_avals_ft = internal_pe.lower_jaxpr(call_jaxpr, in_avals)
+
+  lo_args = tuple(lo_consts) + tuple(lo_carry)
+
+  all_outs = fori_loop_p.bind(
+      *lo_args,
+      call_jaxpr=lo_jaxpr,
+      num_iterations=num_iterations,
+      carried_arguments_start=new_carried_arguments_start,
+      wrap_with_mpmd_call=wrap_with_mpmd_call,
+      **kwargs,
+  )
+
+  out_mut, lo_outs = out_avals_ft.update(all_outs).unpack()
+
+  for a, x, u in zip(
+      call_jaxpr.final_aval_qdds[:-1], hi_args, out_mut.unpack()
+  ):
+    if a.has_qdd:
+      a.aval.update_from_loval2(a.qdd, x, u)
+
+  return [
+      a.raise_val2(y) for a, y in zip(call_jaxpr.out_avals, lo_outs.unpack())
+  ]
+
+
 def _register_fori_loop_primitive():
   """Registers the `fori_loop` op to JAX."""
   primitive = jex.core.Primitive('fori_loop')
@@ -1324,6 +1383,8 @@ def _register_fori_loop_primitive():
   state_discharge.register_discharge_rule(primitive)(
       _fori_loop_discharge_rule
   )
+  primitive.is_high = _fori_loop_is_high
+  primitive.to_lojax = _fori_loop_to_lojax
   return primitive
 
 

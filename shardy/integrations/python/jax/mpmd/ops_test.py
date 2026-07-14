@@ -397,6 +397,16 @@ class ForiLoopTest(absltest.TestCase):
 
     self.assertEqual(f(), sum(range(3)))
 
+  def test_hijax(self):
+    @jax.jit
+    def _f(x):
+      return ops.fori_loop(
+          3, lambda _, x: square(x), x
+      )
+
+    self.assertEqual(_f(2.0), 256.0)
+
+
 
 class EnumeratedForLoopTest(parameterized.TestCase):
 
