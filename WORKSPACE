@@ -18,50 +18,55 @@ workspace(name = "shardy")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
-    name = "bazel_skylib",
-    sha256 = "74d544d96f4a5bb630d465ca8bbcfe231e3594e5aae57e1edbf17a6eb3ca2506",
-    urls = [
-        "https://storage.googleapis.com/mirror.tensorflow.org/github.com/bazelbuild/bazel-skylib/releases/download/1.3.0/bazel-skylib-1.3.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.3.0/bazel-skylib-1.3.0.tar.gz",
-    ],
-)
-
-http_archive(
-    name = "rules_cc",
-    sha256 = "b8b918a85f9144c01f6cfe0f45e4f2838c7413961a8ff23bc0c6cdf8bb07a3b6",
-    strip_prefix = "rules_cc-0.1.5",
-    url = "https://github.com/bazelbuild/rules_cc/releases/download/0.1.5/rules_cc-0.1.5.tar.gz",
-)
-
-http_archive(
-    name = "rules_shell",
-    sha256 = "bc61ef94facc78e20a645726f64756e5e285a045037c7a61f65af2941f4c25e1",
-    strip_prefix = "rules_shell-0.4.1",
-    url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.4.1/rules_shell-v0.4.1.tar.gz",
-)
-
-###############################
-# Initialize non-hermetic Python
-
-rules_python_version = "0.30.0"
-
-http_archive(
     name = "rules_python",
-    strip_prefix = "rules_python-{}".format(rules_python_version),
-    url = "https://github.com/bazelbuild/rules_python/releases/download/{}/rules_python-{}.tar.gz".format(rules_python_version, rules_python_version),
+    sha256 = "8964aa1e7525fea5244ba737458694a057ada1be96a92998a41caa1983562d00",
+    strip_prefix = "rules_python-1.8.5",
+    url = "https://github.com/bazel-contrib/rules_python/releases/download/1.8.5/rules_python-1.8.5.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
 
 py_repositories()
 
-python_version = "3.11"
-
 python_register_toolchains(
-    name = "local_config_python",  #"python_{}".format(python_version_),
-    # Available versions are listed in @rules_python//python:versions.bzl.
-    # We recommend using the same version your team is already standardized on.
-    python_version = python_version,
+    name = "python_3_11",
+    python_version = "3.11",
+)
+
+# Initialize toolchains for ML projects.
+#
+# A hermetic build system is designed to produce completely reproducible builds
+# for C++. Details: https://github.com/google-ml-infra/rules_ml_toolchain
+http_archive(
+    name = "rules_ml_toolchain",
+    patch_args = ["-p1"],
+    sha256 = "cfc0e72b41c1391b2d943761e24ebfe451020d7ad360a9abdcdc27dfd5e6a62f",
+    strip_prefix = "rules_ml_toolchain-8314786481531481ccb6279c93453488e3e944e4",
+    urls = [
+        "https://github.com/google-ml-infra/rules_ml_toolchain/archive/8314786481531481ccb6279c93453488e3e944e4.tar.gz",
+    ],
+)
+
+load("@rules_ml_toolchain//cc/deps:cc_toolchain_deps.bzl", "cc_toolchain_deps")
+
+cc_toolchain_deps()
+
+register_toolchains("@rules_ml_toolchain//cc:linux_x86_64_linux_x86_64")
+
+http_archive(
+    name = "bazel_skylib",
+    sha256 = "3b5b49006181f5f8ff626ef8ddceaa95e9bb8ad294f7b5d7b11ea9f7ddaf8c59",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+    ],
+)
+
+http_archive(
+    name = "rules_shell",
+    sha256 = "20721f63908879c083f94869e618ea8d4ff5edb91ff9a72a2ebee357fdbc352d",
+    strip_prefix = "rules_shell-0.8.0",
+    url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.8.0/rules_shell-v0.8.0.tar.gz",
 )
 
 ###############################
@@ -70,7 +75,8 @@ python_register_toolchains(
 ###############################
 #TF/TSL workspace 3
 
-#These need to come in this specific order otherwise bazel complains of missing/circular dependencies.
+# These need to come in this specific order or else Bazel will complain about
+# missing/circular dependencies.
 
 # These are needed by the LLVM Bazel overlay (third-party/BUILD.bazel).
 http_archive(
@@ -84,7 +90,6 @@ http_archive(
     ],
 )
 
-
 http_archive(
     name = "zlib",
     build_file = "//third_party:zlib-ng.BUILD",
@@ -94,7 +99,6 @@ http_archive(
         "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.0.7.zip",
     ],
 )
-
 
 load("//third_party/llvm:workspace.bzl", llvm = "repo")
 
