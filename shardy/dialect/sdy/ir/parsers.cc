@@ -353,7 +353,7 @@ ParseResult parseFactorSizes(AsmParser& parser,
       return failure();
     }
 
-    int factorSize;
+    int64_t factorSize;
     if (parser.parseInteger(factorSize)) {
       return failure();
     }
