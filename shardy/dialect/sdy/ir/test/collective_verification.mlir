@@ -1098,3 +1098,24 @@ func.func @replicated_to_unreduced_r2u_axes_has_extra_ones(%arg0 : tensor<16x8xf
   %0 = sdy.replicated_to_unreduced {"y", "z"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced={"x", "y"}> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=4]>
+
+func.func @replicated_to_unreduced_invalid_reduction_op(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{out_sharding reduction_op must be SUM}}
+  %0 = sdy.replicated_to_unreduced {"x"} %arg0 out_sharding=<@mesh, [{}, {}], unreduced=max{"x"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4]>
+
+func.func @sharded_to_unreduced_invalid_reduction_op(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{out_sharding reduction_op must be SUM}}
+  %0 = sdy.sharded_to_unreduced [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}], unreduced=max{"x"}> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+

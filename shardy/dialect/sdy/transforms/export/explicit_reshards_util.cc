@@ -810,9 +810,9 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
       llvm::is_sorted(allReduceAxes, AxisRefAttr::getMeshComparator(mesh)));
   TensorShardingAttr allReduceSharding = sourceSharding.replaceUnreducedAxes(
       getAxisSetDiff(sourceUnreducedAxes, allReduceAxes, mesh));
-  auto allReduceOp =
-      AllReduceOp::create(rewriter, use.get().getLoc(), use.get(),
-                          allReduceAxes, ReductionOp::SUM, allReduceSharding);
+  auto allReduceOp = AllReduceOp::create(
+      rewriter, use.get().getLoc(), use.get(), allReduceAxes,
+      sourceSharding.getReductionOp(), allReduceSharding);
   use.set(allReduceOp);
   return allReduceSharding;
 }
@@ -953,7 +953,8 @@ TensorShardingAttr insertUnreducedCollectives(OpOperand& use,
     sortAndMergeAxes(inPlusR2uAxes, inMesh);
     lastSharding = TensorShardingAttr::get(
         rewriter.getContext(), inSharding.getMeshName(), tmpDimShardings,
-        outSharding.getReplicatedAxes(), inPlusR2uAxes);
+        outSharding.getReplicatedAxes(), inPlusR2uAxes,
+        outSharding.getReductionOp());
     result = ReplicatedToUnreducedOp::create(rewriter, input.getLoc(), result,
                                              r2uAxes, lastSharding);
   }

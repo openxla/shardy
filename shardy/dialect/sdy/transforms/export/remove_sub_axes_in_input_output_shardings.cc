@@ -61,7 +61,8 @@ TensorShardingAttr removeSubAxesInDimensionShardings(
   }
   return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), newDimShardings,
                                  sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes());
+                                 sharding.getUnreducedAxes(),
+                                 sharding.getReductionOp());
 }
 
 void updateValueShardings(

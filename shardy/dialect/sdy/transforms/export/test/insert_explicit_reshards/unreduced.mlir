@@ -411,3 +411,23 @@ func.func @replicated_and_sharded_to_unreduced_sub_axis(
  %0 = sdy.reshard %arg0 <@mesh, [{"x"}, {}], unreduced={"y", "z"}> :  tensor<32x32xf32>
  return %0 : tensor<32x32xf32>
 }
+
+// -----
+
+// CHECK-LABEL: func @insert_reshard_unreduced_to_sharded_max
+func.func @insert_reshard_unreduced_to_sharded_max(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced=max{"x"}>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce max {"x"} %arg0 out_sharding=<@mesh, [{"y"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh, [{"y"}, {"x"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]]
+  return %arg0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @insert_reshard_unreduced_to_sharded_min
+func.func @insert_reshard_unreduced_to_sharded_min(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced=min{"x"}>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce min {"x"} %arg0 out_sharding=<@mesh, [{"y"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh, [{"y"}, {"x"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]]
+  return %arg0 : tensor<8x8xf32>
+}

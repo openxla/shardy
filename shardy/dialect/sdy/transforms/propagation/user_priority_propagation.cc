@@ -97,7 +97,8 @@ TensorShardingAttr getUpdatedShardingForPriority(
                 });
   return TensorShardingAttr::get(
       curSharding.getContext(), curSharding.getMeshOrRef(), newDimShardings,
-      newReplicatedAxes, curSharding.getUnreducedAxes());
+      newReplicatedAxes, curSharding.getUnreducedAxes(),
+      curSharding.getReductionOp());
 }
 
 // Updates the current sharding of all referenced values and function results in
@@ -144,9 +145,9 @@ TensorShardingAttr getInitializedSharding(TensorShardingAttr originalSharding,
   // TODO(tomnatan): we need to merge split axes and split them again when
   // updating? or can we assume we won't see split axes?
 
-  return TensorShardingAttr::get(ctx, originalSharding.getMeshOrRef(),
-                                 newDimShardings, newReplicatedAxes,
-                                 originalSharding.getUnreducedAxes());
+  return TensorShardingAttr::get(
+      ctx, originalSharding.getMeshOrRef(), newDimShardings, newReplicatedAxes,
+      originalSharding.getUnreducedAxes(), originalSharding.getReductionOp());
 }
 
 // Clears `priorities` and add all non-zero priorities in `sharding` to it.

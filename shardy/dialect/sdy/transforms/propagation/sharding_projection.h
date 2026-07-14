@@ -79,11 +79,13 @@ struct TensorFactorShardings {
   FactorIndexToSharding factorIndexToSharding;
   SmallVector<AxisRefAttr> replicatedAxes;
   SmallVector<AxisRefAttr> unreducedAxes;
+  ReductionOp reductionOp = ReductionOp::SUM;
 
   bool operator==(const TensorFactorShardings& other) const {
     return factorIndexToSharding == other.factorIndexToSharding &&
            replicatedAxes == other.replicatedAxes &&
-           unreducedAxes == other.unreducedAxes;
+           unreducedAxes == other.unreducedAxes &&
+           reductionOp == other.reductionOp;
   }
 
   bool operator!=(const TensorFactorShardings& other) const {

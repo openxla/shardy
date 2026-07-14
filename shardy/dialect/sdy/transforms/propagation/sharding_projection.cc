@@ -186,7 +186,7 @@ TensorShardingAttr TensorFactorShardings::createTensorShardingAttr(
   }
 
   return TensorShardingAttr::get(ctx, meshName, newDimShardings, replicatedAxes,
-                                 unreducedAxes);
+                                 unreducedAxes, reductionOp);
 }
 
 UpdateTensorShardings ShardingProjection::expandSharding(
@@ -272,7 +272,8 @@ TensorFactorShardings buildTensorFactorShardings(
     TensorMappingAttr tensorMapping, TensorShardingAttr optionalSharding,
     ArrayRef<int64_t> factorSizes, MeshAttr mesh, const bool closedIfMissing) {
   TensorFactorShardings result;
-  auto& [factorIndexToSharding, replicatedAxes, unreducedAxes] = result;
+  auto& [factorIndexToSharding, replicatedAxes, unreducedAxes, reductionOp] =
+      result;
   factorIndexToSharding.reserve(factorSizes.size());
 
   if (optionalSharding) {
@@ -366,6 +367,7 @@ TensorFactorShardings buildTensorFactorShardings(
                           optionalSharding.getReplicatedAxes().end());
     unreducedAxes.assign(optionalSharding.getUnreducedAxes().begin(),
                          optionalSharding.getUnreducedAxes().end());
+    result.reductionOp = optionalSharding.getReductionOp();
   }
 
   return result;

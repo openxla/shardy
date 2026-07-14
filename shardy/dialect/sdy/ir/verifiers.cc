@@ -1415,6 +1415,9 @@ LogicalResult AllGatherOp::verifySymbolUses(
 
 LogicalResult ShardedToUnreducedOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
+  if (getOutSharding().getReductionOp() != ReductionOp::SUM) {
+    return emitOpError("out_sharding reduction_op must be SUM");
+  }
   LogicalResult result = verifyCollectiveWithAxesPerDim(
       *this, symbolTableCollection, getAxes(),
       [this](DimensionShardingAttr operandDimSharding,
@@ -1456,6 +1459,9 @@ LogicalResult ReplicatedToUnreducedOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   TensorShardingAttr operandSharding = getSharding(getOperand());
   TensorShardingAttr resultSharding = getOutSharding();
+  if (resultSharding.getReductionOp() != ReductionOp::SUM) {
+    return emitOpError("out_sharding reduction_op must be SUM");
+  }
   const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>());
   MeshAttr mesh = resultSharding.getMesh(symbolTable);
