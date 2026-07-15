@@ -80,7 +80,8 @@ addUnusedManualAxesToReplicatedAxes(ArrayRef<TensorShardingAttr> shardings,
     sortAndMergeAxes(newReplicatedAxes, mesh);
     newShardings.push_back(TensorShardingAttr::get(
         sharding.getContext(), commonMeshOrRef, sharding.getDimShardings(),
-        newReplicatedAxes, sharding.getUnreducedAxes()));
+        newReplicatedAxes, sharding.getUnreducedAxes(),
+        sharding.getReductionOp()));
     modified = true;
   }
   return modified ? std::make_optional(newShardings) : std::nullopt;

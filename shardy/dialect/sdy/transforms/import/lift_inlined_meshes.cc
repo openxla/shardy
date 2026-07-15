@@ -107,7 +107,7 @@ TensorShardingAttr replaceMesh(TensorShardingAttr sharding,
   return TensorShardingAttr::get(
       sharding.getContext(), FlatSymbolRefAttr::get(meshName),
       sharding.getDimShardings(), sharding.getReplicatedAxes(),
-      sharding.getUnreducedAxes());
+      sharding.getUnreducedAxes(), sharding.getReductionOp());
 }
 
 template <typename ReplicaGroupMeshAxesAttrTy>

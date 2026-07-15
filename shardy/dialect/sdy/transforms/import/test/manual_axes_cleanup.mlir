@@ -174,3 +174,18 @@ func.func private @foo(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   } : (tensor<8xf32>) -> tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
+
+// CHECK-LABEL: @manual_computation_with_reduction_op
+func.func @manual_computation_with_reduction_op(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh, [{"c", ?}], replicated={"a"}, unreduced=max{"b"}>]
+  // CHECK-SAME{LITERAL}: out_shardings=[<@mesh, [{"c", ?}], replicated={"a"}, unreduced=max{"b"}>]
+  // CHECK-SAME{LITERAL}: manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c", ?}], unreduced=max{"b"}>] out_shardings=[<@mesh, [{"c", ?}], unreduced=max{"b"}>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
+    sdy.return %arg1 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}

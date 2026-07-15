@@ -864,7 +864,7 @@ void insertAllReducesForReductionFactors(
                             /*closedIfMissing=*/true);
     auto allReduceOp =
         AllReduceOp::create(rewriter, result.getLoc(), result, allReduceAxes,
-                            ReductionOp::SUM, resultSharding);
+                            resultSharding.getReductionOp(), resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }

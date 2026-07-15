@@ -270,3 +270,17 @@ func.func @tagged_stablehlo_mesh_attribute(%arg0: tensor<4x4xf32> {sdy.sharding 
   %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["b"=2]>, [{"b"}, {}]>]>} : tensor<4x4xf32>
   return %0 : tensor<4x4xf32>
 }
+
+// -----
+
+// CHECK: sdy.mesh @mesh = <["x"=2, "y"=4]>
+sdy.mesh @mesh = <["x"=2, "y"=4]>
+
+// CHECK: sdy.mesh @mesh_0 = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @inlined_mesh_with_reduction_op
+func.func @inlined_mesh_with_reduction_op(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_0, [{"x"}, {}], unreduced=max{"y"}>]>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {}], unreduced=max{"y"}>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
