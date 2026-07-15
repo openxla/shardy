@@ -120,12 +120,17 @@ void applyConstraint(
   if (input.getDefiningOp<DataFlowEdgeOp>() || DataFlowEdgeOp::lookup(input)) {
     ShardingConstraintOp shardingConstraintOp = getConstraintAfterValue();
     input.replaceAllUsesExcept(shardingConstraintOp, shardingConstraintOp);
-    // If `sharding` has unreduced axes, we need to set then on the sharding of
+    // If `sharding` has unreduced axes, we need to set them on the sharding of
     // `input` directly, as unreduced axes don't propagate.
     if (!sharding.getUnreducedAxes().empty()) {
-      setSharding(input,
-                  getOrCreateSharding(input, sharding.getMeshOrRef())
-                      .replaceUnreducedAxes(sharding.getUnreducedAxes()));
+      TensorShardingAttr currentSharding =
+          getOrCreateSharding(input, sharding.getMeshOrRef());
+      TensorShardingAttr newSharding = TensorShardingAttr::get(
+          sharding.getContext(), currentSharding.getMeshOrRef(),
+          currentSharding.getDimShardings(),
+          currentSharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
+          sharding.getReductionOp());
+      setSharding(input, newSharding);
     }
   } else {
     MLIRContext* context = op->getContext();
