@@ -152,6 +152,24 @@ func.func @set_existing_shardings_for_sharding_group_members(
 
 // -----
 
+sdy.mesh @mesh = <["a"=2]>
+
+// A sharding group with a non-contiguous id (group 1 with no group 0) leaves an
+// empty slot in the group map that findCommonSharding previously dereferenced
+// via front(). Propagation must complete without crashing.
+// CHECK-LABEL: func @non_contiguous_sharding_group_id
+func.func @non_contiguous_sharding_group_id(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
+    %arg1: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8xf32>
+  %1 = stablehlo.add %arg1, %arg1 : tensor<8xf32>
+  sdy.sharding_group %0 group_id=1 : tensor<8xf32>
+  sdy.sharding_group %1 group_id=1 : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // Emit warning as well for sharding groups which have incompatible shardings
