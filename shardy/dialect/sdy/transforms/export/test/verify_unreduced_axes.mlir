@@ -118,3 +118,24 @@ func.func @manual_computation_drops_unreduced(%arg0: tensor<8x8xf32> {sdy.shardi
   return %0 : tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @reshard_mismatches_unreduced_kind(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced=max{"x", "y"}>}) -> tensor<8x8xf32> {
+  // expected-error@+1 {{'sdy.reshard' op cannot change the reduction operator of kept unreduced axes from max to sum. Check source sharding: #sdy.sharding<@mesh, [{}, {}], unreduced=max{"x", "y"}>, target sharding: #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}}
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}], unreduced={"x"}> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @constraint_mismatches_unreduced_kind(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced=max{"x", "y"}>}) -> tensor<8x8xf32> {
+  // expected-error@+1 {{'sdy.sharding_constraint' op cannot change the reduction operator of kept unreduced axes from max to sum. Check source sharding: #sdy.sharding<@mesh, [{}, {}], unreduced=max{"x", "y"}>, target sharding: #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}}
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [{}, {}], unreduced={"x"}> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+

@@ -153,6 +153,33 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
   return success();
 }
 
+LogicalResult verifyReshardUnreducedAxes(Operation* op) {
+  TensorShardingAttr sourceSharding =
+      getShardingBypassingBarriers(op->getOperand(0));
+  TensorShardingAttr targetSharding =
+      op->getAttrOfType<TensorShardingAttr>("sharding");
+  if (!sourceSharding || !targetSharding) {
+    return success();
+  }
+  bool hasKeptAxes = false;
+  for (AxisRefAttr targetAxis : targetSharding.getUnreducedAxes()) {
+    if (llvm::is_contained(sourceSharding.getUnreducedAxes(), targetAxis)) {
+      hasKeptAxes = true;
+      break;
+    }
+  }
+  if (hasKeptAxes &&
+      sourceSharding.getReductionOp() != targetSharding.getReductionOp()) {
+    return op->emitOpError(
+               "cannot change the reduction operator of kept unreduced axes "
+               "from ")
+           << sourceSharding.getReductionOp() << " to "
+           << targetSharding.getReductionOp() << ". Check source sharding: "
+           << sourceSharding << ", target sharding: " << targetSharding;
+  }
+  return success();
+}
+
 // Verifies that standard operations and ReturnLike terminators do not drop
 // or introduce unreduced axes.
 LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
@@ -267,10 +294,22 @@ struct VerifyUnreducedAxesPass
     func::FuncOp funcOp = getOperation();
 
     auto walkResult = funcOp.walk([&](Operation* op) {
-      if (isa<sdy::ReshardOp, sdy::ShardingConstraintOp,
-              stablehlo::DotGeneralOp, stablehlo::DotOp,
-              sdy::ManualComputationOp, sdy::AllReduceOp, sdy::ReduceScatterOp>(
-              op)) {
+      if (auto reshardOp = dyn_cast<sdy::ReshardOp>(op)) {
+        if (failed(verifyReshardUnreducedAxes(reshardOp))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      }
+      if (auto constraintOp = dyn_cast<sdy::ShardingConstraintOp>(op)) {
+        if (failed(verifyReshardUnreducedAxes(constraintOp))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      }
+
+      if (isa<stablehlo::DotGeneralOp, stablehlo::DotOp,
+              sdy::ManualComputationOp, sdy::AllReduceOp,
+              sdy::ReduceScatterOp>(op)) {
         return WalkResult::advance();
       }
 
