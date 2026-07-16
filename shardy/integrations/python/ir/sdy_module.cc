@@ -14,16 +14,19 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
 #include <vector>
 
 #include "llvm/ADT/STLExtras.h"
+#include "mlir-c/Bindings/Python/Interop.h"
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
 #include "mlir/Bindings/Python/NanobindAdaptors.h"  // IWYU pragma: keep
+#include "mlir/Bindings/Python/NanobindUtils.h"
 #include "nanobind/nanobind.h"
 #include "nanobind/stl/optional.h"  // IWYU pragma: keep
 #include "nanobind/stl/string.h"    // IWYU pragma: keep
@@ -32,6 +35,50 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/integrations/c/attributes.h"
 #include "shardy/integrations/c/dialect.h"
+
+namespace nanobind {
+namespace detail {
+
+template <>
+struct type_caster<mlir::sdy::ReductionOp> {
+  NB_TYPE_CASTER(mlir::sdy::ReductionOp,
+                 const_name("mlir.dialects.sdy.ReductionOp"))
+
+  // Converts Python -> C++
+  bool from_python(handle src, uint8_t flags, cleanup_list* cleanup) noexcept {
+    int32_t val;
+    if (!try_cast<int32_t>(src, val)) {
+      return false;
+    }
+    if (auto op = mlir::sdy::symbolizeReductionOp(val)) {
+      value = *op;
+      return true;
+    }
+    return false;
+  }
+
+  // Converts C++ -> Python
+  static handle from_cpp(mlir::sdy::ReductionOp src, rv_policy,
+                         cleanup_list* cleanup) noexcept {
+    static mlir::python::SafeInit<object> safeInit([]() {
+      return std::make_unique<object>(
+          module_::import_(MAKE_MLIR_PYTHON_QUALNAME("dialects.sdy"))
+              .attr("ReductionOp"));
+    });
+
+    try {
+      object& cls = safeInit.get();
+      return cls(static_cast<int>(src)).release();
+    } catch (...) {
+      // Fallback to raw int if Python class cannot be loaded (e.g. during
+      // stubgen or interpreter shutdown, or circular imports at module load).
+      return int_(static_cast<int>(src)).release();
+    }
+  }
+};
+
+}  // namespace detail
+}  // namespace nanobind
 
 namespace mlir {
 namespace sdy {
@@ -108,11 +155,6 @@ NB_MODULE(_sdy, m) {
   //
   // Attributes.
   //
-
-  nb::enum_<sdy::ReductionOp>(m, "ReductionOp")
-      .value("SUM", sdy::ReductionOp::SUM)
-      .value("MAX", sdy::ReductionOp::MAX)
-      .value("MIN", sdy::ReductionOp::MIN);
 
   mlir::python::nanobind_adaptors::mlir_attribute_subclass(
 
