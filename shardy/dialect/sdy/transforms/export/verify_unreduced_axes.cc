@@ -307,8 +307,7 @@ struct VerifyUnreducedAxesPass
         return WalkResult::advance();
       }
 
-      if (isa<stablehlo::DotGeneralOp, stablehlo::DotOp,
-              sdy::ManualComputationOp, sdy::AllReduceOp,
+      if (isa<stablehlo::DotGeneralOp, stablehlo::DotOp, sdy::AllReduceOp,
               sdy::ReduceScatterOp>(op)) {
         return WalkResult::advance();
       }

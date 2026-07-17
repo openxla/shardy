@@ -105,8 +105,9 @@ func.func @dot_general_introduces_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
-// This test verifies that sdy.manual_computation ops are allowed to drop unreduced axes.
+// This test verifies that sdy.manual_computation ops are NOT allowed to drop unreduced axes.
 func.func @manual_computation_drops_unreduced(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> tensor<8x8xf32> {
+  // expected-error@+1 {{'sdy.manual_computation' op dropped unreduced axis 'y' without a blessed operation (e.g., sdy.reshard). This is an invalid transition from unreduced to reduced.}}
   %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"x"}, {}], unreduced={"y"}>] out_shardings=[<@mesh, [{"x"}, {}]>] manual_axes={"x", "y"} (%arg1: tensor<4x8xf32>) {
     %1 = "stablehlo.all_reduce"(%arg1) <{channel_handle = #stablehlo.channel_handle<handle = 1, type = 0>, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh, axes = [#stablehlo.axis_ref<name = "y">]>, use_global_device_ids}> ({
     ^bb0(%arg2: tensor<f32>, %arg3: tensor<f32>):
@@ -116,6 +117,24 @@ func.func @manual_computation_drops_unreduced(%arg0: tensor<8x8xf32> {sdy.shardi
     sdy.return %1 : tensor<4x8xf32>
   } : (tensor<8x8xf32>) -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// This test verifies that sdy.manual_computation ops are allowed to have unreduced axes, which are then dropped by a sharding_constraint.
+func.func @manual_computation_drops_unreduced_proper(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>}) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"x"}, {}], unreduced={"y"}>] out_shardings=[<@mesh, [{"x"}, {}], unreduced={"y"}>] manual_axes={"x", "y"} (%arg1: tensor<4x8xf32>) {
+    %1 = "stablehlo.all_reduce"(%arg1) <{channel_handle = #stablehlo.channel_handle<handle = 1, type = 0>, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh, axes = [#stablehlo.axis_ref<name = "y">]>, use_global_device_ids}> ({
+    ^bb0(%arg2: tensor<f32>, %arg3: tensor<f32>):
+      %2 = "stablehlo.add"(%arg2, %arg3) : (tensor<f32>, tensor<f32>) -> tensor<f32>
+      "stablehlo.return"(%2) : (tensor<f32>) -> ()
+    }) : (tensor<4x8xf32>) -> tensor<4x8xf32>
+    sdy.return %1 : tensor<4x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"x"}, {}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
 }
 
 // -----
