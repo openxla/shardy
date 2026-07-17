@@ -20,6 +20,7 @@ limitations under the License.
 #include <list>
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -66,6 +67,12 @@ void alignSubAxesByDecomposition(SmallVector<AxisList>& axesPerDim,
 void alignSubAxesByDecomposition(SmallVector<AxisList>& inAxesPerDim,
                                  SmallVector<AxisList>& outAxesPerDim,
                                  MeshAttr mesh);
+
+// Returns a copy of `sharding` with its dimension axes updated to `axesPerDim`.
+// Preserves all other properties of the sharding (replicated axes, unreduced
+// axes, reduction op, and per-dimension priorities/closedness).
+TensorShardingAttr updateSharding(TensorShardingAttr sharding,
+                                  ArrayRef<AxisList> axesPerDim);
 
 // Returns true if the slice operation on the given dimension is
 // "communication-free". A slice is communication-free if it is not sharded, or

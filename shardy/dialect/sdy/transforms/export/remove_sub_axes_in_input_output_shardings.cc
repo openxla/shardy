@@ -16,6 +16,7 @@ limitations under the License.
 #include <cassert>
 #include <cstdint>
 #include <functional>
+#include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,6 +30,7 @@ limitations under the License.
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -40,29 +42,24 @@ namespace {
 
 TensorShardingAttr removeSubAxesInDimensionShardings(
     TensorShardingAttr sharding) {
-  MLIRContext* ctx = sharding.getContext();
-  SmallVector<DimensionShardingAttr> newDimShardings;
-  newDimShardings.reserve(sharding.getRank());
+  SmallVector<AxisList> newAxesPerDim;
+  newAxesPerDim.reserve(sharding.getRank());
   for (DimensionShardingAttr oldDimSharding : sharding.getDimShardings()) {
+    AxisList newAxes;
     if (oldDimSharding.getIsClosed()) {
-      newDimShardings.push_back(oldDimSharding);
-      continue;
-    }
-    SmallVector<AxisRefAttr> newAxes;
-    for (AxisRefAttr axis : oldDimSharding.getAxes()) {
-      if (axis.getSubAxisInfo()) {
-        break;
+      newAxes.assign(oldDimSharding.getAxes().begin(),
+                     oldDimSharding.getAxes().end());
+    } else {
+      for (AxisRefAttr axis : oldDimSharding.getAxes()) {
+        if (axis.getSubAxisInfo()) {
+          break;
+        }
+        newAxes.push_back(axis);
       }
-      newAxes.push_back(axis);
     }
-    newDimShardings.push_back(
-        DimensionShardingAttr::get(ctx, newAxes, oldDimSharding.getIsClosed(),
-                                   oldDimSharding.getPriority()));
+    newAxesPerDim.push_back(std::move(newAxes));
   }
-  return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), newDimShardings,
-                                 sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes(),
-                                 sharding.getReductionOp());
+  return updateSharding(sharding, newAxesPerDim);
 }
 
 void updateValueShardings(

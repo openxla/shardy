@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/Support/LLVM.h"
@@ -99,6 +100,22 @@ void alignSubAxesByDecomposition(SmallVector<AxisList>& inAxesPerDim,
   SmallVector<AxisRefAttr> orderedOutAxes = getOrderedAxes(outAxesPerDim);
   alignSubAxesByDecomposition(inAxesPerDim, orderedOutAxes, mesh);
   alignSubAxesByDecomposition(outAxesPerDim, orderedInAxes, mesh);
+}
+TensorShardingAttr updateSharding(TensorShardingAttr sharding,
+                                  ArrayRef<AxisList> axesPerDim) {
+  MLIRContext* context = sharding.getContext();
+  SmallVector<DimensionShardingAttr> dimShardings;
+  dimShardings.reserve(sharding.getRank());
+  for (auto [dimSharding, axes] :
+       llvm::zip(sharding.getDimShardings(), axesPerDim)) {
+    dimShardings.push_back(DimensionShardingAttr::get(
+        context, llvm::to_vector(axes), dimSharding.getIsClosed(),
+        dimSharding.getPriority()));
+  }
+  return TensorShardingAttr::get(context, sharding.getMeshOrRef(), dimShardings,
+                                 sharding.getReplicatedAxes(),
+                                 sharding.getUnreducedAxes(),
+                                 sharding.getReductionOp());
 }
 
 bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
