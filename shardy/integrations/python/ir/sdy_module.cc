@@ -21,7 +21,6 @@ limitations under the License.
 #include <vector>
 
 #include "llvm/ADT/STLExtras.h"
-#include "mlir-c/Bindings/Python/Interop.h"
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
@@ -32,6 +31,9 @@ limitations under the License.
 #include "nanobind/stl/string.h"    // IWYU pragma: keep
 #include "nanobind/stl/variant.h"   // IWYU pragma: keep
 #include "nanobind/stl/vector.h"    // IWYU pragma: keep
+// clang-format off
+#include "mlir-c/Bindings/Python/Interop.h"
+// clang-format on
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/integrations/c/attributes.h"
 #include "shardy/integrations/c/dialect.h"
