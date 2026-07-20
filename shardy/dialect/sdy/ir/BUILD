@@ -6,6 +6,8 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files(["ops.td"])
+
 cc_library(
     name = "macros",
     hdrs = ["macros.h"],
