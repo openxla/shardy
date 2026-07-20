@@ -51,6 +51,19 @@ namespace sdy {
 
 namespace {
 
+// Unwraps transient conversion casts on custom-padded values so downstream
+// collective ops can access their sharding. We see such casts during the
+// conversion because the divisible result size of an op with indivisible
+// operands is different from the divisible result size of the op after its
+// operands are padded.
+Value getShardableValue(Value value) {
+  while (auto castOp = dyn_cast_or_null<UnrealizedConversionCastOp>(
+             value.getDefiningOp())) {
+    value = castOp.getInputs()[0];
+  }
+  return sdy::getShardableValue(value);
+}
+
 
 // Computes the padded type for a given type with sharding.
 Type getPaddedType(Type type, TensorShardingAttr sharding,
