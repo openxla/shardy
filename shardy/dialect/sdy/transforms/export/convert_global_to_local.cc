@@ -1183,7 +1183,10 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     for (int64_t i = 0; i < rank; ++i) {
       auto* it = llvm::find(scatteredDims, i);
       if (it == scatteredDims.end()) {
+        // This dimension is not scattered; keep its original size and do not
+        // emit a factor sub-dimension for it.
         splitShape.push_back(inputShape[i]);
+        continue;
       }
       int64_t factor =
           scatteredFactors[std::distance(scatteredDims.begin(), it)];
