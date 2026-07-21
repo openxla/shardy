@@ -999,13 +999,13 @@ LogicalResult verifyManualComputationValue(
     //    arguments/results match.
     auto expectedLocalRankedType =
         RankedTensorType::get(newDimSizes, globalShapedType.getElementType());
-    auto localRankedType = cast<RankedTensorType>(localType);
+    auto localRankedType = dyn_cast<RankedTensorType>(localType);
     if (expectedLocalRankedType != localRankedType) {
       return op->emitOpError(valueKindStr)
              << " shape, corresponding sharding, and region " << valueKindStr
              << " shape at index " << valueIndex
              << " must match. Expected local shape " << expectedLocalRankedType
-             << ", actual local shape " << localRankedType;
+             << ", actual local shape " << localType;
     }
   }
 
