@@ -389,14 +389,14 @@ def _add_input_specs_for_removed_inputs(
   removed_inputs_idx = [
       i
       for i in range(len(jax_fn_info.global_flat_input_abstract_values))
-      if i not in jax_fn_info.kept_inputs_indices
+      if (i + len(jax_fn_info.const_args)) not in jax_fn_info.kept_inputs_indices
   ]
   if flat_input_mesh_assignment:
     arbitrarily_assigned_input_indices = []
     for i in removed_inputs_idx:
       if input_assignment := flat_input_mesh_assignment[i]:
         mesh_name_without_memory_kind = input_assignment.split('#')[0]
-        input_specs[i] = jaxlib_mpmd.NamedSpmdShardingSpec(
+        input_specs[i + len(jax_fn_info.const_args)] = jaxlib_mpmd.NamedSpmdShardingSpec(
             mesh_name_without_memory_kind, [[]], memory_kind=None
         )
       else:
