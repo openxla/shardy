@@ -9,6 +9,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "llvm/ADT/STLExtras.h"
@@ -19,6 +20,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -44,26 +46,20 @@ void appendUnreducedAxes(TensorShardingAttr sharding,
   }
 }
 
-// Verifies that all unreduced axes in `sourceAxes` are present in `targetAxes`.
-// Otherwise, emits an op error with `errorMsgSuffix` and returns failure.
-LogicalResult verifySubset(ArrayRef<AxisRefAttr> sourceAxes,
-                           ArrayRef<AxisRefAttr> targetAxes, Operation* op,
-                           const llvm::Twine& errorMsgSuffix) {
-  for (AxisRefAttr axis : sourceAxes) {
-    if (!llvm::is_contained(targetAxes, axis)) {
-      return op->emitOpError("dropped unreduced axis '")
-             << axis.getName() << errorMsgSuffix;
-    }
-  }
-  return success();
-}
 
 // Verifies that `sourceAxes` and `targetAxes` contain the same unreduced axes.
 // Otherwise, emits an op error with `errorMsgSuffix` and returns failure.
 LogicalResult verifyEqual(ArrayRef<AxisRefAttr> sourceAxes,
                           ArrayRef<AxisRefAttr> targetAxes, Operation* op,
                           const llvm::Twine& errorMsgSuffix) {
-  if (sourceAxes != targetAxes) {
+  SmallVector<AxisRefAttr> sortedSource(sourceAxes);
+  SmallVector<AxisRefAttr> sortedTarget(targetAxes);
+  llvm::sort(sortedSource);
+  sortedSource.erase(llvm::unique(sortedSource), sortedSource.end());
+  llvm::sort(sortedTarget);
+  sortedTarget.erase(llvm::unique(sortedTarget), sortedTarget.end());
+
+  if (sortedSource != sortedTarget) {
     // Generate mismatch names to keep the error message helpful.
     SmallVector<StringRef> mismatchNames;
     for (AxisRefAttr axis : sourceAxes) {
@@ -85,26 +81,23 @@ LogicalResult verifyEqual(ArrayRef<AxisRefAttr> sourceAxes,
   return success();
 }
 
-bool isDefiningOpBlessedOrDot(Value value) {
+bool isExplicitReshardOp(Operation* op) {
+  return isa_and_nonnull<sdy::ReshardOp, sdy::ShardingConstraintOp>(op);
+}
+
+bool isDefiningOpExplicitReshard(Value value) {
   if (!value) {
     return false;
   }
-  Operation* defOp = value.getDefiningOp();
-  if (!defOp) {
-    return false;
+  while (auto barrierOp = value.getDefiningOp<PropagationBarrierOp>()) {
+    value = barrierOp.getInput();
   }
-  if (isa<sdy::ReshardOp, sdy::ShardingConstraintOp, stablehlo::DotGeneralOp,
-          stablehlo::DotOp>(defOp)) {
-    return true;
-  }
-  StringRef opName = defOp->getName().getStringRef();
-  return opName == "mhlo.dot_general" || opName == "mhlo.dot" ||
-         opName == "stablehlo.copy" || opName == "mhlo.copy";
+  return isExplicitReshardOp(value.getDefiningOp());
 }
 
-// Verifies that a call operation has the exact same unreduced axes at its
+/// Verifies that a call operation has the exact same unreduced axes at its
 // operand-argument boundary and callee-caller result boundary.
-LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
+LogicalResult verifyCall(func::CallOp callOp) {
   auto callee = dyn_cast_or_null<func::FuncOp>(
       SymbolTable::lookupNearestSymbolFrom(callOp, callOp.getCalleeAttr()));
   if (!callee) {
@@ -114,7 +107,7 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
   // Verify call operands against callee arguments.
   for (int64_t i = 0; i < callOp.getNumOperands(); ++i) {
     Value operand = callOp.getOperand(i);
-    if (isDefiningOpBlessedOrDot(operand)) {
+    if (isDefiningOpExplicitReshard(operand)) {
       continue;
     }
     TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
@@ -153,136 +146,172 @@ LogicalResult verifyCallUnreducedAxes(func::CallOp callOp) {
   return success();
 }
 
-LogicalResult verifyReshardUnreducedAxes(Operation* op) {
-  TensorShardingAttr sourceSharding =
-      getShardingBypassingBarriers(op->getOperand(0));
-  TensorShardingAttr targetSharding =
-      op->getAttrOfType<TensorShardingAttr>("sharding");
-  if (!sourceSharding || !targetSharding) {
+LogicalResult verifyReturnPair(Value operand, TensorShardingAttr resultSharding,
+                               Operation* op, int64_t index) {
+  if (isDefiningOpExplicitReshard(operand)) {
     return success();
   }
-  bool hasKeptAxes = false;
-  for (AxisRefAttr targetAxis : targetSharding.getUnreducedAxes()) {
-    if (llvm::is_contained(sourceSharding.getUnreducedAxes(), targetAxis)) {
-      hasKeptAxes = true;
-      break;
-    }
+  if (!resultSharding) {
+    return success();
   }
-  if (hasKeptAxes &&
-      sourceSharding.getReductionOp() != targetSharding.getReductionOp()) {
-    return op->emitOpError(
-               "cannot change the reduction operator of kept unreduced axes "
-               "from ")
-           << sourceSharding.getReductionOp() << " to "
-           << targetSharding.getReductionOp() << ". Check source sharding: "
-           << sourceSharding << ", target sharding: " << targetSharding;
-  }
-  return success();
+  SmallVector<AxisRefAttr> operandAxes;
+  SmallVector<AxisRefAttr> resultAxes;
+  appendUnreducedAxes(getShardingBypassingBarriers(operand), operandAxes);
+  appendUnreducedAxes(resultSharding, resultAxes);
+  return verifyEqual(operandAxes, resultAxes, op,
+                     llvm::Twine("' at return value ") + llvm::Twine(index) +
+                         " without a blessed operation (e.g., sdy.reshard). "
+                         "This is an invalid transition "
+                         "from unreduced to reduced.");
 }
 
 // Verifies that standard operations and ReturnLike terminators do not drop
 // or introduce unreduced axes.
-LogicalResult verifyDefaultOpUnreducedAxes(Operation* op, func::FuncOp funcOp) {
-  SmallVector<AxisRefAttr> operandUnreducedAxes;
-  SmallVector<AxisRefAttr> resultUnreducedAxes;
-
-  if (op->hasTrait<OpTrait::ReturnLike>() &&
-      isa<func::FuncOp>(op->getParentOp())) {
+LogicalResult verifyTerminator(Operation* op, func::FuncOp funcOp) {
+  // Verify function-level terminator: the return operands must match the
+  // function results.
+  if (isa<func::FuncOp>(op->getParentOp())) {
     auto parentFuncOp = cast<func::FuncOp>(op->getParentOp());
     for (int64_t i = 0; i < op->getNumOperands(); ++i) {
-      Value operand = op->getOperand(i);
-      if (isDefiningOpBlessedOrDot(operand)) {
-        continue;
-      }
       TensorShardingAttr resultSharding =
           getFuncResultSharding(parentFuncOp, i);
-      if (!resultSharding) {
-        continue;
-      }
-      appendUnreducedAxes(getShardingBypassingBarriers(operand),
-                          operandUnreducedAxes);
-      appendUnreducedAxes(resultSharding, resultUnreducedAxes);
-    }
-
-    if (operandUnreducedAxes.empty() && resultUnreducedAxes.empty()) {
-      return success();
-    }
-    return verifyEqual(
-        operandUnreducedAxes, resultUnreducedAxes, op,
-        "' without a blessed operation (e.g., sdy.reshard). "
-        "This is an invalid transition from unreduced to reduced.");
-  }
-
-  for (Value operand : op->getOperands()) {
-    if (isDefiningOpBlessedOrDot(operand)) {
-      continue;
-    }
-    appendUnreducedAxes(getShardingBypassingBarriers(operand),
-                        operandUnreducedAxes);
-  }
-
-  if (op->hasTrait<OpTrait::ReturnLike>()) {
-    Operation* parentOp = op->getParentOp();
-    if (parentOp->getNumResults() > 0) {
-      for (int64_t i = 0; i < op->getNumOperands(); ++i) {
-        if (i < parentOp->getNumResults()) {
-          TensorShardingAttr resultSharding =
-              getShardingBypassingBarriers(parentOp->getResult(i));
-          if (auto manualCompOp =
-                  dyn_cast<sdy::ManualComputationOp>(parentOp)) {
-            resultSharding =
-                eraseManualAxes(resultSharding, manualCompOp.getManualAxes());
-          }
-          appendUnreducedAxes(resultSharding, resultUnreducedAxes);
-        }
+      if (failed(verifyReturnPair(op->getOperand(i), resultSharding, op, i))) {
+        return failure();
       }
     }
-
-    if (operandUnreducedAxes.empty() && resultUnreducedAxes.empty()) {
-      return success();
-    }
-    return verifyEqual(
-        operandUnreducedAxes, resultUnreducedAxes, op,
-        "' without a blessed operation (e.g., sdy.reshard). "
-        "This is an invalid transition from unreduced to reduced.");
-  }
-
-  for (Value result : op->getResults()) {
-    appendUnreducedAxes(getShardingBypassingBarriers(result),
-                        resultUnreducedAxes);
-  }
-
-  if (operandUnreducedAxes.empty()) {
     return success();
   }
 
-  // Operations like stablehlo.dot_general can legitimately introduce new
-  // unreduced axes on their results. Instead of coding a fragile whitelist of
-  // such operations, we just check that all unreduced axes in the operands
-  // are still present in the results (and not dropped without a reeshard).
-  return verifySubset(
-      operandUnreducedAxes, resultUnreducedAxes, op,
-      "' without a blessed operation (e.g., sdy.reshard). "
-      "This is an invalid transition from unreduced to reduced.");
-}
-
-bool isSumReduction(stablehlo::ReduceOp reduceOp) {
-  if (reduceOp.getBody().empty()) {
-    return false;
-  }
-  Block& body = reduceOp.getBody().front();
-  auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
-  if (!returnOp ||
-      returnOp.getOperands().size() != reduceOp.getInputs().size()) {
-    return false;
-  }
-  for (Value retValue : returnOp.getOperands()) {
-    Operation* curOp = retValue.getDefiningOp();
-    if (!curOp || !isa<stablehlo::AddOp>(curOp)) {
-      return false;
+  // Verify nested terminator: the return operands must match the manual
+  // computation results.
+  Operation* parentOp = op->getParentOp();
+  if (parentOp->getNumResults() > 0) {
+    for (int64_t i = 0; i < op->getNumOperands(); ++i) {
+      if (i < parentOp->getNumResults()) {
+        TensorShardingAttr resultSharding =
+            getShardingBypassingBarriers(parentOp->getResult(i));
+        if (auto manualCompOp = dyn_cast<sdy::ManualComputationOp>(parentOp)) {
+          resultSharding =
+              eraseManualAxes(resultSharding, manualCompOp.getManualAxes());
+        }
+        if (failed(
+                verifyReturnPair(op->getOperand(i), resultSharding, op, i))) {
+          return failure();
+        }
+      }
     }
   }
-  return true;
+  return success();
+}
+
+LogicalResult verifyDefaultOp(Operation* op, func::FuncOp funcOp) {
+  SmallVector<TensorShardingAttr> operandShardings;
+  operandShardings.reserve(op->getNumOperands());
+  for (Value operand : op->getOperands()) {
+    operandShardings.push_back(isDefiningOpExplicitReshard(operand)
+                                   ? TensorShardingAttr()
+                                   : getShardingBypassingBarriers(operand));
+  }
+  SmallVector<TensorShardingAttr> resultShardings;
+  resultShardings.reserve(op->getNumResults());
+  for (Value result : op->getResults()) {
+    resultShardings.push_back(getShardingBypassingBarriers(result));
+  }
+  // We currently allow default ops to introduce SUM unreduced axes.
+  return verifyUnreducedAxesTransition(
+      op, operandShardings, resultShardings,
+      /*expectedIntroducedRedOp=*/ReductionOp::SUM);
+}
+
+std::optional<ReductionOp> getReductionType(Region& region) {
+  if (region.empty()) {
+    return std::nullopt;
+  }
+  Block& body = region.front();
+  auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
+  if (!returnOp || returnOp.getOperands().empty()) {
+    return std::nullopt;
+  }
+  std::optional<ReductionOp> result;
+  for (Value operand : returnOp.getOperands()) {
+    Operation* defOp = operand.getDefiningOp();
+    if (!defOp) {
+      return std::nullopt;
+    }
+    std::optional<ReductionOp> curOpType;
+    if (isa<stablehlo::AddOp>(defOp)) {
+      curOpType = ReductionOp::SUM;
+    } else if (isa<stablehlo::MaxOp>(defOp)) {
+      curOpType = ReductionOp::MAX;
+    } else if (isa<stablehlo::MinOp>(defOp)) {
+      curOpType = ReductionOp::MIN;
+    } else {
+      return std::nullopt;
+    }
+    if (!result) {
+      result = curOpType;
+    } else if (result != curOpType) {
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
+LogicalResult verifyReduce(stablehlo::ReduceOp reduceOp) {
+  SmallVector<TensorShardingAttr> operandShardings;
+  for (Value operand : reduceOp.getInputs()) {
+    operandShardings.push_back(isDefiningOpExplicitReshard(operand)
+                                   ? TensorShardingAttr()
+                                   : getShardingBypassingBarriers(operand));
+  }
+  SmallVector<TensorShardingAttr> resultShardings;
+  for (Value result : reduceOp.getResults()) {
+    resultShardings.push_back(getShardingBypassingBarriers(result));
+  }
+
+  std::optional<ReductionOp> expectedBodyRedOp =
+      getReductionType(reduceOp.getBody());
+
+  return verifyUnreducedAxesTransition(reduceOp, operandShardings,
+                                       resultShardings, expectedBodyRedOp);
+}
+
+// We currently verify this for dot and dot_general without analyzing the
+// semantics of the operation:
+// 1. Unreduced axes from the operands can be passed through to the results
+//    (such as for the batching dimensions of the op).
+// 2. Unreduced axes introduced by the result can only be SUM reduction
+//    (such as for the partitioned contraction dimensions).
+LogicalResult verifyDot(Operation* op) {
+  SmallVector<TensorShardingAttr> operandShardings;
+  for (Value operand : op->getOperands()) {
+    operandShardings.push_back(isDefiningOpExplicitReshard(operand)
+                                   ? TensorShardingAttr()
+                                   : getShardingBypassingBarriers(operand));
+  }
+  SmallVector<TensorShardingAttr> resultShardings;
+  for (Value result : op->getResults()) {
+    resultShardings.push_back(getShardingBypassingBarriers(result));
+  }
+  return verifyUnreducedAxesTransition(op, operandShardings, resultShardings,
+                                       ReductionOp::SUM);
+}
+
+LogicalResult verifyStablehloCollective(Operation* op) {
+  TensorShardingAttr operandSharding =
+      getShardingBypassingBarriers(op->getOperand(0));
+  TensorShardingAttr resultSharding =
+      getShardingBypassingBarriers(op->getResult(0));
+  if (!operandSharding && !resultSharding) {
+    return success();
+  }
+
+  std::optional<ReductionOp> bodyRedOp =
+      op->getNumRegions() > 0 ? getReductionType(op->getRegion(0))
+                              : std::nullopt;
+
+  return verifyUnreducedAxesTransition(op, {operandSharding}, {resultSharding},
+                                       std::nullopt, bodyRedOp);
 }
 
 struct VerifyUnreducedAxesPass
@@ -294,43 +323,62 @@ struct VerifyUnreducedAxesPass
     func::FuncOp funcOp = getOperation();
 
     auto walkResult = funcOp.walk([&](Operation* op) {
-      if (auto reshardOp = dyn_cast<sdy::ReshardOp>(op)) {
-        if (failed(verifyReshardUnreducedAxes(reshardOp))) {
+      if (isExplicitReshardOp(op)) {
+        if (failed(mlir::verify(op))) {
           return WalkResult::interrupt();
         }
-        return WalkResult::advance();
-      }
-      if (auto constraintOp = dyn_cast<sdy::ShardingConstraintOp>(op)) {
-        if (failed(verifyReshardUnreducedAxes(constraintOp))) {
-          return WalkResult::interrupt();
-        }
-        return WalkResult::advance();
-      }
-
-      if (isa<stablehlo::DotGeneralOp, stablehlo::DotOp, sdy::AllReduceOp,
-              sdy::ReduceScatterOp>(op)) {
         return WalkResult::advance();
       }
 
       if (auto reduceOp = dyn_cast<stablehlo::ReduceOp>(op)) {
-        if (isSumReduction(reduceOp)) {
-          return WalkResult::advance();
-        }
-      }
-
-      if (op->hasTrait<OpTrait::IsTerminator>() &&
-          !op->hasTrait<OpTrait::ReturnLike>()) {
-        return WalkResult::advance();
-      }
-
-      if (auto callOp = dyn_cast<func::CallOp>(op)) {
-        if (failed(verifyCallUnreducedAxes(callOp))) {
+        if (failed(verifyReduce(reduceOp))) {
           return WalkResult::interrupt();
         }
         return WalkResult::advance();
       }
 
-      if (failed(verifyDefaultOpUnreducedAxes(op, funcOp))) {
+      if (isa<stablehlo::DotGeneralOp, stablehlo::DotOp>(op)) {
+        if (failed(verifyDot(op))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      }
+
+      if (isa<sdy::AllReduceOp, sdy::ReduceScatterOp>(op)) {
+        if (!getShardingBypassingBarriers(op->getOperand(0))) {
+          op->emitOpError("operand must be sharded.");
+          return WalkResult::interrupt();
+        }
+        if (failed(mlir::verify(op))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      }
+
+      if (isa<stablehlo::AllReduceOp, stablehlo::ReduceScatterOp>(op)) {
+        if (failed(verifyStablehloCollective(op))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      }
+
+      if (auto callOp = dyn_cast<func::CallOp>(op)) {
+        if (failed(verifyCall(callOp))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      }
+
+      if (op->hasTrait<OpTrait::IsTerminator>()) {
+        if (op->hasTrait<OpTrait::ReturnLike>()) {
+          if (failed(verifyTerminator(op, funcOp))) {
+            return WalkResult::interrupt();
+          }
+        }
+        return WalkResult::advance();
+      }
+
+      if (failed(verifyDefaultOp(op, funcOp))) {
         return WalkResult::interrupt();
       }
 

@@ -575,7 +575,7 @@ func.func @all_reduce_overlapping_operand_sharding_axis_major(%arg0 : tensor<16x
 
 sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
 
-func.func @all_reduce_overlapping_result_unreduced_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+func.func @all_reduce_overlapping_result_unreduced_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}], unreduced={"z"}>}) -> tensor<16x32xf32> {
   // expected-error@+1 {{'sdy.all_reduce' op reduction axis "z" overlaps with result unreduced axes}}
   %0 = sdy.all_reduce {"z"} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}], unreduced={"z"}> :  tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
@@ -585,7 +585,7 @@ func.func @all_reduce_overlapping_result_unreduced_axis(%arg0 : tensor<16x32xf32
 
 sdy.mesh @mesh= <["x"=2, "y"=2, "z"=8]>
 
-func.func @all_reduce_overlapping_result_unreduced_sub_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+func.func @all_reduce_overlapping_result_unreduced_sub_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}], unreduced={"z"}>}) -> tensor<16x32xf32> {
   // expected-error@+1 {{'sdy.all_reduce' op reduction axis "z":(2)2 overlaps with result unreduced axes}}
   %0 = sdy.all_reduce {"z":(2)2} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}], unreduced={"z"}> :  tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
@@ -1117,5 +1117,44 @@ func.func @sharded_to_unreduced_invalid_reduction_op(%arg0 : tensor<16x8xf32> {s
   // expected-error @+1 {{out_sharding reduction_op must be SUM}}
   %0 = sdy.sharded_to_unreduced [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}], unreduced=max{"x"}> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+
+func.func @all_reduce_mismatch_reduction_op(%arg0: tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}], unreduced=max{"z"}>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op cannot reduce 'max' unreduced axes. Expected 'sum'.}}
+  %0 = sdy.all_reduce {"z"} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+
+func.func @reduce_scatter_mismatch_reduction_op(%arg0: tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {"y"}], unreduced=max{"z"}>}) -> tensor<16x8xf32> {
+  // expected-error@+1 {{'sdy.reduce_scatter' op cannot reduce 'max' unreduced axes. Expected 'min'.}}
+  %0 = sdy.reduce_scatter min [{"x"}, {}] %arg0 out_sharding=<@mesh, [{"x", "z"}, {"y"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+
+func.func @all_reduce_adds_new_unreduced_axis(%arg0: tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op cannot add new unreduced axis 'z'.}}
+  %0 = sdy.all_reduce {} %arg0 out_sharding=<@mesh, [{"y"}, {"x"}], unreduced={"z"}> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @all_reduce_passthrough_unreduced(%arg0 : tensor<8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}], unreduced=max{"x", "y"}>}) -> tensor<8xf32> {
+  %0 = sdy.all_reduce max {"x"} %arg0 out_sharding=<@mesh, [{}], unreduced=max{"y"}> : tensor<8xf32>
+  return %0 : tensor<8xf32>
 }
 

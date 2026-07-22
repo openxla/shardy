@@ -144,37 +144,39 @@ func.func private @foo(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mes
 // -----
 sdy.mesh @mesh_rs = <["x"=2, "y"=2, "z"=2]>
 
-// CHECK-LABEL: func @dot_general_unreduced_to_sharded_max
-func.func @dot_general_unreduced_to_sharded_max(
-    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {"y"}]>},
-    %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"y"}, {}]>})
-    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {"y"}]>}) {
-  // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %arg0, %arg1
+// CHECK-LABEL: func @reduce_unreduced_to_sharded_max
+func.func @reduce_unreduced_to_sharded_max(
+    %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {}, {"y"}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {"y"}]>}) {
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %[[CST]]) applies stablehlo.maximum across dimensions = [2]
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh_rs, [{"x"}, {}], unreduced=max{"y"}>]>}
-  // CHECK-NEXT: %[[REDUCE_SCATTER:.*]] = sdy.reduce_scatter max [{}, {"y"}] %[[DOT_GENERAL]] out_sharding=<@mesh_rs, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[REDUCE_SCATTER:.*]] = sdy.reduce_scatter max [{}, {"y"}] %[[REDUCE]] out_sharding=<@mesh_rs, [{"x"}, {"y"}]>
   // CHECK-NEXT: return %[[REDUCE_SCATTER]]
-  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %0 = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [2]
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh_rs, [{"x"}, {}], unreduced=max{"y"}>]>} :
-    (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
-  %reshard = sdy.reshard %0 <@mesh_rs, [{"x"}, {"y"}]> : tensor<8x16xf32>
-  return %reshard : tensor<8x16xf32>
+    (tensor<8x8x8xf32>, tensor<f32>) -> tensor<8x8xf32>
+  %reshard = sdy.reshard %0 <@mesh_rs, [{"x"}, {"y"}]> : tensor<8x8xf32>
+  return %reshard : tensor<8x8xf32>
 }
 
 // -----
 sdy.mesh @mesh_rs = <["x"=2, "y"=2, "z"=2]>
 
-// CHECK-LABEL: func @dot_general_unreduced_to_sharded_min
-func.func @dot_general_unreduced_to_sharded_min(
-    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {"y"}]>},
-    %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"y"}, {}]>})
-    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {"y"}]>}) {
-  // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %arg0, %arg1
+// CHECK-LABEL: func @reduce_unreduced_to_sharded_min
+func.func @reduce_unreduced_to_sharded_min(
+    %arg0: tensor<8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {}, {"y"}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_rs, [{"x"}, {"y"}]>}) {
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %[[CST]]) applies stablehlo.minimum across dimensions = [2]
   // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh_rs, [{"x"}, {}], unreduced=min{"y"}>]>}
-  // CHECK-NEXT: %[[REDUCE_SCATTER:.*]] = sdy.reduce_scatter min [{}, {"y"}] %[[DOT_GENERAL]] out_sharding=<@mesh_rs, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[REDUCE_SCATTER:.*]] = sdy.reduce_scatter min [{}, {"y"}] %[[REDUCE]] out_sharding=<@mesh_rs, [{"x"}, {"y"}]>
   // CHECK-NEXT: return %[[REDUCE_SCATTER]]
-  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %0 = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.minimum across dimensions = [2]
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh_rs, [{"x"}, {}], unreduced=min{"y"}>]>} :
-    (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
-  %reshard = sdy.reshard %0 <@mesh_rs, [{"x"}, {"y"}]> : tensor<8x16xf32>
-  return %reshard : tensor<8x16xf32>
+    (tensor<8x8x8xf32>, tensor<f32>) -> tensor<8x8xf32>
+  %reshard = sdy.reshard %0 <@mesh_rs, [{"x"}, {"y"}]> : tensor<8x8xf32>
+  return %reshard : tensor<8x8xf32>
 }

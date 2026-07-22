@@ -793,14 +793,36 @@ LogicalResult MeshOp::verify() {
 
 LogicalResult ShardingConstraintOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
-  return verifyTensorShardingAttr(getSharding(), getType(), *this,
-                                  symbolTableCollection, getEmitErrorFn(*this));
+  if (failed(verifyTensorShardingAttr(getSharding(), getType(), *this,
+                                      symbolTableCollection,
+                                      getEmitErrorFn(*this)))) {
+    return failure();
+  }
+  TensorShardingAttr sourceSharding =
+      getShardingBypassingBarriers(getOperand());
+  if (!sourceSharding) {
+    return success();
+  }
+  return verifyUnreducedAxesTransition(*this, {sourceSharding}, {getSharding()},
+                                       ReductionOp::SUM,
+                                       sourceSharding.getReductionOp());
 }
 
 LogicalResult ReshardOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
-  return verifyTensorShardingAttr(getSharding(), getType(), *this,
-                                  symbolTableCollection, getEmitErrorFn(*this));
+  if (failed(verifyTensorShardingAttr(getSharding(), getType(), *this,
+                                      symbolTableCollection,
+                                      getEmitErrorFn(*this)))) {
+    return failure();
+  }
+  TensorShardingAttr sourceSharding =
+      getShardingBypassingBarriers(getOperand());
+  if (!sourceSharding) {
+    return success();
+  }
+  return verifyUnreducedAxesTransition(*this, {sourceSharding}, {getSharding()},
+                                       ReductionOp::SUM,
+                                       sourceSharding.getReductionOp());
 }
 
 LogicalResult FuncDataFlowEdgeOp::verifySymbolUses(
@@ -1754,11 +1776,25 @@ LogicalResult AllReduceOp::verifySymbolUses(
     }
   }
 
+  if (failed(verifyUnreducedAxesTransition(*this, {operandSharding},
+                                           {resultSharding}, std::nullopt,
+                                           getReductionOp()))) {
+    return failure();
+  }
+
   return success();
 }
 
 LogicalResult ReduceScatterOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
+  TensorShardingAttr resultSharding = getOutSharding();
+  TensorShardingAttr operandSharding =
+      getOrCreateSharding(getOperand(), resultSharding.getMeshOrRef());
+  if (failed(verifyUnreducedAxesTransition(*this, {operandSharding},
+                                           {resultSharding}, std::nullopt,
+                                           getReductionOp()))) {
+    return failure();
+  }
   return verifyCollectiveWithAxesPerDim(
       *this, symbolTableCollection, getReduceScatterAxes(),
       [](DimensionShardingAttr operandDimSharding,

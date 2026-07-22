@@ -33,3 +33,42 @@ func.func @constraint_replication_inside_bound_manual_computation(%arg0: tensor<
   } : (tensor<16x32xf32>) -> tensor<16x32xf32>
   return %0 : tensor<16x32xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @reshard_mismatch_reduction_op(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}) -> tensor<8xf32> {
+  // expected-error@+1 {{'sdy.reshard' op cannot change the reduction operator of kept unreduced axes from max to sum.}}
+  %0 = sdy.reshard %arg0 <@mesh, [{}], unreduced={"x"}> : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @reshard_introduces_axes_non_sum(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> tensor<8xf32> {
+  // expected-error@+1 {{'sdy.reshard' op cannot introduce 'max' unreduced axes. Expected 'sum'.}}
+  %0 = sdy.reshard %arg0 <@mesh, [{}], unreduced=max{"x"}> : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+
+func.func @reshard_keep_and_introduce_mismatch(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}) -> tensor<8xf32> {
+  // expected-error@+1 {{'sdy.reshard' op cannot change the reduction operator of kept unreduced axes from max to sum.}}
+  %0 = sdy.reshard %arg0 <@mesh, [{}], unreduced={"x", "y"}> : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+
+func.func @reshard_drop_and_introduce_success(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x", "y"}>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}], unreduced={"x", "z"}> : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}

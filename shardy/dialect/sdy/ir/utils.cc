@@ -1286,5 +1286,144 @@ void modifyAllResultAttrs(FuncOp funcOp,
   }
 }
 
+LogicalResult verifyUnreducedAxesTransition(
+    Operation* op, ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultShardings,
+    std::optional<ReductionOp> expectedIntroducedRedOp,
+    std::optional<ReductionOp> expectedRemovedRedOp) {
+  bool canIntroduce = expectedIntroducedRedOp.has_value();
+  bool canRemove = expectedRemovedRedOp.has_value();
+
+  // Collect unreduced axes from all operand and result shardings.
+  SmallVector<AxisRefAttr> flatOperandAxes;
+  for (TensorShardingAttr sharding : operandShardings) {
+    if (sharding) {
+      llvm::append_range(flatOperandAxes, sharding.getUnreducedAxes());
+    }
+  }
+
+  SmallVector<AxisRefAttr> flatResultAxes;
+  for (TensorShardingAttr sharding : resultShardings) {
+    if (sharding) {
+      llvm::append_range(flatResultAxes, sharding.getUnreducedAxes());
+    }
+  }
+
+  // Retrieve the MeshAttr since getAxisSetDiff requires it to inspect splits.
+  // Skip verification if there is no mesh or if the mesh is not consistent.
+  MeshAttr mesh;
+  for (TensorShardingAttr sharding : operandShardings) {
+    if (sharding) {
+      MeshAttr curMesh = getMeshOrLookup(op, sharding.getMeshOrRef());
+      if (curMesh) {
+        if (!mesh) {
+          mesh = curMesh;
+        } else if (mesh != curMesh) {
+          return success();
+        }
+      }
+    }
+  }
+  for (TensorShardingAttr sharding : resultShardings) {
+    if (sharding) {
+      MeshAttr curMesh = getMeshOrLookup(op, sharding.getMeshOrRef());
+      if (curMesh) {
+        if (!mesh) {
+          mesh = curMesh;
+        } else if (mesh != curMesh) {
+          return success();
+        }
+      }
+    }
+  }
+
+  // Compute introduced and removed axes using getAxisSetDiff.
+  SmallVector<AxisRefAttr> introducedAxes =
+      getAxisSetDiff(flatResultAxes, flatOperandAxes, mesh);
+  SmallVector<AxisRefAttr> removedAxes =
+      getAxisSetDiff(flatOperandAxes, flatResultAxes, mesh);
+
+  auto verifyRedOp = [&](ArrayRef<TensorShardingAttr> shardings,
+                         ArrayRef<AxisRefAttr> diffAxes,
+                         ReductionOp expectedRedOp, StringRef errorMsgPrefix,
+                         StringRef errorMsgSuffix) -> LogicalResult {
+    for (TensorShardingAttr sharding : shardings) {
+      if (!sharding) {
+        continue;
+      }
+      bool hasDiff =
+          llvm::any_of(sharding.getUnreducedAxes(), [&](AxisRefAttr axis) {
+            return llvm::any_of(diffAxes, [&](AxisRefAttr diffAxis) {
+              return axis.overlaps(diffAxis);
+            });
+          });
+      if (hasDiff) {
+        ReductionOp redOp = sharding.getReductionOp();
+        if (redOp != expectedRedOp) {
+          return op->emitOpError(errorMsgPrefix)
+                 << redOp << errorMsgSuffix << expectedRedOp << "'.";
+        }
+      }
+    }
+    return success();
+  };
+
+  // Verify introduced axes.
+  if (!introducedAxes.empty()) {
+    if (!canIntroduce) {
+      return op->emitOpError("cannot add new unreduced axis '")
+             << introducedAxes[0].getName() << "'.";
+    }
+    if (failed(verifyRedOp(resultShardings, introducedAxes,
+                           *expectedIntroducedRedOp, "cannot introduce '",
+                           "' unreduced axes. Expected '"))) {
+      return failure();
+    }
+  }
+
+  // Verify removed axes.
+  if (!removedAxes.empty()) {
+    if (!canRemove) {
+      return op->emitOpError("dropped unreduced axis '")
+             << removedAxes[0].getName()
+             << "' without a blessed operation (e.g., sdy.reshard). "
+                "This is an invalid transition from unreduced to reduced.";
+    }
+    if (failed(verifyRedOp(operandShardings, removedAxes, *expectedRemovedRedOp,
+                           "cannot reduce '",
+                           "' unreduced axes. Expected '"))) {
+      return failure();
+    }
+  }
+
+  // Verify kept axes ReductionOp preservation.
+  for (TensorShardingAttr resultSharding : resultShardings) {
+    if (!resultSharding) {
+      continue;
+    }
+    ReductionOp resultRedOp = resultSharding.getReductionOp();
+    for (AxisRefAttr resultAxis : resultSharding.getUnreducedAxes()) {
+      for (TensorShardingAttr operandSharding : operandShardings) {
+        if (!operandSharding) {
+          continue;
+        }
+        ReductionOp operandRedOp = operandSharding.getReductionOp();
+        for (AxisRefAttr operandAxis : operandSharding.getUnreducedAxes()) {
+          if (operandAxis.overlaps(resultAxis)) {
+            if (operandRedOp != resultRedOp) {
+              return op->emitOpError(
+                         "cannot change the reduction operator of kept "
+                         "unreduced axes from ")
+                     << operandRedOp << " to " << resultRedOp << ".";
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return success();
+}
+
 }  // namespace sdy
 }  // namespace mlir

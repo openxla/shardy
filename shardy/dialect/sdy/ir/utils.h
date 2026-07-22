@@ -385,6 +385,20 @@ void setShardings(Operation* op, TensorShardingPerValueAttr shardingPerValue);
 // ones.
 void removeShardingRules(Operation* rootOp);
 
+// Verifies the transition of unreduced axes from operand shardings to result
+// shardings:
+// - Kept unreduced axes (present in both source and target) must preserve
+//   their `ReductionOp` (reduction operator).
+// - Introducing new unreduced axes is prohibited if `expectedIntroducedRedOp`
+//   is `std::nullopt`. Otherwise, it is allowed and checked against it.
+// - Removing/dropping unreduced axes is prohibited if `expectedRemovedRedOp`
+//   is `std::nullopt`. Otherwise, it is allowed and checked against it.
+LogicalResult verifyUnreducedAxesTransition(
+    Operation* op, ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultShardings,
+    std::optional<ReductionOp> expectedIntroducedRedOp = std::nullopt,
+    std::optional<ReductionOp> expectedRemovedRedOp = std::nullopt);
+
 // Gets the `op` body's terminator.
 template <typename RegionOpTy>
 Operation* getBodyTerminator(RegionOpTy op) {
