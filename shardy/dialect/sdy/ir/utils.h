@@ -183,6 +183,12 @@ TensorShardingPerValueAttr inlineMesh(
 // device order. I.e., it returns a mesh, that is common to all shardings on
 // axes, and the device order is arbitrary, except if one of the meshes has iota
 // device order, the device order is iota.
+// Returns true if two shardings define the same physical linear distribution
+// of data across devices, accounting for t1 is a reshape of t2.
+bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
+                                        TensorShardingAttr s2, Type t2,
+                                        Operation* op);
+
 Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
                              ArrayRef<TensorShardingAttr> resultsShardings,
                              const SymbolTable& symbolTable,
