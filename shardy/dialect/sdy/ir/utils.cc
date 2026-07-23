@@ -33,6 +33,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Analysis/CallGraph.h"
@@ -1425,5 +1426,66 @@ LogicalResult verifyUnreducedAxesTransition(
   return success();
 }
 
+bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
+                                        TensorShardingAttr s2, Type t2,
+                                        Operation* op) {
+  if (s1 == s2 && t1 == t2) {
+    return true;
+  }
+  if (!s1 || !s2 || s1.getMeshName() != s2.getMeshName()) {
+    return false;
+  }
+  if (s1.getReplicatedAxes() != s2.getReplicatedAxes()) {
+    return false;
+  }
+
+  auto rt1 = dyn_cast<RankedTensorType>(t1);
+  auto rt2 = dyn_cast<RankedTensorType>(t2);
+  if (!rt1 || !rt2) {
+    return false;
+  }
+
+  // Skip optimization if there is an explicit layout in the tensors.
+  // The linear stride calculation below assumes a default row-major layout.
+  if (rt1.getEncoding() || rt2.getEncoding()) {
+    return false;
+  }
+
+  MeshAttr mesh = s1.getMesh(op);
+  if (!mesh) {
+    return false;
+  }
+
+  // Calculates linear stride for every axis in the sharding.
+  auto getAxisStrides = [&](TensorShardingAttr sharding,
+                            RankedTensorType type) {
+    SmallVector<std::pair<AxisRefAttr, int64_t>> axisStrides;
+    int64_t cumulativeDimSize = 1;
+    for (int64_t i = type.getRank() - 1; i >= 0; --i) {
+      ArrayRef<AxisRefAttr> axes = sharding.getDimShardings()[i].getAxes();
+      int64_t totalAxesSize = 1;
+      for (AxisRefAttr axis : axes) {
+        totalAxesSize *= axis.getSize(mesh);
+      }
+      // Use ceiling division to calculate strides. If dimensions are not
+      // perfectly divisible by the sharding axes, any mismatched partition
+      // bounds will correctly cause a stride mismatch.
+      int64_t currentAxisStride =
+          cumulativeDimSize *
+          llvm::divideCeil(type.getDimSize(i), totalAxesSize);
+      for (int64_t j = static_cast<int64_t>(axes.size()) - 1; j >= 0; --j) {
+        axisStrides.push_back({axes[j], currentAxisStride});
+        currentAxisStride *= axes[j].getSize(mesh);
+      }
+      cumulativeDimSize *= type.getDimSize(i);
+    }
+    llvm::stable_sort(axisStrides, [](const auto& a, const auto& b) {
+      return a.second < b.second;
+    });
+    return axisStrides;
+  };
+
+  return getAxisStrides(s1, rt1) == getAxisStrides(s2, rt2);
+}
 }  // namespace sdy
 }  // namespace mlir

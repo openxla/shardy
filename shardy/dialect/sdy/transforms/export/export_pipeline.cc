@@ -48,6 +48,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
     addCanonicalizerPass(pm, kReshardLabel);
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+    pm.addNestedPass<func::FuncOp>(createOptimizeCollectivesPass());
     // NOTE: ReshardToCollectives pass above generates all-slice collectives,
     // which during the canonicalizer below may be converted to reduce scatters
     // by potentially fusing with preceeding all-reduces, which are inserted
