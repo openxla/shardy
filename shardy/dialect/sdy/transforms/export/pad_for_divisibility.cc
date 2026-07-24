@@ -131,7 +131,7 @@ constexpr PaddingValueKind kDefaultPaddingValueKind = PaddingValueKind::kZero;
 // Returns true if the operation has custom padding handling implemented in
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
-  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp>(op);
+  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp>(op);
 }
 
 class PaddingCache {
@@ -615,9 +615,9 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     Type paddedInputType =
         getPaddedType(rankedInputType, outSharding, symbolTable);
 
-    Operation* newOp = padCollectiveOp(
-        op, input, inputOrig, cast<RankedTensorType>(paddedInputType),
-        symbolTable, rewriter, cache);
+    Operation* newOp = padCollectiveOp(op, input, inputOrig,
+                                       cast<RankedTensorType>(paddedInputType),
+                                       symbolTable, rewriter, cache);
 
     rewriter.replaceOp(op, newOp->getResults());
     return success();
@@ -699,9 +699,9 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
         getPaddedType(rankedInputType, outSharding, symbolTable);
 
     std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
-    Operation* newOp = padCollectiveOp(
-        op, input, inputOrig, cast<RankedTensorType>(paddedInputType),
-        symbolTable, rewriter, cache);
+    Operation* newOp = padCollectiveOp(op, input, inputOrig,
+                                       cast<RankedTensorType>(paddedInputType),
+                                       symbolTable, rewriter, cache);
 
     Value res = newOp->getResult(0);
 
@@ -766,6 +766,93 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
   }
 };
 
+class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
+ public:
+  explicit StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx)
+      : OpConversionPattern(converter, ctx) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::PadOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+
+    Value input = adaptor.getOperands()[0];
+    auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
+    if (!rankedInputType) {
+      return failure();
+    }
+
+    Value result = op.getResult();
+
+    // Compute inferred types with padded operands.
+    SmallVector<Type> inferredTypes;
+    if (failed(op.inferReturnTypes(
+            op.getContext(), op.getLoc(), adaptor.getOperands(),
+            op->getAttrDictionary(), op->getPropertiesStorage(),
+            op->getRegions(), inferredTypes))) {
+      return failure();
+    }
+
+    auto inferredResultType = cast<RankedTensorType>(inferredTypes[0]);
+    auto paddedType = cast<RankedTensorType>(
+        getPaddedType(result.getType(), getSharding(result), symbolTable));
+
+    SmallVector<int64_t> reconciledShape;
+    reconciledShape.reserve(rankedInputType.getRank());
+    for (int d = 0; d < rankedInputType.getRank(); ++d) {
+      reconciledShape.push_back(
+          std::max(inferredResultType.getDimSize(d), paddedType.getDimSize(d)));
+    }
+    auto reconciledResultType = RankedTensorType::get(
+        reconciledShape, inferredResultType.getElementType());
+    reconciledResultType = cast<RankedTensorType>(
+        getPaddedType(reconciledResultType, getSharding(result), symbolTable));
+
+    // Compute the new edge_padding_high values.
+    // The relation is:
+    // paddedInputSize + low + high + (paddedInputSize - 1) * interior =
+    //     reconciledResultSize
+    // Therefore:
+    // high = reconciledResultSize - paddedInputSize - low -
+    //     std::max(0, paddedInputSize - 1) * interior
+    ArrayRef<int64_t> low = op.getEdgePaddingLow();
+    ArrayRef<int64_t> high = op.getEdgePaddingHigh();
+    ArrayRef<int64_t> interior = op.getInteriorPadding();
+
+    SmallVector<int64_t> newHigh;
+    newHigh.reserve(rankedInputType.getRank());
+
+    for (int d = 0; d < rankedInputType.getRank(); ++d) {
+      int64_t paddedInputSize = rankedInputType.getDimSize(d);
+      int64_t reconciledResultSize = reconciledResultType.getDimSize(d);
+      int64_t dLow = low[d];
+      int64_t dInterior = interior[d];
+      int64_t dHigh = reconciledResultSize - paddedInputSize - dLow -
+                      std::max<int64_t>(0, paddedInputSize - 1) * dInterior;
+      SDY_CHECK(dHigh >= high[d]);
+      newHigh.push_back(dHigh);
+    }
+
+    auto newHighAttr = rewriter.getDenseI64ArrayAttr(newHigh);
+
+    // Create the new pad operation.
+    auto newPadOp = stablehlo::PadOp::create(
+        rewriter, op.getLoc(), reconciledResultType, input,
+        adaptor.getOperands()[1], op.getEdgePaddingLowAttr(), newHighAttr,
+        op.getInteriorPaddingAttr());
+
+    // Copy sharding attribute to the new result.
+    setSharding(newPadOp.getResult(), getSharding(result));
+
+    // TODO(b/537380378): We could parse the padding value from the original pad
+    // op to cache the padding kind and avoid downstream selects.
+    rewriter.replaceOp(op, newPadOp.getResult());
+    return success();
+  }
+};
+
 class StablehloDotGeneralOpPattern
     : public OpConversionPattern<stablehlo::DotGeneralOp> {
  public:
@@ -822,8 +909,9 @@ struct PadForDivisibilityPass
 
     PaddedTypeConverter typeConverter(symbolTable);
     RewritePatternSet patterns(&getContext());
-    patterns.add<GenericOpPattern, StablehloSliceOpPattern>(
-        typeConverter, &getContext());
+    patterns.add<GenericOpPattern, StablehloSliceOpPattern>(typeConverter,
+                                                            &getContext());
+    patterns.add<StablehloPadOpPattern>(typeConverter, &getContext());
     patterns.add<FuncOpPattern>(typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
