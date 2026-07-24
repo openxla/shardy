@@ -20,9 +20,8 @@ func.func @input_dim_split_and_swapped(%arg0: tensor<8x8x8xf32> {sdy.sharding = 
 // CHECK-LABEL: func @input_dim_split_into_three_groups
 func.func @input_dim_split_into_three_groups(%arg0: tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{"x", "y", "z"}, {}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[RESHAPE_0:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh3d, [{"x"}, {"y"}, {"z"}, {}, {}]>]>} : (tensor<16x8x8xf32>) -> tensor<2x2x4x8x8xf32>
-  // CHECK-NEXT: %[[A2A_1:.*]] = sdy.all_to_all [{"z"}: 2->4] %[[RESHAPE_0]] out_sharding=<@mesh3d, [{"x"}, {"y"}, {}, {}, {"z"}]> : tensor<2x2x4x8x8xf32>
-  // CHECK-NEXT: %[[A2A_2:.*]] = sdy.all_to_all [{"x"}: 0->3] %[[A2A_1]] out_sharding=<@mesh3d, [{}, {"y"}, {}, {"x"}, {"z"}]> : tensor<2x2x4x8x8xf32>
-  // CHECK-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[A2A_2]], dims = [1, 0, 2, 3, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh3d, [{"y"}, {}, {}, {"x"}, {"z"}]>]>} : (tensor<2x2x4x8x8xf32>) -> tensor<2x2x4x8x8xf32>
+  // CHECK-NEXT: %[[A2A:.*]] = sdy.all_to_all [{"x"}: 0->3, {"z"}: 2->4] %[[RESHAPE_0]] out_sharding=<@mesh3d, [{}, {"y"}, {}, {"x"}, {"z"}]> : tensor<2x2x4x8x8xf32>
+  // CHECK-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[A2A]], dims = [1, 0, 2, 3, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh3d, [{"y"}, {}, {}, {"x"}, {"z"}]>]>} : (tensor<2x2x4x8x8xf32>) -> tensor<2x2x4x8x8xf32>
   // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[TRANSPOSE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh3d, [{"y"}, {"x"}, {"z"}]>]>} : (tensor<2x2x4x8x8xf32>) -> tensor<16x8x8xf32>
   // CHECK-NEXT: return %[[RESHAPE_1]]
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{"y", "x", "z"}, {}, {}]> : tensor<16x8x8xf32>
@@ -66,9 +65,8 @@ func.func @input_dim_split_mismatched_strides(%arg0: tensor<16x8xf32> {sdy.shard
 // CHECK-LABEL: func @spatial_partitioning_batch_shard
 func.func @spatial_partitioning_batch_shard(%arg0: tensor<16x8x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_spatial, [{"batch", "shard"}, {}, {}, {}]>}) -> tensor<16x8x8x8xf32> {
   // CHECK-NEXT: %[[RESHAPE_0:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_spatial, [{"batch"}, {"shard"}, {}, {}, {}]>]>} : (tensor<16x8x8x8xf32>) -> tensor<2x8x8x8x8xf32>
-  // CHECK-NEXT: %[[A2A_1:.*]] = sdy.all_to_all [{"batch"}: 0->2] %[[RESHAPE_0]] out_sharding=<@mesh_spatial, [{}, {"shard"}, {"batch"}, {}, {}]> : tensor<2x8x8x8x8xf32>
-  // CHECK-NEXT: %[[A2A_2:.*]] = sdy.all_to_all [{"shard"}: 1->3] %[[A2A_1]] out_sharding=<@mesh_spatial, [{}, {}, {"batch"}, {"shard"}, {}]> : tensor<2x8x8x8x8xf32>
-  // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[A2A_2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_spatial, [{}, {"batch"}, {"shard"}, {}]>]>} : (tensor<2x8x8x8x8xf32>) -> tensor<16x8x8x8xf32>
+  // CHECK-NEXT: %[[A2A:.*]] = sdy.all_to_all [{"batch"}: 0->2, {"shard"}: 1->3] %[[RESHAPE_0]] out_sharding=<@mesh_spatial, [{}, {}, {"batch"}, {"shard"}, {}]> : tensor<2x8x8x8x8xf32>
+  // CHECK-NEXT: %[[RESHAPE_1:.*]] = stablehlo.reshape %[[A2A]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_spatial, [{}, {"batch"}, {"shard"}, {}]>]>} : (tensor<2x8x8x8x8xf32>) -> tensor<16x8x8x8xf32>
   // CHECK-NEXT: return %[[RESHAPE_1]]
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_spatial, [{"shard", "batch"}, {}, {}, {}]> : tensor<16x8x8x8xf32>
   %1 = sdy.all_to_all [{"batch"}: 0->1] %0 out_sharding=<@mesh_spatial, [{"shard"}, {"batch"}, {}, {}]> : tensor<16x8x8x8xf32>

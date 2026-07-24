@@ -385,9 +385,8 @@ void rewriteA2AChain(AllToAllOp terminalOp, const A2AChain& chain,
       stablehlo::ReshapeOp::create(rewriter, loc, splitTensorType, chain.input);
   setSharding(reshape1, config.inShardingSplit);
 
-  Value lastVal = reshape1;
-  TensorShardingAttr currSharding = config.inShardingSplit;
-
+  SmallVector<AllToAllParamAttr> newParams;
+  newParams.reserve(chain.a2as.size());
   for (size_t i = 0; i < chain.a2as.size(); ++i) {
     AllToAllOp oldA2a = chain.a2as[i];
     AllToAllParamAttr param = oldA2a.getParams()[0];
@@ -397,18 +396,19 @@ void rewriteA2AChain(AllToAllOp terminalOp, const A2AChain& chain,
     int64_t splitTgtDim =
         *mapDim(param.getTgtDim(), axis, config.splitDim, config.axesToSplit);
 
-    TensorShardingAttr nextSharding =
-        (i == chain.a2as.size() - 1)
-            ? config.outShardingSplit
-            : moveAxis(currSharding, axis, splitSrcDim, splitTgtDim,
-                       rewriter.getContext());
-
-    auto newParam = AllToAllParamAttr::get(rewriter.getContext(), {axis},
-                                           splitSrcDim, splitTgtDim);
-    lastVal = AllToAllOp::create(rewriter, oldA2a.getLoc(), splitTensorType,
-                                 lastVal, newParam, nextSharding);
-    currSharding = nextSharding;
+    newParams.push_back(AllToAllParamAttr::get(rewriter.getContext(), {axis},
+                                               splitSrcDim, splitTgtDim));
   }
+
+  llvm::sort(newParams,
+             [](const AllToAllParamAttr& a, const AllToAllParamAttr& b) {
+               return a.getSrcDim() < b.getSrcDim();
+             });
+
+  auto paramsAttr =
+      AllToAllParamListAttr::get(rewriter.getContext(), newParams);
+  Value lastVal = AllToAllOp::create(rewriter, loc, splitTensorType, reshape1,
+                                     paramsAttr, config.outShardingSplit);
 
   // Reshape Output. If the split dimensions are not in stride order, insert a
   // local transpose first to swap them on-device. This ensures the final
