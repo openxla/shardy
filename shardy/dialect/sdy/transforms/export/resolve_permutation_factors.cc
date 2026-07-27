@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -1317,6 +1318,302 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
 }
 
 // -----------------------------------------------------------------------------
+// stablehlo.reshape
+// -----------------------------------------------------------------------------
+
+LogicalResult handleReshapeOpReplicate(
+    stablehlo::ReshapeOp reshapeOp, Value operand,
+    TensorShardingAttr inSharding, TensorShardingAttr outSharding,
+    RankedTensorType resultType,
+    const llvm::SmallDenseSet<StringRef>& nonDivisibleAxes,
+    ResolutionState& state) {
+  IRRewriter& rewriter = state.rewriter;
+  Location loc = reshapeOp.getLoc();
+  rewriter.setInsertionPoint(reshapeOp);
+
+  TensorShardingAttr newInSharding =
+      removeAxesFromSharding(inSharding, nonDivisibleAxes);
+  Value reshardInput = ReshardOp::create(rewriter, loc, operand.getType(),
+                                         operand, newInSharding);
+
+  TensorShardingAttr newOutSharding =
+      removeAxesFromSharding(outSharding, nonDivisibleAxes);
+
+  rewriter.setInsertionPointAfter(reshapeOp);
+  auto newReshapeOp =
+      stablehlo::ReshapeOp::create(rewriter, loc, resultType, reshardInput);
+  setSharding(newReshapeOp.getResult(), newOutSharding);
+
+  Value restoredResult = ReshardOp::create(
+      rewriter, loc, resultType, newReshapeOp.getResult(), outSharding);
+
+  rewriter.replaceOp(reshapeOp, restoredResult);
+  return success();
+}
+
+struct ShardingAxisMapping {
+  AxisRefAttr axis;
+  int64_t inDim;
+  int64_t outDim;
+};
+
+// Produces a mapping for each sharding sub-axis used in input dimension and
+// output dimension.
+SmallVector<ShardingAxisMapping> getShardingAxisMappings(
+    TensorShardingAttr inSharding, TensorShardingAttr outSharding,
+    MeshAttr mesh) {
+  struct DimAxis {
+    AxisRefAttr axis;
+    int64_t dim;
+  };
+  auto getDimAxes = [](TensorShardingAttr sharding) {
+    SmallVector<DimAxis> axes;
+    for (auto [dim, dimSharding] :
+         llvm::enumerate(sharding.getDimShardings())) {
+      for (auto axis : dimSharding.getAxes()) {
+        axes.push_back({axis, static_cast<int64_t>(dim)});
+      }
+    }
+    return axes;
+  };
+  SmallVector<DimAxis> inAxes = getDimAxes(inSharding);
+  SmallVector<DimAxis> outAxes = getDimAxes(outSharding);
+
+  SmallVector<ShardingAxisMapping> mappings;
+  size_t i = 0, j = 0;
+  while (i < inAxes.size() && j < outAxes.size()) {
+    DimAxis& in = inAxes[i];
+    DimAxis& out = outAxes[j];
+    std::optional<AxisRefAttr> overlap = in.axis.getOverlap(out.axis);
+    if (!overlap) {
+      ++i;
+      continue;
+    }
+    mappings.push_back({*overlap, in.dim, out.dim});
+    std::optional<AxisRefAttr> inRem =
+        in.axis.getSuffixWithoutOverlap(*overlap, mesh);
+    std::optional<AxisRefAttr> outRem =
+        out.axis.getSuffixWithoutOverlap(*overlap, mesh);
+    if (!inRem) {
+      ++i;
+    } else {
+      in.axis = *inRem;
+    }
+    if (!outRem) {
+      ++j;
+    } else {
+      out.axis = *outRem;
+    }
+  }
+  SDY_CHECK(i == inAxes.size() && j == outAxes.size());
+  return mappings;
+}
+
+LogicalResult handleReshapeOp(stablehlo::ReshapeOp reshapeOp,
+                              ResolutionState& state, bool enableHaloExchange,
+                              SmallVector<Operation*>& opsToResolve) {
+  Value operand = reshapeOp.getOperand();
+  TensorShardingAttr inSharding = getSharding(operand);
+  TensorShardingAttr outSharding = getSharding(reshapeOp.getResult());
+  // Insert-explicit-reshard pass should have made sharding consistent.
+  SDY_CHECK((inSharding != nullptr) == (outSharding != nullptr));
+  if (!inSharding) {
+    return success();
+  }
+
+  auto origInputType = mlir::dyn_cast<RankedTensorType>(operand.getType());
+  RankedTensorType resultType = reshapeOp.getResult().getType();
+  if (!origInputType || !resultType) {
+    return success();
+  }
+
+  MeshAttr mesh = inSharding.getMesh(state.symbolTable);
+  if (!mesh) {
+    return success();
+  }
+
+  // Verify the assumption that the input and output shardings are equivalent.
+  auto getOrderedNormalizedAxes = [mesh](TensorShardingAttr sharding) {
+    SmallVector<AxisRefAttr> axes;
+    for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
+      for (AxisRefAttr axis : dimSharding.getAxes()) {
+        addAxisOrMerge(axes, axis, mesh);
+      }
+    }
+    return axes;
+  };
+  SDY_CHECK(getOrderedNormalizedAxes(inSharding) ==
+            getOrderedNormalizedAxes(outSharding));
+
+  // Verify that there is no sharding boundary shift (prefixSize mismatch) across
+  // the reshape. Any boundary shift represents an incompatible sharding that
+  // must be resolved upstream by sdy-insert-explicit-reshards.
+  SDY_CHECK(isShardingEquivalentAcrossReshapes(inSharding, origInputType,
+                                               outSharding, resultType,
+                                               reshapeOp,
+                                               /*allowNonDivisible=*/true));
+
+
+
+  // Detect if there are any non-divisible output dimensions.
+  llvm::SmallDenseSet<StringRef> nonDivisibleAxes;
+  SmallVector<int64_t> paddedOutputShape =
+      llvm::to_vector(resultType.getShape());
+  int64_t flatPaddedOutputSize = 1;
+
+  for (auto [dim, dimSharding] :
+       llvm::enumerate(outSharding.getDimShardings())) {
+    int64_t shardCount = dimSharding.getShardedSize(mesh);
+    if (shardCount > 1 && resultType.getDimSize(dim) % shardCount != 0) {
+      for (auto axis : dimSharding.getAxes()) {
+        nonDivisibleAxes.insert(axis.getName());
+      }
+      paddedOutputShape[dim] =
+          getPaddedDimSize(resultType.getDimSize(dim), shardCount);
+    }
+    flatPaddedOutputSize *= paddedOutputShape[dim];
+  }
+
+  for (auto [dim, dimSharding] :
+       llvm::enumerate(inSharding.getDimShardings())) {
+    int64_t shardCount = dimSharding.getShardedSize(mesh);
+    if (shardCount > 1 && origInputType.getDimSize(dim) % shardCount != 0) {
+      for (auto axis : dimSharding.getAxes()) {
+        nonDivisibleAxes.insert(axis.getName());
+      }
+    }
+  }
+
+  if (nonDivisibleAxes.empty()) {
+    return success();
+  }
+
+  if (!enableHaloExchange) {
+    return handleReshapeOpReplicate(reshapeOp, operand, inSharding, outSharding,
+                                    resultType, nonDivisibleAxes, state);
+  }
+
+
+  SmallVector<ShardingAxisMapping> mappings =
+      getShardingAxisMappings(inSharding, outSharding, mesh);
+
+  // Check if any sharded axes map to dimensions that do not divide each other.
+  for (const ShardingAxisMapping& mapping : mappings) {
+    int64_t inSize = origInputType.getDimSize(mapping.inDim);
+    int64_t outSize = resultType.getDimSize(mapping.outDim);
+    if (inSize % outSize != 0 && outSize % inSize != 0) {
+      return handleReshapeOpReplicate(reshapeOp, operand, inSharding,
+                                      outSharding, resultType, nonDivisibleAxes,
+                                      state);
+    }
+    int64_t inDim = mapping.inDim;
+    int64_t outDim = mapping.outDim;
+    int64_t inShardCount =
+        inSharding.getDimShardings()[inDim].getShardedSize(mesh);
+    int64_t outShardCount =
+        outSharding.getDimShardings()[outDim].getShardedSize(mesh);
+    if (inDim != outDim &&
+        (inShardCount > 1 &&
+         origInputType.getDimSize(inDim) % inShardCount != 0) &&
+        (outShardCount > 1 &&
+         resultType.getDimSize(outDim) % outShardCount != 0)) {
+      return handleReshapeOpReplicate(reshapeOp, operand, inSharding,
+                                      outSharding, resultType, nonDivisibleAxes,
+                                      state);
+    }
+  }
+  IRRewriter& rewriter = state.rewriter;
+  Location loc = reshapeOp.getLoc();
+  rewriter.setInsertionPoint(reshapeOp);
+
+  SmallVector<int64_t> edgePaddingLow(origInputType.getRank(), 0);
+  SmallVector<int64_t> edgePaddingHigh(origInputType.getRank(), 0);
+  SmallVector<int64_t> interiorPadding(origInputType.getRank(), 0);
+
+  bool needsInputPadding = false;
+  SmallVector<int64_t> divisibleInputShape =
+      llvm::to_vector(origInputType.getShape());
+
+  for (auto [dim, dimSharding] :
+       llvm::enumerate(inSharding.getDimShardings())) {
+    int64_t shardCount = dimSharding.getShardedSize(mesh);
+    if (shardCount > 1) {
+      int64_t product = origInputType.getDimSize(dim) * flatPaddedOutputSize;
+      if (product % origInputType.getNumElements() == 0) {
+        int64_t targetPaddedDimSize = product / origInputType.getNumElements();
+        int64_t padHigh = targetPaddedDimSize - origInputType.getDimSize(dim);
+        if (padHigh > 0) {
+          edgePaddingHigh[dim] = padHigh;
+          divisibleInputShape[dim] = targetPaddedDimSize;
+          needsInputPadding = true;
+        }
+      }
+    }
+  }
+
+  // Checks whether padding origShape to paddedShape along sharded dimensions
+  // can be resolved using 1-hop HALO exchange (neighbor communication).
+  //
+  // Mathematical derivation:
+  // In 1-hop HALO exchange, each shard can only communicate with its immediate
+  // left and right neighbors (at most 1 hop away). When padding a dimension of
+  // original size `sIn` to `sOut` across `N = shardCount` shards, the added
+  // padding `P = sOut - sIn` causes elements to shift across shard boundaries.
+  //
+  // If the ratio of added padding `P / sIn` is too large—specifically when
+  // `P / sIn >= (N - 2) / N`—the cumulative shift of real elements across the
+  // N shards exceeds 1 full shard, causing at least one shard to require data
+  // from >= 2 hops away.
+  //
+  // To evaluate `(sOut - sIn) / sIn >= (N - 2) / N` without integer truncation
+  // or floating-point division, we cross-multiply by `sIn * N`:
+  //   (sOut - sIn) * N >= sIn * (N - 2)
+  auto canPadSliceUseOneHopHalo = [&](ArrayRef<int64_t> origShape,
+                                      ArrayRef<int64_t> paddedShape,
+                                      TensorShardingAttr sharding) {
+    for (auto [dim, dimSharding] :
+         llvm::enumerate(sharding.getDimShardings())) {
+      int64_t shardCount = dimSharding.getShardedSize(mesh);
+      if (shardCount > 2 && paddedShape[dim] > origShape[dim]) {
+        int64_t sIn = origShape[dim];
+        int64_t sOut = paddedShape[dim];
+        if ((sOut - sIn) * shardCount >= sIn * (shardCount - 2)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  if (!canPadSliceUseOneHopHalo(origInputType.getShape(), divisibleInputShape,
+                                inSharding) ||
+      !canPadSliceUseOneHopHalo(resultType.getShape(), paddedOutputShape,
+                                outSharding)) {
+    return handleReshapeOpReplicate(reshapeOp, operand, inSharding, outSharding,
+                                    resultType, nonDivisibleAxes, state);
+  }
+
+  Value paddedInput =
+      padHighSideToShape(loc, rewriter, operand, divisibleInputShape,
+                         inSharding, nullptr, &opsToResolve);
+
+  // Reshape the padded input to the padded output shape.
+  auto paddedOutputType =
+      RankedTensorType::get(paddedOutputShape, resultType.getElementType());
+  auto newReshapeOp = stablehlo::ReshapeOp::create(
+      rewriter, loc, paddedOutputType, paddedInput);
+  setSharding(newReshapeOp.getResult(), outSharding);
+
+  // Slice the padded output to the final resultType shape.
+  Value slicedResult =
+      sliceHighSideToShape(loc, rewriter, newReshapeOp.getResult(), resultType,
+                           outSharding, &opsToResolve);
+
+  rewriter.replaceOp(reshapeOp, slicedResult);
+  return success();
+}
+
+// -----------------------------------------------------------------------------
 // stablehlo.reverse
 // -----------------------------------------------------------------------------
 
@@ -1630,6 +1927,61 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   return success();
 }
 
+void resolvePermutationFactorsViaReplication(Operation* op,
+                                             OpShardingRuleAttr rule,
+                                             ResolutionState& state) {
+  SmallVector<TensorShardingAttr> inShardings =
+      getShardings(op->getOperands());
+  SmallVector<TensorShardingAttr> outShardings =
+      getShardings(op->getResults());
+  std::optional<StringRef> meshName =
+      getCommonMeshName(inShardings, outShardings, state.symbolTable, true);
+  if (!meshName) {
+    return;
+  }
+  MeshOp meshOp = getMeshOp(state.symbolTable, *meshName);
+  if (!meshOp || meshOp.getMesh().isMaximal()) {
+    return;
+  }
+
+  ShardingProjection projection =
+      ShardingProjection::build(inShardings, outShardings, rule,
+                                meshOp.getMesh(), /*closedIfMissing=*/true);
+  UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
+
+  for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
+    // When HALO exchange is disabled, we replication-reshard the
+    // permutation factors.
+    bool isReplicatedFactor =
+        rule.getFactorType(i) == FactorType::kPermutation;
+    if (!isReplicatedFactor) {
+      continue;
+    }
+    if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(op)) {
+      SDY_CHECK(inShardings[0] == outShardings[0]);
+      if (isCommunicationFreeSliceDim(i, sliceOp, inShardings[0],
+                                      meshOp.getMesh())) {
+        continue;
+      }
+    }
+    if (auto padOp = dyn_cast<stablehlo::PadOp>(op)) {
+      if (isCommunicationFreePadDim(i, padOp, inShardings[0],
+                                    meshOp.getMesh())) {
+        continue;
+      }
+    }
+
+    update |=
+        projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
+  }
+
+  if (update.updateOperands.any() || update.updateResults.any()) {
+    insertExplicitReshards(op, inShardings, outShardings, projection,
+                           update, state.rewriter, rule, state.symbolTable,
+                           meshOp);
+  }
+}
+
 // -----------------------------------------------------------------------------
 // The module pass.
 // -----------------------------------------------------------------------------
@@ -1665,7 +2017,13 @@ struct ShardyResolvePermutationFactorsPass
           !inDialect<stablehlo::StablehloDialect>(op)) {
         return;
       }
-
+      // Reshape op is the only op that doesn't have kPermutation factor but
+      // needs HALO exchange.
+      if (auto reshapeOp = dyn_cast<stablehlo::ReshapeOp>(op)) {
+        SDY_CHECK(succeeded(handleReshapeOp(reshapeOp, state,
+                                            enableHaloExchange, opsToResolve)));
+        return;
+      }
       OpShardingRuleAttr rule = getOrCreateShardingRule(op, false, false);
       if (!rule || rule.isCustom()) {
         return;
@@ -1700,63 +2058,26 @@ struct ShardyResolvePermutationFactorsPass
       }
 
       // Otherwise, use a generic resolution based on explicit reshards.
-      SmallVector<TensorShardingAttr> inShardings =
-          getShardings(op->getOperands());
-      SmallVector<TensorShardingAttr> outShardings =
-          getShardings(op->getResults());
-      std::optional<StringRef> meshName =
-          getCommonMeshName(inShardings, outShardings, symbolTable, true);
-      if (!meshName) {
-        return;
-      }
-      MeshOp meshOp = getMeshOp(symbolTable, *meshName);
-      if (!meshOp || meshOp.getMesh().isMaximal()) {
-        return;
-      }
-
-      ShardingProjection projection =
-          ShardingProjection::build(inShardings, outShardings, rule,
-                                    meshOp.getMesh(), /*closedIfMissing=*/true);
-      UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
-
-      for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
-        // When HALO exchange is disabled, we replication-reshard the
-        // permutation factors.
-        bool isReplicatedFactor =
-            rule.getFactorType(i) == FactorType::kPermutation;
-        if (!isReplicatedFactor) {
-          continue;
-        }
-        if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(op)) {
-          SDY_CHECK(inShardings[0] == outShardings[0]);
-          if (isCommunicationFreeSliceDim(i, sliceOp, inShardings[0],
-                                          meshOp.getMesh())) {
-            continue;
-          }
-        }
-        if (auto padOp = dyn_cast<stablehlo::PadOp>(op)) {
-          if (isCommunicationFreePadDim(i, padOp, inShardings[0],
-                                        meshOp.getMesh())) {
-            continue;
-          }
-        }
-        if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(op)) {
-          SDY_CHECK(inShardings[0] == outShardings[0]);
-          if (isCommunicationFreeSliceDim(i, sliceOp, inShardings[0],
-                                          meshOp.getMesh())) {
-            continue;
-          }
-        }
-
-        update |=
-            projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
-      }
-
-      if (update.updateOperands.any() || update.updateResults.any()) {
-        insertExplicitReshards(op, inShardings, outShardings, projection,
-                               update, rewriter, rule, symbolTable, meshOp);
-      }
+      resolvePermutationFactorsViaReplication(op, rule, state);
     });
+
+    if (enableHaloExchange && !opsToResolve.empty()) {
+      // When HALO exchange is enabled, we may add PadOp and SliceOp to resolve
+      // permutation factors. We need to explicitly handle these newly added
+      // ops.
+      for (Operation* op : opsToResolve) {
+        TypeSwitch<Operation*, void>(op)
+            .Case([&](stablehlo::PadOp padOp) {
+              SDY_CHECK(succeeded(handlePadOp(padOp, state)));
+            })
+            .Case([&](stablehlo::SliceOp sliceOp) {
+              SDY_CHECK(succeeded(handleSliceOp(sliceOp, state)));
+            })
+            .Default([](Operation*) {
+              llvm_unreachable("Unexpected op to resolve");
+            });
+      }
+    }
   }
 };
 
