@@ -46,7 +46,7 @@ func.func @one_dim_two_axes_subaxis(%arg0: tensor<16x32xf32> {sdy.sharding = #sd
   // CHECK-DAG: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK-DAG: %[[PIDI64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
   // CHECK-DAG: %[[OFF0:.*]] = stablehlo.constant dense<0> : tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 8, 8, 8, 8, 16, 16, 16, 16, 24, 24, 24, 24]> : tensor<16xi64>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 8, 8, 0, 0, 8, 8, 16, 16, 24, 24, 16, 16, 24, 24]> : tensor<16xi64>
   // CHECK: %[[DS:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PIDI64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
   // CHECK: %[[OFF1:.*]] = stablehlo.reshape %[[DS]] : (tensor<1xi64>) -> tensor<i64>
   // CHECK: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ARG0]], %[[OFF0]], %[[OFF1]], sizes = [16, 8] : (tensor<16x32xf32>, tensor<i64>, tensor<i64>) -> tensor<16x8xf32>

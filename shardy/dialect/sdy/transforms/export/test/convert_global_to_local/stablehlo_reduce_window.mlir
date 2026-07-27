@@ -34,3 +34,27 @@ func.func @batch_sharded(
   // CHECK-NEXT: return %[[RES]] : tensor<16x8x8x8xf32>
   return %0 : tensor<32x8x8x8xf32>
 }
+
+// CHECK-LABEL: func @reduce_window_stride_greater_than_window
+// CHECK-SAME: (%[[ARG0:[^ :]+]]: tensor<16x16xf32> {{.*}}) -> (tensor<16x8xf32> {{.*}})
+func.func @reduce_window_stride_greater_than_window(
+    %arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
+    -> (tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) {
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[RES:.*]] = "stablehlo.reduce_window"(%[[ARG0]], %[[CST]]) <{
+  // CHECK-SAME:   padding = dense<0> : tensor<2x2xi64>,
+  // CHECK-SAME:   window_dimensions = array<i64: 1, 2>,
+  // CHECK-SAME:   window_strides = array<i64: 1, 2>}>
+  %0 = "stablehlo.reduce_window"(%arg0, %cst) <{
+    padding = dense<0> : tensor<2x2xi64>,
+    window_dimensions = array<i64: 1, 2>,
+    window_strides = array<i64: 1, 2>
+  }> ({
+  ^bb0(%arg1: tensor<f32>, %arg2: tensor<f32>):
+    %1 = stablehlo.maximum %arg1, %arg2 : tensor<f32>
+    stablehlo.return %1 : tensor<f32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>}
+  : (tensor<16x32xf32>, tensor<f32>) -> tensor<16x16xf32>
+  return %0 : tensor<16x16xf32>
+}

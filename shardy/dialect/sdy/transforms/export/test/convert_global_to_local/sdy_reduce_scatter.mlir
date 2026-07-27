@@ -70,7 +70,7 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // AR-DS: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // AR-DS: %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
   //
-  // AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 4, 6, 4, 6, 0, 2, 0, 2, 4, 6, 4, 6]> : tensor<16xi64>
+  // AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]> : tensor<16xi64>
   // AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID_I64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
   // AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi64>) -> tensor<i64>
   //

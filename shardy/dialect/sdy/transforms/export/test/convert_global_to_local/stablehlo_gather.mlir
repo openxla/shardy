@@ -289,7 +289,7 @@ func.func @shard_two_of_three_reduction_dims(
   // CHECK: %[[OFF_R1:.*]] = stablehlo.convert %{{.*}} : tensor<i64>
 
   // Offset r2 logic ("y:(2)2" axis)
-  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 0, 2, 2, 0, 0, 2, 2]> : tensor<8xi64>
+  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 0, 2, 0, 2]> : tensor<8xi64>
   // CHECK: %[[OFF_R2:.*]] = stablehlo.convert %{{.*}} : tensor<i64>
 
   // Local Coordinate Shift
@@ -346,7 +346,7 @@ func.func @shard_two_of_three_reduction_dims_one_not_in_start_index_map(
 
   // Unindexed sharded dim 2 ("y:(2)2" axis) logic
   // CHECK: %[[PID2:.*]] = stablehlo.partition_id
-  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 0, 2, 2, 0, 0, 2, 2]> : tensor<8xi64>
+  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 0, 2, 0, 2]> : tensor<8xi64>
   // CHECK: %[[OFF_R2:.*]] = stablehlo.reshape %{{.*}} : (tensor<1xi64>) -> tensor<i64>
   // CHECK: %[[EQ_ZERO:.*]] = stablehlo.compare EQ, %[[OFF_R2]], %{{.*}} : (tensor<i64>, tensor<i64>) -> tensor<i1>
 

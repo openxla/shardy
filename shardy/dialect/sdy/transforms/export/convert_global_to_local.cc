@@ -16,14 +16,18 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <numeric>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -91,7 +95,7 @@ struct ConversionState {
 
 class GlobalToLocalTypeConverter : public TypeConverter {
  public:
-  GlobalToLocalTypeConverter(SymbolTable& symbolTable)
+  explicit GlobalToLocalTypeConverter(SymbolTable& symbolTable)
       : symbolTable(symbolTable) {
     addConversion([](Type type) { return type; });
 
@@ -602,8 +606,10 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
     }
 
     // Extract the coordinate component for the current (possibly sub-) axis.
+    int64_t fullSize = mesh.getAxisSize(axis.getName());
+    int64_t subAxisStride = fullSize / (axis.getSubAxisPreSize() * axisSize);
     int64_t axisCoord =
-        (logicalDeviceId / (suffixSize * axis.getSubAxisPreSize())) % axisSize;
+        (logicalDeviceId / (suffixSize * subAxisStride)) % axisSize;
 
     // Linearize the coordinates of all axes sharding this dimension.
     shardIndex = shardIndex * axisSize + axisCoord;
@@ -1724,7 +1730,7 @@ SmallVector<int64_t> computeLocalSliceSizes(stablehlo::GatherOp op,
   if (isFullyReplicated(operandSharding)) {
     return localSliceSizes;
   }
-  auto globalOperandType = cast<RankedTensorType>(op.getOperand().getType());
+  auto globalOperandType = op.getOperand().getType();
   auto operandBatchingDims = op.getDimensionNumbers().getOperandBatchingDims();
 
   for (int64_t i = 0; i < localSliceSizes.size(); ++i) {
@@ -1995,7 +2001,7 @@ class StablehloGatherOpPattern
     }
 
     // Identify trivial slice dimensions (sharded, non-batching, slice size 1).
-    auto globalOperandType = cast<RankedTensorType>(op.getOperand().getType());
+    auto globalOperandType = op.getOperand().getType();
     stablehlo::GatherDimensionNumbersAttr dimNumbers = op.getDimensionNumbers();
     ArrayRef<int64_t> sliceSizes = op.getSliceSizes();
     SmallVector<int64_t> trivialSliceDims;
@@ -2203,8 +2209,8 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       return op.emitOpError("failed to resolve mesh");
     }
 
-    auto globalInputType = cast<RankedTensorType>(op.getOperand().getType());
-    auto globalResultType = cast<RankedTensorType>(op.getType());
+    auto globalInputType = op.getOperand().getType();
+    auto globalResultType = op.getType();
     int64_t rank = globalInputType.getRank();
     int64_t numDevices = mesh.getTotalSize();
     ArrayRef<int64_t> edgePaddingLow = op.getEdgePaddingLow();
@@ -2621,7 +2627,7 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
                                conversionState);
     }
 
-    auto globalInputType = cast<RankedTensorType>(op.getOperand().getType());
+    auto globalInputType = op.getOperand().getType();
     SmallVector<int64_t> newStartIndices, newLimitIndices;
     int64_t rank = globalInputType.getRank();
     newStartIndices.reserve(rank);
@@ -2740,8 +2746,12 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
 
           if (isPassthrough) {
             isPassthrough =
-                (windowStrides.empty() || windowStrides[dim] == 1) &&
-                (windowDimensions.empty() || windowDimensions[dim] == 1);
+                (windowStrides.empty() || windowStrides[dim] == 1 ||
+                 (!windowDimensions.empty() &&
+                  windowStrides[dim] >= windowDimensions[dim])) &&
+                (windowDimensions.empty() || windowDimensions[dim] == 1 ||
+                 (!windowStrides.empty() &&
+                  windowStrides[dim] >= windowDimensions[dim]));
           }
 
           SDY_CHECK(isPassthrough)

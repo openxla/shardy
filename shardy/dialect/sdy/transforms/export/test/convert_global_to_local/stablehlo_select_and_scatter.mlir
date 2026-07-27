@@ -45,3 +45,33 @@ func.func @select_and_scatter_batch_sharded(
   // CHECK-NEXT: return %[[RES]] : tensor<16x16x16x8xf32>
   return %0 : tensor<32x16x16x8xf32>
 }
+
+// CHECK-LABEL: func @select_and_scatter_stride_greater_than_window
+// CHECK-SAME: (%[[OPERAND:[^ :]+]]: tensor<16x16xf32> {{.*}}, %[[SOURCE:[^ :]+]]: tensor<16x4xf32> {{.*}}) -> (tensor<16x16xf32> {{.*}})
+func.func @select_and_scatter_stride_greater_than_window(
+    %arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
+    %arg1: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>})
+    -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) {
+  %init = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[INIT:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[RES:.*]] = "stablehlo.select_and_scatter"(%[[OPERAND]], %[[SOURCE]], %[[INIT]]) <{
+  // CHECK-SAME:   padding = dense<0> : tensor<2x2xi64>,
+  // CHECK-SAME:   window_dimensions = array<i64: 1, 2>,
+  // CHECK-SAME:   window_strides = array<i64: 1, 4>}>
+  %0 = "stablehlo.select_and_scatter"(%arg0, %arg1, %init) <{
+    padding = dense<[[0, 0], [0, 0]]> : tensor<2x2xi64>,
+    window_dimensions = array<i64: 1, 2>,
+    window_strides = array<i64: 1, 4>
+  }> ({
+  ^bb0(%sel_arg1: tensor<f32>, %sel_arg2: tensor<f32>):
+    %cmp = stablehlo.compare GE, %sel_arg1, %sel_arg2 : (tensor<f32>, tensor<f32>) -> tensor<i1>
+    %1 = "stablehlo.convert"(%cmp) : (tensor<i1>) -> tensor<i1>
+    stablehlo.return %1 : tensor<i1>
+  }, {
+  ^bb0(%scat_arg1: tensor<f32>, %scat_arg2: tensor<f32>):
+    %add = stablehlo.add %scat_arg1, %scat_arg2 : tensor<f32>
+    stablehlo.return %add : tensor<f32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>}
+  : (tensor<16x32xf32>, tensor<16x8xf32>, tensor<f32>) -> tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
