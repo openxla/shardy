@@ -85,6 +85,13 @@ TensorShardingAttr updateSharding(TensorShardingAttr sharding,
 bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
                                  TensorShardingAttr sharding, MeshAttr mesh);
 
+// Returns true if the pad operation on the given dimension is
+// "communication-free". A pad is communication-free if it is not sharded, or if
+// it is sharded but has no interior padding, and edge padding low and high are
+// multiples of the shard size.
+bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
+                               TensorShardingAttr sharding, MeshAttr mesh);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -15,15 +15,21 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <optional>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+
+#include "mlir/IR/BuiltinTypes.h"  // IWYU pragma: keep
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/PatternMatch.h"
@@ -65,6 +71,89 @@ struct ResolutionState {
   int64_t& nextChannelId;
 };
 
+// Describes the data exchange needed to perform explicit resharding for a
+// single shard in a dimension.
+struct ShardExchangeInfo {
+  int64_t sourceId;     // Source shard index.
+  int64_t localOffset;  // Local start index in that source shard.
+};
+
+// Describes the data exchange needed to perform explicit resharding for a
+// single dimension of a tensor operand with permutation factors.
+struct DimExchangeInfo {
+  // shardExchanges[i] contains the source shard index and local offset for the
+  // i-th shard in the dimension.
+  SmallVector<ShardExchangeInfo> shardExchanges;
+  // Aligned logical output shard size for the dimension.
+  int64_t sOut;
+  // The length of the local slice (input footprint) in the physical/un-dilated
+  // input space needed by the device, calculated as:
+  //    sFootprint = divideCeil((sOut - 1) * stride + dilatedWindowSize - 1,
+  //                 baseDilation) + 1
+  int64_t sFootprint;
+  // Max left and right hops required for dimension exchange.
+  int64_t leftHops = 0;
+  int64_t rightHops = 0;
+  // Indicates if the exchange for this dimension requires cross-device
+  // communication.
+  bool needsComm = false;
+  // Indicates if the exchange for this dimension is supported by HALO exchange.
+  // We cannot use HALO exchange if the number of gathered shards (leftHops +
+  // rightHops + 1) is equal to or larger than the total shard count in the
+  // dimension, AND we need more than 1 hop in at least one direction.
+  bool canUseHalo = true;
+};
+
+// Describes the data exchange needed to perform explicit resharding for a
+// tensor operand with permutation factors.
+struct DataExchangeInfo {
+  // The result shape after padding the input for sharding divisibility.
+  SmallVector<int64_t> divisibleInputShape;
+  // Contains the axes sharding all sharded dimensions (i.e. dim size > 1).
+  llvm::SmallDenseSet<StringRef> manualAxes;
+  // dimExchanges[i] contains the exchange info for the i-th sharded
+  // dimension of the sharded tensor operand.
+  SmallVector<DimExchangeInfo> dimExchanges;
+  // Indicates if any of the sharded dimensions require cross-device
+  // communication, if manualAxes is not empty.
+  bool needsComm = false;
+};
+
+// Returns true if the data exchange can be resolved using HALO exchange.
+bool canUseHalo(const DataExchangeInfo& info) {
+  return llvm::all_of(info.dimExchanges,
+                      [](const DimExchangeInfo& dimExchange) {
+                        return dimExchange.canUseHalo;
+                      });
+}
+
+// Sharded dimension exchange context.
+struct ShardedDimContext {
+  // Aligned logical input shard size for the dimension.
+  int64_t sIn;
+  // The number of devices used for sharding this dimension.
+  int64_t shardCount;
+};
+
+// Values used to dynamic-slice the assembled HALO buffer.
+//
+// For sharded dimensions, we concatenate neighbor shards and pad them to
+// assemble the HALO buffer. For pad and slice ops, the buffer is dilated,
+// so we use dilatedOffset to slice the segment (as dilation is 1 for slice,
+// dilatedOffset is equal to undilatedOffset). For window ops, the buffer is
+// un-dilated, so we use undilatedOffset to slice the segment.
+struct DeviceOffsetInfo {
+  Value dilatedOffset;
+  // max(dilatedOffset / baseDilation, 0).
+  Value undilatedOffset;
+  // A constant 0 of type i64, used to initialize offsets of other dimensions
+  // in the dynamic slice array.
+  Value zeroConst;
+};
+
+using PostProcessFn =
+    std::function<Value(Value, Value, RankedTensorType, ResolutionState&)>;
+
 // -----------------------------------------------------------------------------
 // Coordinate math & index conversion helpers.
 // -----------------------------------------------------------------------------
@@ -100,6 +189,160 @@ int64_t getMeshAxisIndex(ArrayRef<MeshAxisAttr> axes, StringRef name) {
     }
   }
   return -1;
+}
+
+// Projects the global device ID to a flat coordinate index within the
+// partition group. It assumes the partitioning axes only contain full axes,
+// as shardy manual_computation can only have full axes in manual_axes.
+Value convertPartitionIdToIdInGroup(
+    Location loc, Value globalPartitionId, MeshAttr mesh,
+    const llvm::SmallDenseSet<StringRef>& partitionAxes, IRRewriter& rewriter) {
+  SDY_CHECK(!partitionAxes.empty());
+  auto axes = mesh.getAxes();
+  int64_t rank = axes.size();
+
+  // Find partition axes and their sizes/multipliers
+  SmallVector<MeshAxisAttr> partitionMeshAxes;
+  for (auto axis : axes) {
+    if (partitionAxes.contains(axis.getName())) {
+      partitionMeshAxes.push_back(axis);
+    }
+  }
+
+  // If all mesh axes are partition axes, idInPartition = globalId.
+  if (partitionMeshAxes.size() == axes.size()) {
+    return globalPartitionId;
+  }
+
+  auto getSuffixMultipliers = [](ArrayRef<MeshAxisAttr> meshAxes) {
+    int64_t r = meshAxes.size();
+    SmallVector<int64_t> mults(r, 1);
+    for (int64_t i = r - 2; i >= 0; --i) {
+      mults[i] = mults[i + 1] * meshAxes[i + 1].getSize();
+    }
+    return mults;
+  };
+
+  SmallVector<int64_t> meshSuffixMultipliers = getSuffixMultipliers(axes);
+  SmallVector<int64_t> partitionSuffixMultipliers =
+      getSuffixMultipliers(partitionMeshAxes);
+
+  auto getConstVal = [&](int64_t val) -> Value {
+    return stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseIntElementsAttr::get(
+            RankedTensorType::get({}, rewriter.getI64Type()), {val}));
+  };
+
+  Value idInPartition = nullptr;
+  int64_t partitionIdx = 0;
+  // For each axis in the mesh: if it partitions the dimension, extract the
+  // device's coordinate along this axis, scale it by the partition group
+  // multiplier, and accumulate it into the locally flat `idInPartition`.
+  for (int64_t i = 0; i < rank; ++i) {
+    if (!partitionAxes.contains(axes[i].getName())) {
+      continue;
+    }
+
+    Value coord = globalPartitionId;
+    if (meshSuffixMultipliers[i] > 1) {
+      coord = stablehlo::DivOp::create(rewriter, loc, coord.getType(), coord,
+                                       getConstVal(meshSuffixMultipliers[i]));
+    }
+    if (i > 0 || meshSuffixMultipliers[i] > 1) {
+      coord = stablehlo::RemOp::create(rewriter, loc, coord.getType(), coord,
+                                       getConstVal(axes[i].getSize()));
+    }
+
+    int64_t multiplier = partitionSuffixMultipliers[partitionIdx++];
+    if (multiplier > 1) {
+      coord = stablehlo::MulOp::create(rewriter, loc, coord,
+                                       getConstVal(multiplier));
+    }
+
+    if (!idInPartition) {
+      idInPartition = coord;
+    } else {
+      idInPartition =
+          stablehlo::AddOp::create(rewriter, loc, idInPartition, coord);
+    }
+  }
+
+  return idInPartition;
+}
+
+// Compute and return the following values from the input:
+//
+// dilatedOffset = partitionId * diffSize + baseOffset
+// physicalOffset = max(dilatedOffset / baseDilation, 0)
+//
+// Derivation of dilatedOffset:
+// 1. In a global coordinate system, the start index of the partition's
+//    needed input segment is:
+//      globalOffset = partitionId * sOut * stride - padLow
+// 2. The partition's own local input starts at:
+//      globalInputStart = partitionId * sInDilated
+// 3. However, inside the locally assembled HALO buffer, the left neighbor
+//    segments and low-padding shift the local input's start position to:
+//      localInputStart = leftHops * sInDilated + sFootprint * baseDilation
+// 4. Therefore, the coordinate translation shift to map from the global space
+//    to the local HALO buffer is:
+//      shift = localInputStart - globalInputStart
+//            = leftHops * sInDilated + sFootprint * baseDilation
+//              - partitionId * sInDilated
+// 5. Applying this shift to get the local offset inside the HALO buffer:
+//      localOffset = globalOffset + shift
+//                  = partitionId * sOut * stride - padLow
+//                    + leftHops * sInDilated + sFootprint * baseDilation
+//                    - partitionId * sInDilated
+//                  = partitionId * (sOut * stride - sInDilated) - padLow
+//                    + leftHops * sInDilated + sFootprint * baseDilation
+//                  = partitionId * diffSize + baseOffset
+//    where:
+//      diffSize = sOut * stride - sInDilated
+//      baseOffset = -padLow + leftHops * sInDilated
+//                                 + sFootprint * baseDilation
+DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
+                                     int64_t diffSize, int64_t baseOffset,
+                                     int64_t baseDilation,
+                                     ResolutionState& state,
+                                     bool needUndilated = true) {
+  IRRewriter& rewriter = state.rewriter;
+  Type i64Ty = rewriter.getI64Type();
+  auto diffSizeVal = stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty),
+                                ArrayRef<int64_t>{diffSize}));
+  auto baseOffsetVal = stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty),
+                                ArrayRef<int64_t>{baseOffset}));
+  Value offsetInPartition =
+      stablehlo::MulOp::create(rewriter, loc, partitionId, diffSizeVal);
+  Value dilatedOffset =
+      stablehlo::AddOp::create(rewriter, loc, offsetInPartition, baseOffsetVal);
+
+  auto zeroConst = stablehlo::ConstantOp::create(
+      rewriter, loc, rewriter.getZeroAttr(RankedTensorType::get({}, i64Ty)));
+
+  dilatedOffset =
+      stablehlo::MaxOp::create(rewriter, loc, dilatedOffset, zeroConst);
+
+  Value undilatedOffset;
+  if (needUndilated) {
+    if (baseDilation == 1) {
+      undilatedOffset = dilatedOffset;
+    } else {
+      auto baseDilationVal = stablehlo::ConstantOp::create(
+          rewriter, loc,
+          DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty),
+                                    ArrayRef<int64_t>{baseDilation}));
+      undilatedOffset =
+          stablehlo::DivOp::create(rewriter, loc, dilatedOffset.getType(),
+                                   dilatedOffset, baseDilationVal);
+    }
+  }
+  return {dilatedOffset, undilatedOffset, zeroConst};
 }
 
 // -----------------------------------------------------------------------------
@@ -275,7 +518,7 @@ Value sliceHighSideToShape(
 // partitioned by the manual axes in 'manualAxesInDim'. The number of devices
 // to shift is given by 'shardOffset'. Returns all the (i, j) pairs where i is
 // the source device and j is the target device.
-SmallVector<int64_t> getRightShiftSourceTargetPairs(
+SmallVector<int64_t> getDataShiftSourceTargetPairs(
     MeshAttr manualMesh, ArrayRef<AxisRefAttr> manualAxesInDim,
     int64_t shardOffset) {
   ArrayRef<MeshAxisAttr> manualMeshAxes = manualMesh.getAxes();
@@ -320,62 +563,6 @@ SmallVector<int64_t> getRightShiftSourceTargetPairs(
   return pairs;
 }
 
-// =============================================================================
-// Implementation of handleXYZOps routines in alphabetical order.
-// =============================================================================
-
-// -----------------------------------------------------------------------------
-// stablehlo.reverse
-// -----------------------------------------------------------------------------
-
-// Information for implementing a reverse operation.
-struct ReverseOpInfo {
-  // Axes used to shard dimensions being reversed, which are also the axes
-  // whose device ordering needs to be reverses.
-  llvm::SmallVector<AxisRefAttr> axesToReverse;
-  // Axes used to shard dimensions being reversed and also involve in
-  // indivisible dimensions.
-  llvm::SmallDenseSet<StringRef> manualAxes;
-  // The new shape of the input tensor after all indivisible dimensions are
-  // padded.
-  SmallVector<int64_t> paddedShape;
-};
-
-// Returns a ReverseOpInfo for the given reverse operation. Returns nullopt if
-// there is no need to apply the sharded reverse operation.
-std::optional<ReverseOpInfo> getReverseOpInfo(stablehlo::ReverseOp reverseOp,
-                                              TensorShardingAttr sharding,
-                                              MeshAttr mesh,
-                                              RankedTensorType type) {
-  ReverseOpInfo info;
-  info.paddedShape = llvm::to_vector(type.getShape());
-
-  for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
-    bool isReversedDim = llvm::is_contained(reverseOp.getDimensions(), dim);
-    int64_t shardCount = dimSharding.getShardedSize(mesh);
-    if (!isReversedDim || shardCount <= 1) {
-      continue;
-    }
-
-    for (AxisRefAttr axisRef : dimSharding.getAxes()) {
-      info.axesToReverse.push_back(axisRef);
-    }
-
-    if (type.getDimSize(dim) % shardCount != 0) {
-      for (AxisRefAttr axis : dimSharding.getAxes()) {
-        info.manualAxes.insert(axis.getName());
-      }
-      info.paddedShape[dim] =
-          getPaddedDimSize(type.getDimSize(dim), shardCount);
-    }
-  }
-
-  if (info.axesToReverse.empty()) {
-    return std::nullopt;
-  }
-  return info;
-}
-
 // Generates code to right shift elements logically in each local device across
 // the partitioning space using HALO exchange and support multi-hop shifts.
 Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
@@ -385,7 +572,6 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
   auto inputType = cast<RankedTensorType>(input.getType());
   int64_t shardSize = inputType.getDimSize(dim);
   int64_t rank = inputType.getRank();
-  removeAxesFromSharding(sharding, manualAxes);
   TensorShardingAttr localSharding =
       removeAxesFromSharding(sharding, manualAxes);
 
@@ -406,7 +592,7 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
       return piece;
     }
     SmallVector<int64_t> pairs =
-        getRightShiftSourceTargetPairs(mesh, manualAxesInDim, deviceOffset);
+        getDataShiftSourceTargetPairs(mesh, manualAxesInDim, deviceOffset);
     if (pairs.empty()) {
       auto zeroAttr = state.rewriter.getZeroAttr(
           RankedTensorType::get({}, inputType.getElementType()));
@@ -523,6 +709,628 @@ Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
   return manualComp.getResult(0);
 }
 
+SmallVector<StringAttr> getManualAxesAttrs(
+    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    Builder& builder) {
+  SmallVector<StringAttr> manualAxesAttrs;
+  for (auto axis : mesh.getAxes()) {
+    if (manualAxes.contains(axis.getName())) {
+      manualAxesAttrs.push_back(builder.getStringAttr(axis.getName()));
+    }
+  }
+  return manualAxesAttrs;
+}
+
+// Returns the given input if sourceTargetPairs is empty, otherwise returns the
+// result of a collective permute operation with the given sourceTargetPairs.
+// The local sharding is set on the result.
+Value mayCollectivePermute(Location loc, Value input,
+                           ArrayRef<int64_t> sourceTargetPairs,
+                           TensorShardingAttr localSharding,
+                           ResolutionState& state) {
+  if (sourceTargetPairs.empty()) {
+    return input;
+  }
+
+  auto pairType = RankedTensorType::get(
+      {static_cast<int64_t>(sourceTargetPairs.size()) / 2, 2},
+      state.rewriter.getI64Type());
+  auto channelAttr = stablehlo::ChannelHandleAttr::get(
+      state.rewriter.getContext(), state.nextChannelId++, 1);
+  auto permOp = stablehlo::CollectivePermuteOp::create(
+      state.rewriter, loc, input.getType(), input,
+      DenseIntElementsAttr::get(pairType, sourceTargetPairs), channelAttr);
+  setSharding(permOp.getResult(), localSharding);
+  return permOp.getResult();
+}
+
+// Gathers boundary data from left and right neighboring shards along a single
+// sharded dimension, concatenates them with the local shard, and pads the
+// accumulated buffer on both sides to prepare for dynamic slicing to assemble
+// the HALO exchanged buffer for the dimension.
+//
+// For an undilated HALO exchange buffer, interiorPad is 0. Otherwise,
+// interiorPad is baseDilation - 1. Parameter edgePadSize already considers
+// interior padding.
+Value assembleHaloExchangeBuffer(
+    Location loc, Value input, int64_t dim, int64_t edgePadSize,
+    Value paddingValue, int64_t leftHops, int64_t rightHops,
+    TensorShardingAttr sharding, MeshAttr mesh,
+    const llvm::SmallDenseSet<StringRef>& manualAxes,
+    TensorShardingAttr localSharding, ResolutionState& state,
+    int64_t interiorPad = 0) {
+  SmallVector<AxisRefAttr> manualAxesInDim;
+  for (auto axisRef : sharding.getDimShardings()[dim].getAxes()) {
+    if (manualAxes.contains(axisRef.getName())) {
+      manualAxesInDim.push_back(axisRef);
+    }
+  }
+
+  SmallVector<Value> concatSegments;
+  concatSegments.reserve(leftHops + 1 + rightHops);
+
+  auto fetchNeighbors = [&](int64_t start, int64_t end) {
+    for (int64_t offset = start; offset >= end; --offset) {
+      SmallVector<int64_t> pairs =
+          getDataShiftSourceTargetPairs(mesh, manualAxesInDim, offset);
+      concatSegments.push_back(
+          mayCollectivePermute(loc, input, pairs, localSharding, state));
+    }
+  };
+
+  // Fetch Left Neighbors (hop count h = leftHops down to 1)
+  fetchNeighbors(leftHops, 1);
+  // Local Shard
+  concatSegments.push_back(input);
+  // Fetch Right Neighbors (hop count h = 1 up to rightHops, offset maps to -1
+  // down to -rightHops)
+  fetchNeighbors(-1, -rightHops);
+
+  // Concatenate all segments.
+  Value concat = stablehlo::ConcatenateOp::create(state.rewriter, loc,
+                                                  concatSegments, dim);
+  setSharding(concat, localSharding);
+
+  // Pad the concatenated tensor on both sides by edgePadSize.
+  auto concatType = cast<RankedTensorType>(concat.getType());
+  auto inputType = cast<RankedTensorType>(input.getType());
+  int64_t rank = inputType.getRank();
+  SmallVector<int64_t> concatLow(rank, 0), concatHigh(rank, 0),
+      concatInterior(rank, 0);
+  concatLow[dim] = edgePadSize;
+  concatHigh[dim] = edgePadSize;
+  concatInterior[dim] = interiorPad;
+
+  SmallVector<int64_t> paddedConcatShape =
+      llvm::to_vector(concatType.getShape());
+  int64_t dilatedSize =
+      (concatType.getShape()[dim] - 1) * (interiorPad + 1) + 1;
+  paddedConcatShape[dim] = dilatedSize + 2 * edgePadSize;
+  auto paddedConcatType =
+      RankedTensorType::get(paddedConcatShape, concatType.getElementType());
+
+  Value paddedConcat = stablehlo::PadOp::create(
+      state.rewriter, loc, paddedConcatType, concat, paddingValue,
+      state.rewriter.getDenseI64ArrayAttr(concatLow),
+      state.rewriter.getDenseI64ArrayAttr(concatHigh),
+      state.rewriter.getDenseI64ArrayAttr(concatInterior));
+  setSharding(paddedConcat, localSharding);
+
+  return paddedConcat;
+}
+
+// Returns a dynamic slice of the halo exchange buffer.
+Value dynamicSliceHaloExchangeBuffer(Location loc, Value haloBuffer,
+                                     Value offset, Value zeroConst, int64_t dim,
+                                     int64_t sliceSize,
+                                     TensorShardingAttr localSharding,
+                                     ResolutionState& state) {
+  auto inputType = cast<RankedTensorType>(haloBuffer.getType());
+  SmallVector<int64_t> resultPieceShape = llvm::to_vector(inputType.getShape());
+  resultPieceShape[dim] = sliceSize;
+  auto resultPieceType =
+      RankedTensorType::get(resultPieceShape, inputType.getElementType());
+
+  SmallVector<Value> dynamicOffsets(inputType.getRank(), zeroConst);
+  dynamicOffsets[dim] = offset;
+
+  auto dynamicSliceOp = stablehlo::DynamicSliceOp::create(
+      state.rewriter, loc, resultPieceType, haloBuffer, dynamicOffsets,
+      state.rewriter.getDenseI64ArrayAttr(resultPieceShape));
+  setSharding(dynamicSliceOp.getResult(), localSharding);
+  return dynamicSliceOp.getResult();
+}
+
+// Performs HALO data exchange for a single sharded dimension and slices the
+// HALO exchange buffer to retrieve the needed local segment.
+//
+// For window ops, such as reduce_window and convolution, the HALO exchange
+// buffer is not dilated, indicated by dilatedHaloBuffer=false. For pad and
+// slice ops, the buffer is dilated by the base dilation of the dimension.
+Value exchangeDimWithDynamicOffset(
+    Location loc, Value operand, Value paddingValue, int64_t dim,
+    const DimExchangeInfo& dimExchange, TensorShardingAttr sharding,
+    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    TensorShardingAttr localSharding, int64_t padLow, int64_t stride,
+    int64_t sOut, int64_t baseDilation, bool dilatedHaloBuffer,
+    ResolutionState& state) {
+  int64_t edgePadSize = dilatedHaloBuffer
+                            ? dimExchange.sFootprint * baseDilation
+                            : dimExchange.sFootprint;
+  Value paddedConcat = assembleHaloExchangeBuffer(
+      loc, operand, dim, edgePadSize, paddingValue, dimExchange.leftHops,
+      dimExchange.rightHops, sharding, mesh, manualAxes, localSharding, state,
+      dilatedHaloBuffer ? baseDilation - 1 : 0);
+
+  Value partitionId = stablehlo::PartitionIdOp::create(state.rewriter, loc);
+  auto partitionIdType = cast<RankedTensorType>(partitionId.getType());
+  auto i64Ty = state.rewriter.getI64Type();
+  if (partitionIdType.getElementType() != i64Ty) {
+    auto destType = RankedTensorType::get(partitionIdType.getShape(), i64Ty);
+    partitionId = stablehlo::ConvertOp::create(state.rewriter, loc, destType,
+                                               partitionId);
+  }
+  partitionId = stablehlo::ReshapeOp::create(
+      state.rewriter, loc, RankedTensorType::get({}, i64Ty), partitionId);
+
+  auto inputType = cast<RankedTensorType>(operand.getType());
+  int64_t sIn = inputType.getShape()[dim];
+  int64_t sInDilated = sIn * baseDilation;
+  int64_t activeSOut = sOut == 0 ? dimExchange.sFootprint : sOut;
+  int64_t diffSize = activeSOut * stride - sInDilated;
+  int64_t baseOffsetInPaddedConcat = -padLow +
+                                     dimExchange.leftHops * sInDilated +
+                                     dimExchange.sFootprint * baseDilation;
+
+  llvm::SmallDenseSet<StringRef> manualAxesInDim;
+  for (AxisRefAttr axis : sharding.getDimShardings()[dim].getAxes()) {
+    manualAxesInDim.insert(axis.getName());
+  }
+
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, partitionId, mesh, manualAxesInDim, state.rewriter);
+
+  DeviceOffsetInfo offsetInfo =
+      getDeviceOffsetInfo(loc, idInPartitionGroup, diffSize,
+                          baseOffsetInPaddedConcat, baseDilation, state,
+                          /*needUndilated=*/!dilatedHaloBuffer);
+  Value offset =
+      dilatedHaloBuffer ? offsetInfo.dilatedOffset : offsetInfo.undilatedOffset;
+  Value zeroConst = offsetInfo.zeroConst;
+
+  return dynamicSliceHaloExchangeBuffer(loc, paddedConcat, offset, zeroConst,
+                                        dim, dimExchange.sFootprint,
+                                        localSharding, state);
+}
+
+// Performs HALO exchange for a sharded operand inside a manual computation
+// block.
+Value exchangeDataWithDynamicOffset(
+    Location loc, Value operand, Value paddingValue,
+    TensorShardingAttr sharding, MeshAttr mesh,
+    const llvm::SmallDenseSet<StringRef>& manualAxes,
+    ArrayRef<DimExchangeInfo> dimExchanges, ArrayRef<int64_t> edgePaddingLow,
+    ArrayRef<int64_t> windowStrides, bool dilatedHaloBuffer,
+    ResolutionState& state, ArrayRef<int64_t> baseDilations = {}) {
+  TensorShardingAttr localSharding =
+      removeAxesFromSharding(sharding, manualAxes);
+  int64_t dimExchangeIdx = -1;
+  for (int64_t dim = 0; dim < sharding.getDimShardings().size(); ++dim) {
+    if (sharding.getDimShardings()[dim].getShardedSize(mesh) <= 1) {
+      continue;
+    }
+    dimExchangeIdx++;
+    if (!dimExchanges[dimExchangeIdx].needsComm) {
+      continue;
+    }
+
+    int64_t stride = windowStrides.empty() ? 1 : windowStrides[dim];
+    int64_t sOut = dimExchanges[dimExchangeIdx].sOut;
+    int64_t padLow = edgePaddingLow.empty() ? 0 : edgePaddingLow[dim];
+    int64_t baseDilation = baseDilations.empty() ? 1 : baseDilations[dim];
+    operand = exchangeDimWithDynamicOffset(
+        loc, operand, paddingValue, dim, dimExchanges[dimExchangeIdx], sharding,
+        mesh, manualAxes, localSharding, padLow, stride, sOut, baseDilation,
+        dilatedHaloBuffer, state);
+  }
+  return operand;
+}
+
+// Performs HALO exchange over the sharded input inside a newly created
+// `sdy.manual_computation` block.
+//
+// Inside the block, it shifts local shards along the sharded dimensions
+// specified in `dimExchanges` to align boundary requirements. It then runs
+// the user-provided `postProcess` callback to process the local result
+// before returning the output of the manual computation.
+Value haloDataExchange(Location loc, Value divisibleInput,
+                       ArrayRef<int64_t> divisibleInputShape,
+                       RankedTensorType origInputType,
+                       RankedTensorType origOutputType,
+                       TensorShardingAttr sharding, MeshAttr mesh,
+                       const llvm::SmallDenseSet<StringRef>& manualAxes,
+                       Value paddingValue, ArrayRef<int64_t> edgePaddingLow,
+                       ArrayRef<DimExchangeInfo> dimExchanges,
+
+                       const PostProcessFn& postProcess, ResolutionState& state,
+                       ArrayRef<int64_t> windowStrides = {},
+                       ArrayRef<int64_t> baseDilations = {}) {
+  // Extract manual axes while preserving their original order in the mesh.
+  SmallVector<StringAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, manualAxes, state.rewriter);
+
+  // Compute the local shape for input in the manual block based on
+  // divisibleInputShape.
+  SmallVector<int64_t> localShape;
+  auto inputType = cast<RankedTensorType>(divisibleInput.getType());
+  for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
+    int64_t shardCount = dimSharding.getShardedSize(mesh);
+    // Target shape is the padded shape of the input.
+    SDY_CHECK(divisibleInputShape[dim] % shardCount == 0);
+    localShape.push_back(divisibleInputShape[dim] / shardCount);
+  }
+
+  // Build the manual computation block with required operands.
+  SmallVector<Value> operands = {divisibleInput, paddingValue};
+  SmallVector<TensorShardingAttr> inShardings = {
+      sharding, TensorShardingAttr::getFullyReplicated(
+                    state.rewriter.getContext(), 0, sharding.getMeshOrRef(),
+                    /*isClosed=*/false)};
+
+  SmallVector<int64_t> paddedGlobalResultShape;
+  paddedGlobalResultShape.reserve(origOutputType.getRank());
+  for (auto [i, dimSize] : llvm::enumerate(origOutputType.getShape())) {
+    paddedGlobalResultShape.push_back(getPaddedDimSize(
+        dimSize, sharding.getDimShardings()[i].getShardedSize(mesh)));
+  }
+  RankedTensorType paddedGlobalResultType = RankedTensorType::get(
+      paddedGlobalResultShape, origOutputType.getElementType());
+
+  SmallVector<Type> resultTypes = {paddedGlobalResultType};
+  auto manualComp = ManualComputationOp::create(
+      state.rewriter, loc, resultTypes, operands,
+      TensorShardingPerValueAttr::get(state.rewriter.getContext(), inShardings),
+      TensorShardingPerValueAttr::get(state.rewriter.getContext(), {sharding}),
+      manualAxesAttrs);
+
+  Region& body = manualComp.getBody();
+  body.emplaceBlock();
+  Value localInput = body.addArgument(
+      RankedTensorType::get(localShape, inputType.getElementType()), loc);
+  Value localPaddingValue = body.addArgument(paddingValue.getType(), loc);
+
+  OpBuilder::InsertionGuard guard(state.rewriter);
+  state.rewriter.setInsertionPointToStart(&body.front());
+
+  Value exchangedLocal = localInput;
+  exchangedLocal = exchangeDataWithDynamicOffset(
+      loc, exchangedLocal, localPaddingValue, sharding, mesh, manualAxes,
+      dimExchanges, edgePaddingLow, windowStrides,
+      /*dilatedHaloBuffer=*/windowStrides.empty(), state, baseDilations);
+
+  exchangedLocal = postProcess(exchangedLocal, localPaddingValue,
+                               paddedGlobalResultType, state);
+
+  ReturnOp::create(state.rewriter, loc, exchangedLocal);
+  return manualComp.getResult(0);
+}
+
+// Returns the data exchange info for a single sharded dimension.
+DimExchangeInfo getDimExchangeInfo(int64_t shardCount, int64_t sIn,
+                                   int64_t sOut, int64_t sFootprint,
+                                   int64_t padLow, int64_t stride,
+                                   int64_t baseDilation, int64_t inputDimSize) {
+  DimExchangeInfo dimInfo;
+  dimInfo.sFootprint = sFootprint;
+  dimInfo.sOut = sOut;
+
+  bool dimNeedsComm = false;
+  for (int64_t t = 0; t < shardCount; ++t) {
+    // In windowed-ops, the input is dilated and then padded, meaning the stride
+    // and window parameters are defined in this processed input space. In
+    // contrast, the derived sFootprint is defined in the un-dilated (physical)
+    // input space. For this reason, we map "start" and "limit" to the original
+    // input space to find out which shards of the input are needed.
+    int64_t start = (t * sOut * stride - padLow) / baseDilation;
+    int64_t limit = start + sFootprint - 1;
+
+    int64_t validStart = std::max<int64_t>(0, start);
+    int64_t validLimit = std::min<int64_t>(inputDimSize - 1, limit);
+
+    int64_t sourceId = -1;
+    int64_t localOffset = 0;
+    int64_t lastSourceId = -1;
+
+    if (validStart <= validLimit) {
+      sourceId = validStart / sIn;
+      localOffset = start - sourceId * sIn;
+      lastSourceId = validLimit / sIn;
+    }
+
+    if ((sourceId != -1 && sourceId != t) ||
+        (lastSourceId != -1 && lastSourceId != t)) {
+      dimNeedsComm = true;
+    }
+    if (sourceId != -1 && sourceId < t) {
+      dimInfo.leftHops = std::max(dimInfo.leftHops, t - sourceId);
+    }
+    if (lastSourceId != -1 && lastSourceId > t) {
+      dimInfo.rightHops = std::max(dimInfo.rightHops, lastSourceId - t);
+    }
+    dimInfo.shardExchanges.push_back({sourceId, localOffset});
+  }
+
+  dimInfo.needsComm = dimNeedsComm;
+  if (dimInfo.leftHops + dimInfo.rightHops + 1 >= shardCount &&
+      (dimInfo.leftHops > 1 || dimInfo.rightHops > 1)) {
+    dimInfo.canUseHalo = false;
+  }
+  return dimInfo;
+}
+
+// Checks if a dimension is sharded, populates the manual axes, pads the logical
+// shape in DataExchangeInfo, and returns the sharding context.
+std::optional<ShardedDimContext> prepareShardedDimForExchange(
+    int64_t dim, DimensionShardingAttr dimSharding, MeshAttr mesh,
+    DataExchangeInfo& info) {
+  int64_t shardCount = dimSharding.getShardedSize(mesh);
+  if (shardCount <= 1) {
+    return std::nullopt;
+  }
+  for (AxisRefAttr axis : dimSharding.getAxes()) {
+    info.manualAxes.insert(axis.getName());
+  }
+  info.divisibleInputShape[dim] =
+      getPaddedDimSize(info.divisibleInputShape[dim], shardCount);
+  int64_t sIn = info.divisibleInputShape[dim] / shardCount;
+  return ShardedDimContext{sIn, shardCount};
+}
+
+// Master loop builder that walks through all sharded dimensions of an op and
+// constructs the DataExchangeInfo.
+//
+// `processDim` is a callable with signature
+//   DimExchangeInfo(int64_t dim, int64_t sIn, int64_t shardCount)
+// and handles the explicit dimension exchange logic for each axis for a given
+// op.
+template <typename F>
+DataExchangeInfo buildDataExchangeInfo(TensorShardingAttr sharding,
+                                       MeshAttr mesh,
+                                       RankedTensorType inputType,
+                                       F&& processDim) {
+  DataExchangeInfo info;
+  info.divisibleInputShape = llvm::to_vector(inputType.getShape());
+
+  for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
+    std::optional<ShardedDimContext> context =
+        prepareShardedDimForExchange(dim, dimSharding, mesh, info);
+    if (!context) {
+      // Dimension is not sharded.
+      continue;
+    }
+    DimExchangeInfo dimInfo =
+        processDim(dim, context->sIn, context->shardCount);
+    if (dimInfo.needsComm) {
+      info.needsComm = true;
+    }
+    info.dimExchanges.push_back(dimInfo);
+  }
+  return info;
+}
+
+// =============================================================================
+// Implementation of handleXYZOps routines in alphabetical order.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// stablehlo.pad
+// -----------------------------------------------------------------------------
+
+// Returns a DataExchangeInfo to represent the needed data exchange for the
+// given pad op.
+DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
+                                        TensorShardingAttr sharding,
+                                        MeshAttr mesh,
+                                        RankedTensorType inputType) {
+  return buildDataExchangeInfo(
+      sharding, mesh, inputType,
+      [&](int64_t dim, int64_t sIn, int64_t shardCount) {
+        int64_t sOut =
+            llvm::divideCeil(padOp.getType().getDimSize(dim), shardCount);
+        int64_t pLow = padOp.getEdgePaddingLow()[dim];
+        int64_t baseDilation = padOp.getInteriorPadding()[dim] + 1;
+        return getDimExchangeInfo(shardCount, sIn, sOut,
+                                  /*sFootprint=*/sOut, pLow,
+                                  /*stride=*/1, baseDilation,
+                                  inputType.getDimSize(dim));
+      });
+}
+
+// Implements the non-trivial padding operation on replicated dimensions.
+Value handleReplicatedPadDims(
+    Location loc, Value exchangedLocal, Value localPaddingValue,
+    RankedTensorType paddedGlobalType, TensorShardingAttr sharding,
+    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    ArrayRef<int64_t> edgePaddingLow, ArrayRef<int64_t> edgePaddingHigh,
+    ArrayRef<int64_t> interiorPadding, ResolutionState& state) {
+  auto exchangedLocalType = cast<RankedTensorType>(exchangedLocal.getType());
+  int64_t rank = exchangedLocalType.getRank();
+  TensorShardingAttr localSharding =
+      removeAxesFromSharding(sharding, manualAxes);
+
+  SmallVector<int64_t> localResultShape(rank, 0), localLow(rank, 0),
+      localHigh(rank, 0), localInterior(rank, 0);
+  bool needsLocalPad = false;
+  for (int64_t i = 0; i < rank; ++i) {
+    int64_t manualFactor = 1;
+    for (auto axis : sharding.getDimShardings()[i].getAxes()) {
+      if (manualAxes.contains(axis.getName())) {
+        manualFactor *= axis.getSize(mesh);
+      }
+    }
+    int64_t sOutLocal = paddedGlobalType.getDimSize(i) / manualFactor;
+    localResultShape[i] = sOutLocal;
+
+    if (sharding.getDimShardings()[i].getShardedSize(mesh) > 1) {
+      continue;
+    }
+
+    int64_t low = edgePaddingLow[i];
+    int64_t interior = interiorPadding[i];
+    int64_t high = edgePaddingHigh[i];
+    localLow[i] = low;
+    localInterior[i] = interior;
+    localHigh[i] = high;
+    int64_t sInLocal = exchangedLocalType.getShape()[i];
+    int64_t expandedInputSize =
+        (sInLocal - 1) * (interior + 1) + 1 + low + high;
+    SDY_CHECK(expandedInputSize == sOutLocal);
+    if (low != 0 || high != 0 || interior != 0) {
+      needsLocalPad = true;
+    }
+  }
+
+  if (!needsLocalPad) {
+    return exchangedLocal;
+  }
+
+  auto localResultType = RankedTensorType::get(
+      localResultShape, paddedGlobalType.getElementType());
+  exchangedLocal = stablehlo::PadOp::create(
+      state.rewriter, loc, localResultType, exchangedLocal, localPaddingValue,
+      state.rewriter.getDenseI64ArrayAttr(localLow),
+      state.rewriter.getDenseI64ArrayAttr(localHigh),
+      state.rewriter.getDenseI64ArrayAttr(localInterior));
+  setSharding(exchangedLocal, localSharding);
+  return exchangedLocal;
+}
+
+// Implements a sharded pad operation using HALO exchange for non-uniform
+// dimensions as follows:
+//
+// 1. Align logical input shard sizes via high-side padding.
+// 2. Use HALO exchange to implement sharded padding dimensions:
+//    - Concatenate the left neighbor shard, self shard, and right neighbor
+//      shard along the sharded dimension.
+//    - Pad the concatenated buffer by sOut.
+//    - Slice out a local segment of shape sOut using the dynamic offset:
+//        offset = max(partitionId * diffSize + baseOffset, 0)
+//        where diffSize = sOut - sIn,
+//              baseOffset = -padLow + sIn + sOut.
+// 3. Implement replicated padding dimensions.
+// 4. Trim final tensor shape to match expected output shape.
+LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
+  Value origInput = padOp.getOperand();
+  TensorShardingAttr inSharding = getSharding(origInput);
+  auto origInputType = mlir::dyn_cast<RankedTensorType>(origInput.getType());
+  if (isFullyReplicated(inSharding) || !origInputType) {
+    return success();
+  }
+
+  SymbolTable& symbolTable = state.symbolTable;
+  MeshAttr mesh = inSharding.getMesh(symbolTable);
+  if (!mesh || mesh.isMaximal()) {
+    return success();
+  }
+
+  DataExchangeInfo info =
+      getPadDataExchangeInfo(padOp, inSharding, mesh, origInputType);
+  if (info.manualAxes.empty() || !info.needsComm) {
+    return success();
+  }
+  if (!canUseHalo(info)) {
+    return failure();
+  }
+
+  Location loc = padOp.getLoc();
+  IRRewriter& rewriter = state.rewriter;
+  rewriter.setInsertionPoint(padOp);
+  // Align logical shard sizes via high-side padding (Comm-free).
+  Value divisibleInput =
+      padHighSideToShape(loc, rewriter, origInput, info.divisibleInputShape,
+                         inSharding, padOp.getPaddingValue(),
+                         /*opsToResolve=*/nullptr);
+
+  SmallVector<int64_t> baseDilations = llvm::map_to_vector(
+      padOp.getInteriorPadding(), [](int64_t val) { return val + 1; });
+
+  // Define step 3 as post processing inside haloDataExchange.
+  auto postProcess = [&](Value exchangedLocal, Value localPaddingValue,
+                         RankedTensorType paddedGlobalResultType,
+                         ResolutionState& state) -> Value {
+    return handleReplicatedPadDims(
+        loc, exchangedLocal, localPaddingValue, paddedGlobalResultType,
+        inSharding, mesh, info.manualAxes, padOp.getEdgePaddingLow(),
+        padOp.getEdgePaddingHigh(), padOp.getInteriorPadding(), state);
+  };
+
+  Value result = haloDataExchange(
+      loc, divisibleInput, info.divisibleInputShape, origInputType,
+      padOp.getType(), inSharding, mesh, info.manualAxes,
+      padOp.getPaddingValue(), padOp.getEdgePaddingLow(), info.dimExchanges,
+      postProcess, state,
+      /*windowStrides=*/{}, baseDilations);
+
+  // Trim final tensor shape to match expected output shape.
+  result = sliceHighSideToShape(loc, rewriter, result, padOp.getType(),
+                                inSharding, /*opsToResolve=*/nullptr);
+
+  rewriter.replaceOp(padOp, result);
+  return success();
+}
+
+// -----------------------------------------------------------------------------
+// stablehlo.reverse
+// -----------------------------------------------------------------------------
+
+// Information for implementing a reverse operation.
+struct ReverseOpInfo {
+  // Axes used to shard dimensions being reversed, which are also the axes
+  // whose device ordering needs to be reverses.
+  llvm::SmallVector<AxisRefAttr> axesToReverse;
+  // Axes used to shard dimensions being reversed and also involve in
+  // indivisible dimensions.
+  llvm::SmallDenseSet<StringRef> manualAxes;
+  // The new shape of the input tensor after all indivisible dimensions are
+  // padded.
+  SmallVector<int64_t> paddedShape;
+};
+
+// Returns a ReverseOpInfo for the given reverse operation. Returns nullopt if
+// there is no need to apply the sharded reverse operation.
+std::optional<ReverseOpInfo> getReverseOpInfo(stablehlo::ReverseOp reverseOp,
+                                              TensorShardingAttr sharding,
+                                              MeshAttr mesh,
+                                              RankedTensorType type) {
+  ReverseOpInfo info;
+  info.paddedShape = llvm::to_vector(type.getShape());
+
+  for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
+    bool isReversedDim = llvm::is_contained(reverseOp.getDimensions(), dim);
+    int64_t shardCount = dimSharding.getShardedSize(mesh);
+    if (!isReversedDim || shardCount <= 1) {
+      continue;
+    }
+
+    for (AxisRefAttr axisRef : dimSharding.getAxes()) {
+      info.axesToReverse.push_back(axisRef);
+    }
+
+    if (type.getDimSize(dim) % shardCount != 0) {
+      for (AxisRefAttr axis : dimSharding.getAxes()) {
+        info.manualAxes.insert(axis.getName());
+      }
+      info.paddedShape[dim] =
+          getPaddedDimSize(type.getDimSize(dim), shardCount);
+    }
+  }
+
+  if (info.axesToReverse.empty()) {
+    return std::nullopt;
+  }
+  return info;
+}
+
 // Implements a sharded reverse operation using HALO exchange for indivisible
 // dimensions as follows:
 //
@@ -560,7 +1368,7 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
   if (!info->manualAxes.empty()) {
     state.rewriter.setInsertionPoint(reverseOp);
     input = padHighSideToShape(loc, state.rewriter, operand, info->paddedShape,
-                               inSharding);
+                               inSharding, nullptr, nullptr);
 
     SmallVector<int64_t> dimsToShift, shiftAmounts;
     int64_t rank = origType.getRank();
@@ -607,7 +1415,7 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
   // Trim off the padding.
   if (!info->manualAxes.empty()) {
     Value slicedResult = sliceHighSideToShape(
-        loc, state.rewriter, reversedResult, origType, inSharding);
+        loc, state.rewriter, reversedResult, origType, inSharding, nullptr);
     state.rewriter.replaceAllUsesExcept(reverseOp.getResult(), slicedResult,
                                         reversedResult.getDefiningOp());
   } else {
@@ -629,6 +1437,10 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
   });
   return maxChannelId + 1;
 }
+
+// -----------------------------------------------------------------------------
+// The module pass.
+// -----------------------------------------------------------------------------
 
 struct ShardyResolvePermutationFactorsPass
     : public impl::ShardyResolvePermutationFactorsPassBase<
@@ -652,6 +1464,7 @@ struct ShardyResolvePermutationFactorsPass
     ResolutionState state{rewriter, symbolTable, meshCache, nextChannelId};
 
     // Walk the module to resolve permutation factors for each op.
+    SmallVector<Operation*> opsToResolve;
     moduleOp.walk([&](Operation* op) {
       // Skip terminators and any operations not in the StableHLO dialect.
       // This prevents "unknown op" warnings for Shardy collectives or return
@@ -660,6 +1473,7 @@ struct ShardyResolvePermutationFactorsPass
           !inDialect<stablehlo::StablehloDialect>(op)) {
         return;
       }
+
 
       OpShardingRuleAttr rule = getOrCreateShardingRule(op, false, false);
       if (!rule || rule.isCustom()) {
@@ -677,11 +1491,17 @@ struct ShardyResolvePermutationFactorsPass
 
       // Dispatch to HALO exchange if enabled and implemented for the op.
       if (enableHaloExchange) {
-        if (auto reverseOp = dyn_cast<stablehlo::ReverseOp>(op)) {
-          // If HALO exchange failed, fall back to explicit reshards below.
-          if (succeeded(handleReverseOp(reverseOp, state))) {
-            return;
-          }
+        bool resolved =
+            llvm::TypeSwitch<Operation*, bool>(op)
+                .Case([&](stablehlo::PadOp padOp) {
+                  return succeeded(handlePadOp(padOp, state));
+                })
+                .Case([&](stablehlo::ReverseOp reverseOp) {
+                  return succeeded(handleReverseOp(reverseOp, state));
+                })
+                .Default(false);
+        if (resolved) {
+          return;
         }
       }
 
@@ -706,8 +1526,18 @@ struct ShardyResolvePermutationFactorsPass
       UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
 
       for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
-        if (rule.getFactorType(i) != FactorType::kPermutation) {
+        // When HALO exchange is disabled, we replication-reshard the
+        // permutation factors.
+        bool isReplicatedFactor =
+            rule.getFactorType(i) == FactorType::kPermutation;
+        if (!isReplicatedFactor) {
           continue;
+        }
+        if (auto padOp = dyn_cast<stablehlo::PadOp>(op)) {
+          if (isCommunicationFreePadDim(i, padOp, inShardings[0],
+                                        meshOp.getMesh())) {
+            continue;
+          }
         }
         if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(op)) {
           SDY_CHECK(inShardings[0] == outShardings[0]);

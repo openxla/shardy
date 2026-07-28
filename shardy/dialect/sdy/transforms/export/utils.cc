@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
+#include <algorithm>
 #include <cstdint>
 
 #include "llvm/ADT/STLExtras.h"
@@ -143,6 +144,42 @@ bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
 
   return llvm::divideCeil(inDimSize, shardCount) ==
          llvm::divideCeil(outDimSize, shardCount);
+}
+
+bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
+                               TensorShardingAttr sharding, MeshAttr mesh) {
+  int64_t shardCount = sharding.getDimShardings()[dimIdx].getShardedSize(mesh);
+  if (shardCount <= 1) {
+    return true;
+  }
+
+  if (padOp.getInteriorPadding()[dimIdx] != 0) {
+    return false;
+  }
+
+  ArrayRef<int64_t> inShape = getTensorShape(padOp.getOperand());
+  int64_t inDimSize = inShape[dimIdx];
+  if (inDimSize == ShapedType::kDynamic) {
+    return false;
+  }
+
+  int64_t sIn = llvm::divideCeil(inDimSize, shardCount);
+  int64_t sOut =
+      llvm::divideCeil(padOp.getType().getDimSize(dimIdx), shardCount);
+  int64_t low = padOp.getEdgePaddingLow()[dimIdx];
+
+  for (int64_t t = 0; t < shardCount; ++t) {
+    int64_t start = t * sOut - low;
+    int64_t limit = start + sOut - 1;
+    int64_t validStart = std::max<int64_t>(0, start);
+    int64_t validLimit = std::min<int64_t>(inDimSize - 1, limit);
+    if (validStart <= validLimit) {
+      if (validStart / sIn != t || validLimit / sIn != t) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace sdy
