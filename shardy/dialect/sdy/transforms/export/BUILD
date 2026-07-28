@@ -39,7 +39,6 @@ cc_library(
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
         "insert_func_call_reshards.cc",
-        "optimize_collectives.cc",
         "pad_for_divisibility.cc",
         "propagate_to_func_results.cc",
         "remove_ag_rs_for_cmv1.cc",
@@ -123,7 +122,6 @@ cc_library(
     srcs = ["utils.cc"],
     hdrs = ["utils.h"],
     deps = [
-        "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
