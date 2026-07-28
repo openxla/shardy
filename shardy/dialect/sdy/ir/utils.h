@@ -225,6 +225,12 @@ std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> resultsShardings,
     const SymbolTable& symbolTable, bool ignoreDeviceIds);
 
+// Returns true if two shardings define the same physical linear distribution
+// of data across devices, accounting for t1 is a reshape of t2.
+bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
+                                        TensorShardingAttr s2, Type t2,
+                                        Operation* op);
+
 // Creates the symbol equivalent of a factor index:
 //   -  0 -> 'i'
 //   -  1 -> 'j'
