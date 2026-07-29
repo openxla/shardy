@@ -669,8 +669,8 @@ def _register_call_primitive():
       orig_callable,
       primitive=primitive,
   ):
-    body = lu.wrap_init(internal_ad.closed_backward_pass)
-    body = hashable_partial(body, call_jaxpr, False)
+    body = lu.wrap_init(internal_ad.backward_pass)
+    body = hashable_partial(body, call_jaxpr, False, tuple(call_jaxpr.consts))
     primals_and_nz_cts_in, in_treedef = jax.tree.flatten((primals_in, cts_in))
     body, cts_out_treedef_thunk = api_util.flatten_fun_nokwargs(
         body, in_treedef
