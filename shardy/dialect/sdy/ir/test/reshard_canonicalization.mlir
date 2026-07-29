@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -canonicalize | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
+sdy.mesh @mesh_4 = <["a"=4]>
 
 // CHECK-LABEL: func @reshard_of_reshard_no_other_uses
 // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]>
@@ -108,6 +109,19 @@ func.func @reshard_cse_with_shape_2(%arg0: tensor<8x4xf32>)
   %2 = stablehlo.reshape %1 : (tensor<8x2x2xf32>) -> tensor<16x2xf32>
   %3 = sdy.reshard %2 <@mesh, [{"a"}, {}]> : tensor<16x2xf32>
   return %0, %3 : tensor<8x4xf32>, tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @reshard_cse_with_sub_axes
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %arg0 <@mesh_4, [{"a":(1)2}, {"a":(2)2}]> : tensor<2x4xi32>
+// CHECK-NEXT: %[[RS:.*]] = stablehlo.reshape %[[R0]] : (tensor<2x4xi32>) -> tensor<8xi32>
+// CHECK-NEXT: return %[[R0]], %[[RS]] : tensor<2x4xi32>, tensor<8xi32>
+func.func @reshard_cse_with_sub_axes(%arg0: tensor<2x4xi32>)
+  -> (tensor<2x4xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"a":(1)2}, {"a":(2)2}]>},
+      tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"a"}]>}) {
+  %0 = sdy.reshard %arg0 <@mesh_4, [{"a":(1)2}, {"a":(2)2}]> : tensor<2x4xi32>
+  %1 = stablehlo.reshape %arg0 : (tensor<2x4xi32>) -> tensor<8xi32>
+  %2 = sdy.reshard %1 <@mesh_4, [{"a"}]> : tensor<8xi32>
+  return %0, %2 : tensor<2x4xi32>, tensor<8xi32>
 }
 
 // CHECK-LABEL: func @reshard_cse_with_reshape_not_redundant_reshard

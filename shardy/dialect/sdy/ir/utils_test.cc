@@ -823,6 +823,35 @@ TEST_F(UtilsTest, GetMainFuncOrDie_UseSingleFunc_NoMain) {
                "Failed to lookup function: main");
 }
 
+TEST_F(UtilsTest, IsShardingEquivalentAcrossReshapes_SubAxes) {
+  auto module = mlir::parseSourceString<ModuleOp>(R"mlir(
+module {
+  sdy.mesh @mesh = <["a"=4]>
+  func.func @test(
+      %arg0: tensor<2x4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a":(1)2}, {"a":(2)2}]>},
+      %arg1: tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
+      %arg2: tensor<2x4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a":(2)2}, {"a":(1)2}]>}) {
+    return
+  }
+}
+)mlir",
+                                                  &context);
+  auto func = cast<func::FuncOp>(module->lookupSymbol("test"));
+  auto getArgSharding = [&](int idx) {
+    return getSharding(func.getArgument(idx));
+  };
+  auto getType = [&](int idx) { return func.getArgument(idx).getType(); };
+
+  EXPECT_TRUE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(1), getType(1), func));
+  EXPECT_TRUE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(1), getType(1), getArgSharding(0), getType(0), func));
+
+  // Reversed sub-axes should not merge and should return false!
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(2), getType(2), getArgSharding(1), getType(1), func));
+}
+
 }  // namespace
 
 }  // namespace sdy

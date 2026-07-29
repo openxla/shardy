@@ -1486,7 +1486,33 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
     llvm::stable_sort(axisStrides, [](const auto& a, const auto& b) {
       return a.second < b.second;
     });
-    return axisStrides;
+
+    SmallVector<std::pair<AxisRefAttr, int64_t>> merged;
+    for (const auto& entry : axisStrides) {
+      if (!merged.empty()) {
+        auto& back = merged.back();
+        AxisRefAttr prevAxis = back.first;
+        AxisRefAttr currAxis = entry.first;
+        if (prevAxis.getName() == currAxis.getName() &&
+            entry.second == back.second * prevAxis.getSize(mesh) &&
+            currAxis.getSubAxisPreSize() * currAxis.getSize(mesh) ==
+                prevAxis.getSubAxisPreSize()) {
+          int64_t minPreSize = std::min(prevAxis.getSubAxisPreSize(),
+                                        currAxis.getSubAxisPreSize());
+          int64_t size = prevAxis.getSize(mesh) * currAxis.getSize(mesh);
+          int64_t fullSize = mesh.getAxisSize(prevAxis.getName());
+          AxisRefAttr combined =
+              (minPreSize == 1 && size == fullSize)
+                  ? AxisRefAttr::get(mesh.getContext(), prevAxis.getName())
+                  : AxisRefAttr::get(mesh.getContext(), prevAxis.getName(),
+                                     minPreSize, minPreSize * size);
+          back.first = combined;
+          continue;
+        }
+      }
+      merged.push_back(entry);
+    }
+    return merged;
   };
 
   return getAxisStrides(s1, rt1) == getAxisStrides(s2, rt2);
