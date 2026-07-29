@@ -1253,8 +1253,7 @@ def fori_loop(
 
 
 def _fori_loop_discharge_rule(
-    in_avals,
-    _,
+    ctx: state_discharge.DischargeContext,
     *args,
     call_jaxpr,
     num_iterations,
@@ -1276,7 +1275,7 @@ def _fori_loop_discharge_rule(
     carried_out = results[:num_outs]
     ref_iter = iter(results[num_outs:])
     out = []
-    for i, aval in enumerate(in_avals):
+    for i, aval in enumerate(ctx.in_avals):
       if isinstance(aval, state_types.AbstractRef):
         out.append(next(ref_iter))
       elif i < carried_arguments_start:
@@ -1287,7 +1286,7 @@ def _fori_loop_discharge_rule(
 
   body_in_avals = [
       aval.inner_aval if isinstance(aval, state_types.AbstractRef) else aval
-      for aval in in_avals
+      for aval in ctx.in_avals
   ] + [jax_core.ShapedArray((), jnp.uint32)]
   wrapped = lu.wrap_init(
       new_body, debug_info=discharged_jaxpr.debug_info.with_unknown_names()
@@ -1308,7 +1307,7 @@ def _fori_loop_discharge_rule(
 
   new_invals = tuple(
       out_flat[i] if isinstance(aval, state_types.AbstractRef) else None
-      for i, aval in enumerate(in_avals)
+      for i, aval in enumerate(ctx.in_avals)
   )
   return new_invals, list(out_flat[carried_arguments_start:])
 
