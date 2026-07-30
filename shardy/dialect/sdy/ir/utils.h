@@ -225,11 +225,22 @@ std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> resultsShardings,
     const SymbolTable& symbolTable, bool ignoreDeviceIds);
 
-// Returns true if two shardings define the same physical linear distribution
-// of data across devices, accounting for t1 is a reshape of t2.
+// Given two shardings for a reshape between two types, returns whether the
+// shardings are equivalent:
+//
+// When allowNonDivisible is false, returns true if two shardings define the
+// same physical linear distribution of data across devices. In this case, any
+// indivisible sharding in dimensions being changed by the reshape would cause
+// a return value of false.
+//
+// When allowNonDivisible is true, returns true if two shardings define the
+// same structural axis alignment along the logical element sequence. This
+// allows non-divisible shardings in dimensions being changed by the reshape, in
+// which case the reshape can be implemented with pad and slice operations.
 bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
                                         TensorShardingAttr s2, Type t2,
-                                        Operation* op);
+                                        Operation* op,
+                                        bool allowNonDivisible = false);
 
 // Creates the symbol equivalent of a factor index:
 //   -  0 -> 'i'

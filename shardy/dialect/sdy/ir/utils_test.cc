@@ -852,6 +852,50 @@ module {
       getArgSharding(2), getType(2), getArgSharding(1), getType(1), func));
 }
 
+TEST_F(UtilsTest, IsShardingEquivalentAcrossReshapes_AllowNonDivisible) {
+  auto module = mlir::parseSourceString<ModuleOp>(R"mlir(
+module {
+  sdy.mesh @mesh = <["a"=8]>
+  func.func @test(
+      %arg0: tensor<6xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
+      %arg1: tensor<2x3xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>},
+      %arg2: tensor<8x24xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}]>},
+      %arg3: tensor<2x4x4x6xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"a"}, {}]>},
+      %arg4: tensor<4x6xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a":(1)2}, {"a":(2)4}]>},
+      %arg5: tensor<24xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>},
+      %arg6: tensor<4x6xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a":(2)4}, {"a":(1)2}]>}) {
+    return
+  }
+}
+)mlir",
+                                                  &context);
+  auto func = cast<func::FuncOp>(module->lookupSymbol("test"));
+  auto getArgSharding = [&](int idx) {
+    return getSharding(func.getArgument(idx));
+  };
+  auto getType = [&](int idx) { return func.getArgument(idx).getType(); };
+
+  // 1. 6 -> 2x3 (transpose across non-divisible reshape): false
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(1), getType(1), func,
+      /*allowNonDivisible=*/true));
+
+  // 2. 8x24 -> 2x4x4x6 (leading unsharded reshape): true
+  EXPECT_TRUE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(2), getType(2), getArgSharding(3), getType(3), func,
+      /*allowNonDivisible=*/true));
+
+  // 3. 4x6 -> 24 (sub-axes combining): true
+  EXPECT_TRUE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(4), getType(4), getArgSharding(5), getType(5), func,
+      /*allowNonDivisible=*/true));
+
+  // 4. Reversed sub-axes should not combine even when allowNonDivisible=true:
+  // false
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(6), getType(6), getArgSharding(5), getType(5), func,
+      /*allowNonDivisible=*/true));
+}
 }  // namespace
 
 }  // namespace sdy

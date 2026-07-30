@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -64,6 +65,12 @@ namespace mlir {
 namespace sdy {
 
 namespace {
+
+// Returns whether two double-precision floating point numbers are nearly equal
+// within a small epsilon tolerance.
+bool isNear(double a, double b, double epsilon = 1e-6) {
+  return std::abs(a - b) < epsilon;
+}
 
 using func::CallOp;
 using func::FuncOp;
@@ -1428,7 +1435,7 @@ LogicalResult verifyUnreducedAxesTransition(
 
 bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
                                         TensorShardingAttr s2, Type t2,
-                                        Operation* op) {
+                                        Operation* op, bool allowNonDivisible) {
   if (s1 == s2 && t1 == t2) {
     return true;
   }
@@ -1456,47 +1463,58 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
     return false;
   }
 
+  auto getPrefixSize = [](RankedTensorType type, int64_t dim) {
+    int64_t size = 1;
+    for (int64_t d = 0; d < dim; ++d) {
+      size *= type.getDimSize(d);
+    }
+    return size;
+  };
+
+  struct AxisStrideInfo {
+    AxisRefAttr axis;
+    double stride;
+    int64_t prefixSize;
+  };
+
   // Calculates linear stride for every axis in the sharding.
   auto getAxisStrides = [&](TensorShardingAttr sharding,
                             RankedTensorType type) {
-    SmallVector<std::pair<AxisRefAttr, int64_t>> axisStrides;
-    int64_t cumulativeDimSize = 1;
+    SmallVector<AxisStrideInfo> axisStrides;
+    double cumulativeDimSize = 1.0;
     for (int64_t i = type.getRank() - 1; i >= 0; --i) {
       ArrayRef<AxisRefAttr> axes = sharding.getDimShardings()[i].getAxes();
       int64_t totalAxesSize = 1;
       for (AxisRefAttr axis : axes) {
         totalAxesSize *= axis.getSize(mesh);
       }
-      // We use integer division here. If a dimension is not perfectly
-      // divisible by the sharding axes, this truncated stride calculation
-      // ensures we only identify shardings as equivalent if the mesh axes map
-      // to the exact same linear offsets in the global buffer. Since we also
-      // account for the sizes of each dimension and axis, if non-divisibility
-      // causes the data to be partitioned differently across a reshape, the
-      // strides will correctly mismatch.
-      int64_t currentAxisStride =
+      double currentAxisStride =
           cumulativeDimSize *
-          llvm::divideCeil(type.getDimSize(i), totalAxesSize);
+          (allowNonDivisible
+               ? static_cast<double>(type.getDimSize(i)) / totalAxesSize
+               : static_cast<double>(
+                     llvm::divideCeil(type.getDimSize(i), totalAxesSize)));
+      int64_t prefixSize = getPrefixSize(type, i);
       for (int64_t j = static_cast<int64_t>(axes.size()) - 1; j >= 0; --j) {
-        axisStrides.push_back({axes[j], currentAxisStride});
+        axisStrides.push_back({axes[j], currentAxisStride, prefixSize});
         currentAxisStride *= axes[j].getSize(mesh);
       }
       cumulativeDimSize *= type.getDimSize(i);
     }
     llvm::stable_sort(axisStrides, [](const auto& a, const auto& b) {
-      return a.second < b.second;
+      return a.stride < b.stride;
     });
-
-    SmallVector<std::pair<AxisRefAttr, int64_t>> merged;
+    SmallVector<AxisStrideInfo> merged;
     for (const auto& entry : axisStrides) {
       if (!merged.empty()) {
         auto& back = merged.back();
-        AxisRefAttr prevAxis = back.first;
-        AxisRefAttr currAxis = entry.first;
+        AxisRefAttr prevAxis = back.axis;
+        AxisRefAttr currAxis = entry.axis;
         if (prevAxis.getName() == currAxis.getName() &&
-            entry.second == back.second * prevAxis.getSize(mesh) &&
             currAxis.getSubAxisPreSize() * currAxis.getSize(mesh) ==
-                prevAxis.getSubAxisPreSize()) {
+                prevAxis.getSubAxisPreSize() &&
+            (allowNonDivisible ||
+             isNear(entry.stride, back.stride * prevAxis.getSize(mesh)))) {
           int64_t minPreSize = std::min(prevAxis.getSubAxisPreSize(),
                                         currAxis.getSubAxisPreSize());
           int64_t size = prevAxis.getSize(mesh) * currAxis.getSize(mesh);
@@ -1506,7 +1524,8 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
                   ? AxisRefAttr::get(mesh.getContext(), prevAxis.getName())
                   : AxisRefAttr::get(mesh.getContext(), prevAxis.getName(),
                                      minPreSize, minPreSize * size);
-          back.first = combined;
+          back.axis = combined;
+          back.prefixSize = std::min(back.prefixSize, entry.prefixSize);
           continue;
         }
       }
@@ -1515,7 +1534,24 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
     return merged;
   };
 
-  return getAxisStrides(s1, rt1) == getAxisStrides(s2, rt2);
+  auto strides1 = getAxisStrides(s1, rt1);
+  auto strides2 = getAxisStrides(s2, rt2);
+  if (strides1.size() != strides2.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < strides1.size(); ++i) {
+    if (strides1[i].axis != strides2[i].axis) {
+      return false;
+    }
+    if (allowNonDivisible) {
+      if (strides1[i].prefixSize != strides2[i].prefixSize) {
+        return false;
+      }
+    } else if (!isNear(strides1[i].stride, strides2[i].stride)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace sdy
