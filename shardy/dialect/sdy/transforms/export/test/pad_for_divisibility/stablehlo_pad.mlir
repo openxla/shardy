@@ -23,9 +23,15 @@ func.func @extend_padding(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@
 // CHECK-SAME:    %[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<15x8xf32> {
 // CHECK-NEXT:    %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:8, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
 // CHECK-NEXT:    %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-// CHECK-NEXT:    %[[PAD:.*]] = stablehlo.pad %[[SLICE]], %[[CST]], low = [1, 0], high = [4, 0], interior = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xf32>, tensor<f32>) -> tensor<20x8xf32>
-// CHECK-NEXT:    %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[PAD]] out_sharding=<@mesh_4, [{}, {}]> : tensor<20x8xf32>
-// CHECK-NEXT:    %[[TRIM:.*]] = stablehlo.slice %[[ALL_GATHER]] [0:15, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {}]>]>} : (tensor<20x8xf32>) -> tensor<15x8xf32>
+// CHECK-NEXT:    %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : tensor<8x8xi32>
+// CHECK-NEXT:    %[[LIMIT:.*]] = stablehlo.constant dense<7> : tensor<i32>
+// CHECK-NEXT:    %[[BCAST_LIMIT:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<i32>) -> tensor<8x8xi32>
+// CHECK-NEXT:    %[[MASK:.*]] = stablehlo.compare  LT, %[[IOTA]], %[[BCAST_LIMIT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xi32>, tensor<8x8xi32>) -> tensor<8x8xi1>
+// CHECK-NEXT:    %[[BCAST_CST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<f32>) -> tensor<8x8xf32>
+// CHECK-NEXT:    %[[SELECT:.*]] = stablehlo.select %[[MASK]], %[[SLICE]], %[[BCAST_CST]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : tensor<8x8xi1>, tensor<8x8xf32>
+// CHECK-NEXT:    %[[PAD:.*]] = stablehlo.pad %[[SELECT]], %[[CST]], low = [1, 0], high = [0, 0], interior = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xf32>, tensor<f32>) -> tensor<16x8xf32>
+// CHECK-NEXT:    %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[PAD]] out_sharding=<@mesh_4, [{}, {}]> : tensor<16x8xf32>
+// CHECK-NEXT:    %[[TRIM:.*]] = stablehlo.slice %[[ALL_GATHER]] [0:15, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {}]>]>} : (tensor<16x8xf32>) -> tensor<15x8xf32>
 // CHECK-NEXT:    return %[[TRIM]] : tensor<15x8xf32>
 // CHECK-NEXT:  }
 func.func @interior_padding(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<15x8xf32> {
@@ -111,4 +117,26 @@ func.func @negative_high_padding_become_noop(%arg0: tensor<8x8xf32> {sdy.shardin
   %1 = stablehlo.pad %0, %cst, low = [0, 0], high = [-1, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{"x"}, {}]>]>} : (tensor<7x8xf32>, tensor<f32>) -> tensor<6x8xf32>
   %2 = sdy.all_gather [{"x"}, {}] %1 out_sharding=<@mesh_4, [{}, {}]> : tensor<6x8xf32>
   return %2 : tensor<6x8xf32>
+}
+
+// CHECK-LABEL: func @interior_padding_divisible_result(
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+// CHECK-NEXT:    %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:8, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+// CHECK-NEXT:    %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+// CHECK-NEXT:    %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : tensor<8x8xi32>
+// CHECK-NEXT:    %[[LIMIT:.*]] = stablehlo.constant dense<7> : tensor<i32>
+// CHECK-NEXT:    %[[BCAST_LIMIT:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<i32>) -> tensor<8x8xi32>
+// CHECK-NEXT:    %[[MASK:.*]] = stablehlo.compare  LT, %[[IOTA]], %[[BCAST_LIMIT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xi32>, tensor<8x8xi32>) -> tensor<8x8xi1>
+// CHECK-NEXT:    %[[BCAST_CST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<f32>) -> tensor<8x8xf32>
+// CHECK-NEXT:    %[[SELECT:.*]] = stablehlo.select %[[MASK]], %[[SLICE]], %[[BCAST_CST]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : tensor<8x8xi1>, tensor<8x8xf32>
+// CHECK-NEXT:    %[[PAD:.*]] = stablehlo.pad %[[SELECT]], %[[CST]], low = [1, 0], high = [0, 0], interior = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xf32>, tensor<f32>) -> tensor<16x8xf32>
+// CHECK-NEXT:    %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[PAD]] out_sharding=<@mesh_4, [{}, {}]> : tensor<16x8xf32>
+// CHECK-NEXT:    return %[[ALL_GATHER]] : tensor<16x8xf32>
+// CHECK-NEXT:  }
+func.func @interior_padding_divisible_result(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  %0 = stablehlo.slice %arg0 [0:7, 0:8] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x8xf32>) -> tensor<7x8xf32>
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.pad %0, %cst, low = [1, 0], high = [2, 0], interior = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{"x"}, {}]>]>} : (tensor<7x8xf32>, tensor<f32>) -> tensor<16x8xf32>
+  %2 = sdy.all_gather [{"x"}, {}] %1 out_sharding=<@mesh_4, [{}, {}]> : tensor<16x8xf32>
+  return %2 : tensor<16x8xf32>
 }

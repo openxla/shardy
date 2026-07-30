@@ -39,20 +39,20 @@ func.func @padded_contracting_dims_not_reuse(%arg0: tensor<4x7xf32>, %arg1: tens
   // CHECK: %[[RHS_ABS:.*]] = stablehlo.abs %[[RHS_SLICE]] {{.*}}
 
   // Enforce zero-padding on LHS contracting dim (dim 1).
+  // CHECK: %[[LHS_CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // CHECK: %[[LHS_IOTA:.*]] = stablehlo.iota{{.*}}dim = 1
   // CHECK: %[[LHS_LIMIT:.*]] = stablehlo.constant dense<7> : tensor<i32>
   // CHECK: %[[LHS_LIMIT_BCAST:.*]] = stablehlo.broadcast_in_dim %[[LHS_LIMIT]], dims = []
   // CHECK: %[[LHS_MASK:.*]] = stablehlo.compare{{.*}}LT, %[[LHS_IOTA]], %[[LHS_LIMIT_BCAST]]
-  // CHECK: %[[LHS_CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // CHECK: %[[LHS_BCAST:.*]] = stablehlo.broadcast_in_dim %[[LHS_CST]], dims = []
   // CHECK: %[[LHS_SELECT:.*]] = stablehlo.select %[[LHS_MASK]], %[[LHS_ABS]], %[[LHS_BCAST]]
 
   // Enforce zero-padding on RHS contracting dim (dim 0).
+  // CHECK: %[[RHS_CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // CHECK: %[[RHS_IOTA:.*]] = stablehlo.iota{{.*}}dim = 0
   // CHECK: %[[RHS_LIMIT:.*]] = stablehlo.constant dense<7> : tensor<i32>
   // CHECK: %[[RHS_LIMIT_BCAST:.*]] = stablehlo.broadcast_in_dim %[[RHS_LIMIT]], dims = []
   // CHECK: %[[RHS_MASK:.*]] = stablehlo.compare{{.*}}LT, %[[RHS_IOTA]], %[[RHS_LIMIT_BCAST]]
-  // CHECK: %[[RHS_CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // CHECK: %[[RHS_BCAST:.*]] = stablehlo.broadcast_in_dim %[[RHS_CST]], dims = []
   // CHECK: %[[RHS_SELECT:.*]] = stablehlo.select %[[RHS_MASK]], %[[RHS_ABS]], %[[RHS_BCAST]]
   // CHECK-NOT: stablehlo.iota {{.*}} dim = 1

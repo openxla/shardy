@@ -51,18 +51,6 @@ namespace sdy {
 
 namespace {
 
-// Unwraps transient conversion casts on custom-padded values so downstream
-// collective ops can access their sharding. We see such casts during the
-// conversion because the divisible result size of an op with indivisible
-// operands is different from the divisible result size of the op after its
-// operands are padded.
-Value getShardableValue(Value value) {
-  while (auto castOp = dyn_cast_or_null<UnrealizedConversionCastOp>(
-             value.getDefiningOp())) {
-    value = castOp.getInputs()[0];
-  }
-  return sdy::getShardableValue(value);
-}
 
 
 // Computes the padded type for a given type with sharding.
@@ -216,27 +204,23 @@ Value createPaddedValue(RankedTensorType paddedType, Value value,
 }
 
 // Returns 'inputVal' if the value is not padded or the value already has
-// 'requiredKind' as PaddingValueKind. Otherwise, uses compare-and-select to
-// produce a new padded value from inputVal with the requiredKind padding and
-// returns the new value.
+// 'padVal'. Otherwise, uses compare-and-select to produce a new padded
+// value from inputVal with 'padVal' and returns the new value.
+// This ensures elements in 'inputVal' at indices >= 'origType' dimensions
+// are masked with 'padVal'.
 //
-// We ensure all dimensions that require padding are padded with requireKind
+// We ensure all dimensions that require padding are padded with 'padVal'
 // unless dimsToEnforce is provided, in which case only the specified
 // dimensions are padded.
-Value ensurePadding(
-    Value inputVal, RankedTensorType origType, PaddingValueKind requiredKind,
-    OpBuilder& b, Location loc, PaddingCache& cache,
+Value ensurePaddingWithValue(
+    Value inputVal, RankedTensorType origType, Value padVal, OpBuilder& b,
+    Location loc,
     std::optional<ArrayRef<int64_t>> dimsToEnforce = std::nullopt) {
-  // Return early if no padding is applied or the cached padding already
-  // matches.
   auto paddedType = cast<RankedTensorType>(inputVal.getType());
   if (origType == paddedType) {
     return inputVal;
   }
-  std::optional<PaddingValueKind> currentKind = cache.getPadding(inputVal);
-  if (currentKind && *currentKind == requiredKind) {
-    return inputVal;
-  }
+  TensorShardingAttr sharding = getSharding(inputVal);
 
   // Build a mask that is `true` for the original (unpadded) data region.
   // An element is in the original region if its index along each padded
@@ -250,37 +234,75 @@ Value ensurePadding(
     auto iotaType =
         RankedTensorType::get(paddedType.getShape(), b.getI32Type());
     Value iota = stablehlo::IotaOp::create(b, loc, iotaType, dim);
+    if (sharding) {
+      setSharding(iota, sharding);
+    }
     Value limit = stablehlo::ConstantOp::create(
         b, loc,
         DenseElementsAttr::get(RankedTensorType::get({}, b.getI32Type()),
                                b.getI32IntegerAttr(origSize)));
     Value broadcastLimit = stablehlo::BroadcastInDimOp::create(
         b, loc, iotaType, limit, b.getDenseI64ArrayAttr({}));
+    if (sharding) {
+      setSharding(broadcastLimit, sharding);
+    }
     Value mask = stablehlo::CompareOp::create(
         b, loc, iota, broadcastLimit, stablehlo::ComparisonDirection::LT);
-    validDataMask = validDataMask
-                        ? stablehlo::AndOp::create(b, loc, validDataMask, mask)
-                        : mask;
+    if (sharding) {
+      setSharding(mask, sharding);
+    }
+    if (validDataMask) {
+      validDataMask = stablehlo::AndOp::create(b, loc, validDataMask, mask);
+      if (sharding) {
+        setSharding(validDataMask, sharding);
+      }
+    } else {
+      validDataMask = mask;
+    }
   }
 
   if (!validDataMask) {
     return inputVal;
   }
+  Value bcastPadVal = stablehlo::BroadcastInDimOp::create(
+      b, loc, paddedType, padVal, b.getDenseI64ArrayAttr({}));
+  if (sharding) {
+    setSharding(bcastPadVal, sharding);
+  }
 
-  // Create the constant with the new padding value and broadcast it to the
-  // same shape as 'inputVal'.
+  Value select =
+      stablehlo::SelectOp::create(b, loc, validDataMask, inputVal, bcastPadVal);
+  if (sharding) {
+    setSharding(select, sharding);
+  }
+  return select;
+}
+
+// This routine is similar to ensurePaddingWithValue, but it uses a
+// PaddingValueKind to determine the padding value instead of a user-provided
+// value and may put the result into the PaddingCache.
+Value ensurePaddingWithKind(
+    Value inputVal, RankedTensorType origType, PaddingValueKind requiredKind,
+    OpBuilder& b, Location loc, PaddingCache& cache,
+    std::optional<ArrayRef<int64_t>> dimsToEnforce = std::nullopt) {
+  // Return early if no padding is applied or the cached padding already
+  // matches.
+  auto paddedType = cast<RankedTensorType>(inputVal.getType());
+  if (origType == paddedType) {
+    return inputVal;
+  }
+  std::optional<PaddingValueKind> currentKind = cache.getPadding(inputVal);
+  if (currentKind && *currentKind == requiredKind) {
+    return inputVal;
+  }
   Value newPaddingScalar =
       createConstant(b, loc, paddedType.getElementType(), requiredKind);
-  Value newPaddingValue = stablehlo::BroadcastInDimOp::create(
-      b, loc, paddedType, newPaddingScalar, b.getDenseI64ArrayAttr({}));
-
-  // Keep the original data from 'inputVal' (where mask is true), and replace
-  // the padded region with 'newPaddingValue' (where mask is false).
-  Value select = stablehlo::SelectOp::create(b, loc, validDataMask, inputVal,
-                                             newPaddingValue);
-  if (!dimsToEnforce) {
+  Value select = ensurePaddingWithValue(inputVal, origType, newPaddingScalar, b,
+                                        loc, dimsToEnforce);
+  if (select != inputVal && !dimsToEnforce) {
     cache.setPadding(select, requiredKind);
   }
+
   return select;
 }
 
@@ -291,7 +313,7 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
                            const PaddedTypeConverter* typeConverter) {
   SmallVector<Value> shardableOperands;
   for (Value operand : operands) {
-    shardableOperands.push_back(getShardableValue(operand));
+    shardableOperands.push_back(sdy::getShardableValue(operand));
   }
 
   // Compute padded shapes for results.
@@ -518,7 +540,7 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
 
     SmallVector<Value> shardableOperands;
     for (Value operand : adaptor.getOperands()) {
-      shardableOperands.push_back(getShardableValue(operand));
+      shardableOperands.push_back(sdy::getShardableValue(operand));
     }
 
     SmallVector<Type> inferredTypes;
@@ -785,63 +807,56 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     }
 
     Value result = op.getResult();
-
-    // Compute inferred types with padded operands.
-    SmallVector<Type> inferredTypes;
-    if (failed(op.inferReturnTypes(
-            op.getContext(), op.getLoc(), adaptor.getOperands(),
-            op->getAttrDictionary(), op->getPropertiesStorage(),
-            op->getRegions(), inferredTypes))) {
-      return failure();
-    }
-
-    auto inferredResultType = cast<RankedTensorType>(inferredTypes[0]);
     auto paddedType = cast<RankedTensorType>(
         getPaddedType(result.getType(), getSharding(result), symbolTable));
 
-    SmallVector<int64_t> reconciledShape;
-    reconciledShape.reserve(rankedInputType.getRank());
-    for (int d = 0; d < rankedInputType.getRank(); ++d) {
-      reconciledShape.push_back(
-          std::max(inferredResultType.getDimSize(d), paddedType.getDimSize(d)));
-    }
-    auto reconciledResultType = RankedTensorType::get(
-        reconciledShape, inferredResultType.getElementType());
-    reconciledResultType = cast<RankedTensorType>(
-        getPaddedType(reconciledResultType, getSharding(result), symbolTable));
-
-    // Compute the new edge_padding_high values.
-    // The relation is:
-    // paddedInputSize + low + high + (paddedInputSize - 1) * interior =
-    //     reconciledResultSize
-    // Therefore:
-    // high = reconciledResultSize - paddedInputSize - low -
-    //     std::max(0, paddedInputSize - 1) * interior
     ArrayRef<int64_t> low = op.getEdgePaddingLow();
     ArrayRef<int64_t> high = op.getEdgePaddingHigh();
     ArrayRef<int64_t> interior = op.getInteriorPadding();
 
+    // We adjust edge-padding-high to ensure that the new pad op has the
+    // expected result type. We may increase this trailing padding region
+    // if the original result size is not divisible. We may also decrease
+    // this trailing padding region, if there is non-trivial interior
+    // padding and the original input is not divisible. This is because
+    // padding the input for divisibility can increases the size of the new
+    // pad op to beyond the original padded result size.
+    //
+    // We use this formula to calculate `high` as the new edge-padding-high to
+    // the padd op:
+    // paddedResultSize = paddedInputSize + low + high +
+    //   std::max(0, paddedInputSize - 1) * interior
     SmallVector<int64_t> newHigh;
     newHigh.reserve(rankedInputType.getRank());
-
+    bool highPaddingReduced = false;
     for (int d = 0; d < rankedInputType.getRank(); ++d) {
       int64_t paddedInputSize = rankedInputType.getDimSize(d);
-      int64_t reconciledResultSize = reconciledResultType.getDimSize(d);
+      int64_t paddedResultSize = paddedType.getDimSize(d);
       int64_t dLow = low[d];
       int64_t dInterior = interior[d];
-      int64_t dHigh = reconciledResultSize - paddedInputSize - dLow -
+      int64_t dHigh = paddedResultSize - paddedInputSize - dLow -
                       std::max<int64_t>(0, paddedInputSize - 1) * dInterior;
-      SDY_CHECK(dHigh >= high[d]);
       newHigh.push_back(dHigh);
+      if (dHigh < high[d]) {
+        highPaddingReduced = true;
+      }
+    }
+
+    if (highPaddingReduced) {
+      // When high padding is reduced, the input's padding region takes the
+      // place of the trailing padding value for the pad op. As such, we need
+      // to ensure the input is padded with the correct value.
+      input = ensurePaddingWithValue(input, op.getOperand().getType(),
+                                     adaptor.getOperands()[1], rewriter,
+                                     op.getLoc());
     }
 
     auto newHighAttr = rewriter.getDenseI64ArrayAttr(newHigh);
 
     // Create the new pad operation.
     auto newPadOp = stablehlo::PadOp::create(
-        rewriter, op.getLoc(), reconciledResultType, input,
-        adaptor.getOperands()[1], op.getEdgePaddingLowAttr(), newHighAttr,
-        op.getInteriorPaddingAttr());
+        rewriter, op.getLoc(), paddedType, input, adaptor.getOperands()[1],
+        op.getEdgePaddingLowAttr(), newHighAttr, op.getInteriorPaddingAttr());
 
     // Copy sharding attribute to the new result.
     setSharding(newPadOp.getResult(), getSharding(result));
@@ -878,12 +893,12 @@ class StablehloDotGeneralOpPattern
     if (!lhsOrigType || !rhsOrigType) {
       return failure();
     }
-    Value paddedLhs =
-        ensurePadding(lhs, lhsOrigType, PaddingValueKind::kZero, rewriter, loc,
-                      cache, dimNums.getLhsContractingDimensions());
-    Value paddedRhs =
-        ensurePadding(rhs, rhsOrigType, PaddingValueKind::kZero, rewriter, loc,
-                      cache, dimNums.getRhsContractingDimensions());
+    Value paddedLhs = ensurePaddingWithKind(
+        lhs, lhsOrigType, PaddingValueKind::kZero, rewriter, loc, cache,
+        dimNums.getLhsContractingDimensions());
+    Value paddedRhs = ensurePaddingWithKind(
+        rhs, rhsOrigType, PaddingValueKind::kZero, rewriter, loc, cache,
+        dimNums.getRhsContractingDimensions());
 
     return padGenericOp(op, {paddedLhs, paddedRhs}, rewriter, converter);
   }
