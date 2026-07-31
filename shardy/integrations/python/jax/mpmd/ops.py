@@ -328,7 +328,9 @@ def _named_computation_to_lojax(*hi_args, call_jaxpr, name, transpose_count):
     raise NotImplementedError(
         'named_computation does not support qdd on outputs'
     )
-  lo_closed_jaxpr = internal_pe.lower_jaxpr2(closed_jaxpr)
+  lo_closed_jaxpr = internal_pe.convert_constvars_jaxpr(
+      internal_pe.lower_jaxpr2(closed_jaxpr)
+  )
 
   # pylint: disable=g-complex-comprehension
   lo_args = [
@@ -349,6 +351,7 @@ def _named_computation_to_lojax(*hi_args, call_jaxpr, name, transpose_count):
   lo_outs = named_computation_p.bind(
       *lo_args,
       subfuns=(subfun,),
+      call_jaxpr=lo_closed_jaxpr,
       name=name,
       transpose_count=transpose_count,
   )
@@ -373,10 +376,19 @@ def _register_named_computation_primitive():
     primitive = jax.core.CallPrimitive('named_computation')  # pytype: disable=module-attr
     primitive.def_impl(jax.core.call_impl)  # pytype: disable=module-attr
 
-  def custom_call_transpose(params, *rest, primitive=primitive):
-    new_params = dict(params)
-    new_params['transpose_count'] = new_params['transpose_count'] + 1
-    return internal_ad.call_transpose(primitive, new_params, *rest)
+  def custom_call_transpose(
+      arg0, *rest, primitive=primitive, call_jaxpr=None, **params
+  ):
+    # TODO(mattjj): remove latter path when we land jax-ml/jax#39593
+    if isinstance(arg0, dict):
+      new_params = dict(arg0)
+      new_params['transpose_count'] = new_params.get('transpose_count', 0) + 1
+      return internal_ad.call_transpose(primitive, new_params, *rest)
+    else:
+      params['transpose_count'] = params.get('transpose_count', 0) + 1
+      return internal_ad.call_transpose(
+          primitive, params, call_jaxpr, rest, arg0, None
+      )
 
   ad.primitive_transposes[primitive] = custom_call_transpose
 
