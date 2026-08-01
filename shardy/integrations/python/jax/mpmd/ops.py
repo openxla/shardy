@@ -320,14 +320,6 @@ def _named_computation_default_lowering(
 def _named_computation_to_lojax(*hi_args, call_jaxpr, name, transpose_count):
   """Lowers the named_computation primitive to lojax."""
   closed_jaxpr = internal_pe.close_jaxpr(call_jaxpr)
-  if any(aval.has_qdd for aval in closed_jaxpr.in_aval_qdds):
-    raise NotImplementedError(
-        'named_computation does not support qdd on inputs'
-    )
-  if any(aval.has_qdd for aval in closed_jaxpr.final_aval_qdds):
-    raise NotImplementedError(
-        'named_computation does not support qdd on outputs'
-    )
   lo_closed_jaxpr = internal_pe.convert_constvars_jaxpr(
       internal_pe.lower_jaxpr2(closed_jaxpr)
   )
@@ -1341,20 +1333,24 @@ def _fori_loop_to_lojax(
   hi_consts = hi_args[:carried_arguments_start]
   hi_carry = hi_args[carried_arguments_start:]
 
-  qdds = call_jaxpr.in_aval_qdds
+  in_avals = call_jaxpr.in_avals
 
-  loval = lambda a, x: a.read_loval(x) if a.has_qdd else a.lower_val(x)
-
-  lo_consts = list(it.chain.from_iterable(
-      loval(a, x) for a, x in zip(qdds[:carried_arguments_start], hi_consts)
-  ))
-  lo_carry = list(it.chain.from_iterable(
-      loval(a, x) for a, x in zip(qdds[carried_arguments_start:-1], hi_carry)
-  ))
+  lo_consts = list(
+      it.chain.from_iterable(
+          a.lower_val(x)
+          for a, x in zip(in_avals[:carried_arguments_start], hi_consts)
+      )
+  )
+  lo_carry = list(
+      it.chain.from_iterable(
+          a.lower_val(x)
+          for a, x in zip(in_avals[carried_arguments_start:-1], hi_carry)
+      )
+  )
 
   new_carried_arguments_start = len(lo_consts)
 
-  in_avals = ft.flatten(([a.lo_ty() for a in qdds], {}))
+  in_avals = ft.flatten(([a.lo_ty() for a in in_avals], {}))
 
   lo_jaxpr, out_avals_ft = internal_pe.lower_jaxpr(call_jaxpr, in_avals)
 
@@ -1370,12 +1366,6 @@ def _fori_loop_to_lojax(
   )
 
   out_mut, lo_outs = out_avals_ft.update(all_outs).unpack()
-
-  for a, x, u in zip(
-      call_jaxpr.final_aval_qdds[:-1], hi_args, out_mut.unpack()
-  ):
-    if a.has_qdd:
-      a.aval.update_from_loval2(a.qdd, x, u)
 
   return [
       a.raise_val2(y) for a, y in zip(call_jaxpr.out_avals, lo_outs.unpack())
