@@ -43,7 +43,7 @@ func.func @sharded_contracting_dim(
    : (tensor<8x16xf32>, tensor<16x32xf32>) -> tensor<8x32xf32>
 
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[DOT]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]> : tensor<4x2xi64>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<8x32xf32>
 
   // CHECK: return %[[RES]] : tensor<8x32xf32>

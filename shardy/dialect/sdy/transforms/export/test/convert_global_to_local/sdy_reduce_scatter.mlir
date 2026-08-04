@@ -1,8 +1,8 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,AR-DS,V1,AR-DS-V1
-// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true' | FileCheck %s --check-prefixes=CHECK,COMBINED,V1,COMBINED-V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=false' | FileCheck %s --check-prefixes=CHECK,AR-DS,V1,AR-DS-V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true enable-rgv3=false' | FileCheck %s --check-prefixes=CHECK,COMBINED,V1,COMBINED-V1
 
-// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,AR-DS,V3,AR-DS-V3
-// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,COMBINED,V3,COMBINED-V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,AR-DS,V3,AR-DS-V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local='combine-multi-dimension-reduce-scatter=true' | FileCheck %s --check-prefixes=CHECK,COMBINED,V3,COMBINED-V3
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>

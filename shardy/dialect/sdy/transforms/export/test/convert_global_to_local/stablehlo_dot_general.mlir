@@ -38,7 +38,7 @@ func.func @shard_contracting_dims(
   : (tensor<4x16x8xf32>, tensor<4x8x16xf32>) -> tensor<4x16x16xf32>
 
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[DOT]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3], [4, 5, 6, 7]]> : tensor<2x4xi64>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "y">]>
   // CHECK-SAME: use_global_device_ids
   // CHECK: ^bb0(%[[ACC:.*]]: tensor<f32>, %[[UPD:.*]]: tensor<f32>):
   // CHECK:   %[[ADD:.*]] = stablehlo.add %[[ACC]], %[[UPD]] : tensor<f32>

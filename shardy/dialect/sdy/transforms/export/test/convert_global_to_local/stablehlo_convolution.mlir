@@ -155,7 +155,7 @@ func.func @shard__reduction_factors(
     } : (tensor<2x224x224x4xf32>, tensor<2x2x4x64xf32>) -> tensor<1x112x112x64xf32>
 
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[CONV]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3, 4, 5, 6, 7]]> : tensor<1x8xi64>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">, #stablehlo.axis_ref<name = "y">]>
   // CHECK: (tensor<1x112x112x64xf32>) -> tensor<1x112x112x64xf32>
   %1 = sdy.all_reduce {"x", "y"} %0 out_sharding=<@mesh_2_4, [{}, {}, {}, {}]> : tensor<1x112x112x64xf32>
 
