@@ -1475,6 +1475,7 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
     AxisRefAttr axis;
     double stride;
     int64_t prefixSize;
+    int64_t dimSize;
   };
 
   // Calculates linear stride for every axis in the sharding.
@@ -1496,7 +1497,8 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
                      llvm::divideCeil(type.getDimSize(i), totalAxesSize)));
       int64_t prefixSize = getPrefixSize(type, i);
       for (int64_t j = static_cast<int64_t>(axes.size()) - 1; j >= 0; --j) {
-        axisStrides.push_back({axes[j], currentAxisStride, prefixSize});
+        axisStrides.push_back(
+            {axes[j], currentAxisStride, prefixSize, type.getDimSize(i)});
         currentAxisStride *= axes[j].getSize(mesh);
       }
       cumulativeDimSize *= type.getDimSize(i);
@@ -1513,8 +1515,12 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
         if (prevAxis.getName() == currAxis.getName() &&
             currAxis.getSubAxisPreSize() * currAxis.getSize(mesh) ==
                 prevAxis.getSubAxisPreSize() &&
-            (allowNonDivisible ||
-             isNear(entry.stride, back.stride * prevAxis.getSize(mesh)))) {
+            (allowNonDivisible
+                 ? (back.prefixSize == entry.prefixSize ||
+                    (back.prefixSize == entry.prefixSize * entry.dimSize &&
+                     entry.axis.getSize(mesh) == entry.dimSize))
+                 : isNear(entry.stride,
+                          back.stride * prevAxis.getSize(mesh)))) {
           int64_t minPreSize = std::min(prevAxis.getSubAxisPreSize(),
                                         currAxis.getSubAxisPreSize());
           int64_t size = prevAxis.getSize(mesh) * currAxis.getSize(mesh);
@@ -1523,7 +1529,7 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
               (minPreSize == 1 && size == fullSize)
                   ? AxisRefAttr::get(mesh.getContext(), prevAxis.getName())
                   : AxisRefAttr::get(mesh.getContext(), prevAxis.getName(),
-                                     minPreSize, minPreSize * size);
+                                     minPreSize, size);
           back.axis = combined;
           back.prefixSize = std::min(back.prefixSize, entry.prefixSize);
           continue;
@@ -1539,6 +1545,7 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
   if (strides1.size() != strides2.size()) {
     return false;
   }
+
   for (size_t i = 0; i < strides1.size(); ++i) {
     if (strides1[i].axis != strides2[i].axis) {
       return false;
