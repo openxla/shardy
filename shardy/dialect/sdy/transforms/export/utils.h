@@ -95,6 +95,9 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
 // Converts an SDY MeshAttr to a StableHLO MeshAttr.
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 
+// Converts an SDY AxisRefAttr to a StableHLO AxisRefAttr.
+mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef);
+
 }  // namespace sdy
 }  // namespace mlir
 

@@ -99,7 +99,7 @@ func.func @shard_reduction_dim_is_collapsed(
     slice_sizes = array<i64: 1, 10>
   } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x10xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<2x10xf32>
   // CHECK: return %[[RES]] : tensor<2x10xf32>
   return %1 : tensor<2x10xf32>
@@ -135,7 +135,7 @@ func.func @shard_reduction_dim_is_collapsed_not_in_start_index_map(
     slice_sizes = array<i64: 1, 1>
   } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x1xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<2x1xf32>
   // CHECK: return %[[RES]] : tensor<2x1xf32>
   return %1 : tensor<2x1xf32>
@@ -184,7 +184,7 @@ func.func @shard_reduction_dim_is_collapsed_explicit_scalar_index_vector_dim(
     slice_sizes = array<i64: 1, 10>
   } : (tensor<8x10xf32>, tensor<2x1xi64>) -> tensor<2x10xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<2x10xf32>
   // CHECK: return %[[RES]] : tensor<2x10xf32>
   return %1 : tensor<2x10xf32>
@@ -229,7 +229,7 @@ func.func @shard_reduction_dim_not_collapsed(
     slice_sizes = array<i64: 1, 10>
   } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x1x10xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}, {}]> : tensor<2x1x10xf32>
   // CHECK: return %[[RES]] : tensor<2x1x10xf32>
   return %1 : tensor<2x1x10xf32>
@@ -262,7 +262,7 @@ func.func @shard_reduction_dim_explicit_scalar_indices(
     slice_sizes = array<i64: 1>
   } : (tensor<8xf32>, tensor<i64>) -> tensor<f32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, []> : tensor<f32>
   // CHECK: return %[[RES]] : tensor<f32>
   return %1 : tensor<f32>
@@ -316,7 +316,7 @@ func.func @shard_two_of_three_reduction_dims(
     sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}]>]>
   } : (tensor<8x6x4x5x3xf32>, tensor<6x2x3xi64>) -> tensor<6x2x1x1x5x1xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SELECTED]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 4, 5], [2, 3, 6, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">, #stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>]>
   %1 = sdy.all_reduce {"x", "y":(2)2} %0 out_sharding=<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}]> : tensor<6x2x1x1x5x1xf32>
   // CHECK: return %[[RES]] : tensor<3x2x1x1x5x1xf32>
   return %1 : tensor<6x2x1x1x5x1xf32>
@@ -370,7 +370,7 @@ func.func @shard_two_of_three_reduction_dims_one_not_in_start_index_map(
     sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}]>]>
   } : (tensor<8x6x4x5x3xf32>, tensor<6x2x3xi64>) -> tensor<6x2x1x1x5x1xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 4, 5], [2, 3, 6, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">, #stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>]>
   %1 = sdy.all_reduce {"x", "y":(2)2} %0 out_sharding=<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}]> : tensor<6x2x1x1x5x1xf32>
   // CHECK: return %[[RES]] : tensor<3x2x1x1x5x1xf32>
   return %1 : tensor<6x2x1x1x5x1xf32>

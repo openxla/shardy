@@ -32,6 +32,7 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
   --sdy-reshard-to-collectives \
   --sdy-pad-for-divisibility \
   --sdy-convert-global-to-local \
+  --sdy-inline-meshes \
   --sdy-drop-sharding-and-mesh \
   --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 

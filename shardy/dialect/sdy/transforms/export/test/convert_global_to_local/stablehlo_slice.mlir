@@ -8,7 +8,7 @@ sdy.mesh @mesh_1_2 = <["x"=1, "y"=2]>
 func.func @replicated_after_all_gather(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"y"}, {}]>}) -> tensor<4x8xf32> {
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{all_gather_dim = 0 : i64,
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>,
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7]]>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_4_2, axes = [#stablehlo.axis_ref<name = "y">]>
   // CHECK-SAME: (tensor<4x16xf32>) -> tensor<8x16xf32>
   %0 = sdy.all_gather [{"y"}, {}] %arg0 out_sharding=<@mesh_4_2, [{}, {}]> : tensor<8x16xf32>
   // CHECK: %[[SLICE:.*]] = stablehlo.slice %[[GATHER]] [0:4, 0:8] : (tensor<8x16xf32>) -> tensor<4x8xf32>
