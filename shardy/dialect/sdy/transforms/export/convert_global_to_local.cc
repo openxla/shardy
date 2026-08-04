@@ -319,10 +319,20 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
 // Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
 Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
                              OpBuilder& rewriter) {
+  MLIRContext* context = rewriter.getContext();
+  SmallVector<Attribute> newAxes;
+  newAxes.reserve(axes.size());
+  for (AxisRefAttr axis : axes) {
+    mlir::stablehlo::SubAxisInfoAttr subAxisInfo = nullptr;
+    if (auto sdySubAxisInfo = axis.getSubAxisInfo()) {
+      subAxisInfo = mlir::stablehlo::SubAxisInfoAttr::get(
+          context, sdySubAxisInfo.getPreSize(), sdySubAxisInfo.getSize());
+    }
+    newAxes.push_back(mlir::stablehlo::AxisRefAttr::get(
+        context, axis.getName(), subAxisInfo));
+  }
   return mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
-      meshOrRef.getContext(), meshOrRef,
-      rewriter.getArrayAttr(llvm::map_to_vector(
-          axes, [](AxisRefAttr attr) -> Attribute { return attr; })));
+      meshOrRef.getContext(), meshOrRef, rewriter.getArrayAttr(newAxes));
 }
 
 Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,

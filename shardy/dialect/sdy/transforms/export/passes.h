@@ -86,6 +86,10 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       *this, "update-non-divisible-input-output-shardings",
       llvm::cl::desc("Update axes with non-divisible input/output shardings."),
       llvm::cl::init(true)};
+
+  Option<bool> inlineMeshes{*this, "inline-meshes",
+                            llvm::cl::desc("Inline meshes in shardings."),
+                            llvm::cl::init(true)};
 };
 
 // Adds a sequence of export passes needed as a post-processing step for SDY
