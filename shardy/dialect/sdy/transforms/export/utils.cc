@@ -21,6 +21,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/MathExtras.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -180,6 +181,23 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
     }
   }
   return true;
+}
+
+mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh) {
+  SmallVector<mlir::stablehlo::MeshAxisAttr> shloAxes;
+  for (MeshAxisAttr axisAttr : sdyMesh.getAxes()) {
+    shloAxes.push_back(mlir::stablehlo::MeshAxisAttr::get(
+        axisAttr.getContext(), axisAttr.getName(), axisAttr.getSize()));
+  }
+  DenseIntElementsAttr deviceIds;
+  if (!sdyMesh.getDeviceIds().empty()) {
+    auto type = RankedTensorType::get(
+        {static_cast<int64_t>(sdyMesh.getDeviceIds().size())},
+        Builder(sdyMesh.getContext()).getI64Type());
+    deviceIds = DenseIntElementsAttr::get(type, sdyMesh.getDeviceIds());
+  }
+  return mlir::stablehlo::MeshAttr::get(sdyMesh.getContext(), shloAxes,
+                                        deviceIds);
 }
 
 }  // namespace sdy

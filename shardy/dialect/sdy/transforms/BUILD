@@ -9,6 +9,7 @@ cc_library(
     srcs = ["passes.cc"],
     hdrs = ["passes.h"],
     deps = [
+        "//shardy/dialect/sdy/transforms/common:passes",
         "//shardy/dialect/sdy/transforms/export:passes",
         "//shardy/dialect/sdy/transforms/import:passes",
         "//shardy/dialect/sdy/transforms/propagation:passes",

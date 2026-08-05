@@ -92,6 +92,9 @@ bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
 bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
                                TensorShardingAttr sharding, MeshAttr mesh);
 
+// Converts an SDY MeshAttr to a StableHLO MeshAttr.
+mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
+
 }  // namespace sdy
 }  // namespace mlir
 

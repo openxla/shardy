@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cassert>
-#include <cstdint>
 
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/IR/Attributes.h"
@@ -25,21 +24,23 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
-#include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
 
 #define GEN_PASS_DEF_INLINEMESHESPASS
-#include "shardy/dialect/sdy/transforms/import/passes.h.inc"
+#include "shardy/dialect/sdy/transforms/common/passes.h.inc"
 
 namespace {
 
 struct InlineMeshesPass : public impl::InlineMeshesPassBase<InlineMeshesPass> {
   using InlineMeshesPassBase::InlineMeshesPassBase;
 
+protected:
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
     SymbolTable symbolTable(moduleOp);
@@ -57,22 +58,7 @@ struct InlineMeshesPass : public impl::InlineMeshesPassBase<InlineMeshesPass> {
                   replicaGroupsAttr.getMesh())) {
             MeshAttr sdyMesh = getMeshAttr(symbolTable, symbolRef);
             if (sdyMesh) {
-              SmallVector<mlir::stablehlo::MeshAxisAttr> shloAxes;
-              for (MeshAxisAttr axisAttr : sdyMesh.getAxes()) {
-                shloAxes.push_back(mlir::stablehlo::MeshAxisAttr::get(
-                    axisAttr.getContext(), axisAttr.getName(),
-                    axisAttr.getSize()));
-              }
-              DenseIntElementsAttr deviceIds;
-              if (!sdyMesh.getDeviceIds().empty()) {
-                auto type = RankedTensorType::get(
-                    {static_cast<int64_t>(sdyMesh.getDeviceIds().size())},
-                    Builder(sdyMesh.getContext()).getI64Type());
-                deviceIds =
-                    DenseIntElementsAttr::get(type, sdyMesh.getDeviceIds());
-              }
-              auto shloMeshAttr = mlir::stablehlo::MeshAttr::get(
-                  sdyMesh.getContext(), shloAxes, deviceIds);
+              mlir::stablehlo::MeshAttr shloMeshAttr = convertMeshAttr(sdyMesh);
               op->setAttr("replica_groups",
                           mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
                               replicaGroupsAttr.getContext(), shloMeshAttr,

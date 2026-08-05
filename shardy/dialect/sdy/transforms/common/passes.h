@@ -1,4 +1,4 @@
-/* Copyright 2024 The Shardy Authors.
+/* Copyright 2026 The Shardy Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,28 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "shardy/dialect/sdy/transforms/passes.h"
+#ifndef SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_PASSES_H_
+#define SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_PASSES_H_
 
-#include "shardy/dialect/sdy/transforms/common/passes.h"
-#include "shardy/dialect/sdy/transforms/export/passes.h"
-#include "shardy/dialect/sdy/transforms/import/passes.h"
-#include "shardy/dialect/sdy/transforms/propagation/passes.h"
+#include <memory>            // IWYU pragma: keep
+#include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 
 namespace mlir {
 namespace sdy {
 
-void registerAllSdyPassesAndPipelines() {
-  registerSdyCommonPasses();
-
-  registerSdyImportPasses();
-  registerImportPipeline();
-
-  registerSdyExportPasses();
-  registerExportPipeline();
-
-  registerSdyPropagationPasses();
-  registerPropagationPipeline();
-}
+#define GEN_PASS_DECL
+#define GEN_PASS_REGISTRATION
+#include "shardy/dialect/sdy/transforms/common/passes.h.inc"
 
 }  // namespace sdy
 }  // namespace mlir
+
+#endif  // SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_PASSES_H_

@@ -1,5 +1,6 @@
 # The SDY transformations common library.
 
+load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
@@ -62,5 +63,48 @@ cc_library(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
+    ],
+)
+
+td_library(
+    name = "passes_td_files",
+    srcs = [
+        "passes.td",
+    ],
+    deps = ["@llvm-project//mlir:PassBaseTdFiles"],
+)
+
+gentbl_cc_library(
+    name = "passes_inc",
+    tbl_outs = {
+        "passes.h.inc": [
+            "-gen-pass-decls",
+            "-name=SdyCommon",
+        ],
+        "g3doc/sdy_common_passes.md": ["-gen-pass-doc"],
+    },
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "passes.td",
+    deps = [":passes_td_files"],
+)
+
+cc_library(
+    name = "passes",
+    srcs = [
+        "inline_meshes.cc",
+    ],
+    hdrs = [
+        "passes.h",
+    ],
+    deps = [
+        ":passes_inc",
+        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:sharding_walker",
+        "//shardy/dialect/sdy/transforms/export:utils",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+        "@stablehlo//:stablehlo_ops",
     ],
 )
