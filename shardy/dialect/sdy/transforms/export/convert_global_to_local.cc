@@ -319,10 +319,13 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
 // Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
 Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
                              OpBuilder& rewriter) {
+  MLIRContext* ctx = rewriter.getContext();
+  SmallVector<Attribute> shloAxes;
+  for (AxisRefAttr axis : axes) {
+    shloAxes.push_back(convertAxisRefAttr(axis));
+  }
   return mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
-      meshOrRef.getContext(), meshOrRef,
-      rewriter.getArrayAttr(llvm::map_to_vector(
-          axes, [](AxisRefAttr attr) -> Attribute { return attr; })));
+      ctx, meshOrRef, rewriter.getArrayAttr(shloAxes));
 }
 
 Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
@@ -504,10 +507,10 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
            "canonicalization.";
 
     MeshAttr mesh = op.getOutSharding().getMesh(op);
-    Attribute meshOrRef = op.getOutSharding().getMeshOrRef();
     if (!mesh) {
       return op.emitOpError("failed to resolve mesh");
     }
+    Attribute meshOrRef = op.getOutSharding().getMeshOrRef();
 
     if (perDimAllGather || numGatheringDims == 1) {
       return rewriteAllGatherPerDim(op, mesh, meshOrRef, adaptor.getTensor(),
@@ -545,9 +548,9 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
       return op.emitOpError("failed to resolve mesh");
     }
 
-    Attribute replicaGroups =
-        getReplicaGroups(op.getReductionAxesAttr(), mesh,
-                         outSharding.getMeshOrRef(), enableRGV3, rewriter);
+    Attribute meshOrRef = outSharding.getMeshOrRef();
+    Attribute replicaGroups = getReplicaGroups(op.getReductionAxesAttr(), mesh,
+                                               meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
         kChannelHandleType);

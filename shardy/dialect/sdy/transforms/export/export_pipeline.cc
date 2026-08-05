@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/constants.h"
+#include "shardy/dialect/sdy/transforms/common/passes.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 
 namespace mlir {
@@ -104,6 +105,9 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
   }
   if (!options.keepShardingRules) {
     pm.addNestedPass<func::FuncOp>(createDropShardingRulesPass());
+  }
+  if (!options.avoidExportForPartitioning && options.inlineMeshes) {
+    pm.addPass(createInlineMeshesPass());
   }
 }
 

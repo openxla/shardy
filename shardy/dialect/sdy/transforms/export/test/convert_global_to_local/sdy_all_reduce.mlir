@@ -11,7 +11,7 @@ func.func @shard_result(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@
   -> (tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y":(2)2}]>}) {
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[ARG0]])
   // V1-SAME{LITERAL}: replica_groups = dense<[[0, 2], [1, 3], [4, 6], [5, 7]]>
-  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#sdy<axis_ref"y":(1)2>]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "y", sub_axis_info = (1)2>]>
   // CHECK-SAME: use_global_device_ids
   // CHECK: ^bb0(%[[ACC:.*]]: tensor<f32>, %[[UPD:.*]]: tensor<f32>):
   // CHECK: %[[ADD:.*]] = stablehlo.add %[[ACC]], %[[UPD]] : tensor<f32>
@@ -28,7 +28,7 @@ func.func @not_shard_result(%arg0: tensor<16x32xf32>)
   -> tensor<16x32xf32> {
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[ARG0]])
   // V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7]]>
-  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#sdy<axis_ref"x">, #sdy<axis_ref"y":(1)2>]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">, #stablehlo.axis_ref<name = "y", sub_axis_info = (1)2>]>
   // CHECK-SAME: use_global_device_ids
   // CHECK: ^bb0(%[[ACC:.*]]: tensor<f32>, %[[UPD:.*]]: tensor<f32>):
   // CHECK: %[[ADD:.*]] = stablehlo.add %[[ACC]], %[[UPD]] : tensor<f32>
