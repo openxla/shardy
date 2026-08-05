@@ -1365,7 +1365,7 @@ def _fori_loop_to_lojax(
       **kwargs,
   )
 
-  out_mut, lo_outs = out_avals_ft.update(all_outs).unpack()
+  lo_outs = out_avals_ft.update(all_outs)
 
   return [
       a.raise_val2(y) for a, y in zip(call_jaxpr.out_avals, lo_outs.unpack())
