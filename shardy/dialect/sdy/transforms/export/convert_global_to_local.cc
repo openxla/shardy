@@ -47,6 +47,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
@@ -2653,16 +2654,22 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
         newStartIndices.push_back(globalStart);
         newLimitIndices.push_back(globalLimit);
       } else {
-        // Sharded -> Sharded. Expect a full slice.
-        if (globalStart != 0 || globalLimit != globalInputType.getDimSize(i)) {
+        MeshAttr mesh = inSharding.getMesh(converter->getSymbolTable());
+        // Sharded -> Sharded. Expect a full slice or communication-free slice.
+        if (globalStart != 0 ||
+            (globalLimit != globalInputType.getDimSize(i) &&
+             !isCommunicationFreeSliceDim(i, op, inSharding, mesh))) {
           return op.emitOpError() << "dimension " << i
                                   << " is sharded but the slice is not a full "
                                      "slice and requires device communication.";
         }
         newStartIndices.push_back(0);
         newLimitIndices.push_back(
-            cast<RankedTensorType>(adaptor.getOperand().getType())
-                .getDimSize(i));
+            globalLimit == globalInputType.getDimSize(i)
+                ? cast<RankedTensorType>(adaptor.getOperand().getType())
+                      .getDimSize(i)
+                : cast<RankedTensorType>(converter->convertType(op.getResult()))
+                      .getDimSize(i));
       }
     }
 

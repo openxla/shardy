@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s
 
 sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
+sdy.mesh @mesh_1_2 = <["x"=1, "y"=2]>
 
 // CHECK-LABEL: func @replicated_after_all_gather
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"y"}, {}]>}) -> tensor<4x8xf32>
@@ -36,4 +37,15 @@ func.func @slicing_dim_sharded(%arg0: tensor<32x16xf32> {sdy.sharding = #sdy.sha
   %0 = stablehlo.slice %arg0 [0:32:2, 0:16] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<32x16xf32>) -> tensor<16x16xf32>
   // CHECK-NEXT:    return %[[RES]] : tensor<4x8xf32>
   return %0 : tensor<16x16xf32>
+}
+
+// CHECK-LABEL: func @communication_free_slice_sharded_dim(
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"x"}, {"y"}]>})
+// CHECK-SAME:  -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"x"}, {"y"}]>}) {
+func.func @communication_free_slice_sharded_dim(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"x"}, {"y"}]>})
+    -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"x"}, {"y"}]>}) {
+  // CHECK-NEXT:    %[[RES:.*]] = stablehlo.slice %arg0 [0:4, 0:8] : (tensor<8x8xf32>) -> tensor<4x8xf32>
+  %0 = stablehlo.slice %arg0 [0:4, 0:16] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_1_2, [{"x"}, {"y"}]>]>} : (tensor<8x16xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT:    return %[[RES]] : tensor<4x8xf32>
+  return %0 : tensor<4x16xf32>
 }
