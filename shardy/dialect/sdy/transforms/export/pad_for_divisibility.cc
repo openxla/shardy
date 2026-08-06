@@ -42,6 +42,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
+#include "stablehlo/dialect/TypeInference.h"
 
 namespace mlir {
 namespace sdy {
@@ -119,7 +120,8 @@ constexpr PaddingValueKind kDefaultPaddingValueKind = PaddingValueKind::kZero;
 // Returns true if the operation has custom padding handling implemented in
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
-  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp>(op);
+  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp,
+             stablehlo::ConvolutionOp>(op);
 }
 
 class PaddingCache {
@@ -907,6 +909,114 @@ class StablehloDotGeneralOpPattern
   PaddingCache& cache;
 };
 
+class StablehloConvolutionOpPattern
+    : public OpConversionPattern<stablehlo::ConvolutionOp> {
+ public:
+  StablehloConvolutionOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                                PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::ConvolutionOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+
+    Location loc = op.getLoc();
+    stablehlo::ConvDimensionNumbersAttr dimNums = op.getDimensionNumbers();
+
+    Value lhs = adaptor.getOperands()[0];
+    Value rhs = adaptor.getOperands()[1];
+    Value lhsOrig = op->getOperand(0);
+    Value rhsOrig = op->getOperand(1);
+    auto lhsOrigType = dyn_cast<RankedTensorType>(lhsOrig.getType());
+    auto rhsOrigType = dyn_cast<RankedTensorType>(rhsOrig.getType());
+    if (!lhsOrigType || !rhsOrigType) {
+      return failure();
+    }
+
+    SmallVector<int64_t> lhsEnforceDims;
+    lhsEnforceDims.push_back(dimNums.getInputFeatureDimension());
+    llvm::append_range(lhsEnforceDims, dimNums.getInputSpatialDimensions());
+    SmallVector<int64_t> rhsEnforceDims;
+    rhsEnforceDims.push_back(dimNums.getKernelInputFeatureDimension());
+    llvm::append_range(rhsEnforceDims, dimNums.getKernelSpatialDimensions());
+
+    // Enforce zero-padding on contracting dimensions.
+    Value paddedLhs = ensurePadding(lhs, lhsOrigType, PaddingValueKind::kZero,
+                                    rewriter, loc, cache, lhsEnforceDims);
+    Value paddedRhs = ensurePadding(rhs, rhsOrigType, PaddingValueKind::kZero,
+                                    rewriter, loc, cache, rhsEnforceDims);
+
+    SmallVector<ShapedTypeComponents> inferredReturnShapes;
+    if (failed(mlir::hlo::inferConvolutionOp(
+            op->getLoc(), paddedLhs.getType(), paddedRhs.getType(),
+            op.getWindowStrides(), op.getPaddingAttr(), op.getLhsDilation(),
+            op.getRhsDilation(), op.getWindowReversal(),
+            dimNums.getInputBatchDimension(),
+            dimNums.getInputFeatureDimension(),
+            dimNums.getInputSpatialDimensions(),
+            dimNums.getKernelInputFeatureDimension(),
+            dimNums.getKernelOutputFeatureDimension(),
+            dimNums.getKernelSpatialDimensions(),
+            dimNums.getOutputBatchDimension(),
+            dimNums.getOutputFeatureDimension(),
+            dimNums.getOutputSpatialDimensions(), op.getFeatureGroupCount(),
+            op.getBatchGroupCount(), op.getPrecisionConfig(),
+            inferredReturnShapes))) {
+      return failure();
+    }
+
+    auto inferredResultType = RankedTensorType::get(
+        inferredReturnShapes[0].getDims(), lhsOrigType.getElementType());
+    Value result = op.getResult();
+    Type paddedResultType = getPaddedType(result.getType(), getSharding(result),
+                                          converter->getSymbolTable());
+    auto paddedResultShaped = cast<RankedTensorType>(paddedResultType);
+    auto originalResultType = cast<RankedTensorType>(result.getType());
+
+    // Since conv input and output spatial shapes cannot always be divisible
+    // simultaneously, we run conv/slice as replicated and pad/shard post-op.
+    TensorShardingAttr outSharding = getSharding(result);
+    TensorShardingAttr replicatedSharding =
+        TensorShardingAttr::getFullyClosedLike(outSharding);
+
+    // Recreate the convolution operation with inferredResultType and replicated
+    // sharding.
+    OperationState state(op->getLoc(), op->getName());
+    state.addOperands(
+        {getShardableValue(paddedLhs), getShardableValue(paddedRhs)});
+    state.addTypes(inferredResultType);
+    state.addAttributes(op->getAttrs());
+    Operation* newOp = rewriter.create(state);
+    setSharding(newOp->getResult(0), replicatedSharding);
+    Value res = newOp->getResult(0);
+
+    // Trim the output spatial dimensions back to original sizes, with
+    // a fully replicated sharding.
+    Value trimmed = trimOutputForDims(
+        res, originalResultType, dimNums.getOutputSpatialDimensions(),
+        replicatedSharding, rewriter, PaddingValueKind::kZero, cache);
+
+    // Pad the trimmed output to the final target type if it requires
+    // divisibility padding.
+    Value finalResult = trimmed;
+    if (paddedResultShaped != originalResultType) {
+      finalResult =
+          createPaddedValue(paddedResultShaped, trimmed,
+                            PaddingValueKind::kZero, PaddingValueKind::kZero,
+                            converter->getSymbolTable(), rewriter, cache);
+      setSharding(finalResult, outSharding);
+    }
+
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
 struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
   using PadForDivisibilityPassBase::PadForDivisibilityPassBase;
@@ -931,7 +1041,8 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
-                 AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern>(
+                 StablehloConvolutionOpPattern, AllToAllOpPattern,
+                 AllGatherOpPattern, ReduceScatterOpPattern>(
         typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
