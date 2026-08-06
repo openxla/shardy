@@ -136,13 +136,6 @@ function body for each call op and emit a warning.
 -add-data-flow-edges-on-named-computations : Whether to add data flow edges on named computations.
 ```
 
-### `-sdy-inline-meshes`
-
-_Inlines `MeshAttr`s into `TensorShardingAttr`s._
-
-Replaces mesh symbol names in `TensorShardingAttr`s with inlined
-`MeshAttr`s, and removes all unused `MeshOp`s.
-
 ### `-sdy-lift-inlined-meshes`
 
 _Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s._
