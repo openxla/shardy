@@ -66,7 +66,9 @@ def _sdy_spec_to_named_sharding(
     return jax.sharding.PartitionSpec(*cloned_sharding, unreduced=unreduced)
 
   return jax.sharding.NamedSharding(
-      mesh, get_pspec(sdy_sharding), memory_kind=memory_kind
+      mesh,
+      get_pspec(sdy_sharding),
+      memory_kind=None if memory_kind == 'device' else memory_kind,
   )
 
 
