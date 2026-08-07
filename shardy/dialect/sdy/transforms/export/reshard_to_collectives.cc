@@ -226,8 +226,8 @@ class CollectiveInserter {
         loc(op->getLoc()),
         result(result),
         mesh(inSharding.getMesh(op)),
-        curMeshName(inSharding.getMeshSymName()),
-        outMeshName(outSharding.getMeshSymName()),
+        curMeshOrRef(inSharding.getMeshOrRef()),
+        outMeshOrRef(outSharding.getMeshOrRef()),
         unreducedAxes(outSharding.getUnreducedAxes()),
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
@@ -300,9 +300,9 @@ class CollectiveInserter {
  private:
   // Returns true if the input sharding has been transformed into the output
   // sharding, i.e., both `inAxesPerDim` and `outAxesPerDim` are empty and
-  // `curMeshName == outMeshName`.
+  // `curMeshOrRef == outMeshOrRef`.
   bool isDone() const {
-    return curMeshName == outMeshName &&
+    return curMeshOrRef == outMeshOrRef &&
            llvm::all_of(inAxesPerDim, std::mem_fn(&AxisList::empty)) &&
            llvm::all_of(outAxesPerDim, std::mem_fn(&AxisList::empty));
   }
@@ -312,7 +312,7 @@ class CollectiveInserter {
   int64_t getRank() const { return inAxesPerDim.size(); }
 
   TensorShardingAttr getCurrentSharding() const {
-    return TensorShardingAttr::getClosed(getContext(), curMeshName,
+    return TensorShardingAttr::getClosed(getContext(), curMeshOrRef,
                                          currentAxesPerDim, unreducedAxes);
   }
 
@@ -1037,15 +1037,15 @@ class CollectiveInserter {
     // actually redundant.
     if (shouldCollectivePermute()) {
       performCollectivePermute();
-    } else if (curMeshName == outMeshName) {
+    } else if (curMeshOrRef == outMeshOrRef) {
       return;
     }
-    // If `curMeshName != outMeshName`, it means the output sharding has a mesh
-    // with a different order of device ids than that of the input sharding,
-    // which requires a collective permute. If `shouldCollectivePermute()` is
-    // false, we want to insert a collective permute to reorder the device ids
-    // without changing the sharding axes.
-    curMeshName = outMeshName;
+    // If `curMeshOrRef != outMeshOrRef`, it means the output sharding has a
+    // mesh with a different order of device ids than that of the input
+    // sharding, which requires a collective permute. If
+    // `shouldCollectivePermute()` is false, we want to insert a collective
+    // permute to reorder the device ids without changing the sharding axes.
+    curMeshOrRef = outMeshOrRef;
 
     // TODO(b/392797233): if the order of device ids changes, but the input or
     // output sharding is fully replicated, we can skip the collective permute.
@@ -1206,7 +1206,7 @@ class CollectiveInserter {
   Location loc;
   Value result;
   MeshAttr mesh;
-  FlatSymbolRefAttr curMeshName, outMeshName;
+  mlir::Attribute curMeshOrRef, outMeshOrRef;
   ArrayRef<AxisRefAttr> unreducedAxes;
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;
   AxesPerDim currentAxesPerDim;
@@ -1219,7 +1219,7 @@ class CollectiveInserter {
 // Assumes both `inSharding` and `outSharding` are non-null.
 bool isEquivalentOnMesh(TensorShardingAttr inSharding,
                         TensorShardingAttr outSharding, ReshardOp reshardOp) {
-  if (inSharding.getMeshName() == outSharding.getMeshName()) {
+  if (inSharding.getMeshOrRef() == outSharding.getMeshOrRef()) {
     return true;
   }
   MeshAttr inMesh = inSharding.getMesh(reshardOp);
@@ -1228,11 +1228,11 @@ bool isEquivalentOnMesh(TensorShardingAttr inSharding,
 }
 
 TensorShardingAttr getOrCreateShardingBypassingBarriers(
-    Value value, StringRef meshName, bool closedIfMissing = false) {
+    Value value, Attribute meshOrRef, bool closedIfMissing = false) {
   while (auto barrierOp = value.getDefiningOp<PropagationBarrierOp>()) {
     value = barrierOp.getInput();
   }
-  return getOrCreateSharding(value, meshName, closedIfMissing);
+  return getOrCreateSharding(value, meshOrRef, closedIfMissing);
 }
 
 class ReshardPattern : public OpConversionPattern<ReshardOp> {
@@ -1251,8 +1251,8 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
     }
 
     TensorShardingAttr inSharding = getOrCreateShardingBypassingBarriers(
-        bypassedInput, outSharding.getMeshName());
-    // Here it's safe to assume that shardings' meshes have a name.
+        bypassedInput, outSharding.getMeshOrRef());
+    // We support both symbol and inlined meshes.
     if (inSharding.getRank() != outSharding.getRank()) {
       return rewriter.notifyMatchFailure(
           op, [](Diagnostic& diag) { diag << "Incompatible shardings"; });

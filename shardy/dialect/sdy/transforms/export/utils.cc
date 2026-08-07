@@ -200,5 +200,16 @@ mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh) {
                                         deviceIds);
 }
 
+mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef) {
+  MLIRContext* ctx = sdyAxisRef.getContext();
+  mlir::stablehlo::SubAxisInfoAttr subAxisInfo = nullptr;
+  if (auto sdySubAxisInfo = sdyAxisRef.getSubAxisInfo()) {
+    subAxisInfo = mlir::stablehlo::SubAxisInfoAttr::get(
+        ctx, sdySubAxisInfo.getPreSize(), sdySubAxisInfo.getSize());
+  }
+  return mlir::stablehlo::AxisRefAttr::get(ctx, sdyAxisRef.getName(),
+                                           subAxisInfo);
+}
+
 }  // namespace sdy
 }  // namespace mlir

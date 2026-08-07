@@ -561,7 +561,7 @@ void removeShardingRules(Operation* rootOp) {
 namespace {
 
 SmallVector<TensorShardingAttr> getFullyReplicatedShardings(
-    MLIRContext* context, TypeRange types, StringRef meshName, bool isClosed) {
+    MLIRContext* context, TypeRange types, Attribute meshOrRef, bool isClosed) {
   SmallVector<TensorShardingAttr> shardings;
   shardings.reserve(types.size());
   for (Type type : types) {
@@ -571,7 +571,7 @@ SmallVector<TensorShardingAttr> getFullyReplicatedShardings(
       rank = tensorType.getRank();
     }
     shardings.push_back(TensorShardingAttr::getFullyReplicated(
-        context, rank, meshName, isClosed));
+        context, rank, meshOrRef, isClosed));
   }
   return shardings;
 }
@@ -581,14 +581,28 @@ SmallVector<TensorShardingAttr> getFullyReplicatedShardings(
 SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
                                                       TypeRange types,
                                                       StringRef meshName) {
-  return getFullyReplicatedShardings(context, types, meshName,
+  return getFullyOpenShardings(context, types,
+                               FlatSymbolRefAttr::get(context, meshName));
+}
+
+SmallVector<TensorShardingAttr> getFullyOpenShardings(MLIRContext* context,
+                                                      TypeRange types,
+                                                      Attribute meshOrRef) {
+  return getFullyReplicatedShardings(context, types, meshOrRef,
                                      /*isClosed=*/false);
 }
 
 SmallVector<TensorShardingAttr> getFullyClosedShardings(MLIRContext* context,
                                                         TypeRange types,
                                                         StringRef meshName) {
-  return getFullyReplicatedShardings(context, types, meshName,
+  return getFullyClosedShardings(context, types,
+                                 FlatSymbolRefAttr::get(context, meshName));
+}
+
+SmallVector<TensorShardingAttr> getFullyClosedShardings(MLIRContext* context,
+                                                        TypeRange types,
+                                                        Attribute meshOrRef) {
+  return getFullyReplicatedShardings(context, types, meshOrRef,
                                      /*isClosed=*/true);
 }
 
