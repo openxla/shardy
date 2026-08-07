@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -24,6 +25,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -198,6 +200,43 @@ mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh) {
   }
   return mlir::stablehlo::MeshAttr::get(sdyMesh.getContext(), shloAxes,
                                         deviceIds);
+}
+
+int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
+                      ArrayRef<AxisRefAttr> axes) {
+  int64_t logicalDeviceId = deviceId;
+  ArrayRef<int64_t> deviceIds = mesh.getDeviceIds();
+  if (!deviceIds.empty()) {
+    const auto* it = llvm::find(deviceIds, deviceId);
+    SDY_CHECK(it != deviceIds.end()) << "Device ID not found in mesh";
+    logicalDeviceId = std::distance(deviceIds.begin(), it);
+  } else {
+    SDY_CHECK(deviceId >= 0 && deviceId < mesh.getTotalSize())
+        << "Device ID out of range for mesh";
+  }
+
+  int64_t shardIndex = 0;
+  for (AxisRefAttr axis : axes) {
+    int64_t axisSize = axis.getSize(mesh);
+    int64_t suffixSize = 1;
+    bool foundAxis = false;
+    for (MeshAxisAttr meshAxis : mesh.getAxes()) {
+      if (foundAxis) {
+        suffixSize *= meshAxis.getSize();
+      }
+      if (meshAxis.getName() == axis.getName()) {
+        foundAxis = true;
+      }
+    }
+
+    int64_t fullSize = mesh.getAxisSize(axis.getName());
+    int64_t subAxisStride = fullSize / (axis.getSubAxisPreSize() * axisSize);
+    int64_t axisCoord =
+        (logicalDeviceId / (suffixSize * subAxisStride)) % axisSize;
+
+    shardIndex = shardIndex * axisSize + axisCoord;
+  }
+  return shardIndex;
 }
 
 }  // namespace sdy

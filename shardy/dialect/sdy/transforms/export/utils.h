@@ -19,9 +19,6 @@ limitations under the License.
 #include <cstdint>
 #include <list>
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -94,6 +91,11 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
 
 // Converts an SDY MeshAttr to a StableHLO MeshAttr.
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
+
+// Returns the logical index of the shard that the given device (`deviceId`)
+// resides in, along a dimension sharded by the provided `axes`.
+int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
+                      ArrayRef<AxisRefAttr> axes);
 
 }  // namespace sdy
 }  // namespace mlir
