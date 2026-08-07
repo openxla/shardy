@@ -470,7 +470,8 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
-         !isa<sdy::ReturnOp>(op)) ||
+         !isa<sdy::ReturnOp, sdy::AllReduceOp, sdy::ShardedToUnreducedOp,
+              sdy::ReplicatedToUnreducedOp>(op)) ||
         hasCustomPadHandling(op)) {
       return failure();
     }
@@ -968,6 +969,10 @@ struct PadForDivisibilityPass
         return llvm::all_of(op->getOperands(), isLegalValue);
       }
       if (auto allToAllOp = dyn_cast<AllToAllOp>(op)) {
+        return llvm::all_of(op->getOperands(), isLegalValue) &&
+               llvm::all_of(op->getResults(), isLegalValue);
+      }
+      if (isa<AllReduceOp, ShardedToUnreducedOp, ReplicatedToUnreducedOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue) &&
                llvm::all_of(op->getResults(), isLegalValue);
       }
