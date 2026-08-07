@@ -941,6 +941,34 @@ module {
       getArgSharding(10), getType(10), getArgSharding(11), getType(11), func,
       /*allowNonDivisible=*/true));
 }
+
+TEST_F(UtilsTest, IsShardingEquivalentAcrossReshapes_MultiAxisPrefixSize) {
+  auto module = mlir::parseSourceString<ModuleOp>(R"mlir(
+module {
+  sdy.mesh @mesh_xy = <["x"=2, "y"=2]>
+  func.func @test(
+      %arg0: tensor<4x4xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x", "y"}, {}]>},
+      %arg1: tensor<2x2x4xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {"y"}, {}]>},
+      %arg2: tensor<2x2x4xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {"x"}, {}]>}) {
+    return
+  }
+}
+)mlir",
+                                                  &context);
+  auto func = cast<func::FuncOp>(module->lookupSymbol("test"));
+  auto getArgSharding = [&](int idx) {
+    return getSharding(func.getArgument(idx));
+  };
+  auto getType = [&](int idx) { return func.getArgument(idx).getType(); };
+
+  // Matching axis order and prefix sizes (x:1, y:2 -> x:1, y:2): true
+  EXPECT_TRUE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(1), getType(1), func));
+
+  // Swapped axis order (x:1, y:2 -> y:1, x:2): false
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(2), getType(2), func));
+}
 }  // namespace
 
 }  // namespace sdy

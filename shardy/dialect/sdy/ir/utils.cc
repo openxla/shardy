@@ -1433,6 +1433,90 @@ LogicalResult verifyUnreducedAxesTransition(
   return success();
 }
 
+namespace {
+
+struct AxisStrideInfo {
+  AxisRefAttr axis;
+  double stride;
+  int64_t prefixSize;
+  int64_t dimSize;
+};
+
+int64_t getPrefixSize(RankedTensorType type, int64_t dim) {
+  int64_t size = 1;
+  for (int64_t d = 0; d < dim; ++d) {
+    size *= type.getDimSize(d);
+  }
+  return size;
+}
+
+// Calculates linear stride for every axis in the sharding.
+SmallVector<AxisStrideInfo> getAxisStrides(TensorShardingAttr sharding,
+                                           RankedTensorType type, MeshAttr mesh,
+                                           bool allowNonDivisible) {
+  SmallVector<AxisStrideInfo> axisStrides;
+  double cumulativeDimSize = 1.0;
+  for (int64_t i = type.getRank() - 1; i >= 0; --i) {
+    ArrayRef<AxisRefAttr> axes = sharding.getDimShardings()[i].getAxes();
+    int64_t totalAxesSize = 1;
+    for (AxisRefAttr axis : axes) {
+      totalAxesSize *= axis.getSize(mesh);
+    }
+    double currentAxisStride =
+        cumulativeDimSize *
+        (allowNonDivisible
+             ? static_cast<double>(type.getDimSize(i)) / totalAxesSize
+             : static_cast<double>(
+                   llvm::divideCeil(type.getDimSize(i), totalAxesSize)));
+    int64_t basePrefixSize = getPrefixSize(type, i);
+    int64_t precedingAxesSize = totalAxesSize;
+    for (int64_t j = static_cast<int64_t>(axes.size()) - 1; j >= 0; --j) {
+      precedingAxesSize /= axes[j].getSize(mesh);
+      axisStrides.push_back({axes[j], currentAxisStride,
+                             basePrefixSize * precedingAxesSize,
+                             type.getDimSize(i)});
+      currentAxisStride *= axes[j].getSize(mesh);
+    }
+    cumulativeDimSize *= type.getDimSize(i);
+  }
+  llvm::stable_sort(axisStrides, [](const auto& a, const auto& b) {
+    return a.stride < b.stride;
+  });
+  SmallVector<AxisStrideInfo> merged;
+  for (const auto& entry : axisStrides) {
+    if (!merged.empty()) {
+      auto& back = merged.back();
+      AxisRefAttr prevAxis = back.axis;
+      AxisRefAttr currAxis = entry.axis;
+      if (prevAxis.getName() == currAxis.getName() &&
+          currAxis.getSubAxisPreSize() * currAxis.getSize(mesh) ==
+              prevAxis.getSubAxisPreSize() &&
+          (allowNonDivisible
+               ? (back.prefixSize == entry.prefixSize ||
+                  (back.prefixSize == entry.prefixSize * entry.dimSize &&
+                   entry.axis.getSize(mesh) == entry.dimSize))
+               : isNear(entry.stride, back.stride * prevAxis.getSize(mesh)))) {
+        int64_t minPreSize = std::min(prevAxis.getSubAxisPreSize(),
+                                      currAxis.getSubAxisPreSize());
+        int64_t size = prevAxis.getSize(mesh) * currAxis.getSize(mesh);
+        int64_t fullSize = mesh.getAxisSize(prevAxis.getName());
+        AxisRefAttr combined =
+            (minPreSize == 1 && size == fullSize)
+                ? AxisRefAttr::get(mesh.getContext(), prevAxis.getName())
+                : AxisRefAttr::get(mesh.getContext(), prevAxis.getName(),
+                                   minPreSize, size);
+        back.axis = combined;
+        back.prefixSize = std::min(back.prefixSize, entry.prefixSize);
+        continue;
+      }
+    }
+    merged.push_back(entry);
+  }
+  return merged;
+}
+
+}  // namespace
+
 bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
                                         TensorShardingAttr s2, Type t2,
                                         Operation* op, bool allowNonDivisible) {
@@ -1463,85 +1547,8 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
     return false;
   }
 
-  auto getPrefixSize = [](RankedTensorType type, int64_t dim) {
-    int64_t size = 1;
-    for (int64_t d = 0; d < dim; ++d) {
-      size *= type.getDimSize(d);
-    }
-    return size;
-  };
-
-  struct AxisStrideInfo {
-    AxisRefAttr axis;
-    double stride;
-    int64_t prefixSize;
-    int64_t dimSize;
-  };
-
-  // Calculates linear stride for every axis in the sharding.
-  auto getAxisStrides = [&](TensorShardingAttr sharding,
-                            RankedTensorType type) {
-    SmallVector<AxisStrideInfo> axisStrides;
-    double cumulativeDimSize = 1.0;
-    for (int64_t i = type.getRank() - 1; i >= 0; --i) {
-      ArrayRef<AxisRefAttr> axes = sharding.getDimShardings()[i].getAxes();
-      int64_t totalAxesSize = 1;
-      for (AxisRefAttr axis : axes) {
-        totalAxesSize *= axis.getSize(mesh);
-      }
-      double currentAxisStride =
-          cumulativeDimSize *
-          (allowNonDivisible
-               ? static_cast<double>(type.getDimSize(i)) / totalAxesSize
-               : static_cast<double>(
-                     llvm::divideCeil(type.getDimSize(i), totalAxesSize)));
-      int64_t prefixSize = getPrefixSize(type, i);
-      for (int64_t j = static_cast<int64_t>(axes.size()) - 1; j >= 0; --j) {
-        axisStrides.push_back(
-            {axes[j], currentAxisStride, prefixSize, type.getDimSize(i)});
-        currentAxisStride *= axes[j].getSize(mesh);
-      }
-      cumulativeDimSize *= type.getDimSize(i);
-    }
-    llvm::stable_sort(axisStrides, [](const auto& a, const auto& b) {
-      return a.stride < b.stride;
-    });
-    SmallVector<AxisStrideInfo> merged;
-    for (const auto& entry : axisStrides) {
-      if (!merged.empty()) {
-        auto& back = merged.back();
-        AxisRefAttr prevAxis = back.axis;
-        AxisRefAttr currAxis = entry.axis;
-        if (prevAxis.getName() == currAxis.getName() &&
-            currAxis.getSubAxisPreSize() * currAxis.getSize(mesh) ==
-                prevAxis.getSubAxisPreSize() &&
-            (allowNonDivisible
-                 ? (back.prefixSize == entry.prefixSize ||
-                    (back.prefixSize == entry.prefixSize * entry.dimSize &&
-                     entry.axis.getSize(mesh) == entry.dimSize))
-                 : isNear(entry.stride,
-                          back.stride * prevAxis.getSize(mesh)))) {
-          int64_t minPreSize = std::min(prevAxis.getSubAxisPreSize(),
-                                        currAxis.getSubAxisPreSize());
-          int64_t size = prevAxis.getSize(mesh) * currAxis.getSize(mesh);
-          int64_t fullSize = mesh.getAxisSize(prevAxis.getName());
-          AxisRefAttr combined =
-              (minPreSize == 1 && size == fullSize)
-                  ? AxisRefAttr::get(mesh.getContext(), prevAxis.getName())
-                  : AxisRefAttr::get(mesh.getContext(), prevAxis.getName(),
-                                     minPreSize, size);
-          back.axis = combined;
-          back.prefixSize = std::min(back.prefixSize, entry.prefixSize);
-          continue;
-        }
-      }
-      merged.push_back(entry);
-    }
-    return merged;
-  };
-
-  auto strides1 = getAxisStrides(s1, rt1);
-  auto strides2 = getAxisStrides(s2, rt2);
+  auto strides1 = getAxisStrides(s1, rt1, mesh, allowNonDivisible);
+  auto strides2 = getAxisStrides(s2, rt2, mesh, allowNonDivisible);
   if (strides1.size() != strides2.size()) {
     return false;
   }
