@@ -66,6 +66,9 @@ struct CommonSharding {
 // If they do, the returned sharding is the sharding of the first value in the
 // group.
 CommonSharding findCommonSharding(int64_t groupId, ValueRange groupMembers) {
+  if (groupMembers.empty()) {
+    return {nullptr, false};
+  }
   if (groupMembers.size() == 1) {
     return {getSharding(groupMembers.front()), false};
   }
