@@ -68,6 +68,9 @@ struct PropagationOptions {
 
   // Whether to clear reverse op sharding on export.
   bool clearReverseOpSharding = false;
+
+  // Whether to inline meshes.
+  bool inlineMeshes = true;
 };
 
 }  // namespace sdy
