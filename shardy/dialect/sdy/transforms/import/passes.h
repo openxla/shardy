@@ -26,7 +26,6 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
-#include "shardy/dialect/sdy/transforms/common/passes.h"
 
 // IWYU pragma: end_keep
 

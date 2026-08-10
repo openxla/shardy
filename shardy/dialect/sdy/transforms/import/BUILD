@@ -57,7 +57,6 @@ cc_library(
         "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
-        "//shardy/dialect/sdy/transforms/common:passes",
         "//shardy/dialect/sdy/transforms/common:propagation_options",
         "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "//shardy/dialect/sdy/transforms/common:util",
