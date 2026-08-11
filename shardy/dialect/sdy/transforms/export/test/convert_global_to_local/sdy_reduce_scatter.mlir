@@ -104,3 +104,35 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // CHECK: return %[[RESULT]] : tensor<2x4xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @reduce_scatter_max
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>})
+func.func @reduce_scatter_max(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {"x"}]>}) {
+  // CHECK: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[ARG0]])
+  // CHECK-SAME: scatter_dimension = 1 : i64
+  // CHECK-SAME: use_global_device_ids
+  // CHECK: (%arg1: tensor<f32>, %arg2: tensor<f32>):
+  // CHECK:   %[[MAX:.*]] = stablehlo.maximum %arg1, %arg2 : tensor<f32>
+  // CHECK:   stablehlo.return %[[MAX]] : tensor<f32>
+  // CHECK: (tensor<2x8xf32>) -> tensor<2x4xf32>
+  %0 = sdy.reduce_scatter max [{}, {"x"}] %arg0 out_sharding=<@mesh_2_4, [{"y"}, {"x"}]> : tensor<8x8xf32>
+  // CHECK: return %[[RES]] : tensor<2x4xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_min
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>})
+func.func @reduce_scatter_min(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {"x"}]>}) {
+  // CHECK: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[ARG0]])
+  // CHECK-SAME: scatter_dimension = 1 : i64
+  // CHECK-SAME: use_global_device_ids
+  // CHECK: (%arg1: tensor<f32>, %arg2: tensor<f32>):
+  // CHECK:   %[[MIN:.*]] = stablehlo.minimum %arg1, %arg2 : tensor<f32>
+  // CHECK:   stablehlo.return %[[MIN]] : tensor<f32>
+  // CHECK: (tensor<2x8xf32>) -> tensor<2x4xf32>
+  %0 = sdy.reduce_scatter min [{}, {"x"}] %arg0 out_sharding=<@mesh_2_4, [{"y"}, {"x"}]> : tensor<8x8xf32>
+  // CHECK: return %[[RES]] : tensor<2x4xf32>
+  return %0 : tensor<8x8xf32>
+}

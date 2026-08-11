@@ -27,6 +27,7 @@ limitations under the License.
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
@@ -83,6 +84,26 @@ Type getLocalType(Type type, TensorShardingAttr sharding,
   SDY_CHECK(localType)
       << "Failed to compute local type due to non-divisible sharding";
   return localType;
+}
+
+// Builds the reduction computation body for AllReduceOp and ReduceScatterOp
+// based on the specified ReductionOp (SUM, MIN, MAX).
+template <typename OpWithComputation>
+void buildReduceComputation(OpWithComputation opWithComputation,
+                            Type elementType, ReductionOp reductionOp,
+                            OpBuilder& builder) {
+  switch (reductionOp) {
+    case ReductionOp::SUM:
+      return stablehlo::buildReduceBody<stablehlo::AddOp>(
+          elementType, opWithComputation.getComputation(), builder);
+    case ReductionOp::MIN:
+      return stablehlo::buildReduceBody<stablehlo::MinOp>(
+          elementType, opWithComputation.getComputation(), builder);
+    case ReductionOp::MAX:
+      return stablehlo::buildReduceBody<stablehlo::MaxOp>(
+          elementType, opWithComputation.getComputation(), builder);
+  }
+  llvm_unreachable("unknown ReductionOp");
 }
 
 struct ConversionState {
@@ -569,8 +590,8 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
         /*use_global_device_ids=*/true);
     Type elementType = cast<RankedTensorType>(allReduce->getResult(0).getType())
                            .getElementType();
-    stablehlo::buildReduceBody<stablehlo::AddOp>(
-        elementType, allReduce.getComputation(), rewriter);
+    buildReduceComputation(allReduce, elementType, op.getReductionOp(),
+                           rewriter);
 
     rewriter.replaceOp(op, allReduce.getResults());
     conversionState.removeToConvertOp(op);
@@ -1116,8 +1137,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto reduceScatter = stablehlo::ReduceScatterOp::create(
         rewriter, loc, localResultType, input, scatterDim, replicaGroups,
         channelHandle, /*use_global_device_ids=*/true);
-    stablehlo::buildReduceBody<stablehlo::AddOp>(
-        inputType.getElementType(), reduceScatter.getComputation(), rewriter);
+    buildReduceComputation(reduceScatter, inputType.getElementType(),
+                           op.getReductionOp(), rewriter);
 
     rewriter.replaceOp(op, reduceScatter.getResult());
     conversionState.removeToConvertOp(op);
@@ -1207,8 +1228,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto reduceScatter = stablehlo::ReduceScatterOp::create(
         rewriter, loc, rsType, curInput, /*scatter_dimension=*/0, replicaGroups,
         channelHandle, /*use_global_device_ids=*/true);
-    stablehlo::buildReduceBody<stablehlo::AddOp>(
-        inputType.getElementType(), reduceScatter.getComputation(), rewriter);
+    buildReduceComputation(reduceScatter, inputType.getElementType(),
+                           op.getReductionOp(), rewriter);
 
     // Reshape to remove the leading dimension of size 1, matching the final
     // local shape.
@@ -1241,8 +1262,8 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     auto allReduce = stablehlo::AllReduceOp::create(
         rewriter, loc, inputType, input, replicaGroups, channelHandle,
         /*use_global_device_ids=*/true);
-    stablehlo::buildReduceBody<stablehlo::AddOp>(
-        inputType.getElementType(), allReduce.getComputation(), rewriter);
+    buildReduceComputation(allReduce, inputType.getElementType(),
+                           op.getReductionOp(), rewriter);
 
     // Perform the "Scatter" part using a multi-dimensional DynamicSlice.
     Value localPiece =
