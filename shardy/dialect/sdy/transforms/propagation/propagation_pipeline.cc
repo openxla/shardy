@@ -48,6 +48,7 @@ void populateExportOptions(ExportOptions& options,
   options.avoidReshardsOnCalls = propOptions.dedupFunctionsFully;
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
+  options.inlineMeshes = propOptions.inlineMeshes;
 }
 
 }  // namespace
@@ -125,6 +126,7 @@ void registerPropagationPipeline() {
       [](OpPassManager& pm, const PropagationOptionsOptions& options) {
         PropagationOptions propOptions;
         propOptions.dedupFunctionsFully = options.dedupFunctionsFully;
+        propOptions.inlineMeshes = false;
 
         return addPropagationPipeline(pm, propOptions);
       });

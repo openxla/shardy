@@ -243,7 +243,6 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
   }
 
   static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
-
 };
 
 struct FactorAxesCandidate {
@@ -952,7 +951,7 @@ TensorShardingAttr insertUnreducedCollectives(OpOperand& use,
     inPlusR2uAxes.append(r2uAxes.begin(), r2uAxes.end());
     sortAndMergeAxes(inPlusR2uAxes, inMesh);
     lastSharding = TensorShardingAttr::get(
-        rewriter.getContext(), inSharding.getMeshName(), tmpDimShardings,
+        rewriter.getContext(), inSharding.getMeshOrRef(), tmpDimShardings,
         outSharding.getReplicatedAxes(), inPlusR2uAxes,
         outSharding.getReductionOp());
     result = ReplicatedToUnreducedOp::create(rewriter, input.getLoc(), result,
