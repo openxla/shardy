@@ -25,6 +25,8 @@ limitations under the License.
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -240,5 +242,47 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
   return shardIndex;
 }
 
+Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
+                            const SymbolTable& symbolTable,
+                            const llvm::DenseSet<StringRef>* allowedAxes) {
+  auto rankedType = dyn_cast<RankedTensorType>(type);
+  if (!rankedType || !sharding || sharding.isFullyReplicated()) {
+    return type;
+  }
+  MeshAttr mesh = sharding.getMesh(symbolTable);
+  if (!mesh) {
+    return type;
+  }
+  SmallVector<int64_t> newShape;
+  bool changed = false;
+  for (auto [dimSize, dimSharding] :
+       llvm::zip_equal(rankedType.getShape(), sharding.getDimShardings())) {
+    if (dimSize == ShapedType::kDynamic) {
+      newShape.push_back(ShapedType::kDynamic);
+      continue;
+    }
+    int64_t shardCount = 1;
+    if (allowedAxes) {
+      for (AxisRefAttr axisRef : dimSharding.getAxes()) {
+        if (allowedAxes->contains(axisRef.getName())) {
+          shardCount *= axisRef.getSize(mesh);
+        }
+      }
+    } else {
+      shardCount = dimSharding.getShardedSize(mesh);
+    }
+    if (shardCount > 1 && dimSize % shardCount != 0) {
+      int64_t paddedDim = dimSize + shardCount - (dimSize % shardCount);
+      newShape.push_back(paddedDim);
+      changed = true;
+    } else {
+      newShape.push_back(dimSize);
+    }
+  }
+  if (!changed) {
+    return type;
+  }
+  return RankedTensorType::get(newShape, rankedType.getElementType());
+}
 }  // namespace sdy
 }  // namespace mlir

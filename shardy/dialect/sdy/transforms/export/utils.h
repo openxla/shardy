@@ -20,6 +20,12 @@ limitations under the License.
 #include <list>
 #include <optional>
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -100,6 +106,13 @@ mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
                       ArrayRef<AxisRefAttr> axes);
 
+// Returns the padded RankedTensorType where each sharded dimension of `type`
+// is padded to be divisible by its shard count along the specified axes (or all
+// axes in `sharding` if `allowedAxes` is null). If the type is already
+// divisible, not a RankedTensorType, or un-sharded, returns `type`.
+Type getDivisiblePaddedType(
+    Type type, TensorShardingAttr sharding, const SymbolTable& symbolTable,
+    const llvm::DenseSet<StringRef>* allowedAxes = nullptr);
 }  // namespace sdy
 }  // namespace mlir
 

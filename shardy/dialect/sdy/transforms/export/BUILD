@@ -141,7 +141,9 @@ cc_test(
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/ir:testing_utils",
         "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Support",
     ],
 )

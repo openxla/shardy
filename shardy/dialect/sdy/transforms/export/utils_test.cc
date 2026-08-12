@@ -17,6 +17,15 @@ limitations under the License.
 
 #include <cstdint>
 
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/StringRef.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/OwningOpRef.h"
+#include "mlir/IR/SymbolTable.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/testing_utils.h"
@@ -26,7 +35,28 @@ namespace mlir {
 namespace sdy {
 namespace {
 
-class ExportUtilsTest : public ShardyTestBase {};
+class ExportUtilsTest : public ShardyTestBase {
+ protected:
+  void SetUp() override {
+    ShardyTestBase::SetUp();
+    moduleOp = mlir::parseSourceString<ModuleOp>(
+        "module {\n"
+        "  sdy.mesh @mesh = <[\"x\"=2, \"y\"=4]>\n"
+        "}",
+        &context);
+    f32Type = Builder(&context).getF32Type();
+  }
+
+  const SymbolTable& getSymbolTable() {
+    return symbolTableCollection.getSymbolTable(moduleOp.get());
+  }
+
+  Type f32Type;
+
+ private:
+  OwningOpRef<ModuleOp> moduleOp;
+  mlir::SymbolTableCollection symbolTableCollection;
+};
 
 TEST_F(ExportUtilsTest, GetShardIndexInterleavedSubAxes) {
   // mesh = <["a"=4, "b"=2]>
@@ -83,6 +113,109 @@ TEST_F(ExportUtilsTest, GetShardIndexWithExplicitDeviceIds) {
   EXPECT_EQ(getShardIndex(2, mesh, axes), 2);
   EXPECT_EQ(getShardIndex(1, mesh, axes), 3);
   EXPECT_EQ(getShardIndex(0, mesh, axes), 3);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeAlreadyDivisible) {
+  auto origType = RankedTensorType::get({8, 16}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "mesh",
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "y")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  Type paddedType =
+      getDivisiblePaddedType(origType, sharding, getSymbolTable());
+  EXPECT_EQ(paddedType, origType);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeIndivisible) {
+  auto origType = RankedTensorType::get({7, 15}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "mesh",
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "y")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  Type paddedType =
+      getDivisiblePaddedType(origType, sharding, getSymbolTable());
+  EXPECT_EQ(paddedType, RankedTensorType::get({8, 16}, f32Type));
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeWithAllowedAxes) {
+  auto origType = RankedTensorType::get({7, 15}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "mesh",
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "y")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  llvm::DenseSet<StringRef> allowedAxes = {"x"};
+  Type paddedType = getDivisiblePaddedType(origType, sharding, getSymbolTable(),
+                                           &allowedAxes);
+  // Dim 0 (axis "x", size 2) is padded from 7 to 8.
+  // Dim 1 (axis "y") is not in allowedAxes, so it remains 15.
+  EXPECT_EQ(paddedType, RankedTensorType::get({8, 15}, f32Type));
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeReplicated) {
+  auto origType = RankedTensorType::get({7, 15}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "mesh",
+      {DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  Type paddedType =
+      getDivisiblePaddedType(origType, sharding, getSymbolTable());
+  EXPECT_EQ(paddedType, origType);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDynamicShape) {
+  auto origType = RankedTensorType::get({ShapedType::kDynamic, 15}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "mesh",
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "y")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  Type paddedType =
+      getDivisiblePaddedType(origType, sharding, getSymbolTable());
+  EXPECT_EQ(paddedType,
+            RankedTensorType::get({ShapedType::kDynamic, 16}, f32Type));
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeUnknownMesh) {
+  auto origType = RankedTensorType::get({7, 15}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "unknown_mesh",
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "y")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  Type paddedType =
+      getDivisiblePaddedType(origType, sharding, getSymbolTable());
+  EXPECT_EQ(paddedType, origType);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeNonRankedType) {
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, "mesh",
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  Type paddedType = getDivisiblePaddedType(f32Type, sharding, getSymbolTable());
+  EXPECT_EQ(paddedType, f32Type);
 }
 
 }  // namespace

@@ -40,7 +40,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/export/utils.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -51,48 +50,15 @@ namespace sdy {
 
 namespace {
 
-
-
-// Computes the padded type for a given type with sharding.
-Type getPaddedType(Type type, TensorShardingAttr sharding,
-                   const SymbolTable& symbolTable) {
-  auto rankedType = dyn_cast<RankedTensorType>(type);
-  if (!rankedType || isFullyReplicated(sharding)) {
-    return type;
-  }
-  MeshAttr mesh = sharding.getMesh(symbolTable);
-  if (!mesh) {
-    return type;
-  }
-
-  SmallVector<int64_t> paddedShape = llvm::to_vector(rankedType.getShape());
-  bool changed = false;
-  for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
-    int64_t dimSize = paddedShape[dim];
-    if (dimSize == ShapedType::kDynamic) continue;
-
-    int64_t shardCount = dimSharding.getShardedSize(mesh);
-    if (shardCount > 1 && dimSize % shardCount != 0) {
-      paddedShape[dim] = ((dimSize + shardCount - 1) / shardCount) * shardCount;
-      changed = true;
-    }
-  }
-
-  if (!changed) {
-    return type;
-  }
-  return RankedTensorType::get(paddedShape, rankedType.getElementType());
-}
-
 class PaddedTypeConverter : public TypeConverter {
  public:
-  PaddedTypeConverter(const SymbolTable& symbolTable)
+  explicit PaddedTypeConverter(const SymbolTable& symbolTable)
       : symbolTable(symbolTable) {
     addConversion([](Type type) { return type; });
 
     addConversion([&](Value value) -> std::optional<Type> {
       if (auto type = dyn_cast<RankedTensorType>(value.getType())) {
-        return getPaddedType(type, getSharding(value), symbolTable);
+        return getDivisiblePaddedType(type, getSharding(value), symbolTable);
       }
       return std::nullopt;
     });
@@ -330,8 +296,8 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
   SmallVector<Type> newResultTypes;
   for (int i = 0; i < op->getNumResults(); ++i) {
     Value result = op->getResult(i);
-    Type paddedType = getPaddedType(result.getType(), getSharding(result),
-                                    typeConverter->getSymbolTable());
+    Type paddedType = getDivisiblePaddedType(
+        result.getType(), getSharding(result), typeConverter->getSymbolTable());
     if (inferredTypes.empty()) {
       newResultTypes.push_back(paddedType);
     } else {
@@ -492,8 +458,8 @@ class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
     for (auto [index, arg] : llvm::enumerate(op.getArguments())) {
-      if (getPaddedType(arg.getType(), getSharding(arg), symbolTable) !=
-          arg.getType()) {
+      if (getDivisiblePaddedType(arg.getType(), getSharding(arg),
+                                 symbolTable) != arg.getType()) {
         return op.emitOpError()
                << "argument #" << index << " has a non-divisible sharding. "
                << "Shardy expects function IO to be divisible.";
@@ -502,8 +468,8 @@ class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
 
     for (int i = 0; i < op.getNumResults(); ++i) {
       Type resultType = op.getResultTypes()[i];
-      if (getPaddedType(resultType, getFuncResultSharding(op, i),
-                        symbolTable) != resultType) {
+      if (getDivisiblePaddedType(resultType, getFuncResultSharding(op, i),
+                                 symbolTable) != resultType) {
         return op.emitOpError()
                << "result #" << i << " has a non-divisible sharding. "
                << "Shardy expects function IO to be divisible.";
@@ -555,8 +521,8 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     SmallVector<Type> newResultTypes;
     for (int i = 0; i < op->getNumResults(); ++i) {
       Value result = op->getResult(i);
-      Type paddedType =
-          getPaddedType(result.getType(), getSharding(result), symbolTable);
+      Type paddedType = getDivisiblePaddedType(
+          result.getType(), getSharding(result), symbolTable);
       if (inferredTypes.empty()) {
         newResultTypes.push_back(paddedType);
       } else {
@@ -635,11 +601,10 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     }
 
     TensorShardingAttr outSharding = op.getOutSharding();
-    Type paddedInputType =
-        getPaddedType(rankedInputType, outSharding, symbolTable);
+    RankedTensorType paddedInputType = cast<RankedTensorType>(
+        getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
 
-    Operation* newOp = padCollectiveOp(op, input, inputOrig,
-                                       cast<RankedTensorType>(paddedInputType),
+    Operation* newOp = padCollectiveOp(op, input, inputOrig, paddedInputType,
                                        symbolTable, rewriter, cache);
 
     rewriter.replaceOp(op, newOp->getResults());
@@ -672,11 +637,10 @@ class ReduceScatterOpPattern
     }
 
     TensorShardingAttr outSharding = op.getOutSharding();
-    Type paddedInputType =
-        getPaddedType(rankedInputType, outSharding, symbolTable);
+    RankedTensorType paddedInputType = cast<RankedTensorType>(
+        getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
 
-    Operation* newOp = padCollectiveOp(op, input, inputOrig,
-                                       cast<RankedTensorType>(paddedInputType),
+    Operation* newOp = padCollectiveOp(op, input, inputOrig, paddedInputType,
                                        symbolTable, rewriter, cache);
 
     rewriter.replaceOp(op, newOp->getResults());
@@ -718,12 +682,11 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
     }
 
     TensorShardingAttr outSharding = op.getOutSharding();
-    Type paddedInputType =
-        getPaddedType(rankedInputType, outSharding, symbolTable);
+    RankedTensorType paddedInputType = cast<RankedTensorType>(
+        getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
 
     std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
-    Operation* newOp = padCollectiveOp(op, input, inputOrig,
-                                       cast<RankedTensorType>(paddedInputType),
+    Operation* newOp = padCollectiveOp(op, input, inputOrig, paddedInputType,
                                        symbolTable, rewriter, cache);
 
     Value res = newOp->getResult(0);
@@ -752,15 +715,14 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
         static_cast<const PaddedTypeConverter*>(getTypeConverter());
     TensorShardingAttr sharding = getSharding(op.getResult());
     RankedTensorType resultType = op.getResult().getType();
-    Type paddedType =
-        getPaddedType(resultType, sharding, converter->getSymbolTable());
+    RankedTensorType paddedType = cast<RankedTensorType>(getDivisiblePaddedType(
+        resultType, sharding, converter->getSymbolTable()));
 
     if (paddedType == resultType) {
       return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
     }
 
-    auto paddedRankedType = cast<RankedTensorType>(paddedType);
-    ArrayRef<int64_t> paddedShape = paddedRankedType.getShape();
+    ArrayRef<int64_t> paddedShape = paddedType.getShape();
 
     // Update limit_indices to expand the slice to match padded shape.
     ArrayRef<int64_t> limitIndices = op.getLimitIndices();
@@ -808,8 +770,8 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     }
 
     Value result = op.getResult();
-    auto paddedType = cast<RankedTensorType>(
-        getPaddedType(result.getType(), getSharding(result), symbolTable));
+    RankedTensorType paddedType = cast<RankedTensorType>(getDivisiblePaddedType(
+        result.getType(), getSharding(result), symbolTable));
 
     ArrayRef<int64_t> low = op.getEdgePaddingLow();
     ArrayRef<int64_t> high = op.getEdgePaddingHigh();
@@ -937,7 +899,7 @@ struct PadForDivisibilityPass
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
-      return getPaddedType(type, sharding, symbolTable) == type;
+      return getDivisiblePaddedType(type, sharding, symbolTable) == type;
     };
     auto isLegalValue = [&](Value value) {
       return isLegalType(value.getType(), getSharding(value));
