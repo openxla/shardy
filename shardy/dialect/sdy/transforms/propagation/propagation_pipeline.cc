@@ -35,6 +35,8 @@ namespace {
 
 void populateExportOptions(ExportOptions& options,
                            const PropagationOptions& propOptions) {
+  options.replicaCount = propOptions.replicaCount;
+  options.partitionCount = propOptions.partitionCount;
   options.keepShardingRules = propOptions.keepShardingRules;
   options.dumpDirectory = propOptions.dumpDirectory.str();
   options.avoidExportForPartitioning = propOptions.avoidExportForPartitioning;
@@ -56,7 +58,7 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
-  if (options.dedupFunctionsFully) {  // Aggresive compilation mode.
+  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
     pm.addPass(createAddFuncDataFlowEdgesPass());
   } else {  // Conservative compilation mode.
     pm.addPass(createFlattenCallGraphPass());
@@ -83,7 +85,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
-  if (options.dedupFunctionsFully) {  // Aggresive compilation mode.
+  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
     pm.addPass(createPropagateToFuncResultsPass());
     pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
   } else {  // Conservative compilation mode.
@@ -110,6 +112,8 @@ void addPropagationPipeline(OpPassManager& pm,
   addPropagationPipeline(pm, dumpIndex, options);
 }
 
+namespace {
+
 struct PropagationOptionsOptions
     : public PassPipelineOptions<PropagationOptionsOptions> {
   Option<bool> dedupFunctionsFully{
@@ -117,6 +121,8 @@ struct PropagationOptionsOptions
       llvm::cl::desc("Whether to dedup functions fully."),
       llvm::cl::init(false)};
 };
+
+}  // namespace
 
 void registerPropagationPipeline() {
   PassPipelineRegistration<PropagationOptionsOptions>(

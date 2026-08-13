@@ -35,6 +35,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OperationSupport.h"
@@ -109,12 +110,34 @@ void buildReduceComputation(OpWithComputation opWithComputation,
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;
   int64_t nextChannelId = 0;
+  int64_t replicaCount = 1;
+  int64_t partitionCount = 1;
 
   void addToConvertOp(Operation* op) { toConvertOps.insert(op); }
   void removeToConvertOp(Operation* op) { toConvertOps.erase(op); }
   bool needConversion(Operation* op) { return toConvertOps.contains(op); }
   int64_t getNextChannelId() { return nextChannelId++; }
 };
+
+// Returns a 0-rank i64 tensor containing the device ID (either replica_id or
+// partition_id based on topology config).
+Value getDeviceId(Location loc, const ConversionState& conversionState,
+                  ConversionPatternRewriter& rewriter) {
+  Type i64Ty = rewriter.getI64Type();
+  auto indexTy = RankedTensorType::get({}, i64Ty);
+  int64_t replicaCount = conversionState.replicaCount;
+  int64_t partitionCount = conversionState.partitionCount;
+
+  SDY_CHECK(replicaCount == 1 || partitionCount == 1)
+      << "Shardy partitioner convert_global_to_local does not support "
+         "both replica_count > 1 and partition_count > 1 yet.";
+  if (replicaCount > 1) {
+    return stablehlo::ConvertOp::create(
+        rewriter, loc, indexTy, stablehlo::ReplicaIdOp::create(rewriter, loc));
+  }
+  return stablehlo::ConvertOp::create(
+      rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
+}
 
 class GlobalToLocalTypeConverter : public TypeConverter {
  public:
@@ -609,14 +632,13 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
 // axes and local shard size.
 Value getDimensionOffset(Location loc, MeshAttr mesh,
                          ArrayRef<AxisRefAttr> axes, int64_t shardSize,
+                         const ConversionState& conversionState,
                          ConversionPatternRewriter& rewriter) {
   int64_t numDevices = mesh.getTotalSize();
   Type i64Ty = rewriter.getI64Type();
   auto indexTy = RankedTensorType::get({}, i64Ty);
 
-  // partitionId = (i64)stablehlo.partition_id
-  Value partitionId = stablehlo::ConvertOp::create(
-      rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
+  Value deviceId = getDeviceId(loc, conversionState, rewriter);
 
   // Calculate a compile-time offset table for this dimension.
   SmallVector<int64_t> offsetsTable = llvm::map_to_vector(
@@ -631,7 +653,7 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
                                 offsetsTable));
   auto offsetSlice = stablehlo::DynamicSliceOp::create(
       rewriter, loc, RankedTensorType::get({1}, i64Ty), tableConst,
-      ValueRange{partitionId}, rewriter.getDenseI64ArrayAttr({1}));
+      ValueRange{deviceId}, rewriter.getDenseI64ArrayAttr({1}));
 
   return stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice);
 }
@@ -639,6 +661,7 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
 Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
                               ArrayRef<AxisRefListAttr> slicingAxesPerDim,
                               RankedTensorType localResultType,
+                              const ConversionState& conversionState,
                               ConversionPatternRewriter& rewriter) {
   // Generate start indices for slicing.
   auto indexTy = RankedTensorType::get({}, rewriter.getI64Type());
@@ -653,8 +676,9 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
       continue;
     }
 
-    startIndices.push_back(getDimensionOffset(
-        loc, mesh, axes, localResultType.getDimSize(i), rewriter));
+    startIndices.push_back(getDimensionOffset(loc, mesh, axes,
+                                              localResultType.getDimSize(i),
+                                              conversionState, rewriter));
   }
 
   return stablehlo::DynamicSliceOp::create(rewriter, loc, localResultType,
@@ -689,7 +713,7 @@ class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
     rewriter.replaceOp(
         op, emitDynamicSliceForAxes(loc, adaptor.getTensor(), mesh,
                                     op.getSlicingAxesAttr(), localResultType,
-                                    rewriter));
+                                    conversionState, rewriter));
     conversionState.removeToConvertOp(op);
 
     return success();
@@ -1054,7 +1078,7 @@ class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
 
     rewriter.replaceOp(
         op, emitDynamicSliceForAxes(loc, globalConst, mesh, slicingAxesPerDim,
-                                    localType, rewriter));
+                                    localType, conversionState, rewriter));
     conversionState.removeToConvertOp(op);
 
     return success();
@@ -1266,9 +1290,9 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
                            op.getReductionOp(), rewriter);
 
     // Perform the "Scatter" part using a multi-dimensional DynamicSlice.
-    Value localPiece =
-        emitDynamicSliceForAxes(loc, allReduce.getResult(0), mesh,
-                                slicingAxesPerDim, localResultType, rewriter);
+    Value localPiece = emitDynamicSliceForAxes(
+        loc, allReduce.getResult(0), mesh, slicingAxesPerDim, localResultType,
+        conversionState, rewriter);
 
     rewriter.replaceOp(op, localPiece);
     conversionState.removeToConvertOp(op);
@@ -1751,7 +1775,8 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
     Location loc, MeshAttr mesh, TensorShardingAttr operandSharding,
     RankedTensorType globalOperandType, RankedTensorType localOperandType,
     ArrayRef<int64_t> startIndexMap, ArrayRef<int64_t> trivialSliceDims,
-    Type indexEltTy, ConversionPatternRewriter& rewriter, bool computeMask) {
+    Type indexEltTy, const ConversionState& conversionState,
+    ConversionPatternRewriter& rewriter, bool computeMask) {
   SmallVector<Value> minBounds, maxBounds;
   minBounds.reserve(startIndexMap.size());
   if (computeMask) {
@@ -1777,7 +1802,8 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
     ArrayRef<AxisRefAttr> axes =
         operandSharding.getDimShardings()[indexedDim].getAxes();
     int64_t shardSize = localOperandType.getDimSize(indexedDim);
-    Value offset = getDimensionOffset(loc, mesh, axes, shardSize, rewriter);
+    Value offset = getDimensionOffset(loc, mesh, axes, shardSize,
+                                      conversionState, rewriter);
     // Ensure offset matches the index element type (e.g., i32 or i64).
     offset = stablehlo::ConvertOp::create(
         rewriter, loc, RankedTensorType::get({}, indexEltTy), offset);
@@ -1842,8 +1868,8 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     Location loc, Value indices, MeshAttr mesh,
     TensorShardingAttr operandSharding, RankedTensorType globalOperandType,
     RankedTensorType localOperandType, DimNumbersOp dimNumbers,
-    ArrayRef<int64_t> trivialSliceDims, ConversionPatternRewriter& rewriter,
-    bool computeMask = true) {
+    ArrayRef<int64_t> trivialSliceDims, const ConversionState& conversionState,
+    ConversionPatternRewriter& rewriter, bool computeMask = true) {
   int64_t ivd = dimNumbers.getIndexVectorDim();
   ArrayRef<int64_t> startIndexMap;
   if constexpr (std::is_same_v<DimNumbersOp,
@@ -1873,7 +1899,8 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     }
     auto [minBounds, maxBounds] = getTrivialSliceDimBounds(
         loc, mesh, operandSharding, globalOperandType, localOperandType,
-        startIndexMap, trivialSliceDims, indexEltTy, rewriter, computeMask);
+        startIndexMap, trivialSliceDims, indexEltTy, conversionState, rewriter,
+        computeMask);
 
     // Builds bounds tensors matching the indices tensor type.
     auto buildBoundsTensor = [&](ArrayRef<Value> bounds) -> Value {
@@ -1935,7 +1962,8 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
         ArrayRef<AxisRefAttr> axes =
             operandSharding.getDimShardings()[dim].getAxes();
         int64_t shardSize = localOperandType.getDimSize(dim);
-        Value offset = getDimensionOffset(loc, mesh, axes, shardSize, rewriter);
+        Value offset = getDimensionOffset(loc, mesh, axes, shardSize,
+                                          conversionState, rewriter);
         Value zero = stablehlo::ConstantOp::create(
             rewriter, loc,
             DenseIntElementsAttr::get(cast<RankedTensorType>(offset.getType()),
@@ -2029,7 +2057,7 @@ class StablehloGatherOpPattern
         loc, adaptor.getStartIndices(), mesh, operandSharding,
         globalOperandType,
         cast<RankedTensorType>(adaptor.getOperand().getType()), dimNumbers,
-        trivialSliceDims, rewriter);
+        trivialSliceDims, conversionState, rewriter);
     Value result = stablehlo::GatherOp::create(
         rewriter, loc, converter->convertType(op.getResult()),
         adaptor.getOperand(), adjustedIndices, dimNumbers,
@@ -2152,7 +2180,7 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
         RankedTensorType::get({}, localType.getElementType());
     Value offset = getDimensionOffset(
         loc, mesh, sharding.getDimShardings()[iotaDim].getAxes(), shardSize,
-        rewriter);
+        conversionState, rewriter);
     Value offsetConverted = stablehlo::ConvertOp::create(
         rewriter, loc, convertedOffsetType, offset);
     Value broadcastOffset = stablehlo::BroadcastInDimOp::create(
@@ -2301,9 +2329,7 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
         rewriter, loc, safePadType, localInput, adaptor.getPaddingValue(), kLow,
         kHigh, interiorPaddingAttr);
 
-    Value partitionId = stablehlo::ConvertOp::create(
-        rewriter, loc, RankedTensorType::get({}, rewriter.getI64Type()),
-        stablehlo::PartitionIdOp::create(rewriter, loc));
+    Value partitionId = getDeviceId(loc, conversionState, rewriter);
 
     SmallVector<Value> sliceOffsets;
     sliceOffsets.reserve(rank);
@@ -2504,9 +2530,7 @@ class StablehloScatterOpPattern
           llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
             return getShardIndex(devId, mesh, reductionAxes) == 0;
           });
-      Value partitionId = stablehlo::ConvertOp::create(
-          rewriter, loc, RankedTensorType::get({}, rewriter.getI64Type()),
-          stablehlo::PartitionIdOp::create(rewriter, loc));
+      Value partitionId = getDeviceId(loc, conversionState, rewriter);
       auto tableConst = stablehlo::ConstantOp::create(
           rewriter, loc,
           DenseElementsAttr::get(
@@ -2568,8 +2592,8 @@ class StablehloScatterOpPattern
       adjustedIndices =
           computeLocalIndicesAndMask(loc, adjustedIndices, mesh, inputSharding,
                                      globalInputType, localInputType, dnums,
-                                     indexedInputDims, rewriter,
-                                     /*computeMask=*/false)
+                                     indexedInputDims, conversionState,
+                                     rewriter, /*computeMask=*/false)
               .first;
     }
 
@@ -2789,6 +2813,12 @@ struct ConvertGlobalToLocalPass
  protected:
   void runOnOperation() final {
     ModuleOp module = getOperation();
+    if (replicaCount > 1 && partitionCount > 1) {
+      module.emitError(
+          "Shardy partitioner convert_global_to_local does not support "
+          "both replica_count > 1 and partition_count > 1 yet.");
+      return signalPassFailure();
+    }
     SymbolTable symbolTable(module);
     GlobalToLocalTypeConverter typeConverter(symbolTable);
 
@@ -2801,6 +2831,8 @@ struct ConvertGlobalToLocalPass
     });
 
     ConversionState conversionState;
+    conversionState.replicaCount = replicaCount;
+    conversionState.partitionCount = partitionCount;
     // Walk the module and collect the set of ops that need to be converted.
     // We use the set to determine whether a given op is legal or not during
     // conversion.

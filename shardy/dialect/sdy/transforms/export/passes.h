@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <stdbool.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -41,6 +42,16 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 struct ExportOptions : public PassPipelineOptions<ExportOptions> {
+  Option<int64_t> replicaCount{
+      *this, "replica-count",
+      llvm::cl::desc("Number of replicas (data parallelism)."),
+      llvm::cl::init(1)};
+
+  Option<int64_t> partitionCount{
+      *this, "partition-count",
+      llvm::cl::desc("Number of partitions (model parallelism)."),
+      llvm::cl::init(1)};
+
   Option<std::string> dumpDirectory{
       *this, "dump-directory",
       llvm::cl::desc("Directory to dump intermediate MLIR modules."),

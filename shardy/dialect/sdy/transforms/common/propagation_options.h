@@ -16,6 +16,8 @@ limitations under the License.
 #ifndef SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_PROPAGATION_OPTIONS_H_
 #define SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_PROPAGATION_OPTIONS_H_
 
+#include <cstdint>
+
 #include "llvm/ADT/StringRef.h"
 
 namespace mlir {
@@ -24,6 +26,11 @@ namespace sdy {
 // Options to control the Shardy propagation passes.
 
 struct PropagationOptions {
+  // Number of data-parallel replicas (defaults to 1).
+  int64_t replicaCount = 1;
+  // Number of model-parallel partitions (defaults to 1).
+  int64_t partitionCount = 1;
+
   // Whether to keep existing and created `sdy::OpShardingRuleAttr` on ops.
   bool keepShardingRules = false;
   // The system directory to dump various rewritten modules for debugging.
@@ -68,7 +75,6 @@ struct PropagationOptions {
 
   // Whether to clear reverse op sharding on export.
   bool clearReverseOpSharding = false;
-
   // Whether to inline meshes.
   bool inlineMeshes = true;
 };

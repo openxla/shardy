@@ -262,7 +262,11 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
             "bool", /*default=*/"false",
             "Combine multi-dimension reduce-scatter into a single reduce-scatter.">,
       Option<"enableRGV3", "enable-rgv3", "bool", /*default=*/"false",
-           "Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.">
+           "Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.">,
+      Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
+             "Number of replicas (data parallelism).">,
+      Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
+             "Number of partitions (model parallelism).">
     ];
 }
 
@@ -331,6 +335,10 @@ def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors"
   let options = [
       Option<"enableHaloExchange", "enable-halo-exchange",
             "bool", /*default=*/"true",
-            "Implement halo exchange logic for windowed operations.">
+            "Implement halo exchange logic for windowed operations.">,
+      Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
+             "Number of replicas (data parallelism).">,
+      Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
+             "Number of partitions (model parallelism).">
     ];
 }

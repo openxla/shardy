@@ -99,6 +99,10 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
 // Converts an SDY MeshAttr to a StableHLO MeshAttr.
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 
+// Returns a rank-0 i64 tensor containing the device ID for the current partition/replica.
+Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
+                  OpBuilder& rewriter);
+
 // Returns the logical index of the shard that the given device (`deviceId`)
 // resides in, along a dimension sharded by the provided `axes`.
 // This "shard index" ranges is [0, (TotalShardCount - 1)] and identifies
