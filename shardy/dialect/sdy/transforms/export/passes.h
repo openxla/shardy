@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <stdbool.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -41,6 +42,16 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 struct ExportOptions : public PassPipelineOptions<ExportOptions> {
+  Option<int64_t> replicaCount{
+      *this, "replica-count",
+      llvm::cl::desc("Number of replicas (data parallelism)."),
+      llvm::cl::init(1)};
+
+  Option<int64_t> partitionCount{
+      *this, "partition-count",
+      llvm::cl::desc("Number of partitions (model parallelism)."),
+      llvm::cl::init(1)};
+
   Option<std::string> dumpDirectory{
       *this, "dump-directory",
       llvm::cl::desc("Directory to dump intermediate MLIR modules."),
@@ -62,6 +73,18 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       *this, "remove-all-gather-reduce-scatter-for-cmv1",
       llvm::cl::desc("Remove all-gather and reduce-scatter ops for CMV1."),
       llvm::cl::init(false)};
+
+  Option<bool> enablePerInstructionPartitioning{
+      *this, "enable-per-instruction-partitioning",
+      llvm::cl::desc("Enable selective per-instruction partitioning and "
+                     "sdy.manual_computation wrapping."),
+      llvm::cl::init(false)};
+
+  Option<std::string> perInstructionPartitioningFilter{
+      *this, "per-instruction-partitioning-filter",
+      llvm::cl::desc("Filter string for selective partitioning (e.g. 'dot, "
+                     "pad', 'selectLow=0, selectHigh=10')."),
+      llvm::cl::init("")};
 
   Option<bool> keepShardingRules{
       *this, "keep-sharding-rules",

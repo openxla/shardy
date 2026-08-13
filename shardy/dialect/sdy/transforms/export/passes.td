@@ -262,7 +262,11 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
             "bool", /*default=*/"false",
             "Combine multi-dimension reduce-scatter into a single reduce-scatter.">,
       Option<"enableRGV3", "enable-rgv3", "bool", /*default=*/"false",
-           "Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.">
+           "Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.">,
+      Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
+             "Number of replicas (data parallelism).">,
+      Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
+             "Number of partitions (model parallelism).">
     ];
 }
 
@@ -332,5 +336,32 @@ def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors"
       Option<"enableHaloExchange", "enable-halo-exchange",
             "bool", /*default=*/"true",
             "Implement halo exchange logic for windowed operations.">
+    ];
+}
+
+def PerInstructionPartitioningPass : Pass<"sdy-per-instruction-partitioning", "ModuleOp"> {
+  let summary = "Selectively extracts target instructions, runs the partitioner pipeline on them to generate device-local code, and wraps them in sdy.manual_computation.";
+  let description = [{
+    For debugging and bisection purposes, selectively partitions individual instructions using
+    the standalone Shardy partitioner pipeline (resolve-permutation-factors,
+    reshard-to-collectives, pad-for-divisibility, convert-global-to-local), and
+    wraps the resulting device-local code inside sdy.manual_computation. This
+    keeps the rest of the global program intact so XLA SPMD partitions only the
+    unwrapped global instructions.
+  }];
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+  let options = [
+      Option<"filter", "filter",
+            "std::string", /*default=*/"\"\"",
+            "Filter string for selective partitioning. Can be empty (all sharded ops), "
+            "comma-separated op name substrings (e.g. 'dot, pad'), or key-values like "
+            "'selectLow=0, selectHigh=10'.">,
+      Option<"enableHaloExchange", "enable-halo-exchange",
+            "bool", /*default=*/"true",
+            "Implement halo exchange logic for windowed operations inside the sub-pipeline.">,
+      Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
+             "Number of replicas (data parallelism).">,
+      Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
+             "Number of partitions (model parallelism).">
     ];
 }
