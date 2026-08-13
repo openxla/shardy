@@ -53,8 +53,7 @@ func.func @two_params_move_suffix(%arg0: tensor<2x8x2x4xf32> {sdy.sharding = #sd
   // CHECK: %[[A2A:.*]] = "stablehlo.all_to_all"(%[[RESHAPE1]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
   // CHECK-SAME: concat_dimension = 0 : i64,
-  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 1, 3], [4, 6, 5, 7], [8, 10, 9, 11], [12, 14, 13, 15]]>
-  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "z">, #stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>]>
+  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 2, 1, 3], [4, 6, 5, 7], [8, 10, 9, 11], [12, 14, 13, 15]]>
   // CHECK-SAME: split_count = 4 : i64,
   // CHECK-SAME: split_dimension = 0 : i64
   // CHECK-SAME: }> : (tensor<4x1x2x1x2xf32>) -> tensor<4x1x2x1x2xf32>

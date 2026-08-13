@@ -117,6 +117,9 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
 Type getDivisiblePaddedType(
     Type type, TensorShardingAttr sharding, const SymbolTable& symbolTable,
     const llvm::DenseSet<StringRef>* allowedAxes = nullptr);
+
+// Converts an SDY AxisRefAttr to a StableHLO AxisRefAttr.
+mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef);
 }  // namespace sdy
 }  // namespace mlir
 

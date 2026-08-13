@@ -1,8 +1,8 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,COMBINED,V1
-// RUN: sdy_opt %s -sdy-convert-global-to-local='per-dim-all-gather=true' | FileCheck %s --check-prefixes=CHECK,PER-DIM,V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,COMBINED,V1,COMBINED-V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local='per-dim-all-gather=true' | FileCheck %s --check-prefixes=CHECK,PER-DIM,V1,PER-DIM-V1
 
-// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,COMBINED,V3
-// RUN: sdy_opt %s -sdy-convert-global-to-local='per-dim-all-gather=true enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,PER-DIM,V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,COMBINED,V3,COMBINED-V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local='per-dim-all-gather=true enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,PER-DIM,V3,PER-DIM-V3
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
@@ -68,8 +68,7 @@ func.func @one_dim_two_axes_subaxis(%arg0 : tensor<8x16xf32> {sdy.sharding = #sd
   // CHECK: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{
   // CHECK-SAME:   all_gather_dim = 0 : i64,
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 4, type = 1>,
-  // V1-SAME{LITERAL}:   replica_groups = dense<[[0, 2, 8, 10], [1, 3, 9, 11], [4, 6, 12, 14], [5, 7, 13, 15]]>
-  // V3-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "x">, #stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>]>
+  // CHECK-SAME{LITERAL}:   replica_groups = dense<[[0, 2, 8, 10], [1, 3, 9, 11], [4, 6, 12, 14], [5, 7, 13, 15]]>
   // CHECK-SAME:   use_global_device_ids
   // CHECK-SAME: }> : (tensor<2x8xf32>) -> tensor<8x8xf32>
   %0 = sdy.all_gather [{"x", "y":(2)2}, {}] %arg0 out_sharding=<@mesh_2_4_2, [{}, {"z"}]> : tensor<8x16xf32>
@@ -88,13 +87,13 @@ func.func @two_dims_yz(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
   // PER-DIM-SAME: all_gather_dim = 1 : i64,
   // PER-DIM-SAME: channel_handle = #stablehlo.channel_handle<handle = 5, type = 1>,
   // PER-DIM-V1-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13], [14, 15]]>
-  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "z">]>, use_global_device_ids}>
+  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "z">]>
   // PER-DIM-SAME: }> : (tensor<1x8xf32>) -> tensor<1x16xf32>
   // PER-DIM: %[[RESULT:.*]] = "stablehlo.all_gather"(%[[GATHER1]]) <{
   // PER-DIM-SAME: all_gather_dim = 0 : i64,
   // PER-DIM-SAME: channel_handle = #stablehlo.channel_handle<handle = 6, type = 1>,
   // PER-DIM-V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]]>
-  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">]>, use_global_device_ids}>
+  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">]>
   // PER-DIM-SAME: }> : (tensor<1x16xf32>) -> tensor<4x16xf32>
 
   // --- Combined Dimensions All-Gather Strategy (per-dim-all-gather=false) ---
@@ -126,13 +125,13 @@ func.func @two_dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
   // PER-DIM-SAME: all_gather_dim = 1 : i64,
   // PER-DIM-SAME: channel_handle = #stablehlo.channel_handle<handle = 7, type = 1>,
   // PER-DIM-V1-SAME{LITERAL}: replica_groups = dense<[[0, 8], [1, 9], [2, 10], [3, 11], [4, 12], [5, 13], [6, 14], [7, 15]]>
-  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "x">]>, use_global_device_ids}>
+  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "x">]>
   // PER-DIM-SAME: }> : (tensor<1x8xf32>) -> tensor<1x16xf32>
   // PER-DIM: %[[RESULT:.*]] = "stablehlo.all_gather"(%[[GATHER1]]) <{
   // PER-DIM-SAME: all_gather_dim = 0 : i64,
   // PER-DIM-SAME: channel_handle = #stablehlo.channel_handle<handle = 8, type = 1>,
   // PER-DIM-V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]]>
-  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">]>, use_global_device_ids}>
+  // PER-DIM-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">]>
   // PER-DIM-SAME: use_global_device_ids
   // PER-DIM-SAME: }> : (tensor<1x16xf32>) -> tensor<4x16xf32>
 

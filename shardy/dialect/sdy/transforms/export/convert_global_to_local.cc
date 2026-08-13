@@ -361,32 +361,35 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
   return maxChannelId + 1;
 }
 
+bool hasSubAxis(ArrayRef<AxisRefAttr> axes) {
+  for (AxisRefAttr axis : axes) {
+    if (axis.getSubAxisInfo()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
 Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
                              OpBuilder& rewriter) {
-  MLIRContext* context = rewriter.getContext();
-  SmallVector<Attribute> newAxes;
-  newAxes.reserve(axes.size());
+  MLIRContext* ctx = rewriter.getContext();
+  SmallVector<Attribute> shloAxes;
   for (AxisRefAttr axis : axes) {
-    mlir::stablehlo::SubAxisInfoAttr subAxisInfo = nullptr;
-    if (auto sdySubAxisInfo = axis.getSubAxisInfo()) {
-      subAxisInfo = mlir::stablehlo::SubAxisInfoAttr::get(
-          context, sdySubAxisInfo.getPreSize(), sdySubAxisInfo.getSize());
-    }
-    newAxes.push_back(mlir::stablehlo::AxisRefAttr::get(context, axis.getName(),
-                                                        subAxisInfo));
+    shloAxes.push_back(convertAxisRefAttr(axis));
   }
   return mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
-      meshOrRef.getContext(), meshOrRef, rewriter.getArrayAttr(newAxes));
+      ctx, meshOrRef, rewriter.getArrayAttr(shloAxes));
 }
 
 Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
                            Attribute meshOrRef, bool enableRGV3,
                            OpBuilder& rewriter) {
-  return enableRGV3 ? getReplicaGroupsV3(axes, meshOrRef, rewriter)
-                    : getReplicaGroups(
-                          AxisRefListAttr::get(rewriter.getContext(), axes),
-                          mesh, rewriter);
+  return (enableRGV3 && !hasSubAxis(axes))
+             ? getReplicaGroupsV3(axes, meshOrRef, rewriter)
+             : getReplicaGroups(
+                   AxisRefListAttr::get(rewriter.getContext(), axes),
+                   mesh, rewriter);
 }
 
 // Returns a pair containing the replica groups (as an Attribute) and the
@@ -394,7 +397,7 @@ Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
 std::pair<Attribute, int64_t> getReplicaGroupsAndSize(
     ArrayRef<AxisRefAttr> axes, MeshAttr mesh, Attribute meshOrRef,
     bool enableRGV3, OpBuilder& rewriter) {
-  if (enableRGV3) {
+  if (enableRGV3 && !hasSubAxis(axes)) {
     Attribute replicaGroups = getReplicaGroupsV3(axes, meshOrRef, rewriter);
     // Group size is the product of the sizes of the sharding axes.
     int64_t groupSize = getTotalAxesSize(axes, mesh);
@@ -559,10 +562,10 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
            "canonicalization.";
 
     MeshAttr mesh = op.getOutSharding().getMesh(op);
-    Attribute meshOrRef = op.getOutSharding().getMeshOrRef();
     if (!mesh) {
       return op.emitOpError("failed to resolve mesh");
     }
+    Attribute meshOrRef = op.getOutSharding().getMeshOrRef();
 
     if (perDimAllGather || numGatheringDims == 1) {
       return rewriteAllGatherPerDim(op, mesh, meshOrRef, adaptor.getTensor(),
@@ -600,9 +603,9 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
       return op.emitOpError("failed to resolve mesh");
     }
 
-    Attribute replicaGroups =
-        getReplicaGroups(op.getReductionAxesAttr(), mesh,
-                         outSharding.getMeshOrRef(), enableRGV3, rewriter);
+    Attribute meshOrRef = outSharding.getMeshOrRef();
+    Attribute replicaGroups = getReplicaGroups(op.getReductionAxesAttr(), mesh,
+                                               meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
         kChannelHandleType);
