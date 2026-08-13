@@ -32,6 +32,8 @@ logical shapes to device-local physical shapes.
 -per-dim-all-gather                     : Keep per-dimension all-gather without combining them into a single all-gather.
 -combine-multi-dimension-reduce-scatter : Combine multi-dimension reduce-scatter into a single reduce-scatter.
 -enable-rgv3                            : Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.
+-replica-count                          : Number of replicas (data parallelism).
+-partition-count                        : Number of partitions (model parallelism).
 ```
 
 ### `-sdy-drop-sharding-and-mesh`
@@ -118,6 +120,26 @@ Inserts reshards for func and call sharding conflicts on results.
 ### `-sdy-pad-for-divisibility`
 
 _Pads tensors with non-divisible shardings to divisible shapes._
+
+### `-sdy-per-instruction-partitioning`
+
+_Selectively extracts target instructions, runs the partitioner pipeline on them to generate device-local code, and wraps them in sdy.manual_computation._
+
+For debugging and bisection purposes, selectively partitions individual instructions using
+the standalone Shardy partitioner pipeline (resolve-permutation-factors,
+reshard-to-collectives, pad-for-divisibility, convert-global-to-local), and
+wraps the resulting device-local code inside sdy.manual_computation. This
+keeps the rest of the global program intact so XLA SPMD partitions only the
+unwrapped global instructions.
+
+#### Options
+
+```
+-filter               : Filter string for selective partitioning. Can be empty (all sharded ops), comma-separated op name substrings (e.g. 'dot, pad'), or key-values like 'selectLow=0, selectHigh=10'.
+-enable-halo-exchange : Implement halo exchange logic for windowed operations inside the sub-pipeline.
+-replica-count        : Number of replicas (data parallelism).
+-partition-count      : Number of partitions (model parallelism).
+```
 
 ### `-sdy-propagate-to-func-results`
 
@@ -211,6 +233,8 @@ default of `enableHaloExchange` is true.
 
 ```
 -enable-halo-exchange : Implement halo exchange logic for windowed operations.
+-replica-count        : Number of replicas (data parallelism).
+-partition-count      : Number of partitions (model parallelism).
 ```
 
 ### `-sdy-sharding-constraint-to-reshard`
