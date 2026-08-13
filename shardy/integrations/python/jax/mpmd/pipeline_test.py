@@ -31,7 +31,7 @@ def _make_fragment(
   # Use None instead of [] to avoid shared mutable default argument
   if origins is None:
     origins = ()
-  return pipeline.FragmentInfo(origins=origins, mesh_name=mesh_name, **kwargs)
+  return pipeline.FragmentInfo(origins=origins, mesh_name=mesh_name, **kwargs)  # pyrefly: ignore[bad-argument-type]
 
 
 class BasicScheduleBuildTest(unittest.TestCase):
@@ -58,7 +58,7 @@ class BasicScheduleBuildTest(unittest.TestCase):
     )
 
     self.assertIsNotNone(schedule)
-    self.assertEqual(len(schedule.schedule_merge_rule_builders), 2)
+    self.assertEqual(len(schedule.schedule_merge_rule_builders), 2)  # pyrefly: ignore[bad-argument-type]
 
   def test_direct_construction_schedule_example(self):
     # This test implements the same logic as the predicate-based example above.
@@ -105,7 +105,7 @@ class BasicScheduleBuildTest(unittest.TestCase):
     )
 
     self.assertIsNotNone(schedule)
-    self.assertEqual(len(schedule.schedule_merge_rule_builders), 1)
+    self.assertEqual(len(schedule.schedule_merge_rule_builders), 1)  # pyrefly: ignore[bad-argument-type]
 
 
 class MinimalCreateTargetInfoTest(parameterized.TestCase):

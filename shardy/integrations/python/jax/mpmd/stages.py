@@ -556,7 +556,7 @@ class MpmdLowered(stages.Lowered):
               ' which is not defined by the topology.'
           )
       else:
-        compiler_options = {k: compiler_options for k in self.topology}
+        compiler_options = {k: compiler_options for k in self.topology}  # pyrefly: ignore[bad-assignment]
       compiler_options = cast(
           mpmd_types.MeshToCompileOptions, compiler_options
       )  # for pytype.
@@ -644,7 +644,7 @@ class MpmdLowered(stages.Lowered):
       )
       const_shardings = [
           jax.sharding.NamedSharding(
-              lowered_mesh_to_compiled_mesh[s.mesh],
+              lowered_mesh_to_compiled_mesh[s.mesh],  # pyrefly: ignore[bad-index]
               s.spec,
               memory_kind=s.memory_kind,
           )

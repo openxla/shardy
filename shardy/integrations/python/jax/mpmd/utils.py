@@ -229,4 +229,4 @@ def weakref_lru_cache(
     f: Callable[..., Any] | None = None, *, maxsize: int | None = 2048,
 ):
   tc_fn = _jax.config.trace_context
-  return lib_weakref_lru_cache.weakref_lru_cache(tc_fn, f, maxsize=maxsize)
+  return lib_weakref_lru_cache.weakref_lru_cache(tc_fn, f, maxsize=maxsize)  # pyrefly: ignore[bad-argument-type]

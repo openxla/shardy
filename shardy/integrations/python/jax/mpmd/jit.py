@@ -202,7 +202,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
       _private_parameters = mlir.LoweringParameters()
     _private_parameters = dataclasses.replace(
         _private_parameters,
-        override_lowering_rules=ops.jit_lowerings,
+        override_lowering_rules=ops.jit_lowerings,  # pyrefly: ignore[bad-argument-type]
     )
 
     logging.info('Lowering function %s via jax.jit.', func_name)
@@ -325,7 +325,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
     partitioning_args = _MpmdPartitioningArgs(
         func_name=func_name,
         named_meshes=topology_shape,
-        assignment=self._mpmd_config.mesh_and_stage_assignment,
+        assignment=self._mpmd_config.mesh_and_stage_assignment,  # pyrefly: ignore[bad-argument-type]
         input_meshes=kept_inputs_mesh_assignment,
         output_meshes=flat_output_mesh_assignment,
         donate_argnums=donate_argnums,
@@ -338,7 +338,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
         jax_fn_info=jax_fn_info,
         args_info=args_info,
         topology=self._mpmd_config.topology,
-        name_to_mesh_map=self._mpmd_config.mesh_and_stage_assignment,
+        name_to_mesh_map=self._mpmd_config.mesh_and_stage_assignment,  # pyrefly: ignore[bad-argument-type]
         flat_input_mesh_assignment=flat_input_mesh_assignment,
     )
     return mlir_module, partitioning_args, lowered_args
@@ -423,7 +423,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
     return partitioning_result
 
   @typing_extensions.override
-  def lower(
+  def lower(  # pyrefly: ignore[bad-override]
       self,
       _private_parameters: mlir.LoweringParameters | None = None,  # pytype: disable=signature-mismatch  # pylint: disable=invalid-name
   ) -> stages.MpmdLowered:
@@ -525,9 +525,9 @@ def _standardize_sharding_mesh(
     nonlocal has_error
 
     if isinstance(sharding, jax_layout.Format):
-      return jax_layout.Format(
+      return jax_layout.Format(  # pyrefly: ignore[bad-return]
           sharding.layout,
-          sharding=replace_mesh(path, sharding.sharding),
+          sharding=replace_mesh(path, sharding.sharding),  # pyrefly: ignore[bad-argument-type]
       )
 
     if not isinstance(sharding, jax.sharding.NamedSharding):
@@ -595,7 +595,7 @@ def _to_sharded_shape(
       sharding = sharding.sharding
 
     if isinstance(sharding, jax.sharding.NamedSharding):
-      sharding = _replace_mesh_on_sharding(path, x.sharding, mesh)
+      sharding = _replace_mesh_on_sharding(path, x.sharding, mesh)  # pyrefly: ignore[bad-argument-type]
       if sharding is None:
         has_error = True
     else:

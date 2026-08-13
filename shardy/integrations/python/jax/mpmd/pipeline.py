@@ -46,8 +46,8 @@ import dataclasses
 import enum
 from typing import Callable
 
-FragmentMergeRules = Sequence['FragmentMergeRule']
-FragmentScheduleRules = Sequence['FragmentScheduleRule']
+FragmentMergeRules = Sequence['FragmentMergeRule']  # pyrefly: ignore[not-a-type]
+FragmentScheduleRules = Sequence['FragmentScheduleRule']  # pyrefly: ignore[not-a-type]
 
 # Function that constructs a target FragmentInfo from a sequence of source
 # fragments that will be merged together into the target.

@@ -35,14 +35,14 @@ class Square(hijax.VJPHiPrimitive):
     self.params = {}
     super().__init__()
 
-  def expand(self, x):
+  def expand(self, x):  # pyrefly: ignore[bad-override]
     return x**2
 
   def jvp(self, primals, tangents):
     (x,), (t,) = primals, tangents
     return self(x), t * 2.0 * x
 
-  def vjp_fwd(self, nzs_in, x):
+  def vjp_fwd(self, nzs_in, x):  # pyrefly: ignore[bad-override]
     return (self(x), x)
 
   def vjp_bwd_retval(self, res, t):
@@ -282,7 +282,7 @@ class BroadcastTest(absltest.TestCase):
   def test_eager_execution(self):
     """Checks the eager execution of the broadcast op."""
     np.testing.assert_equal(
-        ops.broadcast(np.ones((3, 5), dtype=jnp.float32)),
+        ops.broadcast(np.ones((3, 5), dtype=jnp.float32)),  # pyrefly: ignore[bad-argument-type]
         np.ones((3, 5), dtype=jnp.float32),
     )
 

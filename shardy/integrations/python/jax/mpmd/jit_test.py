@@ -728,9 +728,9 @@ class SdyPropagationTest(parameterized.TestCase):
     assignment = {'name1': 'mesh1', 'name2': 'mesh2'}
 
     def f1():
-      x = mpmd.named_tensor(np.ones((16, 16), dtype=np.float32), name='name1')
+      x = mpmd.named_tensor(np.ones((16, 16), dtype=np.float32), name='name1')  # pyrefly: ignore[bad-argument-type]
       y = mpmd.named_tensor(
-          np.full((16, 16), 2, dtype=np.float32), name='name2'
+          np.full((16, 16), 2, dtype=np.float32), name='name2'  # pyrefly: ignore[bad-argument-type]
       )
       return (
           test_utils.with_sharding(x, ('x',), topology['mesh1']),
@@ -1343,8 +1343,8 @@ class SdyPropagationTest(parameterized.TestCase):
 
   def test_output_on_different_meshes(self):
     def fn():
-      x = mpmd.named_tensor(np.ones((3, 5), dtype=np.float32), name='name1')
-      y = mpmd.named_tensor(np.full((5, 7), 2, dtype=np.float32), name='name2')
+      x = mpmd.named_tensor(np.ones((3, 5), dtype=np.float32), name='name1')  # pyrefly: ignore[bad-argument-type]
+      y = mpmd.named_tensor(np.full((5, 7), 2, dtype=np.float32), name='name2')  # pyrefly: ignore[bad-argument-type]
       return x, y
 
     topology = test_utils.get_two_mesh_topology()

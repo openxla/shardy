@@ -121,7 +121,7 @@ class MakeConfigTest(parameterized.TestCase):
   ):
     topology = {'mesh1': jax.sharding.Mesh(jax.devices(), 'x')}
 
-    with self.assertRaisesRegex(ValueError, expected_error):
+    with self.assertRaisesRegex(ValueError, expected_error):  # pyrefly: ignore[bad-argument-type]
       types.make_config(
           topology,
           name_to_mesh_assignment,
@@ -264,7 +264,7 @@ class ValidateAndMergePartitioningOptionsTest(parameterized.TestCase):
   def test_no_pipeline_options_returns_user_options(self):
     user_options = {'mpmd_infer_transfers': True}
     result = types.validate_and_merge_partitioning_options(
-        pipeline_required_options=None, user_provided_options=user_options
+        pipeline_required_options=None, user_provided_options=user_options  # pyrefly: ignore[bad-argument-type]
     )
     self.assertEqual(user_options, result)
 

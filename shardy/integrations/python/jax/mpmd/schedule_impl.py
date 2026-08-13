@@ -61,14 +61,14 @@ def one_fwd_one_bwd_schedule_predicate(
   # of microbatch 0 must be scheduled before the forward computation of
   # microbatch 4: 0 == 4 - 4 + 0.
   if transpose_count_f1 == 1 and transpose_count_f2 == 0:
-    return call_counter_f1 == call_counter_f2 - context.num_meshes + f1.stage_id
+    return call_counter_f1 == call_counter_f2 - context.num_meshes + f1.stage_id  # pyrefly: ignore[unsupported-operation]
 
   # Example: in mesh/stage 0 of pipeline of depth 4, the forward computation of
   # microbatch 5 must be scheduled before the backward computation of
   # microbatch 2: 5 == 2 + 4 - (0 + 1).
   if transpose_count_f1 == 0 and transpose_count_f2 == 1:
     return call_counter_f1 == call_counter_f2 + context.num_meshes - (
-        f1.stage_id + 1
+        f1.stage_id + 1  # pyrefly: ignore[unsupported-operation]
     )
 
   # If the fragments have the same transpose count, guarantee that the
@@ -164,12 +164,12 @@ def zero_bubble_h1_schedule_predicate(
 
   # Clause 1: Ba(i) < F(i + num_meshes - stage_id)
   if transpose_count_f1 == 1 and not is_wgrad_f1 and transpose_count_f2 == 0:
-    return call_counter_f1 == call_counter_f2 - context.num_meshes + f1.stage_id
+    return call_counter_f1 == call_counter_f2 - context.num_meshes + f1.stage_id  # pyrefly: ignore[unsupported-operation]
 
   # Clause 2: F(i + num_meshes - stage_id - 1) < Ba(i)
   if transpose_count_f1 == 0 and transpose_count_f2 == 1 and not is_wgrad_f2:
     return call_counter_f1 == call_counter_f2 + context.num_meshes - (
-        f1.stage_id + 1
+        f1.stage_id + 1  # pyrefly: ignore[unsupported-operation]
     )
 
   # The rest of the conditions position the parameter gradient fragments.
@@ -205,7 +205,7 @@ def zero_bubble_h1_schedule_predicate(
       and transpose_count_f2 == 1
       and not is_wgrad_f2
   ):
-    return call_counter_f2 - call_counter_f1 == f1.stage_id + 1
+    return call_counter_f2 - call_counter_f1 == f1.stage_id + 1  # pyrefly: ignore[unsupported-operation]
 
   return False
 
@@ -228,10 +228,10 @@ def zero_bubble_h2_schedule_predicate(
   is_wgrad_f2 = f2.split_type == pipeline.SplitFragmentType.DROP_TRANSFERRED
 
   # How many fwd we are allowed to stream before entering steady state
-  init_fwd = init_fwd_per_stage_fn(f1.stage_id)
+  init_fwd = init_fwd_per_stage_fn(f1.stage_id)  # pyrefly: ignore[bad-argument-type]
   # The ZeroBubbleH2 pipeline is diagonally symmetric
   complement_init_fwd = init_fwd_per_stage_fn(
-      context.num_meshes - f1.stage_id - 1
+      context.num_meshes - f1.stage_id - 1  # pyrefly: ignore[unsupported-operation]
   )
 
   # Initial phase
@@ -239,7 +239,7 @@ def zero_bubble_h2_schedule_predicate(
   if (
       transpose_count_f1 == 0
       and transpose_count_f2 == 1
-      and f1.call_counter < init_fwd
+      and f1.call_counter < init_fwd  # pyrefly: ignore[unsupported-operation]
   ):
     return True
 
@@ -248,18 +248,18 @@ def zero_bubble_h2_schedule_predicate(
       transpose_count_f1 == 1
       and not is_wgrad_f1
       and transpose_count_f2 == 0
-      and f2.call_counter >= init_fwd
+      and f2.call_counter >= init_fwd  # pyrefly: ignore[unsupported-operation]
   ):
-    return f2.call_counter - f1.call_counter == init_fwd
+    return f2.call_counter - f1.call_counter == init_fwd  # pyrefly: ignore[unsupported-operation]
 
   # Clause 3: F(i + init_fwd - 1) < Ba(i)
   if (
       transpose_count_f1 == 0
-      and f1.call_counter >= init_fwd
+      and f1.call_counter >= init_fwd  # pyrefly: ignore[unsupported-operation]
       and transpose_count_f2 == 1
       and not is_wgrad_f2
   ):
-    return f1.call_counter - f2.call_counter == init_fwd - 1
+    return f1.call_counter - f2.call_counter == init_fwd - 1  # pyrefly: ignore[unsupported-operation]
 
   # Clause 4: Ba(i + complement_init_fwd - 1) < Bw(i)
   if (
@@ -268,7 +268,7 @@ def zero_bubble_h2_schedule_predicate(
       and transpose_count_f2 == 1
       and is_wgrad_f2
   ):
-    return f1.call_counter - f2.call_counter == complement_init_fwd - 1
+    return f1.call_counter - f2.call_counter == complement_init_fwd - 1  # pyrefly: ignore[unsupported-operation]
 
   # Clause 5: Bw(i) < Ba(i + complement_init_fwd)
   if (
@@ -277,7 +277,7 @@ def zero_bubble_h2_schedule_predicate(
       and transpose_count_f2 == 1
       and not is_wgrad_f2
   ):
-    return f2.call_counter - f1.call_counter == complement_init_fwd
+    return f2.call_counter - f1.call_counter == complement_init_fwd  # pyrefly: ignore[unsupported-operation]
 
   return False
 
@@ -353,8 +353,8 @@ def parallel_pipelines_with_wraparound_schedule_predicate(
   # stage_id is the pivot. If both call_counters are on the same side of
   # the pivot, we flip the order. But if they are on different
   # sides, then we take the order as per normal.
-  if (call_counter_f1 > f1.stage_id and call_counter_f2 > f1.stage_id) or (
-      call_counter_f1 < f1.stage_id and call_counter_f2 < f1.stage_id
+  if (call_counter_f1 > f1.stage_id and call_counter_f2 > f1.stage_id) or (  # pyrefly: ignore[unsupported-operation]
+      call_counter_f1 < f1.stage_id and call_counter_f2 < f1.stage_id  # pyrefly: ignore[unsupported-operation]
   ):
     return call_counter_f1 > call_counter_f2
 

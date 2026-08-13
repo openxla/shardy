@@ -198,7 +198,7 @@ def named_computation(
     )
 
   if fn is None:
-    return lambda fn: named_computation(
+    return lambda fn: named_computation(  # pyrefly: ignore[bad-return]
         fn, name=name, static_argnames=static_argnames
     )
 
@@ -231,7 +231,7 @@ def named_computation_partir_lowering(
       jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
       for c, aval in const_args_and_avals
   )
-  args = (*const_arg_values, *args)
+  args = (*const_arg_values, *args)  # pyrefly: ignore[bad-assignment]
 
   if jax.__version_info__ >= (0, 10, 1):
     _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
@@ -515,7 +515,7 @@ def call_mpmd_jit_lowering(
       jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
       for c, aval in const_args_and_avals
   ]
-  args = tuple(hoisted_const_values) + args
+  args = tuple(hoisted_const_values) + args  # pyrefly: ignore[bad-assignment]
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   call_op = mpmd.CallOp(
@@ -1119,7 +1119,7 @@ def fori_loop_mpmd_jit_lowering(
       call_op = func_dialect.CallOp(
           flat_output_types,
           ir.FlatSymbolRefAttr.get(func_declaration.sym_name.value),
-          block.arguments,
+          block.arguments,  # pyrefly: ignore[bad-argument-type]
       )
     mpmd.ReturnOp(list(constants_to_return) + list(call_op.results))
   return for_loop.results[carried_arguments_start:]
