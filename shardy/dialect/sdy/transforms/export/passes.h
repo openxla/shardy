@@ -74,6 +74,18 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       llvm::cl::desc("Remove all-gather and reduce-scatter ops for CMV1."),
       llvm::cl::init(false)};
 
+  Option<bool> enablePerInstructionPartitioning{
+      *this, "enable-per-instruction-partitioning",
+      llvm::cl::desc("Enable selective per-instruction partitioning and "
+                     "sdy.manual_computation wrapping."),
+      llvm::cl::init(false)};
+
+  Option<std::string> perInstructionPartitioningFilter{
+      *this, "per-instruction-partitioning-filter",
+      llvm::cl::desc("Filter string for selective partitioning (e.g. 'dot, "
+                     "pad', 'selectLow=0, selectHigh=10')."),
+      llvm::cl::init("")};
+
   Option<bool> keepShardingRules{
       *this, "keep-sharding-rules",
       llvm::cl::desc("Keep sdy.sharding_rule attrs."), llvm::cl::init(false)};

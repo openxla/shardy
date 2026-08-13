@@ -17,6 +17,7 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_COMMON_PROPAGATION_OPTIONS_H_
 
 #include <cstdint>
+#include <string>
 
 #include "llvm/ADT/StringRef.h"
 
@@ -77,6 +78,20 @@ struct PropagationOptions {
   bool clearReverseOpSharding = false;
   // Whether to inline meshes.
   bool inlineMeshes = true;
+
+  // Whether to enable per-instruction partitioning.
+  bool enablePerInstructionPartitioning = false;
+
+  // Filter specification for per-instruction partitioning:
+  // - If empty (""): selects and partitions all instructions with sharding.
+  // - If it contains "selectLow=<val>, selectHigh=<val>":
+  //   filters operations within the specified sequential index range [low,
+  //   high].
+  // - If it contains comma-separated substrings (e.g. "dot, pad"): matches and
+  //   partitions any op whose name contains any of the substrings.
+  // - Can also combine range and op names (e.g. "selectLow=0, selectHigh=10,
+  // dot").
+  std::string perInstructionPartitioningFilter = "";
 };
 
 }  // namespace sdy

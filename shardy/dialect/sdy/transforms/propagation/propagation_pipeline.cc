@@ -51,6 +51,10 @@ void populateExportOptions(ExportOptions& options,
   options.updateNonDivisibleInputOutputShardings =
       propOptions.updateNonDivisibleInputOutputShardings;
   options.inlineMeshes = propOptions.inlineMeshes;
+  options.enablePerInstructionPartitioning =
+      propOptions.enablePerInstructionPartitioning;
+  options.perInstructionPartitioningFilter =
+      propOptions.perInstructionPartitioningFilter;
 }
 
 }  // namespace

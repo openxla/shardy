@@ -41,6 +41,7 @@ cc_library(
         "insert_explicit_reshards.cc",
         "insert_func_call_reshards.cc",
         "pad_for_divisibility.cc",
+        "per_instruction_partitioning.cc",
         "propagate_to_func_results.cc",
         "remove_ag_rs_for_cmv1.cc",
         "remove_propagation_debug_info.cc",

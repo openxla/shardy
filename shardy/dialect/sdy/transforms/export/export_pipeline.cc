@@ -42,16 +42,30 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   // Catch the cases where unreduced axes are dropped and cause inconsistencies.
   pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   InsertExplicitReshardsPassOptions passOptions;
-  passOptions.enableFullVersion = options.enableInsertExplicitCollectives;
+  passOptions.enableFullVersion = options.enableInsertExplicitCollectives ||
+                                  options.enablePerInstructionPartitioning;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
-  if (options.enableInsertExplicitCollectives) {
+
+  if (options.enablePerInstructionPartitioning) {
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        options.dumpDirectory, "before_per_instruction_partitioning",
+        dumpIndex++));
+    PerInstructionPartitioningPassOptions passOptions;
+    passOptions.filter = options.perInstructionPartitioningFilter;
+    passOptions.replicaCount = options.replicaCount;
+    passOptions.partitionCount = options.partitionCount;
+    pm.addPass(createPerInstructionPartitioningPass(passOptions));
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        options.dumpDirectory, "after_per_instruction_partitioning",
+        dumpIndex++));
+  } else if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
     addCanonicalizerPass(pm, kReshardLabel);
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     // NOTE: ReshardToCollectives pass above generates all-slice collectives,
     // which during the canonicalizer below may be converted to reduce scatters
-    // by potentially fusing with preceeding all-reduces, which are inserted
+    // by potentially fusing with preceding all-reduces, which are inserted
     // during InsertExplicitReshards pass.
   }
 
