@@ -44,7 +44,10 @@ import collections
 from collections.abc import Collection, Mapping, Sequence, Set
 import dataclasses
 import enum
+import hashlib
 from typing import Callable
+
+import cloudpickle
 
 FragmentMergeRules = Sequence['FragmentMergeRule']
 FragmentScheduleRules = Sequence['FragmentScheduleRule']
@@ -365,6 +368,21 @@ def build_rules_from_pipeline(
         all_merge_rules.extend(merge_rules)
 
   return all_schedule_rules, all_merge_rules
+
+
+def fingerprint_pipeline_schedule(pipeline: PipelineSchedule) -> bytes:
+  """Generates a fingerprint for a PipelineSchedule."""
+  hasher = hashlib.sha256()
+
+  if pipeline.schedule_merge_rule_builders:
+    for builder in pipeline.schedule_merge_rule_builders:
+      serialized_callable = cloudpickle.dumps(builder)
+      hasher.update(serialized_callable)
+
+  # required_mpmd_options is not hashed since the entire partitioning
+  # environment gets hashed later on.
+
+  return hasher.digest()
 
 
 def maybe_unique_transpose_count(
