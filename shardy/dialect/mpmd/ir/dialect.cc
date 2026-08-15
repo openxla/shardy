@@ -928,11 +928,11 @@ FragmentOp FragmentOp::createMeshFragmentWithGlobalBody(
 void FragmentCallOp::setCalleeFromCallable(CallInterfaceCallable callee) {
   // Direct call.
   if (FlatSymbolRefAttr calleeAttr = getCalleeAttr()) {
-    auto symRef = callee.get<SymbolRefAttr>();
+    auto symRef = cast<SymbolRefAttr>(callee);
     return setCalleeAttr(cast<FlatSymbolRefAttr>(symRef));
   }
   // Indirect call, callee Value is the first operand.
-  return setOperand(0, callee.get<Value>());
+  return setOperand(0, cast<Value>(callee));
 }
 
 LogicalResult FragmentCallOp::verifySymbolUses(
@@ -1185,11 +1185,11 @@ bool isInVhloFunc(CallOp call_op) {
 void CallOp::setCalleeFromCallable(CallInterfaceCallable callee) {
   // Direct call.
   if (FlatSymbolRefAttr calleeAttr = getCalleeAttr()) {
-    auto symRef = callee.get<SymbolRefAttr>();
+    auto symRef = cast<SymbolRefAttr>(callee);
     setCalleeAttr(cast<FlatSymbolRefAttr>(symRef));
   }
   // Indirect call, callee Value is the first operand.
-  setOperand(0, callee.get<Value>());
+  setOperand(0, cast<Value>(callee));
 }
 
 LogicalResult CallOp::verifySymbolUses(SymbolTableCollection& symbolTable) {
