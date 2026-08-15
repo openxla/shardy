@@ -32,6 +32,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir::mpmd {
 
@@ -100,7 +101,9 @@ class ConvertSdyShardingsToMpmdTypesPass
                                           sdy::getSharding(op_result));
             }
           });
-      op->removeAttr(sdy::kShardingAttr);
+      if (!mlir::isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
+        op->removeAttr(sdy::kShardingAttr);
+      }
       return WalkResult::advance();
     });
     // Remove the sharding attribute in args and results and update the function

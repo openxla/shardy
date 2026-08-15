@@ -447,6 +447,7 @@ class MpmdLowered(stages.Lowered):
       topology: mpmd_types.Topology,
       name_to_mesh_map: mpmd_types.NameToMeshAssignment,
       flat_input_mesh_assignment: Sequence[str] | None = None,
+      host_callbacks: tuple[Any, ...] = (),
   ):
     """Initializes an MpmdLowered object.
 
@@ -462,6 +463,7 @@ class MpmdLowered(stages.Lowered):
       name_to_mesh_map: a mapping between names and meshes.
       flat_input_mesh_assignment: the mesh assignment of the inputs, including
         removed unused inputs.
+      host_callbacks: host callbacks for JAX debug callbacks.
     """
     self._stablehlo_mlir_module = stablehlo_mlir_module
     self.partitioning_result = partitioning_result
@@ -534,6 +536,7 @@ class MpmdLowered(stages.Lowered):
     self.no_kwargs = True
 
     self.mpmd_module = partitioning_result.mpmd_module
+    self.host_callbacks = list(host_callbacks)
 
   def _get_compile_options(
       self,
@@ -573,7 +576,7 @@ class MpmdLowered(stages.Lowered):
       ) = None,
       *,
       ifrt_ir_compile_options: dict[str, Any] | None = None,
-      device_assignment=None,
+      device_assignment: Sequence[jax.Device] | None = None,
   ) -> MpmdCompiled:
     """See base class.
 
@@ -665,6 +668,7 @@ class MpmdLowered(stages.Lowered):
         out_shardings=flat_out_shardings,
         xla_compile_options=self._get_compile_options(compiler_options),
         ifrt_ir_compile_options=ifrt_ir_compile_options,
+        host_callbacks=self.host_callbacks,
     )
     executable = MpmdExecutable(
         program_executable,

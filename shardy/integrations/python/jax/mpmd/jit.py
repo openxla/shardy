@@ -114,6 +114,7 @@ class MpmdLoweredArgs:
   topology: types.Topology
   name_to_mesh_map: types.NameToMeshAssignment
   flat_input_mesh_assignment: Sequence[str] | None = None
+  host_callbacks: tuple[Any, ...] = ()
 
 
 def _get_fragment_info(
@@ -264,7 +265,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
         in_tree,
         out_tree,
         kept_inputs_indices=preserved_input_indices,
-        const_args=lowered_computation._lowering.const_args,  # type: ignore
+        const_args=lowered_computation._lowering.const_args,  # pylint: disable=protected-access
     )
 
     # Flatten the input to mesh assignment pytree.
@@ -340,6 +341,9 @@ class MpmdGspmdTraced(jax.stages.Traced):
         topology=self._mpmd_config.topology,
         name_to_mesh_map=self._mpmd_config.mesh_and_stage_assignment,  # pyrefly: ignore[bad-argument-type]
         flat_input_mesh_assignment=flat_input_mesh_assignment,
+        host_callbacks=lowered_computation._lowering.compile_args.get(  # pylint: disable=protected-access
+            'host_callbacks', []
+        ),
     )
     return mlir_module, partitioning_args, lowered_args
 
@@ -468,6 +472,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
         topology=lowered_args.topology,
         name_to_mesh_map=lowered_args.name_to_mesh_map,
         flat_input_mesh_assignment=lowered_args.flat_input_mesh_assignment,
+        host_callbacks=lowered_args.host_callbacks,
     )
 
 

@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-convert-sdy-shardings-to-mpmd-types 2>&1 | FileCheck -implicit-check-not sdy.sharding -implicit-check-not in_shardings %s
+// RUN: mpmd_opt %s -mpmd-convert-sdy-shardings-to-mpmd-types -split-input-file 2>&1 | FileCheck -implicit-check-not sdy.sharding -implicit-check-not in_shardings %s
 
 !mesh_1_tensor_4_8_f32 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
 !mesh_2_tensor_4_8_f32 = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
@@ -148,4 +148,28 @@ func.func @tranfer_has_different_input_and_output_shardings(%arg0: !mpmd.mesh_te
   return %2 : !mpmd.mesh_tensor<"m2", tensor<4xf32>>
 }
 
+}
+
+// -----
+
+module @jit_mpmd_program attributes {mhlo.num_partitions = 4 : i32, mhlo.num_replicas = 1 : i32} {
+  sdy.mesh @mesh = <["x"=2, "y"=2]> {stablehlo.mesh = {axes = [{name = "x", size = 2 : i64}, {name = "y", size = 2 : i64}]}}
+  sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]> {stablehlo.mesh = {axes = [], device_ids = dense<0> : tensor<1xi64>}}
+  // CHECK-LABEL: func.func public @main
+  // CHECK-SAME: %arg0: !mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>, sharding=<@mesh, [{"x"}, {"y"}]>>
+  // CHECK-SAME: -> (!mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>> {jax.result_info = "result"})
+  // CHECK: "stablehlo.send"
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>
+  // CHECK: "stablehlo.recv"
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>, <@maximal_mesh_0, []>]>
+  func.func public @main(%arg0: !mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> (!mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>> {jax.result_info = "result"}) attributes {topology = #mpmd.topology<<"mesh0" : <["x"=2, "y"=2]>>, <"mesh1" : <["x"=2, "y"=2]>>>} {
+    %0 = mpmd.fragment<mesh="mesh0", origin=["add_a"]> (%arg0) (%arg1: tensor<1024x2048xi32>) {
+      %2 = stablehlo.add %arg1, %arg1 : tensor<1024x2048xi32>
+      %3 = stablehlo.create_token : !stablehlo.token
+      %4 = "stablehlo.send"(%arg1, %3) <{channel_handle = #stablehlo.channel_handle<handle = 2, type = 2>, is_host_transfer = true}> {mhlo.frontend_attributes = {_xla_host_transfer_handler_name = "pjrt_rendezvous", _xla_host_transfer_rendezvous = "2"}, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : (tensor<1024x2048xi32>, !stablehlo.token) -> !stablehlo.token
+      %5:2 = "stablehlo.recv"(%4) <{channel_handle = #stablehlo.channel_handle<handle = 3, type = 3>, is_host_transfer = true}> {mhlo.frontend_attributes = {_xla_host_transfer_handler_name = "pjrt_rendezvous", _xla_host_transfer_rendezvous = "3"}, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>, <@maximal_mesh_0, []>]>} : (!stablehlo.token) -> (tensor<f32>, !stablehlo.token)
+      mpmd.return %2 : tensor<1024x2048xi32>
+    } : (!mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>>) -> !mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>>
+    return %0 : !mpmd.mesh_tensor<"mesh0", tensor<1024x2048xi32>>
+  }
 }
