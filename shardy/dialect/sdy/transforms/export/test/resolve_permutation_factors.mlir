@@ -91,9 +91,8 @@ func.func @pad_single_left_hop(
   // HALO: %[[PAD_1:.*]] = stablehlo.pad %[[CONCAT]], %[[ARG2]], low ={{.*}}
   // HALO: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO: %[[CONVERT:.*]] = stablehlo.convert %[[PART_ID]] : (tensor<ui32>) -> tensor<i64>
-  // HALO: %[[RESHAPE:.*]] = stablehlo.reshape %[[CONVERT]] : (tensor<i64>) -> tensor<i64>
   // HALO: %[[C_DIV:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO: %[[DIV:.*]] = stablehlo.divide %[[RESHAPE]], %[[C_DIV]] : tensor<i64>
+  // HALO: %[[DIV:.*]] = stablehlo.divide %[[CONVERT]], %[[C_DIV]] : tensor<i64>
   // HALO: %[[C_REM:.*]] = stablehlo.constant dense<2> : tensor<i64>
   // HALO: %[[REM:.*]] = stablehlo.remainder %[[DIV]], %[[C_REM]] : tensor<i64>
   // HALO: %[[CST_3:.*]] = stablehlo.constant dense<2> : tensor<i64>
@@ -296,9 +295,8 @@ func.func @pad_replicated_negative_low_padding(
   // HALO-NEXT:   %[[PAD1:.*]] = stablehlo.pad %[[CONCAT1]], %arg2, low = [6, 0, 0], high = [6, 0, 0], interior = [0, 0, 0]
   // HALO-NEXT:   %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:   %[[CONV1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:   %[[RESHAPE1:.*]] = stablehlo.reshape %[[CONV1]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:   %[[C_DIV1:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[RESHAPE1]], %[[C_DIV1]] : tensor<i64>
+  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[CONV1]], %[[C_DIV1]] : tensor<i64>
   // HALO-NEXT:   %[[C_MOD1:.*]] = stablehlo.constant dense<2> : tensor<i64>
   // HALO-NEXT:   %[[REM_PR:.*]] = stablehlo.remainder %[[DIV1]], %[[C_MOD1]] : tensor<i64>
   // HALO-NEXT:   %[[C_STRIDE1:.*]] = stablehlo.constant dense<2> : tensor<i64>
@@ -400,9 +398,8 @@ func.func @pad_sharded_indivisible_interior_pad(
   // HALO-NEXT:   %[[PAD1:.*]] = stablehlo.pad %[[CONCAT1]], %arg2, low = [12, 0], high = [12, 0], interior = [2, 0]
   // HALO-NEXT:   %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:   %[[CONV1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:   %[[RESHAPE1:.*]] = stablehlo.reshape %[[CONV1]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:   %[[C_DIV1:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[RESHAPE1]], %[[C_DIV1]] : tensor<i64>
+  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[CONV1]], %[[C_DIV1]] : tensor<i64>
   // HALO-NEXT:   %[[C_MOD1:.*]] = stablehlo.constant dense<2> : tensor<i64>
   // HALO-NEXT:   %[[REM1:.*]] = stablehlo.remainder %[[DIV1]], %[[C_MOD1]] : tensor<i64>
   // HALO-NEXT:   %[[C_STRIDE1:.*]] = stablehlo.constant dense<-2> : tensor<i64>
@@ -441,9 +438,8 @@ func.func @pad_replicated_negative_high_padding(
   // HALO-NEXT:   %[[PAD:.*]] = stablehlo.pad %[[CONCAT]], %[[ARG2]], low = [0, 5], high = [0, 5], interior = [0, 0]
   // HALO-NEXT:   %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:   %[[CONV:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:   %[[RESHAPE:.*]] = stablehlo.reshape %[[CONV]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:   %[[C_MOD:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO-NEXT:   %[[REM:.*]] = stablehlo.remainder %[[RESHAPE]], %[[C_MOD]] : tensor<i64>
+  // HALO-NEXT:   %[[REM:.*]] = stablehlo.remainder %[[CONV]], %[[C_MOD]] : tensor<i64>
   // HALO-NEXT:   %[[C_STRIDE:.*]] = stablehlo.constant dense<1> : tensor<i64>
   // HALO-NEXT:   %[[C_OFFSET:.*]] = stablehlo.constant dense<5> : tensor<i64>
   // HALO-NEXT:   %[[MUL:.*]] = stablehlo.multiply %[[REM]], %[[C_STRIDE]] : tensor<i64>
@@ -733,9 +729,8 @@ func.func @reshape_1d_to_2d_split_custom_device_ids(%arg0: tensor<8xi32> {sdy.sh
   // HALO-NEXT:       %[[PAD_BUF:.*]] = stablehlo.pad %[[CONCAT]], %[[ARG2]], low = [2], high = [2], interior = [0]
   // HALO-NEXT:       %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:       %[[CONV:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:       %[[RESHAPE:.*]] = stablehlo.reshape %[[CONV]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:       %[[C_TABLE:.*]] = stablehlo.constant dense<[3, 2, 1, 0]> : tensor<4xi64>
-  // HALO-NEXT:       %[[DS_ID:.*]] = stablehlo.dynamic_slice %[[C_TABLE]], %[[RESHAPE]], sizes = [1]
+  // HALO-NEXT:       %[[DS_ID:.*]] = stablehlo.dynamic_slice %[[C_TABLE]], %[[CONV]], sizes = [1]
   // HALO:            sdy.return %{{.*}} : tensor<1x2xi32>
   // HALO-NEXT:     } : (tensor<8xi32>, tensor<i32>) -> tensor<2x4xi32>
   // HALO-NEXT:     %[[RES_SHARDED:.*]] = stablehlo.slice %[[MC]] [0:2, 0:3] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_custom, [{"b"}, {"c"}]>]>} : (tensor<2x4xi32>) -> tensor<2x3xi32>
@@ -1142,9 +1137,8 @@ func.func @slice_partition_partial_dim_with_communication(
   // HALO-NEXT:    %[[PAD:.*]] = stablehlo.pad %[[CONCAT]], %arg2, low = [2], high = [2], interior = [0]
   // HALO-NEXT:    %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:    %[[CONV:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:    %[[RESHAPE:.*]] = stablehlo.reshape %[[CONV]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:    %[[C_DIV:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO-NEXT:    %[[DIV:.*]] = stablehlo.divide %[[RESHAPE]], %[[C_DIV]] : tensor<i64>
+  // HALO-NEXT:    %[[DIV:.*]] = stablehlo.divide %[[CONV]], %[[C_DIV]] : tensor<i64>
   // HALO-NEXT:    %[[C_MOD:.*]] = stablehlo.constant dense<2> : tensor<i64>
   // HALO-NEXT:    %[[REM:.*]] = stablehlo.remainder %[[DIV]], %[[C_MOD]] : tensor<i64>
   // HALO-NEXT:    %[[C_STRIDE:.*]] = stablehlo.constant dense<-2> : tensor<i64>
@@ -1187,9 +1181,8 @@ func.func @slice_multidim_mixed(
   // HALO-NEXT:   %[[PAD2:.*]] = stablehlo.pad %[[CONCAT2]], %arg2, low = [0, 2, 0], high = [0, 2, 0], interior = [0, 0, 0]
   // HALO-NEXT:   %[[PID2:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:   %[[CONV2:.*]] = stablehlo.convert %[[PID2]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:   %[[RESHAPE2:.*]] = stablehlo.reshape %[[CONV2]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:   %[[C_MOD_S:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO-NEXT:   %[[REM_S:.*]] = stablehlo.remainder %[[RESHAPE2]], %[[C_MOD_S]] : tensor<i64>
+  // HALO-NEXT:   %[[REM_S:.*]] = stablehlo.remainder %[[CONV2]], %[[C_MOD_S]] : tensor<i64>
   // HALO-NEXT:   %[[C_STRIDE2:.*]] = stablehlo.constant dense<0> : tensor<i64>
   // HALO-NEXT:   %[[C_OFFSET2:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // HALO-NEXT:   %[[MUL2:.*]] = stablehlo.multiply %[[REM_S]], %[[C_STRIDE2]] : tensor<i64>
@@ -1235,9 +1228,8 @@ func.func @slice_multiple_hops_shift(
   // HALO-NEXT:   %[[PAD1:.*]] = stablehlo.pad %[[CONCAT1]], %arg2, low = [1, 0], high = [1, 0], interior = [0, 0]
   // HALO-NEXT:   %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO-NEXT:   %[[CONV1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
-  // HALO-NEXT:   %[[RESHAPE1:.*]] = stablehlo.reshape %[[CONV1]] : (tensor<i64>) -> tensor<i64>
   // HALO-NEXT:   %[[C_DIV_MH:.*]] = stablehlo.constant dense<2> : tensor<i64>
-  // HALO-NEXT:   %[[DIV_MH:.*]] = stablehlo.divide %[[RESHAPE1]], %[[C_DIV_MH]] : tensor<i64>
+  // HALO-NEXT:   %[[DIV_MH:.*]] = stablehlo.divide %[[CONV1]], %[[C_DIV_MH]] : tensor<i64>
   // HALO-NEXT:   %[[C_MOD_MH:.*]] = stablehlo.constant dense<4> : tensor<i64>
   // HALO-NEXT:   %[[REM_MH:.*]] = stablehlo.remainder %[[DIV_MH]], %[[C_MOD_MH]] : tensor<i64>
   // HALO-NEXT:   %[[C_STRIDE1:.*]] = stablehlo.constant dense<-1> : tensor<i64>

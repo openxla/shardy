@@ -119,24 +119,10 @@ struct ConversionState {
   int64_t getNextChannelId() { return nextChannelId++; }
 };
 
-// Returns a 0-rank i64 tensor containing the device ID (either replica_id or
-// partition_id based on topology config).
 Value getDeviceId(Location loc, const ConversionState& conversionState,
                   ConversionPatternRewriter& rewriter) {
-  Type i64Ty = rewriter.getI64Type();
-  auto indexTy = RankedTensorType::get({}, i64Ty);
-  int64_t replicaCount = conversionState.replicaCount;
-  int64_t partitionCount = conversionState.partitionCount;
-
-  SDY_CHECK(replicaCount == 1 || partitionCount == 1)
-      << "Shardy partitioner convert_global_to_local does not support "
-         "both replica_count > 1 and partition_count > 1 yet.";
-  if (replicaCount > 1) {
-    return stablehlo::ConvertOp::create(
-        rewriter, loc, indexTy, stablehlo::ReplicaIdOp::create(rewriter, loc));
-  }
-  return stablehlo::ConvertOp::create(
-      rewriter, loc, indexTy, stablehlo::PartitionIdOp::create(rewriter, loc));
+  return sdy::getDeviceId(conversionState.replicaCount,
+                          conversionState.partitionCount, loc, rewriter);
 }
 
 class GlobalToLocalTypeConverter : public TypeConverter {

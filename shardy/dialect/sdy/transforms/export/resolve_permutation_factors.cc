@@ -70,6 +70,8 @@ struct ResolutionState {
   SymbolTable& symbolTable;
   MeshCache& meshCache;
   int64_t& nextChannelId;
+  int64_t replicaCount = 1;
+  int64_t partitionCount = 1;
 };
 
 // Describes the data exchange needed to perform explicit resharding for a
@@ -241,18 +243,9 @@ int64_t getMeshAxisIndex(ArrayRef<MeshAxisAttr> axes, StringRef name) {
   return -1;
 }
 
-// Creates a scalar i64 partition_id value.
-Value createScalarI64PartitionId(Location loc, IRRewriter& rewriter) {
-  Value partitionId = stablehlo::PartitionIdOp::create(rewriter, loc);
-  auto partitionIdType = cast<RankedTensorType>(partitionId.getType());
-  auto i64Ty = rewriter.getI64Type();
-  if (partitionIdType.getElementType() != i64Ty) {
-    auto destType = RankedTensorType::get(partitionIdType.getShape(), i64Ty);
-    partitionId =
-        stablehlo::ConvertOp::create(rewriter, loc, destType, partitionId);
-  }
-  return stablehlo::ReshapeOp::create(
-      rewriter, loc, RankedTensorType::get({}, i64Ty), partitionId);
+Value createDeviceId(Location loc, ResolutionState& state) {
+  return getDeviceId(state.replicaCount, state.partitionCount, loc,
+                     state.rewriter);
 }
 
 // Returns the logical index of the shard that the given device (`deviceId`)
@@ -994,7 +987,7 @@ Value exchangeDimWithDynamicOffset(
       dimExchange.rightHops, sharding, mesh, manualAxes, localSharding, state,
       dilatedHaloBuffer ? baseDilation - 1 : 0, &dimExchange);
 
-  Value partitionId = createScalarI64PartitionId(loc, state.rewriter);
+  Value partitionId = createDeviceId(loc, state);
 
   auto inputType = cast<RankedTensorType>(operand.getType());
   int64_t sIn = inputType.getShape()[dim];
@@ -2477,7 +2470,8 @@ struct ShardyResolvePermutationFactorsPass
     }
 
     int64_t nextChannelId = getNextChannelId(moduleOp);
-    ResolutionState state{rewriter, symbolTable, meshCache, nextChannelId};
+    ResolutionState state{rewriter,      symbolTable,  meshCache,
+                          nextChannelId, replicaCount, partitionCount};
 
     // Walk the module to resolve permutation factors for each op.
     moduleOp.walk([&](Operation* op) {

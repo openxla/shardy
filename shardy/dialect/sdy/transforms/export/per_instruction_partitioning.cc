@@ -448,6 +448,8 @@ LogicalResult runPartitionerPipeline(ModuleOp module, bool enableHaloExchange,
   PassManager pm(ctx);
   ShardyResolvePermutationFactorsPassOptions resolveFactorsOptions;
   resolveFactorsOptions.enableHaloExchange = enableHaloExchange;
+  resolveFactorsOptions.replicaCount = replicaCount;
+  resolveFactorsOptions.partitionCount = partitionCount;
   pm.addPass(createShardyResolvePermutationFactorsPass(resolveFactorsOptions));
   InsertExplicitReshardsPassOptions insertReshardOptions;
   insertReshardOptions.enableFullVersion = true;

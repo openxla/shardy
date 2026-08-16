@@ -19,6 +19,9 @@ set -e
 SRC=$1
 TMP=$2
 ENABLE_HALO_EXCHANGE=${3:-true}
+# When replica_count=partition_count=1, the test use partition id.
+REPLICA_COUNT=${4:-1}
+PARTITION_COUNT=${5:-1}
 
 SPLIT_FILE=${SPLIT_FILE:-split-file}
 SDY_OPT=${SDY_OPT:-sdy_opt}
@@ -28,10 +31,10 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 # Run the partitioner pipeline passes.
 "$SDY_OPT" "$TMP/part1.mlir" \
   --sdy-insert-explicit-reshards="enable-full-version=true" \
-  --sdy-resolve-permutation-factors="enable-halo-exchange=$ENABLE_HALO_EXCHANGE" \
+  --sdy-resolve-permutation-factors="enable-halo-exchange=$ENABLE_HALO_EXCHANGE replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-reshard-to-collectives \
   --sdy-pad-for-divisibility \
-  --sdy-convert-global-to-local \
+  --sdy-convert-global-to-local="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-drop-sharding-and-mesh \
   --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 
