@@ -256,30 +256,135 @@ func.func @error_return_twice_with_incompatible_layouts(%func_arg: !m1_16) ->
 // -----
 
 !m1_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>>
-#topology = #mpmd.topology<<"m1": <["x"=8]>>>
+!m2_16 = !mpmd.mesh_tensor<"m2", tensor<16xf32>>
+#topology = #mpmd.topology<<"m1": <["x"=8]>>, <"m2": <["x"=8]>>>
 
-// expected-warning@+1 {{Arg #0 is used in a transfer op, but with a non-default layout: "{0}". Forcing the layout to default.}}
-func.func @warning_used_in_transfer_op_with_non_default_layout(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
-  (!m1_16 {mhlo.layout_mode = "auto"}, !m1_16 {mhlo.layout_mode = "default"})
+// CHECK-LABEL: func @custom_layout_preserved_in_transfer_op
+// CHECK-SAME: (%arg0: !mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"}) -> (!mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "auto"}, !mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"})
+func.func @custom_layout_preserved_in_transfer_op(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
+  (!m1_16 {mhlo.layout_mode = "auto"}, !m1_16 {mhlo.layout_mode = "auto"})
   attributes {topology=#topology} {
 
-  %t = mpmd.transfer %func_arg : (!m1_16) -> !m1_16
+  %t = mpmd.transfer %func_arg : (!m1_16) -> !m2_16
 
-  %f = mpmd.fragment<mesh="m1", origin=[]> (%t)
+  // CHECK: fragment
+  // CHECK-SAME: {arg_attrs = [{mhlo.layout_mode = "{0}"}], res_attrs = [{mhlo.layout_mode = "auto"}]}
+  %f = mpmd.fragment<mesh="m1", origin=[]> (%func_arg)
     (%arg0: tensor<16xf32>) {
     mpmd.return %arg0 : tensor<16xf32>
   } : (!m1_16) -> !m1_16
 
-  func.return %f, %f : !m1_16, !m1_16
+  func.return %f, %func_arg : !m1_16, !m1_16
 }
 
 // -----
 
 !m1_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>>
+!m2_16 = !mpmd.mesh_tensor<"m2", tensor<16xf32>>
+#topology = #mpmd.topology<<"m1": <["x"=8]>>, <"m2": <["x"=8]>>>
+
+// CHECK-LABEL: func @custom_layout_fragment_output_preserved_in_transfer_op
+// CHECK-SAME: (%arg0: !mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"}) -> (!mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"}, !mpmd.mesh_tensor<"m2", tensor<16xf32>> {mhlo.layout_mode = "{0}"})
+func.func @custom_layout_fragment_output_preserved_in_transfer_op(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
+  (!m1_16 {mhlo.layout_mode = "{0}"}, !m2_16 {mhlo.layout_mode = "auto"})
+  attributes {topology=#topology} {
+
+  // CHECK: fragment
+  // CHECK-SAME: {arg_attrs = [{mhlo.layout_mode = "{0}"}], res_attrs = [{mhlo.layout_mode = "{0}"}]}
+  %f = mpmd.fragment<mesh="m1", origin=[]> (%func_arg)
+    (%arg0: tensor<16xf32>) {
+    mpmd.return %arg0 : tensor<16xf32>
+  } : (!m1_16) -> !m1_16
+
+  %t = mpmd.transfer %f : (!m1_16) -> !m2_16
+
+  func.return %f, %t : !m1_16, !m2_16
+}
+
+// -----
+
+!m1_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>>
+!m2_16 = !mpmd.mesh_tensor<"m2", tensor<16xf32>>
+#topology = #mpmd.topology<<"m1": <["x"=8]>>, <"m2": <["x"=8]>>>
+
+// CHECK-LABEL: func @custom_layout_fragment_output_propagated_via_transfer
+// CHECK-SAME: (%arg0: !mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"}) -> (!mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"}, !mpmd.mesh_tensor<"m2", tensor<16xf32>> {mhlo.layout_mode = "auto"})
+func.func @custom_layout_fragment_output_propagated_via_transfer(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
+  (!m1_16 {mhlo.layout_mode = "{0}"}, !m2_16 {mhlo.layout_mode = "auto"})
+  attributes {topology=#topology} {
+
+  // CHECK: fragment
+  // CHECK-SAME: {arg_attrs = [{mhlo.layout_mode = "{0}"}], res_attrs = [{mhlo.layout_mode = "{0}"}]}
+  %f1 = mpmd.fragment<mesh="m1", origin=[]> (%func_arg)
+    (%arg0: tensor<16xf32>) {
+    mpmd.return %arg0 : tensor<16xf32>
+  } : (!m1_16) -> !m1_16
+
+  %t = mpmd.transfer %f1 : (!m1_16) -> !m2_16
+
+  // CHECK: fragment
+  // CHECK-SAME: {arg_attrs = [{mhlo.layout_mode = "{0}"}], res_attrs = [{mhlo.layout_mode = "auto"}]}
+  %f2 = mpmd.fragment<mesh="m2", origin=[]> (%t)
+    (%arg1: tensor<16xf32>) {
+    mpmd.return %arg1 : tensor<16xf32>
+  } : (!m2_16) -> !m2_16
+
+  func.return %f1, %f2 : !m1_16, !m2_16
+}
+
+// -----
+
+!m1_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>>
+!pinned_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>, memory_kind = "pinned_host">
 #topology = #mpmd.topology<<"m1": <["x"=8]>>>
 
-func.func @warning_fragment_output_used_in_transfer_op_with_non_default_layout(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
-  (!m1_16 {mhlo.layout_mode = "{0}"}, !m1_16 {mhlo.layout_mode = "default"})
+// CHECK-LABEL: func @custom_layout_preserved_in_transfer_to_pinned_host
+// CHECK-SAME: (%arg0: !mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"}) -> (!mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "auto"}, !mpmd.mesh_tensor<"m1", tensor<16xf32>> {mhlo.layout_mode = "{0}"})
+func.func @custom_layout_preserved_in_transfer_to_pinned_host(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
+  (!m1_16 {mhlo.layout_mode = "auto"}, !m1_16 {mhlo.layout_mode = "auto"})
+  attributes {topology=#topology} {
+
+  %t = mpmd.transfer %func_arg : (!m1_16) -> !pinned_16
+
+  // CHECK: fragment
+  // CHECK-SAME: {arg_attrs = [{mhlo.layout_mode = "{0}"}], res_attrs = [{mhlo.layout_mode = "auto"}]}
+  %f = mpmd.fragment<mesh="m1", origin=[]> (%func_arg)
+    (%arg0: tensor<16xf32>) {
+    mpmd.return %arg0 : tensor<16xf32>
+  } : (!m1_16) -> !m1_16
+
+  func.return %f, %func_arg : !m1_16, !m1_16
+}
+
+// -----
+
+!m1_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>>
+!cpu_16 = !mpmd.mesh_tensor<"m1/cpu", tensor<16xf32>>
+#topology = #mpmd.topology<<"m1": <["x"=8]>>, <"m1/cpu": <["x"=8]>>>
+
+// expected-warning@+1 {{Arg #0 is used in a transfer op, but with a non-default layout: "{0}". Forcing the layout to default.}}
+func.func @warning_used_in_transfer_to_cpu_with_non_default_layout(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
+  (!cpu_16 {mhlo.layout_mode = "auto"}, !cpu_16 {mhlo.layout_mode = "default"})
+  attributes {topology=#topology} {
+
+  %t = mpmd.transfer %func_arg : (!m1_16) -> !cpu_16
+
+  %f = mpmd.fragment<mesh="m1/cpu", origin=[]> (%t)
+    (%arg0: tensor<16xf32>) {
+    mpmd.return %arg0 : tensor<16xf32>
+  } : (!cpu_16) -> !cpu_16
+
+  func.return %f, %f : !cpu_16, !cpu_16
+}
+
+// -----
+
+!m1_16 = !mpmd.mesh_tensor<"m1", tensor<16xf32>>
+!cpu_16 = !mpmd.mesh_tensor<"m1/cpu", tensor<16xf32>>
+#topology = #mpmd.topology<<"m1": <["x"=8]>>, <"m1/cpu": <["x"=8]>>>
+
+func.func @warning_fragment_output_used_in_transfer_to_cpu_with_non_default_layout(%func_arg: !m1_16 {mhlo.layout_mode = "{0}"}) ->
+  (!m1_16 {mhlo.layout_mode = "{0}"}, !cpu_16 {mhlo.layout_mode = "default"})
   attributes {topology=#topology} {
 
   // expected-warning@+1 {{Result #0 is used in a transfer op, but with a non-default layout: "{0}". Forcing the layout to default.}}
@@ -288,7 +393,8 @@ func.func @warning_fragment_output_used_in_transfer_op_with_non_default_layout(%
     mpmd.return %arg0 : tensor<16xf32>
   } : (!m1_16) -> !m1_16
 
-  %t = mpmd.transfer %f : (!m1_16) -> !m1_16
+  %t = mpmd.transfer %f : (!m1_16) -> !cpu_16
 
-  func.return %f, %t : !m1_16, !m1_16
+  func.return %f, %t : !m1_16, !cpu_16
 }
+

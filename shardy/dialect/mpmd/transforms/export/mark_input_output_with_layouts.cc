@@ -88,6 +88,11 @@ void setFunctionArgumentLayout(int argumentIndex, StringAttr layout,
   }
 }
 
+bool isTransferOpWithoutCustomLayoutSupport(TransferOp transfer) {
+  StringRef meshName = transfer.getType().getMeshName();
+  return meshName.ends_with(kCpuMeshSuffix);
+}
+
 void setLayoutForUsers(const Value& value, const StringAttr layout,
                        FuncOp& programFunc) {
   for (OpOperand& use : value.getUses()) {
@@ -97,14 +102,21 @@ void setLayoutForUsers(const Value& value, const StringAttr layout,
       SetArgAttrs(fragOp, fragAttrs);
     } else if (use.getOwner() == programFunc.front().getTerminator()) {
       setFunctionResultLayout(use.getOperandNumber(), layout, programFunc);
+    } else if (TransferOp transferOp = dyn_cast<TransferOp>(use.getOwner())) {
+      StringAttr propagatedLayout =
+          isTransferOpWithoutCustomLayoutSupport(transferOp)
+              ? StringAttr::get(programFunc.getContext(), kLayoutModeDefault)
+              : layout;
+      setLayoutForUsers(transferOp.getResult(), propagatedLayout, programFunc);
     }
   }
 };
 
 struct CommonLayoutResult {
   int numUsesInFragments;
+  int numUsesInTransfers;
   int propagatedFromProgramResIdx;
-  bool hasTransferOpUse;
+  bool hasTransferOpUseWithoutCustomLayoutSupport;
   StringAttr commonLayout;
 };
 
@@ -113,11 +125,15 @@ std::optional<CommonLayoutResult> extractCommonLayoutFromUsers(
   StringAttr commonLayout =
       StringAttr::get(programFunc.getContext(), kLayoutModeAuto);
   int numUsesInFragments = 0;
+  int numUsesInTransfers = 0;
   int propagatedFromProgramResIdx = -1;
-  bool hasTransferOpUse = false;
+  bool hasTransferOpUseWithoutCustomLayoutSupport = false;
   for (OpOperand& use : value.getUses()) {
-    if (isa<TransferOp>(use.getOwner())) {
-      hasTransferOpUse = true;
+    if (auto transfer = dyn_cast<TransferOp>(use.getOwner())) {
+      numUsesInTransfers++;
+      if (isTransferOpWithoutCustomLayoutSupport(transfer)) {
+        hasTransferOpUseWithoutCustomLayoutSupport = true;
+      }
       continue;
     }
     if (use.getOwner() != programFunc.front().getTerminator()) {
@@ -140,16 +156,17 @@ std::optional<CommonLayoutResult> extractCommonLayoutFromUsers(
       propagatedFromProgramResIdx = use.getOperandNumber();
     }
   }
-  return CommonLayoutResult{numUsesInFragments, propagatedFromProgramResIdx,
-                            hasTransferOpUse, commonLayout};
+  return CommonLayoutResult{
+      numUsesInFragments, numUsesInTransfers, propagatedFromProgramResIdx,
+      hasTransferOpUseWithoutCustomLayoutSupport, commonLayout};
 }
 
 // Choose layout for FragmentOp result based on its uses {TransferOp,
 // ReturnOp, another FragmentOp} and then propagate to all these uses.
 //
 // *Important*: If the chosen layout is AUTO, but there are uses in any
-// fragment, enforce DEFAULT layout, since we don't support cross-fragment
-// layout propagation.
+// fragment or transfer, enforce DEFAULT layout, since we don't support
+// cross-fragment layout propagation.
 bool propagateFragmentResultsToEverything(
     OpResult fragRes, FuncOp& programFunc,
     SmallVector<Attribute>& fragResAttrs) {
@@ -169,10 +186,9 @@ bool propagateFragmentResultsToEverything(
   }
   StringAttr chosenLayout = layoutExtractionResult->commonLayout;
 
-  if (layoutExtractionResult->hasTransferOpUse) {
-    // if used in a transfer op, we *MUST* stick to default layout, since
-    // ifrt transfers only support default layouts
-    // TODO(icgog): b/450351477 ifrt support non-default layouts
+  if (layoutExtractionResult->hasTransferOpUseWithoutCustomLayoutSupport) {
+    // If used in a transfer op to CPU, we *MUST* stick to default layout, since
+    // such transfers only support default layouts.
     StringAttr defaultLayout =
         StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
     if (!areLayoutsCompatible(chosenLayout, defaultLayout)) {
@@ -183,7 +199,8 @@ bool propagateFragmentResultsToEverything(
     }
     chosenLayout = defaultLayout;
   } else if (isAutoLayout(chosenLayout) &&
-             (layoutExtractionResult->numUsesInFragments > 0)) {
+             (layoutExtractionResult->numUsesInFragments > 0 ||
+              layoutExtractionResult->numUsesInTransfers > 0)) {
     chosenLayout =
         StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
   }
@@ -193,11 +210,11 @@ bool propagateFragmentResultsToEverything(
 }
 
 // Choose a common layout for program arg based on its initial value and uses
-// {TransferOp(always DEFAULT), ReturnOp, another FragmentOp}, and then
-// propagate to all these uses.
+// {TransferOp, ReturnOp, another FragmentOp}, and then propagate to all these
+// uses.
 //
 // *Important*: If the chosen layout is AUTO, but there are *MORE THAN ONE*
-// use in a fragment, enforce DEFAULT layout, since we don't support
+// use in a fragment or transfer, enforce DEFAULT layout, since we don't support
 // cross-fragment layout propagation yet.
 bool propagateInputsToEverything(BlockArgument arg, FuncOp& programFunc) {
   if (arg.use_empty()) {
@@ -226,10 +243,9 @@ bool propagateInputsToEverything(BlockArgument arg, FuncOp& programFunc) {
     chosenLayout = layoutExtractionResult->commonLayout;
   }
 
-  if (layoutExtractionResult->hasTransferOpUse) {
-    // if used in a transfer op, we *MUST* stick to default layout, since
-    // ifrt transfers only support default layouts
-    // TODO(icgog): b/450351477 ifrt support non-default layouts
+  if (layoutExtractionResult->hasTransferOpUseWithoutCustomLayoutSupport) {
+    // If used in a transfer op to CPU, we *MUST* stick to default layout, since
+    // such transfers only support default layouts.
     StringAttr defaultLayout =
         StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
     if (!areLayoutsCompatible(chosenLayout, defaultLayout)) {
@@ -240,7 +256,9 @@ bool propagateInputsToEverything(BlockArgument arg, FuncOp& programFunc) {
     }
     chosenLayout = defaultLayout;
   } else if (isAutoLayout(chosenLayout) &&
-             (layoutExtractionResult->numUsesInFragments > 1)) {
+             (layoutExtractionResult->numUsesInFragments +
+                  layoutExtractionResult->numUsesInTransfers >
+              1)) {
     chosenLayout =
         StringAttr::get(programFunc.getContext(), kLayoutModeDefault);
   }
