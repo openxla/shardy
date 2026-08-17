@@ -1,4 +1,4 @@
-// TODO(b/489770982): enable once stablehlo.pad is implemented.  %S/run_sdy_interpreter_test.sh %s %t "true"
+// RUN: %S/run_sdy_interpreter_test.sh %s %t "true"
 // RUN: %S/run_sdy_interpreter_test.sh %s %t "false"
 
 //--- part1.mlir
