@@ -971,6 +971,15 @@ mlir::Attribute getMeshOrRef(
   return nullptr;
 }
 
+bool isSingleDeviceSharding(TensorShardingAttr sharding,
+                            const SymbolTable& symbolTable) {
+  if (!sharding) {
+    return false;
+  }
+  MeshAttr mesh = sharding.getMesh(symbolTable);
+  return mesh && mesh.isMaximal();
+}
+
 int64_t getFuncResultTensorRank(FuncOp funcOp, int64_t resNum) {
   return getTensorRank(funcOp.getResultTypes()[resNum]);
 }

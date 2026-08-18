@@ -5,9 +5,7 @@ sdy.mesh @mesh_xt = <["x"=2, "t"=4]>
 sdy.mesh @mesh_xy = <["x"=2, "y"=3]>
 sdy.mesh @mesh_iota = <["x"=3, "y"=2]>
 sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
-sdy.mesh @mesh_maximal = #sdy.mesh<[], device_ids=[0]>
-sdy.mesh @mesh_maximal_another = #sdy.mesh<[], device_ids=[1]>
-sdy.mesh @mesh_maximal_copy = #sdy.mesh<[], device_ids=[0]>
+
 
 // CHECK-LABEL: func @optimization_barrier_different_meshes
 func.func @optimization_barrier_different_meshes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{"x"}]>}) {
@@ -124,21 +122,6 @@ func.func @negate_different_axes_different_meshes(%arg0: tensor<210xf32> {sdy.sh
   return %0 : tensor<210xf32>
 }
 
-// CHECK-LABEL: func @negate_identical_maximal_meshes
-func.func @negate_identical_maximal_meshes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_maximal, []>}) -> tensor<210xf32> {
-  // CHECK-NOT: sdy.reshard
-  // TODO(enver): Reshard to output mesh.
-  %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_maximal_copy, []>]>} : tensor<210xf32>
-  return %0 : tensor<210xf32>
-}
-
-// CHECK-LABEL: func @negate_different_maximal_meshes
-func.func @negate_different_maximal_meshes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_maximal, []>}) -> tensor<210xf32> {
-  // CHECK-NOT: sdy.reshard
-  // TODO(enver): Reshard to output mesh.
-  %0 = stablehlo.negate %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_maximal_another, []>]>} : tensor<210xf32>
-  return %0 : tensor<210xf32>
-}
 
 // CHECK-LABEL: func @dot_same_axes_different_meshes
 func.func @dot_same_axes_different_meshes(

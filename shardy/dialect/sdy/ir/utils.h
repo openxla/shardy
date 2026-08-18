@@ -225,6 +225,11 @@ std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> resultsShardings,
     const SymbolTable& symbolTable, bool ignoreDeviceIds);
 
+// Returns true if the sharding attribute is bound to a single-device (maximal)
+// mesh.
+bool isSingleDeviceSharding(TensorShardingAttr sharding,
+                            const SymbolTable& symbolTable);
+
 // Given two shardings for a reshape between two types, returns whether the
 // shardings are equivalent:
 //

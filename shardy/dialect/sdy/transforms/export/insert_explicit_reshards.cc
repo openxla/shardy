@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -42,6 +43,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
@@ -610,6 +612,221 @@ SmallVector<TensorShardingAttr> getShardingsBypassingBarriers(
       values, [](Value value) { return getShardingBypassingBarriers(value); });
 }
 
+// Returns true if any of the result shardings is single-device sharded, which
+// indicates that the operation needs to be guarded by a device ID check.
+bool isSingleDeviceOperation(ArrayRef<TensorShardingAttr> outShardings,
+                             const SymbolTable& symbolTable) {
+  return llvm::any_of(outShardings, [&](TensorShardingAttr sharding) {
+    return isSingleDeviceSharding(sharding, symbolTable);
+  });
+}
+
+// Reports an error and returns failure if the result shardings have conflicting
+// single-device meshes. Otherwise, returns the name of the single-device mesh.
+FailureOr<StringRef> getSingleDeviceMeshInfo(
+    Operation* op, ArrayRef<TensorShardingAttr> outShardings,
+    const SymbolTable& symbolTable) {
+  std::optional<int64_t> singleDeviceId;
+  StringRef singleDeviceMeshName;
+  for (TensorShardingAttr sharding : outShardings) {
+    if (isSingleDeviceSharding(sharding, symbolTable)) {
+      MeshOp meshOp = getMeshOpOrDefault(sharding, symbolTable, nullptr);
+      int64_t devId = meshOp.getMesh().getDeviceIds().front();
+      if (singleDeviceId.has_value() && *singleDeviceId != devId) {
+        op->emitOpError("has conflicting single-device result shardings");
+        return failure();
+      }
+      singleDeviceId = devId;
+      singleDeviceMeshName = meshOp.getName();
+    }
+  }
+  SDY_CHECK(singleDeviceId.has_value());
+  return singleDeviceMeshName;
+}
+
+// Returns the source sharding for an operand of a single-device operation, or
+// global fully-replicated sharding if missing.
+TensorShardingAttr getSourceShardingForSingleDeviceOperand(
+    Value operand, MeshOp globalMeshOp, RankedTensorType rankedType,
+    MLIRContext* ctx) {
+  TensorShardingAttr operandSharding = getSharding(operand);
+  if (!operandSharding) {
+    return TensorShardingAttr::getFullyReplicated(
+        ctx, rankedType.getRank(), globalMeshOp.getName(), /*isClosed=*/true);
+  }
+  return operandSharding;
+}
+
+// Inserts explicit reshards to convert all operands of the given single-device
+// operation to the single-device sharding, except for tokens, which can only
+// have global replicated sharding.
+void insertSingleDeviceOperandReshards(Operation* op,
+                                       TensorShardingAttr singleDevSharding,
+                                       const SymbolTable& symbolTable,
+                                       MeshOp globalMeshOp,
+                                       IRRewriter& rewriter) {
+  rewriter.setInsertionPoint(op);
+  for (OpOperand& opOperand : op->getOpOperands()) {
+    Value operand = opOperand.get();
+    auto rankedType = dyn_cast<RankedTensorType>(operand.getType());
+    if (!rankedType) {
+      continue;
+    }
+
+    TensorShardingAttr operandSharding =
+        getSourceShardingForSingleDeviceOperand(
+            operand, globalMeshOp, rankedType, rewriter.getContext());
+
+    MeshOp singleDevMeshOp =
+        getMeshOpOrDefault(singleDevSharding, symbolTable, nullptr);
+    MeshOp operandMeshOp =
+        getMeshOpOrDefault(operandSharding, symbolTable, nullptr);
+
+    bool isSameShardingAndMesh =
+        isEquivalent(operandSharding, singleDevSharding) &&
+        operandMeshOp == singleDevMeshOp;
+    if (isSameShardingAndMesh) {
+      continue;
+    }
+
+    Value input = operand;
+    bool isReplicatedOnGlobalMesh =
+        isFullyReplicated(operandSharding) && operandMeshOp == globalMeshOp;
+    if (!isReplicatedOnGlobalMesh) {
+      // Tiled / Single-Device A / Replicated on other mesh -> Replicated on
+      // @mesh -> Single-Device B
+      TensorShardingAttr replicatedSharding =
+          TensorShardingAttr::getFullyReplicated(
+              rewriter.getContext(), rankedType.getRank(),
+              globalMeshOp.getName(), /*isClosed=*/true);
+      input = ReshardOp::create(rewriter, operand.getLoc(), input,
+                                replicatedSharding);
+    }
+    auto reshardSingle =
+        ReshardOp::create(rewriter, operand.getLoc(), input, singleDevSharding);
+    opOperand.set(reshardSingle);
+  }
+}
+
+// Returns the target non-single-device sharding required for a result of a
+// single-device operation.
+//
+// If origOutSharding is non-single-device, it is returned directly. Otherwise,
+// returns global fully-replicated sharding on globalMeshOp.
+TensorShardingAttr getTargetShardingForSingleDeviceResult(
+    TensorShardingAttr origOutSharding, MeshOp globalMeshOp,
+    const SymbolTable& symbolTable, RankedTensorType rankedType,
+    MLIRContext* ctx) {
+  if (origOutSharding &&
+      !isSingleDeviceSharding(origOutSharding, symbolTable)) {
+    return origOutSharding;
+  }
+  return TensorShardingAttr::getFullyReplicated(
+      ctx, rankedType.getRank(), globalMeshOp.getName(), /*isClosed=*/true);
+}
+
+// Inserts explicit reshards to convert results of the given single-device
+// operation to their target non-single-device shardings.
+void insertSingleDeviceResultReshards(Operation* op,
+                                      ArrayRef<TensorShardingAttr> outShardings,
+                                      TensorShardingAttr singleDevSharding,
+                                      const SymbolTable& symbolTable,
+                                      MeshOp globalMeshOp,
+                                      IRRewriter& rewriter) {
+  Operation* lastInsertedOp = op;
+  for (auto [index, res] : llvm::enumerate(op->getResults())) {
+    auto rankedType = dyn_cast<RankedTensorType>(res.getType());
+    if (!rankedType) {
+      continue;
+    }
+
+    rewriter.setInsertionPointAfter(lastInsertedOp);
+
+    TensorShardingAttr targetSharding = getTargetShardingForSingleDeviceResult(
+        outShardings[index], globalMeshOp, symbolTable, rankedType,
+        rewriter.getContext());
+    MeshOp targetMeshOp =
+        getMeshOpOrDefault(targetSharding, symbolTable, nullptr);
+    SDY_CHECK(targetMeshOp && !targetMeshOp.getMesh().isMaximal());
+
+    TensorShardingAttr replicatedSharding =
+        TensorShardingAttr::getFullyReplicated(
+            rewriter.getContext(), rankedType.getRank(), globalMeshOp.getName(),
+            /*isClosed=*/true);
+    auto reshardRepl =
+        ReshardOp::create(rewriter, op->getLoc(), res, replicatedSharding);
+    rewriter.replaceAllUsesExcept(res, reshardRepl, reshardRepl);
+    lastInsertedOp = reshardRepl;
+
+    if (targetSharding == replicatedSharding) {
+      continue;
+    }
+
+    auto reshardTiled =
+        ReshardOp::create(rewriter, op->getLoc(), reshardRepl, targetSharding);
+    rewriter.replaceAllUsesExcept(reshardRepl, reshardTiled, reshardTiled);
+    lastInsertedOp = reshardTiled;
+  }
+}
+
+// Sets the single-device sharding on all tensor results of a single-device
+// operation, except for token results which can only have global replicated
+// sharding.
+void updateSingleDeviceOpResultShardings(Operation* op,
+                                         TensorShardingAttr singleDevSharding,
+                                         MeshOp globalMeshOp,
+                                         IRRewriter& rewriter) {
+  for (auto [index, res] : llvm::enumerate(op->getResults())) {
+    if (isa<RankedTensorType>(res.getType())) {
+      setSharding(res, singleDevSharding);
+    } else if (isa<TokenType>(res.getType())) {
+      TensorShardingAttr tokenSharding = TensorShardingAttr::getFullyReplicated(
+          rewriter.getContext(), /*rank=*/0, globalMeshOp.getName(),
+          /*isClosed=*/true);
+      setSharding(res, tokenSharding);
+    }
+  }
+}
+
+// Processes an operation that produces single-device sharding results.
+//
+// Converts operands and results to/from single-device sharding:
+// 1. Reshards input operands to the single-device sharding.
+// 2. Reshards output results to their target non-single-device shardings (or
+// global replicated).
+// 3. Updates result sharding attributes on the operation itself.
+LogicalResult processSingleDeviceOperation(
+    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, const SymbolTable& symbolTable,
+    func::FuncOp funcOp, IRRewriter& rewriter, bool onFullVersion) {
+  FailureOr<StringRef> singleDeviceMeshName =
+      getSingleDeviceMeshInfo(op, outShardings, symbolTable);
+  if (failed(singleDeviceMeshName)) {
+    return failure();
+  }
+
+  ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
+  MeshOp globalMeshOp = getGlobalMeshOp(moduleOp);
+  if (!globalMeshOp) {
+    return success();
+  }
+
+  TensorShardingAttr singleDevSharding = TensorShardingAttr::getFullyReplicated(
+      rewriter.getContext(), /*rank=*/0, *singleDeviceMeshName,
+      /*isClosed=*/true);
+
+  insertSingleDeviceOperandReshards(op, singleDevSharding, symbolTable,
+                                    globalMeshOp, rewriter);
+
+  insertSingleDeviceResultReshards(op, outShardings, singleDevSharding,
+                                   symbolTable, globalMeshOp, rewriter);
+
+  updateSingleDeviceOpResultShardings(op, singleDevSharding, globalMeshOp,
+                                      rewriter);
+
+  return success();
+}
+
 struct InsertExplicitReshardsPass
     : public impl::InsertExplicitReshardsPassBase<InsertExplicitReshardsPass> {
   using InsertExplicitReshardsPassBase::InsertExplicitReshardsPassBase;
@@ -618,6 +835,31 @@ struct InsertExplicitReshardsPass
     func::FuncOp funcOp = getOperation();
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
+
+    // Disallow single-device sharding on function inputs and outputs.
+    auto verifyNoSingleDeviceSharding = [&](TensorShardingAttr sharding,
+                                            StringRef type,
+                                            int index) -> LogicalResult {
+      if (isSingleDeviceSharding(sharding, symbolTable)) {
+        return funcOp.emitOpError("function ")
+               << type << " " << index
+               << " cannot have a single-device (maximal) sharding attribute";
+      }
+      return success();
+    };
+
+    for (int i = 0; i < funcOp.getNumArguments(); ++i) {
+      if (failed(verifyNoSingleDeviceSharding(
+              getSharding(funcOp.getArgument(i)), "argument", i))) {
+        return signalPassFailure();
+      }
+    }
+    for (int i = 0; i < funcOp.getNumResults(); ++i) {
+      if (failed(verifyNoSingleDeviceSharding(getFuncResultSharding(funcOp, i),
+                                              "result", i))) {
+        return signalPassFailure();
+      }
+    }
 
     funcOp->walk([&](Operation* op) {
       if (op->hasTrait<OpTrait::IsTerminator>()) {
@@ -647,6 +889,20 @@ struct InsertExplicitReshardsPass
 
       insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable);
 
+      SmallVector<TensorShardingAttr> inShardings =
+          getShardingsBypassingBarriers(op->getOperands());
+      SmallVector<TensorShardingAttr> outShardings =
+          getShardingsBypassingBarriers(op->getResults());
+
+      if (isSingleDeviceOperation(outShardings, symbolTable)) {
+        if (failed(processSingleDeviceOperation(op, inShardings, outShardings,
+                                                symbolTable, funcOp, rewriter,
+                                                onFullVersion))) {
+          return signalPassFailure();
+        }
+        return;
+      }
+
       // NOTE: Creating a sharding rule requires data flow edges are present.
       OpShardingRuleAttr shardingRule =
           getOrCreateShardingRule(op, /*conservativePropagation=*/false,
@@ -658,11 +914,6 @@ struct InsertExplicitReshardsPass
         // since all the operations of interest got their sharding rules.
         return;
       }
-
-      SmallVector<TensorShardingAttr> inShardings =
-          getShardingsBypassingBarriers(op->getOperands());
-      SmallVector<TensorShardingAttr> outShardings =
-          getShardingsBypassingBarriers(op->getResults());
 
       std::optional<MeshOp> meshOp =
           getMesh(inShardings, outShardings, symbolTable);
