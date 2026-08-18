@@ -1252,6 +1252,20 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
 
     TensorShardingAttr inSharding = getOrCreateShardingBypassingBarriers(
         bypassedInput, outSharding.getMeshOrRef());
+    if (inSharding) {
+      MeshAttr inMesh = inSharding.getMesh(op);
+      if (inMesh && inMesh.isMaximal()) {
+        return rewriter.notifyMatchFailure(
+            op, [](Diagnostic& diag) { diag << "Single device inSharding"; });
+      }
+    }
+    if (outSharding) {
+      MeshAttr outMesh = outSharding.getMesh(op);
+      if (outMesh && outMesh.isMaximal()) {
+        return rewriter.notifyMatchFailure(
+            op, [](Diagnostic& diag) { diag << "Single device outSharding"; });
+      }
+    }
     // We support both symbol and inlined meshes.
     if (inSharding.getRank() != outSharding.getRank()) {
       return rewriter.notifyMatchFailure(
@@ -1295,6 +1309,7 @@ struct ReshardToCollectivesPass
     : public impl::ReshardToCollectivesPassBase<ReshardToCollectivesPass> {
   using ReshardToCollectivesPassBase::ReshardToCollectivesPassBase;
 
+ private:
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
     target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,
@@ -1305,6 +1320,18 @@ struct ReshardToCollectivesPass
       TensorShardingAttr outSharding = op.getSharding();
       if (keepRedundantReshards && isEquivalent(inSharding, outSharding)) {
         return true;
+      }
+      if (inSharding) {
+        MeshAttr inMesh = inSharding.getMesh(op);
+        if (inMesh && inMesh.isMaximal()) {
+          return true;
+        }
+      }
+      if (outSharding) {
+        MeshAttr outMesh = outSharding.getMesh(op);
+        if (outMesh && outMesh.isMaximal()) {
+          return true;
+        }
       }
       // In case out sharding is fully replicated, the reshard is either erased
       // (if input sharding is fully replicated too) or it adds an all gather

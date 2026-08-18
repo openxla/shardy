@@ -19,6 +19,7 @@ sdy.mesh @mesh4d_w16 = <["x"=2, "y"=2, "z"=2, "w"=16]>
 sdy.mesh @mesh6d = <["x"=2, "y"=2, "z"=2, "w"=2, "u"=2, "v"=2]>
 sdy.mesh @empty_mesh = <[]>
 sdy.mesh @empty_mesh_another = <[]>
+sdy.mesh @single_dev_0 = <[], device_ids=[0]>
 
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated
@@ -933,3 +934,27 @@ func.func @reshard_with_propagation_barrier(
 
   return %1 : tensor<8x8x8xf32>
 }
+
+//===----------------------------------------------------------------------===//
+// Single-Device Reshard Tests (Preserved as sdy.reshard)
+//===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: func @single_device_in_sharding
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@single_dev_0, []>}) -> tensor<16x8xf32> {
+func.func @single_device_in_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@single_dev_0, []>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh2d, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh2d, [{}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @single_device_out_sharding
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>}) -> tensor<16x8xf32> {
+func.func @single_device_out_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@single_dev_0, []> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@single_dev_0, []> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+
