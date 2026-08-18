@@ -464,6 +464,7 @@ LogicalResult runPartitionerPipeline(ModuleOp module, bool enableHaloExchange,
   pm.addNestedPass<func::FuncOp>(
       createInsertExplicitReshardsPass(insertReshardOptions));
   pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
+  pm.addNestedPass<func::FuncOp>(createOptimizeCollectivesPass());
   pm.addNestedPass<func::FuncOp>(createPadForDivisibilityPass());
   ConvertGlobalToLocalPassOptions convertOptions;
   convertOptions.replicaCount = replicaCount;

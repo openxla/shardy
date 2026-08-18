@@ -40,6 +40,9 @@ cc_library(
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
         "insert_func_call_reshards.cc",
+        "optimize_collectives.cc",
+        "optimize_collectives_patterns.cc",
+        "optimize_collectives_util.cc",
         "pad_for_divisibility.cc",
         "per_instruction_partitioning.cc",
         "propagate_to_func_results.cc",
@@ -57,6 +60,8 @@ cc_library(
         "verify_unreduced_axes.cc",
     ],
     hdrs = [
+        "optimize_collectives_patterns.h",
+        "optimize_collectives_util.h",
         "passes.h",
     ],
     deps = [
