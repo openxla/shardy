@@ -25,6 +25,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -106,6 +107,10 @@ mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 // TODO(b/545097355): support replica_count > 1 && partition_count > 1.
 Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
                   OpBuilder& rewriter);
+
+// Returns the first non-maximal MeshOp found in moduleOp, or nullptr if none
+// exists.
+MeshOp getGlobalMeshOp(ModuleOp moduleOp);
 
 // Returns the logical index of the shard that the given device (`deviceId`)
 // resides in, along a dimension sharded by the provided `axes`.

@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
@@ -228,6 +229,17 @@ Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
   }
   return idOp;
 }
+
+MeshOp getGlobalMeshOp(ModuleOp moduleOp) {
+  for (MeshOp meshOp : moduleOp.getOps<MeshOp>()) {
+    MeshAttr mesh = meshOp.getMesh();
+    if (!mesh.isMaximal() && !mesh.getAxes().empty()) {
+      return meshOp;
+    }
+  }
+  return nullptr;
+}
+
 int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
                       ArrayRef<AxisRefAttr> axes) {
   int64_t logicalDeviceId = deviceId;

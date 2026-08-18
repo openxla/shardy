@@ -183,6 +183,14 @@ FlatSymbolRefAttr getOrCreateMeshSymbol(Operation* op, Attribute meshOrRef,
   }
   if (auto meshAttr = dyn_cast<MeshAttr>(meshOrRef)) {
     ModuleOp module = op->getParentOfType<ModuleOp>();
+    if (!meshAttr.isMaximal()) {
+      if (MeshOp globalMeshOp = getGlobalMeshOp(module)) {
+        if (globalMeshOp.getMesh() == meshAttr) {
+          return FlatSymbolRefAttr::get(op->getContext(),
+                                        globalMeshOp.getSymName());
+        }
+      }
+    }
     for (MeshOp meshOp : module.getOps<MeshOp>()) {
       if (meshOp.getMesh() == meshAttr) {
         return FlatSymbolRefAttr::get(op->getContext(), meshOp.getSymName());
