@@ -26,11 +26,13 @@ func.func @no_work_needed(%arg0: !mesh_1_tensor, %arg1: !mesh_2_tensor) -> (!mes
 func.func @single_mesh_one_return_operand(%arg0: !mesh_1_tensor) -> (!mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor) attributes {
   "topology"=#mpmd.topology<<"m1": <["x"=2]>>>
 } {
-  // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // The producer f1 is extended with extra results instead of creating a
+  // separate uniquify fragment.
+  // CHECK-NEXT: %[[F1:.*]]:2 = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // CHECK:        %[[V:.*]] = stablehlo.add
+  // CHECK:        mpmd.return %[[V]], %[[V]]
   // CHECK:      %[[F2:.*]] = mpmd.fragment<mesh="m1", origin=["f2"]>
-  // CHECK:      %[[UF:.*]]:2 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]]) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xf32>) {
-  // CHECK:         mpmd.return %arg1, %arg1 : tensor<4xf32>, tensor<4xf32>
-  // CHECK:      %[[F2]], %[[UF]]#0, %[[UF]]#1
+  // CHECK:      return %[[F2]], %[[F1]]#0, %[[F1]]#1
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<4xf32>
     mpmd.return %1 : tensor<4xf32>
@@ -46,13 +48,14 @@ func.func @needs_fragment_for_m1_with_many_values(%arg0: !mesh_1_tensor, %arg1: 
 ) -> (!mesh_2_tensor, !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor) attributes {
   "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 } {
-  // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // f1 is extended with 1 extra result (used at positions 1 and 3).
+  // CHECK-NEXT: %[[F1:.*]]:2 = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // CHECK:        mpmd.return %arg2, %arg2
   // CHECK:      %[[F2:.*]] = mpmd.fragment<mesh="m2", origin=["f2"]>
-  // CHECK:      %[[F3:.*]] = mpmd.fragment<mesh="m1", origin=["f3"]>
-  // CHECK:      %[[UF:.*]]:5 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]], %[[F3]]) {mpmd.inferred_by = ["uniquify"]} (%[[A1:.*]]: tensor<4xf32>, %[[A2:.*]]: tensor<4xf32>)
-  // CHECK-NEXT:   mpmd.return %[[A1]], %[[A1]], %[[A2]], %[[A2]], %[[A2]]
-  // CHECK-NEXT: }
-  // CHECK-NEXT: return %[[F2]], %[[UF]]#0, %[[UF]]#2, %[[UF]]#1, %[[UF]]#3, %[[UF]]#4
+  // f3 is extended with 2 extra results (used at positions 2, 4, and 5).
+  // CHECK:      %[[F3:.*]]:3 = mpmd.fragment<mesh="m1", origin=["f3"]>
+  // CHECK:        mpmd.return %arg2, %arg2, %arg2
+  // CHECK:      return %[[F2]], %[[F1]]#0, %[[F3]]#0, %[[F1]]#1, %[[F3]]#1, %[[F3]]#2
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg2: tensor<4xf32>) {
     mpmd.return %arg2 : tensor<4xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor
@@ -70,9 +73,16 @@ func.func @needs_fragment_for_m1_and_m2(%arg0: !mesh_1_tensor, %arg1: !mesh_2_te
 ) -> (!mesh_1_tensor, !mesh_2_tensor, !mesh_2_tensor, !mesh_1_tensor, !mesh_1_tensor, !mesh_1_tensor) attributes {
   "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>
 } {
-  // CHECK: %[[UF1:.*]]:4 = mpmd.fragment<mesh="m1", origin=[]> ({{.*}}) {mpmd.inferred_by = ["uniquify"]}
-  // CHECK: %[[UF2:.*]]:2 = mpmd.fragment<mesh="m2", origin=[]> ({{.*}}) {mpmd.inferred_by = ["uniquify"]}
-  // CHECK: return %[[UF1]]#0, %[[UF2]]#0, %[[UF2]]#1, %[[UF1]]#2, %[[UF1]]#1, %[[UF1]]#3
+  // f1 is extended with 1 extra result.
+  // CHECK: %[[F1:.*]]:2 = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // CHECK:   mpmd.return %arg2, %arg2
+  // f2 is extended with 1 extra result.
+  // CHECK: %[[F2:.*]]:2 = mpmd.fragment<mesh="m2", origin=["f2"]>
+  // CHECK:   mpmd.return %arg2, %arg2
+  // f3 is extended with 1 extra result.
+  // CHECK: %[[F3:.*]]:2 = mpmd.fragment<mesh="m1", origin=["f3"]>
+  // CHECK:   mpmd.return %arg2, %arg2
+  // CHECK: return %[[F1]]#0, %[[F2]]#0, %[[F2]]#1, %[[F3]]#0, %[[F1]]#1, %[[F3]]#1
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg2: tensor<4xf32>) {
     mpmd.return %arg2 : tensor<4xf32>
   } : (!mesh_1_tensor) -> !mesh_1_tensor
@@ -95,11 +105,11 @@ module {
 func.func @single_mesh_one_return_operand_with_global_view(%arg0: !dist_mesh_tensor) -> (!dist_mesh_tensor, !dist_mesh_tensor, !dist_mesh_tensor) attributes {
   "topology"=#mpmd.topology<<"m1": <["x"=2]>>>
 } {
-  // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // CHECK-NEXT: %[[F1:.*]]:2 = mpmd.fragment<mesh="m1", origin=["f1"]>
+  // CHECK:        %[[V:.*]] = stablehlo.add
+  // CHECK:        mpmd.return %[[V]], %[[V]]
   // CHECK:      %[[F2:.*]] = mpmd.fragment<mesh="m1", origin=["f2"]>
-  // CHECK:      %[[UF:.*]]:2 = mpmd.fragment<mesh="m1", origin=[]> (%[[F1]]) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xf32>) {
-  // CHECK:         mpmd.return %arg1, %arg1 : tensor<4xf32>, tensor<4xf32>
-  // CHECK:      %[[F2]], %[[UF]]#0, %[[UF]]#1
+  // CHECK:      return %[[F2]], %[[F1]]#0, %[[F1]]#1
   %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4xf32>) {
     %1 = stablehlo.add %arg1, %arg1 : tensor<4xf32>
     mpmd.return %1 : tensor<4xf32>
@@ -119,13 +129,15 @@ func.func @single_mesh_one_return_operand_with_global_view(%arg0: !dist_mesh_ten
 func.func @f(%arg0: !mesh_tensor) -> (!mesh_tensor, !mesh_tensor, !mesh_tensor)
   attributes {"topology"=#mpmd.topology<<"m": <["x"=2]>>>}
 {
+  // The f fragment result appears once (position 1). Block arg %arg0 appears at
+  // positions 0 and 2 — it gets a uniquify identity fragment.
   // CHECK-NEXT: %[[F1:.*]] = mpmd.fragment<mesh="m", origin=["f"]> (%arg0) (%arg1: tensor<4xui32>) {
   // CHECK-NEXT:   return %arg1
   // CHECK-NEXT: }
-  // CHECK-NEXT: %[[F2:.*]]:2 = mpmd.fragment<mesh="m", origin=[]> (%arg0) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xui32>) {
+  // CHECK-NEXT: %[[UF:.*]]:2 = mpmd.fragment<mesh="m", origin=[]> (%arg0) {mpmd.inferred_by = ["uniquify"]} (%arg1: tensor<4xui32>) {
   // CHECK-NEXT:   return %arg1, %arg1
   // CHECK-NEXT: }
-  // CHECK-NEXT: return %[[F2]]#0, %[[F1]], %[[F2]]#1
+  // CHECK-NEXT: return %[[UF]]#0, %[[F1]], %[[UF]]#1
   %0 = mpmd.fragment<mesh="m", origin=["f"]>(%arg0) (%arg1: tensor<4xui32>) {
     mpmd.return %arg1 : tensor<4xui32>
   } : (!mesh_tensor) -> !mesh_tensor
