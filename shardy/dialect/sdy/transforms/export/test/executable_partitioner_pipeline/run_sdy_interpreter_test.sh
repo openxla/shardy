@@ -16,12 +16,40 @@
 
 set -e
 
-SRC=$1
-TMP=$2
-ENABLE_HALO_EXCHANGE=${3:-true}
+SRC=""
+TMP=""
+ENABLE_HALO_EXCHANGE=true
 # When replica_count=partition_count=1, the test use partition id.
-REPLICA_COUNT=${4:-1}
-PARTITION_COUNT=${5:-1}
+REPLICA_COUNT=1
+PARTITION_COUNT=1
+
+pos_idx=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --src=*)                  SRC="${arg#*=}" ;;
+    --temp_dir=*)             TMP="${arg#*=}" ;;
+    --enable_halo_exchange=*) ENABLE_HALO_EXCHANGE="${arg#*=}" ;;
+    --replica_count=*)        REPLICA_COUNT="${arg#*=}" ;;
+    --partition_count=*)      PARTITION_COUNT="${arg#*=}" ;;
+    --*)                      echo "Warning: Unknown flag '$arg'" >&2 ;;
+    *)
+      pos_idx=$((pos_idx + 1))
+      case "$pos_idx" in
+        1) SRC="$arg" ;;
+        2) TMP="$arg" ;;
+        3) ENABLE_HALO_EXCHANGE="$arg" ;;
+        4) REPLICA_COUNT="$arg" ;;
+        5) PARTITION_COUNT="$arg" ;;
+      esac
+      ;;
+  esac
+done
+
+if [ -z "$SRC" ] || [ -z "$TMP" ]; then
+  echo "Error: Missing required arguments. Usage: $0 <src.mlir> <temp_dir> [flags...]" >&2
+  exit 1
+fi
 
 SPLIT_FILE=${SPLIT_FILE:-split-file}
 SDY_OPT=${SDY_OPT:-sdy_opt}

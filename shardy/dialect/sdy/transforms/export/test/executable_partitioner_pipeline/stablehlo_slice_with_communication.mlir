@@ -1,5 +1,5 @@
-// RUN: %S/run_sdy_interpreter_test.sh %s %t "true"
-// RUN: %S/run_sdy_interpreter_test.sh %s %t "false"
+// RUN: %S/run_sdy_interpreter_test.sh %s %t --enable_halo_exchange=true
+// RUN: %S/run_sdy_interpreter_test.sh %s %t --enable_halo_exchange=false
 
 //--- part1.mlir
 

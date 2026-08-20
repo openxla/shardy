@@ -1,5 +1,5 @@
-// RUN: %S/run_sdy_interpreter_test.sh %s %t "false"
-// RUN: %S/run_sdy_interpreter_test.sh %s %t "true"
+// RUN: %S/run_sdy_interpreter_test.sh %s %t --enable_halo_exchange=false
+// RUN: %S/run_sdy_interpreter_test.sh %s %t --enable_halo_exchange=true
 
 //--- part1.mlir
 sdy.mesh @mesh_ab_16 = <["a"=4, "b"=4]>
