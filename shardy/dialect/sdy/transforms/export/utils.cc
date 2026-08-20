@@ -330,5 +330,42 @@ mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef) {
   return mlir::stablehlo::AxisRefAttr::get(ctx, sdyAxisRef.getName(),
                                            subAxisInfo);
 }
+
+FlatSymbolRefAttr getOrCreateMeshSymbol(Location loc, ModuleOp module,
+                                        Attribute meshOrRef,
+                                        SymbolTable& symbolTable) {
+  if (auto sym = dyn_cast_or_null<FlatSymbolRefAttr>(meshOrRef)) {
+    return sym;
+  }
+  auto meshAttr = dyn_cast_or_null<MeshAttr>(meshOrRef);
+  if (!meshAttr) {
+    return nullptr;
+  }
+  if (!meshAttr.isMaximal()) {
+    if (MeshOp globalMeshOp = getGlobalMeshOp(module)) {
+      if (globalMeshOp.getMesh() == meshAttr) {
+        return FlatSymbolRefAttr::get(module.getContext(),
+                                      globalMeshOp.getSymName());
+      }
+    }
+  }
+  for (MeshOp meshOp : module.getOps<MeshOp>()) {
+    if (meshOp.getMesh() == meshAttr) {
+      return FlatSymbolRefAttr::get(module.getContext(), meshOp.getSymName());
+    }
+  }
+  OpBuilder moduleBuilder(module.getBodyRegion());
+  MeshOp newMeshOp = MeshOp::create(moduleBuilder, loc, "mesh", meshAttr);
+  symbolTable.insert(newMeshOp, module.getBody()->begin());
+  return FlatSymbolRefAttr::get(module.getContext(), newMeshOp.getSymName());
+}
+
+FlatSymbolRefAttr getOrCreateMeshSymbol(Operation* op, Attribute meshOrRef,
+                                        SymbolTable& symbolTable) {
+  ModuleOp module =
+      isa<ModuleOp>(op) ? cast<ModuleOp>(op) : op->getParentOfType<ModuleOp>();
+  return getOrCreateMeshSymbol(op->getLoc(), module, meshOrRef, symbolTable);
+}
+
 }  // namespace sdy
 }  // namespace mlir

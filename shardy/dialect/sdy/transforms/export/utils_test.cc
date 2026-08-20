@@ -20,6 +20,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringRef.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -52,9 +53,9 @@ class ExportUtilsTest : public ShardyTestBase {
   }
 
   Type f32Type;
+  OwningOpRef<ModuleOp> moduleOp;
 
  private:
-  OwningOpRef<ModuleOp> moduleOp;
   mlir::SymbolTableCollection symbolTableCollection;
 };
 
@@ -216,6 +217,114 @@ TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeNonRankedType) {
 
   Type paddedType = getDivisiblePaddedType(f32Type, sharding, getSymbolTable());
   EXPECT_EQ(paddedType, f32Type);
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolSymbolRef) {
+  FlatSymbolRefAttr sym = FlatSymbolRefAttr::get(&context, "mesh");
+  SymbolTable symbolTable(moduleOp.get());
+  EXPECT_EQ(getOrCreateMeshSymbol(moduleOp.get(), sym, symbolTable), sym);
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolExistingMeshAttr) {
+  MeshAttr meshAttr =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2),
+                               MeshAxisAttr::get(&context, "y", 4)});
+  SymbolTable symbolTable(moduleOp.get());
+  FlatSymbolRefAttr sym =
+      getOrCreateMeshSymbol(moduleOp.get(), meshAttr, symbolTable);
+  ASSERT_NE(sym, nullptr);
+  EXPECT_EQ(sym.getValue(), "mesh");
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolNewMeshAttr) {
+  MeshAttr newMeshAttr =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "z", 8)});
+  SymbolTable symbolTable(moduleOp.get());
+  FlatSymbolRefAttr sym =
+      getOrCreateMeshSymbol(moduleOp.get(), newMeshAttr, symbolTable);
+  ASSERT_NE(sym, nullptr);
+  auto meshOp = symbolTable.lookup<MeshOp>(sym.getValue());
+  ASSERT_NE(meshOp, nullptr);
+  EXPECT_EQ(meshOp.getMesh(), newMeshAttr);
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolNullOrInvalidAttr) {
+  SymbolTable symbolTable(moduleOp.get());
+  EXPECT_EQ(getOrCreateMeshSymbol(moduleOp.get(), nullptr, symbolTable),
+            nullptr);
+  EXPECT_EQ(getOrCreateMeshSymbol(moduleOp.get(), UnitAttr::get(&context),
+                                  symbolTable),
+            nullptr);
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolDirectModule) {
+  MeshAttr meshAttr =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2),
+                               MeshAxisAttr::get(&context, "y", 4)});
+  SymbolTable symbolTable(moduleOp.get());
+  FlatSymbolRefAttr sym = getOrCreateMeshSymbol(
+      moduleOp.get()->getLoc(), moduleOp.get(), meshAttr, symbolTable);
+  ASSERT_NE(sym, nullptr);
+  EXPECT_EQ(sym.getValue(), "mesh");
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolNestedOp) {
+  SymbolTable symbolTable(moduleOp.get());
+  Operation* nestedOp = *moduleOp.get().getOps<MeshOp>().begin();
+  FlatSymbolRefAttr sym = FlatSymbolRefAttr::get(&context, "mesh");
+  EXPECT_EQ(getOrCreateMeshSymbol(nestedOp, sym, symbolTable), sym);
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolGlobalMesh) {
+  // Create a global mesh (non-maximal, non-empty axes) and add it to the
+  // module.
+  MeshAttr globalMeshAttr =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 4)});
+  SymbolTable symbolTable(moduleOp.get());
+
+  OpBuilder builder(moduleOp.get().getBodyRegion());
+  MeshOp globalMeshOp = MeshOp::create(builder, moduleOp.get().getLoc(),
+                                       "global_mesh", globalMeshAttr);
+  symbolTable.insert(globalMeshOp);
+
+  // Calling getOrCreateMeshSymbol with the matching inlined MeshAttr should
+  // return the global_mesh symbol ref.
+  FlatSymbolRefAttr sym =
+      getOrCreateMeshSymbol(moduleOp.get(), globalMeshAttr, symbolTable);
+  ASSERT_NE(sym, nullptr);
+  EXPECT_EQ(sym.getValue(), "global_mesh");
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolMaximalMesh) {
+  // Create a maximal mesh (e.g. single-device mesh with device_ids)
+  MeshAttr maximalMeshAttr =
+      MeshAttr::get(&context, /*axes=*/{}, /*deviceIds=*/{0});
+  SymbolTable symbolTable(moduleOp.get());
+
+  FlatSymbolRefAttr sym =
+      getOrCreateMeshSymbol(moduleOp.get(), maximalMeshAttr, symbolTable);
+  ASSERT_NE(sym, nullptr);
+
+  auto meshOp = symbolTable.lookup<MeshOp>(sym.getValue());
+  ASSERT_NE(meshOp, nullptr);
+  EXPECT_EQ(meshOp.getMesh(), maximalMeshAttr);
+  EXPECT_TRUE(meshOp.getMesh().isMaximal());
+}
+
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolExistingMaximalMesh) {
+  MeshAttr maximalMeshAttr =
+      MeshAttr::get(&context, /*axes=*/{}, /*deviceIds=*/{0});
+  SymbolTable symbolTable(moduleOp.get());
+
+  OpBuilder builder(moduleOp.get().getBodyRegion());
+  MeshOp maximalMeshOp = MeshOp::create(builder, moduleOp.get().getLoc(),
+                                        "maximal_mesh", maximalMeshAttr);
+  symbolTable.insert(maximalMeshOp);
+
+  FlatSymbolRefAttr sym =
+      getOrCreateMeshSymbol(moduleOp.get(), maximalMeshAttr, symbolTable);
+  ASSERT_NE(sym, nullptr);
+  EXPECT_EQ(sym.getValue(), "maximal_mesh");
 }
 
 }  // namespace

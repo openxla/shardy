@@ -127,6 +127,17 @@ Type getDivisiblePaddedType(
     Type type, TensorShardingAttr sharding, const SymbolTable& symbolTable,
     const llvm::DenseSet<StringRef>* allowedAxes = nullptr);
 
+// Returns the FlatSymbolRefAttr for meshOrRef if it is already a symbol
+// reference, finds a matching existing MeshOp for an inlined MeshAttr, or
+// creates a new MeshOp in the module.
+FlatSymbolRefAttr getOrCreateMeshSymbol(Location loc, ModuleOp module,
+                                        Attribute meshOrRef,
+                                        SymbolTable& symbolTable);
+
+// Same as above, retrieving location and parent ModuleOp from `op`.
+FlatSymbolRefAttr getOrCreateMeshSymbol(Operation* op, Attribute meshOrRef,
+                                        SymbolTable& symbolTable);
+
 // Converts an SDY AxisRefAttr to a StableHLO AxisRefAttr.
 mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef);
 }  // namespace sdy

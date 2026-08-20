@@ -170,41 +170,6 @@ Attribute getTargetMeshOrRef(Operation* op, const SymbolTable& symbolTable) {
   return getCommonMeshOrRef(inShardings, outShardings, symbolTable);
 }
 
-// TODO(b/545097355): Consider sharing code with
-// resolve-permutation-factors and inline-meshes.
-//
-// Returns the FlatSymbolRefAttr for meshOrRef if it is already a symbol
-// reference, finds a matching existing MeshOp for an inlined MeshAttr, or
-// creates a new MeshOp in the parent module.
-FlatSymbolRefAttr getOrCreateMeshSymbol(Operation* op, Attribute meshOrRef,
-                                        SymbolTable& symbolTable) {
-  if (auto sym = dyn_cast<FlatSymbolRefAttr>(meshOrRef)) {
-    return sym;
-  }
-  if (auto meshAttr = dyn_cast<MeshAttr>(meshOrRef)) {
-    ModuleOp module = op->getParentOfType<ModuleOp>();
-    if (!meshAttr.isMaximal()) {
-      if (MeshOp globalMeshOp = getGlobalMeshOp(module)) {
-        if (globalMeshOp.getMesh() == meshAttr) {
-          return FlatSymbolRefAttr::get(op->getContext(),
-                                        globalMeshOp.getSymName());
-        }
-      }
-    }
-    for (MeshOp meshOp : module.getOps<MeshOp>()) {
-      if (meshOp.getMesh() == meshAttr) {
-        return FlatSymbolRefAttr::get(op->getContext(), meshOp.getSymName());
-      }
-    }
-    OpBuilder moduleBuilder(module.getBodyRegion());
-    MeshOp newMeshOp =
-        MeshOp::create(moduleBuilder, op->getLoc(), "mesh", meshAttr);
-    symbolTable.insert(newMeshOp, module.getBody()->begin());
-    return FlatSymbolRefAttr::get(op->getContext(), newMeshOp.getSymName());
-  }
-  return nullptr;
-}
-
 // Collects operand and result shardings (defaulting to fully replicated if
 // missing) and all unique manual axes used across the instruction.
 InstructionShardingInfo getInstructionShardingInfo(Operation* op,
