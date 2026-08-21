@@ -327,6 +327,37 @@ TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolExistingMaximalMesh) {
   EXPECT_EQ(sym.getValue(), "maximal_mesh");
 }
 
+TEST_F(ExportUtilsTest, BuildReshapeGroupInfos) {
+  auto inType = RankedTensorType::get({3, 16, 7}, f32Type);
+  auto outType = RankedTensorType::get({3, 4, 4, 7}, f32Type);
+
+  SmallVector<ReshapeGroupInfo> groups =
+      buildReshapeGroupInfos(inType, outType);
+  ASSERT_EQ(groups.size(), 3);
+
+  // Group 0: 3 -> 3 (passthrough)
+  EXPECT_EQ(groups[0].inStartDim, 0);
+  EXPECT_EQ(groups[0].inLastDim, 1);
+  EXPECT_EQ(groups[0].outStartDim, 0);
+  EXPECT_EQ(groups[0].outLastDim, 1);
+  EXPECT_TRUE(groups[0].isPassthrough());
+
+  // Group 1: 16 -> 4x4 (split)
+  EXPECT_EQ(groups[1].inStartDim, 1);
+  EXPECT_EQ(groups[1].inLastDim, 2);
+  EXPECT_EQ(groups[1].outStartDim, 1);
+  EXPECT_EQ(groups[1].outLastDim, 3);
+  EXPECT_TRUE(groups[1].isSplit());
+  EXPECT_FALSE(groups[1].isPassthrough());
+
+  // Group 2: 7 -> 7 (passthrough)
+  EXPECT_EQ(groups[2].inStartDim, 2);
+  EXPECT_EQ(groups[2].inLastDim, 3);
+  EXPECT_EQ(groups[2].outStartDim, 3);
+  EXPECT_EQ(groups[2].outLastDim, 4);
+  EXPECT_TRUE(groups[2].isPassthrough());
+}
+
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir

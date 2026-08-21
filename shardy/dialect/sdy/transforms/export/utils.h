@@ -140,6 +140,81 @@ FlatSymbolRefAttr getOrCreateMeshSymbol(Operation* op, Attribute meshOrRef,
 
 // Converts an SDY AxisRefAttr to a StableHLO AxisRefAttr.
 mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef);
+
+// Information about an independent contiguous group of dimensions in a reshape
+// whose input and output volumes match. Classifies the sub-transform as
+// pass-through, split, or combine to determine communication and padding needs.
+struct ReshapeGroupInfo {
+  int64_t inStartDim = 0;
+  int64_t inLastDim = 0;
+  int64_t outStartDim = 0;
+  int64_t outLastDim = 0;
+  int64_t numInNontrivialDims = 0;
+  int64_t numOutNontrivialDims = 0;
+
+  int64_t getInIndivisibleDim() const { return inLastDim - 1; }
+  int64_t getOutIndivisibleDim() const { return outLastDim - 1; }
+
+  bool isSplit() const {
+    return numInNontrivialDims <= 1 && numOutNontrivialDims > 1;
+  }
+  bool isCombine() const {
+    return numInNontrivialDims > 1 && numOutNontrivialDims <= 1;
+  }
+  bool isPassthrough() const {
+    return numInNontrivialDims <= 1 && numOutNontrivialDims <= 1;
+  }
+  bool isNeither() const {
+    return numInNontrivialDims > 1 && numOutNontrivialDims > 1;
+  }
+
+  // Returns whether any dimension in this group is indivisible based on padded
+  // shapes.
+  bool hasIndivisibility(ArrayRef<int64_t> paddedInputShape,
+                         ArrayRef<int64_t> paddedOutputShape,
+                         RankedTensorType inType,
+                         RankedTensorType outType) const;
+
+  // Returns whether any dimension in this group is indivisible based on
+  // sharding.
+  bool hasIndivisibility(TensorShardingAttr inSharding,
+                         TensorShardingAttr outSharding, MeshAttr mesh,
+                         RankedTensorType inType,
+                         RankedTensorType outType) const;
+
+  // Returns all axis references across input and output dimensions in this
+  // group.
+  SmallVector<AxisRefAttr> getAllAxisRefs(TensorShardingAttr inSharding,
+                                          TensorShardingAttr outSharding) const;
+
+  // Returns the volume (product of dimension sizes) for input dimensions in
+  // this group.
+  int64_t getInVolume(ArrayRef<int64_t> shape) const;
+
+  // Returns the volume (product of dimension sizes) for output dimensions in
+  // this group.
+  int64_t getOutVolume(ArrayRef<int64_t> shape) const;
+};
+
+// Builds ReshapeGroupInfo instances based on cumulative shape prefix products.
+SmallVector<ReshapeGroupInfo> buildReshapeGroupInfos(RankedTensorType inType,
+                                                     RankedTensorType outType);
+
+// Checks whether a reshape operation is communication-free, meaning we can
+// just apply high pad to the input and the output is correctly padded without
+// any halo exchange or data redistribution.
+bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
+                                TensorShardingAttr inSharding,
+                                TensorShardingAttr outSharding, MeshAttr mesh,
+                                RankedTensorType inputType,
+                                RankedTensorType outputType,
+                                ArrayRef<ReshapeGroupInfo> reshapeGroups);
+
+bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
+                                TensorShardingAttr inSharding,
+                                TensorShardingAttr outSharding, MeshAttr mesh,
+                                RankedTensorType inputType,
+                                RankedTensorType outputType);
 }  // namespace sdy
 }  // namespace mlir
 
