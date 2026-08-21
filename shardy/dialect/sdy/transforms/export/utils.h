@@ -100,6 +100,12 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
 // Converts an SDY MeshAttr to a StableHLO MeshAttr.
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 
+// Returns true if the device ID should be derived from partition ID (i.e.,
+// partitionCount > 1 or replicaCount == 1).
+//
+// TODO(b/545097355): support replica_count > 1 && partition_count > 1.
+bool usePartitionId(int64_t replicaCount, int64_t partitionCount);
+
 // Returns a scalar i64 tensor containing the device ID. Currently, the device
 // ID is either replica ID or partition ID, depending on the replica count and
 // partition count.
