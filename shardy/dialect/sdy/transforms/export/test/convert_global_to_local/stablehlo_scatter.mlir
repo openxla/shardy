@@ -43,7 +43,7 @@ func.func @input_not_sharded_scatter_indices_update_sharded_on_implicit_batch_di
 
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SCATTER]])
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]> : tensor<4x2xi64>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   // CHECK: (tensor<3x4x2xf32>) -> tensor<3x4x2xf32>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}, {}]> : tensor<3x4x2xf32>
 
@@ -94,7 +94,7 @@ func.func @input_sharded_not_on_indexed_dim(
 
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SCATTER]])
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 4], [1, 5], [2, 6], [3, 7]]> : tensor<4x2xi64>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
   // CHECK: (tensor<3x4x1xf32>) -> tensor<3x4x1xf32>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}, {"y":(2)2}]> : tensor<3x4x2xf32>
 

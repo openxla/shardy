@@ -1,5 +1,5 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V1
-// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=false' | FileCheck %s --check-prefixes=CHECK,V1
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V3
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>

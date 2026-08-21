@@ -24,7 +24,7 @@ SDY_OPT=${SDY_OPT:-sdy_opt}
 STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 
 "$SPLIT_FILE" "$SRC" "$TMP"
-"$SDY_OPT" "$TMP/part1.mlir" --sdy-convert-global-to-local --sdy-drop-sharding-and-mesh --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
+"$SDY_OPT" "$TMP/part1.mlir" --sdy-convert-global-to-local --sdy-inline-meshes --sdy-drop-sharding-and-mesh --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 sed '1d; /^}/,$d' "$TMP/part1_processed.mlir" > "$TMP/combined.mlir"
 
 # If part1.mlir contains @parallel_x but not @sequential_x, then remove sharding
