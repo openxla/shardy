@@ -1437,104 +1437,6 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
 // stablehlo.reshape
 // -----------------------------------------------------------------------------
 
-struct ReshapeGroupInfo {
-  int64_t inStartDim = 0;
-  int64_t inLastDim = 0;
-  int64_t outStartDim = 0;
-  int64_t outLastDim = 0;
-  int64_t numInNontrivialDims = 0;
-  int64_t numOutNontrivialDims = 0;
-
-  int64_t getInIndivisibleDim() const { return inLastDim - 1; }
-  int64_t getOutIndivisibleDim() const { return outLastDim - 1; }
-
-  bool isSplit() const {
-    return numInNontrivialDims <= 1 && numOutNontrivialDims > 1;
-  }
-  bool isCombine() const {
-    return numInNontrivialDims > 1 && numOutNontrivialDims <= 1;
-  }
-  bool isPassthrough() const {
-    return numInNontrivialDims <= 1 && numOutNontrivialDims <= 1;
-  }
-  bool isNeither() const {
-    return numInNontrivialDims > 1 && numOutNontrivialDims > 1;
-  }
-
-  // Returns whether any dimension in this group is indivisible based on padded
-  // shapes.
-  bool hasIndivisibility(ArrayRef<int64_t> paddedInputShape,
-                         ArrayRef<int64_t> paddedOutputShape,
-                         RankedTensorType inType,
-                         RankedTensorType outType) const {
-    auto checkDims = [&](int64_t startDim, int64_t lastDim,
-                         ArrayRef<int64_t> paddedShape, RankedTensorType type) {
-      for (int64_t d = startDim; d < lastDim; ++d) {
-        if (paddedShape[d] != type.getDimSize(d)) {
-          return true;
-        }
-      }
-      return false;
-    };
-    return checkDims(inStartDim, inLastDim, paddedInputShape, inType) ||
-           checkDims(outStartDim, outLastDim, paddedOutputShape, outType);
-  }
-
-  // Returns whether any dimension in this group is indivisible based on
-  // sharding.
-  bool hasIndivisibility(TensorShardingAttr inSharding,
-                         TensorShardingAttr outSharding, MeshAttr mesh,
-                         RankedTensorType inType,
-                         RankedTensorType outType) const {
-    auto checkDims = [&](int64_t startDim, int64_t lastDim,
-                         TensorShardingAttr sharding, RankedTensorType type) {
-      for (int64_t d = startDim; d < lastDim; ++d) {
-        int64_t sc = sharding.getDimShardings()[d].getShardedSize(mesh);
-        if (sc > 1 && type.getDimSize(d) % sc != 0) {
-          return true;
-        }
-      }
-      return false;
-    };
-    return checkDims(inStartDim, inLastDim, inSharding, inType) ||
-           checkDims(outStartDim, outLastDim, outSharding, outType);
-  }
-
-  // Returns all axis references across input and output dimensions in this
-  // group.
-  SmallVector<AxisRefAttr> getAllAxisRefs(
-      TensorShardingAttr inSharding, TensorShardingAttr outSharding) const {
-    SmallVector<AxisRefAttr> axisRefs;
-    for (int64_t d = inStartDim; d < inLastDim; ++d) {
-      for (AxisRefAttr axis : inSharding.getDimShardings()[d].getAxes()) {
-        axisRefs.push_back(axis);
-      }
-    }
-    for (int64_t d = outStartDim; d < outLastDim; ++d) {
-      for (AxisRefAttr axis : outSharding.getDimShardings()[d].getAxes()) {
-        axisRefs.push_back(axis);
-      }
-    }
-    return axisRefs;
-  }
-
-  // Returns the volume (product of dimension sizes) for input dimensions in
-  // this group.
-  int64_t getInVolume(ArrayRef<int64_t> shape) const {
-    return std::accumulate(shape.begin() + inStartDim,
-                           shape.begin() + inLastDim, 1LL,
-                           std::multiplies<int64_t>());
-  }
-
-  // Returns the volume (product of dimension sizes) for output dimensions in
-  // this group.
-  int64_t getOutVolume(ArrayRef<int64_t> shape) const {
-    return std::accumulate(shape.begin() + outStartDim,
-                           shape.begin() + outLastDim, 1LL,
-                           std::multiplies<int64_t>());
-  }
-};
-
 struct ReshapeHaloInfo {
   SmallVector<ReshapeGroupInfo> activeGroups;
 };
@@ -1556,65 +1458,6 @@ struct ReshapeShardingAnalysis {
                                      RankedTensorType resultType,
                                      bool enableHaloExchange);
 };
-
-// Builds ReshapeGroupInfo instances based on cumulative shape prefix products.
-SmallVector<ReshapeGroupInfo> buildReshapeGroupInfos(RankedTensorType inType,
-                                                     RankedTensorType outType) {
-  SmallVector<ReshapeGroupInfo> groups;
-  int64_t inRank = inType.getRank();
-  int64_t outRank = outType.getRank();
-
-  int64_t inDim = 0;
-  int64_t outDim = 0;
-
-  auto countNonOneDims = [](RankedTensorType type, int64_t start,
-                            int64_t last) {
-    int64_t count = 0;
-    for (int64_t d = start; d < last; ++d) {
-      if (type.getDimSize(d) != 1) {
-        count++;
-      }
-    }
-    return count;
-  };
-
-  while (inDim < inRank || outDim < outRank) {
-    int64_t inStart = inDim;
-    int64_t outStart = outDim;
-
-    int64_t inProd = inDim < inRank ? inType.getDimSize(inDim++) : 1;
-    int64_t outProd = outDim < outRank ? outType.getDimSize(outDim++) : 1;
-
-    while (inProd != outProd && (inDim < inRank || outDim < outRank)) {
-      if (inProd < outProd && inDim < inRank) {
-        inProd *= inType.getDimSize(inDim++);
-      } else if (outProd < inProd && outDim < outRank) {
-        outProd *= outType.getDimSize(outDim++);
-      } else {
-        break;
-      }
-    }
-
-    ReshapeGroupInfo g;
-    g.inStartDim = inStart;
-    g.inLastDim = inDim;
-    g.outStartDim = outStart;
-    g.outLastDim = outDim;
-    g.numInNontrivialDims = countNonOneDims(inType, inStart, inDim);
-    g.numOutNontrivialDims = countNonOneDims(outType, outStart, outDim);
-
-    if (inDim - inStart > 1) {
-      SDY_CHECK(inType.getDimSize(inDim - 1) != 1);
-    }
-    if (outDim - outStart > 1) {
-      SDY_CHECK(outType.getDimSize(outDim - 1) != 1);
-    }
-
-    groups.push_back(g);
-  }
-
-  return groups;
-}
 
 // Returns ReshapeHaloInfo for the given reshape groups for HALO exchange or
 // std::nullopt if HALO exchange cannot be performed.
@@ -1671,36 +1514,6 @@ std::optional<ReshapeHaloInfo> getReshapeHaloInfo(
   }
 
   return info;
-}
-
-// Checks whether a reshape operation is communication-free, meaning we can
-// just apply high pad to the input and the output is correctly padded without
-// any halo exchange or data redistribution.
-bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
-                                TensorShardingAttr inSharding,
-                                TensorShardingAttr outSharding, MeshAttr mesh,
-                                RankedTensorType inputType,
-                                RankedTensorType outputType,
-                                ArrayRef<ReshapeGroupInfo> reshapeGroups) {
-  if (isShardingEquivalentAcrossReshapes(inSharding, inputType, outSharding,
-                                         outputType, reshapeOp,
-                                         /*allowNonDivisible=*/false)) {
-    return true;
-  }
-
-  if (!isShardingEquivalentAcrossReshapes(inSharding, inputType, outSharding,
-                                          outputType, reshapeOp,
-                                          /*allowNonDivisible=*/true)) {
-    return false;
-  }
-
-  for (const ReshapeGroupInfo& g : reshapeGroups) {
-    if (!g.isPassthrough()) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 // Returns a ReshapeShardingAnalysis for the given reshape operation.
