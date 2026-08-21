@@ -26,7 +26,7 @@ import numpy as np
 from shardy.integrations.python.jax.mpmd import ops
 
 
-class Square(hijax.VJPHiPrimitive):
+class Square(hijax.HiPrim):
   """Simple parameterless hijax primitive for use in tests."""
 
   def __init__(self, in_aval):
