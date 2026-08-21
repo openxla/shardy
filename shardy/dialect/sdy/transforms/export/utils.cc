@@ -206,18 +206,22 @@ mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh) {
                                         deviceIds);
 }
 
+bool usePartitionId(int64_t replicaCount, int64_t partitionCount) {
+  SDY_CHECK(replicaCount == 1 || partitionCount == 1)
+      << "Shardy partitioner does not support "
+         "replica_count > 1 && partition_count > 1 yet.";
+  return replicaCount == 1;
+}
+
 Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
                   OpBuilder& rewriter) {
   Type i64Ty = rewriter.getI64Type();
   auto indexTy = RankedTensorType::get({}, i64Ty);
   Value idOp;
-  SDY_CHECK(replicaCount == 1 || partitionCount == 1)
-      << "Shardy partitioner does not support "
-         "replica_count > 1 && partition_count > 1 yet.";
-  if (replicaCount > 1) {
-    idOp = stablehlo::ReplicaIdOp::create(rewriter, loc);
-  } else {
+  if (usePartitionId(replicaCount, partitionCount)) {
     idOp = stablehlo::PartitionIdOp::create(rewriter, loc);
+  } else {
+    idOp = stablehlo::ReplicaIdOp::create(rewriter, loc);
   }
   auto idType = cast<RankedTensorType>(idOp.getType());
   if (idType.getElementType() != i64Ty) {
