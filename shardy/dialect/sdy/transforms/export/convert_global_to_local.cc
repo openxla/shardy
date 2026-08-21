@@ -1002,8 +1002,12 @@ class CollectivePermuteOpPattern
 
     auto pairsAttr = DenseIntElementsAttr::get(
         RankedTensorType::get({numDevices, 2}, rewriter.getI64Type()), pairs);
-    auto channel = stablehlo::ChannelHandleAttr::get(
-        getContext(), conversionState.getNextChannelId(), 1);
+    stablehlo::ChannelHandleAttr channel = nullptr;
+    if (usePartitionId(conversionState.replicaCount,
+                       conversionState.partitionCount)) {
+      channel = stablehlo::ChannelHandleAttr::get(
+          getContext(), conversionState.getNextChannelId(), 1);
+    }
     rewriter.replaceOpWithNewOp<stablehlo::CollectivePermuteOp>(
         op, adaptor.getTensor().getType(), adaptor.getTensor(), pairsAttr,
         channel);
