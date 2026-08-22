@@ -140,6 +140,18 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     ];
 }
 
+def ResolveSingleDeviceShardingPass
+    : Pass<"sdy-resolve-single-device-sharding", "func::FuncOp"> {
+  let summary = "Lowers single-device operations into stablehlo.if guarded by target device ID.";
+  let dependentDialects = ["mlir::sdy::SdyDialect", "mlir::stablehlo::StablehloDialect"];
+  let options = [
+    Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
+           "Number of replicas per partition.">,
+    Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
+           "Number of partitions per replica.">,
+  ];
+}
+
 def VerifyUnreducedAxesPass : Pass<"sdy-verify-unreduced-axes", "func::FuncOp"> {
   let summary = "Verifies the consistency of unreduced axis usage.";
   let description = [{

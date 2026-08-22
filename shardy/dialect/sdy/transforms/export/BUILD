@@ -49,6 +49,7 @@ cc_library(
         "remove_sub_axes_in_input_output_shardings.cc",
         "reshard_to_collectives.cc",
         "resolve_permutation_factors.cc",
+        "resolve_single_device_sharding.cc",
         "sharding_constraint_to_reshard.cc",
         "sink_data_flow_edges.cc",
         "sink_func_data_flow_edges.cc",

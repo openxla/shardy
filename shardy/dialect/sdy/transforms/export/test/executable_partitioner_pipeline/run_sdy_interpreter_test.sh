@@ -62,6 +62,7 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
   --sdy-resolve-permutation-factors="enable-halo-exchange=$ENABLE_HALO_EXCHANGE replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-reshard-to-collectives \
   --sdy-pad-for-divisibility \
+  --sdy-resolve-single-device-sharding="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-convert-global-to-local="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-drop-sharding-and-mesh \
   --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
