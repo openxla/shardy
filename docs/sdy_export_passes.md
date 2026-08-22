@@ -237,6 +237,17 @@ default of `enableHaloExchange` is true.
 -partition-count      : Number of partitions (model parallelism).
 ```
 
+### `-sdy-resolve-single-device-sharding`
+
+_Lowers single-device operations into stablehlo.if guarded by target device ID._
+
+#### Options
+
+```
+-replica-count   : Number of replicas per partition.
+-partition-count : Number of partitions per replica.
+```
+
 ### `-sdy-sharding-constraint-to-reshard`
 
 _Converts ShardingConstraintOp into ReshardOp._
