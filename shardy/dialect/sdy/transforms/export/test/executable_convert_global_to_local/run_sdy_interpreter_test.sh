@@ -16,15 +16,47 @@
 
 set -e
 
-SRC=$1
-TMP=$2
+SRC=""
+TMP=""
+# When replica_count=partition_count=1, the test uses partition id.
+REPLICA_COUNT=1
+PARTITION_COUNT=1
+
+pos_idx=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --src=*)                  SRC="${arg#*=}" ;;
+    --temp_dir=*)             TMP="${arg#*=}" ;;
+    --replica_count=*)        REPLICA_COUNT="${arg#*=}" ;;
+    --partition_count=*)      PARTITION_COUNT="${arg#*=}" ;;
+    --*)                      echo "Warning: Unknown flag '$arg'" >&2 ;;
+    *)
+      pos_idx=$((pos_idx + 1))
+      case "$pos_idx" in
+        1) SRC="$arg" ;;
+        2) TMP="$arg" ;;
+        3) REPLICA_COUNT="$arg" ;;
+        4) PARTITION_COUNT="$arg" ;;
+      esac
+      ;;
+  esac
+done
+
+if [ -z "$SRC" ] || [ -z "$TMP" ]; then
+  echo "Error: Missing required arguments. Usage: $0 <src.mlir> <temp_dir> [flags...]" >&2
+  exit 1
+fi
 
 SPLIT_FILE=${SPLIT_FILE:-split-file}
 SDY_OPT=${SDY_OPT:-sdy_opt}
 STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 
 "$SPLIT_FILE" "$SRC" "$TMP"
-"$SDY_OPT" "$TMP/part1.mlir" --sdy-convert-global-to-local --sdy-drop-sharding-and-mesh --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
+"$SDY_OPT" "$TMP/part1.mlir" \
+  --sdy-convert-global-to-local="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
+  --sdy-drop-sharding-and-mesh \
+  --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 sed '1d; /^}/,$d' "$TMP/part1_processed.mlir" > "$TMP/combined.mlir"
 
 # If part1.mlir contains @parallel_x but not @sequential_x, then remove sharding

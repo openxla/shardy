@@ -125,6 +125,19 @@ Value getDeviceId(Location loc, const ConversionState& conversionState,
                           conversionState.partitionCount, loc, rewriter);
 }
 
+// Returns a channel handle with handle = getNextChannelId() and type = 1
+// (CROSS_PARTITION) if usePartitionId is true. Otherwise returns nullptr (to
+// perform cross-replica communication without channel handle).
+stablehlo::ChannelHandleAttr getChannelHandle(ConversionState& conversionState,
+                                              MLIRContext* ctx) {
+  if (usePartitionId(conversionState.replicaCount,
+                     conversionState.partitionCount)) {
+    return stablehlo::ChannelHandleAttr::get(
+        ctx, conversionState.getNextChannelId(), kChannelHandleType);
+  }
+  return nullptr;
+}
+
 class GlobalToLocalTypeConverter : public TypeConverter {
  public:
   explicit GlobalToLocalTypeConverter(SymbolTable& symbolTable)
@@ -747,9 +760,7 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
     resultShape[srcDim] *= numDevicesPerGroup;
     resultShape[tgtDim] /= numDevicesPerGroup;
 
-    auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        op->getContext(), /*handle=*/conversionState.getNextChannelId(),
-        kChannelHandleType);
+    auto channelHandle = getChannelHandle(conversionState, op->getContext());
     auto allToAll = stablehlo::AllToAllOp::create(
         rewriter, op.getLoc(),
         TypeRange{
@@ -848,9 +859,8 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
         RankedTensorType::get(shape1, inputType.getElementType()), transpose0);
 
     // Perform all-to-all on the combined dim 0.
-    auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        rewriter.getContext(), conversionState.getNextChannelId(),
-        kChannelHandleType);
+    auto channelHandle =
+        getChannelHandle(conversionState, rewriter.getContext());
     auto allToAll = stablehlo::AllToAllOp::create(
         rewriter, loc, reshape1.getType(), reshape1,
         /*split_dimension=*/0, /*concat_dimension=*/0,
@@ -1002,8 +1012,7 @@ class CollectivePermuteOpPattern
 
     auto pairsAttr = DenseIntElementsAttr::get(
         RankedTensorType::get({numDevices, 2}, rewriter.getI64Type()), pairs);
-    auto channel = stablehlo::ChannelHandleAttr::get(
-        getContext(), conversionState.getNextChannelId(), 1);
+    auto channel = getChannelHandle(conversionState, getContext());
     rewriter.replaceOpWithNewOp<stablehlo::CollectivePermuteOp>(
         op, adaptor.getTensor().getType(), adaptor.getTensor(), pairsAttr,
         channel);

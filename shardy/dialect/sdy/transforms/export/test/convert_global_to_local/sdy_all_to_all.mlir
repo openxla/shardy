@@ -1,5 +1,6 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V1
-// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,V3
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V1,PARTITION
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,V3,PARTITION
+// RUN: sdy_opt %s -sdy-convert-global-to-local='replica-count=16 partition-count=1' | FileCheck %s --check-prefixes=CHECK,V1,REPLICA
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
@@ -12,7 +13,8 @@ sdy.mesh @mesh_2_4_2 = <["x"=2, "y"=4, "z"=2]>
 func.func @one_param_move_suffix(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x", "y"}, {}]>})
     -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"x"}, {"y"}]>}) {
   // CHECK: %[[RESULT:.*]] = "stablehlo.all_to_all"(%[[ARG0]]) <{
-  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>
+  // PARTITION-SAME: channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>
+  // REPLICA-NOT: channel_handle
   // CHECK-SAME: concat_dimension = 0 : i64
   // V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]]>
   // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">]>
@@ -30,7 +32,8 @@ func.func @one_param_move_suffix(%arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sh
 func.func @one_param_move_all_axes(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {"y", "z"}]>})
     -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y", "z"}, {}]>}) {
   // CHECK: %[[RESULT:.*]] = "stablehlo.all_to_all"(%[[ARG0]]) <{
-  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>
+  // PARTITION-SAME: channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>
+  // REPLICA-NOT: channel_handle
   // CHECK-SAME: concat_dimension = 1 : i64
   // V1-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14, 15]]>
   // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">, #stablehlo.axis_ref<name = "z">]>
@@ -51,7 +54,8 @@ func.func @two_params_move_suffix(%arg0: tensor<2x8x2x4xf32> {sdy.sharding = #sd
   // CHECK: %[[TRANSPOSE0:.*]] = stablehlo.transpose %[[RESHAPE0]], dims = [0, 4, 1, 2, 3, 5] : (tensor<2x1x2x1x2x2xf32>) -> tensor<2x2x1x2x1x2xf32>
   // CHECK: %[[RESHAPE1:.*]] = stablehlo.reshape %[[TRANSPOSE0]] : (tensor<2x2x1x2x1x2xf32>) -> tensor<4x1x2x1x2xf32>
   // CHECK: %[[A2A:.*]] = "stablehlo.all_to_all"(%[[RESHAPE1]]) <{
-  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
+  // PARTITION-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
+  // REPLICA-NOT: channel_handle
   // CHECK-SAME: concat_dimension = 0 : i64,
   // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 2, 1, 3], [4, 6, 5, 7], [8, 10, 9, 11], [12, 14, 13, 15]]>
   // CHECK-SAME: split_count = 4 : i64,
@@ -74,7 +78,8 @@ func.func @two_params_move_all_axes(%arg0: tensor<4x2x4x2xf32> {sdy.sharding = #
   // CHECK: %[[TRANSPOSE0:.*]] = stablehlo.transpose %[[RESHAPE0]], dims = [0, 4, 1, 2, 3, 5] : (tensor<4x1x1x1x2x1xf32>) -> tensor<4x2x1x1x1x1xf32>
   // CHECK: %[[RESHAPE1:.*]] = stablehlo.reshape %[[TRANSPOSE0]] : (tensor<4x2x1x1x1x1xf32>) -> tensor<8x1x1x1x1xf32>
   // CHECK: %[[A2A:.*]] = "stablehlo.all_to_all"(%[[RESHAPE1]]) <{
-  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 4, type = 1>,
+  // PARTITION-SAME: channel_handle = #stablehlo.channel_handle<handle = 4, type = 1>,
+  // REPLICA-NOT: channel_handle
   // CHECK-SAME: concat_dimension = 0 : i64,
   // V1-SAME{LITERAL}: replica_groups = dense<[[0, 4, 1, 5, 2, 6, 3, 7]]>
   // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "y">, #stablehlo.axis_ref<name = "x">]>
