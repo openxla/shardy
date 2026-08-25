@@ -87,7 +87,7 @@ constexpr PaddingValueKind kDefaultPaddingValueKind = PaddingValueKind::kZero;
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
   return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp,
-             stablehlo::ConvolutionOp>(op);
+             stablehlo::ConvolutionOp, stablehlo::ReshapeOp>(op);
 }
 
 class PaddingCache {
@@ -705,6 +705,33 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
   PaddingCache& cache;
 };
 
+class StablehloReshapeOpPattern
+    : public OpConversionPattern<stablehlo::ReshapeOp> {
+ public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      stablehlo::ReshapeOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    TensorShardingAttr inSharding = getSharding(op.getOperand());
+    TensorShardingAttr outSharding = getSharding(op.getResult());
+    MeshAttr mesh =
+        inSharding ? inSharding.getMesh(converter->getSymbolTable()) : nullptr;
+
+    if (!isCommunicationFreeReshape(op, inSharding, outSharding, mesh,
+                                    op.getOperand().getType(), op.getType())) {
+      return op.emitOpError(
+          "participating reshape dimensions are not divisible. Reshape "
+          "sharding "
+          "should have been resolved by resolve-permutation-factors.");
+    }
+
+    return padGenericOp(op, adaptor.getOperands(), rewriter, converter);
+  }
+};
+
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
   StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx)
@@ -1001,7 +1028,8 @@ struct PadForDivisibilityPass
     RewritePatternSet patterns(&getContext());
     patterns.add<GenericOpPattern, StablehloSliceOpPattern>(typeConverter,
                                                             &getContext());
-    patterns.add<StablehloPadOpPattern>(typeConverter, &getContext());
+    patterns.add<StablehloPadOpPattern, StablehloReshapeOpPattern>(
+        typeConverter, &getContext());
     patterns.add<FuncOpPattern>(typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
