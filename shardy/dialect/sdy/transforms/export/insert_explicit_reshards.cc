@@ -877,10 +877,6 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      if (isa<AllReduceOp>(op)) {
-        return;
-      }
-
       if (CallOp callOp = dyn_cast<CallOp>(op)) {
           insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
                                          onFullVersion);

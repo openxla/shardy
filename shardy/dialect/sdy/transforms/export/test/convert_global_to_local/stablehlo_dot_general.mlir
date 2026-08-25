@@ -49,21 +49,3 @@ func.func @shard_contracting_dims(
   // CHECK: return %[[RES]] : tensor<2x16x16xf32>
   return %1 : tensor<4x16x16xf32>
 }
-
-// CHECK-LABEL: func @shard_contracting_dims_unreduced_result
-// CHECK-SAME: (%[[ARG0:.*]]: tensor<2x16x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y"}]>},
-// CHECK-SAME:  %[[ARG1:.*]]: tensor<2x2x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}, {}]>})
-// CHECK-SAME: -> (tensor<2x16x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}], unreduced={"y"}>}) {
-func.func @shard_contracting_dims_unreduced_result(
-  %arg0: tensor<4x16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y"}]>},
-  %arg1: tensor<4x8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}, {}]>})
-  -> (tensor<4x16x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}], unreduced={"y"}>}) {
-  // CHECK: %[[DOT:.*]] = stablehlo.dot_general %[[ARG0]], %[[ARG1]], batching_dims = [0] x [0], contracting_dims = [2] x [1]
-  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {}, {}], unreduced={"y"}>]>}
-  // CHECK-SAME: : (tensor<2x16x2xf32>, tensor<2x2x16xf32>) -> tensor<2x16x16xf32>
-  // CHECK: return %[[DOT]] : tensor<2x16x16xf32>
-  %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1]
-    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {}, {}], unreduced={"y"}>]>}
-  : (tensor<4x16x8xf32>, tensor<4x8x16xf32>) -> tensor<4x16x16xf32>
-  return %0 : tensor<4x16x16xf32>
-}

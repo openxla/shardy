@@ -861,13 +861,6 @@ void insertAllReducesForReductionFactors(
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
-    SmallVector<AxisRefAttr> unreducedAxes =
-        llvm::to_vector(resultSharding.getUnreducedAxes());
-    unreducedAxes.append(allReduceAxes.begin(), allReduceAxes.end());
-    sortAndMergeAxes(unreducedAxes, meshOp.getMesh());
-    TensorShardingAttr unreducedSharding =
-        resultSharding.replaceUnreducedAxes(unreducedAxes);
-    setSharding(result, unreducedSharding);
     auto allReduceOp =
         AllReduceOp::create(rewriter, result.getLoc(), result, allReduceAxes,
                             resultSharding.getReductionOp(), resultSharding);

@@ -56,7 +56,7 @@ func.func @all_reduce_delayed_to_call_site(%arg0: tensor<2x64x13xf32> {sdy.shard
 
 // CHECK-LABEL: func @all_reduce_partially_delayed_until_return
 func.func @all_reduce_partially_delayed_until_return(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>}) -> tensor<2x13xf32> {
-  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x", "y"}>]>}
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
   // CHECK-NEXT: %[[ALL_REDUCE_Y:.*]] = sdy.all_reduce {"y"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[ALL_REDUCE_Y]], %[[ALL_REDUCE_Y]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
   // CHECK-NEXT: %[[ALL_REDUCE_X:.*]] = sdy.all_reduce {"x"} %[[ADD]] out_sharding=<@mesh, [{}, {}]>
@@ -99,7 +99,7 @@ func.func @reduce_single_result_fully_unreduced(%arg0: tensor<2x64x13xf32> {sdy.
 // CHECK-LABEL: func @reduce_single_result_partially_unreduced
 func.func @reduce_single_result_partially_unreduced(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y", "x"}, {}]>})
     -> (tensor<2x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
-  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x", "y"}>]>}
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
   // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
   // CHECK-NEXT: return %[[ALL_REDUCE]]
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
@@ -110,7 +110,7 @@ func.func @reduce_single_result_partially_unreduced(%arg0: tensor<2x64x13xf32> {
 // CHECK-LABEL: func @reduce_single_result_unreduced_full_axis
 func.func @reduce_single_result_unreduced_full_axis(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x":(1)2, "y"}, {}]>})
     -> (tensor<2x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
-  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x", "y"}>]>}
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
   // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
   // CHECK-NEXT: return %[[ALL_REDUCE]]
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
@@ -121,7 +121,7 @@ func.func @reduce_single_result_unreduced_full_axis(%arg0: tensor<2x64x13xf32> {
 // CHECK-LABEL: func @reduce_single_result_unreduced_sub_axis
 func.func @reduce_single_result_unreduced_sub_axis(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>})
     -> (tensor<2x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x":(1)2}>}) {
-  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x", "y"}>]>}
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x":(1)2}>]>}
   // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x":(2)2, "y"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"x":(1)2}>
   // CHECK-NEXT: return %[[ALL_REDUCE]]
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
@@ -132,7 +132,7 @@ func.func @reduce_single_result_unreduced_sub_axis(%arg0: tensor<2x64x13xf32> {s
 // CHECK-LABEL: func @reduce_single_result_unreduced_resharded
 func.func @reduce_single_result_unreduced_resharded(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x", "y"}, {}]>})
     -> (tensor<2x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x"}>}) {
-  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x", "y"}>]>}
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.add across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"x"}>]>}
   // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"x"}>
   // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh, [{"y"}, {}], unreduced={"x"}>
   // CHECK-NEXT: return %[[RESHARD]]
@@ -150,7 +150,7 @@ func.func @reduce_multiple_results_unreduced(
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1 = stablehlo.constant dense<0> : tensor<i32>
   // CHECK:      %[[REDUCE:.*]]:2 = stablehlo.reduce(%arg0 init: %cst), (%arg1 init: %c) across dimensions = [0, 2]
-  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x", "y"}>, <@mesh, [{}], unreduced={"x", "y"}>]>}
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"x"}>, <@mesh, [{}], unreduced={"x"}>]>}
   // CHECK:      %[[ALL_REDUCE1:.*]] = sdy.all_reduce {"y"} %[[REDUCE]]#0 out_sharding=<@mesh, [{}], unreduced={"x"}> : tensor<64xf32>
   // CHECK-NEXT: %[[ALL_REDUCE2:.*]] = sdy.all_reduce {"y"} %[[REDUCE]]#1 out_sharding=<@mesh, [{}], unreduced={"x"}> : tensor<64xi32>
   // CHECK-NEXT: %[[ALL_REDUCE3:.*]] = sdy.all_reduce {"x":(2)2} %[[ALL_REDUCE2]] out_sharding=<@mesh, [{}], unreduced={"x":(1)2}> : tensor<64xi32>
