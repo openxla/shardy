@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard" | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice" | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
@@ -107,3 +107,62 @@ func.func @selective_indivisible_reshard(%arg0: tensor<5x8xf32> {sdy.sharding = 
   // CHECK: return %[[SLICED]] : tensor<5x8xf32>
   return %0 : tensor<5x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @selective_all_gather
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+func.func @selective_all_gather(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[ARG0]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg1: tensor<4x16xf32>) {
+  // CHECK-NEXT:   %[[AG:.*]] = "stablehlo.all_gather"(%arg1)
+  // CHECK-SAME:     all_gather_dim = 0 : i64
+  // CHECK-SAME:     replica_groups = dense<{{\[\[}}0, 1]]> : tensor<1x2xi64>
+  // CHECK-NEXT:   sdy.return %[[AG]] : tensor<8x16xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %0 = sdy.all_gather [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<8x16xf32>
+  // CHECK: return %[[MANUAL]] : tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @selective_all_slice
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @selective_all_slice(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[ARG0]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg1: tensor<8x16xf32>) {
+  // CHECK-NEXT:   %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %arg1
+  // CHECK:        sdy.return %[[SLICE]] : tensor<4x16xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %0 = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x16xf32>
+  // CHECK: return %[[MANUAL]] : tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @skip_sharding_custom_call
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @skip_sharding_custom_call(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NOT: sdy.manual_computation
+  // CHECK: %[[CC:.*]] = stablehlo.custom_call @Sharding(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK: return %[[CC]] : tensor<8x16xf32>
+  %0 = stablehlo.custom_call @Sharding(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+

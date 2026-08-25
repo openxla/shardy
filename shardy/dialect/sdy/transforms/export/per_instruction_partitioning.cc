@@ -372,6 +372,7 @@ LogicalResult outlineInstruction(Operation* op,
   for (size_t i = 0; i < clonedOp->getNumOperands(); ++i) {
     clonedOp->setOperand(i, block->getArgument(i));
   }
+  setShardings(clonedOp, shardingInfo.outShardings);
   if (clonedOp->getResultTypes() != TypeRange(paddedResultTypes)) {
     for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
       Type origResType = op->getResult(i).getType();
@@ -525,13 +526,18 @@ struct PerInstructionPartitioningPass
           }
           // TODO(b/545097355): fine tune the list of ops to skip.
           //
-          // We currently skip Collective operations because we are not ready
-          // to handle them in this pass yet, for example,
-          // sdy.replicated_to_unreduced is currently handled later in the
-          // export pipeline.
-          if (isa<CollectiveOpInterface, DataFlowEdgeOp, ManualComputationOp,
-                  MeshOp, PropagationBarrierOp, ReturnOp, ShardingConstraintOp,
-                  ShardingGroupOp>(&op)) {
+          // We skip metadata/control ops and unreduced-related collective
+          // operations (sdy.replicated_to_unreduced, sdy.sharded_to_unreduced)
+          // because unreduced collectives are handled later in export.
+          if (isa<DataFlowEdgeOp, ManualComputationOp, MeshOp,
+                  PropagationBarrierOp, ReplicatedToUnreducedOp, ReturnOp,
+                  ShardedToUnreducedOp, ShardingConstraintOp, ShardingGroupOp>(
+                  &op)) {
+            continue;
+          }
+          // Avoid taking a dependency on the MHLO dialect by checking operation
+          // names directly.
+          if (op.getName().getStringRef() == "mhlo.copy") {
             continue;
           }
           if (auto customCall = dyn_cast<mlir::stablehlo::CustomCallOp>(&op)) {
