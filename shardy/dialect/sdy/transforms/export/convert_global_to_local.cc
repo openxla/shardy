@@ -1640,18 +1640,24 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
         checkPadding(lhs);
         checkPadding(op.getRhs());
 
-        // Verify that an AllReduce has been inserted by a previous pass.
-        // The local partial sums must be combined.
-        SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
-            << "Expected sharded contracting dot to have one user and the user "
-               "is "
-               "an sdy.all_reduce.";
+        // Verify that an AllReduce has been inserted by a previous pass unless
+        // the result is explicitly unreduced.
+        TensorShardingAttr resSharding = getSharding(op.getResult());
+        if (resSharding && !resSharding.getUnreducedAxes().empty()) {
+          SDY_CHECK(resSharding.getUnreducedAxes() == contractingAxes)
+              << "The unreduced axes of the dot result sharding should match "
+                 "the sharded contracting dimension of the dot.";
+        } else {
+          SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
+              << "Expected sharded contracting dot to have one user and the "
+                 "user is an sdy.all_reduce.";
 
-        auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
-        SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
-                  AxisRefListAttr::get(op->getContext(), contractingAxes))
-            << "The axes of the sdy.all_reduce should match the sharded "
-               "contracting dimension of the dot.";
+          auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
+          SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
+                    AxisRefListAttr::get(op->getContext(), contractingAxes))
+              << "The axes of the sdy.all_reduce should match the sharded "
+                 "contracting dimension of the dot.";
+        }
       }
     }
 
@@ -1712,16 +1718,25 @@ class StablehloDotGeneralOpPattern
         checkPadding(lhs);
         checkPadding(op.getRhs());
 
-        // Verify that an AllReduce has been inserted by a previous pass.
-        SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
-            << "Expected sharded contracting dot_general to have one user and "
-               "the user is an sdy.all_reduce.";
+        // Verify that an AllReduce has been inserted by a previous pass unless
+        // the result is explicitly unreduced.
+        TensorShardingAttr resSharding = getSharding(op.getResult());
+        if (resSharding && !resSharding.getUnreducedAxes().empty()) {
+          SDY_CHECK(resSharding.getUnreducedAxes() ==
+                    ArrayRef<AxisRefAttr>(reductionAxes))
+              << "The unreduced axes of the dot_general result sharding should "
+                 "match the sharded contracting dimensions of the dot_general.";
+        } else {
+          SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
+              << "Expected sharded contracting dot_general to have one user and "
+                 "the user is an sdy.all_reduce.";
 
-        auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
-        SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
-                  AxisRefListAttr::get(op->getContext(), reductionAxes))
-            << "The axes of the sdy.all_reduce should match the sharded "
-               "contracting dimensions of the dot_general.";
+          auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
+          SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
+                    AxisRefListAttr::get(op->getContext(), reductionAxes))
+              << "The axes of the sdy.all_reduce should match the sharded "
+                 "contracting dimensions of the dot_general.";
+        }
       }
     }
 

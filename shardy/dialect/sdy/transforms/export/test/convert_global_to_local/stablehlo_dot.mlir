@@ -50,3 +50,19 @@ func.func @sharded_contracting_dim(
   return %1 : tensor<8x32xf32>
 }
 
+// CHECK-LABEL: func @sharded_contracting_dim_unreduced_result
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+// CHECK-SAME: -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>}) {
+func.func @sharded_contracting_dim_unreduced_result(
+  %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}]>},
+  %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+  -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>}) {
+  // CHECK: %[[DOT:.*]] = stablehlo.dot %[[ARG0]], %[[ARG1]]
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
+  // CHECK-SAME: : (tensor<8x8xf32>, tensor<8x32xf32>) -> tensor<8x32xf32>
+  // CHECK: return %[[DOT]] : tensor<8x32xf32>
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
+   : (tensor<8x16xf32>, tensor<16x32xf32>) -> tensor<8x32xf32>
+  return %0 : tensor<8x32xf32>
+}
