@@ -238,6 +238,37 @@ func.func @pad_two_direction_hops(
   return %1 : tensor<13x8xi32>
 }
 
+// CHECK-LABEL: func @strided_slice
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<12x8xi32>
+func.func @strided_slice(
+  %arg0: tensor<12x8xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}, {"b"}]>})
+  -> tensor<5x8xi32> {
+  // REPL: %[[RESHARD0:.*]] = sdy.reshard %[[ARG0]] <@mesh_a4, [{}, {"b"}]> : tensor<12x8xi32>
+  // REPL-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[RESHARD0]] [0:10:2, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {"b"}]>]>} : (tensor<12x8xi32>) -> tensor<5x8xi32>
+  // REPL-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SLICE]] <@mesh_a4, [{"a"}, {"b"}]> : tensor<5x8xi32>
+  // REPL-NEXT: %[[RES:.*]] = sdy.reshard %[[RESHARD1]] <@mesh_a4, [{}, {}]> : tensor<5x8xi32>
+
+  // HALO: %[[CST:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST]]) in_shardings=[<@mesh_a4, [{"a"}, {"b"}]>, <@mesh_a4, []>] out_shardings=[<@mesh_a4, [{"a"}, {"b"}]>] manual_axes={"a", "b"} (%arg1: tensor<3x4xi32>, %arg2: tensor<i32>) {
+  // HALO-NEXT: %[[CP:.*]] = "stablehlo.collective_permute"(%arg1)
+  // HALO-SAME{LITERAL}: source_target_pairs = dense<[[0, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]> : tensor<6x2xi64>}>
+  // HALO-NEXT: %[[CONCAT:.*]] = stablehlo.concatenate %[[CP]], %arg1, dim = 0
+  // HALO-NEXT: %[[PAD:.*]] = stablehlo.pad %[[CONCAT]], %arg2, low = [2, 0], high = [2, 0], interior = [0, 0]
+  // HALO: %[[DYN_SLICE:.*]] = stablehlo.dynamic_slice %[[PAD]], {{.*}}, sizes = [2, 4]
+  // HALO-NEXT: sdy.return %[[DYN_SLICE]] : tensor<2x4xi32>
+  // HALO-NEXT: }
+  // HALO-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[MC]] [0:5, 0:8]
+  // HALO-NEXT: %[[RES:.*]] = sdy.reshard %[[SLICE]] <@mesh_a4, [{}, {}]> : tensor<5x8xi32>
+  %slice = stablehlo.slice %arg0 [0:10:2, 0:8]
+    {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a"}, {"b"}]>]>}
+    : (tensor<12x8xi32>) -> tensor<5x8xi32>
+
+  %0 = sdy.reshard %slice <@mesh_a4, [{}, {}]> : tensor<5x8xi32>
+
+  // CHECK: return %[[RES]] : tensor<5x8xi32>
+  return %0 : tensor<5x8xi32>
+}
+
 // CHECK-LABEL: func @pad_multidim_with_hops
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<4x4x2xi32>
 func.func @pad_multidim_with_hops(

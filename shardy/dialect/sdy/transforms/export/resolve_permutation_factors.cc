@@ -74,6 +74,15 @@ struct ResolutionState {
   int64_t partitionCount = 1;
 };
 
+// Returns a channel handle with handle = nextChannelId++ and type = 1
+// (CROSS_PARTITION) if usePartitionId is true. Otherwise returns nullptr (to
+// perform cross-replica communication without channel handle).
+stablehlo::ChannelHandleAttr getChannelHandle(ResolutionState& state,
+                                              MLIRContext* ctx) {
+  return sdy::getChannelHandle(ctx, state.replicaCount, state.partitionCount,
+                               state.nextChannelId);
+}
+
 // Describes the data exchange needed to perform explicit resharding for a
 // single shard in a dimension.
 struct ShardExchangeInfo {
@@ -599,7 +608,7 @@ Value padHighSideToShape(Location loc, IRRewriter& rewriter, Value operand,
   auto paddedType = RankedTensorType::get(paddedShape, type.getElementType());
   return padHighSideToType(rewriter, loc, operand, paddedType, sharding,
                            paddingValue);
-  }
+}
 
 // -----------------------------------------------------------------------------
 // Core HALO exchange helpers.
@@ -697,8 +706,7 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
     auto pairType =
         RankedTensorType::get({static_cast<int64_t>(pairs.size()) / 2, 2},
                               state.rewriter.getI64Type());
-    auto channelAttr = stablehlo::ChannelHandleAttr::get(
-        state.rewriter.getContext(), state.nextChannelId++, 1);
+    auto channelAttr = getChannelHandle(state, state.rewriter.getContext());
     auto permOp = stablehlo::CollectivePermuteOp::create(
         state.rewriter, loc, piece.getType(), piece,
         DenseIntElementsAttr::get(pairType, pairs), channelAttr);
@@ -823,8 +831,7 @@ Value mayCollectivePermute(Location loc, Value input,
   auto pairType = RankedTensorType::get(
       {static_cast<int64_t>(sourceTargetPairs.size()) / 2, 2},
       state.rewriter.getI64Type());
-  auto channelAttr = stablehlo::ChannelHandleAttr::get(
-      state.rewriter.getContext(), state.nextChannelId++, 1);
+  auto channelAttr = getChannelHandle(state, state.rewriter.getContext());
   auto permOp = stablehlo::CollectivePermuteOp::create(
       state.rewriter, loc, input.getType(), input,
       DenseIntElementsAttr::get(pairType, sourceTargetPairs), channelAttr);
@@ -2049,7 +2056,7 @@ Value handleReplicatedSliceDims(
     Location loc, Value exchangedLocal, TensorShardingAttr sharding,
     MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
     ArrayRef<int64_t> startIndices, ArrayRef<int64_t> limitIndices,
-    ResolutionState& state) {
+    ArrayRef<int64_t> strides, ResolutionState& state) {
   auto exchangedLocalType = cast<RankedTensorType>(exchangedLocal.getType());
   int64_t rank = exchangedLocalType.getRank();
   TensorShardingAttr localSharding =
@@ -2058,6 +2065,7 @@ Value handleReplicatedSliceDims(
   SmallVector<int64_t> localSliceStarts(rank, 0);
   SmallVector<int64_t> localSliceLimits =
       llvm::to_vector(exchangedLocalType.getShape());
+  SmallVector<int64_t> localSliceStrides(rank, 1);
   bool needsLocalSlice = false;
   for (int64_t i = 0; i < rank; ++i) {
     if (sharding.getDimShardings()[i].getShardedSize(mesh) > 1) {
@@ -2065,9 +2073,12 @@ Value handleReplicatedSliceDims(
     }
     int64_t start = startIndices[i];
     int64_t limit = limitIndices[i];
-    if (start != 0 || limit != exchangedLocalType.getDimSize(i)) {
+    int64_t stride = strides.empty() ? 1 : strides[i];
+    if (start != 0 || limit != exchangedLocalType.getDimSize(i) ||
+        stride != 1) {
       localSliceStarts[i] = start;
       localSliceLimits[i] = limit;
+      localSliceStrides[i] = stride;
       needsLocalSlice = true;
     }
   }
@@ -2079,15 +2090,17 @@ Value handleReplicatedSliceDims(
   SmallVector<int64_t> localResultShape =
       llvm::to_vector(exchangedLocalType.getShape());
   for (int64_t i = 0; i < rank; ++i) {
-    localResultShape[i] = localSliceLimits[i] - localSliceStarts[i];
+    localResultShape[i] = llvm::divideCeil(
+        localSliceLimits[i] - localSliceStarts[i], localSliceStrides[i]);
   }
+
   auto localResultType = RankedTensorType::get(
       localResultShape, exchangedLocalType.getElementType());
   exchangedLocal = stablehlo::SliceOp::create(
       state.rewriter, loc, localResultType, exchangedLocal,
       state.rewriter.getDenseI64ArrayAttr(localSliceStarts),
       state.rewriter.getDenseI64ArrayAttr(localSliceLimits),
-      state.rewriter.getDenseI64ArrayAttr(SmallVector<int64_t>(rank, 1)));
+      state.rewriter.getDenseI64ArrayAttr(localSliceStrides));
   setSharding(exchangedLocal, localSharding);
   return exchangedLocal;
 }
@@ -2160,7 +2173,8 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
                          ResolutionState& state) -> Value {
     return handleReplicatedSliceDims(loc, exchangedLocal, inSharding, mesh,
                                      info.manualAxes, sliceOp.getStartIndices(),
-                                     sliceOp.getLimitIndices(), state);
+                                     sliceOp.getLimitIndices(),
+                                     sliceOp.getStrides(), state);
   };
 
   Value result = haloDataExchange(

@@ -1,4 +1,4 @@
-// No need to run this test with halo exchange enabled.
+// RUN: %S/run_sdy_interpreter_test.sh %s %t --enable_halo_exchange=true --replica_count=2 --partition_count=1
 // RUN: %S/run_sdy_interpreter_test.sh %s %t --enable_halo_exchange=false --replica_count=2 --partition_count=1
 
 //--- part1.mlir
