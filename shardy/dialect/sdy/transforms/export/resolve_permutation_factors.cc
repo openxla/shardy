@@ -597,43 +597,9 @@ Value padHighSideToShape(Location loc, IRRewriter& rewriter, Value operand,
     return operand;
   }
   auto paddedType = RankedTensorType::get(paddedShape, type.getElementType());
-  SmallVector<int64_t> edgePaddingHigh;
-  for (int64_t i = 0; i < type.getRank(); ++i) {
-    edgePaddingHigh.push_back(paddedShape[i] - type.getDimSize(i));
+  return padHighSideToType(rewriter, loc, operand, paddedType, sharding,
+                           paddingValue);
   }
-  Value padVal = paddingValue ? paddingValue
-                              : createZeroScalarConstant(loc, rewriter,
-                                                         type.getElementType());
-  auto padHighOp = stablehlo::PadOp::create(
-      rewriter, loc, paddedType, operand, padVal,
-      rewriter.getDenseI64ArrayAttr(SmallVector<int64_t>(type.getRank(), 0)),
-      rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
-      rewriter.getDenseI64ArrayAttr(SmallVector<int64_t>(type.getRank(), 0)));
-  setSharding(padHighOp.getResult(), sharding);
-  return padHighOp.getResult();
-}
-
-// Slices the high side of `operand` (e.g., to trim away high-side padding
-// elements previously inserted by `padHighSideToShape`) to match `targetType`.
-// When used to align dimensions after local operations complete, the created
-// slice op is a communication-free operation.
-Value sliceHighSideToShape(Location loc, IRRewriter& rewriter, Value operand,
-                           Type targetType, TensorShardingAttr sharding) {
-  auto rankedTargetType = cast<RankedTensorType>(targetType);
-  if (operand.getType() == rankedTargetType) {
-    return operand;
-  }
-  int64_t rank = rankedTargetType.getRank();
-  SmallVector<int64_t> sliceStarts(rank, 0);
-  SmallVector<int64_t> sliceStrides(rank, 1);
-  auto sliceOp = stablehlo::SliceOp::create(
-      rewriter, loc, rankedTargetType, operand,
-      rewriter.getDenseI64ArrayAttr(sliceStarts),
-      rewriter.getDenseI64ArrayAttr(rankedTargetType.getShape()),
-      rewriter.getDenseI64ArrayAttr(sliceStrides));
-  setSharding(sliceOp.getResult(), sharding);
-  return sliceOp.getResult();
-}
 
 // -----------------------------------------------------------------------------
 // Core HALO exchange helpers.
@@ -1427,7 +1393,7 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
 
   // Trim final tensor shape to match expected output shape.
   result =
-      sliceHighSideToShape(loc, rewriter, result, padOp.getType(), inSharding);
+      sliceHighSideToType(rewriter, loc, result, padOp.getType(), inSharding);
 
   rewriter.replaceOp(padOp, result);
   return success();
@@ -1836,7 +1802,7 @@ LogicalResult handleReshapeHaloExchange(
       loc, paddedInput, divisibleInputShape, origInputType, resultType,
       inSharding, outSharding, mesh, info.manualAxes, paddingValue,
       edgePaddingLow, info.dimExchanges, postProcess, state);
-  result = sliceHighSideToShape(loc, rewriter, result, resultType, outSharding);
+  result = sliceHighSideToType(rewriter, loc, result, resultType, outSharding);
   rewriter.replaceOp(reshapeOp, result);
   return success();
 }
@@ -2033,8 +1999,8 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
 
   // Trim off the padding.
   if (!info->manualAxes.empty()) {
-    Value slicedResult = sliceHighSideToShape(
-        loc, state.rewriter, reversedResult, origType, inSharding);
+    Value slicedResult = sliceHighSideToType(
+        state.rewriter, loc, reversedResult, origType, inSharding);
     state.rewriter.replaceAllUsesExcept(reverseOp.getResult(), slicedResult,
                                         reversedResult.getDefiningOp());
   } else {
@@ -2203,8 +2169,8 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
       paddingValue, edgePaddingLow, info.dimExchanges, postProcess, state);
 
   // Trim final tensor shape to match expected output shape.
-  result = sliceHighSideToShape(loc, rewriter, result, sliceOp.getType(),
-                                inSharding);
+  result =
+      sliceHighSideToType(rewriter, loc, result, sliceOp.getType(), inSharding);
 
   rewriter.replaceOp(sliceOp, result);
   return success();

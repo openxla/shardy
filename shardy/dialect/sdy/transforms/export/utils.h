@@ -34,6 +34,8 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+constexpr int64_t kCrossPartitionChannelHandleType = 1;
+
 using OptionalAxisRef = std::optional<AxisRefAttr>;
 
 // We use an std::list so we can pop from the front, back, and with a specific
@@ -114,6 +116,14 @@ bool usePartitionId(int64_t replicaCount, int64_t partitionCount);
 Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
                   OpBuilder& rewriter);
 
+// Returns a channel handle with handle = nextChannelId++ and type = 1
+// (CROSS_PARTITION) if usePartitionId is true. Otherwise returns nullptr (to
+// perform cross-replica communication without channel handle).
+mlir::stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
+                                                    int64_t replicaCount,
+                                                    int64_t partitionCount,
+                                                    int64_t& nextChannelId);
+
 // Returns the first non-maximal MeshOp found in moduleOp, or nullptr if none
 // exists.
 MeshOp getGlobalMeshOp(ModuleOp moduleOp);
@@ -146,7 +156,6 @@ FlatSymbolRefAttr getOrCreateMeshSymbol(Operation* op, Attribute meshOrRef,
 
 // Converts an SDY AxisRefAttr to a StableHLO AxisRefAttr.
 mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef);
-
 // Information about an independent contiguous group of dimensions in a reshape
 // whose input and output volumes match. Classifies the sub-transform as
 // pass-through, split, or combine to determine communication and padding needs.
@@ -221,6 +230,21 @@ bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
                                 TensorShardingAttr outSharding, MeshAttr mesh,
                                 RankedTensorType inputType,
                                 RankedTensorType outputType);
+
+// Slices the high side of `operand` starting at zero with unit strides to match
+// `targetType`. If `operand` already matches `targetType`, returns `operand`.
+// Attaches `sharding` to the created slice op if non-null.
+Value sliceHighSideToType(OpBuilder& builder, Location loc, Value operand,
+                          Type targetType,
+                          TensorShardingAttr sharding = nullptr);
+
+// Zero-pads the high side of `operand` to match `targetType`. If `operand`
+// already matches `targetType`, returns `operand`. Attaches `sharding` to the
+// created pad op if non-null.
+Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
+                        Type targetType, TensorShardingAttr sharding = nullptr,
+                        Value paddingValue = nullptr,
+                        bool allowSlicePeephole = false);
 }  // namespace sdy
 }  // namespace mlir
 

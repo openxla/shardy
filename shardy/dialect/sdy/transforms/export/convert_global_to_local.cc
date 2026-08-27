@@ -62,8 +62,6 @@ namespace sdy {
 
 namespace {
 
-constexpr int64_t kChannelHandleType = 1;
-
 // Computes the local type of a given type and sharding.
 //
 // If the sharding is not defined or the mesh is not defined, the original
@@ -130,12 +128,9 @@ Value getDeviceId(Location loc, const ConversionState& conversionState,
 // perform cross-replica communication without channel handle).
 stablehlo::ChannelHandleAttr getChannelHandle(ConversionState& conversionState,
                                               MLIRContext* ctx) {
-  if (usePartitionId(conversionState.replicaCount,
-                     conversionState.partitionCount)) {
-    return stablehlo::ChannelHandleAttr::get(
-        ctx, conversionState.getNextChannelId(), kChannelHandleType);
-  }
-  return nullptr;
+  return sdy::getChannelHandle(ctx, conversionState.replicaCount,
+                               conversionState.partitionCount,
+                               conversionState.nextChannelId);
 }
 
 class GlobalToLocalTypeConverter : public TypeConverter {
@@ -462,7 +457,8 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     std::tie(replicaGroups, tmpShape[0]) = getReplicaGroupsAndSize(
         allGatheringAxes, mesh, meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
-        ctx, /*handle=*/conversionState.getNextChannelId(), kChannelHandleType);
+        ctx, /*handle=*/conversionState.getNextChannelId(),
+        kCrossPartitionChannelHandleType);
     // Change tmpShape to represent the result of the All-Gather.
 
     auto allGather = stablehlo::AllGatherOp::create(
@@ -533,7 +529,7 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
 
       auto channelHandle = stablehlo::ChannelHandleAttr::get(
           op->getContext(), /*handle=*/conversionState.getNextChannelId(),
-          kChannelHandleType);
+          kCrossPartitionChannelHandleType);
 
       auto allGather = stablehlo::AllGatherOp::create(
           rewriter, op.getLoc(),
@@ -607,7 +603,7 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
                                                meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
-        kChannelHandleType);
+        kCrossPartitionChannelHandleType);
 
     auto allReduce = stablehlo::AllReduceOp::create(
         rewriter, op.getLoc(), converter->convertResultTypes(op->getResults()),
@@ -1153,7 +1149,7 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
 
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
-        kChannelHandleType);
+        kCrossPartitionChannelHandleType);
     Attribute replicaGroups =
         getReplicaGroups(axes, mesh, meshOrRef, enableRGV3, rewriter);
     auto reduceScatter = stablehlo::ReduceScatterOp::create(
@@ -1241,7 +1237,7 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
         getReplicaGroups(allReduceAxes, mesh, meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
-        kChannelHandleType);
+        kCrossPartitionChannelHandleType);
 
     // The result of the reduce-scatter will have dimension 0 reduced to size 1.
     combinedShape[0] = 1;
@@ -1277,7 +1273,7 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
     // Perform one All-Reduce across all involved axes.
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         op->getContext(), conversionState.getNextChannelId(),
-        kChannelHandleType);
+        kCrossPartitionChannelHandleType);
     Attribute replicaGroups =
         getReplicaGroups(allReduceAxes, mesh, meshOrRef, enableRGV3, rewriter);
 

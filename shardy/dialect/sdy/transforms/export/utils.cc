@@ -236,6 +236,17 @@ Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
   return idOp;
 }
 
+stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
+                                              int64_t replicaCount,
+                                              int64_t partitionCount,
+                                              int64_t& nextChannelId) {
+  if (usePartitionId(replicaCount, partitionCount)) {
+    return stablehlo::ChannelHandleAttr::get(ctx, nextChannelId++,
+                                             kCrossPartitionChannelHandleType);
+  }
+  return nullptr;
+}
+
 MeshOp getGlobalMeshOp(ModuleOp moduleOp) {
   for (MeshOp meshOp : moduleOp.getOps<MeshOp>()) {
     MeshAttr mesh = meshOp.getMesh();
@@ -531,5 +542,71 @@ bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
                                     inputType, outputType, groups);
 }
 
+Value sliceHighSideToType(OpBuilder& builder, Location loc, Value operand,
+                          Type targetType, TensorShardingAttr sharding) {
+  Type currentType = operand.getType();
+  if (currentType == targetType) {
+    return operand;
+  }
+  auto rankedTargetType = cast<RankedTensorType>(targetType);
+  int64_t rank = rankedTargetType.getRank();
+  SmallVector<int64_t> sliceStarts(rank, 0);
+  SmallVector<int64_t> sliceStrides(rank, 1);
+  Value sliced = stablehlo::SliceOp::create(
+      builder, loc, rankedTargetType, operand,
+      builder.getDenseI64ArrayAttr(sliceStarts),
+      builder.getDenseI64ArrayAttr(rankedTargetType.getShape()),
+      builder.getDenseI64ArrayAttr(sliceStrides));
+  if (sharding) {
+    setSharding(sliced, sharding);
+  }
+  return sliced;
+}
+
+Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
+                        Type targetType, TensorShardingAttr sharding,
+                        Value paddingValue, bool allowSlicePeephole) {
+  Type currentType = operand.getType();
+  if (currentType == targetType) {
+    return operand;
+  }
+  if (allowSlicePeephole) {
+    if (auto sliceOp = operand.getDefiningOp<stablehlo::SliceOp>()) {
+      if (sliceOp.getOperand().getType() == targetType) {
+        bool allZeros = llvm::all_of(sliceOp.getStartIndices(),
+                                     [](int64_t idx) { return idx == 0; });
+        bool allUnitStrides = llvm::all_of(
+            sliceOp.getStrides(), [](int64_t stride) { return stride == 1; });
+        if (allZeros && allUnitStrides) {
+          return sliceOp.getOperand();
+        }
+      }
+    }
+  }
+  auto currentRanked = cast<RankedTensorType>(currentType);
+  auto targetRanked = cast<RankedTensorType>(targetType);
+  SmallVector<int64_t> edgePaddingHigh(targetRanked.getRank(), 0);
+  for (int d = 0; d < targetRanked.getRank(); ++d) {
+    edgePaddingHigh[d] =
+        targetRanked.getDimSize(d) - currentRanked.getDimSize(d);
+  }
+  Value padVal = paddingValue;
+  if (!padVal) {
+    auto zeroType = RankedTensorType::get({}, targetRanked.getElementType());
+    padVal = stablehlo::ConstantOp::create(builder, loc,
+                                           builder.getZeroAttr(zeroType));
+  }
+  Value padded = stablehlo::PadOp::create(
+      builder, loc, targetRanked, operand, padVal,
+      builder.getDenseI64ArrayAttr(
+          SmallVector<int64_t>(targetRanked.getRank(), 0)),
+      builder.getDenseI64ArrayAttr(edgePaddingHigh),
+      builder.getDenseI64ArrayAttr(
+          SmallVector<int64_t>(targetRanked.getRank(), 0)));
+  if (sharding) {
+    setSharding(padded, sharding);
+  }
+  return padded;
+}
 }  // namespace sdy
 }  // namespace mlir
