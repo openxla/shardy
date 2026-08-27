@@ -64,6 +64,7 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
   --sdy-pad-for-divisibility \
   --sdy-resolve-single-device-sharding="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-convert-global-to-local="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
+  --sdy-inline-meshes \
   --sdy-drop-sharding-and-mesh \
   --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 

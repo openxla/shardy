@@ -1,12 +1,12 @@
 // RUN: split-file %s %t
 
 // Convert the routine using per-dim-all-gather=false.
-// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local="per-dim-all-gather=false" \
+// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local="per-dim-all-gather=false" --sdy-inline-meshes \
 // RUN:         --sdy-drop-sharding-and-mesh --allow-unregistered-dialect | \
 // RUN: sed 's/all_gather_test/combined_gather/g' > %t/combined_gather.mlir
 
 // Convert the routine using per-dim-all-gather=true.
-// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local="per-dim-all-gather=true" \
+// RUN: sdy_opt %t/part1.mlir --sdy-convert-global-to-local="per-dim-all-gather=true" --sdy-inline-meshes \
 // RUN:         --sdy-drop-sharding-and-mesh --allow-unregistered-dialect | \
 // RUN: sed 's/all_gather_test/per_dim_gather/g' > %t/per_dim_gather.mlir
 

@@ -55,6 +55,7 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 "$SPLIT_FILE" "$SRC" "$TMP"
 "$SDY_OPT" "$TMP/part1.mlir" \
   --sdy-convert-global-to-local="replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
+  --sdy-inline-meshes \
   --sdy-drop-sharding-and-mesh \
   --allow-unregistered-dialect > "$TMP/part1_processed.mlir"
 sed '1d; /^}/,$d' "$TMP/part1_processed.mlir" > "$TMP/combined.mlir"

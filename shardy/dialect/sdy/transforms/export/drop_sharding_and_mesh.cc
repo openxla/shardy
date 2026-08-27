@@ -7,6 +7,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -45,7 +46,11 @@ struct DropShardingAndMeshPass
       }
     });
 
-    module.walk([](MeshOp meshOp) { meshOp.erase(); });
+    module.walk([&](MeshOp meshOp) {
+      if (SymbolTable::symbolKnownUseEmpty(meshOp, module)) {
+        meshOp.erase();
+      }
+    });
   }
 };
 

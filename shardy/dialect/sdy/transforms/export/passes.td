@@ -273,7 +273,7 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
       Option<"combineMultiDimensionReduceScatter", "combine-multi-dimension-reduce-scatter",
             "bool", /*default=*/"false",
             "Combine multi-dimension reduce-scatter into a single reduce-scatter.">,
-      Option<"enableRGV3", "enable-rgv3", "bool", /*default=*/"false",
+      Option<"enableRGV3", "enable-rgv3", "bool", /*default=*/"true",
            "Use StableHLO ReplicaGroupV3 (mesh-axes based) for collectives.">,
       Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
              "Number of replicas (data parallelism).">,

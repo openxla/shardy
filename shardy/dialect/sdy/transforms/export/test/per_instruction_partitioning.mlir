@@ -54,7 +54,7 @@ func.func @selective_indivisible_dot(%lhs: tensor<6x32xf32> {sdy.sharding = #sdy
   // CHECK-SAME:   out_shardings=[<@mesh, [{}, {}]>]
   // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<3x16xf32>) {
   // CHECK-NEXT:   %[[ALL_GATHER:.*]] = "stablehlo.all_gather"(%arg2)
-  // CHECK-SAME:     replica_groups = dense<{{\[\[}}0, 1]]> : tensor<1x2xi64>
+  // CHECK-SAME:     replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh, axes = [#stablehlo.axis_ref<name = "x">]>
   // CHECK-NEXT:   sdy.return %[[ALL_GATHER]] : tensor<6x16xf32>
   // CHECK-NEXT: } : (tensor<6x16xf32>) -> tensor<6x16xf32>
   // CHECK-NEXT: %[[SLICED_FINAL:.*]] = stablehlo.slice %[[MANUAL_RESHARD]] [0:5, 0:16] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<6x16xf32>) -> tensor<5x16xf32>
@@ -99,7 +99,7 @@ func.func @selective_indivisible_reshard(%arg0: tensor<5x8xf32> {sdy.sharding = 
   // CHECK-SAME:   out_shardings=[<@mesh, [{}, {}]>]
   // CHECK-SAME:   manual_axes={"x"} (%arg1: tensor<3x8xf32>) {
   // CHECK-NEXT:   %[[ALL_GATHER:.*]] = "stablehlo.all_gather"(%arg1)
-  // CHECK-SAME:     replica_groups = dense<{{\[\[}}0, 1]]> : tensor<1x2xi64>
+  // CHECK-SAME:     replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh, axes = [#stablehlo.axis_ref<name = "x">]>
   // CHECK-NEXT:   sdy.return %[[ALL_GATHER]] : tensor<6x8xf32>
   // CHECK-NEXT: } : (tensor<6x8xf32>) -> tensor<6x8xf32>
   // CHECK-NEXT: %[[SLICED:.*]] = stablehlo.slice %[[MANUAL]] [0:5, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<6x8xf32>) -> tensor<5x8xf32>
@@ -122,7 +122,7 @@ func.func @selective_all_gather(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sha
   // CHECK-SAME:   manual_axes={"x"} (%arg1: tensor<4x16xf32>) {
   // CHECK-NEXT:   %[[AG:.*]] = "stablehlo.all_gather"(%arg1)
   // CHECK-SAME:     all_gather_dim = 0 : i64
-  // CHECK-SAME:     replica_groups = dense<{{\[\[}}0, 1]]> : tensor<1x2xi64>
+  // CHECK-SAME:     replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh, axes = [#stablehlo.axis_ref<name = "x">]>
   // CHECK-NEXT:   sdy.return %[[AG]] : tensor<8x16xf32>
   // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
   %0 = sdy.all_gather [{"x"}, {}] %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<8x16xf32>

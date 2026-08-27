@@ -1,6 +1,6 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V1,PARTITION
-// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=true' | FileCheck %s --check-prefixes=CHECK,V3,PARTITION
-// RUN: sdy_opt %s -sdy-convert-global-to-local='replica-count=16 partition-count=1' | FileCheck %s --check-prefixes=CHECK,V1,REPLICA
+// RUN: sdy_opt %s -sdy-convert-global-to-local='enable-rgv3=false' | FileCheck %s --check-prefixes=CHECK,V1,PARTITION
+// RUN: sdy_opt %s -sdy-convert-global-to-local | FileCheck %s --check-prefixes=CHECK,V3,PARTITION
+// RUN: sdy_opt %s -sdy-convert-global-to-local='replica-count=16 partition-count=1 enable-rgv3=false' | FileCheck %s --check-prefixes=CHECK,V1,REPLICA
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
