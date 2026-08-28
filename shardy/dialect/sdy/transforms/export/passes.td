@@ -207,6 +207,18 @@ def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"
     ];
 }
 
+def OptimizeCollectivesPass : Pass<"sdy-optimize-collectives", "func::FuncOp"> {
+  let summary = "Optimizes collective communication operations.";
+  let description = [{
+    Eliminates redundant collective-permute operations preceding all-to-all
+    chains by decomposing split dimensions and fusing into a combined all-to-all.
+  }];
+  let dependentDialects = [
+    "mlir::sdy::SdyDialect",
+    "mlir::stablehlo::StablehloDialect",
+  ];
+}
+
 def RemoveAllGatherReduceScatterForCMV1Pass : Pass<"sdy-remove-all-gather-reduce-scatter-for-cmv1", "func::FuncOp"> {
   let summary = "Removes sdy.all_gather and sdy.reduce_scatter for CMV1.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
