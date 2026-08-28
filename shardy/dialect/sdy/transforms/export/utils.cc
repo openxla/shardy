@@ -323,12 +323,10 @@ Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
     } else {
       shardCount = dimSharding.getShardedSize(mesh);
     }
-    if (shardCount > 1 && dimSize % shardCount != 0) {
-      int64_t paddedDim = dimSize + shardCount - (dimSize % shardCount);
-      newShape.push_back(paddedDim);
+    int64_t paddedDim = llvm::alignTo(dimSize, shardCount);
+    newShape.push_back(paddedDim);
+    if (paddedDim != dimSize) {
       changed = true;
-    } else {
-      newShape.push_back(dimSize);
     }
   }
   if (!changed) {
