@@ -1769,19 +1769,21 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
     maxBounds.reserve(startIndexMap.size());
   }
 
+  unsigned bitWidth = indexEltTy.getIntOrFloatBitWidth();
   for (int64_t indexedDim : startIndexMap) {
     if (!llvm::is_contained(trivialSliceDims, indexedDim)) {
       // For non-trivial dims, the bounds cover the entire global range.
       minBounds.push_back(stablehlo::ConstantOp::create(
           rewriter, loc,
           DenseIntElementsAttr::get(RankedTensorType::get({}, indexEltTy),
-                                    (int64_t)0)));
+                                    APInt(bitWidth, 0))));
       if (computeMask) {
         maxBounds.push_back(stablehlo::ConstantOp::create(
             rewriter, loc,
             DenseIntElementsAttr::get(
                 RankedTensorType::get({}, indexEltTy),
-                globalOperandType.getDimSize(indexedDim) - 1)));
+                APInt(bitWidth,
+                      globalOperandType.getDimSize(indexedDim) - 1))));
       }
       continue;
     }
@@ -1799,7 +1801,7 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
       Value shardSizeMinus1 = stablehlo::ConstantOp::create(
           rewriter, loc,
           DenseIntElementsAttr::get(RankedTensorType::get({}, indexEltTy),
-                                    shardSize - 1));
+                                    APInt(bitWidth, shardSize - 1)));
       maxBounds.push_back(stablehlo::AddOp::create(
           rewriter, loc, RankedTensorType::get({}, indexEltTy), offset,
           shardSizeMinus1));
@@ -1818,16 +1820,19 @@ Value clampGatherIndices(Location loc, Value indices,
   Type indexEltTy = indicesType.getElementType();
 
   auto buildIndicesLikeTensor = [&](ArrayRef<int64_t> values) -> Value {
+    unsigned bitWidth = indexEltTy.getIntOrFloatBitWidth();
+    auto apValues = llvm::map_to_vector(
+        values, [&](int64_t v) { return APInt(bitWidth, v); });
     if (ivd < indicesType.getRank() && values.size() > 1) {
       auto attr = DenseIntElementsAttr::get(
-          RankedTensorType::get(values.size(), indexEltTy), values);
+          RankedTensorType::get(values.size(), indexEltTy), apValues);
       Value valuesConst = stablehlo::ConstantOp::create(rewriter, loc, attr);
       return stablehlo::BroadcastInDimOp::create(
           rewriter, loc, indicesType, valuesConst,
           rewriter.getDenseI64ArrayAttr({ivd}));
     }
     return stablehlo::ConstantOp::create(
-        rewriter, loc, DenseIntElementsAttr::get(indicesType, values[0]));
+        rewriter, loc, DenseIntElementsAttr::get(indicesType, apValues[0]));
   };
 
   SmallVector<int64_t> globalMaxValues =
