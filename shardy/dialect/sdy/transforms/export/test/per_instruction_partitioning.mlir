@@ -35,9 +35,7 @@ func.func @selective_indivisible_dot(%lhs: tensor<6x32xf32> {sdy.sharding = #sdy
   // CHECK: %[[SLICE:.*]] = stablehlo.slice %[[LHS]] [0:5, 0:32] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<6x32xf32>) -> tensor<5x32xf32>
   %sliced_lhs = stablehlo.slice %lhs [0:5, 0:32] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<6x32xf32>) -> tensor<5x32xf32>
 
-  // CHECK:      %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-  // CHECK:      %[[PAD:.*]] = stablehlo.pad %[[SLICE]], %[[CST]], low = [0, 0], high = [1, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<5x32xf32>, tensor<f32>) -> tensor<6x32xf32>
-  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[PAD]], %[[RHS]])
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[LHS]], %[[RHS]])
   // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {}]>, <@mesh, [{}, {}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}, {}]>]
   // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<3x32xf32>, %arg3: tensor<32x16xf32>) {
@@ -47,9 +45,7 @@ func.func @selective_indivisible_dot(%lhs: tensor<6x32xf32> {sdy.sharding = #sdy
   // CHECK-NEXT: %[[SLICED_RES:.*]] = stablehlo.slice %[[MANUAL]] [0:5, 0:16] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<6x16xf32>) -> tensor<5x16xf32>
   %dot = stablehlo.dot %sliced_lhs, %rhs {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<5x32xf32>, tensor<32x16xf32>) -> tensor<5x16xf32>
 
-  // CHECK:      %[[CST_0:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
-  // CHECK:      %[[PAD_RESHARD:.*]] = stablehlo.pad %[[SLICED_RES]], %[[CST_0]], low = [0, 0], high = [1, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<5x16xf32>, tensor<f32>) -> tensor<6x16xf32>
-  // CHECK:      %[[MANUAL_RESHARD:.*]] = sdy.manual_computation(%[[PAD_RESHARD]])
+  // CHECK:      %[[MANUAL_RESHARD:.*]] = sdy.manual_computation(%[[MANUAL]])
   // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{}, {}]>]
   // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<3x16xf32>) {
@@ -165,4 +161,69 @@ func.func @skip_sharding_custom_call(%arg0: tensor<8x16xf32> {sdy.sharding = #sd
   %0 = stablehlo.custom_call @Sharding(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=6]>
+
+// CHECK-LABEL: func @selective_indivisible_subaxis_reshard
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x":(1)2}]>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"x":(2)3}]>})
+func.func @selective_indivisible_subaxis_reshard(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x":(1)2}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}, {"x":(2)3}]>}) {
+  // CHECK:      %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK:      %[[PAD0:.*]] = stablehlo.pad %[[ARG0]], %[[CST]], low = [0, 0], high = [0, 4], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x":(1)2}]>]>} : (tensor<8x8xf32>, tensor<f32>) -> tensor<8x12xf32>
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[PAD0]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{}, {"x":(1)2}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x":(1)2}, {"x":(2)3}]>]
+  // CHECK-SAME:   manual_axes={"x"}
+  // CHECK:      %[[SLICE:.*]] = stablehlo.slice %[[MANUAL]] [0:8, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}, {"x":(2)3}]>]>} : (tensor<8x12xf32>) -> tensor<8x8xf32>
+  // CHECK:      return %[[SLICE]] : tensor<8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh, [{"x":(1)2}, {"x":(2)3}]> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @indivisible_sdy_constant
+// CHECK-SAME: () -> (tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @indivisible_sdy_constant() -> (tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation()
+  // CHECK-SAME:   in_shardings=[]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} () {
+  // CHECK-NEXT:   %[[CST:.*]] = stablehlo.constant dense<1.000000e+00> : tensor<3x16xf32>
+  // CHECK-NEXT:   sdy.return %[[CST]] : tensor<3x16xf32>
+  // CHECK-NEXT: } : () -> tensor<6x16xf32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[MANUAL]] [0:5, 0:16] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<6x16xf32>) -> tensor<5x16xf32>
+  // CHECK-NEXT: return %[[SLICE]] : tensor<5x16xf32>
+  %0 = sdy.constant {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} dense<1.000000e+00> : tensor<5x16xf32>
+  return %0 : tensor<5x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @preserve_unreduced_axes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>})
+// CHECK-SAME: -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}], unreduced={"y"}>})
+func.func @preserve_unreduced_axes(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"y"}>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}], unreduced={"y"}>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[ARG0]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {}], unreduced={"y"}>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{}, {"x"}], unreduced={"y"}>]
+  // CHECK-SAME:   manual_axes={"x", "y"} (%arg1: tensor<4x16xf32>) {
+  // CHECK-NEXT:   %[[A2A:.*]] = "stablehlo.all_to_all"(%arg1)
+  // CHECK:        sdy.return %[[A2A]] : tensor<8x8xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<8x16xf32>
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {"x"}], unreduced={"y"}> : tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+
+
+
 

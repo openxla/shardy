@@ -16,17 +16,20 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
 #include <string>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -35,6 +38,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
+#include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
@@ -203,25 +207,34 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
   info.outShardings =
       getShardings(op->getResults(), /*clearUnreducedAxes=*/false);
 
-  llvm::SmallDenseSet<StringAttr> seenAxes;
-  auto collectAxes = [&](TensorShardingAttr sharding) {
-    if (!sharding) {
-      return;
-    }
-    sharding.forEachAxisRef([&](AxisRefAttr axisRef) {
-      StringAttr axisName = StringAttr::get(ctx, axisRef.getName());
-      if (seenAxes.insert(axisName).second) {
-        info.manualAxesList.push_back(axisName);
-        info.manualAxesSet.insert(axisRef.getName());
-      }
-    });
-  };
+  MeshAttr meshAttr = getMeshOrLookup(op, targetMesh);
 
-  for (TensorShardingAttr sharding : info.inShardings) {
-    collectAxes(sharding);
-  }
-  for (TensorShardingAttr sharding : info.outShardings) {
-    collectAxes(sharding);
+  if (meshAttr) {
+    for (MeshAxisAttr axis : meshAttr.getAxes()) {
+      info.manualAxesList.push_back(StringAttr::get(ctx, axis.getName()));
+      info.manualAxesSet.insert(axis.getName());
+    }
+  } else {
+    llvm::SmallDenseSet<StringAttr> seenAxes;
+    auto collectAxes = [&](TensorShardingAttr sharding) {
+      if (!sharding) {
+        return;
+      }
+      sharding.forEachAxisRef([&](AxisRefAttr axisRef) {
+        StringAttr axisName = StringAttr::get(ctx, axisRef.getName());
+        if (seenAxes.insert(axisName).second) {
+          info.manualAxesList.push_back(axisName);
+          info.manualAxesSet.insert(axisRef.getName());
+        }
+      });
+    };
+
+    for (TensorShardingAttr sharding : info.inShardings) {
+      collectAxes(sharding);
+    }
+    for (TensorShardingAttr sharding : info.outShardings) {
+      collectAxes(sharding);
+    }
   }
 
   return info;
@@ -231,103 +244,197 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
 // Divisible Padding & Outlined Partitioning Helpers
 // =============================================================================
 
-// Returns the unified padded type for ops whose operand and result types must
-// match (such as sdy.reshard).
+// Computes the per-dimension divisor for a specific sharding.
+SmallVector<int64_t> getDivisorsForSharding(
+    TensorShardingAttr sharding, int64_t rank,
+    const InstructionShardingInfo& shardingInfo,
+    const SymbolTable& symbolTable) {
+  SmallVector<int64_t> divisors(rank, 1);
+  if (!sharding || sharding.isFullyReplicated()) {
+    return divisors;
+  }
+  MeshAttr mesh = sharding.getMesh(symbolTable);
+  if (!mesh) {
+    return divisors;
+  }
+  for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
+    if (dim >= rank) {
+      break;
+    }
+    for (AxisRefAttr axisRef : dimSharding.getAxes()) {
+      if (shardingInfo.manualAxesSet.contains(axisRef.getName())) {
+        int64_t axisSize = axisRef.getSize(mesh);
+        divisors[dim] *= axisSize;
+      }
+    }
+  }
+  return divisors;
+}
+
+// Computes the divisible padded type for a ranked tensor given per-dimension
+// divisors.
+Type getPaddedTypeWithDivisors(Type type, ArrayRef<int64_t> divisors) {
+  auto rankedType = dyn_cast<RankedTensorType>(type);
+  if (!rankedType) {
+    return type;
+  }
+  SmallVector<int64_t> newShape;
+  bool changed = false;
+  for (size_t d = 0; d < rankedType.getShape().size(); ++d) {
+    int64_t dimSize = rankedType.getDimSize(d);
+    int64_t divisor = d < divisors.size() ? divisors[d] : 1;
+    if (dimSize == ShapedType::kDynamic || divisor <= 1) {
+      newShape.push_back(dimSize);
+      continue;
+    }
+    int64_t paddedDim = llvm::alignTo(dimSize, divisor);
+    newShape.push_back(paddedDim);
+    if (paddedDim != dimSize) {
+      changed = true;
+    }
+  }
+  return changed ? RankedTensorType::get(newShape, rankedType.getElementType())
+                 : type;
+}
+
+// Computes a unified padded type exclusively for sdy.reshard operations.
+//
+// Unlike other operations where operand and result types are computed
+// independently per-tensor using getDivisiblePaddedType, sdy.reshard has the
+// SameOperandsAndResultType MLIR trait requiring operand and result types to
+// match identically. To satisfy this constraint while ensuring all assigned
+// mesh axes remain divisible, each dimension is padded to the least common
+// multiple (LCM) of its input and output sharding divisors.
+//
+// For all other operations, this returns nullptr so that operand and result
+// types are padded independently according to their own sharding attributes.
 RankedTensorType getUnifiedPaddedTypeForReshard(
     Operation* op, const InstructionShardingInfo& shardingInfo,
     const SymbolTable& symbolTable) {
-  if (!isa<ReshardOp>(op)) {
+  auto reshardOp = dyn_cast<ReshardOp>(op);
+  if (!reshardOp) {
     return nullptr;
   }
-  Type origType = op->getOperand(0).getType();
-  Type inPaddedType =
-      getDivisiblePaddedType(origType, shardingInfo.inShardings[0], symbolTable,
-                             &shardingInfo.manualAxesSet);
-  Type outPaddedType =
-      getDivisiblePaddedType(origType, shardingInfo.outShardings[0],
-                             symbolTable, &shardingInfo.manualAxesSet);
-  if (inPaddedType == origType && outPaddedType == origType) {
+  auto rankedType = dyn_cast<RankedTensorType>(reshardOp.getType());
+  if (!rankedType) {
     return nullptr;
   }
-  auto ranked = cast<RankedTensorType>(origType);
-  SmallVector<int64_t> maxShape(ranked.getShape());
-  if (auto inPadded = dyn_cast<RankedTensorType>(inPaddedType)) {
-    for (int d = 0; d < ranked.getRank(); ++d) {
-      maxShape[d] = std::max(maxShape[d], inPadded.getDimSize(d));
-    }
+  SmallVector<int64_t> inDivisors =
+      getDivisorsForSharding(shardingInfo.inShardings[0], rankedType.getRank(),
+                             shardingInfo, symbolTable);
+  SmallVector<int64_t> outDivisors =
+      getDivisorsForSharding(shardingInfo.outShardings[0], rankedType.getRank(),
+                             shardingInfo, symbolTable);
+  SmallVector<int64_t> unifiedDivisors(rankedType.getRank(), 1);
+  for (int64_t d = 0; d < rankedType.getRank(); ++d) {
+    unifiedDivisors[d] = std::lcm(inDivisors[d], outDivisors[d]);
   }
-  if (auto outPadded = dyn_cast<RankedTensorType>(outPaddedType)) {
-    for (int d = 0; d < ranked.getRank(); ++d) {
-      maxShape[d] = std::max(maxShape[d], outPadded.getDimSize(d));
-    }
-  }
-  return RankedTensorType::get(maxShape, ranked.getElementType());
+  return cast<RankedTensorType>(
+      getPaddedTypeWithDivisors(rankedType, unifiedDivisors));
 }
 
-// TODO(b/545097355): Consider code-sharing with pad-for-divisibility.
-//
+// Computes the padded argument types for manual computation.
+// For sdy.reshard, uses the unified LCM padded type. For all other ops, pads
+// each operand independently using getDivisiblePaddedType.
+SmallVector<Type> computePaddedOperandTypes(
+    Operation* op, const InstructionShardingInfo& shardingInfo,
+    const SymbolTable& symbolTable) {
+  if (RankedTensorType unifiedType =
+          getUnifiedPaddedTypeForReshard(op, shardingInfo, symbolTable)) {
+    return {unifiedType};
+  }
+  SmallVector<Type> paddedArgTypes;
+  for (auto [operand, sharding] :
+       llvm::zip_equal(op->getOperands(), shardingInfo.inShardings)) {
+    paddedArgTypes.push_back(getDivisiblePaddedType(
+        operand.getType(), sharding, symbolTable, &shardingInfo.manualAxesSet));
+  }
+  return paddedArgTypes;
+}
+
+// Computes the padded result types for manual computation.
+// For sdy.reshard, uses the unified LCM padded type. For all other ops, pads
+// each result independently using getDivisiblePaddedType.
+SmallVector<Type> computePaddedResultTypes(
+    Operation* op, const InstructionShardingInfo& shardingInfo,
+    const SymbolTable& symbolTable) {
+  if (RankedTensorType unifiedType =
+          getUnifiedPaddedTypeForReshard(op, shardingInfo, symbolTable)) {
+    return {unifiedType};
+  }
+  SmallVector<Type> paddedResultTypes;
+  for (auto [result, sharding] :
+       llvm::zip_equal(op->getResults(), shardingInfo.outShardings)) {
+    paddedResultTypes.push_back(getDivisiblePaddedType(
+        result.getType(), sharding, symbolTable, &shardingInfo.manualAxesSet));
+  }
+  return paddedResultTypes;
+}
+
 // Pads indivisible operands in the parent module before manual computation.
 SmallVector<Value> padIndivisibleOperands(
     Operation* op, const InstructionShardingInfo& shardingInfo,
-    const SymbolTable& symbolTable, SmallVector<Type>& paddedArgTypes,
-    IRRewriter& rewriter) {
-  RankedTensorType unifiedReshardType =
-      getUnifiedPaddedTypeForReshard(op, shardingInfo, symbolTable);
+    ArrayRef<Type> paddedArgTypes, IRRewriter& rewriter) {
   SmallVector<Value> manualOperands;
-  for (auto [operand, sharding] :
-       llvm::zip_equal(op->getOperands(), shardingInfo.inShardings)) {
-    Type origType = operand.getType();
-    Type paddedType = unifiedReshardType ? unifiedReshardType
-                                         : getDivisiblePaddedType(
-                                               origType, sharding, symbolTable,
-                                               &shardingInfo.manualAxesSet);
-    if (paddedType != origType) {
-      auto origRanked = cast<RankedTensorType>(origType);
-      auto paddedRanked = cast<RankedTensorType>(paddedType);
-      auto zeroType = RankedTensorType::get({}, paddedRanked.getElementType());
-      Value zero = stablehlo::ConstantOp::create(
-          rewriter, op->getLoc(), rewriter.getZeroAttr(zeroType));
-      SmallVector<int64_t> edgePaddingLow(paddedRanked.getRank(), 0);
-      SmallVector<int64_t> edgePaddingHigh(paddedRanked.getRank(), 0);
-      SmallVector<int64_t> interiorPadding(paddedRanked.getRank(), 0);
-      for (int d = 0; d < paddedRanked.getRank(); ++d) {
-        edgePaddingHigh[d] =
-            paddedRanked.getDimSize(d) - origRanked.getDimSize(d);
-      }
-      Value paddedOperand = stablehlo::PadOp::create(
-          rewriter, op->getLoc(), paddedType, operand, zero,
-          rewriter.getDenseI64ArrayAttr(edgePaddingLow),
-          rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
-          rewriter.getDenseI64ArrayAttr(interiorPadding));
-      setSharding(paddedOperand, sharding);
-      manualOperands.push_back(paddedOperand);
-      paddedArgTypes.push_back(paddedType);
-    } else {
-      manualOperands.push_back(operand);
-      paddedArgTypes.push_back(origType);
-    }
+  for (auto [operand, paddedType, sharding] : llvm::zip_equal(
+           op->getOperands(), paddedArgTypes, shardingInfo.inShardings)) {
+    manualOperands.push_back(padHighSideToType(
+        rewriter, op->getLoc(), operand, paddedType, sharding,
+        /*paddingValue=*/nullptr, /*allowSlicePeephole=*/true));
   }
   return manualOperands;
 }
 
-// Computes the padded result types for manual computation.
-SmallVector<Type> computePaddedResultTypes(
-    Operation* op, const InstructionShardingInfo& shardingInfo,
-    const SymbolTable& symbolTable) {
-  RankedTensorType unifiedReshardType =
-      getUnifiedPaddedTypeForReshard(op, shardingInfo, symbolTable);
-  SmallVector<Type> paddedResultTypes;
-  for (auto [result, sharding] :
-       llvm::zip_equal(op->getResults(), shardingInfo.outShardings)) {
-    Type origResType = result.getType();
-    Type paddedResType =
-        unifiedReshardType
-            ? unifiedReshardType
-            : getDivisiblePaddedType(origResType, sharding, symbolTable,
-                                     &shardingInfo.manualAxesSet);
-    paddedResultTypes.push_back(paddedResType);
+// Pads an ElementsAttr to paddedType by inserting zero elements for padded
+// regions.
+ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
+                             RankedTensorType origType,
+                             RankedTensorType paddedType) {
+  if (origType == paddedType) {
+    return elementsAttr;
   }
-  return paddedResultTypes;
+  if (elementsAttr.isSplat()) {
+    return SplatElementsAttr::get(paddedType,
+                                  elementsAttr.getSplatValue<Attribute>());
+  }
+  auto denseAttr = dyn_cast<DenseElementsAttr>(elementsAttr);
+  if (!denseAttr) {
+    return elementsAttr;
+  }
+  Type elemType = paddedType.getElementType();
+  Attribute zeroAttr;
+  if (auto floatType = dyn_cast<FloatType>(elemType)) {
+    zeroAttr = FloatAttr::get(floatType, 0.0);
+  } else if (auto intType = dyn_cast<IntegerType>(elemType)) {
+    zeroAttr = IntegerAttr::get(intType, 0);
+  } else {
+    return elementsAttr;
+  }
+
+  SmallVector<Attribute> paddedValues(paddedType.getNumElements(), zeroAttr);
+  int64_t rank = origType.getRank();
+  ArrayRef<int64_t> origShape = origType.getShape();
+  ArrayRef<int64_t> paddedShape = paddedType.getShape();
+
+  SmallVector<int64_t> origStrides(rank, 1);
+  SmallVector<int64_t> paddedStrides(rank, 1);
+  for (int64_t i = rank - 2; i >= 0; --i) {
+    origStrides[i] = origStrides[i + 1] * origShape[i + 1];
+    paddedStrides[i] = paddedStrides[i + 1] * paddedShape[i + 1];
+  }
+
+  int64_t idx = 0;
+  for (Attribute val : denseAttr.getValues<Attribute>()) {
+    int64_t temp = idx++;
+    int64_t paddedLinearIdx = 0;
+    for (int64_t d = 0; d < rank; ++d) {
+      int64_t coord = temp / origStrides[d];
+      temp %= origStrides[d];
+      paddedLinearIdx += coord * paddedStrides[d];
+    }
+    paddedValues[paddedLinearIdx] = val;
+  }
+  return DenseElementsAttr::get(paddedType, paddedValues);
 }
 
 // Outlines the target instruction and its mesh dependencies into an ephemeral
@@ -368,46 +475,69 @@ LogicalResult outlineInstruction(Operation* op,
 
   Block* block = outlinedFunc.addEntryBlock();
   tempRewriter.setInsertionPointToStart(block);
+  SmallVector<Value> operands(block->getArguments().begin(),
+                              block->getArguments().end());
+  SmallVector<Type> resultTypes;
+  auto inferTypeOp = dyn_cast<InferTypeOpInterface>(op);
+  if (!inferTypeOp ||
+      failed(inferTypeOp.inferReturnTypes(
+          ctx, op->getLoc(), operands, op->getAttrDictionary(),
+          op->getPropertiesStorage(), op->getRegions(), resultTypes))) {
+    resultTypes.assign(paddedResultTypes.begin(), paddedResultTypes.end());
+  }
+
   Operation* clonedOp = tempRewriter.clone(*op);
   for (size_t i = 0; i < clonedOp->getNumOperands(); ++i) {
     clonedOp->setOperand(i, block->getArgument(i));
   }
-  setShardings(clonedOp, shardingInfo.outShardings);
-  if (clonedOp->getResultTypes() != TypeRange(paddedResultTypes)) {
-    for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
-      Type origResType = op->getResult(i).getType();
-      Type paddedResType = paddedResultTypes[i];
-      if (origResType != paddedResType) {
-        auto origRanked = cast<RankedTensorType>(origResType);
-        auto paddedRanked = cast<RankedTensorType>(paddedResType);
-        // TODO(b/545097355): Update shape-dependent attributes for other ops
-        // requiring padding (e.g. slice_sizes for stablehlo.dynamic_slice,
-        // gather, scatter) if they are partitioned individually with
-        // indivisible shardings.
-        if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(clonedOp)) {
-          SmallVector<int64_t> newLimit(sliceOp.getLimitIndices().begin(),
-                                        sliceOp.getLimitIndices().end());
-          for (int d = 0; d < paddedRanked.getRank(); ++d) {
-            newLimit[d] +=
-                (paddedRanked.getDimSize(d) - origRanked.getDimSize(d));
-          }
-          sliceOp.setLimitIndicesAttr(
-              tempRewriter.getDenseI64ArrayAttr(newLimit));
-        } else if (auto padOp = dyn_cast<stablehlo::PadOp>(clonedOp)) {
-          SmallVector<int64_t> newHigh(padOp.getEdgePaddingHigh().begin(),
-                                       padOp.getEdgePaddingHigh().end());
-          for (int d = 0; d < paddedRanked.getRank(); ++d) {
-            newHigh[d] +=
-                (paddedRanked.getDimSize(d) - origRanked.getDimSize(d));
-          }
-          padOp.setEdgePaddingHighAttr(
-              tempRewriter.getDenseI64ArrayAttr(newHigh));
+  for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
+    if (i < resultTypes.size()) {
+      clonedOp->getResult(i).setType(resultTypes[i]);
+    }
+  }
+
+  // TODO(b/553579414): Remove the need of handling stablehlo.constant when
+  // shardy internal pass generate sdy.constant instead of stablehlo.constant
+  // in global view of the program.
+  ElementsAttr valueAttr = nullptr;
+  if (auto constantOp = dyn_cast<sdy::ConstantOp>(clonedOp)) {
+    valueAttr = constantOp.getValue();
+  } else if (auto constantOp = dyn_cast<stablehlo::ConstantOp>(clonedOp)) {
+    valueAttr = constantOp.getValue();
+  }
+  if (valueAttr) {
+    auto origRanked = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+    auto paddedRanked = dyn_cast<RankedTensorType>(paddedResultTypes[0]);
+    if (origRanked && paddedRanked && origRanked != paddedRanked) {
+      ElementsAttr paddedAttr =
+          padElementsAttr(valueAttr, origRanked, paddedRanked);
+      if (paddedAttr && paddedAttr.getType() == paddedRanked) {
+        if (auto sdyConst = dyn_cast<sdy::ConstantOp>(clonedOp)) {
+          sdyConst.setValueAttr(paddedAttr);
+        } else if (auto shloConst = dyn_cast<stablehlo::ConstantOp>(clonedOp)) {
+          shloConst.setValueAttr(paddedAttr);
         }
-        clonedOp->getResult(i).setType(paddedResType);
+        clonedOp->getResult(0).setType(paddedRanked);
       }
     }
   }
-  func::ReturnOp::create(tempRewriter, op->getLoc(), clonedOp->getResults());
+  setShardings(clonedOp, shardingInfo.outShardings);
+
+  SmallVector<Value> returnValues;
+  returnValues.reserve(clonedOp->getNumResults());
+  for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
+    Value res = clonedOp->getResult(i);
+    Type targetType = paddedResultTypes[i];
+    if (res.getType() != targetType) {
+      returnValues.push_back(padHighSideToType(tempRewriter, op->getLoc(), res,
+                                               targetType,
+                                               shardingInfo.outShardings[i]));
+    } else {
+      returnValues.push_back(res);
+    }
+  }
+
+  func::ReturnOp::create(tempRewriter, op->getLoc(), returnValues);
   return success();
 }
 
@@ -425,10 +555,6 @@ LogicalResult runPartitionerPipeline(ModuleOp module, bool enableHaloExchange,
   resolveFactorsOptions.replicaCount = replicaCount;
   resolveFactorsOptions.partitionCount = partitionCount;
   pm.addPass(createShardyResolvePermutationFactorsPass(resolveFactorsOptions));
-  InsertExplicitReshardsPassOptions insertReshardOptions;
-  insertReshardOptions.enableFullVersion = true;
-  pm.addNestedPass<func::FuncOp>(
-      createInsertExplicitReshardsPass(insertReshardOptions));
   pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
   pm.addNestedPass<func::FuncOp>(createOptimizeCollectivesPass());
   pm.addNestedPass<func::FuncOp>(createPadForDivisibilityPass());
@@ -471,27 +597,12 @@ ManualComputationOp createManualComputationFromFunc(
 // module and replaces uses of the original operation.
 void sliceIndivisibleResults(Operation* op, ManualComputationOp manualCompOp,
                              ArrayRef<TensorShardingAttr> outShardings,
-                             ArrayRef<Type> paddedResultTypes,
                              IRRewriter& rewriter) {
   for (size_t j = 0; j < op->getNumResults(); ++j) {
     Value manualRes = manualCompOp.getResult(j);
     Type origResType = op->getResult(j).getType();
-    Type paddedResType = paddedResultTypes[j];
-    if (origResType == paddedResType) {
-      rewriter.replaceAllUsesWith(op->getResult(j), manualRes);
-      continue;
-    }
-    auto origRanked = cast<RankedTensorType>(origResType);
-    SmallVector<int64_t> startIndices(origRanked.getRank(), 0);
-    SmallVector<int64_t> limitIndices(origRanked.getShape().begin(),
-                                      origRanked.getShape().end());
-    SmallVector<int64_t> strides(origRanked.getRank(), 1);
-    Value slicedRes = stablehlo::SliceOp::create(
-        rewriter, op->getLoc(), origResType, manualRes,
-        rewriter.getDenseI64ArrayAttr(startIndices),
-        rewriter.getDenseI64ArrayAttr(limitIndices),
-        rewriter.getDenseI64ArrayAttr(strides));
-    setSharding(slicedRes, outShardings[j]);
+    Value slicedRes = sliceHighSideToType(rewriter, op->getLoc(), manualRes,
+                                          origResType, outShardings[j]);
     rewriter.replaceAllUsesWith(op->getResult(j), slicedRes);
   }
 }
@@ -590,12 +701,13 @@ struct PerInstructionPartitioningPass
     InstructionShardingInfo shardingInfo =
         getInstructionShardingInfo(op, meshSym, targetMesh);
 
-    SmallVector<Type> paddedArgTypes;
-    SmallVector<Value> manualOperands = padIndivisibleOperands(
-        op, shardingInfo, symbolTable, paddedArgTypes, rewriter);
-
+    SmallVector<Type> paddedArgTypes =
+        computePaddedOperandTypes(op, shardingInfo, symbolTable);
     SmallVector<Type> paddedResultTypes =
         computePaddedResultTypes(op, shardingInfo, symbolTable);
+
+    SmallVector<Value> manualOperands =
+        padIndivisibleOperands(op, shardingInfo, paddedArgTypes, rewriter);
 
     OwningOpRef<ModuleOp> tempModule;
     func::FuncOp outlinedFunc;
@@ -612,7 +724,7 @@ struct PerInstructionPartitioningPass
         rewriter);
 
     sliceIndivisibleResults(op, manualCompOp, shardingInfo.outShardings,
-                            paddedResultTypes, rewriter);
+                            rewriter);
 
     rewriter.eraseOp(op);
     return true;
