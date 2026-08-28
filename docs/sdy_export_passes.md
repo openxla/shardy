@@ -117,6 +117,13 @@ _Inserts reshards for func and call sharding conflicts._
 
 Inserts reshards for func and call sharding conflicts on results.
 
+### `-sdy-optimize-collectives`
+
+_Optimizes collective communication operations._
+
+Eliminates redundant collective-permute operations preceding all-to-all
+chains by decomposing split dimensions and fusing into a combined all-to-all.
+
 ### `-sdy-pad-for-divisibility`
 
 _Pads tensors with non-divisible shardings to divisible shapes._
