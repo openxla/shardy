@@ -87,6 +87,7 @@ func.func @shard_reduction_dim_is_collapsed(
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 1>
   // CHECK-SAME: slice_sizes = array<i64: 1, 10>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
   // CHECK: %[[MASK_BCAST:.*]] = stablehlo.broadcast_in_dim %[[MASK]], dims = [0] : (tensor<2xi1>) -> tensor<2x10xi1>
   // CHECK: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<2x10xf32>
   // CHECK: %[[SEL:.*]] = stablehlo.select %[[MASK_BCAST]], %[[GATHER]], %[[ZERO]] : tensor<2x10xi1>, tensor<2x10xf32>
@@ -96,7 +97,8 @@ func.func @shard_reduction_dim_is_collapsed(
       collapsed_slice_dims = [0],
       start_index_map = [0],
       index_vector_dim = 1>,
-    slice_sizes = array<i64: 1, 10>
+    slice_sizes = array<i64: 1, 10>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>]>
   } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x10xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
   // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
@@ -123,6 +125,7 @@ func.func @shard_reduction_dim_is_collapsed_not_in_start_index_map(
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[ARG1]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [0], start_index_map = [1], index_vector_dim = 1>
   // CHECK-SAME: slice_sizes = array<i64: 1, 1>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
   // CHECK: %[[MASK_BCAST:.*]] = stablehlo.broadcast_in_dim %[[EQ_ZERO]], dims = [] : (tensor<i1>) -> tensor<2x1xi1>
   // CHECK: %[[ZERO_F32:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<2x1xf32>
   // CHECK: %[[SEL:.*]] = stablehlo.select %[[MASK_BCAST]], %[[GATHER]], %[[ZERO_F32]] : tensor<2x1xi1>, tensor<2x1xf32>
@@ -132,7 +135,8 @@ func.func @shard_reduction_dim_is_collapsed_not_in_start_index_map(
       collapsed_slice_dims = [0],
       start_index_map = [1],
       index_vector_dim = 1>,
-    slice_sizes = array<i64: 1, 1>
+    slice_sizes = array<i64: 1, 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>]>
   } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x1xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
   // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
@@ -169,6 +173,7 @@ func.func @shard_reduction_dim_is_collapsed_explicit_scalar_index_vector_dim(
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 1>
   // CHECK-SAME: slice_sizes = array<i64: 1, 10>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
   // CHECK: %[[TRUE:.*]] = stablehlo.constant dense<true> : tensor<i1>
   // CHECK: %[[RED_MASK:.*]] = stablehlo.reduce(%[[MASK]] init: %[[TRUE]])
   // CHECK-SAME: applies stablehlo.and across dimensions = [1]
@@ -181,7 +186,8 @@ func.func @shard_reduction_dim_is_collapsed_explicit_scalar_index_vector_dim(
       collapsed_slice_dims = [0],
       start_index_map = [0],
       index_vector_dim = 1>,
-    slice_sizes = array<i64: 1, 10>
+    slice_sizes = array<i64: 1, 10>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>]>
   } : (tensor<8x10xf32>, tensor<2x1xi64>) -> tensor<2x10xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
   // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
@@ -218,6 +224,7 @@ func.func @shard_reduction_dim_not_collapsed(
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1, 2], start_index_map = [0], index_vector_dim = 1>
   // CHECK-SAME: slice_sizes = array<i64: 1, 10>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}, {}], unreduced={"x"}>]>}
   // CHECK: %[[MASK_BCAST:.*]] = stablehlo.broadcast_in_dim %[[MASK]], dims = [0] : (tensor<2xi1>) -> tensor<2x1x10xi1>
   // CHECK: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<2x1x10xf32>
   // CHECK: %[[SEL:.*]] = stablehlo.select %[[MASK_BCAST]], %[[GATHER]], %[[ZERO]] : tensor<2x1x10xi1>, tensor<2x1x10xf32>
@@ -226,7 +233,8 @@ func.func @shard_reduction_dim_not_collapsed(
       offset_dims = [1, 2],
       start_index_map = [0],
       index_vector_dim = 1>,
-    slice_sizes = array<i64: 1, 10>
+    slice_sizes = array<i64: 1, 10>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}, {}], unreduced={"x"}>]>
   } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x1x10xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
   // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
@@ -254,12 +262,14 @@ func.func @shard_reduction_dim_explicit_scalar_indices(
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMP]], %[[BCAST_OFF]] : tensor<i64>
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<collapsed_slice_dims = [0], start_index_map = [0]>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [], unreduced={"x"}>]>}
   // CHECK: %[[SEL:.*]] = stablehlo.select %{{.*}}, %[[GATHER]], %{{.*}} : tensor<i1>, tensor<f32>
   %0 = "stablehlo.gather"(%arg0, %arg1) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [], collapsed_slice_dims = [0],
       start_index_map = [0], index_vector_dim = 0>,
-    slice_sizes = array<i64: 1>
+    slice_sizes = array<i64: 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [], unreduced={"x"}>]>
   } : (tensor<8xf32>, tensor<i64>) -> tensor<f32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
   // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
@@ -300,6 +310,7 @@ func.func @shard_two_of_three_reduction_dims(
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: operand_batching_dims = [1], start_indices_batching_dims = [0], start_index_map = [0, 2, 4], index_vector_dim = 2
   // CHECK-SAME: slice_sizes = array<i64: 1, 1, 1, 5, 1>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}], unreduced={"x", "y":(2)2}>]>}
 
   // Masking & Filtering
   // CHECK: %[[MASK_RED:.*]] = stablehlo.reduce(%{{.*}}) {{.*}} across dimensions = [2]
@@ -313,7 +324,7 @@ func.func @shard_two_of_three_reduction_dims(
       start_index_map = [0, 2, 4],
       index_vector_dim = 2>,
     slice_sizes = array<i64: 1, 1, 1, 5, 1>,
-    sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}]>]>
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}], unreduced={"x", "y":(2)2}>]>
   } : (tensor<8x6x4x5x3xf32>, tensor<6x2x3xi64>) -> tensor<6x2x1x1x5x1xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SELECTED]])
   // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 4, 5], [2, 3, 6, 7]]> : tensor<2x4xi64>
@@ -355,6 +366,7 @@ func.func @shard_two_of_three_reduction_dims_one_not_in_start_index_map(
   // CHECK: %[[COMBINED_MASK:.*]] = stablehlo.and %[[IDX_MASK]], %[[PART_BCAST]] : tensor<3x2x3xi1>
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [2, 3, 4, 5], operand_batching_dims = [1], start_indices_batching_dims = [0], start_index_map = [0, 3, 4], index_vector_dim = 2>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}], unreduced={"x", "y":(2)2}>]>}
 
   // Mask reduction and filtering
   // CHECK: %[[RED_MASK:.*]] = stablehlo.reduce(%[[COMBINED_MASK]] init: %{{.*}}) applies stablehlo.and across dimensions = [2]
@@ -367,7 +379,7 @@ func.func @shard_two_of_three_reduction_dims_one_not_in_start_index_map(
       start_index_map = [0, 3, 4],
       index_vector_dim = 2>,
     slice_sizes = array<i64: 1, 1, 1, 5, 1>,
-    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}]>]>
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"y":(1)2}, {}, {}, {}, {}, {}], unreduced={"x", "y":(2)2}>]>
   } : (tensor<8x6x4x5x3xf32>, tensor<6x2x3xi64>) -> tensor<6x2x1x1x5x1xf32>
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SEL]])
   // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1, 4, 5], [2, 3, 6, 7]]> : tensor<2x4xi64>
@@ -375,3 +387,25 @@ func.func @shard_two_of_three_reduction_dims_one_not_in_start_index_map(
   // CHECK: return %[[RES]] : tensor<3x2x1x1x5x1xf32>
   return %1 : tensor<6x2x1x1x5x1xf32>
 }
+
+// CHECK-LABEL: func @gather_unreduced(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<4x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<2xi64>) -> (tensor<2x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>}) {
+func.func @gather_unreduced(
+  %arg0: tensor<8x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+  %arg1: tensor<2xi64>) -> (tensor<2x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>}) {
+  // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %{{.*}})
+  // CHECK: %[[SEL:.*]] = stablehlo.select %{{.*}}, %[[GATHER]], %{{.*}}
+  // CHECK: return %[[SEL]] : tensor<2x10xf32>
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [0],
+      start_index_map = [0],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 10>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>]>
+  } : (tensor<8x10xf32>, tensor<2xi64>) -> tensor<2x10xf32>
+  return %0 : tensor<2x10xf32>
+}
+

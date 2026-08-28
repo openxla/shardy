@@ -31,7 +31,8 @@ func.func @parallel_gather(
       start_indices_batching_dims = [0],
       start_index_map = [0, 2],
       index_vector_dim = 2>,
-    slice_sizes = array<i64: 1, 1, 1>
+    slice_sizes = array<i64: 1, 1, 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_2, [{}, {}], unreduced={"x", "y"}>]>
   } : (tensor<4x2x2xf32>, tensor<2x1x2xi64>) -> tensor<2x1xf32>
 
   // All-reduce across both sharded reduction axes.

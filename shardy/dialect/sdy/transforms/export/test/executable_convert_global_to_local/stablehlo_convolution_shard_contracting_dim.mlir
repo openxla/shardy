@@ -24,7 +24,8 @@ func.func @parallel_conv(
     window = {stride = [2, 2], pad = [[0, 1], [0, 1]]}
     {
       feature_group_count = 1 : i64,
-      batch_group_count = 1 : i64
+      batch_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2, [{}, {}, {}, {}], unreduced={"x"}>]>
     } : (tensor<2x4x4x4xi32>, tensor<3x3x4x4xi32>) -> tensor<2x2x2x4xi32>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2, [{}, {}, {}, {}]> : tensor<2x2x2x4xi32>
   return %1 : tensor<2x2x2x4xi32>

@@ -12,7 +12,7 @@ func.func @parallel_dot_contracting_indivisible(
   -> (tensor<3x5xf32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}, {}]>}) {
   %0 = sdy.reshard %arg0 <@mesh_x2_y2, [{"x"}, {"y"}]> : tensor<3x3xf32>
   %1 = sdy.reshard %arg1 <@mesh_x2_y2, [{"y"}, {}]> : tensor<3x5xf32>
-  %2 = stablehlo.dot_general %0, %1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2_y2, [{"x"}, {}]>]>} : (tensor<3x3xf32>, tensor<3x5xf32>) -> tensor<3x5xf32>
+  %2 = stablehlo.dot_general %0, %1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_x2_y2, [{"x"}, {}], unreduced={"y"}>]>} : (tensor<3x3xf32>, tensor<3x5xf32>) -> tensor<3x5xf32>
   %3 = sdy.reshard %2 <@mesh_x2_y2, [{}, {}]> : tensor<3x5xf32>
   return %3 : tensor<3x5xf32>
 }

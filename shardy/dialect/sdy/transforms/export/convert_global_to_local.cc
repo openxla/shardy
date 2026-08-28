@@ -244,6 +244,19 @@ LogicalResult localizeGenericOp(Operation* op, ValueRange operands,
   return success();
 }
 
+void checkUnreducedResultSharding(TensorShardingAttr resSharding,
+                                  ArrayRef<AxisRefAttr> expectedAxes,
+                                  StringRef opName) {
+  SDY_CHECK(resSharding && !resSharding.getUnreducedAxes().empty())
+      << "Expected sharded reduction " << opName.str()
+      << " result to have unreduced axes sharding.";
+  SDY_CHECK(resSharding.getUnreducedAxes() == expectedAxes)
+      << "The unreduced axes of the " << opName.str()
+      << " result sharding should match the sharded reduction dimensions of "
+         "the "
+      << opName.str() << ".";
+}
+
 // Pattern for generic ops that do not require special handling beyond type
 // conversion, such as StableHLO ops, sdy.all_reduce, etc.
 class GenericOpPattern : public ConversionPattern {
@@ -1526,16 +1539,9 @@ class StablehloConvolutionOpPattern
     }
 
     if (!reductionAxes.empty()) {
-      SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
-          << "Expected sharded contracting convolution to have one user and "
-             "the user is an sdy.all_reduce.";
-
-      auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
       sortAndMergeAxes(reductionAxes, mesh);
-      SDY_CHECK(AxisRefListAttr::get(op->getContext(), reductionAxes) ==
-                allReduceOp.getReductionAxesAttr())
-          << "The axes of the sdy.all_reduce should match the sharded "
-             "reduction dimensions of the convolution.";
+      TensorShardingAttr resSharding = getSharding(op.getResult());
+      checkUnreducedResultSharding(resSharding, reductionAxes, "convolution");
     }
 
     auto getAxes = [&](TensorShardingAttr sharding, int64_t dim) {
@@ -1636,18 +1642,10 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
         checkPadding(lhs);
         checkPadding(op.getRhs());
 
-        // Verify that an AllReduce has been inserted by a previous pass.
-        // The local partial sums must be combined.
-        SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
-            << "Expected sharded contracting dot to have one user and the user "
-               "is "
-               "an sdy.all_reduce.";
-
-        auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
-        SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
-                  AxisRefListAttr::get(op->getContext(), contractingAxes))
-            << "The axes of the sdy.all_reduce should match the sharded "
-               "contracting dimension of the dot.";
+        // Verify that an AllReduce has been inserted by a previous pass unless
+        // the result is explicitly unreduced.
+        TensorShardingAttr resSharding = converter->getSharding(op.getResult());
+        checkUnreducedResultSharding(resSharding, contractingAxes, "dot");
       }
     }
 
@@ -1708,16 +1706,10 @@ class StablehloDotGeneralOpPattern
         checkPadding(lhs);
         checkPadding(op.getRhs());
 
-        // Verify that an AllReduce has been inserted by a previous pass.
-        SDY_CHECK(op->hasOneUse() && isa<sdy::AllReduceOp>(*op->user_begin()))
-            << "Expected sharded contracting dot_general to have one user and "
-               "the user is an sdy.all_reduce.";
-
-        auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
-        SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
-                  AxisRefListAttr::get(op->getContext(), reductionAxes))
-            << "The axes of the sdy.all_reduce should match the sharded "
-               "contracting dimensions of the dot_general.";
+        // Verify that an AllReduce has been inserted by a previous pass unless
+        // the result is explicitly unreduced.
+        TensorShardingAttr resSharding = converter->getSharding(op.getResult());
+        checkUnreducedResultSharding(resSharding, reductionAxes, "dot_general");
       }
     }
 
@@ -2114,18 +2106,13 @@ class StablehloGatherOpPattern
     result =
         stablehlo::SelectOp::create(rewriter, loc, bcastMask, result, zero);
 
-    // Verify that an AllReduce has been inserted, such as by
-    // insert-explicit-reshards pass.
-    auto allReduceOp = cast<sdy::AllReduceOp>(*op->user_begin());
-    SDY_CHECK(op->hasOneUse() && allReduceOp)
-        << "Expected the gather to have one user and the user is an "
-           "sdy.all_reduce.";
-    SDY_CHECK(allReduceOp.getReductionAxesAttr() ==
-              AxisRefListAttr::get(op->getContext(), reductionAxes))
-        << "The axes of the sdy.all_reduce should match the sharded collapsed "
-           "operand dimensions of the gather.";
+    // Verify that an AllReduce has been inserted by a previous pass unless
+    // the result is explicitly unreduced.
+    TensorShardingAttr resSharding = getSharding(op.getResult());
+    checkUnreducedResultSharding(resSharding, reductionAxes, "gather");
 
     rewriter.replaceOp(op, result);
+
     conversionState.removeToConvertOp(op);
     return success();
   }

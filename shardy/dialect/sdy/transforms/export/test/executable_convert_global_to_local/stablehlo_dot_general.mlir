@@ -22,7 +22,8 @@ func.func @parallel_dot(
     dot_dimension_numbers = #stablehlo.dot<
       lhs_contracting_dimensions = [1],
       rhs_contracting_dimensions = [0]
-    >
+    >,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2, [{}, {}], unreduced={"x"}>]>
   } : (tensor<2x4xi32>, tensor<4x2xi32>) -> tensor<2x2xi32>
 
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2, [{}, {}]> : tensor<2x2xi32>

@@ -26,7 +26,8 @@ func.func @parallel_gather(
     dimension_numbers = #stablehlo.gather<
       offset_dims = [1], collapsed_slice_dims = [0],
       start_index_map = [0], index_vector_dim = 1>,
-    slice_sizes = array<i64: 1, 2>
+    slice_sizes = array<i64: 1, 2>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2, [{}, {}], unreduced={"x"}>]>
   } : (tensor<4x2xf32>, tensor<2xi64>) -> tensor<2x2xf32>
 
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2, [{}, {}]> : tensor<2x2xf32>

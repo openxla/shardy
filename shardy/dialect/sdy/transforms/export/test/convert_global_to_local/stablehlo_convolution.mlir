@@ -151,7 +151,7 @@ func.func @shard__reduction_factors(
     {
       feature_group_count = 1 : i64,
       batch_group_count = 2 : i64,
-      sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}, {}, {}]>]>
+      sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}, {}, {}], unreduced={"x", "y"}>]>
     } : (tensor<2x224x224x4xf32>, tensor<2x2x4x64xf32>) -> tensor<1x112x112x64xf32>
 
   // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[CONV]])
@@ -161,4 +161,31 @@ func.func @shard__reduction_factors(
 
   // CHECK: return %[[RES]] : tensor<1x112x112x64xf32>
   return %1 : tensor<1x112x112x64xf32>
+}
+
+// CHECK-LABEL: func @shard_reduction_factors_unreduced_result
+// CHECK-SAME: (%arg0: tensor<2x224x224x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {}, {"y":(2)2}]>},
+// CHECK-SAME:  %arg1: tensor<1x1x2x64xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y":(1)2}, {"y":(2)2}, {}]>})
+// CHECK-SAME: -> (tensor<1x112x112x64xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {}, {}], unreduced={"x", "y"}>})
+func.func @shard_reduction_factors_unreduced_result(
+  %arg0: tensor<2x224x224x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {}, {"y":(2)2}]>},
+  %arg1: tensor<2x2x4x64xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y":(1)2}, {"y":(2)2}, {}]>})
+    -> (tensor<1x112x112x64xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {}, {}], unreduced={"x", "y"}>}) {
+
+  // CHECK: %[[CONV:.*]] = stablehlo.convolution(%arg0, %arg1)
+  // CHECK-SAME: dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]
+  // CHECK-SAME{LITERAL}: window = {stride = [2, 2], pad = [[0, 0], [0, 0]]}
+  // CHECK-SAME: {batch_group_count = 2 : i64, feature_group_count = 1 : i64}
+  // CHECK-SAME: : (tensor<2x224x224x2xf32>, tensor<1x1x2x64xf32>) -> tensor<1x112x112x64xf32>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [2, 2], pad = [[0, 0], [0, 0]]}
+    {
+      feature_group_count = 1 : i64,
+      batch_group_count = 2 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}, {}, {}], unreduced={"x", "y"}>]>
+    } : (tensor<2x224x224x4xf32>, tensor<2x2x4x64xf32>) -> tensor<1x112x112x64xf32>
+
+  // CHECK: return %[[CONV]] : tensor<1x112x112x64xf32>
+  return %0 : tensor<1x112x112x64xf32>
 }

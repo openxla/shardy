@@ -201,7 +201,7 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
   info.inShardings =
       getShardings(op->getOperands(), /*clearUnreducedAxes=*/false);
   info.outShardings =
-      getShardings(op->getResults(), /*clearUnreducedAxes=*/true);
+      getShardings(op->getResults(), /*clearUnreducedAxes=*/false);
 
   llvm::SmallDenseSet<StringAttr> seenAxes;
   auto collectAxes = [&](TensorShardingAttr sharding) {
