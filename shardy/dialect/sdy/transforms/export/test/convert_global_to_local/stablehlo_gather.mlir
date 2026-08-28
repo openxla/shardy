@@ -107,6 +107,49 @@ func.func @shard_reduction_dim_is_collapsed(
   return %1 : tensor<2x10xf32>
 }
 
+// CHECK-LABEL: func @shard_reduction_dim_is_collapsed_i32(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<4x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<2xi32>) -> tensor<2x10xf32> {
+func.func @shard_reduction_dim_is_collapsed_i32(
+  %arg0: tensor<8x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+  %arg1: tensor<2xi32>) -> tensor<2x10xf32> {
+  // CHECK-DAG: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<2xi32>
+  // CHECK-DAG: %[[C7:.*]] = stablehlo.constant dense<7> : tensor<2xi32>
+  // CHECK: %[[CLAMPED:.*]] = stablehlo.clamp %[[C0]], %[[ARG1]], %[[C7]] : tensor<2xi32>
+  // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK: %[[CVT_PID:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[CVT_PID]], sizes = [1]
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i64>) -> tensor<i32>
+  // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i32>
+  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] : (tensor<i32>) -> tensor<2xi32>
+  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] : (tensor<i32>) -> tensor<2xi32>
+  // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[BCAST_OFF]] : tensor<2xi32>
+  // CHECK: %[[GE:.*]] = stablehlo.compare GE, %[[CLAMPED]], %[[BCAST_OFF]]
+  // CHECK: %[[LE:.*]] = stablehlo.compare LE, %[[CLAMPED]], %[[BCAST_LIM]]
+  // CHECK: %[[MASK:.*]] = stablehlo.and %[[GE]], %[[LE]] : tensor<2xi1>
+  // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
+  // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 1>
+  // CHECK-SAME: slice_sizes = array<i64: 1, 10>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
+  // CHECK: %[[MASK_BCAST:.*]] = stablehlo.broadcast_in_dim %[[MASK]], dims = [0] : (tensor<2xi1>) -> tensor<2x10xi1>
+  // CHECK: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<2x10xf32>
+  // CHECK: %[[SEL:.*]] = stablehlo.select %[[MASK_BCAST]], %[[GATHER]], %[[ZERO]] : tensor<2x10xi1>, tensor<2x10xf32>
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [0],
+      start_index_map = [0],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 10>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>]>
+  } : (tensor<8x10xf32>, tensor<2xi32>) -> tensor<2x10xf32>
+  %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<2x10xf32>
+  return %1 : tensor<2x10xf32>
+}
+
 // ([m, n], [i]) -> ([i, n]) reduction={m}
 //
 // CHECK-LABEL: func @shard_reduction_dim_is_collapsed_not_in_start_index_map(
