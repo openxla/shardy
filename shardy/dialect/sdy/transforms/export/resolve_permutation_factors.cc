@@ -583,7 +583,7 @@ TensorShardingAttr removeAxisRefsFromSharding(
 // -----------------------------------------------------------------------------
 
 inline int64_t getPaddedDimSize(int64_t dimSize, int64_t shardCount) {
-  return llvm::divideCeil(dimSize, shardCount) * shardCount;
+  return llvm::alignTo(dimSize, shardCount);
 }
 
 // Creates a zero scalar constant of element type `elemType`.
