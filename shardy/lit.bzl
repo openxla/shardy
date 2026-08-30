@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Bazel rules for lit tests."""
+"""Bazel rules for lit test."""
 
 load("@llvm-project//llvm:lit_test.bzl", "lit_test")
 
