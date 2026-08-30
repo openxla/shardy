@@ -2,7 +2,7 @@
 
 // CHECK-LABEL: func @pointwise_op
 func.func @pointwise_op(%arg0: tensor<2x1x4xf32>) -> tensor<2x1x4xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=2, j=1, k=4}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [i, j, k])->([i, j, k]) {i=3, j=1, k=4}>
   %0 = stablehlo.add %arg0, %arg0: tensor<2x1x4xf32>
   return %0 : tensor<2x1x4xf32>
 }
