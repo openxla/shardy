@@ -42,6 +42,7 @@ cc_library(
         "rule_based_merge.cc",
         "scheduler_preprocess.cc",
         "split_bwd_fragments.cc",
+        "uniquify_and_merge_returns.cc",
         "uniquify_function_inputs_outputs.cc",
         "unroll_for_loops.cc",
     ],
