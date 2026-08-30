@@ -461,6 +461,27 @@ def UniquifyFunctionInputsOutputsPass :
   let dependentDialects = ["mlir::mpmd::MpmdDialect"];
 }
 
+def UniquifyAndMergeReturnsPass :
+    PassBase<"mpmd-uniquify-and-merge-returns", "DistributedFunctionPass"> {
+  let summary = "Uniquifies return values by merging copies into existing "
+                "fragments.";
+  let description = [{
+    Like `mpmd-uniquify-function-inputs-outputs`, ensures each return operand is
+    unique. But instead of creating new inferred fragments, this pass directly
+    adds extra return values to existing fragments, producing the same result as
+    running uniquify followed by merge-inferred-fragments (producer/consumer +
+    sideways).
+
+    For each value that is returned multiple times (or a block argument returned
+    directly), this pass finds the producing fragment (or the nearest same-mesh
+    fragment for block arguments) and adds extra copies of the value as
+    additional results of that fragment. If no existing fragment can be found on
+    the same mesh, a new fragment is created as a fallback.
+  }];
+
+  let dependentDialects = ["mlir::mpmd::MpmdDialect"];
+}
+
 def SchedulingUnitVerifierPass :
     PassBase<"mpmd-scheduling-units-verifier", "DistributedFunctionPass"> {
   let summary = "Verifies if the program contains the required scheduling units.";
