@@ -81,12 +81,12 @@ std::optional<int64_t> getSplitDimension(CollectivePermuteOp cpOp,
 std::optional<AllToAllChain> extractAllToAllChain(CollectivePermuteOp cpOp,
                                                   int64_t splitDim);
 
-// Returns true if the AllToAllOp chain communicates all permuted axes from
-// `splitDim`. Uses `symbolTable` to resolve mesh information.
+// Returns true if the AllToAllOp chain communicates at least one permuted axis
+// from `splitDim`. Uses `symbolTable` to resolve mesh information.
 //
 // Example:
 // - Permuted axes on splitDim are {"x", "y"}, chain communicates
-//   [{"x"}, {"y"}] -> returns true
+//   [{"x"}] -> returns true
 bool isChainOptimizable(const AllToAllChain& chain, int64_t splitDim,
                         const SymbolTable& symbolTable);
 
