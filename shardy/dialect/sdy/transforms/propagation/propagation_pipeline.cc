@@ -55,6 +55,8 @@ void populateExportOptions(ExportOptions& options,
       propOptions.enablePerInstructionPartitioning;
   options.perInstructionPartitioningFilter =
       propOptions.perInstructionPartitioningFilter;
+  options.markPartialResultWithUnreducedAxes =
+      propOptions.markPartialResultWithUnreducedAxes;
 }
 
 }  // namespace

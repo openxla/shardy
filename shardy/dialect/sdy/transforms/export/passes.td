@@ -137,6 +137,10 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
       Option<"enableFullVersion", "enable-full-version",
             "bool", /*default=*/"false",
             "Enable full version.">,
+      Option<"markPartialResultWithUnreducedAxes",
+             "mark-partial-result-with-unreduced-axes",
+             "bool", /*default=*/"false",
+             "Whether to mark partial reduction results with unreduced axes.">,
     ];
 }
 
