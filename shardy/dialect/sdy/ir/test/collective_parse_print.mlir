@@ -492,3 +492,17 @@ func.func @implicit_and_explicit_replicated_to_unreduced(%arg0 : tensor<16x8xf32
   %0 = sdy.replicated_to_unreduced {"x":(4)4, "y"} %arg0 out_sharding=<@mesh7, [{"x":(1)2}, {}], unreduced={"x":(2)8, "y"}> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @sharded_to_unreduced_max
+func.func @sharded_to_unreduced_max(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{"y"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.sharded_to_unreduced [{"y"}, {}] %arg0 out_sharding=<@mesh1, [{}, {}], unreduced=max{"y"}>
+  %0 = sdy.sharded_to_unreduced [{"y"}, {}] %arg0 out_sharding=<@mesh1, [{}, {}], unreduced=max{"y"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @replicated_to_unreduced_min
+func.func @replicated_to_unreduced_min(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh1, [{}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.replicated_to_unreduced {"x", "y"} %arg0 out_sharding=<@mesh1, [{}, {}], unreduced=min{"x", "y"}>
+  %0 = sdy.replicated_to_unreduced {"x", "y"} %arg0 out_sharding=<@mesh1, [{}, {}], unreduced=min{"x", "y"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

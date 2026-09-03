@@ -105,6 +105,37 @@ void buildReduceComputation(OpWithComputation opWithComputation,
   llvm_unreachable("unknown ReductionOp");
 }
 
+Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
+                                   OpBuilder& builder) {
+  switch (reductionOp) {
+    case ReductionOp::SUM:
+      return builder.getZeroAttr(elementType);
+    case ReductionOp::MIN:
+      if (auto floatType = dyn_cast<FloatType>(elementType)) {
+        return builder.getFloatAttr(
+            floatType,
+            APFloat::getInf(floatType.getFloatSemantics(), /*Negative=*/false));
+      }
+      if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        return builder.getIntegerAttr(
+            intType, APInt::getSignedMaxValue(intType.getWidth()));
+      }
+      return nullptr;
+    case ReductionOp::MAX:
+      if (auto floatType = dyn_cast<FloatType>(elementType)) {
+        return builder.getFloatAttr(
+            floatType,
+            APFloat::getInf(floatType.getFloatSemantics(), /*Negative=*/true));
+      }
+      if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        return builder.getIntegerAttr(
+            intType, APInt::getSignedMinValue(intType.getWidth()));
+      }
+      return nullptr;
+  }
+  llvm_unreachable("unknown ReductionOp");
+}
+
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;
   int64_t nextChannelId = 0;
@@ -2102,19 +2133,16 @@ class StablehloGatherOpPattern
         RankedTensorType::get(resultType.getShape(), rewriter.getI1Type()),
         mask, bcastDims);
 
-    // Zero out the result where the mask is false (index was out of bounds
-    // for the shard).
-    Value zero = stablehlo::ConstantOp::create(
-        rewriter, loc,
-        DenseElementsAttr::get(
-            resultType, rewriter.getZeroAttr(resultType.getElementType())));
-    result =
-        stablehlo::SelectOp::create(rewriter, loc, bcastMask, result, zero);
-
-    // Verify that an AllReduce has been inserted by a previous pass unless
-    // the result is explicitly unreduced.
     TensorShardingAttr resSharding = getSharding(op.getResult());
     checkUnreducedResultSharding(resSharding, reductionAxes, "gather");
+
+    // Fill the out-of-bounds positions with the reduction identity.
+    Attribute identityAttr = getReductionIdentityAttr(
+        resultType.getElementType(), resSharding.getReductionOp(), rewriter);
+    Value identityVal = stablehlo::ConstantOp::create(
+        rewriter, loc, DenseElementsAttr::get(resultType, identityAttr));
+    result = stablehlo::SelectOp::create(rewriter, loc, bcastMask, result,
+                                         identityVal);
 
     rewriter.replaceOp(op, result);
 

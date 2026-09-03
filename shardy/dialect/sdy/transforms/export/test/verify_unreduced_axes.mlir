@@ -290,3 +290,13 @@ func.func @different_meshes(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding
   %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_b, [{"z"}, {}], unreduced={"w"}>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @default_op_multiple_results_conflicting_unreduced_reduction_ops(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // expected-error@+1 {{'stablehlo.custom_call' op results introduce unreduced axes with conflicting reduction ops}}
+  %0, %1 = "stablehlo.custom_call"(%arg0) {call_target_name = "foo", sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}], unreduced={"y"}>, <@mesh, [{"x"}, {}], unreduced=max{"y"}>]>} : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+  return %0, %1 : tensor<8x8xf32>, tensor<8x8xf32>
+}

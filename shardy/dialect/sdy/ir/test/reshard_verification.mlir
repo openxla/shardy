@@ -44,15 +44,7 @@ func.func @reshard_mismatch_reduction_op(%arg0: tensor<8xf32> {sdy.sharding = #s
   return %0 : tensor<8xf32>
 }
 
-// -----
 
-sdy.mesh @mesh = <["x"=2, "y"=2]>
-
-func.func @reshard_introduces_axes_non_sum(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> tensor<8xf32> {
-  // expected-error@+1 {{'sdy.reshard' op cannot introduce 'max' unreduced axes. Expected 'sum'.}}
-  %0 = sdy.reshard %arg0 <@mesh, [{}], unreduced=max{"x"}> : tensor<8xf32>
-  return %0 : tensor<8xf32>
-}
 
 // -----
 

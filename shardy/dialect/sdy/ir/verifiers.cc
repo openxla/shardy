@@ -804,7 +804,7 @@ LogicalResult ShardingConstraintOp::verifySymbolUses(
     return success();
   }
   return verifyUnreducedAxesTransition(*this, {sourceSharding}, {getSharding()},
-                                       ReductionOp::SUM,
+                                       getSharding().getReductionOp(),
                                        sourceSharding.getReductionOp());
 }
 
@@ -821,7 +821,7 @@ LogicalResult ReshardOp::verifySymbolUses(
     return success();
   }
   return verifyUnreducedAxesTransition(*this, {sourceSharding}, {getSharding()},
-                                       ReductionOp::SUM,
+                                       getSharding().getReductionOp(),
                                        sourceSharding.getReductionOp());
 }
 
@@ -1437,8 +1437,11 @@ LogicalResult AllGatherOp::verifySymbolUses(
 
 LogicalResult ShardedToUnreducedOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
-  if (getOutSharding().getReductionOp() != ReductionOp::SUM) {
-    return emitOpError("out_sharding reduction_op must be SUM");
+  TensorShardingAttr operandSharding = getSharding(getOperand());
+  TensorShardingAttr outSharding = getOutSharding();
+  if (!operandSharding.getUnreducedAxes().empty() &&
+      operandSharding.getReductionOp() != outSharding.getReductionOp()) {
+    return emitOpError("cannot change reduction_op of existing unreduced axes");
   }
   LogicalResult result = verifyCollectiveWithAxesPerDim(
       *this, symbolTableCollection, getAxes(),
@@ -1455,19 +1458,19 @@ LogicalResult ShardedToUnreducedOp::verifySymbolUses(
 
   // out_unreduced_axes should be in_unreduced_axes + sharded_to_unreduced_axes.
   SmallVector<AxisRefAttr> expectedUnreducedAxes(
-      getSharding(getOperand()).getUnreducedAxes().begin(),
-      getSharding(getOperand()).getUnreducedAxes().end());
+      operandSharding.getUnreducedAxes().begin(),
+      operandSharding.getUnreducedAxes().end());
   for (AxisRefListAttr shardedToUnreducedAxes : getAxes()) {
     expectedUnreducedAxes.append(shardedToUnreducedAxes.getValue().begin(),
                                  shardedToUnreducedAxes.getValue().end());
   }
-  MeshAttr mesh = getOutSharding().getMesh(symbolTableCollection.getSymbolTable(
+  MeshAttr mesh = outSharding.getMesh(symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>()));
   sortAndMergeAxes(expectedUnreducedAxes, mesh);
 
   SmallVector<AxisRefAttr> outUnreducedAxes(
-      getOutSharding().getUnreducedAxes().begin(),
-      getOutSharding().getUnreducedAxes().end());
+      outSharding.getUnreducedAxes().begin(),
+      outSharding.getUnreducedAxes().end());
 
   if (expectedUnreducedAxes != outUnreducedAxes) {
     return emitOpError(
@@ -1481,8 +1484,9 @@ LogicalResult ReplicatedToUnreducedOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   TensorShardingAttr operandSharding = getSharding(getOperand());
   TensorShardingAttr resultSharding = getOutSharding();
-  if (resultSharding.getReductionOp() != ReductionOp::SUM) {
-    return emitOpError("out_sharding reduction_op must be SUM");
+  if (!operandSharding.getUnreducedAxes().empty() &&
+      operandSharding.getReductionOp() != resultSharding.getReductionOp()) {
+    return emitOpError("cannot change reduction_op of existing unreduced axes");
   }
   const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>());

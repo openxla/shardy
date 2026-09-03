@@ -214,13 +214,22 @@ LogicalResult verifyDefaultOp(Operation* op, func::FuncOp funcOp) {
   }
   SmallVector<TensorShardingAttr> resultShardings;
   resultShardings.reserve(op->getNumResults());
+  std::optional<ReductionOp> expectedIntroducedRedOp;
   for (Value result : op->getResults()) {
-    resultShardings.push_back(getShardingBypassingBarriers(result));
+    TensorShardingAttr resultSharding = getShardingBypassingBarriers(result);
+    resultShardings.push_back(resultSharding);
+    if (resultSharding && !resultSharding.getUnreducedAxes().empty()) {
+      if (expectedIntroducedRedOp &&
+          *expectedIntroducedRedOp != resultSharding.getReductionOp()) {
+        return op->emitOpError(
+            "results introduce unreduced axes with conflicting reduction ops");
+      }
+      expectedIntroducedRedOp = resultSharding.getReductionOp();
+    }
   }
-  // We currently allow default ops to introduce SUM unreduced axes.
   return verifyUnreducedAxesTransition(
       op, operandShardings, resultShardings,
-      /*expectedIntroducedRedOp=*/ReductionOp::SUM);
+      /*expectedIntroducedRedOp=*/expectedIntroducedRedOp);
 }
 
 std::optional<ReductionOp> getReductionType(Region& region) {
