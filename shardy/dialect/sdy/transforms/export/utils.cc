@@ -815,11 +815,14 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
 
 Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
                                    OpBuilder& builder) {
+  if (reductionOp == ReductionOp::SUM) {
+    return getZeroAttr(builder, elementType);
+  }
   if (auto floatType = dyn_cast<FloatType>(elementType)) {
     const llvm::fltSemantics& semantics = floatType.getFloatSemantics();
     switch (reductionOp) {
       case ReductionOp::SUM:
-        return builder.getZeroAttr(floatType);
+        llvm_unreachable("handled above");
       case ReductionOp::MIN:
         return builder.getFloatAttr(
             floatType, APFloat::getInf(semantics, /*Negative=*/false));
@@ -832,7 +835,7 @@ Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
     unsigned width = intType.getWidth();
     switch (reductionOp) {
       case ReductionOp::SUM:
-        return builder.getZeroAttr(intType);
+        llvm_unreachable("handled above");
       case ReductionOp::MIN:
         return builder.getIntegerAttr(
             intType, intType.isUnsigned() ? APInt::getMaxValue(width)
