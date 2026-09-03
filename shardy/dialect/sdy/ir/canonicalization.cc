@@ -25,6 +25,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
@@ -202,6 +203,42 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
                           /*closedIfMissing=*/true);
   SmallVector<DimensionShardingAttr> reduceScatterOutDimShardings;
   reduceScatterOutDimShardings.reserve(rank);
+
+  // TODO(b/553078138): This is a conservative workaround. The proper fix is to
+  // make a reduce-scatter with unreduced axes exportable for the non-divisible
+  // case (in `convertReduceScatter`); once that lands, this bail-out (which
+  // falls back to the less efficient `all_reduce` + `all_slice` form) can be
+  // removed so these cases fuse as well.
+  // Bail out of the fusion if it would create an `sdy.reduce_scatter` that
+  // scatters a dimension by a group size that does not evenly divide the local
+  // (already-sharded) dimension size. Exporting a reduce-scatter with unreduced
+  // axes (see `convertReduceScatter` in export_manual_reduction_collectives)
+  // requires the scattered dimension to be divisible by the group size, and
+  // would otherwise fail. Keeping the `all_reduce` + `all_slice` form preserves
+  // correct behavior for these non-divisible cases.
+  if (auto operandType =
+          dyn_cast<RankedTensorType>(allReduceOp.getTensor().getType())) {
+    // Local (per-device) shape of the all-reduce operand under its existing
+    // sharding. `allowNonDivisible=true` handles the case where the existing
+    // sharding does not evenly divide a dimension: the local size is rounded up
+    // (ceil), matching how Shardy pads such dimensions.
+    RankedTensorType localType = allReduceInSharding.getLocalTensorType(
+        operandType, mesh, /*allowNonDivisible=*/true);
+    for (int64_t dim = 0; dim < rank; ++dim) {
+      int64_t groupSize =
+          getTotalAxesSize(reduceScatterAxes[dim].getValue(), mesh);
+      if (groupSize <= 1) {
+        continue;
+      }
+      int64_t localDimSize = localType.getDimSize(dim);
+      if (ShapedType::isDynamic(localDimSize)) {
+        continue;
+      }
+      if (localDimSize % groupSize != 0) {
+        return std::nullopt;
+      }
+    }
+  }
 
   for (auto [operandDimSharding, reduceScatterAxesPerDim] : llvm::zip_equal(
            allReduceInSharding.getDimShardings(), reduceScatterAxes)) {

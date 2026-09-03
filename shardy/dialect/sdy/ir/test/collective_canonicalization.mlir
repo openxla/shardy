@@ -115,6 +115,33 @@ func.func @reduce_scatter_fusion4(%arg0 : tensor<64x8xf32> {sdy.sharding=#sdy.sh
   return %1 : tensor<64x8xf32>
 }
 
+// The local size of dim 0 is 2 / size("x"=2) = 1, which is not divisible by the
+// reduce-scatter group size (size("y"=2)). The fusion must be skipped and the
+// original `all_reduce` + `all_slice` preserved, otherwise the resulting
+// `reduce_scatter` cannot be exported (see `convertReduceScatter` in
+// export_manual_reduction_collectives).
+// CHECK-LABEL: func @reduce_scatter_fusion_non_divisible
+func.func @reduce_scatter_fusion_non_divisible(%arg0 : tensor<2x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<2x4xf32> {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<2x4xf32>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %[[ALL_REDUCE]] out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<2x4xf32>
+  // CHECK-NEXT: return %[[ALL_SLICE]] : tensor<2x4xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<2x4xf32>
+  %1 = sdy.all_slice [{"y"}, {}] %0 out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<2x4xf32>
+  return %1 : tensor<2x4xf32>
+}
+
+// The `all_reduce` operand is sharded indivisibly: dim 0 size 7 with
+// size("x"=2), so its local size is ceil(7 / 2) = 4, which is divisible by
+// the reduce-scatter group size (size("y"=2)). Therefore, fusion happens.
+// CHECK-LABEL: func @reduce_scatter_fusion_non_divisible_all_reduce
+func.func @reduce_scatter_fusion_non_divisible_all_reduce(%arg0 : tensor<7x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<7x4xf32> {
+  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"y"}, {}] %arg0 out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<7x4xf32>
+  // CHECK-NEXT: return %0 : tensor<7x4xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<7x4xf32>
+  %1 = sdy.all_slice [{"y"}, {}] %0 out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<7x4xf32>
+  return %1 : tensor<7x4xf32>
+}
+
 // CHECK-LABEL: func @reduce_scatter_fusion_missing_in_sharding
 func.func @reduce_scatter_fusion_missing_in_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
   // CHECK-NEXT: %0 = sdy.reduce_scatter [{"x"}, {"y"}] %arg0 out_sharding=<@mesh2, [{"x"}, {"y"}]> : tensor<16x8xf32>
