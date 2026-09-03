@@ -109,7 +109,7 @@ Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
                                    OpBuilder& builder) {
   switch (reductionOp) {
     case ReductionOp::SUM:
-      return builder.getZeroAttr(elementType);
+      return getZeroAttr(builder, elementType);
     case ReductionOp::MIN:
       if (auto floatType = dyn_cast<FloatType>(elementType)) {
         return builder.getFloatAttr(
@@ -2442,7 +2442,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
 
   return llvm::TypeSwitch<Operation*, Value>(reductionOp)
       .Case([&](stablehlo::AddOp) {
-        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+        return createZeroConstant(b, loc, scalarType);
       })
       .Case([&](stablehlo::AndOp) {
         return stablehlo::ConstantOp::create(
@@ -2451,7 +2451,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
                                    b.getIntegerAttr(elementType, 1)));
       })
       .Case([&](stablehlo::OrOp) {
-        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+        return createZeroConstant(b, loc, scalarType);
       })
       .Case([&](stablehlo::MulOp) {
         if (isa<FloatType>(elementType)) {
