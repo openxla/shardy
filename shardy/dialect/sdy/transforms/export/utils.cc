@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
@@ -561,6 +562,38 @@ Value sliceHighSideToType(OpBuilder& builder, Location loc, Value operand,
   return sliced;
 }
 
+Attribute getZeroAttr(OpBuilder& builder, Type type) {
+  if (Attribute attr = builder.getZeroAttr(type)) {
+    return attr;
+  }
+  Type elemType = type;
+  ShapedType shapedType = dyn_cast<ShapedType>(type);
+  if (shapedType) {
+    elemType = shapedType.getElementType();
+  }
+  if (auto complexType = dyn_cast<ComplexType>(elemType)) {
+    Type complexElemType = complexType.getElementType();
+    ShapedType zeroType =
+        shapedType ? shapedType : RankedTensorType::get({}, type);
+    if (auto floatType = dyn_cast<FloatType>(complexElemType)) {
+      APFloat zero(floatType.getFloatSemantics());
+      return DenseElementsAttr::get(zeroType,
+                                    mlir::Complex<APFloat>(zero, zero));
+    }
+    if (auto intType = dyn_cast<IntegerType>(complexElemType)) {
+      APInt zero(intType.getWidth(), 0, intType.isSigned());
+      return DenseElementsAttr::get(zeroType, mlir::Complex<APInt>(zero, zero));
+    }
+  }
+  return nullptr;
+}
+
+Value createZeroConstant(OpBuilder& builder, Location loc, Type type) {
+  Attribute zeroAttr = getZeroAttr(builder, type);
+  SDY_CHECK(zeroAttr) << "Failed to create zero attribute";
+  return stablehlo::ConstantOp::create(builder, loc, zeroAttr);
+}
+
 Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
                         Type targetType, TensorShardingAttr sharding,
                         Value paddingValue, bool allowSlicePeephole) {
@@ -591,8 +624,7 @@ Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
   Value padVal = paddingValue;
   if (!padVal) {
     auto zeroType = RankedTensorType::get({}, targetRanked.getElementType());
-    padVal = stablehlo::ConstantOp::create(builder, loc,
-                                           builder.getZeroAttr(zeroType));
+    padVal = createZeroConstant(builder, loc, zeroType);
   }
   Value padded = stablehlo::PadOp::create(
       builder, loc, targetRanked, operand, padVal,

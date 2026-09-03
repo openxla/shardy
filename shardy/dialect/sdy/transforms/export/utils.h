@@ -20,12 +20,9 @@ limitations under the License.
 #include <list>
 #include <optional>
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -237,6 +234,15 @@ bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
 Value sliceHighSideToType(OpBuilder& builder, Location loc, Value operand,
                           Type targetType,
                           TensorShardingAttr sharding = nullptr);
+
+// Returns a zero attribute for any ShapedType or scalar Type, including real
+// integer, real float, and all ComplexType elements (complex<f32>,
+// complex<bf16>, etc.).
+Attribute getZeroAttr(OpBuilder& builder, Type type);
+
+// Creates a stablehlo.constant zero matching `type` (scalar or tensor, real or
+// complex).
+Value createZeroConstant(OpBuilder& builder, Location loc, Type type);
 
 // Zero-pads the high side of `operand` to match `targetType`. If `operand`
 // already matches `targetType`, returns `operand`. Attaches `sharding` to the

@@ -410,8 +410,8 @@ DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
   Value dilatedOffset =
       stablehlo::AddOp::create(rewriter, loc, offsetInPartition, baseOffsetVal);
 
-  auto zeroConst = stablehlo::ConstantOp::create(
-      rewriter, loc, rewriter.getZeroAttr(RankedTensorType::get({}, i64Ty)));
+  auto zeroConst =
+      createZeroConstant(rewriter, loc, RankedTensorType::get({}, i64Ty));
 
   dilatedOffset =
       stablehlo::MaxOp::create(rewriter, loc, dilatedOffset, zeroConst);
@@ -589,8 +589,7 @@ inline int64_t getPaddedDimSize(int64_t dimSize, int64_t shardCount) {
 // Creates a zero scalar constant of element type `elemType`.
 inline Value createZeroScalarConstant(Location loc, IRRewriter& rewriter,
                                       Type elemType) {
-  return stablehlo::ConstantOp::create(
-      rewriter, loc, rewriter.getZeroAttr(RankedTensorType::get({}, elemType)));
+  return createZeroConstant(rewriter, loc, RankedTensorType::get({}, elemType));
 }
 
 // Pads the high side of `operand` with `paddingValue` (default zero if null)
@@ -1006,9 +1005,8 @@ Value exchangeDimWithDynamicOffset(
         idInPartitionGroup, state.rewriter.getDenseI64ArrayAttr({1}));
     offset = stablehlo::ReshapeOp::create(
         state.rewriter, loc, RankedTensorType::get({}, i64Ty), sliceOp);
-    zeroConst = stablehlo::ConstantOp::create(
-        state.rewriter, loc,
-        state.rewriter.getZeroAttr(RankedTensorType::get({}, i64Ty)));
+    zeroConst = createZeroConstant(state.rewriter, loc,
+                                   RankedTensorType::get({}, i64Ty));
   } else {
     DeviceOffsetInfo offsetInfo =
         getDeviceOffsetInfo(loc, idInPartitionGroup, diffSize,

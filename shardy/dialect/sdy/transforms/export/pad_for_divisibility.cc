@@ -120,7 +120,7 @@ Value createConstant(OpBuilder& b, Location loc, Type elementType,
   auto type = RankedTensorType::get({}, elementType);
   switch (kind) {
     case PaddingValueKind::kZero:
-      return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(type));
+      return createZeroConstant(b, loc, type);
     case PaddingValueKind::kOne:
       if (auto floatType = dyn_cast<FloatType>(elementType)) {
         return stablehlo::ConstantOp::create(

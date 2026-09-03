@@ -223,6 +223,20 @@ func.func @preserve_unreduced_axes(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.
   return %0 : tensor<8x16xf32>
 }
 
+// -----
+
+sdy.mesh @mesh2 = <["x"=2]>
+
+// CHECK-LABEL: func @complex_indivisible_padding
+func.func @complex_indivisible_padding(%arg0: tensor<5x16xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh2, [{"x"}, {}]>},
+                                       %arg1: tensor<16x16xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh2, [{}, {}]>})
+    -> (tensor<5x16xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh2, [{"x"}, {}]>}) {
+  // CHECK: %[[ZERO:.*]] = stablehlo.constant dense<(0.000000e+00,0.000000e+00)> : tensor<complex<f32>>
+  // CHECK: %[[PAD:.*]] = stablehlo.pad %arg0, %[[ZERO]], low = [0, 0], high = [1, 0], interior = [0, 0]
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{"x"}, {}]>]>} : (tensor<5x16xcomplex<f32>>, tensor<16x16xcomplex<f32>>) -> tensor<5x16xcomplex<f32>>
+  return %0 : tensor<5x16xcomplex<f32>>
+}
+
 
 
 
