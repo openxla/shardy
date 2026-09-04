@@ -50,6 +50,75 @@ namespace sdy {
 #include "shardy/dialect/sdy/transforms/export/passes.h.inc"
 
 namespace {
+// Known padding value kinds for generated padding values.
+enum class PaddingValueKind { kZero, kOne };
+
+constexpr PaddingValueKind kDefaultPaddingValueKind = PaddingValueKind::kZero;
+
+// Returns a constant for the given PaddingValueKind.
+Value createConstant(OpBuilder& b, Location loc, Type elementType,
+                     PaddingValueKind kind) {
+  auto type = RankedTensorType::get({}, elementType);
+  switch (kind) {
+    case PaddingValueKind::kZero:
+      return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(type));
+    case PaddingValueKind::kOne:
+      if (auto floatType = dyn_cast<FloatType>(elementType)) {
+        return stablehlo::ConstantOp::create(
+            b, loc,
+            DenseElementsAttr::get(type, b.getFloatAttr(elementType, 1.0)));
+      }
+      return stablehlo::ConstantOp::create(
+          b, loc,
+          DenseElementsAttr::get(type, b.getIntegerAttr(elementType, 1)));
+  }
+  llvm_unreachable("invalid PaddingValueKind");
+}
+
+// Helper methods for commonly created ops (stablehlo.slice and stablehlo.pad).
+
+// Slices a tensor to `targetType` along dimensions that need trimming.
+Value createSliceOp(OpBuilder& b, Location loc, RankedTensorType targetType,
+                    Value input, TensorShardingAttr sharding = nullptr) {
+  SmallVector<int64_t> starts(targetType.getRank(), 0);
+  SmallVector<int64_t> strides(targetType.getRank(), 1);
+  SmallVector<int64_t> limits(targetType.getShape().begin(),
+                              targetType.getShape().end());
+  Value sliceRes = stablehlo::SliceOp::create(b, loc, targetType, input,
+                                              b.getDenseI64ArrayAttr(starts),
+                                              b.getDenseI64ArrayAttr(limits),
+                                              b.getDenseI64ArrayAttr(strides))
+                       .getResult();
+  if (sharding) {
+    setSharding(sliceRes, sharding);
+  }
+  return sliceRes;
+}
+
+// Pads a tensor to `targetType` with `paddingKind` along dimensions that need
+// expansion.
+Value createPadOp(OpBuilder& b, Location loc, RankedTensorType targetType,
+                  Value input, TensorShardingAttr sharding = nullptr,
+                  PaddingValueKind paddingKind = kDefaultPaddingValueKind) {
+  auto inputType = cast<RankedTensorType>(input.getType());
+  SmallVector<int64_t> edgePaddingHigh(targetType.getRank(), 0);
+  for (int d = 0; d < targetType.getRank(); ++d) {
+    edgePaddingHigh[d] = targetType.getDimSize(d) - inputType.getDimSize(d);
+  }
+  Value padding =
+      createConstant(b, loc, targetType.getElementType(), paddingKind);
+  SmallVector<int64_t> zeroPadding(targetType.getRank(), 0);
+  Value padRes =
+      stablehlo::PadOp::create(b, loc, targetType, input, padding,
+                               b.getDenseI64ArrayAttr(zeroPadding),
+                               b.getDenseI64ArrayAttr(edgePaddingHigh),
+                               b.getDenseI64ArrayAttr(zeroPadding))
+          .getResult();
+  if (sharding) {
+    setSharding(padRes, sharding);
+  }
+  return padRes;
+}
 
 class PaddedTypeConverter : public TypeConverter {
  public:
@@ -77,11 +146,6 @@ class PaddedTypeConverter : public TypeConverter {
  private:
   const SymbolTable& symbolTable;
 };
-
-// Known padding value kinds for generated padding values.
-enum class PaddingValueKind { kZero, kOne };
-
-constexpr PaddingValueKind kDefaultPaddingValueKind = PaddingValueKind::kZero;
 
 // Returns true if the operation has custom padding handling implemented in
 // this file and should be excluded from GenericOpPattern.
@@ -114,61 +178,47 @@ class PaddingCache {
   DenseMap<Value, PaddingValueKind> cache;
 };
 
-// Returns a constant for the given PaddingValueKind.
-Value createConstant(OpBuilder& b, Location loc, Type elementType,
-                     PaddingValueKind kind) {
-  auto type = RankedTensorType::get({}, elementType);
-  switch (kind) {
-    case PaddingValueKind::kZero:
-      return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(type));
-    case PaddingValueKind::kOne:
-      if (auto floatType = dyn_cast<FloatType>(elementType)) {
-        return stablehlo::ConstantOp::create(
-            b, loc,
-            DenseElementsAttr::get(type, b.getFloatAttr(elementType, 1.0)));
-      }
-      return stablehlo::ConstantOp::create(
-          b, loc,
-          DenseElementsAttr::get(type, b.getIntegerAttr(elementType, 1)));
-  }
-  llvm_unreachable("invalid PaddingValueKind");
-}
-
 // Creates a padded value for 'value' with 'paddedType' and 'paddingKind',
 // and adds the padded value to the PaddingCache if registeredKind is present.
 Value createPaddedValue(RankedTensorType paddedType, Value value,
                         PaddingValueKind paddingKind,
                         std::optional<PaddingValueKind> registeredKind,
-                        const SymbolTable& symbolTable,
-                        ConversionPatternRewriter& rewriter,
-                        PaddingCache& cache) {
-  Location loc = value.getLoc();
-  auto origType = cast<RankedTensorType>(value.getType());
-  SDY_CHECK(paddedType != origType);
-
-  Value padding =
-      createConstant(rewriter, loc, paddedType.getElementType(), paddingKind);
-
-  SmallVector<int64_t> edgePaddingHigh;
-  for (int i = 0; i < origType.getRank(); ++i) {
-    edgePaddingHigh.push_back(paddedType.getDimSize(i) -
-                              origType.getDimSize(i));
-  }
-
-  Value padOp = stablehlo::PadOp::create(
-      rewriter, loc, paddedType, value, padding,
-      rewriter.getDenseI64ArrayAttr(
-          SmallVector<int64_t>(origType.getRank(), 0)),
-      rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
-      rewriter.getDenseI64ArrayAttr(
-          SmallVector<int64_t>(origType.getRank(), 0)));
-  if (auto sharding = getSharding(value)) {
-    setSharding(padOp, sharding);
-  }
+                        OpBuilder& rewriter, PaddingCache& cache) {
+  Value padOp = createPadOp(rewriter, value.getLoc(), paddedType, value,
+                            getSharding(value), paddingKind);
   if (registeredKind) {
     cache.setPadding(padOp, *registeredKind);
   }
   return padOp;
+}
+
+// Computes result types for `op` by taking the element-wise maximum between
+// mathematically inferred shapes and divisible padded shapes.
+SmallVector<Type> computeReconciledResultTypes(Operation* op,
+                                               ArrayRef<Type> inferredTypes,
+                                               const SymbolTable& symbolTable) {
+  SmallVector<Type> newResultTypes;
+  newResultTypes.reserve(op->getNumResults());
+  for (auto [i, result] : llvm::enumerate(op->getResults())) {
+    Type paddedType = getDivisiblePaddedType(result.getType(),
+                                             getSharding(result), symbolTable);
+    if (!inferredTypes.empty() && i < inferredTypes.size()) {
+      if (auto inferredShaped = dyn_cast<RankedTensorType>(inferredTypes[i])) {
+        auto paddedShaped = cast<RankedTensorType>(paddedType);
+        SmallVector<int64_t> reconciledShape;
+        reconciledShape.reserve(inferredShaped.getRank());
+        for (int d = 0; d < inferredShaped.getRank(); ++d) {
+          reconciledShape.push_back(std::max(inferredShaped.getDimSize(d),
+                                             paddedShaped.getDimSize(d)));
+        }
+        newResultTypes.push_back(RankedTensorType::get(
+            reconciledShape, inferredShaped.getElementType()));
+        continue;
+      }
+    }
+    newResultTypes.push_back(paddedType);
+  }
+  return newResultTypes;
 }
 
 // Returns 'inputVal' if the value is not padded or the value already has
@@ -295,28 +345,8 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
     }
   }
 
-  SmallVector<Type> newResultTypes;
-  for (int i = 0; i < op->getNumResults(); ++i) {
-    Value result = op->getResult(i);
-    Type paddedType = getDivisiblePaddedType(
-        result.getType(), getSharding(result), typeConverter->getSymbolTable());
-    if (inferredTypes.empty()) {
-      newResultTypes.push_back(paddedType);
-    } else {
-      if (auto inferredShaped = dyn_cast<RankedTensorType>(inferredTypes[i])) {
-        auto paddedShaped = cast<RankedTensorType>(paddedType);
-        SmallVector<int64_t> reconciledShape;
-        for (int d = 0; d < inferredShaped.getRank(); ++d) {
-          reconciledShape.push_back(std::max(inferredShaped.getDimSize(d),
-                                             paddedShaped.getDimSize(d)));
-        }
-        newResultTypes.push_back(RankedTensorType::get(
-            reconciledShape, inferredShaped.getElementType()));
-      } else {
-        newResultTypes.push_back(paddedType);
-      }
-    }
-  }
+  SmallVector<Type> newResultTypes = computeReconciledResultTypes(
+      op, inferredTypes, typeConverter->getSymbolTable());
   SDY_CHECK(newResultTypes.size() == op->getNumResults());
   OperationState state(op->getLoc(), op->getName());
   state.addOperands(shardableOperands);
@@ -371,16 +401,10 @@ Value trimOutputForDims(Value res, Type origType, ArrayRef<int64_t> trimDims,
     return res;
   }
 
-  SmallVector<int64_t> starts(origRanked.getRank(), 0);
-  SmallVector<int64_t> strides(origRanked.getRank(), 1);
-  auto sliceOp = stablehlo::SliceOp::create(
-      rewriter, res.getLoc(),
-      RankedTensorType::get(limitIndices, origRanked.getElementType()), res,
-      rewriter.getDenseI64ArrayAttr(starts),
-      rewriter.getDenseI64ArrayAttr(limitIndices),
-      rewriter.getDenseI64ArrayAttr(strides));
-  setSharding(sliceOp.getResult(), outSharding);
-  Value sliceRes = sliceOp.getResult();
+  auto targetType =
+      RankedTensorType::get(limitIndices, origRanked.getElementType());
+  Value sliceRes =
+      createSliceOp(rewriter, res.getLoc(), targetType, res, outSharding);
   if (paddingKind) {
     cache.setPadding(sliceRes, *paddingKind);
   }
@@ -392,7 +416,6 @@ Value trimOutputForDims(Value res, Type origType, ArrayRef<int64_t> trimDims,
 // cache.
 Operation* padCollectiveOp(Operation* op, Value input, Value inputOrig,
                            RankedTensorType paddedInputType,
-                           const SymbolTable& symbolTable,
                            ConversionPatternRewriter& rewriter,
                            PaddingCache& cache) {
   auto rankedInput = cast<RankedTensorType>(input.getType());
@@ -411,7 +434,7 @@ Operation* padCollectiveOp(Operation* op, Value input, Value inputOrig,
       registeredKind = paddingKind;
     }
     padOp = createPaddedValue(paddedInputType, input, constantKind,
-                              registeredKind, symbolTable, rewriter, cache);
+                              registeredKind, rewriter, cache);
     paddingKind = registeredKind;
   }
 
@@ -520,29 +543,8 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
       return failure();
     }
 
-    SmallVector<Type> newResultTypes;
-    for (int i = 0; i < op->getNumResults(); ++i) {
-      Value result = op->getResult(i);
-      Type paddedType = getDivisiblePaddedType(
-          result.getType(), getSharding(result), symbolTable);
-      if (inferredTypes.empty()) {
-        newResultTypes.push_back(paddedType);
-      } else {
-        if (auto inferredShaped =
-                dyn_cast<RankedTensorType>(inferredTypes[i])) {
-          auto paddedShaped = cast<RankedTensorType>(paddedType);
-          SmallVector<int64_t> reconciledShape;
-          for (int d = 0; d < inferredShaped.getRank(); ++d) {
-            reconciledShape.push_back(std::max(inferredShaped.getDimSize(d),
-                                               paddedShaped.getDimSize(d)));
-          }
-          newResultTypes.push_back(RankedTensorType::get(
-              reconciledShape, inferredShaped.getElementType()));
-        } else {
-          newResultTypes.push_back(paddedType);
-        }
-      }
-    }
+    SmallVector<Type> newResultTypes =
+        computeReconciledResultTypes(op, inferredTypes, symbolTable);
 
     OperationState state(op->getLoc(), op->getName());
     state.addOperands(shardableOperands);
@@ -606,8 +608,8 @@ class AllSliceOpPattern : public OpConversionPattern<sdy::AllSliceOp> {
     RankedTensorType paddedInputType = cast<RankedTensorType>(
         getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
 
-    Operation* newOp = padCollectiveOp(op, input, inputOrig, paddedInputType,
-                                       symbolTable, rewriter, cache);
+    Operation* newOp =
+        padCollectiveOp(op, input, inputOrig, paddedInputType, rewriter, cache);
 
     rewriter.replaceOp(op, newOp->getResults());
     return success();
@@ -642,8 +644,8 @@ class ReduceScatterOpPattern
     RankedTensorType paddedInputType = cast<RankedTensorType>(
         getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
 
-    Operation* newOp = padCollectiveOp(op, input, inputOrig, paddedInputType,
-                                       symbolTable, rewriter, cache);
+    Operation* newOp =
+        padCollectiveOp(op, input, inputOrig, paddedInputType, rewriter, cache);
 
     rewriter.replaceOp(op, newOp->getResults());
     return success();
@@ -688,8 +690,8 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
         getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
 
     std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
-    Operation* newOp = padCollectiveOp(op, input, inputOrig, paddedInputType,
-                                       symbolTable, rewriter, cache);
+    Operation* newOp =
+        padCollectiveOp(op, input, inputOrig, paddedInputType, rewriter, cache);
 
     Value res = newOp->getResult(0);
 
