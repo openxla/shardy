@@ -65,3 +65,40 @@ func.func @reduce_multiple_results(%arg0: tensor<2x64x13xf32> {sdy.sharding = #s
     }
   return %2#0, %2#1 : tensor<64xf32>, tensor<64xi32>
 }
+
+// CHECK-LABEL: func @reduce_min_sharded
+func.func @reduce_min_sharded(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<2x13xf32> {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.minimum across dimensions = [1]
+  // CHECK-NOT:  sdy.sharding
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce min {"x"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.minimum across dimensions = [1] : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<2x13xf32>
+  return %1 : tensor<2x13xf32>
+}
+
+// CHECK-LABEL: func @reduce_max_sharded
+func.func @reduce_max_sharded(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<2x13xf32> {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [1]
+  // CHECK-NOT:  sdy.sharding
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce max {"x"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.maximum across dimensions = [1] : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<2x13xf32>
+  return %1 : tensor<2x13xf32>
+}
+
+// CHECK-LABEL: func @reduce_custom_combiner_without_unreduced
+func.func @reduce_custom_combiner_without_unreduced(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<2x13xf32> {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.multiply across dimensions = [1]
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}]>
+  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+  %1 = "stablehlo.reduce"(%arg0, %0) <{dimensions = array<i64: 1>}> ({
+  ^bb0(%arg1: tensor<f32>, %arg2: tensor<f32>):
+    %2 = stablehlo.multiply %arg1, %arg2 : tensor<f32>
+    stablehlo.return %2 : tensor<f32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<2x13xf32>
+  return %1 : tensor<2x13xf32>
+}

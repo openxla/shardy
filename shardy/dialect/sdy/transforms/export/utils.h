@@ -251,6 +251,17 @@ Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
                         Type targetType, TensorShardingAttr sharding = nullptr,
                         Value paddingValue = nullptr,
                         bool allowSlicePeephole = false);
+
+// Returns the reduction type for a region (e.g., reduce body or scatter update
+// computation), or std::nullopt if the region cannot be matched to a supported
+// reduction type (SUM, MAX, MIN).
+std::optional<ReductionOp> getReductionType(Region& region);
+
+// Returns the reduction type for an operation, or std::nullopt if not
+// supported. Defaults to SUM for ops without a region (e.g., Dot, Convolution,
+// Gather).
+std::optional<ReductionOp> getReductionType(Operation* op);
+
 }  // namespace sdy
 }  // namespace mlir
 

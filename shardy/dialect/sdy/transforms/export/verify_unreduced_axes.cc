@@ -28,6 +28,7 @@ limitations under the License.
 #include "mlir/Support/WalkResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -230,40 +231,6 @@ LogicalResult verifyDefaultOp(Operation* op, func::FuncOp funcOp) {
   return verifyUnreducedAxesTransition(
       op, operandShardings, resultShardings,
       /*expectedIntroducedRedOp=*/expectedIntroducedRedOp);
-}
-
-std::optional<ReductionOp> getReductionType(Region& region) {
-  if (region.empty()) {
-    return std::nullopt;
-  }
-  Block& body = region.front();
-  auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
-  if (!returnOp || returnOp.getOperands().empty()) {
-    return std::nullopt;
-  }
-  std::optional<ReductionOp> result;
-  for (Value operand : returnOp.getOperands()) {
-    Operation* defOp = operand.getDefiningOp();
-    if (!defOp) {
-      return std::nullopt;
-    }
-    std::optional<ReductionOp> curOpType;
-    if (isa<stablehlo::AddOp>(defOp)) {
-      curOpType = ReductionOp::SUM;
-    } else if (isa<stablehlo::MaxOp>(defOp)) {
-      curOpType = ReductionOp::MAX;
-    } else if (isa<stablehlo::MinOp>(defOp)) {
-      curOpType = ReductionOp::MIN;
-    } else {
-      return std::nullopt;
-    }
-    if (!result) {
-      result = curOpType;
-    } else if (result != curOpType) {
-      return std::nullopt;
-    }
-  }
-  return result;
 }
 
 LogicalResult verifyReduce(stablehlo::ReduceOp reduceOp) {

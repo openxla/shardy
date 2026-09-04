@@ -20,6 +20,7 @@ limitations under the License.
 #include <functional>
 #include <iterator>
 #include <numeric>
+#include <optional>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,6 +30,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
@@ -638,5 +640,50 @@ Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
   }
   return padded;
 }
+
+std::optional<ReductionOp> getReductionType(Region& region) {
+  if (region.empty()) {
+    return std::nullopt;
+  }
+  Block& body = region.front();
+  auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
+  if (!returnOp || returnOp.getOperands().empty()) {
+    return std::nullopt;
+  }
+  std::optional<ReductionOp> result;
+  for (Value operand : returnOp.getOperands()) {
+    Operation* defOp = operand.getDefiningOp();
+    if (!defOp) {
+      return std::nullopt;
+    }
+    std::optional<ReductionOp> curOpType;
+    if (isa<stablehlo::AddOp>(defOp)) {
+      curOpType = ReductionOp::SUM;
+    } else if (isa<stablehlo::MaxOp>(defOp)) {
+      curOpType = ReductionOp::MAX;
+    } else if (isa<stablehlo::MinOp>(defOp)) {
+      curOpType = ReductionOp::MIN;
+    } else {
+      return std::nullopt;
+    }
+    if (!result) {
+      result = curOpType;
+    } else if (result != curOpType) {
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
+std::optional<ReductionOp> getReductionType(Operation* op) {
+  if (auto reduceOp = dyn_cast<stablehlo::ReduceOp>(op)) {
+    return getReductionType(reduceOp.getBody());
+  }
+  if (auto scatterOp = dyn_cast<stablehlo::ScatterOp>(op)) {
+    return getReductionType(scatterOp.getUpdateComputation());
+  }
+  return ReductionOp::SUM;
+}
+
 }  // namespace sdy
 }  // namespace mlir

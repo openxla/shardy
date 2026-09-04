@@ -16,9 +16,12 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
 #include <cstdint>
+#include <optional>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringRef.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -356,6 +359,53 @@ TEST_F(ExportUtilsTest, BuildReshapeGroupInfos) {
   EXPECT_EQ(groups[2].outStartDim, 3);
   EXPECT_EQ(groups[2].outLastDim, 4);
   EXPECT_TRUE(groups[2].isPassthrough());
+}
+
+TEST_F(ExportUtilsTest, GetReductionType) {
+  OwningOpRef<ModuleOp> module = mlir::parseSourceString<ModuleOp>(
+      R"mlir(
+        func.func @test_ops(%arg0: tensor<4xf32>, %arg1: tensor<f32>,
+                            %arg2: tensor<4xi64>, %arg3: tensor<4xf32>) {
+          %0 = stablehlo.reduce(%arg0 init: %arg1) applies stablehlo.add across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %1 = stablehlo.reduce(%arg0 init: %arg1) applies stablehlo.maximum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %2 = stablehlo.reduce(%arg0 init: %arg1) applies stablehlo.minimum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %3 = "stablehlo.reduce"(%arg0, %arg1) <{dimensions = array<i64: 0>}> ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %m = stablehlo.multiply %a, %b : tensor<f32>
+            stablehlo.return %m : tensor<f32>
+          }) : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %4 = "stablehlo.scatter"(%arg0, %arg2, %arg3) ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %max = stablehlo.maximum %a, %b : tensor<f32>
+            stablehlo.return %max : tensor<f32>
+          }) {
+            scatter_dimension_numbers = #stablehlo.scatter<
+              update_window_dims = [],
+              inserted_window_dims = [0],
+              input_batching_dims = [],
+              scatter_indices_batching_dims = [],
+              scatter_dims_to_operand_dims = [0],
+              index_vector_dim = 1>
+          } : (tensor<4xf32>, tensor<4xi64>, tensor<4xf32>) -> tensor<4xf32>
+          return
+        }
+      )mlir",
+      &context);
+  ASSERT_TRUE(module);
+  auto funcOp = cast<func::FuncOp>(module->lookupSymbol("test_ops"));
+  Block& block = funcOp.getBody().front();
+  auto it = block.begin();
+  Operation* reduceAdd = &*it++;
+  Operation* reduceMax = &*it++;
+  Operation* reduceMin = &*it++;
+  Operation* reduceMul = &*it++;
+  Operation* scatterMax = &*it++;
+
+  EXPECT_EQ(getReductionType(reduceAdd), ReductionOp::SUM);
+  EXPECT_EQ(getReductionType(reduceMax), ReductionOp::MAX);
+  EXPECT_EQ(getReductionType(reduceMin), ReductionOp::MIN);
+  EXPECT_EQ(getReductionType(reduceMul), std::nullopt);
+  EXPECT_EQ(getReductionType(scatterMax), ReductionOp::MAX);
 }
 
 }  // namespace
