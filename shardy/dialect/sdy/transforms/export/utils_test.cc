@@ -16,6 +16,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include "llvm/ADT/DenseSet.h"
@@ -406,6 +407,47 @@ TEST_F(ExportUtilsTest, GetReductionType) {
   EXPECT_EQ(getReductionType(reduceMin), ReductionOp::MIN);
   EXPECT_EQ(getReductionType(reduceMul), std::nullopt);
   EXPECT_EQ(getReductionType(scatterMax), ReductionOp::MAX);
+}
+
+TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {
+  OpBuilder builder(&context);
+  Type i32Type = builder.getI32Type();
+  Type u32Type = IntegerType::get(&context, 32, IntegerType::Unsigned);
+
+  // SUM
+  Attribute sumF32 =
+      getReductionIdentityAttr(f32Type, ReductionOp::SUM, builder);
+  EXPECT_EQ(cast<FloatAttr>(sumF32).getValueAsDouble(), 0.0);
+  Attribute sumI32 =
+      getReductionIdentityAttr(i32Type, ReductionOp::SUM, builder);
+  EXPECT_EQ(cast<IntegerAttr>(sumI32).getInt(), 0);
+
+  // MIN
+  Attribute minF32 =
+      getReductionIdentityAttr(f32Type, ReductionOp::MIN, builder);
+  EXPECT_TRUE(cast<FloatAttr>(minF32).getValue().isInfinity());
+  EXPECT_FALSE(cast<FloatAttr>(minF32).getValue().isNegative());
+  Attribute minI32 =
+      getReductionIdentityAttr(i32Type, ReductionOp::MIN, builder);
+  EXPECT_EQ(cast<IntegerAttr>(minI32).getInt(),
+            std::numeric_limits<int32_t>::max());
+  Attribute minU32 =
+      getReductionIdentityAttr(u32Type, ReductionOp::MIN, builder);
+  EXPECT_EQ(cast<IntegerAttr>(minU32).getValue().getZExtValue(),
+            std::numeric_limits<uint32_t>::max());
+
+  // MAX
+  Attribute maxF32 =
+      getReductionIdentityAttr(f32Type, ReductionOp::MAX, builder);
+  EXPECT_TRUE(cast<FloatAttr>(maxF32).getValue().isInfinity());
+  EXPECT_TRUE(cast<FloatAttr>(maxF32).getValue().isNegative());
+  Attribute maxI32 =
+      getReductionIdentityAttr(i32Type, ReductionOp::MAX, builder);
+  EXPECT_EQ(cast<IntegerAttr>(maxI32).getInt(),
+            std::numeric_limits<int32_t>::min());
+  Attribute maxU32 =
+      getReductionIdentityAttr(u32Type, ReductionOp::MAX, builder);
+  EXPECT_EQ(cast<IntegerAttr>(maxU32).getValue().getZExtValue(), 0);
 }
 
 }  // namespace

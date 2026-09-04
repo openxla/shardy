@@ -105,36 +105,6 @@ void buildReduceComputation(OpWithComputation opWithComputation,
   llvm_unreachable("unknown ReductionOp");
 }
 
-Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
-                                   OpBuilder& builder) {
-  switch (reductionOp) {
-    case ReductionOp::SUM:
-      return builder.getZeroAttr(elementType);
-    case ReductionOp::MIN:
-      if (auto floatType = dyn_cast<FloatType>(elementType)) {
-        return builder.getFloatAttr(
-            floatType,
-            APFloat::getInf(floatType.getFloatSemantics(), /*Negative=*/false));
-      }
-      if (auto intType = dyn_cast<IntegerType>(elementType)) {
-        return builder.getIntegerAttr(
-            intType, APInt::getSignedMaxValue(intType.getWidth()));
-      }
-      return nullptr;
-    case ReductionOp::MAX:
-      if (auto floatType = dyn_cast<FloatType>(elementType)) {
-        return builder.getFloatAttr(
-            floatType,
-            APFloat::getInf(floatType.getFloatSemantics(), /*Negative=*/true));
-      }
-      if (auto intType = dyn_cast<IntegerType>(elementType)) {
-        return builder.getIntegerAttr(
-            intType, APInt::getSignedMinValue(intType.getWidth()));
-      }
-      return nullptr;
-  }
-  llvm_unreachable("unknown ReductionOp");
-}
 
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;

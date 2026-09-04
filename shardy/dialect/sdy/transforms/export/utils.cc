@@ -22,8 +22,11 @@ limitations under the License.
 #include <numeric>
 #include <optional>
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -776,5 +779,39 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
 
   return elementsAttr;
 }
+
+Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
+                                   OpBuilder& builder) {
+  if (auto floatType = dyn_cast<FloatType>(elementType)) {
+    const llvm::fltSemantics& semantics = floatType.getFloatSemantics();
+    switch (reductionOp) {
+      case ReductionOp::SUM:
+        return builder.getZeroAttr(floatType);
+      case ReductionOp::MIN:
+        return builder.getFloatAttr(
+            floatType, APFloat::getInf(semantics, /*Negative=*/false));
+      case ReductionOp::MAX:
+        return builder.getFloatAttr(
+            floatType, APFloat::getInf(semantics, /*Negative=*/true));
+    }
+  }
+  if (auto intType = dyn_cast<IntegerType>(elementType)) {
+    unsigned width = intType.getWidth();
+    switch (reductionOp) {
+      case ReductionOp::SUM:
+        return builder.getZeroAttr(intType);
+      case ReductionOp::MIN:
+        return builder.getIntegerAttr(
+            intType, intType.isUnsigned() ? APInt::getMaxValue(width)
+                                          : APInt::getSignedMaxValue(width));
+      case ReductionOp::MAX:
+        return builder.getIntegerAttr(
+            intType, intType.isUnsigned() ? APInt::getMinValue(width)
+                                          : APInt::getSignedMinValue(width));
+    }
+  }
+  SDY_CHECK(false) << "Unsupported element type for reduction identity";
+}
+
 }  // namespace sdy
 }  // namespace mlir

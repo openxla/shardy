@@ -262,6 +262,13 @@ std::optional<ReductionOp> getReductionType(Region& region);
 // Gather).
 std::optional<ReductionOp> getReductionType(Operation* op);
 
+// Returns the identity attribute for the given element type and reduction op
+// (e.g., 0 for SUM, +inf / max_int for MIN, -inf / min_int for MAX).
+//
+// Requires `elementType` to be a float or integer type.
+Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
+                                   OpBuilder& builder);
+
 // Zero-pads an ElementsAttr from `origType` to `paddedType`. Handles splat
 // attributes, dense attributes, and all element types (float, int, complex).
 ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
