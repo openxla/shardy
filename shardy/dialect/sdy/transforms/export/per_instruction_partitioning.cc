@@ -385,57 +385,7 @@ SmallVector<Value> padIndivisibleOperands(
   return manualOperands;
 }
 
-// Pads an ElementsAttr to paddedType by inserting zero elements for padded
-// regions.
-ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
-                             RankedTensorType origType,
-                             RankedTensorType paddedType) {
-  if (origType == paddedType) {
-    return elementsAttr;
-  }
-  if (elementsAttr.isSplat()) {
-    return SplatElementsAttr::get(paddedType,
-                                  elementsAttr.getSplatValue<Attribute>());
-  }
-  auto denseAttr = dyn_cast<DenseElementsAttr>(elementsAttr);
-  if (!denseAttr) {
-    return elementsAttr;
-  }
-  Type elemType = paddedType.getElementType();
-  Attribute zeroAttr;
-  if (auto floatType = dyn_cast<FloatType>(elemType)) {
-    zeroAttr = FloatAttr::get(floatType, 0.0);
-  } else if (auto intType = dyn_cast<IntegerType>(elemType)) {
-    zeroAttr = IntegerAttr::get(intType, 0);
-  } else {
-    return elementsAttr;
-  }
 
-  SmallVector<Attribute> paddedValues(paddedType.getNumElements(), zeroAttr);
-  int64_t rank = origType.getRank();
-  ArrayRef<int64_t> origShape = origType.getShape();
-  ArrayRef<int64_t> paddedShape = paddedType.getShape();
-
-  SmallVector<int64_t> origStrides(rank, 1);
-  SmallVector<int64_t> paddedStrides(rank, 1);
-  for (int64_t i = rank - 2; i >= 0; --i) {
-    origStrides[i] = origStrides[i + 1] * origShape[i + 1];
-    paddedStrides[i] = paddedStrides[i + 1] * paddedShape[i + 1];
-  }
-
-  int64_t idx = 0;
-  for (Attribute val : denseAttr.getValues<Attribute>()) {
-    int64_t temp = idx++;
-    int64_t paddedLinearIdx = 0;
-    for (int64_t d = 0; d < rank; ++d) {
-      int64_t coord = temp / origStrides[d];
-      temp %= origStrides[d];
-      paddedLinearIdx += coord * paddedStrides[d];
-    }
-    paddedValues[paddedLinearIdx] = val;
-  }
-  return DenseElementsAttr::get(paddedType, paddedValues);
-}
 
 // Outlines the target instruction and its mesh dependencies into an ephemeral
 // module containing a single private func::FuncOp.

@@ -685,5 +685,96 @@ std::optional<ReductionOp> getReductionType(Operation* op) {
   return ReductionOp::SUM;
 }
 
+namespace {
+
+// Efficiently zero-pads a DenseElementsAttr of raw element type `ValueT` (e.g.
+// APFloat, APInt, Complex<APFloat>, Complex<APInt>) without allocating MLIR
+// Attribute objects for individual elements.
+template <typename ValueT>
+ElementsAttr padDenseElementsAttrImpl(DenseElementsAttr denseAttr,
+                                      RankedTensorType origType,
+                                      RankedTensorType paddedType, ValueT zero,
+                                      ArrayRef<int64_t> origStrides,
+                                      ArrayRef<int64_t> paddedStrides) {
+  SmallVector<ValueT> paddedValues(paddedType.getNumElements(), zero);
+  int64_t rank = origType.getRank();
+  int64_t idx = 0;
+  for (ValueT val : denseAttr.getValues<ValueT>()) {
+    int64_t temp = idx++;
+    int64_t paddedLinearIdx = 0;
+    for (int64_t d = 0; d < rank; ++d) {
+      int64_t coord = temp / origStrides[d];
+      temp %= origStrides[d];
+      paddedLinearIdx += coord * paddedStrides[d];
+    }
+    paddedValues[paddedLinearIdx] = val;
+  }
+  return DenseElementsAttr::get(paddedType, paddedValues);
+}
+
+}  // namespace
+
+ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
+                             RankedTensorType origType,
+                             RankedTensorType paddedType) {
+  if (origType == paddedType) {
+    return elementsAttr;
+  }
+  if (elementsAttr.isSplat()) {
+    return SplatElementsAttr::get(paddedType,
+                                  elementsAttr.getSplatValue<Attribute>());
+  }
+  auto denseAttr = dyn_cast<DenseElementsAttr>(elementsAttr);
+  if (!denseAttr) {
+    return elementsAttr;
+  }
+
+  OpBuilder builder(paddedType.getContext());
+  auto zeroDenseAttr =
+      dyn_cast_or_null<DenseElementsAttr>(getZeroAttr(builder, paddedType));
+  SDY_CHECK(zeroDenseAttr) << "Failed to create zero attribute";
+
+  int64_t rank = origType.getRank();
+  ArrayRef<int64_t> origShape = origType.getShape();
+  ArrayRef<int64_t> paddedShape = paddedType.getShape();
+
+  SmallVector<int64_t> origStrides(rank, 1);
+  SmallVector<int64_t> paddedStrides(rank, 1);
+  for (int64_t i = rank - 2; i >= 0; --i) {
+    origStrides[i] = origStrides[i + 1] * origShape[i + 1];
+    paddedStrides[i] = paddedStrides[i + 1] * paddedShape[i + 1];
+  }
+
+  Type elemType = paddedType.getElementType();
+  if (auto complexType = dyn_cast<ComplexType>(elemType)) {
+    Type complexElemType = complexType.getElementType();
+    if (isa<FloatType>(complexElemType)) {
+      return padDenseElementsAttrImpl<mlir::Complex<APFloat>>(
+          denseAttr, origType, paddedType,
+          zeroDenseAttr.getSplatValue<mlir::Complex<APFloat>>(), origStrides,
+          paddedStrides);
+    }
+    if (isa<IntegerType>(complexElemType)) {
+      return padDenseElementsAttrImpl<mlir::Complex<APInt>>(
+          denseAttr, origType, paddedType,
+          zeroDenseAttr.getSplatValue<mlir::Complex<APInt>>(), origStrides,
+          paddedStrides);
+    }
+    return elementsAttr;
+  }
+
+  if (isa<FloatType>(elemType)) {
+    return padDenseElementsAttrImpl<APFloat>(
+        denseAttr, origType, paddedType,
+        zeroDenseAttr.getSplatValue<APFloat>(), origStrides, paddedStrides);
+  }
+  if (isa<IntegerType>(elemType)) {
+    return padDenseElementsAttrImpl<APInt>(
+        denseAttr, origType, paddedType, zeroDenseAttr.getSplatValue<APInt>(),
+        origStrides, paddedStrides);
+  }
+
+  return elementsAttr;
+}
 }  // namespace sdy
 }  // namespace mlir

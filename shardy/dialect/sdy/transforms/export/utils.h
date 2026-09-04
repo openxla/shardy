@@ -262,6 +262,11 @@ std::optional<ReductionOp> getReductionType(Region& region);
 // Gather).
 std::optional<ReductionOp> getReductionType(Operation* op);
 
+// Zero-pads an ElementsAttr from `origType` to `paddedType`. Handles splat
+// attributes, dense attributes, and all element types (float, int, complex).
+ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
+                             RankedTensorType origType,
+                             RankedTensorType paddedType);
 }  // namespace sdy
 }  // namespace mlir
 
