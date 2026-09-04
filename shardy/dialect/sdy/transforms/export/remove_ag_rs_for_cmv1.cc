@@ -24,6 +24,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/explicit_reshards_util.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -66,8 +67,7 @@ struct RemoveAllGatherReduceScatterForCMV1Pass
       if (dotOp->hasOneUse()) {
         if (auto reduceScatterOp =
                 dyn_cast<sdy::ReduceScatterOp>(*dotOp->user_begin());
-            reduceScatterOp &&
-            getSharding(dotOp->getResult(0)).getUnreducedAxes().empty()) {
+            reduceScatterOp && getUnreducedAxes(dotOp->getResult(0)).empty()) {
           setShardings(dotOp, {getSharding(reduceScatterOp->getResult(0))});
           opsToReplace.push_back(reduceScatterOp);
         }

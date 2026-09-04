@@ -117,6 +117,14 @@ func.func private @foo(
   %3 = stablehlo.concatenate %2, %2, dim=0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x32xf32>, tensor<8x32xf32>) -> tensor<16x32xf32>
   return %3 : tensor<16x32xf32>
 }
-
-
-
+// CHECK-LABEL: func @dot_reduce_scatter_null_sharding
+func.func @dot_reduce_scatter_null_sharding(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>},
+    %arg1: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK: %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %0
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] : (tensor<8x16xf32>, tensor<16x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.reduce_scatter [{"x"}, {}] %0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
