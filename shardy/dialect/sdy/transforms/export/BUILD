@@ -102,6 +102,7 @@ cc_library(
     srcs = ["explicit_reshards_util.cc"],
     hdrs = ["explicit_reshards_util.h"],
     deps = [
+        ":utils",
         "//shardy/common:file_utils",
         "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:axis_list_ref",
@@ -148,6 +149,7 @@ cc_test(
         "//shardy/dialect/sdy/ir:testing_utils",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Support",

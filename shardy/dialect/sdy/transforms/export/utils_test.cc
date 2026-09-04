@@ -16,9 +16,13 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
 #include <cstdint>
+#include <limits>
+#include <optional>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringRef.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -356,6 +360,123 @@ TEST_F(ExportUtilsTest, BuildReshapeGroupInfos) {
   EXPECT_EQ(groups[2].outStartDim, 3);
   EXPECT_EQ(groups[2].outLastDim, 4);
   EXPECT_TRUE(groups[2].isPassthrough());
+}
+
+TEST_F(ExportUtilsTest, GetReductionType) {
+  OwningOpRef<ModuleOp> module = mlir::parseSourceString<ModuleOp>(
+      R"mlir(
+        func.func @test_ops(%arg0: tensor<4xf32>, %arg1: tensor<f32>,
+                            %arg2: tensor<4xi64>, %arg3: tensor<4xf32>) {
+          %0 = stablehlo.reduce(%arg0 init: %arg1) applies stablehlo.add across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %1 = stablehlo.reduce(%arg0 init: %arg1) applies stablehlo.maximum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %2 = stablehlo.reduce(%arg0 init: %arg1) applies stablehlo.minimum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %3 = "stablehlo.reduce"(%arg0, %arg1) <{dimensions = array<i64: 0>}> ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %m = stablehlo.multiply %a, %b : tensor<f32>
+            stablehlo.return %m : tensor<f32>
+          }) : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %4 = "stablehlo.scatter"(%arg0, %arg2, %arg3) ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %max = stablehlo.maximum %a, %b : tensor<f32>
+            stablehlo.return %max : tensor<f32>
+          }) {
+            scatter_dimension_numbers = #stablehlo.scatter<
+              update_window_dims = [],
+              inserted_window_dims = [0],
+              input_batching_dims = [],
+              scatter_indices_batching_dims = [],
+              scatter_dims_to_operand_dims = [0],
+              index_vector_dim = 1>
+          } : (tensor<4xf32>, tensor<4xi64>, tensor<4xf32>) -> tensor<4xf32>
+          return
+        }
+      )mlir",
+      &context);
+  ASSERT_TRUE(module);
+  auto funcOp = cast<func::FuncOp>(module->lookupSymbol("test_ops"));
+  Block& block = funcOp.getBody().front();
+  auto it = block.begin();
+  Operation* reduceAdd = &*it++;
+  Operation* reduceMax = &*it++;
+  Operation* reduceMin = &*it++;
+  Operation* reduceMul = &*it++;
+  Operation* scatterMax = &*it++;
+
+  EXPECT_EQ(getReductionType(reduceAdd), ReductionOp::SUM);
+  EXPECT_EQ(getReductionType(reduceMax), ReductionOp::MAX);
+  EXPECT_EQ(getReductionType(reduceMin), ReductionOp::MIN);
+  EXPECT_EQ(getReductionType(reduceMul), std::nullopt);
+  EXPECT_EQ(getReductionType(scatterMax), ReductionOp::MAX);
+}
+
+TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {
+  OpBuilder builder(&context);
+  Type i32Type = builder.getI32Type();
+  Type u32Type = IntegerType::get(&context, 32, IntegerType::Unsigned);
+
+  // SUM
+  Attribute sumF32 =
+      getReductionIdentityAttr(f32Type, ReductionOp::SUM, builder);
+  EXPECT_EQ(cast<FloatAttr>(sumF32).getValueAsDouble(), 0.0);
+  Attribute sumI32 =
+      getReductionIdentityAttr(i32Type, ReductionOp::SUM, builder);
+  EXPECT_EQ(cast<IntegerAttr>(sumI32).getInt(), 0);
+
+  // MIN
+  Attribute minF32 =
+      getReductionIdentityAttr(f32Type, ReductionOp::MIN, builder);
+  EXPECT_TRUE(cast<FloatAttr>(minF32).getValue().isInfinity());
+  EXPECT_FALSE(cast<FloatAttr>(minF32).getValue().isNegative());
+  Attribute minI32 =
+      getReductionIdentityAttr(i32Type, ReductionOp::MIN, builder);
+  EXPECT_EQ(cast<IntegerAttr>(minI32).getInt(),
+            std::numeric_limits<int32_t>::max());
+  Attribute minU32 =
+      getReductionIdentityAttr(u32Type, ReductionOp::MIN, builder);
+  EXPECT_EQ(cast<IntegerAttr>(minU32).getValue().getZExtValue(),
+            std::numeric_limits<uint32_t>::max());
+
+  // MAX
+  Attribute maxF32 =
+      getReductionIdentityAttr(f32Type, ReductionOp::MAX, builder);
+  EXPECT_TRUE(cast<FloatAttr>(maxF32).getValue().isInfinity());
+  EXPECT_TRUE(cast<FloatAttr>(maxF32).getValue().isNegative());
+  Attribute maxI32 =
+      getReductionIdentityAttr(i32Type, ReductionOp::MAX, builder);
+  EXPECT_EQ(cast<IntegerAttr>(maxI32).getInt(),
+            std::numeric_limits<int32_t>::min());
+  Attribute maxU32 =
+      getReductionIdentityAttr(u32Type, ReductionOp::MAX, builder);
+  EXPECT_EQ(cast<IntegerAttr>(maxU32).getValue().getZExtValue(), 0);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualSharding) {
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "a", 4),
+                               MeshAxisAttr::get(&context, "b", 6)});
+
+  auto origType = RankedTensorType::get({14, 15}, f32Type);
+  TensorShardingAttr inSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  TensorShardingAttr outSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "b")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  // Dim 0: inShardSize = 4 ("a"), outShardSize = 6 ("b"). LCM(4, 6) = 12.
+  // 14 padded to multiple of 12 -> 24.
+  // Dim 1: inShardSize = 1, outShardSize = 4 ("a"). LCM(1, 4) = 4.
+  // 15 padded to multiple of 4 -> 16.
+  RankedTensorType paddedType =
+      getDivisiblePaddedType(origType, inSharding, outSharding, mesh);
+  EXPECT_EQ(paddedType, RankedTensorType::get({24, 16}, f32Type));
 }
 
 }  // namespace

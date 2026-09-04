@@ -39,6 +39,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 
@@ -855,15 +856,17 @@ void insertAllReducesForReductionFactors(
 
   sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
 
+  std::optional<ReductionOp> reductionOp = getReductionType(op);
+
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
-    auto allReduceOp =
-        AllReduceOp::create(rewriter, result.getLoc(), result, allReduceAxes,
-                            resultSharding.getReductionOp(), resultSharding);
+    auto allReduceOp = AllReduceOp::create(
+        rewriter, result.getLoc(), result, allReduceAxes,
+        reductionOp.value_or(ReductionOp::SUM), resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }

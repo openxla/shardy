@@ -137,8 +137,22 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
 // axes in `sharding` if `allowedAxes` is null). If the type is already
 // divisible, not a RankedTensorType, or un-sharded, returns `type`.
 Type getDivisiblePaddedType(
+    Type type, TensorShardingAttr sharding, MeshAttr mesh,
+    const llvm::DenseSet<StringRef>* allowedAxes = nullptr);
+// Same as above, but takes a SymbolTable to retrieve the MeshAttr from.
+Type getDivisiblePaddedType(
     Type type, TensorShardingAttr sharding, const SymbolTable& symbolTable,
     const llvm::DenseSet<StringRef>* allowedAxes = nullptr);
+
+// Returns the padded RankedTensorType where each dimension `d` of `globalType`
+// is padded to be divisible by the least common multiple (LCM) of its shard
+// counts in `inSharding` and `outSharding` along dimension `d`.
+// If `globalType` is already divisible or neither sharding shards dimension
+// `d`, the dimension size is unchanged.
+RankedTensorType getDivisiblePaddedType(RankedTensorType globalType,
+                                        TensorShardingAttr inSharding,
+                                        TensorShardingAttr outSharding,
+                                        MeshAttr mesh);
 
 // Returns the FlatSymbolRefAttr for meshOrRef if it is already a symbol
 // reference, finds a matching existing MeshOp for an inlined MeshAttr, or
@@ -251,6 +265,23 @@ Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
                         Type targetType, TensorShardingAttr sharding = nullptr,
                         Value paddingValue = nullptr,
                         bool allowSlicePeephole = false);
+
+// Returns the reduction type for a region (e.g., reduce body or scatter update
+// computation), or std::nullopt if the region cannot be matched to a supported
+// reduction type (SUM, MAX, MIN).
+std::optional<ReductionOp> getReductionType(Region& region);
+
+// Returns the reduction type for an operation, or std::nullopt if not
+// supported. Defaults to SUM for ops without a region (e.g., Dot, Convolution,
+// Gather).
+std::optional<ReductionOp> getReductionType(Operation* op);
+
+// Returns the identity attribute for the given element type and reduction op
+// (e.g., 0 for SUM, +inf / max_int for MIN, -inf / min_int for MAX), or nullptr
+// if not supported.
+Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
+                                   OpBuilder& builder);
+
 }  // namespace sdy
 }  // namespace mlir
 

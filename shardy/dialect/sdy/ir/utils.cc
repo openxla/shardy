@@ -611,7 +611,7 @@ SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(
     TensorShardingAttr sharding) {
   assert(index >= 0 && index < types.size());
   SmallVector<TensorShardingAttr> shardings =
-      getFullyOpenShardings(context, types, sharding.getMeshName());
+      getFullyOpenShardings(context, types, sharding.getMeshOrRef());
   shardings[index] = sharding;
   return shardings;
 }
@@ -1546,7 +1546,7 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
   if (s1 == s2 && t1 == t2) {
     return true;
   }
-  if (!s1 || !s2 || s1.getMeshName() != s2.getMeshName()) {
+  if (!s1 || !s2 || s1.getMeshOrRef() != s2.getMeshOrRef()) {
     return false;
   }
   if (s1.getReplicatedAxes() != s2.getReplicatedAxes()) {

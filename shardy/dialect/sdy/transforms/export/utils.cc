@@ -20,15 +20,20 @@ limitations under the License.
 #include <functional>
 #include <iterator>
 #include <numeric>
+#include <optional>
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
@@ -296,14 +301,10 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
 }
 
 Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
-                            const SymbolTable& symbolTable,
+                            MeshAttr mesh,
                             const llvm::DenseSet<StringRef>* allowedAxes) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
-  if (!rankedType || !sharding || sharding.isFullyReplicated()) {
-    return type;
-  }
-  MeshAttr mesh = sharding.getMesh(symbolTable);
-  if (!mesh) {
+  if (!rankedType || !sharding || sharding.isFullyReplicated() || !mesh) {
     return type;
   }
   SmallVector<int64_t> newShape;
@@ -334,6 +335,57 @@ Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
     return type;
   }
   return RankedTensorType::get(newShape, rankedType.getElementType());
+}
+
+Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
+                            const SymbolTable& symbolTable,
+                            const llvm::DenseSet<StringRef>* allowedAxes) {
+  if (!sharding) {
+    return type;
+  }
+  return getDivisiblePaddedType(type, sharding, sharding.getMesh(symbolTable),
+                                allowedAxes);
+}
+
+RankedTensorType getDivisiblePaddedType(RankedTensorType globalType,
+                                        TensorShardingAttr inSharding,
+                                        TensorShardingAttr outSharding,
+                                        MeshAttr mesh) {
+  if (!mesh) {
+    return globalType;
+  }
+  SmallVector<int64_t> paddedShape;
+  paddedShape.reserve(globalType.getRank());
+  bool changed = false;
+  for (int64_t dim = 0; dim < globalType.getRank(); ++dim) {
+    int64_t dimSize = globalType.getDimSize(dim);
+    if (ShapedType::isDynamic(dimSize)) {
+      paddedShape.push_back(dimSize);
+      continue;
+    }
+    int64_t inShardSize =
+        (inSharding && dim < inSharding.getRank())
+            ? inSharding.getDimSharding(dim).getShardedSize(mesh)
+            : 1;
+    int64_t outShardSize =
+        (outSharding && dim < outSharding.getRank())
+            ? outSharding.getDimSharding(dim).getShardedSize(mesh)
+            : 1;
+    int64_t divisor = std::lcm(inShardSize, outShardSize);
+    if (divisor > 1) {
+      int64_t paddedDim = llvm::alignTo(dimSize, divisor);
+      paddedShape.push_back(paddedDim);
+      if (paddedDim != dimSize) {
+        changed = true;
+      }
+    } else {
+      paddedShape.push_back(dimSize);
+    }
+  }
+  if (!changed) {
+    return globalType;
+  }
+  return RankedTensorType::get(paddedShape, globalType.getElementType());
 }
 
 mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef) {
@@ -638,5 +690,89 @@ Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
   }
   return padded;
 }
+
+std::optional<ReductionOp> getReductionType(Region& region) {
+  if (region.empty()) {
+    return std::nullopt;
+  }
+  Block& body = region.front();
+  auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
+  if (!returnOp || returnOp.getOperands().empty()) {
+    return std::nullopt;
+  }
+  std::optional<ReductionOp> result;
+  for (Value operand : returnOp.getOperands()) {
+    Operation* defOp = operand.getDefiningOp();
+    if (!defOp) {
+      return std::nullopt;
+    }
+    std::optional<ReductionOp> curOpType;
+    if (isa<stablehlo::AddOp>(defOp)) {
+      curOpType = ReductionOp::SUM;
+    } else if (isa<stablehlo::MaxOp>(defOp)) {
+      curOpType = ReductionOp::MAX;
+    } else if (isa<stablehlo::MinOp>(defOp)) {
+      curOpType = ReductionOp::MIN;
+    } else {
+      return std::nullopt;
+    }
+    if (!result) {
+      result = curOpType;
+    } else if (result != curOpType) {
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
+std::optional<ReductionOp> getReductionType(Operation* op) {
+  if (auto reduceOp = dyn_cast<stablehlo::ReduceOp>(op)) {
+    return getReductionType(reduceOp.getBody());
+  }
+  if (auto scatterOp = dyn_cast<stablehlo::ScatterOp>(op)) {
+    return getReductionType(scatterOp.getUpdateComputation());
+  }
+  return ReductionOp::SUM;
+}
+
+Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
+                                   OpBuilder& builder) {
+  switch (reductionOp) {
+    case ReductionOp::SUM:
+      return builder.getZeroAttr(elementType);
+    case ReductionOp::MIN:
+      if (auto floatType = dyn_cast<FloatType>(elementType)) {
+        return builder.getFloatAttr(
+            floatType,
+            APFloat::getInf(floatType.getFloatSemantics(), /*Negative=*/false));
+      }
+      if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        if (intType.isUnsigned()) {
+          return builder.getIntegerAttr(intType,
+                                        APInt::getMaxValue(intType.getWidth()));
+        }
+        return builder.getIntegerAttr(
+            intType, APInt::getSignedMaxValue(intType.getWidth()));
+      }
+      return nullptr;
+    case ReductionOp::MAX:
+      if (auto floatType = dyn_cast<FloatType>(elementType)) {
+        return builder.getFloatAttr(
+            floatType,
+            APFloat::getInf(floatType.getFloatSemantics(), /*Negative=*/true));
+      }
+      if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        if (intType.isUnsigned()) {
+          return builder.getIntegerAttr(intType,
+                                        APInt::getMinValue(intType.getWidth()));
+        }
+        return builder.getIntegerAttr(
+            intType, APInt::getSignedMinValue(intType.getWidth()));
+      }
+      return nullptr;
+  }
+  llvm_unreachable("unknown ReductionOp");
+}
+
 }  // namespace sdy
 }  // namespace mlir
