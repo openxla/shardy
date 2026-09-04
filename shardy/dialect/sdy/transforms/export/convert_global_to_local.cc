@@ -1951,6 +1951,16 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
 
     Value indicesMin = buildBoundsTensor(minBounds);
     Value indicesMax = computeMask ? buildBoundsTensor(maxBounds) : nullptr;
+    if (operandSharding && operandSharding.getMeshOrRef()) {
+      TensorShardingAttr replicatedIndices =
+          TensorShardingAttr::getFullyReplicated(
+              indicesType.getContext(), indicesType.getRank(),
+              operandSharding.getMeshOrRef(), /*isClosed=*/true);
+      setSharding(indicesMin, replicatedIndices);
+      if (indicesMax) {
+        setSharding(indicesMax, replicatedIndices);
+      }
+    }
 
     adjustedIndices =
         stablehlo::SubtractOp::create(rewriter, loc, baseIndices, indicesMin);

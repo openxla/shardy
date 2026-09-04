@@ -78,8 +78,10 @@ func.func @shard_reduction_dim_is_collapsed(
   // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i64>
-  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] : (tensor<i64>) -> tensor<2xi64>
-  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] : (tensor<i64>) -> tensor<2xi64>
+  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}]>]>} : (tensor<i64>) -> tensor<2xi64>
+  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}]>]>} : (tensor<i64>) -> tensor<2xi64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[BCAST_OFF]] : tensor<2xi64>
   // CHECK: %[[GE:.*]] = stablehlo.compare GE, %[[CLAMPED]], %[[BCAST_OFF]]
   // CHECK: %[[LE:.*]] = stablehlo.compare LE, %[[CLAMPED]], %[[BCAST_LIM]]
@@ -124,8 +126,10 @@ func.func @shard_reduction_dim_is_collapsed_i32(
   // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i64>) -> tensor<i32>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i32>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i32>
-  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] : (tensor<i32>) -> tensor<2xi32>
-  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] : (tensor<i32>) -> tensor<2xi32>
+  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}]>]>} : (tensor<i32>) -> tensor<2xi32>
+  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}]>]>} : (tensor<i32>) -> tensor<2xi32>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[BCAST_OFF]] : tensor<2xi32>
   // CHECK: %[[GE:.*]] = stablehlo.compare GE, %[[CLAMPED]], %[[BCAST_OFF]]
   // CHECK: %[[LE:.*]] = stablehlo.compare LE, %[[CLAMPED]], %[[BCAST_LIM]]
@@ -207,8 +211,10 @@ func.func @shard_reduction_dim_is_collapsed_explicit_scalar_index_vector_dim(
   // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i64>
-  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] : (tensor<i64>) -> tensor<2x1xi64>
-  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] : (tensor<i64>) -> tensor<2x1xi64>
+  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>} : (tensor<i64>) -> tensor<2x1xi64>
+  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>} : (tensor<i64>) -> tensor<2x1xi64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[BCAST_OFF]] : tensor<2x1xi64>
   // CHECK: %[[GE:.*]] = stablehlo.compare GE, %[[CLAMPED]], %[[BCAST_OFF]]
   // CHECK: %[[LE:.*]] = stablehlo.compare LE, %[[CLAMPED]], %[[BCAST_LIM]]
@@ -258,8 +264,10 @@ func.func @shard_reduction_dim_not_collapsed(
   // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i64>
-  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] : (tensor<i64>) -> tensor<2xi64>
-  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] : (tensor<i64>) -> tensor<2xi64>
+  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}]>]>} : (tensor<i64>) -> tensor<2xi64>
+  // CHECK: %[[BCAST_LIM:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}]>]>} : (tensor<i64>) -> tensor<2xi64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[BCAST_OFF]] : tensor<2xi64>
   // CHECK: %[[GE:.*]] = stablehlo.compare GE, %[[CLAMPED]], %[[BCAST_OFF]]
   // CHECK: %[[LE:.*]] = stablehlo.compare LE, %[[CLAMPED]], %[[BCAST_LIM]]
@@ -301,7 +309,8 @@ func.func @shard_reduction_dim_explicit_scalar_indices(
   // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID_I64]], sizes = [1]
   // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
   // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
-  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] : (tensor<i64>) -> tensor<i64>
+  // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, []>]>} : (tensor<i64>) -> tensor<i64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMP]], %[[BCAST_OFF]] : tensor<i64>
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[LOCAL_IDX]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<collapsed_slice_dims = [0], start_index_map = [0]>
