@@ -301,14 +301,10 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
 }
 
 Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
-                            const SymbolTable& symbolTable,
+                            MeshAttr mesh,
                             const llvm::DenseSet<StringRef>* allowedAxes) {
   auto rankedType = dyn_cast<RankedTensorType>(type);
-  if (!rankedType || !sharding || sharding.isFullyReplicated()) {
-    return type;
-  }
-  MeshAttr mesh = sharding.getMesh(symbolTable);
-  if (!mesh) {
+  if (!rankedType || !sharding || sharding.isFullyReplicated() || !mesh) {
     return type;
   }
   SmallVector<int64_t> newShape;
@@ -339,6 +335,43 @@ Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
     return type;
   }
   return RankedTensorType::get(newShape, rankedType.getElementType());
+}
+
+Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,
+                            const SymbolTable& symbolTable,
+                            const llvm::DenseSet<StringRef>* allowedAxes) {
+  if (!sharding) {
+    return type;
+  }
+  return getDivisiblePaddedType(type, sharding, sharding.getMesh(symbolTable),
+                                allowedAxes);
+}
+
+RankedTensorType getDivisiblePaddedType(RankedTensorType globalType,
+                                        TensorShardingAttr inSharding,
+                                        TensorShardingAttr outSharding,
+                                        MeshAttr mesh) {
+  if (!mesh) {
+    return globalType;
+  }
+  SDY_CHECK(!inSharding || inSharding.getRank() == globalType.getRank());
+  SDY_CHECK(!outSharding || outSharding.getRank() == globalType.getRank());
+  SmallVector<int64_t> paddedShape;
+  paddedShape.reserve(globalType.getRank());
+  for (int64_t dim = 0; dim < globalType.getRank(); ++dim) {
+    int64_t dimSize = globalType.getDimSize(dim);
+    if (ShapedType::isDynamic(dimSize)) {
+      paddedShape.push_back(dimSize);
+      continue;
+    }
+    int64_t inShardSize =
+        inSharding ? inSharding.getDimSharding(dim).getShardedSize(mesh) : 1;
+    int64_t outShardSize =
+        outSharding ? outSharding.getDimSharding(dim).getShardedSize(mesh) : 1;
+    int64_t divisor = std::lcm(inShardSize, outShardSize);
+    paddedShape.push_back(llvm::alignTo(dimSize, divisor));
+  }
+  return RankedTensorType::get(paddedShape, globalType.getElementType());
 }
 
 mlir::stablehlo::AxisRefAttr convertAxisRefAttr(AxisRefAttr sdyAxisRef) {

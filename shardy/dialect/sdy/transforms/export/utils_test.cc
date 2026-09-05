@@ -450,6 +450,142 @@ TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {
   EXPECT_EQ(cast<IntegerAttr>(maxU32).getValue().getZExtValue(), 0);
 }
 
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualSharding) {
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "a", 4),
+                               MeshAxisAttr::get(&context, "b", 6)});
+
+  auto origType = RankedTensorType::get({14, 15}, f32Type);
+  TensorShardingAttr inSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  TensorShardingAttr outSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "b")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  // Dim 0: inShardSize = 4 ("a"), outShardSize = 6 ("b"). LCM(4, 6) = 12.
+  // 14 padded to multiple of 12 -> 24.
+  // Dim 1: inShardSize = 1, outShardSize = 4 ("a"). LCM(1, 4) = 4.
+  // 15 padded to multiple of 4 -> 16.
+  RankedTensorType paddedType =
+      getDivisiblePaddedType(origType, inSharding, outSharding, mesh);
+  EXPECT_EQ(paddedType, RankedTensorType::get({24, 16}, f32Type));
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualShardingAlreadyDivisible) {
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "a", 4),
+                               MeshAxisAttr::get(&context, "b", 6)});
+
+  auto origType = RankedTensorType::get({24, 16}, f32Type);
+  TensorShardingAttr inSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  TensorShardingAttr outSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "b")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  RankedTensorType paddedType =
+      getDivisiblePaddedType(origType, inSharding, outSharding, mesh);
+  EXPECT_EQ(paddedType, origType);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualShardingNullMesh) {
+  auto origType = RankedTensorType::get({14, 15}, f32Type);
+  TensorShardingAttr nullSharding = nullptr;
+  MeshAttr nullMesh = nullptr;
+  RankedTensorType paddedType =
+      getDivisiblePaddedType(origType, nullSharding, nullSharding, nullMesh);
+  EXPECT_EQ(paddedType, origType);
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualShardingNullSharding) {
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "a", 4),
+                               MeshAxisAttr::get(&context, "b", 6)});
+
+  auto origType = RankedTensorType::get({14, 15}, f32Type);
+  TensorShardingAttr inSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  TensorShardingAttr outSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "b")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  TensorShardingAttr nullSharding = nullptr;
+  // Null inSharding: Dim 0 padded to multiple of 6 -> 18, Dim 1 padded to 4
+  // -> 16.
+  EXPECT_EQ(getDivisiblePaddedType(origType, nullSharding, outSharding, mesh),
+            RankedTensorType::get({18, 16}, f32Type));
+  // Null outSharding: Dim 0 padded to multiple of 4 -> 16, Dim 1 is unsharded
+  // -> 15.
+  EXPECT_EQ(getDivisiblePaddedType(origType, inSharding, nullSharding, mesh),
+            RankedTensorType::get({16, 15}, f32Type));
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualShardingDynamicShape) {
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "a", 4),
+                               MeshAxisAttr::get(&context, "b", 6)});
+
+  auto origType = RankedTensorType::get({ShapedType::kDynamic, 15}, f32Type);
+  TensorShardingAttr inSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  TensorShardingAttr outSharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "b")},
+                                  /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "a")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  RankedTensorType paddedType =
+      getDivisiblePaddedType(origType, inSharding, outSharding, mesh);
+  EXPECT_EQ(paddedType,
+            RankedTensorType::get({ShapedType::kDynamic, 16}, f32Type));
+}
+
+TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualShardingUnsharded) {
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "a", 4)});
+
+  auto origType = RankedTensorType::get({7, 11}, f32Type);
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true),
+       DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  RankedTensorType paddedType =
+      getDivisiblePaddedType(origType, sharding, sharding, mesh);
+  EXPECT_EQ(paddedType, origType);
+}
+
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir
