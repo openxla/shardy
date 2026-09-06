@@ -20,16 +20,19 @@ limitations under the License.
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
-#include "shardy/common/logging.h"
+#include "shardy/common/logging.h"  // IWYU pragma: keep
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/utils.h"
 #include "shardy/dialect/mpmd/transforms/common/passes.h"  // IWYU pragma: keep
+#include "shardy/dialect/mpmd/transforms/common/utils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir::mpmd {
@@ -40,6 +43,44 @@ namespace mlir::mpmd {
 namespace {
 
 using ValueToReturnIndices = llvm::MapVector<Value, SmallVector<int64_t>>;
+
+// Tries to merge the newly created inferred fragment into an existing
+// same-mesh fragment in the block. No-op if no suitable merge target exists.
+void TryMergeWithExistingFragment(FragmentOp fragment_op, OpBuilder& builder) {
+  // 1. Find the earliest valid position for the merge target.
+  Operation* latest_producer = FindLatestOperandProducer(fragment_op);
+
+  // 2. Find a merge candidate. Prefer a same-mesh fragment among operand
+  //    producers (no risk of false dependencies), fall back to the nearest
+  //    preceding same-mesh fragment (sideways merge).
+  FragmentOp merge_target = FindLatestProducerFragmentOnMesh(fragment_op);
+  if (!merge_target) {
+    merge_target = FindLastFragmentOnMesh(fragment_op);
+  }
+
+  // 3. Move merge_target after latest_producer if needed.
+  if (!merge_target || !EnsureAfter(merge_target, latest_producer)) {
+    SDY_LOG(INFO) << "[UniquifyFunctionInputsOutputs] No existing fragment on "
+                     "mesh '"
+                  << fragment_op.getMeshName().str()
+                  << "' could be merged with.";
+    return;
+  }
+
+  // 4. Position inferred fragment and merge.
+  fragment_op->moveAfter(merge_target);
+
+  SmallVector<std::pair<StringRef, Attribute>> merged_attrs =
+      MergeAttributes(merge_target, fragment_op);
+
+  IRRewriter rewriter(builder.getContext());
+  FragmentOp merged_fragment =
+      MergeFragments(merge_target, fragment_op, rewriter);
+
+  for (auto [name, attr] : merged_attrs) {
+    merged_fragment->setAttr(name, attr);
+  }
+}
 
 void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
                                  ValueToReturnIndices& value_to_return_indices,
@@ -98,6 +139,8 @@ void CreateReturnFragmentForMesh(StringRef mesh_name, Operation* return_op,
   }
   auto block_builder = OpBuilder::atBlockEnd(&fragment_block);
   ReturnOp::create(block_builder, loc, returned_values);
+
+  TryMergeWithExistingFragment(fragment_op, builder);
 }
 
 // Replaces the return values of the function with transfer ops.
