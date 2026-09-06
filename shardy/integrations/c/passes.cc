@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/passes.h"
 
+/// @brief Registers all SDY passes and pipelines.
 void mlirRegisterAllSdyPassesAndPipelines() {
   mlir::sdy::registerAllSdyPassesAndPipelines();
 }
