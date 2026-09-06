@@ -13,7 +13,7 @@ func.func @main(
     %arg3: tensor<48xf32>, %arg4: tensor<96xf32>, %arg5: tensor<192xf32>)
     -> (tensor<4xf32>, tensor<12xf32>, tensor<24xf32>,
         tensor<48xf32>, tensor<96xf32>, tensor<192xf32>) {
-  // CHECK-NEXT: sdy.manual_computation(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5)
+  // CHECK:      sdy.manual_computation
   // CHECK-SAME:   in_shardings=[<mesh<["a"=4, "b"=4, "c"=4]>, [{"a"}]>, <mesh<["a"=4, "b"=4, "c"=4]>, [{"a"}]>,
   // CHECK-SAME:                 <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b":(1)2}]>, <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b"}]>,
   // CHECK-SAME:                 <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b", "c":(1)2}]>, <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b", "c"}]>]
@@ -21,6 +21,8 @@ func.func @main(
   // CHECK-SAME:                  <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b":(1)2}]>, <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b"}]>,
   // CHECK-SAME:                  <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b", "c":(1)2}]>, <mesh<["a"=4, "b"=4, "c"=4]>, [{"a", "b", "c"}]>]
   // CHECK-SAME:   manual_axes={"a"}
+  // CHECK:      %[[RESHARD:.*]] = sdy.reshard %{{.*}} <mesh<["a"=4, "b"=4, "c"=4]>, [{}]> : tensor<192xf32>
+  // CHECK:      return %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %[[RESHARD]]
   %0:6 = sdy.manual_computation(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5)
     in_shardings=[<@mesh3d, [{"a", "b", "c"}]>, <@mesh3d, [{"a", "b", "c"}]>,
                   <@mesh3d, [{"a", "b", "c"}]>, <@mesh3d, [{"a", "b", "c"}]>,
@@ -72,7 +74,8 @@ func.func @main(%arg0: tensor<8x2xi32>, %arg1: tensor<4x2xi32>) -> tensor<12x2xi
   // CHECK-NEXT: %2 = sdy.reshard %1#0 <mesh<["a"=2, "b"=2, "c"=2]>, [{}, {"a"}]> : tensor<8x2xi32>
   // CHECK-NEXT: %3 = sdy.reshard %1#1 <mesh<["a"=2, "b"=2, "c"=2]>, [{}, {"a"}]> : tensor<4x2xi32>
   // CHECK-NEXT: %4 = stablehlo.concatenate %2, %3, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["a"=2, "b"=2, "c"=2]>, [{}, {"a"}]>]>}
-  // CHECK-NEXT: return %4 : tensor<12x2xi32>
+  // CHECK-NEXT: %5 = sdy.reshard %4 <mesh<["a"=2, "b"=2, "c"=2]>, [{}, {}]> : tensor<12x2xi32>
+  // CHECK-NEXT: return %5 : tensor<12x2xi32>
   %0:2 = call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>, <@mesh, [{}, {}]>]>} : (tensor<8x2xi32>, tensor<4x2xi32>) -> (tensor<8x2xi32>, tensor<4x2xi32>)
   %1 = stablehlo.concatenate %0#0, %0#1, dim=0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : (tensor<8x2xi32>, tensor<4x2xi32>) -> tensor<12x2xi32>
   return %1 : tensor<12x2xi32>
@@ -109,6 +112,8 @@ func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh,
 
 // CHECK-LABEL: func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<mesh<["a"=2, "b"=2]>, [{"b"}]>}) -> tensor<8xf32> {
 func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <mesh<["a"=2, "b"=2]>, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: return %0 : tensor<8xf32>
   return %arg0 : tensor<8xf32>
 }
 
@@ -137,10 +142,14 @@ func.func private @foo(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh,
 
 // CHECK-LABEL: func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<mesh<["a"=2, "b"=2, "c"=2]>, [{"b"}]>}) -> tensor<8xf32> {
 func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>}) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <mesh<["a"=2, "b"=2, "c"=2]>, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: return %0 : tensor<8xf32>
   return %arg0 : tensor<8xf32>
 }
 
 // CHECK-LABEL: func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<mesh<["a"=2, "b"=2, "c"=2]>, [{"c"}]>}) -> tensor<8xf32> {
 func.func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}]>}) -> tensor<8xf32> {
+  // CHECK-NEXT: %0 = sdy.reshard %arg0 <mesh<["a"=2, "b"=2, "c"=2]>, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: return %0 : tensor<8xf32>
   return %arg0 : tensor<8xf32>
 }

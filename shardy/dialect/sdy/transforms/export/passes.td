@@ -135,7 +135,7 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
   // operations for optimizations.
   let options = [
       Option<"enableFullVersion", "enable-full-version",
-            "bool", /*default=*/"false",
+            "bool", /*default=*/"true",
             "Enable full version.">,
     ];
 }
