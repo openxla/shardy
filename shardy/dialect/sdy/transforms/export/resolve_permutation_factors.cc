@@ -16,7 +16,6 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <numeric>
 #include <optional>
 
 #include "llvm/ADT/DenseSet.h"
@@ -37,6 +36,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -72,6 +72,7 @@ struct ResolutionState {
   int64_t& nextChannelId;
   int64_t replicaCount = 1;
   int64_t partitionCount = 1;
+  SmallVector<Operation*> opsToErase;
 };
 
 // Returns a channel handle with handle = nextChannelId++ and type = 1
@@ -283,7 +284,8 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
         rewriter, loc, RankedTensorType::get({}, i64Ty), globalPartitionId);
   }
 
-  // If mesh has explicit non-iota device_ids mapping, use lookup table constant.
+  // If mesh has explicit non-iota device_ids mapping, use lookup table
+  // constant.
   if (!mesh.getDeviceIds().empty()) {
     int64_t totalDevices = mesh.getTotalSize();
     SmallVector<int64_t> shardIndices;
@@ -852,7 +854,8 @@ Value assembleHaloExchangeBuffer(
     TensorShardingAttr sharding, MeshAttr mesh,
     const llvm::SmallDenseSet<StringRef>& manualAxes,
     TensorShardingAttr localSharding, ResolutionState& state,
-    int64_t interiorPad = 0, const DimExchangeInfo* dimExchange = nullptr) {
+    int64_t interiorPad = 0, const DimExchangeInfo* dimExchange = nullptr,
+    Value idInPartitionGroup = nullptr) {
   SmallVector<AxisRefAttr> manualAxesInDim;
   DimensionShardingAttr activeDimSharded =
       (dimExchange && dimExchange->reshapeInfo)
@@ -871,8 +874,34 @@ Value assembleHaloExchangeBuffer(
     for (int64_t offset = start; offset >= end; --offset) {
       SmallVector<int64_t> pairs =
           getDataShiftSourceTargetPairs(mesh, manualAxesInDim, offset);
-      concatSegments.push_back(
-          mayCollectivePermute(loc, input, pairs, state));
+      Value neighborData = mayCollectivePermute(loc, input, pairs, state);
+      if (paddingValue && idInPartitionGroup && !manualAxesInDim.empty()) {
+        // Ensure devices not in target set use 0 instead of garbage values.
+        int64_t shardCount = activeDimSharded.getShardedSize(mesh);
+        int64_t thresholdVal = offset > 0 ? offset : shardCount + offset;
+        Value thresholdConst = stablehlo::ConstantOp::create(
+            state.rewriter, loc,
+            DenseIntElementsAttr::get(
+                RankedTensorType::get({}, state.rewriter.getI64Type()),
+                {thresholdVal}));
+        Value isTargetPred = stablehlo::CompareOp::create(
+            state.rewriter, loc, idInPartitionGroup, thresholdConst,
+            offset > 0 ? stablehlo::ComparisonDirection::GE
+                       : stablehlo::ComparisonDirection::LT);
+        auto inputType = cast<RankedTensorType>(input.getType());
+        Value broadcastPadding = stablehlo::BroadcastInDimOp::create(
+            state.rewriter, loc, inputType, paddingValue,
+            state.rewriter.getDenseI64ArrayAttr({}));
+        Value broadcastPred = stablehlo::BroadcastInDimOp::create(
+            state.rewriter, loc,
+            RankedTensorType::get(inputType.getShape(),
+                                  state.rewriter.getI1Type()),
+            isTargetPred, state.rewriter.getDenseI64ArrayAttr({}));
+        neighborData = stablehlo::SelectOp::create(
+            state.rewriter, loc, inputType, broadcastPred, neighborData,
+            broadcastPadding);
+      }
+      concatSegments.push_back(neighborData);
     }
   };
 
@@ -952,15 +981,21 @@ Value exchangeDimWithDynamicOffset(
     TensorShardingAttr localSharding, int64_t padLow, int64_t stride,
     int64_t sOut, int64_t baseDilation, bool dilatedHaloBuffer,
     ResolutionState& state) {
+  Value partitionId = createDeviceId(loc, state);
+  DimensionShardingAttr activeDimShardedAttr =
+      dimExchange.reshapeInfo ? dimExchange.reshapeInfo->getTargetDimSharding()
+                              : sharding.getDimShardings()[dim];
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, partitionId, mesh, activeDimShardedAttr, state.rewriter);
+
   int64_t edgePadSize = dilatedHaloBuffer
                             ? dimExchange.sFootprint * baseDilation
                             : dimExchange.sFootprint;
   Value paddedConcat = assembleHaloExchangeBuffer(
       loc, operand, dim, edgePadSize, paddingValue, dimExchange.leftHops,
       dimExchange.rightHops, sharding, mesh, manualAxes, localSharding, state,
-      dilatedHaloBuffer ? baseDilation - 1 : 0, &dimExchange);
-
-  Value partitionId = createDeviceId(loc, state);
+      dilatedHaloBuffer ? baseDilation - 1 : 0, &dimExchange,
+      idInPartitionGroup);
 
   auto inputType = cast<RankedTensorType>(operand.getType());
   int64_t sIn = inputType.getShape()[dim];
@@ -975,12 +1010,6 @@ Value exchangeDimWithDynamicOffset(
   for (AxisRefAttr axis : sharding.getDimShardings()[dim].getAxes()) {
     manualAxesInDim.insert(axis.getName());
   }
-
-  DimensionShardingAttr activeDimShardedAttr =
-      dimExchange.reshapeInfo ? dimExchange.reshapeInfo->getTargetDimSharding()
-                              : sharding.getDimShardings()[dim];
-  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
-      loc, partitionId, mesh, activeDimShardedAttr, state.rewriter);
 
   Value offset;
   Value zeroConst;
@@ -1267,10 +1296,16 @@ DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
             llvm::divideCeil(padOp.getType().getDimSize(dim), shardCount);
         int64_t pLow = padOp.getEdgePaddingLow()[dim];
         int64_t baseDilation = padOp.getInteriorPadding()[dim] + 1;
-        return getDimExchangeInfo(shardCount, sIn, sOut,
-                                  /*sFootprint=*/sOut, pLow,
-                                  /*stride=*/1, baseDilation,
-                                  inputType.getDimSize(dim));
+        DimExchangeInfo dimInfo = getDimExchangeInfo(shardCount, sIn, sOut,
+                                                     /*sFootprint=*/sOut, pLow,
+                                                     /*stride=*/1, baseDilation,
+                                                     inputType.getDimSize(dim));
+        if (!isCommunicationFreePadDim(dim, padOp, sharding, mesh)) {
+          // This is a zero-hop-non-communication-free case, which doesn't
+          // require collective-permute but dynamic-slice.
+          dimInfo.needsComm = true;
+        }
+        return dimInfo;
       });
 }
 
@@ -2044,10 +2079,16 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
         int64_t sliceSize = sliceOp.getType().getDimSize(dim);
         int64_t sOut = llvm::divideCeil(sliceSize, shardCount);
         int64_t start = sliceOp.getStartIndices()[dim];
-        return getDimExchangeInfo(shardCount, sIn, sOut,
-                                  /*sFootprint=*/sOut, /*padLow=*/-start,
-                                  /*stride=*/1, /*baseDilation=*/1,
-                                  inputType.getDimSize(dim));
+        DimExchangeInfo dimInfo = getDimExchangeInfo(
+            shardCount, sIn, sOut,
+            /*sFootprint=*/sOut, /*padLow=*/-start,
+            /*stride=*/1, /*baseDilation=*/1, inputType.getDimSize(dim));
+        // This is a zero-hop-non-communication-free case, which doesn't
+        // require collective-permute but dynamic-slice.
+        if (!isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh)) {
+          dimInfo.needsComm = true;
+        }
+        return dimInfo;
       });
 }
 
@@ -2190,6 +2231,56 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   return success();
 }
 
+// Returns true if the convolution spatial dimension `spatialDimIdx` is a pure
+// reduction dimension without sliding-window shifts (i.e., output spatial size
+// `numWindows[spatialDimIdx]` is 1, padding is 0, window stride is 1, and
+// lhs/rhs dilations are 1). When false, sharding this spatial reduction
+// dimension also requires permutation (halo exchange) across shards.
+bool isPureSpatialReductionDim(stablehlo::ConvolutionOp convOp,
+                               int64_t spatialDimIdx,
+                               ArrayRef<int64_t> numWindows) {
+  return isWindowPassthroughDim(
+      convOp.getPadding(), /*windowDimensions=*/numWindows,
+      convOp.getWindowStrides().value_or(ArrayRef<int64_t>()), spatialDimIdx,
+      convOp.getLhsDilation().value_or(ArrayRef<int64_t>()),
+      convOp.getRhsDilation().value_or(ArrayRef<int64_t>()));
+}
+
+// Returns true if factorIdx is a Reduction factor with dual kPermutation
+// semantics.
+bool isReductionFactorWithPermutationSemantics(stablehlo::ConvolutionOp convOp,
+                                              OpShardingRuleAttr rule,
+                                              int64_t factorIdx) {
+  if (rule.getFactorType(factorIdx) != FactorType::kReduction) {
+    return false;
+  }
+  stablehlo::ConvDimensionNumbersAttr dimNums = convOp.getDimensionNumbers();
+  RankedTensorType outType = convOp.getType();
+  SmallVector<int64_t> numWindows = llvm::to_vector(llvm::map_range(
+      dimNums.getOutputSpatialDimensions(),
+      [&](int64_t outDim) { return outType.getDimSize(outDim); }));
+  for (auto [i, dims] :
+       llvm::enumerate(llvm::zip_equal(dimNums.getInputSpatialDimensions(),
+                                       dimNums.getKernelSpatialDimensions(),
+                                       dimNums.getOutputSpatialDimensions()))) {
+    auto [lhsDim, rhsDim, outDim] = dims;
+    auto lhsFactors =
+        rule.getOperandMapping(0).getDimMappings()[lhsDim].getFactorIndices();
+    auto rhsFactors =
+        rule.getOperandMapping(1).getDimMappings()[rhsDim].getFactorIndices();
+    if (llvm::is_contained(lhsFactors, factorIdx) &&
+        llvm::is_contained(rhsFactors, factorIdx)) {
+      // This is a spatial factor.
+      if (!isPureSpatialReductionDim(convOp, i, numWindows)) {
+        // If the spatial reduction dimension involves sliding windows, padding,
+        // or dilation, it has dual kPermutation semantics.
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void resolvePermutationFactorsViaReplication(Operation* op,
                                              OpShardingRuleAttr rule,
                                              ResolutionState& state) {
@@ -2210,10 +2301,19 @@ void resolvePermutationFactorsViaReplication(Operation* op,
                                 meshOp.getMesh(), /*closedIfMissing=*/true);
   UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
 
+  SmallVector<AxisRefAttr> removedReductionAxes;
   for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
     // When HALO exchange is disabled, we replication-reshard the
     // permutation factors.
     bool isReplicatedFactor = rule.getFactorType(i) == FactorType::kPermutation;
+    if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op);
+        convOp && isReductionFactorWithPermutationSemantics(convOp, rule, i)) {
+      isReplicatedFactor = true;
+      if (std::optional<ArrayRef<AxisRefAttr>> axes =
+              getCompatibleFactorSharding(projection, i)) {
+        llvm::append_range(removedReductionAxes, *axes);
+      }
+    }
     if (!isReplicatedFactor) {
       continue;
     }
@@ -2234,9 +2334,80 @@ void resolvePermutationFactorsViaReplication(Operation* op,
     update |= projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
   }
 
+  sdy::AllReduceOp remainingAllReduceOp = nullptr;
+  if (!removedReductionAxes.empty() && !outShardings.empty() &&
+      outShardings[0]) {
+    TensorShardingAttr oldOutSharding = outShardings[0];
+    ArrayRef<AxisRefAttr> oldUnreduced = oldOutSharding.getUnreducedAxes();
+    if (!oldUnreduced.empty()) {
+      SmallVector<AxisRefAttr> newUnreduced;
+      for (AxisRefAttr axis : oldUnreduced) {
+        SmallVector<AxisRefAttr> curAxes = {axis};
+        for (AxisRefAttr removed : removedReductionAxes) {
+          SmallVector<AxisRefAttr> nextAxes;
+          for (AxisRefAttr cur : curAxes) {
+            if (!cur.overlaps(removed)) {
+              nextAxes.push_back(cur);
+              continue;
+            }
+            if (auto prefix = cur.getPrefixWithoutOverlap(removed)) {
+              nextAxes.push_back(*prefix);
+            }
+            if (auto suffix =
+                    cur.getSuffixWithoutOverlap(removed, meshOp.getMesh())) {
+              nextAxes.push_back(*suffix);
+            }
+          }
+          curAxes = std::move(nextAxes);
+        }
+        llvm::append_range(newUnreduced, curAxes);
+      }
+      if (newUnreduced != oldUnreduced) {
+        // Remove the dual-semantics reduction axes from the op's result
+        // unreduced sharding annotation and update/remove its downstream
+        // sdy.all_reduce user before inserting explicit reshards.
+        outShardings[0] = oldOutSharding.replaceUnreducedAxes(newUnreduced);
+        sdy::setShardings(op, outShardings[0]);
+        projection.getMutableResult(0).unreducedAxes = newUnreduced;
+        if (op->getResult(0).hasOneUse()) {
+          if (auto allReduceOp = dyn_cast<sdy::AllReduceOp>(
+                  *op->getResult(0).getUsers().begin());
+              allReduceOp && allReduceOp.getReductionAxes() == oldUnreduced) {
+            if (newUnreduced.empty()) {
+              allReduceOp.replaceAllUsesWith(allReduceOp.getTensor());
+              state.opsToErase.push_back(allReduceOp);
+            } else {
+              allReduceOp.setReductionAxesAttr(
+                  AxisRefListAttr::get(op->getContext(), newUnreduced));
+              remainingAllReduceOp = allReduceOp;
+            }
+          }
+        }
+      }
+    }
+  }
+
   if (update.updateOperands.any() || update.updateResults.any()) {
     insertExplicitReshards(op, inShardings, outShardings, projection, update,
                            state.rewriter, rule, state.symbolTable, meshOp);
+    if (remainingAllReduceOp && update.updateResults.test(0)) {
+      if (auto reshardOp =
+              remainingAllReduceOp.getTensor().getDefiningOp<sdy::ReshardOp>()) {
+        // Move the result reshard after remainingAllReduceOp so that
+        // sdy.reshard operates on the reduced tensor rather than the
+        // intermediate unreduced tensor.
+        remainingAllReduceOp.getTensorMutable().assign(reshardOp.getInput());
+        remainingAllReduceOp.setOutShardingAttr(
+            getSharding(op->getResult(0)).replaceUnreducedAxes({}));
+        state.rewriter.setInsertionPointAfter(remainingAllReduceOp);
+        auto newReshardOp = sdy::ReshardOp::create(
+            state.rewriter, reshardOp.getLoc(), remainingAllReduceOp.getResult(),
+            reshardOp.getSharding().replaceUnreducedAxes({}));
+        state.rewriter.replaceAllUsesExcept(remainingAllReduceOp.getResult(),
+                                            newReshardOp, newReshardOp);
+        state.opsToErase.push_back(reshardOp);
+      }
+    }
   }
 }
 
@@ -2287,12 +2458,19 @@ struct ShardyResolvePermutationFactorsPass
         return;
       }
 
-      // Identify if the op defines any permutation factors.
-      auto isPermutation = [&](int64_t i) {
-        return rule.getFactorType(i) == FactorType::kPermutation;
+      // Identify if the op defines any permutation factors or dual-semantics
+      // convolution factors.
+      auto isPermutationOrDualSemantics = [&](int64_t i) {
+        if (rule.getFactorType(i) == FactorType::kPermutation) {
+          return true;
+        }
+        if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op)) {
+          return isReductionFactorWithPermutationSemantics(convOp, rule, i);
+        }
+        return false;
       };
       if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
-                        isPermutation)) {
+                        isPermutationOrDualSemantics)) {
         return;
       }
 
@@ -2318,6 +2496,9 @@ struct ShardyResolvePermutationFactorsPass
       // Otherwise, use a generic resolution based on explicit reshards.
       resolvePermutationFactorsViaReplication(op, rule, state);
     });
+    for (Operation* opToErase : state.opsToErase) {
+      rewriter.eraseOp(opToErase);
+    }
   }
 };
 

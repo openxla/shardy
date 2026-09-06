@@ -113,6 +113,12 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
   Option<bool> inlineMeshes{*this, "inline-meshes",
                             llvm::cl::desc("Inline meshes in shardings."),
                             llvm::cl::init(true)};
+
+  Option<bool> markPartialResultWithUnreducedAxes{
+      *this, "mark-partial-result-with-unreduced-axes",
+      llvm::cl::desc(
+          "Whether to mark partial reduction results with unreduced axes."),
+      llvm::cl::init(false)};
 };
 
 // Adds a sequence of export passes needed as a post-processing step for SDY

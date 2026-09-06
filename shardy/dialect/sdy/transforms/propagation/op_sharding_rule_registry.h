@@ -43,6 +43,15 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
                                            bool conservativePropagation = false,
                                            bool setShardingRuleOnOp = true);
 
+// Helper to check if a window dimension has no sliding window offset/padding
+// (i.e., start/end padding is 0, window dimension is 1, stride is 1, and
+// dilations are 1).
+bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
+                            ArrayRef<int64_t> windowDimensions,
+                            ArrayRef<int64_t> windowStrides, int64_t dim,
+                            ArrayRef<int64_t> lhsDilations = {},
+                            ArrayRef<int64_t> rhsDilations = {});
+
 }  // namespace sdy
 }  // namespace mlir
 
