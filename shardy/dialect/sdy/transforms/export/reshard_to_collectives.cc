@@ -348,7 +348,7 @@ class CollectiveInserter {
     while (axisRevIt != inAxes.rend() &&
            !outAxisToDimAndIndex.contains(*axisRevIt)) {
       inAxisSet.erase(*axisRevIt);
-      --axisRevIt;
+      ++axisRevIt;
     }
     auto inAxisIt = axisRevIt.base();
     popBackFromCurrentAxes(currentAxes, inAxes, inAxisIt);
