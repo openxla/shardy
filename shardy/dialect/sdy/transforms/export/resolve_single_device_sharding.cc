@@ -153,8 +153,7 @@ void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
   SmallVector<Value> falseZeros;
   for (Type type : resultTypes) {
     if (auto rankedType = dyn_cast<RankedTensorType>(type)) {
-      Value zeroConst = stablehlo::ConstantOp::create(
-          rewriter, loc, rewriter.getZeroAttr(rankedType));
+      Value zeroConst = createZeroConstant(rewriter, loc, rankedType);
       falseZeros.push_back(zeroConst);
     } else if (isa<stablehlo::TokenType>(type)) {
       Value tokenConst = stablehlo::CreateTokenOp::create(rewriter, loc);

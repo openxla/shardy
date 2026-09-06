@@ -105,7 +105,6 @@ void buildReduceComputation(OpWithComputation opWithComputation,
   llvm_unreachable("unknown ReductionOp");
 }
 
-
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;
   int64_t nextChannelId = 0;
@@ -2422,7 +2421,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
 
   return llvm::TypeSwitch<Operation*, Value>(reductionOp)
       .Case([&](stablehlo::AddOp) {
-        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+        return createZeroConstant(b, loc, scalarType);
       })
       .Case([&](stablehlo::AndOp) {
         return stablehlo::ConstantOp::create(
@@ -2431,7 +2430,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
                                    b.getIntegerAttr(elementType, 1)));
       })
       .Case([&](stablehlo::OrOp) {
-        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+        return createZeroConstant(b, loc, scalarType);
       })
       .Case([&](stablehlo::MulOp) {
         if (isa<FloatType>(elementType)) {
