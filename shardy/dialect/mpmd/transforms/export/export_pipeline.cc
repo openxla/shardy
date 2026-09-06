@@ -81,15 +81,14 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   // and by DCE'ing the fragment bodies.
   pm.addNestedPass<FuncOp>(createFragmentDcePass());
 
+  // Merge inferred fragments from earlier in the pipeline (e.g.,
+  // extract_reshards) that could not be merged before.
+  pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
+
   // Must be applied after the last -mpmd-fragment-dedup, as it may add
   // duplicated fragment results and after -canonicalize, as it may add
   // identity fragments, which would be canonicalized away.
   pm.addNestedPass<FuncOp>(createUniquifyFunctionInputsOutputsPass());
-
-  // The fragments created by the pass above maybe slowdown compilation (more
-  // fragments to compile) and may cause performance regressions. Thus, we merge
-  // them with other fragments.
-  pm.addNestedPass<FuncOp>(createMergeInferredFragmentsPass());
 
   // Mark each fragment with the inputs and outputs which are offloaded to host
   // memory.
