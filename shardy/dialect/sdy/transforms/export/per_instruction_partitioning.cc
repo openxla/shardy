@@ -13,7 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
@@ -38,7 +37,6 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
-#include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
@@ -423,26 +421,80 @@ LogicalResult outlineInstruction(Operation* op,
     }
   }
 
+  // We slice the padded operands back to their original unpadded types, so that
+  // the outlined op preserves its shapes. We then pad the outlined op results
+  // to match the function results which are required to be divisible.
+  //
+  // We do the above to all ops except for sdy.reshard, because sdy.reshard's
+  // padded input type is computed to be jointly divisible by both its input and
+  // output shardings; slicing it back to the unpadded type along a sharded
+  // dimension can introduce a non-communication-free slice that fails
+  // pad-for-divisibility.
+
+  // Replicates the given dimension in the given sharding.
+  auto replicateDimension = [&](TensorShardingAttr sharding,
+                                int64_t dim) -> TensorShardingAttr {
+    if (!sharding || dim < 0 || dim >= sharding.getRank() ||
+        sharding.getDimShardings()[dim].getAxes().empty()) {
+      return sharding;
+    }
+    MLIRContext* ctx = sharding.getContext();
+    SmallVector<DimensionShardingAttr> dimShardings(
+        sharding.getDimShardings().begin(), sharding.getDimShardings().end());
+    SmallVector<AxisRefAttr> replicatedAxes(
+        sharding.getReplicatedAxes().begin(),
+        sharding.getReplicatedAxes().end());
+    for (AxisRefAttr axis : dimShardings[dim].getAxes()) {
+      if (!llvm::is_contained(replicatedAxes, axis)) {
+        replicatedAxes.push_back(axis);
+      }
+    }
+    if (MeshAttr mesh = sharding.getMesh(op)) {
+      llvm::sort(replicatedAxes, AxisRefAttr::getMeshComparator(mesh));
+    }
+    dimShardings[dim] =
+        DimensionShardingAttr::get(ctx, /*axes=*/{}, /*isClosed=*/true);
+    return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), dimShardings,
+                                   replicatedAxes, sharding.getUnreducedAxes());
+  };
+
   Block* block = outlinedFunc.addEntryBlock();
   tempRewriter.setInsertionPointToStart(block);
-  SmallVector<Value> operands(block->getArguments().begin(),
-                              block->getArguments().end());
-  SmallVector<Type> resultTypes;
-  auto inferTypeOp = dyn_cast<InferTypeOpInterface>(op);
-  if (!inferTypeOp ||
-      failed(inferTypeOp.inferReturnTypes(
-          ctx, op->getLoc(), operands, op->getAttrDictionary(),
-          op->getPropertiesStorage(), op->getRegions(), resultTypes))) {
-    resultTypes.assign(paddedResultTypes.begin(), paddedResultTypes.end());
+  SmallVector<Value> operands;
+  operands.reserve(op->getNumOperands());
+  for (size_t i = 0; i < op->getNumOperands(); ++i) {
+    Value arg = block->getArgument(i);
+    Type origType = op->getOperand(i).getType();
+    TensorShardingAttr operandSharding = shardingInfo.inShardings[i];
+    if (!isa<ReshardOp>(op) && arg.getType() != origType) {
+      arg = sliceHighSideToType(tempRewriter, op->getLoc(), arg, origType,
+                                operandSharding);
+    }
+    if (auto concatOp = dyn_cast<stablehlo::ConcatenateOp>(op)) {
+      int64_t concatDim = concatOp.getDimension();
+      TensorShardingAttr newSharding =
+          replicateDimension(operandSharding, concatDim);
+      if (newSharding != operandSharding) {
+        // A concatenating dim may have a kPermutation factor before the op is
+        // outlined if the operands are slice ops. In the outlined function,
+        // since the operands are no longer slices, it now has a
+        // kNeedReplication factor. We need to reshard the dim to replicated to
+        // ensure sharding consistency.
+        operandSharding = newSharding;
+        arg =
+            ReshardOp::create(tempRewriter, op->getLoc(), arg, operandSharding);
+      }
+    }
+    operands.push_back(arg);
   }
 
   Operation* clonedOp = tempRewriter.clone(*op);
   for (size_t i = 0; i < clonedOp->getNumOperands(); ++i) {
-    clonedOp->setOperand(i, block->getArgument(i));
+    clonedOp->setOperand(i, operands[i]);
   }
-  for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
-    if (i < resultTypes.size()) {
-      clonedOp->getResult(i).setType(resultTypes[i]);
+  if (isa<ReshardOp>(clonedOp)) {
+    for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
+      clonedOp->getResult(i).setType(paddedResultTypes[i]);
     }
   }
 
@@ -471,12 +523,26 @@ LogicalResult outlineInstruction(Operation* op,
       }
     }
   }
-  setShardings(clonedOp, shardingInfo.outShardings);
 
+  SmallVector<TensorShardingAttr> opOutShardings(
+      shardingInfo.outShardings.begin(), shardingInfo.outShardings.end());
+  if (auto concatOp = dyn_cast<stablehlo::ConcatenateOp>(clonedOp)) {
+    int64_t concatDim = concatOp.getDimension();
+    if (!opOutShardings.empty() && opOutShardings[0] &&
+        concatDim < opOutShardings[0].getRank() &&
+        !opOutShardings[0].getDimShardings()[concatDim].getAxes().empty()) {
+      opOutShardings[0] = replicateDimension(opOutShardings[0], concatDim);
+    }
+  }
+  setShardings(clonedOp, opOutShardings);
   SmallVector<Value> returnValues;
   returnValues.reserve(clonedOp->getNumResults());
   for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
     Value res = clonedOp->getResult(i);
+    if (opOutShardings[i] != shardingInfo.outShardings[i]) {
+      res = ReshardOp::create(tempRewriter, op->getLoc(), res,
+                              shardingInfo.outShardings[i]);
+    }
     Type targetType = paddedResultTypes[i];
     if (res.getType() != targetType) {
       returnValues.push_back(padHighSideToType(tempRewriter, op->getLoc(), res,
