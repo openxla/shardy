@@ -13,8 +13,8 @@ func.func @reshape_pass_through_pad(%arg0: tensor<3x4xf32>) -> tensor<3x4xf32> {
   // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {}]>]>} : (tensor<4x4xf32>) -> tensor<4x4xf32>
   %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {}]>]>} : (tensor<3x4xf32>) -> tensor<3x4xf32>
 
-  // CHECK: %[[CAST:.*]] = builtin.unrealized_conversion_cast %[[RESHAPE]] : tensor<4x4xf32> to tensor<3x4xf32>
-  // CHECK: return %[[CAST]] : tensor<3x4xf32>
+  // CHECK: %[[SLICE_RES:.*]] = stablehlo.slice %[[RESHAPE]] [0:3, 0:4]
+  // CHECK: return %[[SLICE_RES]] : tensor<3x4xf32>
   return %1 : tensor<3x4xf32>
 }
 
@@ -50,8 +50,8 @@ func.func @reshape_mix_participating_and_passthrough(%arg0: tensor<16x3xf32>) ->
   // CHECK: %[[PAD:.*]] = stablehlo.pad %arg0, %[[CST]], low = [0, 0], high = [0, 1], interior = [0, 0] : (tensor<16x3xf32>, tensor<f32>) -> tensor<16x4xf32>
   // CHECK: %[[SLICE:.*]] = sdy.all_slice [{"x"}, {"y"}] %[[PAD]] out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<16x4xf32>
   // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {}, {"y"}]>]>} : (tensor<16x4xf32>) -> tensor<4x4x4xf32>
-  // CHECK: %[[CAST:.*]] = builtin.unrealized_conversion_cast %[[RESHAPE]] : tensor<4x4x4xf32> to tensor<4x4x3xf32>
-  // CHECK: return %[[CAST]] : tensor<4x4x3xf32>
+  // CHECK: %[[SLICE_RES:.*]] = stablehlo.slice %[[RESHAPE]] [0:4, 0:4, 0:3]
+  // CHECK: return %[[SLICE_RES]] : tensor<4x4x3xf32>
   %0 = sdy.all_slice [{"x"}, {"y"}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<16x3xf32>
   %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {}, {"y"}]>]>} : (tensor<16x3xf32>) -> tensor<4x4x3xf32>
   return %1 : tensor<4x4x3xf32>
@@ -77,8 +77,8 @@ func.func @reshape_mix_participating_middle(%arg0: tensor<3x16x7xf32>) -> tensor
   // CHECK: %[[PAD:.*]] = stablehlo.pad %arg0, %[[CST]], low = [0, 0, 0], high = [1, 0, 2], interior = [0, 0, 0] : (tensor<3x16x7xf32>, tensor<f32>) -> tensor<4x16x9xf32>
   // CHECK: %[[SLICE:.*]] = sdy.all_slice [{"y"}, {"x"}, {"z"}] %[[PAD]] out_sharding=<@mesh_4_2_3, [{"y"}, {"x"}, {"z"}]> : tensor<4x16x9xf32>
   // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2_3, [{"y"}, {"x"}, {}, {"z"}]>]>} : (tensor<4x16x9xf32>) -> tensor<4x4x4x9xf32>
-  // CHECK: %[[CAST:.*]] = builtin.unrealized_conversion_cast %[[RESHAPE]] : tensor<4x4x4x9xf32> to tensor<3x4x4x7xf32>
-  // CHECK: return %[[CAST]] : tensor<3x4x4x7xf32>
+  // CHECK: %[[SLICE_RES:.*]] = stablehlo.slice %[[RESHAPE]] [0:3, 0:4, 0:4, 0:7]
+  // CHECK: return %[[SLICE_RES]] : tensor<3x4x4x7xf32>
   %0 = sdy.all_slice [{"y"}, {"x"}, {"z"}] %arg0 out_sharding=<@mesh_4_2_3, [{"y"}, {"x"}, {"z"}]> : tensor<3x16x7xf32>
   %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2_3, [{"y"}, {"x"}, {}, {"z"}]>]>} : (tensor<3x16x7xf32>) -> tensor<3x4x4x7xf32>
   return %1 : tensor<3x4x4x7xf32>
@@ -95,8 +95,8 @@ func.func @reshape_insert_unit_dim_indivisible(%arg0: tensor<14xf32>) -> tensor<
   // CHECK: %[[PAD:.*]] = stablehlo.pad %arg0, %[[CST]], low = [0], high = [2], interior = [0] : (tensor<14xf32>, tensor<f32>) -> tensor<16xf32>
   // CHECK: %[[SLICE:.*]] = sdy.all_slice [{"x"}] %[[PAD]] out_sharding=<@mesh_4_2, [{"x"}]> : tensor<16xf32>
   // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}]>]>} : (tensor<16xf32>) -> tensor<1x16xf32>
-  // CHECK: %[[CAST:.*]] = builtin.unrealized_conversion_cast %[[RESHAPE]] : tensor<1x16xf32> to tensor<1x14xf32>
-  // CHECK: return %[[CAST]] : tensor<1x14xf32>
+  // CHECK: %[[SLICE_RES:.*]] = stablehlo.slice %[[RESHAPE]] [0:1, 0:14]
+  // CHECK: return %[[SLICE_RES]] : tensor<1x14xf32>
   %0 = sdy.all_slice [{"x"}] %arg0 out_sharding=<@mesh_4_2, [{"x"}]> : tensor<14xf32>
   %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}]>]>} : (tensor<14xf32>) -> tensor<1x14xf32>
   return %1 : tensor<1x14xf32>
@@ -113,8 +113,8 @@ func.func @reshape_remove_unit_dim_indivisible(%arg0: tensor<1x14xf32>) -> tenso
   // CHECK: %[[PAD:.*]] = stablehlo.pad %arg0, %[[CST]], low = [0, 0], high = [0, 2], interior = [0, 0] : (tensor<1x14xf32>, tensor<f32>) -> tensor<1x16xf32>
   // CHECK: %[[SLICE:.*]] = sdy.all_slice [{}, {"x"}] %[[PAD]] out_sharding=<@mesh_4_2, [{}, {"x"}]> : tensor<1x16xf32>
   // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}]>]>} : (tensor<1x16xf32>) -> tensor<16xf32>
-  // CHECK: %[[CAST:.*]] = builtin.unrealized_conversion_cast %[[RESHAPE]] : tensor<16xf32> to tensor<14xf32>
-  // CHECK: return %[[CAST]] : tensor<14xf32>
+  // CHECK: %[[SLICE_RES:.*]] = stablehlo.slice %[[RESHAPE]] [0:14]
+  // CHECK: return %[[SLICE_RES]] : tensor<14xf32>
   %0 = sdy.all_slice [{}, {"x"}] %arg0 out_sharding=<@mesh_4_2, [{}, {"x"}]> : tensor<1x14xf32>
   %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}]>]>} : (tensor<1x14xf32>) -> tensor<14xf32>
   return %1 : tensor<14xf32>
