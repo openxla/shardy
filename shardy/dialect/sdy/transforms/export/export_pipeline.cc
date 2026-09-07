@@ -44,6 +44,8 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives ||
                                   options.enablePerInstructionPartitioning;
+  passOptions.markPartialResultWithUnreducedAxes =
+      options.markPartialResultWithUnreducedAxes;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enablePerInstructionPartitioning) {
