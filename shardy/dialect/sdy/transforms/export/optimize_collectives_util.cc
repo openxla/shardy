@@ -15,7 +15,9 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/export/optimize_collectives_util.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <utility>
 
@@ -41,30 +43,29 @@ namespace sdy {
 
 namespace {
 
-// Returns true if all the permuted axes are communicated off the split
-// dimension by the all-to-all chain.
+// Returns true if at least one axis in `inAxes` that is permuted in `cpAxes` is
+// present in `communicatedAxes`.
 //
 // Example:
-// - inAxes=[{"z"}, {"x"}, {"y"}], cpAxes=[{"z"}, {"y"}, {"x"}],
-//   commAxes=[{"x"}, {"y"}] -> returns true (permuted axes "x", "y" are both
-//   communicated)
-bool arePermutedAxesCommunicated(const AxisList& inAxes, const AxisList& cpAxes,
-                                 ArrayRef<AxisRefAttr> commAxes) {
-  SmallVector<AxisRefAttr> permutedAxes;
+// - inAxes=[{"x"}, {"y"}], cpAxes=[{"y"}, {"x"}], communicatedAxes=[{"x"}]
+//   -> returns true
+bool communicatesAnyPermutedAxis(ArrayRef<AxisRefAttr> inAxes,
+                                 ArrayRef<AxisRefAttr> cpAxes,
+                                 ArrayRef<AxisRefAttr> communicatedAxes) {
   for (auto [inAxis, cpAxis] : llvm::zip(inAxes, cpAxes)) {
+    // Only axes whose position or presence changed on the split dimension are
+    // considered permuted.
     if (inAxis != cpAxis) {
-      permutedAxes.push_back(inAxis);
+      // Checks whether this permuted axis is communicated off splitDim.
+      AxisRefAttr permutedAxis = inAxis;
+      if (llvm::any_of(communicatedAxes, [&](AxisRefAttr commAxis) {
+            return commAxis.contains(permutedAxis);
+          })) {
+        return true;
+      }
     }
   }
-
-  for (AxisRefAttr pAxis : permutedAxes) {
-    bool communicated = llvm::any_of(
-        commAxes, [&](AxisRefAttr cAxis) { return cAxis.contains(pAxis); });
-    if (!communicated) {
-      return false;
-    }
-  }
-  return true;
+  return false;
 }
 
 // Builds an AllToAllStage representing one step in the optimized all-to-all
@@ -344,6 +345,7 @@ SmallVector<AllToAllStage> computeAllToAllStages(
         for (int64_t k = 0; k < kNumAxes; ++k) {
           if (axis.contains(inAxes[k])) {
             int64_t tgtDim = param.getTgtDim();
+            // Shifts dimensions after splitDim by the net change in rank.
             int64_t tgtSubDim =
                 tgtDim < splitDim ? tgtDim : tgtDim + numSplitDims - 1;
             int64_t srcSubDim = splitDim + k;
@@ -364,6 +366,97 @@ SmallVector<AllToAllStage> computeAllToAllStages(
     }
   }
   return a2aStages;
+}
+
+// Returns true if the leading sub-dimensions of `subDimAxes` match
+// `targetAxes` in exact order.
+bool matchesTargetAxes(ArrayRef<AxisRefAttr> subDimAxes,
+                       ArrayRef<AxisRefAttr> targetAxes) {
+  return std::equal(targetAxes.begin(), targetAxes.end(), subDimAxes.begin());
+}
+
+// Returns the next available axis move whose destination sub-dimension is
+// currently empty as a (srcIdx, tgtIdx) pair, or std::nullopt if no move can
+// be scheduled or if a target axis is missing.
+//
+// Example:
+// - subDimAxes=[{}, {"y"}, {"z"}], targetAxes=[{"y"}, {"z"}]
+//   -> returns pair (1, 0)
+std::optional<std::pair<int64_t, int64_t>> findAvailableAxisMove(
+    ArrayRef<AxisRefAttr> subDimAxes, ArrayRef<AxisRefAttr> targetAxes) {
+  for (auto [tgtIdx, targetAxis] : llvm::enumerate(targetAxes)) {
+    // Target sub-dimension already holds the correct target axis or is
+    // currently occupied; skip.
+    if (subDimAxes[tgtIdx] == targetAxis || subDimAxes[tgtIdx]) {
+      continue;
+    }
+    const auto* it = llvm::find(subDimAxes, targetAxis);
+    if (it == subDimAxes.end()) {
+      return std::nullopt;
+    }
+    int64_t srcIdx = std::distance(subDimAxes.begin(), it);
+    return std::make_pair(srcIdx, tgtIdx);
+  }
+  return std::nullopt;
+}
+
+// Computes AllToAll stages to reorder remaining unscattered axes on splitDim
+// into leading sub-dimensions [splitDim .. splitDim + m - 1] in the exact
+// order specified by `targetAxes`.
+//
+// Example:
+// - subDimAxes=[{}, {"y"}, {"z"}], targetAxes=[{"y"}, {"z"}]
+//   -> Stage 1: {"y"}: 1->0
+//   -> Stage 2: {"z"}: 2->1
+//   Resulting in leading sub-dimensions matching targetAxes.
+std::optional<SmallVector<AllToAllStage>> computeStagesForRemainingAxes(
+    TensorShardingAttr currentSharding, RankedTensorType splitType,
+    int64_t splitDim, int64_t numSplitDims, ArrayRef<AxisRefAttr> targetAxes) {
+  int64_t m = static_cast<int64_t>(targetAxes.size());
+  if (m > numSplitDims) {
+    return std::nullopt;
+  }
+  if (targetAxes.empty()) {
+    return SmallVector<AllToAllStage>{};
+  }
+
+  MLIRContext* ctx = currentSharding.getContext();
+
+  // Each decomposed sub-dimension holds at most one axis (or null if empty).
+  SmallVector<AxisRefAttr> subDimAxes(numSplitDims, AxisRefAttr{});
+  for (int64_t i = 0; i < numSplitDims; ++i) {
+    ArrayRef<AxisRefAttr> axes =
+        currentSharding.getDimSharding(splitDim + i).getAxes();
+    if (!axes.empty()) {
+      subDimAxes[i] = axes.front();
+    }
+  }
+
+  SmallVector<AllToAllStage> stages;
+
+  // Move remaining axes into leading sub-dimensions until they match
+  // targetAxes.
+  while (!matchesTargetAxes(subDimAxes, targetAxes)) {
+    std::optional<std::pair<int64_t, int64_t>> move =
+        findAvailableAxisMove(subDimAxes, targetAxes);
+    if (!move) {
+      // Aborts the pattern rewrite and preserves collective_permute if
+      // remaining axes cannot be placed due to cyclic dependencies.
+      return std::nullopt;
+    }
+
+    auto [srcIdx, tgtIdx] = *move;
+    auto param = AllToAllParamAttr::get(ctx, {subDimAxes[srcIdx]},
+                                        splitDim + srcIdx, splitDim + tgtIdx);
+    stages.push_back(computeAllToAllStage(
+        currentSharding, splitType, AllToAllParamListAttr::get(ctx, {param})));
+    currentSharding = stages.back().outSharding;
+
+    subDimAxes[tgtIdx] = subDimAxes[srcIdx];
+    subDimAxes[srcIdx] = AxisRefAttr{};
+  }
+
+  return stages;
 }
 
 }  // namespace
@@ -433,9 +526,10 @@ bool isChainOptimizable(const AllToAllChain& chain, int64_t splitDim,
   auto [inAxesPerDim, cpAxesPerDim] =
       getDecomposedAxesPerDim(inSharding, cpOutSharding, mesh);
 
+  SmallVector<AxisRefAttr> inAxes = llvm::to_vector(inAxesPerDim[splitDim]);
+  SmallVector<AxisRefAttr> cpAxes = llvm::to_vector(cpAxesPerDim[splitDim]);
   SmallVector<AxisRefAttr> communicatedAxes = getCommunicatedAxes(chain);
-  return arePermutedAxesCommunicated(inAxesPerDim[splitDim],
-                                     cpAxesPerDim[splitDim], communicatedAxes);
+  return communicatesAnyPermutedAxis(inAxes, cpAxes, communicatedAxes);
 }
 
 std::optional<AllToAllRewritePlan> computeRewritePlan(
@@ -471,6 +565,16 @@ std::optional<AllToAllRewritePlan> computeRewritePlan(
 
   auto outputType = cast<RankedTensorType>(terminalOp.getType());
   TensorShardingAttr outputSharding = terminalOp.getOutSharding();
+  ArrayRef<AxisRefAttr> targetAxes =
+      outputSharding.getDimSharding(splitDim).getAxes();
+  std::optional<SmallVector<AllToAllStage>> remainingStages =
+      computeStagesForRemainingAxes(a2aStages.back().outSharding,
+                                    decomposed->type, splitDim,
+                                    decomposed->numSplitDims, targetAxes);
+  if (!remainingStages) {
+    return std::nullopt;
+  }
+  a2aStages.append(remainingStages->begin(), remainingStages->end());
 
   // Validates sharding equivalence across the final reshape.
   if (!isShardingEquivalentAcrossReshapes(
