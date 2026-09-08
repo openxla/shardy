@@ -369,15 +369,6 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
   return maxChannelId + 1;
 }
 
-bool hasSubAxis(ArrayRef<AxisRefAttr> axes) {
-  for (AxisRefAttr axis : axes) {
-    if (axis.getSubAxisInfo()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
 Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
                              OpBuilder& rewriter) {
@@ -393,11 +384,10 @@ Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
 Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
                            Attribute meshOrRef, bool enableRGV3,
                            OpBuilder& rewriter) {
-  return (enableRGV3 && !hasSubAxis(axes))
-             ? getReplicaGroupsV3(axes, meshOrRef, rewriter)
-             : getReplicaGroups(
-                   AxisRefListAttr::get(rewriter.getContext(), axes),
-                   mesh, rewriter);
+  return enableRGV3 ? getReplicaGroupsV3(axes, meshOrRef, rewriter)
+                    : getReplicaGroups(
+                          AxisRefListAttr::get(rewriter.getContext(), axes),
+                          mesh, rewriter);
 }
 
 // Returns a pair containing the replica groups (as an Attribute) and the
@@ -405,7 +395,7 @@ Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
 std::pair<Attribute, int64_t> getReplicaGroupsAndSize(
     ArrayRef<AxisRefAttr> axes, MeshAttr mesh, Attribute meshOrRef,
     bool enableRGV3, OpBuilder& rewriter) {
-  if (enableRGV3 && !hasSubAxis(axes)) {
+  if (enableRGV3) {
     Attribute replicaGroups = getReplicaGroupsV3(axes, meshOrRef, rewriter);
     // Group size is the product of the sizes of the sharding axes.
     int64_t groupSize = getTotalAxesSize(axes, mesh);
@@ -2887,6 +2877,5 @@ struct ConvertGlobalToLocalPass
 };
 
 }  // namespace
-
 }  // namespace sdy
 }  // namespace mlir

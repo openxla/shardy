@@ -35,7 +35,8 @@ func.func @one_dim_sharded(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.shardin
   -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x", "y":(2)2}, {}]>}) {
   // CHECK: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[ARG0]]) <{
   // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>
-  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7]]>
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 1], [2, 3], [4, 5], [6, 7]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>]>
   // CHECK-SAME: scatter_dimension = 0 : i64
   // CHECK-SAME: use_global_device_ids
   // CHECK-SAME: }> ({
@@ -57,7 +58,7 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // AR-DS-NEXT: %[[ALL_REDUCE:.*]] = "stablehlo.all_reduce"(%[[ARG0]]) <{
   // AR-DS-SAME: channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>
   // AR-DS-V1-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]>
-  // AR-DS-V3-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]>
+  // AR-DS-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>, #stablehlo.axis_ref<name = "z">, #stablehlo.axis_ref<name = "x">]>
   // AR-DS-SAME: use_global_device_ids
   // AR-DS-SAME: }> ({
   // AR-DS-NEXT: ^bb0(%[[RS_ARG1:.*]]: tensor<f32>, %[[RS_ARG2:.*]]: tensor<f32>):
@@ -89,7 +90,7 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // COMBINED-NEXT: %[[RS:.*]] = "stablehlo.reduce_scatter"(%[[RESHAPE1]]) <{
   // COMBINED-SAME:   channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>,
   // COMBINED-V1-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]>
-  // COMBINED-V3-SAME{LITERAL}: replica_groups = dense<[[0, 8, 1, 9, 2, 10, 3, 11], [4, 12, 5, 13, 6, 14, 7, 15]]>
+  // COMBINED-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y", sub_axis_info = (2)2>, #stablehlo.axis_ref<name = "z">, #stablehlo.axis_ref<name = "x">]>
   // COMBINED-SAME:   scatter_dimension = 0 : i64,
   // COMBINED-SAME:   use_global_device_ids
   // COMBINED-SAME: }> ({
