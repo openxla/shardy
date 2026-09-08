@@ -1288,24 +1288,114 @@ func.func @slice_multiple_hops_shift(
 //===----------------------------------------------------------------------===//
 // stablehlo.dynamic_update_slice tests
 //===----------------------------------------------------------------------===//
+//
+// These use bare `CHECK` rather than the `REPL`/`HALO` prefixes: whether a
+// dynamic-update-slice needs communication does not depend on
+// `enable-halo-exchange`, so every assertion below must hold under *both* RUN
+// lines. The communication-free cases are asserted with an unbroken CHECK-NEXT
+// chain from the label to the return, so no op can be inserted anywhere in
+// those bodies without failing the test.
 
-// Operand is sharded along sliced dimension 0 ("a").
-// resolve-permutation-factors replicates the operand before the slice update
-// and reshards the result back to the original sharding.
-// CHECK-LABEL: func @dynamic_update_slice_sharded_operand
-func.func @dynamic_update_slice_sharded_operand(
+// Communication-free: update size 1 on sliced dim 0 can never straddle a shard
+// boundary, whatever the runtime index, so the operand stays [{"a"}, {}].
+// CHECK-LABEL: func @dynamic_update_slice_comm_free_single_element
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<1x8xf32>, %[[ARG2:.*]]: tensor<i32>, %[[ARG3:.*]]: tensor<i32>)
+// CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[ARG0]], %[[ARG1]], %[[ARG2]], %[[ARG3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+// CHECK-NEXT: return %[[DUS]]
+func.func @dynamic_update_slice_comm_free_single_element(
     %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
     %arg1: tensor<1x8xf32>,
     %arg2: tensor<i32>,
     %arg3: tensor<i32>)
     -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
-  // CHECK:      %[[RESHARD_IN:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<16x8xf32>
-  // CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD_IN]], %arg1, %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x8xf32>, tensor<1x8xf32>, tensor<i32>, tensor<i32>) -> tensor<16x8xf32>
-  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {}]> : tensor<16x8xf32>
-  // CHECK-NEXT: return %[[RESHARD_OUT]]
   %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {
     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>
   } : (tensor<16x8xf32>, tensor<1x8xf32>, tensor<i32>, tensor<i32>)
       -> tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// Communication-free: dim 0 of size 16 sharded on "a"=2 has shard size 8, and
+// the constant slice [2, 4) lies inside shard 0 = [0, 8), so no reshard.
+// CHECK-LABEL: func @dynamic_update_slice_comm_free_constant_index
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<2x8xf32>, %[[ARG2:.*]]: tensor<i32>)
+// CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<2> : tensor<i32>
+// CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[ARG0]], %[[ARG1]], %[[CST]], %[[ARG2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+// CHECK-NEXT: return %[[DUS]]
+func.func @dynamic_update_slice_comm_free_constant_index(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+    %arg1: tensor<2x8xf32>,
+    %arg2: tensor<i32>)
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+  %c2 = stablehlo.constant dense<2> : tensor<i32>
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %c2, %arg2 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>
+  } : (tensor<16x8xf32>, tensor<2x8xf32>, tensor<i32>, tensor<i32>)
+      -> tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// Cross-shard: update size 2 with a dynamic index may straddle the boundary at
+// 8, so the operand is replicated and the result resharded back.
+// CHECK-LABEL: func @dynamic_update_slice_cross_shard_dynamic_index
+func.func @dynamic_update_slice_cross_shard_dynamic_index(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+    %arg1: tensor<2x8xf32>,
+    %arg2: tensor<i32>,
+    %arg3: tensor<i32>)
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+  // CHECK:      %[[RESHARD_IN:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]>
+  // CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD_IN]], %arg1, %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: return %[[RESHARD_OUT]]
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>
+  } : (tensor<16x8xf32>, tensor<2x8xf32>, tensor<i32>, tensor<i32>)
+      -> tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// Mixed: dim 0 is communication-free (update size 1) but dim 1 may straddle, so
+// only the offending axis is dropped. The reshard target must be the PARTIAL
+// [{"a"}, {}]; a bug replicating the whole operand would emit [{}, {}].
+// CHECK-LABEL: func @dynamic_update_slice_multidim_mixed
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}, %[[ARG1:.*]]: tensor<1x2xf32>, %[[ARG2:.*]]: tensor<i32>, %[[ARG3:.*]]: tensor<i32>)
+// CHECK-NEXT: %[[RESHARD_IN:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{"a"}, {}]>
+// CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD_IN]], %[[ARG1]], %[[ARG2]], %[[ARG3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+// CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {"b"}]>
+// CHECK-NEXT: return %[[RESHARD_OUT]]
+func.func @dynamic_update_slice_multidim_mixed(
+    %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+    %arg1: tensor<1x2xf32>,
+    %arg2: tensor<i32>,
+    %arg3: tensor<i32>)
+    -> (tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>
+  } : (tensor<16x16xf32>, tensor<1x2xf32>, tensor<i32>, tensor<i32>)
+      -> tensor<16x16xf32>
+  return %0 : tensor<16x16xf32>
+}
+
+// Dynamic sliced dim: shard boundaries are unknown at compile time, so the
+// operand must be replicated even though the update size is 1. This pins the
+// ordering in isCommunicationFreeDynamicUpdateSliceDim - the dynamic-shape
+// guard has to run before the single-element short-circuit.
+// CHECK-LABEL: func @dynamic_update_slice_dynamic_operand_shape
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<?x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<1x8xf32>, %[[ARG2:.*]]: tensor<i32>, %[[ARG3:.*]]: tensor<i32>)
+// CHECK-NEXT: %[[RESHARD_IN:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]>
+// CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD_IN]], %[[ARG1]], %[[ARG2]], %[[ARG3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+// CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {}]>
+// CHECK-NEXT: return %[[RESHARD_OUT]]
+func.func @dynamic_update_slice_dynamic_operand_shape(
+    %arg0: tensor<?x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+    %arg1: tensor<1x8xf32>,
+    %arg2: tensor<i32>,
+    %arg3: tensor<i32>)
+    -> (tensor<?x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>
+  } : (tensor<?x8xf32>, tensor<1x8xf32>, tensor<i32>, tensor<i32>)
+      -> tensor<?x8xf32>
+  return %0 : tensor<?x8xf32>
 }

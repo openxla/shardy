@@ -33,9 +33,11 @@ limitations under the License.
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -46,6 +48,22 @@ namespace mlir {
 namespace sdy {
 
 namespace {
+
+// Returns the constant integer value of `val` if it is a scalar constant.
+std::optional<int64_t> getConstantInt(Value val) {
+  DenseIntElementsAttr attr;
+  if (matchPattern(val, m_Constant(&attr)) && attr.getNumElements() == 1) {
+    return (*attr.getValues<APInt>().begin()).getSExtValue();
+  }
+  if (auto cOp = val.getDefiningOp<stablehlo::ConstantOp>()) {
+    if (auto intAttr = dyn_cast<DenseIntElementsAttr>(cOp.getValue())) {
+      if (intAttr.getNumElements() == 1) {
+        return (*intAttr.getValues<APInt>().begin()).getSExtValue();
+      }
+    }
+  }
+  return std::nullopt;
+}
 
 // Returns a sorted vector containing all axes in `axesPerDim`.
 SmallVector<AxisRefAttr> getOrderedAxes(ArrayRef<AxisList> axesPerDim) {
@@ -195,6 +213,53 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
     }
   }
   return true;
+}
+
+bool isCommunicationFreeDynamicUpdateSliceDim(
+    int64_t dimIdx, stablehlo::DynamicUpdateSliceOp dusOp,
+    TensorShardingAttr operandSharding, MeshAttr mesh) {
+  ArrayRef<int64_t> operandShape = getTensorShape(dusOp.getOperand());
+  ArrayRef<int64_t> updateShape = getTensorShape(dusOp.getUpdate());
+  // Dynamic shapes cannot be analyzed statically at compile time.
+  // Conservatively falls back to the default behavior.
+  if (ShapedType::isDynamicShape(operandShape) ||
+      ShapedType::isDynamicShape(updateShape)) {
+    return false;
+  }
+
+  int64_t operandDimSize = operandShape[dimIdx];
+  int64_t updateDimSize = updateShape[dimIdx];
+  int64_t shardCount =
+      operandSharding.getDimShardings()[dimIdx].getShardedSize(mesh);
+  // An update along this dimension is communication-free if:
+  // 1. It is not sharded across multiple devices.
+  // 2. It is a full replacement of the dimension, executed in parallel across
+  //    all shards without communication.
+  // 3. It is a single-element slice (updateDimSize == 1), which cannot cross
+  //    shard boundaries and is guaranteed to reside entirely within one shard.
+  if (shardCount <= 1 || operandDimSize == updateDimSize ||
+      updateDimSize == 1) {
+    return true;
+  }
+
+  // If the start index is not a compile-time constant, we cannot statically
+  // determine which shard contains the update slice.
+  std::optional<int64_t> startIndex =
+      getConstantInt(dusOp.getStartIndices()[dimIdx]);
+  if (!startIndex) {
+    return false;
+  }
+
+  // Clamps the starting offset so the updated slice is contained entirely
+  // within the operand shape, adhering to the StableHLO specification.
+  int64_t clamped = std::clamp(*startIndex, static_cast<int64_t>(0),
+                               operandDimSize - updateDimSize);
+  int64_t shardSize = llvm::divideCeil(operandDimSize, shardCount);
+  // Checks if the update region fits completely within a single shard without
+  // crossing a shard boundary.
+  int64_t startShard = clamped / shardSize;
+  int64_t endShard = (clamped + updateDimSize - 1) / shardSize;
+  return startShard == endShard;
 }
 
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh) {
@@ -801,13 +866,13 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
 
   if (isa<FloatType>(elemType)) {
     return padDenseElementsAttrImpl<APFloat>(
-        denseAttr, origType, paddedType,
-        zeroDenseAttr.getSplatValue<APFloat>(), origStrides, paddedStrides);
+        denseAttr, origType, paddedType, zeroDenseAttr.getSplatValue<APFloat>(),
+        origStrides, paddedStrides);
   }
   if (isa<IntegerType>(elemType)) {
-    return padDenseElementsAttrImpl<APInt>(
-        denseAttr, origType, paddedType, zeroDenseAttr.getSplatValue<APInt>(),
-        origStrides, paddedStrides);
+    return padDenseElementsAttrImpl<APInt>(denseAttr, origType, paddedType,
+                                           zeroDenseAttr.getSplatValue<APInt>(),
+                                           origStrides, paddedStrides);
   }
 
   return elementsAttr;

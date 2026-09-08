@@ -105,7 +105,6 @@ void buildReduceComputation(OpWithComputation opWithComputation,
   llvm_unreachable("unknown ReductionOp");
 }
 
-
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;
   int64_t nextChannelId = 0;
@@ -274,7 +273,8 @@ class GenericOpPattern : public ConversionPattern {
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
          !isa<sdy::ReturnOp>(op)) ||
         isa<stablehlo::ConcatenateOp, stablehlo::ConvolutionOp,
-            stablehlo::DotGeneralOp, stablehlo::DotOp, stablehlo::GatherOp,
+            stablehlo::DotGeneralOp, stablehlo::DotOp,
+            stablehlo::DynamicUpdateSliceOp, stablehlo::GatherOp,
             stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ReduceWindowOp,
             stablehlo::ScatterOp, stablehlo::SelectAndScatterOp,
             stablehlo::SliceOp>(op)) {
@@ -633,8 +633,6 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
   bool enableRGV3;
 };
 
-
-
 // Returns a 0-rank i64 tensor containing the global offset for the given shard
 // axes and local shard size.
 Value getDimensionOffset(Location loc, MeshAttr mesh,
@@ -647,13 +645,13 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
 
   Value deviceId = getDeviceId(loc, conversionState, rewriter);
 
-  // Calculate a compile-time offset table for this dimension.
+  // Calculates a compile-time offset table for this dimension.
   SmallVector<int64_t> offsetsTable = llvm::map_to_vector(
       llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
         return getShardIndex(devId, mesh, axes) * shardSize;
       });
 
-  // Create the offset table and look up the value for the current device.
+  // Creates the offset table and look up the value for the current device.
   auto tableConst = stablehlo::ConstantOp::create(
       rewriter, loc,
       DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i64Ty),
@@ -670,7 +668,7 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
                               RankedTensorType localResultType,
                               const ConversionState& conversionState,
                               ConversionPatternRewriter& rewriter) {
-  // Generate start indices for slicing.
+  // Generates start indices for slicing.
   auto indexTy = RankedTensorType::get({}, rewriter.getI64Type());
   SmallVector<Value> startIndices;
   startIndices.reserve(localResultType.getRank());
@@ -1974,7 +1972,8 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
       }
     }
     if (mask) {
-      // Broadcast scalar partitionMask to match the rank of indices-based mask.
+      // Broadcasts scalar partitionMask to match the rank of indices-based
+      // mask.
       partitionMask = stablehlo::BroadcastInDimOp::create(
           rewriter, loc, mask.getType(), partitionMask,
           rewriter.getDenseI64ArrayAttr({}));
@@ -2062,7 +2061,7 @@ class StablehloGatherOpPattern
         op.getIndicesAreSorted());
     copyAttributes(op, result.getDefiningOp(), attrsToExclude);
 
-    // Reduce the mask along the index_vector_dim.
+    // Reduces the mask along the index_vector_dim.
     auto maskType = cast<RankedTensorType>(mask.getType());
     int64_t ivd = dimNumbers.getIndexVectorDim();
     if (maskType.getRank() > 0 && ivd < maskType.getRank()) {
@@ -2086,7 +2085,7 @@ class StablehloGatherOpPattern
       maskType = cast<RankedTensorType>(mask.getType());
     }
 
-    // Broadcast the mask to the result shape. We need to determine the
+    // Broadcasts the mask to the result shape. We need to determine the
     // broadcast dimensions based on the mask rank.
     RankedTensorType resultType = cast<RankedTensorType>(result.getType());
     DenseI64ArrayAttr bcastDims;
@@ -2154,7 +2153,7 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
     auto localType = cast<RankedTensorType>(converter->convertType(op));
     Location loc = op.getLoc();
     int64_t iotaDim = op.getIotaDimension();
-    // Create the local iota.
+    // Creates the local iota.
     Value localIota =
         stablehlo::IotaOp::create(rewriter, loc, localType, iotaDim);
     if (sharding.getDimShardings()[iotaDim].getAxes().empty()) {
@@ -2163,7 +2162,7 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
       return success();
     }
 
-    // Calculate and apply the global offset for this shard.
+    // Calculates and apply the global offset for this shard.
     int64_t shardSize = localType.getDimSize(iotaDim);
     Type convertedOffsetType =
         RankedTensorType::get({}, localType.getElementType());
@@ -2220,7 +2219,7 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     int64_t numDevices = mesh.getTotalSize();
     ArrayRef<int64_t> edgePaddingLow = op.getEdgePaddingLow();
     ArrayRef<int64_t> interiorPaddingAttr = op.getInteriorPadding();
-    // Calculate device-specific local offsets and check for uniformity.
+    // Calculates device-specific local offsets and check for uniformity.
     SmallVector<SmallVector<int64_t>> allOffsets(
         rank, SmallVector<int64_t>(numDevices));
     // Whether all devices have the same offset for a given dimension.
@@ -2513,7 +2512,7 @@ class StablehloScatterOpPattern
       if (!identity) {
         return op.emitError("failed to get scatter reduction identity.");
       }
-      // Generate leader mask: (shardIndex(reductionAxes) == 0).
+      // Generates leader mask: (shardIndex(reductionAxes) == 0).
       int64_t numDevices = mesh.getTotalSize();
       SmallVector<bool> leaderTable = llvm::map_to_vector(
           llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
@@ -2536,7 +2535,7 @@ class StablehloScatterOpPattern
           RankedTensorType::get(localInputType.getShape(),
                                 rewriter.getI1Type()),
           isLeader, rewriter.getDenseI64ArrayAttr({0}));
-      // Broadcast the scalar identity to the shape of the current local input.
+      // Broadcasts the scalar identity to the shape of the current local input.
       Value broadcastIdentity = stablehlo::BroadcastInDimOp::create(
           rewriter, loc, localInputs.front().getType(), identity,
           rewriter.getDenseI64ArrayAttr({}));
@@ -2586,7 +2585,7 @@ class StablehloScatterOpPattern
               .first;
     }
 
-    // Create the local scatter using adjusted indices and the original updates.
+    // Creates the local scatter using adjusted indices and original updates.
     auto localScatter = stablehlo::ScatterOp::create(
         rewriter, loc, converter->convertResultTypes(op.getResults()),
         localInputs, adjustedIndices, adaptor.getUpdates(), dnums,
@@ -2605,6 +2604,257 @@ class StablehloScatterOpPattern
   }
 
  private:
+  ConversionState& conversionState;
+};
+
+class StablehloDynamicUpdateSliceOpPattern
+    : public OpConversionPattern<stablehlo::DynamicUpdateSliceOp> {
+ public:
+  StablehloDynamicUpdateSliceOpPattern(TypeConverter& converter,
+                                       MLIRContext* ctx, ConversionState& state)
+      : OpConversionPattern<stablehlo::DynamicUpdateSliceOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::DynamicUpdateSliceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr operandSharding =
+        converter->getSharding(op.getOperand());
+
+    // If the operand is fully replicated, we can simply fall back to the
+    // generic pattern.
+    if (!operandSharding || isFullyReplicated(operandSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    MeshAttr mesh = operandSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    // Iterates through the tensor dimensions and checks if any sliced dimension
+    // is partitioned. If there is no such dimension, we can fall back to the
+    // generic pattern, as no device communication is required.
+    auto globalOperandType = op.getOperand().getType();
+    auto globalUpdateType = op.getUpdate().getType();
+    auto localOperandType =
+        cast<RankedTensorType>(adaptor.getOperand().getType());
+    int64_t rank = globalOperandType.getRank();
+
+    BitVector isPartitionedSliceDim(rank);
+    for (int64_t i = 0; i < rank; ++i) {
+      bool isSliced =
+          globalOperandType.getDimSize(i) != globalUpdateType.getDimSize(i);
+      bool isPartitioned =
+          !operandSharding.getDimShardings()[i].getAxes().empty();
+      if (isSliced && isPartitioned) {
+        isPartitionedSliceDim.set(i);
+      }
+    }
+
+    if (isPartitionedSliceDim.none()) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    // Otherwise, we assume any tensor dimension that is both partitioned and
+    // sliced to be communication-free, i.e., the update should fit in a single
+    // shard.
+    for (int64_t d : isPartitionedSliceDim.set_bits()) {
+      if (!isCommunicationFreeDynamicUpdateSliceDim(d, op, operandSharding,
+                                                    mesh)) {
+        return op.emitOpError(
+            "partitioned dynamic-update-slice crossing shard boundaries "
+            "requires upstream resharding/replication");
+      }
+    }
+    return rewriteSingleShardUpdate(
+        op, adaptor, globalOperandType, globalUpdateType, localOperandType,
+        operandSharding, mesh, isPartitionedSliceDim, rewriter);
+  }
+
+ private:
+  struct LocalIndexAndOwnership {
+    Value safeShardStartIndex;
+    Value isOwner;
+  };
+
+  static Value createScalarInt(OpBuilder& b, Location loc,
+                               RankedTensorType type, int64_t val) {
+    return stablehlo::ConstantOp::create(
+        b, loc,
+        DenseIntElementsAttr::get(type,
+                                  APInt(type.getElementTypeBitWidth(), val)));
+  }
+
+  // Computes the predicate indicating whether the current shard owns the
+  // update slice in a single dimension:
+  // `(clampedIndex >= offset) && (clampedIndex + sliceDim <= offset +
+  // shardDim)`.
+  Value computeOwnershipPredicate(Location loc, Value clampedIndex,
+                                  Value offset, int64_t sliceDim,
+                                  int64_t shardDim,
+                                  RankedTensorType scalarIndexType,
+                                  ConversionPatternRewriter& rewriter) const {
+    Value sliceSizeConst =
+        createScalarInt(rewriter, loc, scalarIndexType, sliceDim);
+    Value clampedPlusSlice = stablehlo::AddOp::create(
+        rewriter, loc, scalarIndexType, clampedIndex, sliceSizeConst);
+
+    Value shardSizeConst =
+        createScalarInt(rewriter, loc, scalarIndexType, shardDim);
+    Value offsetPlusShard = stablehlo::AddOp::create(
+        rewriter, loc, scalarIndexType, offset, shardSizeConst);
+
+    Value ge = stablehlo::CompareOp::create(rewriter, loc, clampedIndex, offset,
+                                            stablehlo::ComparisonDirection::GE);
+    Value le = stablehlo::CompareOp::create(rewriter, loc, clampedPlusSlice,
+                                            offsetPlusShard,
+                                            stablehlo::ComparisonDirection::LE);
+    return stablehlo::AndOp::create(rewriter, loc, ge, le);
+  }
+
+  // Prepares the in-shard start index and ownership predicate for a single
+  // partitioned dimension.
+  LocalIndexAndOwnership computeLocalIndexAndOwnershipForDim(
+      Location loc, Value rawIndex, int64_t globalDim, int64_t sliceDim,
+      int64_t shardDim, MeshAttr mesh, ArrayRef<AxisRefAttr> axes,
+      ConversionPatternRewriter& rewriter) const {
+    auto rawIndexType = cast<RankedTensorType>(rawIndex.getType());
+    // StableHLO constrains `dynamic_update_slice` start indices to 0-d
+    // tensors (`Variadic<HLO_ScalarIntTensor>` in StablehloOps.td), and
+    // sharding never changes a tensor's rank, so the index is always scalar.
+    SDY_CHECK(rawIndexType.getRank() == 0);
+    Type indexEltTy = rawIndexType.getElementType();
+
+    // Index math is done on scalar (rank-0) tensors.
+    auto scalarIndexType = RankedTensorType::get({}, indexEltTy);
+
+    // Dimension clamping to [0, Dim - SliceDim]:
+    // Clamps the start index to [0, globalDim - sliceDim] per the StableHLO
+    // specification. Clamping globally ensures that out-of-bounds start
+    // indices do not falsely match shard intervals or wrap around.
+    Value zeroConst = createScalarInt(rewriter, loc, scalarIndexType, 0);
+    Value maxConst =
+        createScalarInt(rewriter, loc, scalarIndexType, globalDim - sliceDim);
+    Value clampedIndex = stablehlo::ClampOp::create(
+        rewriter, loc, scalarIndexType, zeroConst, rawIndex, maxConst);
+
+    // Shard offset subtraction and type alignment:
+    // Retrieves the current device's shard offset Od (as i64) and converts it
+    // to the start index element type (e.g. i32).
+    Value offsetI64 = getDimensionOffset(loc, mesh, axes, shardDim,
+                                         conversionState, rewriter);
+    Value offset =
+        stablehlo::ConvertOp::create(rewriter, loc, scalarIndexType, offsetI64);
+
+    Value isOwner =
+        computeOwnershipPredicate(loc, clampedIndex, offset, sliceDim, shardDim,
+                                  scalarIndexType, rewriter);
+    // Local index calculation and out-of-bounds guard:
+    // Computes `clampedIndex - offset` for the local shard coordinate. On
+    // non-owning shards, `clampedIndex - offset` could be negative or exceed
+    // shardDim; select `zeroConst` as a dummy safe index to prevent
+    // out-of-bounds access before the non-owning shards are masked out.
+    Value localStartIndex = stablehlo::SubtractOp::create(
+        rewriter, loc, scalarIndexType, clampedIndex, offset);
+    Value safeShardStartIndex = stablehlo::SelectOp::create(
+        rewriter, loc, scalarIndexType, isOwner, localStartIndex, zeroConst);
+
+    return {safeShardStartIndex, isOwner};
+  }
+
+  // Masks output with ownership predicates:
+  // `select(broadcast(owns_all_dims), updatedOperand, originalOperand)`.
+  // The single shard that owns the update receives the updated slice result,
+  // while non-owning shards have their updates masked out and retain their
+  // original operand shard unmodified.
+  static Value maskNonOwningShards(Location loc, Value updatedOperand,
+                                   Value originalOperand,
+                                   ArrayRef<Value> predicates,
+                                   ConversionPatternRewriter& rewriter) {
+    SDY_CHECK(!predicates.empty());
+
+    // Combines all dimension ownership predicates into a single ownership mask:
+    // `ownsAllDims = and(pred_0, pred_1, ...)`.
+    Value ownsAllDims = predicates.front();
+    for (size_t i = 1; i < predicates.size(); ++i) {
+      ownsAllDims =
+          stablehlo::AndOp::create(rewriter, loc, ownsAllDims, predicates[i]);
+    }
+
+    // Masks output:
+    // `select(broadcast(owns_all_dims), updatedOperand, originalOperand)`.
+    // The single shard that owns the update receives the updated slice result,
+    // while non-owning shards have their updates masked out and retain their
+    // original operand shard unmodified.
+    auto operandType = cast<RankedTensorType>(originalOperand.getType());
+    auto maskType =
+        RankedTensorType::get(operandType.getShape(), rewriter.getI1Type());
+    Value bcastMask = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc, maskType, ownsAllDims,
+        rewriter.getDenseI64ArrayAttr({}));
+    return stablehlo::SelectOp::create(rewriter, loc, bcastMask, updatedOperand,
+                                       originalOperand);
+  }
+
+  // Rewrites DynamicUpdateSlice when all updates fit within a single shard.
+  // The dynamic-update-slice executes on the single shard that owns the update,
+  // while non-owning shards run with safe dummy indices and have their updates
+  // masked out by `select`.
+  LogicalResult rewriteSingleShardUpdate(
+      stablehlo::DynamicUpdateSliceOp op, OpAdaptor adaptor,
+      RankedTensorType globalOperandType, RankedTensorType globalUpdateType,
+      RankedTensorType localOperandType, TensorShardingAttr operandSharding,
+      MeshAttr mesh, const BitVector& isPartitionedSliceDim,
+      ConversionPatternRewriter& rewriter) const {
+    Location loc = op.getLoc();
+    int64_t rank = globalOperandType.getRank();
+    SmallVector<Value> inShardStartIndices;
+    inShardStartIndices.reserve(rank);
+    SmallVector<Value> ownershipPredicates;
+
+    // For each dimension, computes the local start index and ownership
+    // predicate.
+    for (int64_t d = 0; d < rank; ++d) {
+      Value rawIndex = adaptor.getStartIndices()[d];
+      if (!isPartitionedSliceDim.test(d)) {
+        inShardStartIndices.push_back(rawIndex);
+        continue;
+      }
+
+      int64_t globalDim = globalOperandType.getDimSize(d);
+      int64_t sliceDim = globalUpdateType.getDimSize(d);
+      int64_t shardDim = localOperandType.getDimSize(d);
+      ArrayRef<AxisRefAttr> axes =
+          operandSharding.getDimShardings()[d].getAxes();
+
+      LocalIndexAndOwnership dimInfo = computeLocalIndexAndOwnershipForDim(
+          loc, rawIndex, globalDim, sliceDim, shardDim, mesh, axes, rewriter);
+      inShardStartIndices.push_back(dimInfo.safeShardStartIndex);
+      ownershipPredicates.push_back(dimInfo.isOwner);
+    }
+
+    // Emits dynamic_update_slice with adjusted in-shard start indices.
+    // The dynamic-update-slice executes on the single shard that owns the
+    // update, while non-owning shards run with safe dummy indices and have
+    // their updates masked out by `select`.
+    Value updatedOperand = stablehlo::DynamicUpdateSliceOp::create(
+        rewriter, loc, localOperandType, adaptor.getOperand(),
+        adaptor.getUpdate(), inShardStartIndices);
+
+    Value result =
+        maskNonOwningShards(loc, updatedOperand, adaptor.getOperand(),
+                            ownershipPredicates, rewriter);
+
+    rewriter.replaceOp(op, result);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
   ConversionState& conversionState;
 };
 
@@ -2673,7 +2923,7 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
       }
     }
 
-    // Generate a local slice.
+    // Generates a local slice.
     rewriter.replaceOp(
         op, stablehlo::SliceOp::create(
                 rewriter, op.getLoc(),
@@ -2849,8 +3099,8 @@ struct ConvertGlobalToLocalPass
                  StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
                  StablehloScatterOpPattern,
                  StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
-                 StablehloSliceOpPattern>(typeConverter, &getContext(),
-                                          conversionState);
+                 StablehloSliceOpPattern, StablehloDynamicUpdateSliceOpPattern>(
+        typeConverter, &getContext(), conversionState);
     patterns.add<AllReduceOpPattern, AllToAllOpPattern>(
         typeConverter, &getContext(), conversionState, enableRGV3);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
