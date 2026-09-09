@@ -49,7 +49,7 @@ namespace sdy {
 
 namespace {
 
-// Returns the single device ID if sharding is placed on a maximal mesh.
+// Returns the single device ID if sharding is placed on a single-device mesh.
 std::optional<int64_t> getSingleDeviceId(TensorShardingAttr sharding,
                                          const SymbolTable& symbolTable) {
   if (!isSingleDeviceSharding(sharding, symbolTable)) {

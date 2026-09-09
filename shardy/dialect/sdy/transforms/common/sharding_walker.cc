@@ -88,17 +88,17 @@ void processShardings(
   if (shardings.empty()) {
     return;
   }
-  // To handle the case where an op has a maximal sharding but returns no,
-  // values, we create a null value to pass to the callback. Note we need to
+  // To handle the case where an op has a single-device sharding but returns
+  // no values, we create a null value to pass to the callback. Note we need to
   // keep a stack variable of the value since `values` is a ValueRange which
   // only holds a reference.
   // TODO(b/391545244): do something smarter than sticking a null `Value` into
   // the callback. Not an issue now but can be in the future.
-  Value emptyMaximalValue;
+  Value emptySingleDeviceValue;
   if (values.empty()) {
-    // This should be a single maximal sharding.
+    // This should be a single-device sharding.
     assert(shardings.size() == 1);
-    values = emptyMaximalValue;
+    values = emptySingleDeviceValue;
   }
 
   if (!transformShardings) {

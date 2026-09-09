@@ -256,7 +256,7 @@ stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
 MeshOp getGlobalMeshOp(ModuleOp moduleOp) {
   for (MeshOp meshOp : moduleOp.getOps<MeshOp>()) {
     MeshAttr mesh = meshOp.getMesh();
-    if (!mesh.isMaximal() && !mesh.getAxes().empty()) {
+    if (!mesh.isSingleDevice() && !mesh.getAxes().empty()) {
       return meshOp;
     }
   }
@@ -395,7 +395,7 @@ FlatSymbolRefAttr getOrCreateMeshSymbol(Location loc, ModuleOp module,
   if (!meshAttr) {
     return nullptr;
   }
-  if (!meshAttr.isMaximal()) {
+  if (!meshAttr.isSingleDevice()) {
     if (MeshOp globalMeshOp = getGlobalMeshOp(module)) {
       if (globalMeshOp.getMesh() == meshAttr) {
         return FlatSymbolRefAttr::get(module.getContext(),

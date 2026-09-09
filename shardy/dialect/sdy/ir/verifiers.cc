@@ -272,16 +272,16 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
     // We can assume the sharding has a mesh symbol name.
     return emitError("unknown mesh: ") << shardingAttr.getMeshSymName();
   }
-  if (mesh.isMaximal() || (!type && shardingAttr.isFullyReplicated())) {
-    // A maximal sharding says that this op should be executed on a single
+  if (mesh.isSingleDevice() || (!type && shardingAttr.isFullyReplicated())) {
+    // A single-device sharding says that this op should be executed on a single
     // device. Skip checking against the type of the op. Just make sure there
     // are no dimension shardings and replicated axes.
     if (shardingAttr.getRank() != 0 ||
         !shardingAttr.getReplicatedAxes().empty() ||
         !shardingAttr.getUnreducedAxes().empty()) {
       return emitError(
-          "a maximal sharding can only have a sharding with rank 0 and no "
-          "replicated or unreduced axes.");
+          "a single-device sharding can only have a sharding with rank 0 and "
+          "no replicated or unreduced axes.");
     }
     return success();
   }
@@ -453,7 +453,7 @@ LogicalResult verifyTensorShardingPerValueAttr(
   if (types.empty() && shardingsPerValue.size() == 1) {
     TensorShardingAttr firstSharding = shardingsPerValue.front();
     MeshAttr mesh = getMeshAttr(firstSharding);
-    if ((mesh && mesh.isMaximal()) || firstSharding.isFullyReplicated()) {
+    if ((mesh && mesh.isSingleDevice()) || firstSharding.isFullyReplicated()) {
       return verifyTensorShardingAttr(
           firstSharding, Type(), op, mesh,
           getEmitValueInRangeErrorFn(emitError, types.size(), /*index=*/0));
@@ -737,7 +737,7 @@ LogicalResult MeshAttr::verify(
              << "axes is empty and device_ids has more than one element";
     }
     // If `deviceIds.size()` is 0, this is an empty mesh.
-    // If `deviceIds.size()` is 1, this is a maximal mesh.
+    // If `deviceIds.size()` is 1, this is a single-device mesh.
     return success();
   }
 
