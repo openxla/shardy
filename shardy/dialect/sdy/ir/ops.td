@@ -31,7 +31,9 @@ include "shardy/dialect/sdy/ir/op_interface.td"
 class Sdy_Op<string mnemonic, list<Trait> traits = []> :
    Op<Sdy_Dialect, mnemonic, traits>;
 
-def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
+def Sdy_MeshOp : Sdy_Op<"mesh", [
+    SymbolName, Symbol, HasParent<"ModuleOp">
+]> {
   let summary = "Named mesh";
   let description = [{
     Defines a new named mesh. All meshes in a module must have the same number
@@ -42,10 +44,36 @@ def Sdy_MeshOp : Sdy_Op<"mesh", [Symbol, HasParent<"ModuleOp">]> {
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    Sdy_Mesh:$mesh);
+    Sdy_Mesh:$mesh
+  );
 
   let assemblyFormat = "$sym_name `=` $mesh attr-dict";
   let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::SymbolTable::Visibility getVisibility() {
+      auto visibility = (*this)->getAttrOfType<::mlir::StringAttr>(
+          ::mlir::SymbolOpInterface::getDefaultVisibilityAttrName());
+      if (!visibility || visibility.getValue() == "public")
+        return ::mlir::SymbolTable::Visibility::Public;
+      if (visibility.getValue() == "private")
+        return ::mlir::SymbolTable::Visibility::Private;
+      return ::mlir::SymbolTable::Visibility::Nested;
+    }
+    void setVisibility(::mlir::SymbolTable::Visibility visibility) {
+      if (visibility == ::mlir::SymbolTable::Visibility::Public) {
+        (*this)->removeAttr(
+            ::mlir::SymbolOpInterface::getDefaultVisibilityAttrName());
+        return;
+      }
+      ::llvm::StringRef value =
+          visibility == ::mlir::SymbolTable::Visibility::Private ? "private"
+                                                                 : "nested";
+      (*this)->setAttr(
+          ::mlir::SymbolOpInterface::getDefaultVisibilityAttrName(),
+          ::mlir::StringAttr::get((*this)->getContext(), value));
+    }
+  }];
 }
 
 def Sdy_ShardingConstraintOp : Sdy_Op<"sharding_constraint",
