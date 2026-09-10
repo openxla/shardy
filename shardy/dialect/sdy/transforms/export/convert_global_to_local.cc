@@ -370,11 +370,15 @@ int64_t getNextChannelId(ModuleOp moduleOp) {
 }
 
 // Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
-Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
-                             OpBuilder& rewriter) {
+Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
+                             Attribute meshOrRef, OpBuilder& rewriter) {
   MLIRContext* ctx = rewriter.getContext();
-  SmallVector<Attribute> shloAxes;
+  SmallVector<AxisRefAttr> mergedAxes;
   for (AxisRefAttr axis : axes) {
+    addAxisOrMerge(mergedAxes, axis, mesh);
+  }
+  SmallVector<Attribute> shloAxes;
+  for (AxisRefAttr axis : mergedAxes) {
     shloAxes.push_back(convertAxisRefAttr(axis));
   }
   return mlir::stablehlo::ReplicaGroupMeshAxesAttr::get(
@@ -384,7 +388,7 @@ Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, Attribute meshOrRef,
 Attribute getReplicaGroups(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,
                            Attribute meshOrRef, bool enableRGV3,
                            OpBuilder& rewriter) {
-  return enableRGV3 ? getReplicaGroupsV3(axes, meshOrRef, rewriter)
+  return enableRGV3 ? getReplicaGroupsV3(axes, mesh, meshOrRef, rewriter)
                     : getReplicaGroups(
                           AxisRefListAttr::get(rewriter.getContext(), axes),
                           mesh, rewriter);
@@ -396,7 +400,8 @@ std::pair<Attribute, int64_t> getReplicaGroupsAndSize(
     ArrayRef<AxisRefAttr> axes, MeshAttr mesh, Attribute meshOrRef,
     bool enableRGV3, OpBuilder& rewriter) {
   if (enableRGV3) {
-    Attribute replicaGroups = getReplicaGroupsV3(axes, meshOrRef, rewriter);
+    Attribute replicaGroups =
+        getReplicaGroupsV3(axes, mesh, meshOrRef, rewriter);
     // Group size is the product of the sizes of the sharding axes.
     int64_t groupSize = getTotalAxesSize(axes, mesh);
     return {replicaGroups, groupSize};

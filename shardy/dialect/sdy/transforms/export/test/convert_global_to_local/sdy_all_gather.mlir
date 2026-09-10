@@ -153,3 +153,24 @@ func.func @two_dims_yx(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@m
   // CHECK: return %[[RESULT]] : tensor<4x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func @two_dims_merge_adjacent_sub_axes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {"y":(2)2}]>})
+// CHECK-SAME: -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>})
+func.func @two_dims_merge_adjacent_sub_axes(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{"y":(1)2}, {"y":(2)2}]>})
+  -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4_2, [{}, {}]>}){
+
+  // --- Combined Dimensions All-Gather Strategy (per-dim-all-gather=false) ---
+  // COMBINED: %[[RESHAPE1:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<4x8xf32>) -> tensor<1x4x8xf32>
+  // COMBINED: %[[GATHER:.*]] = "stablehlo.all_gather"(%[[RESHAPE1]]) <{
+  // COMBINED-SAME: all_gather_dim = 0 : i64,
+  // COMBINED-SAME: channel_handle = #stablehlo.channel_handle<handle = 7, type = 1>,
+  // COMBINED-V1-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7], [8, 10, 12, 14], [9, 11, 13, 15]]>
+  // COMBINED-V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4_2, axes = [#stablehlo.axis_ref<name = "y">]>
+  // COMBINED-SAME: }> : (tensor<1x4x8xf32>) -> tensor<4x4x8xf32>
+
+  %0 = sdy.all_gather[{"y":(1)2}, {"y":(2)2}] %arg0 out_sharding = <@mesh_2_4_2, [{}, {}]> : tensor<8x16xf32>
+
+  return %0 : tensor<8x16xf32>
+}
+
