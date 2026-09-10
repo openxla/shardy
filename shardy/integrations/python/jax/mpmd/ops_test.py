@@ -276,6 +276,28 @@ class CallOpTest(absltest.TestCase):
     ys = f(ones, twos)
     np.testing.assert_array_equal(xs, ys)
 
+  def test_call_with_hijax(self):
+    x = jnp.ones((2, 3), dtype=jnp.float32)
+
+    def f(arr):
+      return square(arr)
+
+    @jax.jit
+    def test_fn(arr):
+      return ops.call(f)(arr)
+
+    res = test_fn(x)
+    np.testing.assert_array_equal(res, x**2)
+
+    traced = test_fn.trace(x)
+    self.assertTrue(
+        traced.jaxpr.is_high, 'Initial jaxpr should contain hi-primitives'
+    )
+    lojaxpr = traced.lojax.jaxpr
+    self.assertFalse(
+        lojaxpr.is_high, 'Lowered jaxpr should not contain hi-primitives'
+    )
+
 
 class BroadcastTest(absltest.TestCase):
 

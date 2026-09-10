@@ -585,6 +585,25 @@ def _register_call_primitive():
   pe.dce_rules[primitive] = pe.dce_jaxpr_closed_call_rule
   primitive.def_effectful_abstract_eval(_call_abstract_eval)
 
+  # TODO(mattjj): rely on generic implementation
+  def _call_to_lojax(*hi_args, call_jaxpr, **params):
+    lo_jaxpr = pe.lower_jaxpr2(call_jaxpr)
+    # pylint: disable=g-complex-comprehension
+    lo_args = [
+        lo_val
+        for aval, x in zip(call_jaxpr.in_avals, hi_args)
+        for lo_val in aval.lower_val(x)
+    ]
+    # pylint: enable=g-complex-comprehension
+    lo_outs = primitive.bind(*lo_args, call_jaxpr=lo_jaxpr, **params)
+    lo_outs_ = iter(lo_outs)
+    return [
+        t.raise_val(*it.islice(lo_outs_, len(t.lo_ty())))
+        for t in call_jaxpr.out_avals
+    ]
+
+  primitive.to_lojax = _call_to_lojax
+
   def _call_jvp_rule(
       primals,
       tangents,
