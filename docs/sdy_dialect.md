@@ -566,7 +566,7 @@ of devices (except for meshes with a single device_id).
 The mesh is a `Symbol` operation that appears in the module's
 `SymbolTable` and can be referenced by its `name`.
 
-Traits: `HasParent<ModuleOp>`
+Traits: `HasParent<ModuleOp>`, `SymbolName`
 
 Interfaces: `Symbol`
 
