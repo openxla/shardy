@@ -149,3 +149,41 @@ func.func private @bar(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   "test.terminator"() : () -> ()
 }
 
+// -----
+
+// test: main func result sharding is propagated from return operand.
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @main
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+// test: main func result sharding is preserved when already present.
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @main
+// CHECK-SAME:  -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+func.func @main(%arg0: tensor<8xf32>) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+// test: single-device (maximal) sharding on terminator operand is not propagated to func results.
+sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
+
+// CHECK-LABEL: func @main
+// CHECK-SAME:  -> tensor<8xf32> {
+func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+
+

@@ -152,8 +152,8 @@ unwrapped global instructions.
 
 _Propagate shardings from the func terminator to func results._
 
-Copies the shardings of func terminator values to the corresponding `func.func` results,
-except for the main func.
+Copies the shardings of func terminator values to the corresponding `func.func`
+results, preserving existing shardings on the main function.
 
 ### `-sdy-remove-all-gather-reduce-scatter-for-cmv1`
 

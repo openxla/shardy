@@ -35,11 +35,14 @@ namespace sdy {
 namespace {
 
 void setFuncResultShardingOrClear(func::FuncOp funcOp,
-                                  const OpOperand& opOperand) {
+                                  const OpOperand& opOperand,
+                                  const SymbolTable& symbolTable) {
   int64_t resNum = opOperand.getOperandNumber();
   if (auto sharding = getSharding(opOperand.get())) {
-    setFuncResultSharding(funcOp, resNum, sharding);
-    return;
+    if (!isSingleDeviceSharding(sharding, symbolTable)) {
+      setFuncResultSharding(funcOp, resNum, sharding);
+      return;
+    }
   }
   funcOp.removeResultAttr(resNum, kShardingAttr);
 }
@@ -55,14 +58,15 @@ struct PropagateToFuncResultsPass
     func::FuncOp mainFuncOp =
         getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true);
     for (func::FuncOp funcOp : moduleOp.getOps<func::FuncOp>()) {
-      if (funcOp == mainFuncOp) {
-        continue;
-      }
       auto returnOp =
           dyn_cast<func::ReturnOp>(funcOp.getBody().front().getTerminator());
       if (!returnOp) continue;
       for (const OpOperand& opOperand : returnOp->getOpOperands()) {
-        setFuncResultShardingOrClear(funcOp, opOperand);
+        int64_t resNum = opOperand.getOperandNumber();
+        if (funcOp == mainFuncOp && getFuncResultSharding(funcOp, resNum)) {
+          continue;
+        }
+        setFuncResultShardingOrClear(funcOp, opOperand, symbolTable);
       }
     }
   }

@@ -215,7 +215,7 @@ sdy.mesh @mesh = <["a"=2, "b"=2]>
 // CHECK-LABEL: func @manual_computation_with_tokens
 // CHECK-SAME:      %arg0: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>},
 // CHECK-SAME:      %arg1: tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>})
-// CHECK-SAME:      -> (!stablehlo.token, tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
+// CHECK-SAME:      -> (!stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}, tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
 func.func @manual_computation_with_tokens(
     %arg0: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>},
     %arg1: tensor<4x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>}
