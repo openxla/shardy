@@ -576,6 +576,17 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
     if (updateTensorShardings.updateOperands.any() ||
         updateTensorShardings.updateResults.any()) {
       if (auto reshapeOp = dyn_cast<stablehlo::ReshapeOp>(op)) {
+        // Preserve non-divisible sharding when equivalent across reshape so
+        // that sdy-resolve-permutation-factors can perform HALO exchange
+        // instead of stripping overflow axes below.
+        if (!inShardings.empty() && !outShardings.empty() &&
+            isShardingEquivalentAcrossReshapes(
+                inShardings[0], reshapeOp.getOperand().getType(),
+                outShardings[0], reshapeOp.getType(), reshapeOp,
+                /*allowNonDivisible=*/true)) {
+          return shardingProjection.getGreatestCommonPrefixAxes(
+              shardingRule.getNumFactors());
+        }
         return processReshapeWithOverflowAxes(reshapeOp, shardingProjection,
                                               outShardings, rewriter,
                                               shardingRule, meshOp);
