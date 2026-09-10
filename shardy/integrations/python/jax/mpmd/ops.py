@@ -357,6 +357,7 @@ def _register_named_computation_primitive():
       primitive,
       name='named_computation',
       transpose_rule=custom_fancy_transpose,
+      inline_jax_late=False,
   )
 
   # Allows JAX to remove unused_args from the primitive when
