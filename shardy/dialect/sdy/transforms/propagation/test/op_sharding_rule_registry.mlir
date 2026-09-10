@@ -721,6 +721,13 @@ func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x
   return %0 : tensor<30x26x16xf32>
 }
 
+// CHECK-LABEL: func @pad_same_shape_permutation
+func.func @pad_same_shape_permutation(%arg0: tensor<28x16xf32>, %arg1: tensor<f32>) -> tensor<28x16xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [])->([i, j]) {i=28, j=16} permutation={i}>
+  %0 = stablehlo.pad %arg0, %arg1, low = [1, 0], high = [-1, 0], interior = [0, 0] : (tensor<28x16xf32>, tensor<f32>) -> tensor<28x16xf32>
+  return %0 : tensor<28x16xf32>
+}
+
 // CHECK-LABEL: func @reduce_single_result
 func.func @reduce_single_result(%arg0: tensor<2x64x13xf32>) -> tensor<2x13xf32> {
   %0 = stablehlo.constant dense<0.000000e+00> : tensor<f32>
@@ -857,42 +864,42 @@ func.func @reshape_split_and_merge_dims(%arg0: tensor<8x4x5xf32>) -> tensor<2x16
 
 // CHECK-LABEL: func @reshape_swap_dims_no_common_divisor
 func.func @reshape_swap_dims_no_common_divisor(%arg0: tensor<3x2xf32>) -> tensor<2x3xf32> {
-  // CHECK: #sdy.op_sharding_rule<([i, l])->([j, k]) {i=3, j=2, k=3, l=2}>
+  // CHECK: #sdy.op_sharding_rule<([i, k])->([i, j]) {i=3, j=3, k=2} need_replication={j, k} permutation={i}>
   %0 = stablehlo.reshape %arg0 : (tensor<3x2xf32>) -> tensor<2x3xf32>
   return %0 : tensor<2x3xf32>
 }
 
 // CHECK-LABEL: func @reshape_swap_dims_with_common_divisor
 func.func @reshape_swap_dims_with_common_divisor(%arg0: tensor<6x4xf32>) -> tensor<4x6xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ij, mn])->([ik, ln]) {i=2, j=3, k=2, l=3, m=2, n=2}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ij, lm])->([ij, km]) {i=2, j=3, k=3, l=2, m=2} need_replication={k, l} permutation={j}>
   %0 = stablehlo.reshape %arg0 : (tensor<6x4xf32>) -> tensor<4x6xf32>
   return %0 : tensor<4x6xf32>
 }
 
 // CHECK-LABEL: func @reshape_swap_with_dim_before_and_in_between
 func.func @reshape_swap_with_dim_before_and_in_between(%arg0: tensor<5x2x5x3xf32>) -> tensor<5x3x5x2xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l, n])->([i, k, m, o]) {i=5, j=2, k=3, l=5, m=5, n=3, o=2}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k, m])->([i, j, l, n]) {i=5, j=2, k=5, l=5, m=3, n=2} need_replication={k, l, m, n} permutation={j}>
   %0 = stablehlo.reshape %arg0 : (tensor<5x2x5x3xf32>) -> tensor<5x3x5x2xf32>
   return %0 : tensor<5x3x5x2xf32>
 }
 
 // CHECK-LABEL: func @reshape_swap_and_merge
 func.func @reshape_swap_and_merge(%arg0: tensor<2x3x8xf32>) -> tensor<3x4x4xf32> {
-  // CHECK: dy.sharding_rule = #sdy.op_sharding_rule<([i, k, mn])->([j, lm, n]) {i=2, j=3, k=3, l=2, m=2, n=4}>
+  // CHECK: dy.sharding_rule = #sdy.op_sharding_rule<([i, j, lm])->([i, kl, m]) {i=2, j=3, k=2, l=2, m=4} need_replication={j, k} permutation={i}>
   %0 = stablehlo.reshape %arg0 : (tensor<2x3x8xf32>) -> tensor<3x4x4xf32>
   return %0 : tensor<3x4x4xf32>
 }
 
 // CHECK-LABEL: func @reshape_split_and_swap
 func.func @reshape_split_and_swap(%arg0: tensor<3x4x4xf32>) -> tensor<2x3x8xf32> {
-  // CHECK: dy.sharding_rule = #sdy.op_sharding_rule<([i, lm, n])->([j, k, mn]) {i=3, j=2, k=3, l=2, m=2, n=4}>
+  // CHECK: dy.sharding_rule = #sdy.op_sharding_rule<([i, kl, m])->([i, j, lm]) {i=3, j=3, k=2, l=2, m=4} need_replication={j, k} permutation={i}>
   %0 = stablehlo.reshape %arg0 : (tensor<3x4x4xf32>) -> tensor<2x3x8xf32>
   return %0 : tensor<2x3x8xf32>
 }
 
 // CHECK-LABEL: func @reshape_split_swap_and_merge
 func.func @reshape_split_swap_and_merge(%arg0: tensor<4x7x5x8xf32>) -> tensor<14x10x8xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ij, l, n, o])->([ik, mn, o]) {i=2, j=2, k=7, l=7, m=2, n=5, o=8}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k, m, n])->([ij, lm, n]) {i=2, j=2, k=7, l=2, m=5, n=8} need_replication={k, l} permutation={j}>
   %0 = stablehlo.reshape %arg0 : (tensor<4x7x5x8xf32>) -> tensor<14x10x8xf32>
   return %0 : tensor<14x10x8xf32>
 }
