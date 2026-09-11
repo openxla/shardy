@@ -830,39 +830,28 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                                          kNullDim);
         OpShardingRuleBuilder builder(dynamicUpdateSlice);
 
-        bool allIndicesConstant =
-            llvm::all_of(dynamicUpdateSlice.getStartIndices(), [](Value v) {
-              Operation* defOp = v.getDefiningOp();
-              return defOp && (isa<sdy::ConstantOp>(defOp) ||
-                               defOp->hasTrait<OpTrait::ConstantLike>());
-            });
-
         for (auto [dim, dimSizes] :
              llvm::enumerate(llvm::zip_equal(operandShape, updateShape))) {
           auto [operandDimSize, updateDimSize] = dimSizes;
           if (operandDimSize == updateDimSize) {
+            // Non-sliced dimensions are just kPassThrough by default.
             builder.addFactor(dim, operandDimSize);
           } else {
-            // For slicing dimensions, the partitioner replicates the update
-            // and can keep the operand/result sharded. Each device can use
-            // its local indices to update the local shard of the operand.
-            //
-            // Thus, we add a factor for the operand/result slicing
-            // dimension with kPassThrough type. We also add a unique factor
-            // for the update with kNeedReplication type (unless all indices
-            // are constant and we can rely on Enzyme comms opt).
+            // For slicing dimensions, factors for both the operand/result and
+            // the update are marked as kPermutation. This allows the tensors to
+            // stay partitioned for sharding consistency and the partitioner to
+            // implement the partitioned op, such as with Enzyme comm opt or
+            // replicate the tensors.
+
             operandDims[0] = dim;
             operandDims[1] = kNullDim;
-            builder.addFactor(operandDims, dim, operandDimSize);
+            builder.addFactor(operandDims, dim, operandDimSize,
+                              FactorType::kPermutation);
 
             operandDims[0] = kNullDim;
             operandDims[1] = dim;
-            if (!allIndicesConstant) {
-              builder.addFactor(operandDims, kNullDim, updateDimSize,
-                                FactorType::kNeedReplication);
-            } else {
-              builder.addFactor(operandDims, kNullDim, updateDimSize);
-            }
+            builder.addFactor(operandDims, kNullDim, updateDimSize,
+                              FactorType::kPermutation);
           }
         }
         return builder.build();

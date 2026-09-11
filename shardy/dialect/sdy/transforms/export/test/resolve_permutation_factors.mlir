@@ -1284,3 +1284,28 @@ func.func @slice_multiple_hops_shift(
   // CHECK-NEXT: return %[[RS]] : tensor<1x8xi32>
   return %1 : tensor<1x8xi32>
 }
+
+//===----------------------------------------------------------------------===//
+// stablehlo.dynamic_update_slice tests
+//===----------------------------------------------------------------------===//
+
+// Operand is sharded along sliced dimension 0 ("a").
+// resolve-permutation-factors replicates the operand before the slice update
+// and reshards the result back to the original sharding.
+// CHECK-LABEL: func @dynamic_update_slice_sharded_operand
+func.func @dynamic_update_slice_sharded_operand(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+    %arg1: tensor<1x8xf32>,
+    %arg2: tensor<i32>,
+    %arg3: tensor<i32>)
+    -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+  // CHECK:      %[[RESHARD_IN:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD_IN]], %arg1, %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x8xf32>, tensor<1x8xf32>, tensor<i32>, tensor<i32>) -> tensor<16x8xf32>
+  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD_OUT]]
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>
+  } : (tensor<16x8xf32>, tensor<1x8xf32>, tensor<i32>, tensor<i32>)
+      -> tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}

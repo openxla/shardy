@@ -578,18 +578,22 @@ func.func @dynamic_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<i32>, %arg2: t
   return %0 : tensor<32x1x2xf32>
 }
 
+// Slicing dimensions {j, k, l, m} are marked as permutation factors, while
+// the non-sliced dimension {i} is shared across operand, update, and result.
 // CHECK-LABEL: func @dynamic_update_slice
 func.func @dynamic_update_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2xf32>, %arg2: tensor<i32>, %arg3: tensor<i32>, %arg4: tensor<i32>) -> tensor<32x4x8xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, k, m], [], [], [])->([i, j, l]) {i=32, j=4, k=1, l=8, m=2} need_replication={k, m}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, k, m], [], [], [])->([i, j, l]) {i=32, j=4, k=1, l=8, m=2} permutation={j, k, l, m}>
   %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3, %arg4 : (tensor<32x4x8xf32>, tensor<32x1x2xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x4x8xf32>
   return %0 : tensor<32x4x8xf32>
 }
 
+// Constant indices also mark slicing dimensions as permutation factors so that
+// export can replicate them via sdy-resolve-permutation-factors.
 // CHECK-LABEL: func @dynamic_update_slice_constant_indices
 func.func @dynamic_update_slice_constant_indices(%arg0: tensor<32x4x8xf32>, %arg1: tensor<32x1x2xf32>) -> tensor<32x4x8xf32> {
   %0 = stablehlo.constant dense<0> : tensor<i32>
   %1 = sdy.constant dense<0> : tensor<i32>
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, k, m], [], [], [])->([i, j, l]) {i=32, j=4, k=1, l=8, m=2}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l], [i, k, m], [], [], [])->([i, j, l]) {i=32, j=4, k=1, l=8, m=2} permutation={j, k, l, m}>
   %2 = stablehlo.dynamic_update_slice %arg0, %arg1, %0, %0, %1 : (tensor<32x4x8xf32>, tensor<32x1x2xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x4x8xf32>
   return %2 : tensor<32x4x8xf32>
 }
