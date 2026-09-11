@@ -367,7 +367,10 @@ def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors"
       Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
              "Number of replicas (data parallelism).">,
       Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
-             "Number of partitions (model parallelism).">
+             "Number of partitions (model parallelism).">,
+      Option<"rngBitGeneratorUnsafe", "rng-bit-generator-unsafe",
+             "bool", /*default=*/"true",
+             "Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.">
     ];
 }
 
@@ -394,6 +397,9 @@ def PerInstructionPartitioningPass : Pass<"sdy-per-instruction-partitioning", "M
       Option<"replicaCount", "replica-count", "int64_t", /*default=*/"1",
              "Number of replicas (data parallelism).">,
       Option<"partitionCount", "partition-count", "int64_t", /*default=*/"1",
-             "Number of partitions (model parallelism).">
+             "Number of partitions (model parallelism).">,
+      Option<"rngBitGeneratorUnsafe", "rng-bit-generator-unsafe",
+             "bool", /*default=*/"true",
+             "Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.">
     ];
 }

@@ -115,6 +115,12 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
                      "pad', 'selectLow=0, selectHigh=10, func=subroutine')."),
       llvm::cl::init("")};
 
+  Option<bool> rngBitGeneratorUnsafe{
+      *this, "rng-bit-generator-unsafe",
+      llvm::cl::desc("Whether to allow unsafe partitioning of "
+                     "stablehlo.rng_bit_generator."),
+      llvm::cl::init(true)};
+
   Option<bool> keepShardingRules{
       *this, "keep-sharding-rules",
       llvm::cl::desc("Keep sdy.sharding_rule attrs."), llvm::cl::init(false)};

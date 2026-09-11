@@ -310,8 +310,9 @@ class GenericOpPattern : public ConversionPattern {
             stablehlo::DotGeneralOp, stablehlo::DotOp,
             stablehlo::DynamicUpdateSliceOp, stablehlo::GatherOp,
             stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ReduceOp,
-            stablehlo::ReduceWindowOp, stablehlo::ScatterOp,
-            stablehlo::SelectAndScatterOp, stablehlo::SliceOp>(op)) {
+            stablehlo::ReduceWindowOp, stablehlo::RngBitGeneratorOp,
+            stablehlo::ScatterOp, stablehlo::SelectAndScatterOp,
+            stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(
@@ -2644,6 +2645,135 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
   ConversionState& conversionState;
 };
 
+class StablehloRngBitGeneratorOpPattern
+    : public OpConversionPattern<stablehlo::RngBitGeneratorOp> {
+ public:
+  StablehloRngBitGeneratorOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                                    ConversionState& state, bool enableRGV3)
+      : OpConversionPattern<stablehlo::RngBitGeneratorOp>(converter, ctx),
+        conversionState(state),
+        enableRGV3(enableRGV3) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::RngBitGeneratorOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr dataSharding = converter->getSharding(op.getOutput());
+    if (!dataSharding || isFullyReplicated(dataSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    MeshAttr mesh = dataSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    SmallVector<AxisRefAttr> dataAxes;
+    for (DimensionShardingAttr dimSharding : dataSharding.getDimShardings()) {
+      llvm::append_range(dataAxes, dimSharding.getAxes());
+    }
+    SDY_CHECK(!dataAxes.empty());
+
+    Value initialState = adaptor.getInitialState();
+    auto stateType = cast<RankedTensorType>(initialState.getType());
+    Type stateElemTy = stateType.getElementType();
+    SDY_CHECK(stateElemTy.isInteger(32) || stateElemTy.isInteger(64));
+
+    int64_t numDevices = mesh.getTotalSize();
+
+    // Compute per-device tile ordinal hash table.
+    SmallVector<APInt> hashTable;
+    hashTable.reserve(numDevices);
+    unsigned bitWidth = stateElemTy.getIntOrFloatBitWidth();
+    for (int64_t devId = 0; devId < numDevices; ++devId) {
+      int64_t ordinal = getShardIndex(devId, mesh, dataAxes);
+      uint64_t h = static_cast<uint64_t>(ordinal);
+      h ^= h >> 33;
+      h *= 0xff51afd7ed558ccdULL;
+      h ^= h >> 33;
+      h *= 0xc4ceb9fe1a85ec53ULL;
+      h ^= h >> 33;
+      uint64_t val = (bitWidth == 64) ? ((h & 0xFFFFFFFFULL) | (h << 32))
+                                      : (h & 0xFFFFFFFFULL);
+      hashTable.push_back(APInt(bitWidth, val));
+    }
+
+    Location loc = op.getLoc();
+    Value deviceId = getDeviceId(loc, conversionState, rewriter);
+    auto tableConst = stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseIntElementsAttr::get(
+            RankedTensorType::get({numDevices}, stateElemTy), hashTable));
+    Value hashSlice = stablehlo::DynamicSliceOp::create(
+        rewriter, loc, RankedTensorType::get({1}, stateElemTy), tableConst,
+        ValueRange{deviceId}, rewriter.getDenseI64ArrayAttr({1}));
+    Value scalarHash = stablehlo::ReshapeOp::create(
+        rewriter, loc, RankedTensorType::get({}, stateElemTy), hashSlice);
+    Value broadcastHash = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc, stateType, scalarHash,
+        rewriter.getDenseI64ArrayAttr({}));
+    Value adjustedState =
+        stablehlo::AddOp::create(rewriter, loc, initialState, broadcastHash);
+
+    auto localStateType =
+        cast<RankedTensorType>(converter->convertType(op.getOutputState()));
+    auto localDataType =
+        cast<RankedTensorType>(converter->convertType(op.getOutput()));
+    auto localRng = stablehlo::RngBitGeneratorOp::create(
+        rewriter, loc, localStateType, localDataType, op.getRngAlgorithm(),
+        adjustedState);
+
+    Value finalState = localRng.getOutputState();
+    TensorShardingAttr outStateSharding =
+        converter->getSharding(op.getOutputState());
+    SDY_CHECK(!outStateSharding || isFullyReplicated(outStateSharding));
+
+    // Mask non-leader shards (where shard index across dataAxes != 0) to zero
+    // and all-reduce across dataAxes so all partitions receive device 0's
+    // updated output_state.
+    SmallVector<bool> leaderTable = llvm::map_to_vector(
+        llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
+          return getShardIndex(devId, mesh, dataAxes) == 0;
+        });
+    auto leaderTableConst = stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseElementsAttr::get(
+            RankedTensorType::get({numDevices}, rewriter.getI1Type()),
+            leaderTable));
+    Value isLeader = stablehlo::DynamicSliceOp::create(
+        rewriter, loc, RankedTensorType::get({1}, rewriter.getI1Type()),
+        leaderTableConst, ValueRange{deviceId},
+        rewriter.getDenseI64ArrayAttr({1}));
+    isLeader = stablehlo::ReshapeOp::create(
+        rewriter, loc, RankedTensorType::get({}, rewriter.getI1Type()),
+        isLeader);
+    isLeader = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc,
+        RankedTensorType::get(localStateType.getShape(), rewriter.getI1Type()),
+        isLeader, rewriter.getDenseI64ArrayAttr({}));
+
+    Value zeroState = createZeroConstant(rewriter, loc, localStateType);
+    Value maskedState = stablehlo::SelectOp::create(rewriter, loc, isLeader,
+                                                    finalState, zeroState);
+
+    finalState =
+        createAllReduceForUnreducedAxes(loc, ValueRange{maskedState}, dataAxes,
+                                        mesh, dataSharding.getMeshOrRef(),
+                                        enableRGV3, conversionState, rewriter)
+            .front();
+
+    rewriter.replaceOp(op, {finalState, localRng.getOutput()});
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+  bool enableRGV3;
+};
+
 class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
  public:
   StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -3322,8 +3452,9 @@ struct ConvertGlobalToLocalPass
     patterns.add<AllReduceOpPattern, AllToAllOpPattern,
                  StablehloConvolutionOpPattern, StablehloDotGeneralOpPattern,
                  StablehloDotOpPattern, StablehloGatherOpPattern,
-                 StablehloReduceOpPattern, StablehloScatterOpPattern>(
-        typeConverter, &getContext(), conversionState, enableRGV3);
+                 StablehloReduceOpPattern, StablehloRngBitGeneratorOpPattern,
+                 StablehloScatterOpPattern>(typeConverter, &getContext(),
+                                            conversionState, enableRGV3);
     patterns.add<AllGatherOpPattern>(typeConverter, &getContext(),
                                      conversionState, perDimAllGather,
                                      enableRGV3);
