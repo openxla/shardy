@@ -31,6 +31,7 @@ limitations under the License.
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
@@ -126,25 +127,103 @@ class PaddedTypeConverter : public TypeConverter {
       : symbolTable(symbolTable) {
     addConversion([](Type type) { return type; });
 
+    // Maps a ranked tensor value to its divisible padded type based on its
+    // sharding.
     addConversion([&](Value value) -> std::optional<Type> {
       if (auto type = dyn_cast<RankedTensorType>(value.getType())) {
-        return getDivisiblePaddedType(type, getSharding(value), symbolTable);
+        return getDivisiblePaddedType(type, this->getSharding(value),
+                                      symbolTable);
       }
       return std::nullopt;
     });
 
-    auto materialize = [](OpBuilder& b, Type t, ValueRange inputs,
-                          Location loc) -> Value {
-      return UnrealizedConversionCastOp::create(b, loc, t, inputs).getResult(0);
-    };
-    addSourceMaterialization(materialize);
-    addTargetMaterialization(materialize);
+    // Source materialization: converts a converted value (padded type) back to
+    // the original source type (unpadded type) via slicing.
+    addSourceMaterialization([&](OpBuilder& b, Type resultType,
+                                 ValueRange inputs, Location loc) -> Value {
+      if (auto rankedResult = dyn_cast<RankedTensorType>(resultType)) {
+        if (auto rankedInput =
+                dyn_cast<RankedTensorType>(inputs[0].getType())) {
+          if (rankedResult != rankedInput &&
+              rankedResult.getRank() == rankedInput.getRank()) {
+            return createSliceOp(b, loc, rankedResult, inputs[0]);
+          }
+        }
+      }
+      return UnrealizedConversionCastOp::create(b, loc, resultType, inputs)
+          .getResult(0);
+    });
+
+    // Target materialization: converts an original source value (unpadded type)
+    // to the converted target type (padded type) via padding.
+    addTargetMaterialization([&](OpBuilder& b, Type resultType,
+                                 ValueRange inputs, Location loc) -> Value {
+      if (auto rankedResult = dyn_cast<RankedTensorType>(resultType)) {
+        if (auto rankedInput =
+                dyn_cast<RankedTensorType>(inputs[0].getType())) {
+          if (rankedResult != rankedInput &&
+              rankedResult.getRank() == rankedInput.getRank()) {
+            return createPadOp(b, loc, rankedResult, inputs[0]);
+          }
+        }
+      }
+      return UnrealizedConversionCastOp::create(b, loc, resultType, inputs)
+          .getResult(0);
+    });
+  }
+
+  void populateArgShardings(func::FuncOp funcOp) {
+    for (BlockArgument arg : funcOp.getArguments()) {
+      if (auto sharding = funcOp.getArgAttrOfType<TensorShardingAttr>(
+              arg.getArgNumber(), "sdy.sharding")) {
+        argShardings[arg] = sharding;
+      }
+    }
+  }
+
+  // Returns the sharding for `value`.
+  TensorShardingAttr getSharding(Value value) const {
+    if (!value) {
+      return nullptr;
+    }
+    if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+      if (auto funcOp = dyn_cast_or_null<func::FuncOp>(
+              blockArg.getOwner()->getParentOp())) {
+        if (auto sharding = funcOp.getArgAttrOfType<TensorShardingAttr>(
+                blockArg.getArgNumber(), "sdy.sharding")) {
+          return sharding;
+        }
+      }
+      auto it = argShardings.find(blockArg);
+      if (it != argShardings.end()) {
+        return it->second;
+      }
+      return nullptr;
+    }
+    return mlir::sdy::getSharding(value);
+  }
+
+  Type convertArgType(BlockArgument arg) const {
+    if (auto type = dyn_cast<RankedTensorType>(arg.getType())) {
+      return getDivisiblePaddedType(type, getSharding(arg), symbolTable);
+    }
+    return arg.getType();
+  }
+
+  Type convertResultType(func::FuncOp funcOp, int resIdx) const {
+    Type resType = funcOp.getResultTypes()[resIdx];
+    if (auto type = dyn_cast<RankedTensorType>(resType)) {
+      return getDivisiblePaddedType(type, getFuncResultSharding(funcOp, resIdx),
+                                    symbolTable);
+    }
+    return resType;
   }
 
   const SymbolTable& getSymbolTable() const { return symbolTable; }
 
  private:
   const SymbolTable& symbolTable;
+  llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
 
 // Returns true if the operation has custom padding handling implemented in
@@ -461,8 +540,8 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
-         !isa<sdy::ReturnOp, sdy::AllReduceOp, sdy::ShardedToUnreducedOp,
-              sdy::ReplicatedToUnreducedOp>(op)) ||
+         !isa<func::CallOp, func::ReturnOp, sdy::ReturnOp, sdy::AllReduceOp,
+              sdy::ShardedToUnreducedOp, sdy::ReplicatedToUnreducedOp>(op)) ||
         hasCustomPadHandling(op)) {
       return failure();
     }
@@ -471,9 +550,11 @@ class GenericOpPattern : public ConversionPattern {
   }
 };
 
-class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
+class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
  public:
-  using OpConversionPattern::OpConversionPattern;
+  FuncOpSignaturePattern(TypeConverter& converter, MLIRContext* ctx,
+                         PaddingCache& cache)
+      : OpConversionPattern<func::FuncOp>(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       func::FuncOp op, OpAdaptor adaptor,
@@ -482,27 +563,60 @@ class FuncOpPattern : public OpConversionPattern<func::FuncOp> {
         static_cast<const PaddedTypeConverter*>(getTypeConverter());
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
+    if (op.isPublic()) {
+      for (auto [index, arg] : llvm::enumerate(op.getArguments())) {
+        if (getDivisiblePaddedType(arg.getType(), getSharding(arg),
+                                   symbolTable) != arg.getType()) {
+          op.emitOpError() << "argument #" << index
+                           << " has a non-divisible sharding. "
+                           << "Shardy expects function IO to be divisible.";
+          return failure();
+        }
+      }
+      for (int i = 0; i < op.getNumResults(); ++i) {
+        Type resultType = op.getResultTypes()[i];
+        if (getDivisiblePaddedType(resultType, getFuncResultSharding(op, i),
+                                   symbolTable) != resultType) {
+          op.emitOpError() << "result #" << i
+                           << " has a non-divisible sharding. "
+                           << "Shardy expects function IO to be divisible.";
+          return failure();
+        }
+      }
+      return failure();
+    }
+
+    TypeConverter::SignatureConversion signature(op.getNumArguments());
+    SmallVector<Type> origTypes;
     for (auto [index, arg] : llvm::enumerate(op.getArguments())) {
-      if (getDivisiblePaddedType(arg.getType(), getSharding(arg),
-                                 symbolTable) != arg.getType()) {
-        return op.emitOpError()
-               << "argument #" << index << " has a non-divisible sharding. "
-               << "Shardy expects function IO to be divisible.";
-      }
+      origTypes.push_back(arg.getType());
+      signature.addInputs(index, converter->convertArgType(arg));
     }
-
+    SmallVector<Type> newResultTypes;
     for (int i = 0; i < op.getNumResults(); ++i) {
-      Type resultType = op.getResultTypes()[i];
-      if (getDivisiblePaddedType(resultType, getFuncResultSharding(op, i),
-                                 symbolTable) != resultType) {
-        return op.emitOpError()
-               << "result #" << i << " has a non-divisible sharding. "
-               << "Shardy expects function IO to be divisible.";
+      newResultTypes.push_back(converter->convertResultType(op, i));
+    }
+
+    auto newFuncType =
+        rewriter.getFunctionType(signature.getConvertedTypes(), newResultTypes);
+    rewriter.modifyOpInPlace(op, [&] { op.setType(newFuncType); });
+
+    if (failed(rewriter.convertRegionTypes(&op.getBody(), *getTypeConverter(),
+                                           &signature))) {
+      return failure();
+    }
+
+    for (auto [index, arg] : llvm::enumerate(op.getArguments())) {
+      if (arg.getType() != origTypes[index]) {
+        cache.setPadding(arg, kDefaultPaddingValueKind);
       }
     }
 
-    return failure();
+    return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 // Returns the dimension indices of `op` that are gathered across devices and
@@ -560,15 +674,21 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
       }
     }
 
+    auto parentFunc = op->getParentOfType<func::FuncOp>();
+    bool isSubroutine = parentFunc && !parentFunc.isPublic();
+
     SmallVector<Value> replacements;
     replacements.reserve(op->getNumResults());
     SmallVector<int64_t> trimDims = getTrimDims(op);
 
     for (int i = 0; i < op->getNumResults(); ++i) {
       Value res = newOp->getResult(i);
-      Value trimmed =
-          trimOutputForDims(res, op->getResult(i).getType(), trimDims,
-                            getSharding(res), rewriter, paddingKind, cache);
+      Value trimmed = res;
+      if (!isSubroutine) {
+        trimmed =
+            trimOutputForDims(res, op->getResult(i).getType(), trimDims,
+                              getSharding(res), rewriter, paddingKind, cache);
+      }
       replacements.push_back(trimmed);
     }
 
@@ -1017,22 +1137,22 @@ struct PadForDivisibilityPass
 
  protected:
   void runOnOperation() final {
-    // FuncOpPattern enforces that function inputs and outputs are always fully
-    // divisible by sharding requirements. Consequently, padded values never
-    // escape the local function scope. This isolation guarantees the cache can
-    // be stack-allocated per function.
     PaddingCache paddingCache;
-    func::FuncOp funcOp = getOperation();
-    ModuleOp module = funcOp->getParentOfType<ModuleOp>();
-    SymbolTable symbolTable(module);
+    ModuleOp moduleOp = getOperation();
+    SymbolTable symbolTable(moduleOp);
 
     PaddedTypeConverter typeConverter(symbolTable);
+    moduleOp.walk([&](func::FuncOp funcOp) {
+      typeConverter.populateArgShardings(funcOp);
+    });
+
     RewritePatternSet patterns(&getContext());
+    patterns.add<FuncOpSignaturePattern>(typeConverter, &getContext(),
+                                         paddingCache);
     patterns.add<GenericOpPattern, StablehloSliceOpPattern>(typeConverter,
                                                             &getContext());
     patterns.add<StablehloPadOpPattern, StablehloReshapeOpPattern>(
         typeConverter, &getContext());
-    patterns.add<FuncOpPattern>(typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
@@ -1045,15 +1165,59 @@ struct PadForDivisibilityPass
       return getDivisiblePaddedType(type, sharding, symbolTable) == type;
     };
     auto isLegalValue = [&](Value value) {
-      return isLegalType(value.getType(), getSharding(value));
+      return isLegalType(value.getType(), typeConverter.getSharding(value));
     };
 
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
+      if (op.isPublic()) {
+        for (BlockArgument arg : op.getArguments()) {
+          if (!isLegalValue(arg)) return false;
+        }
+        for (int i = 0; i < op.getNumResults(); ++i) {
+          if (!isLegalType(op.getResultTypes()[i],
+                           getFuncResultSharding(op, i))) {
+            return false;
+          }
+        }
+        return true;
+      }
       return llvm::all_of(op.getArguments(), isLegalValue) &&
              llvm::all_of(llvm::seq<int>(0, op.getNumResults()), [&](int i) {
                return isLegalType(op.getResultTypes()[i],
                                   getFuncResultSharding(op, i));
              });
+    });
+    target.addDynamicallyLegalOp<func::ReturnOp>([&](func::ReturnOp op) {
+      auto funcOp = op->getParentOfType<func::FuncOp>();
+      if (!funcOp) {
+        return true;
+      }
+      return op.getOperandTypes() == funcOp.getResultTypes();
+    });
+    target.addDynamicallyLegalOp<func::CallOp>([&](func::CallOp op) {
+      auto callee = symbolTable.lookup<func::FuncOp>(op.getCallee());
+      if (!callee) {
+        return true;
+      }
+      if (op.getNumOperands() != callee.getNumArguments()) {
+        return false;
+      }
+      for (auto [operand, arg] :
+           llvm::zip(op.getOperands(), callee.getArguments())) {
+        if (operand.getType() != typeConverter.convertArgType(arg)) {
+          return false;
+        }
+      }
+      if (op.getNumResults() != callee.getNumResults()) {
+        return false;
+      }
+      for (int i = 0; i < callee.getNumResults(); ++i) {
+        if (op.getResult(i).getType() !=
+            typeConverter.convertResultType(callee, i)) {
+          return false;
+        }
+      }
+      return true;
     });
     target.addDynamicallyLegalDialect<stablehlo::StablehloDialect>(
         [&](Operation* op) {
@@ -1084,7 +1248,7 @@ struct PadForDivisibilityPass
       return true;
     });
 
-    if (failed(applyPartialConversion(funcOp, target, std::move(patterns)))) {
+    if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
       return signalPassFailure();
     }
   }
