@@ -25,3 +25,34 @@ func.func @has_backward_dep_warning(%arg0: !mesh_1_tensor) -> !mesh_1_tensor att
   %4 = mpmd.fragment_call<mesh="m1", origin=["f1"(0)]> @fragment_m1(%3) : (!mesh_1_tensor) -> !mesh_1_tensor
   func.return %4 : !mesh_1_tensor
 }
+
+// -----
+
+!mesh_1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+!mesh_2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+
+func.func @fragment_m1_multi(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32>
+    attributes {mesh_shape = #sdy.mesh<["x"=2]>} {
+  %0 = stablehlo.add %arg0, %arg1 : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+func.func @fragment_m2(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32>
+    attributes {mesh_shape = #sdy.mesh<["x"=2]>} {
+  %0 = stablehlo.add %arg0, %arg0 : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+// Tests that multiple operands from the same producer fragment to the same
+// consumer fragment only emit a single warning instead of duplicate warnings.
+func.func @has_backward_dep_dedup_warning(%arg0: !mesh_1_tensor) -> !mesh_1_tensor attributes {
+    "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>} {
+  %0 = mpmd.fragment_call<mesh="m1", origin=["f1"(0)]> @fragment_m1_multi(%arg0, %arg0) : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
+  %1 = mpmd.transfer %0 : (!mesh_1_tensor) -> !mesh_2_tensor
+  %2 = mpmd.fragment_call<mesh="m2", origin=["f2"(0)]> @fragment_m2(%1) : (!mesh_2_tensor) -> !mesh_2_tensor
+  %3 = mpmd.transfer %2 : (!mesh_2_tensor) -> !mesh_1_tensor
+  // expected-warning@+1 {{Detected backward dependency but expected forward-only pipeline since there are no transpose fragments: fragment "fragment_m2" mesh="m2" produces a value consumed by fragment "fragment_m1_multi" mesh="m1". In a forward-only pipeline, dependencies must go from earlier meshes to later meshes.}}
+  %4 = mpmd.fragment_call<mesh="m1", origin=["f1"(0)]> @fragment_m1_multi(%3, %3) : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
+  func.return %4 : !mesh_1_tensor
+}
+
