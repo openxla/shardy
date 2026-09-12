@@ -92,6 +92,9 @@ struct PropagationOptions {
   // - Can also combine range and op names (e.g. "selectLow=0, selectHigh=10,
   // dot").
   std::string perInstructionPartitioningFilter = "";
+
+  // Whether to mark partial reduction results with unreduced axes.
+  bool markPartialResultWithUnreducedAxes = false;
 };
 
 }  // namespace sdy
