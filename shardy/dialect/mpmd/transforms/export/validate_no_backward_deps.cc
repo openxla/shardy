@@ -14,7 +14,9 @@ limitations under the License.
 ==============================================================================*/
 
 #include <string>
+#include <utility>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
@@ -83,6 +85,7 @@ class ValidateNoBackwardDepsPass
       return;
     }
 
+    llvm::DenseSet<std::pair<StringAttr, StringAttr>> reportedCallees;
     func.walk([&](FragmentCallOp consumer) {
       for (Value operand : consumer.getArgOperands()) {
         FragmentCallOp producer = FindProducerFragmentCall(operand);
@@ -91,8 +94,15 @@ class ValidateNoBackwardDepsPass
         }
 
         if (!IsMeshBeforeOtherMesh(producer.getMeshName(),
-                                    consumer.getMeshName()) &&
+                                   consumer.getMeshName()) &&
             producer.getMeshName() != consumer.getMeshName()) {
+          if (!reportedCallees
+                   .insert({producer.getCalleeAttr().getAttr(),
+                            consumer.getCalleeAttr().getAttr()})
+                   .second) {
+            // We've already reported this pair of fragments.
+            continue;
+          }
           std::string msg;
           llvm::raw_string_ostream os(msg);
           os << "Detected backward dependency but expected forward-only "
