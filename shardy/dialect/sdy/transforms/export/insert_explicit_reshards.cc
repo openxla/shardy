@@ -576,6 +576,17 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
     if (updateTensorShardings.updateOperands.any() ||
         updateTensorShardings.updateResults.any()) {
       if (auto reshapeOp = dyn_cast<stablehlo::ReshapeOp>(op)) {
+        // Preserve non-divisible sharding when equivalent across reshape so
+        // that sdy-resolve-permutation-factors can perform HALO exchange
+        // instead of stripping overflow axes below.
+        if (!inShardings.empty() && !outShardings.empty() &&
+            isShardingEquivalentAcrossReshapes(
+                inShardings[0], reshapeOp.getOperand().getType(),
+                outShardings[0], reshapeOp.getType(), reshapeOp,
+                /*allowNonDivisible=*/true)) {
+          return shardingProjection.getGreatestCommonPrefixAxes(
+              shardingRule.getNumFactors());
+        }
         return processReshapeWithOverflowAxes(reshapeOp, shardingProjection,
                                               outShardings, rewriter,
                                               shardingRule, meshOp);
@@ -928,9 +939,9 @@ struct InsertExplicitReshardsPass
           processOp(op, shardingProjection, inShardings, outShardings, rewriter,
                     symbolTable, shardingRule, *meshOp, onFullVersion);
       // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
-      insertAllReducesForReductionFactors(op, shardingProjection,
-                                          commonAxesPerFactor, shardingRule,
-                                          *meshOp, rewriter, onFullVersion);
+      insertAllReducesForReductionFactors(
+          op, shardingProjection, commonAxesPerFactor, shardingRule, *meshOp,
+          rewriter, onFullVersion, markPartialResultWithUnreducedAxes);
 
       // TODO(enver): Remove sharding rules from ops.
     });
