@@ -122,6 +122,34 @@ TEST_F(IsElementwiseTest, BitcastConvertOpDifferentBitWidth) {
       isElementwise(getFirstOp<stablehlo::BitcastConvertOp>(module.get())));
 }
 
+TEST_F(IsElementwiseTest, SingleInputConcatenateOp) {
+  const std::string program = R"mlir(
+    func.func @main(%arg0: tensor<2x4xf32>) -> tensor<2x4xf32> {
+      %0 = stablehlo.concatenate %arg0, dim = 0 : (tensor<2x4xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+
+  EXPECT_TRUE(
+      isElementwise(getFirstOp<stablehlo::ConcatenateOp>(module.get())));
+}
+
+TEST_F(IsElementwiseTest, MultiInputConcatenateOp) {
+  const std::string program = R"mlir(
+    func.func @main(%arg0: tensor<2x4xf32>, %arg1: tensor<2x4xf32>) -> tensor<4x4xf32> {
+      %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 : (tensor<2x4xf32>, tensor<2x4xf32>) -> tensor<4x4xf32>
+      return %0 : tensor<4x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+
+  EXPECT_FALSE(
+      isElementwise(getFirstOp<stablehlo::ConcatenateOp>(module.get())));
+}
+
 }  // namespace
 
 }  // namespace sdy
