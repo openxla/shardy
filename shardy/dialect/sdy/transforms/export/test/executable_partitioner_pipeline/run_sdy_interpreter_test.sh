@@ -58,7 +58,7 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 "$SPLIT_FILE" "$SRC" "$TMP"
 # Run the partitioner pipeline passes.
 "$SDY_OPT" "$TMP/part1.mlir" \
-  --sdy-insert-explicit-reshards="enable-full-version=true" \
+  --sdy-insert-explicit-reshards="enable-full-version=true mark-partial-result-with-unreduced-axes=true" \
   --sdy-resolve-permutation-factors="enable-halo-exchange=$ENABLE_HALO_EXCHANGE replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-reshard-to-collectives \
   --sdy-optimize-collectives \

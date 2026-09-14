@@ -28,6 +28,16 @@ func.func @indivisible_output(
 
 sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
 
+func.func private @inconsistent_return_sharding(%arg0: tensor<7x8xf32>) -> tensor<7x8xf32> {
+  // expected-error @+1 {{found unrealized_conversion_cast after pad-for-divisibility}}
+  %0 = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<7x8xf32>
+  return %0 : tensor<7x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
+
 // Tests subroutine argument padding.
 // CHECK-LABEL: func.func @main(
 // CHECK-SAME:                  %arg0: tensor<7x8xf32>) -> tensor<7x8xf32> {

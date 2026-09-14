@@ -49,27 +49,6 @@ namespace sdy {
 
 namespace {
 
-// Helper to check if reduction window dim can be a passthrough dim.
-// When window size is 1, stride is 1 and there is no padding on the operand, it
-// is a 1-1 mapping between operand and result.
-bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
-                            ArrayRef<int64_t> windowDimensions,
-                            ArrayRef<int64_t> windowStrides, int64_t dim) {
-  if (operandPadding.has_value()) {
-    // Check if start and end padding are 0.
-    auto paddingStart = operandPadding->getValues<int64_t>().begin() + 2 * dim;
-    if (*paddingStart != 0) {
-      return false;
-    }
-    if (*std::next(paddingStart) != 0) {
-      return false;
-    }
-  }
-  // strides and window dimensions are 1.
-  return (windowStrides.empty() || windowStrides[dim] == 1) &&
-         (windowDimensions.empty() || windowDimensions[dim] == 1);
-}
-
 bool isTranspose(stablehlo::Transpose transpose) {
   switch (transpose) {
     case stablehlo::Transpose::TRANSPOSE:
@@ -229,6 +208,28 @@ Value findOperandBeforeSlice(Value operand) {
 }
 
 }  // namespace
+
+bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
+                            ArrayRef<int64_t> windowDimensions,
+                            ArrayRef<int64_t> windowStrides, int64_t dim,
+                            ArrayRef<int64_t> lhsDilations,
+                            ArrayRef<int64_t> rhsDilations) {
+  if (operandPadding.has_value()) {
+    // Check if start and end padding are 0.
+    auto paddingStart = operandPadding->getValues<int64_t>().begin() + 2 * dim;
+    if (*paddingStart != 0) {
+      return false;
+    }
+    if (*std::next(paddingStart) != 0) {
+      return false;
+    }
+  }
+  // strides, dilations, and window dimensions are 1.
+  return (windowStrides.empty() || windowStrides[dim] == 1) &&
+         (windowDimensions.empty() || windowDimensions[dim] == 1) &&
+         (lhsDilations.empty() || lhsDilations[dim] == 1) &&
+         (rhsDilations.empty() || rhsDilations[dim] == 1);
+}
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
                                            bool conservativePropagation,
@@ -899,12 +900,22 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case([conservativePropagation](stablehlo::PadOp pad) {
         // If `conservativePropagation` is false, we propagate through padded
         // dimensions, even though that would require communication.
-        return OpShardingRuleBuilder(pad)
-            .addPointwiseWithDiffTypeForMismatch(
-                getTensorShape(pad.getOperand()),
-                getTensorShape(pad.getResult()), FactorType::kPermutation,
-                /*mismatchFactorIsBlocked=*/conservativePropagation)
-            .build();
+        ArrayRef<int64_t> inShape = getTensorShape(pad.getOperand());
+        ArrayRef<int64_t> outShape = getTensorShape(pad.getResult());
+        ArrayRef<int64_t> low = pad.getEdgePaddingLow();
+        ArrayRef<int64_t> high = pad.getEdgePaddingHigh();
+        ArrayRef<int64_t> interior = pad.getInteriorPadding();
+        OpShardingRuleBuilder builder(pad);
+        for (int64_t dim = 0; dim < inShape.size(); ++dim) {
+          FactorType factorType =
+              (low[dim] == 0 && high[dim] == 0 && interior[dim] == 0)
+                  ? FactorType::kPassThrough
+                  : FactorType::kPermutation;
+          bool isBlocked =
+              (inShape[dim] != outShape[dim]) && conservativePropagation;
+          builder.addFactor(dim, inShape[dim], factorType, isBlocked);
+        }
+        return builder.build();
       })
       .Case([](stablehlo::ReduceOp reduce) {
         OpShardingRuleBuilder builder(reduce);
@@ -1066,13 +1077,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
               prodFactorsIn *= nextFactorGcd;
               prodFactorsOut *= nextFactorGcd;
             } else {
-              // Otherwise, we add the next factors as unique factors, and we
-              // wouldn't be able to add a common factor until the in and out
-              // factors converge again.
+              // Otherwise, the in and out factors are coprime (nextFactorGcd ==
+              // 1). Add a single shared factor of type kPermutation between
+              // inDim and outDim to allow HALO exchange implementation.
               assert(nextInFactor > 1 && nextOutFactor > 1);
-              builder.addFactor(inDim, kNullDim, nextInFactor);
+              builder.addFactor(inDim, outDim, nextInFactor,
+                                FactorType::kPermutation);
               prodFactorsIn *= nextInFactor;
-              builder.addFactor(kNullDim, outDim, nextOutFactor);
               prodFactorsOut *= nextOutFactor;
             }
           } else if (prodFactorsIn < prodFactorsOut) {
@@ -1080,14 +1091,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // input if its factors are behind the output factors.
             nextInFactor = getNextFactorIfDiverged(nextInFactor, prodFactorsIn,
                                                    prodFactorsOut);
-            builder.addFactor(inDim, kNullDim, nextInFactor);
+            builder.addFactor(inDim, kNullDim, nextInFactor,
+                              FactorType::kNeedReplication);
             prodFactorsIn *= nextInFactor;
           } else {
             // Similarly, add a factor for the output if its factors are behind
             // the input factors.
             nextOutFactor = getNextFactorIfDiverged(
                 nextOutFactor, prodFactorsOut, prodFactorsIn);
-            builder.addFactor(kNullDim, outDim, nextOutFactor);
+            builder.addFactor(kNullDim, outDim, nextOutFactor,
+                              FactorType::kNeedReplication);
             prodFactorsOut *= nextOutFactor;
           }
 

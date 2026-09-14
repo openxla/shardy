@@ -57,6 +57,12 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
 std::optional<ArrayRef<AxisRefAttr>> getFactorSharding(
     const TensorFactorShardings& factorShardings, int64_t factorIndex);
 
+// Returns the common axes if all operands and results have the same sharding at
+// `factorIndex`. A tensor is ignored if it does not contain the factor.
+// Otherwise, returns std::nullopt.
+std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
+    const ShardingProjection& shardingProjection, int64_t factorIndex);
+
 // Returns unreduced axes of given `sharding`. If `sharding` is null, returns
 // empty axes.
 ArrayRef<AxisRefAttr> getUnreducedAxes(TensorShardingAttr sharding);
@@ -128,7 +134,8 @@ void insertExplicitReshards(Operation* op,
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
-    MeshOp meshOp, IRRewriter& rewriter, bool onFullVersion);
+    MeshOp meshOp, IRRewriter& rewriter, bool onFullVersion,
+    bool markPartialResultWithUnreducedAxes = false);
 
 // Finds common factor axes on the operands and results of `op` so that the
 // sharding of `op` is compatible with its sharding rule.
