@@ -42,6 +42,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -57,31 +58,6 @@ bool hasShardedPermutationFactors(
                         return shardingRule.isPermutationFactor(factorIndex) &&
                                !factorSharding.axisRefs.empty();
                       });
-}
-
-// Returns the common axes if all operands and results have the same sharding at
-// `factorIndex`. A tensor is ignored if it does not contain the factor.
-// Otherwise, returns std::nullopt.
-std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
-    const ShardingProjection& shardingProjection, int64_t factorIndex) {
-  std::optional<ArrayRef<AxisRefAttr>> compatibleSharding;
-  bool factorSeen = false;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
-            getFactorSharding(tensorFactorSharding, factorIndex)) {
-      if (factorSeen) {
-        if (compatibleSharding != factorSharding) {
-          return std::nullopt;
-        }
-      } else {
-        compatibleSharding = *factorSharding;
-        factorSeen = true;
-      }
-    }
-  }
-  return compatibleSharding.value_or(ArrayRef<AxisRefAttr>());
 }
 
 // Returns the common axes per factor if the factor sharding is compatible.
@@ -172,6 +148,28 @@ bool shouldReshardToCommonMesh(TensorShardingAttr sharding, MeshOp meshOp,
 }
 }  // namespace
 
+std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
+    const ShardingProjection& shardingProjection, int64_t factorIndex) {
+  std::optional<ArrayRef<AxisRefAttr>> compatibleSharding;
+  bool factorSeen = false;
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(), shardingProjection.getResults())) {
+    if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
+            getFactorSharding(tensorFactorSharding, factorIndex)) {
+      if (factorSeen) {
+        if (compatibleSharding != factorSharding) {
+          return std::nullopt;
+        }
+      } else {
+        compatibleSharding = *factorSharding;
+        factorSeen = true;
+      }
+    }
+  }
+  return compatibleSharding.value_or(ArrayRef<AxisRefAttr>());
+}
+
 void insertExplicitReshards(Operation* op,
                             ArrayRef<TensorShardingAttr> inShardings,
                             ArrayRef<TensorShardingAttr> outShardings,
@@ -203,7 +201,6 @@ void insertExplicitReshards(Operation* op,
 namespace {
 struct FactorAxesPair {
   constexpr static int64_t kEmptyFactorIndex = -1;
-  constexpr static int64_t kTombstoneFactorIndex = -2;
 
   int64_t factorIndex = kEmptyFactorIndex;
   AxisListRef axes;
@@ -213,7 +210,7 @@ struct FactorAxesPair {
 
   // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
   // use it when the axes is empty.
-  FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
+  explicit FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
   FactorAxesPair() = default;
 
   bool operator<(const FactorAxesPair& rhs) const {
@@ -243,7 +240,7 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
     return lhs == rhs;
   }
 
-  static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
+  static FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
 };
 
 struct FactorAxesCandidate {
@@ -837,7 +834,8 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
-    MeshOp meshOp, IRRewriter& rewriter, const bool onFullVersion) {
+    MeshOp meshOp, IRRewriter& rewriter, const bool onFullVersion,
+    const bool markPartialResultWithUnreducedAxes) {
   if (op->getResults().empty()) {
     return;
   }
@@ -848,15 +846,24 @@ void insertAllReducesForReductionFactors(
   }
 
   // The first result unreduced axes is also the common one.
-  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
-      reductionAxes, getUnreducedAxes(op->getResult(0)), meshOp.getMesh());
+  ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
+      getUnreducedAxes(op->getResult(0));
+  SmallVector<AxisRefAttr> allReduceAxes =
+      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, meshOp.getMesh());
   if (allReduceAxes.empty()) {
     return;
   }
 
+  SmallVector<AxisRefAttr> unreducedAxes = allReduceAxes;
+  llvm::append_range(unreducedAxes, firstResultUnreducedAxes);
+  sortAndMergeAxes(unreducedAxes, meshOp.getMesh());
   sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
 
   std::optional<ReductionOp> reductionOp = getReductionType(op);
+  if (!reductionOp &&
+      (isa<stablehlo::ScatterOp>(op) || op->getNumResults() > 1)) {
+    return;
+  }
 
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
@@ -864,6 +871,13 @@ void insertAllReducesForReductionFactors(
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
+    if (markPartialResultWithUnreducedAxes) {
+      TensorShardingAttr unreducedSharding = TensorShardingAttr::get(
+          resultSharding.getContext(), resultSharding.getMeshOrRef(),
+          resultSharding.getDimShardings(), resultSharding.getReplicatedAxes(),
+          unreducedAxes, reductionOp.value_or(ReductionOp::SUM));
+      setSharding(result, unreducedSharding);
+    }
     auto allReduceOp = AllReduceOp::create(
         rewriter, result.getLoc(), result, allReduceAxes,
         reductionOp.value_or(ReductionOp::SUM), resultSharding);
