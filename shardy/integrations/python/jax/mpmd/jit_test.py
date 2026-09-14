@@ -683,7 +683,7 @@ class SdyPropagationTest(parameterized.TestCase):
         ' compiler.',
     ):
       mpmd.jit(
-          functools.partial(mpmd.named_computation, name='partir.foo')(jnp.add),
+          functools.partial(mpmd.named_computation, name='partir.foo')(jnp.add),  # pyrefly: ignore[bad-argument-type]
           mpmd_types.make_config(topology, assignment),
       ).lower(
           np.ones((3, 5), dtype=jnp.float32), np.ones((3, 5), dtype=jnp.float32)
