@@ -28,6 +28,13 @@ func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x
   return %0 : tensor<30x26x16xf32>
 }
 
+// CHECK-LABEL: func @pad_same_shape_permutation
+func.func @pad_same_shape_permutation(%arg0: tensor<28x16xf32>, %arg1: tensor<f32>) -> tensor<28x16xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [])->([i, j]) {i=28, j=16} permutation={i}>
+  %0 = stablehlo.pad %arg0, %arg1, low = [1, 0], high = [-1, 0], interior = [0, 0] : (tensor<28x16xf32>, tensor<f32>) -> tensor<28x16xf32>
+  return %0 : tensor<28x16xf32>
+}
+
 // CHECK-LABEL: func @reduce_window
 func.func @reduce_window(%arg0: tensor<48x48x3xf32>, %arg1: tensor<48x48x3xi32>, %arg2: tensor<f32>, %arg3: tensor<i32>)
     -> (tensor<16x48x3xf32>, tensor<16x48x3xi32>) {

@@ -463,3 +463,17 @@ func.func @reshape_to_scalar_with_overflow(
   return %0 : tensor<f32>
 }
 
+// CHECK-LABEL: func @reshape_structurally_aligned_overflow_axis
+func.func @reshape_structurally_aligned_overflow_axis(
+    %arg0: tensor<2x3x14x5xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"y"}, {}]>})
+    -> (tensor<3x2x7x10xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"y"}, {}]>}) {
+  // CHECK-NOT: sdy.reshard
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {"y"}, {}]>]>} : (tensor<2x3x14x5xi32>) -> tensor<3x2x7x10xi32>
+  // CHECK-NEXT: return %[[RESHAPE]] : tensor<3x2x7x10xi32>
+  %0 = stablehlo.reshape %arg0 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {"y"}, {}]>]>
+  } : (tensor<2x3x14x5xi32>) -> tensor<3x2x7x10xi32>
+  return %0 : tensor<3x2x7x10xi32>
+}
+
+
