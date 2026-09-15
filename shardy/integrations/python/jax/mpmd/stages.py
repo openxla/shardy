@@ -203,8 +203,8 @@ class MpmdExecutable(stages.Executable):
     )
     _verify_shardings_are_equivalent(
         self._func_name,
-        self._kept_in_shardings,
-        self._kept_in_shardings_paths,
+        self._kept_in_shardings,  # pyrefly: ignore[bad-argument-type]
+        self._kept_in_shardings_paths,  # pyrefly: ignore[bad-argument-type]
         tuple((idx, arg.sharding, arg.ndim)
               for idx, arg in kept_args.items()
               if idx in self._kept_var_idx and idx >= self.nr_const_args),
