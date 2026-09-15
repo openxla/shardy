@@ -283,7 +283,8 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
         rewriter, loc, RankedTensorType::get({}, i64Ty), globalPartitionId);
   }
 
-  // If mesh has explicit non-iota device_ids mapping, use lookup table constant.
+  // If mesh has explicit non-iota device_ids mapping, use lookup table
+  // constant.
   if (!mesh.getDeviceIds().empty()) {
     int64_t totalDevices = mesh.getTotalSize();
     SmallVector<int64_t> shardIndices;
@@ -359,7 +360,7 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
   return idInGroup;
 }
 
-// Compute and return the following values from the input:
+// Computes and return the following values from the input:
 //
 // dilatedOffset = partitionId * diffSize + baseOffset
 // physicalOffset = max(dilatedOffset / baseDilation, 0)
@@ -502,14 +503,14 @@ MeshAttr getMeshWithReversedAxes(MeshAttr mesh,
       int64_t subSize = axisRef.getSize(mesh);
       int64_t preSize = axisRef.getSubAxisPreSize();
 
-      // Calculate the physical stride (distance between logical shards) for
+      // Calculates the physical stride (distance between logical shards) for
       // this sub-axis.
       int64_t postSize = fullSize / (preSize * subSize);
       // Identify the relative coordinate of this device within the specific
       // sub-axis factor.
       int64_t subCoord = (coords[meshIdx] / postSize) % subSize;
 
-      // Calculate the new coordinate by flipping the sub-axis component.
+      // Calculates the new coordinate by flipping the sub-axis component.
       int64_t newSubCoord = subSize - 1 - subCoord;
       // Update the new coordinate by adding the difference between the new
       // and old sub-axis coordinates, scaled by the stride.
@@ -763,7 +764,7 @@ Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
                          ArrayRef<int64_t> dimsToShift,
                          ArrayRef<int64_t> shiftAmounts,
                          ResolutionState& state) {
-  // Compute the local tensor shape for the operand inside manual computation.
+  // Computes the local tensor shape for the operand inside manual computation.
   SmallVector<int64_t> localShape;
   localShape.reserve(sharding.getDimShardings().size());
   auto inputType = cast<RankedTensorType>(input.getType());
@@ -1088,7 +1089,7 @@ Value haloDataExchange(
   SmallVector<StringAttr> manualAxesAttrs =
       getManualAxesAttrs(mesh, manualAxes, state.rewriter);
 
-  // Compute the local shape for input in the manual block based on
+  // Computes the local shape for input in the manual block based on
   // divisibleInputShape.
   SmallVector<int64_t> localShape;
   auto inputType = cast<RankedTensorType>(divisibleInput.getType());
@@ -2190,6 +2191,23 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   return success();
 }
 
+// Returns the operand dimension that corresponds to factor `factorIndex` for a
+// dynamic-update-slice operation, or `std::nullopt` if none is found.
+std::optional<int64_t> getDynamicUpdateSliceDim(OpShardingRuleAttr rule,
+                                                int64_t factorIndex) {
+  for (int operandIdx : {0, 1}) {
+    if (operandIdx < rule.getNumOperands()) {
+      for (auto [dimIdx, dimMapping] : llvm::enumerate(
+               rule.getOperandMapping(operandIdx).getDimMappings())) {
+        if (llvm::is_contained(dimMapping.getFactorIndices(), factorIndex)) {
+          return dimIdx;
+        }
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 void resolvePermutationFactorsViaReplication(Operation* op,
                                              OpShardingRuleAttr rule,
                                              ResolutionState& state) {
@@ -2211,8 +2229,10 @@ void resolvePermutationFactorsViaReplication(Operation* op,
   UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
 
   for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
-    // When HALO exchange is disabled, we replication-reshard the
-    // permutation factors.
+    // When HALO exchange is disabled, the pass replication-reshards permutation
+    // factors. For operations like dynamic-update-slice, it skips replication
+    // if the update slice falls entirely within a single shard, meaning no
+    // cross-shard communication is required.
     bool isReplicatedFactor = rule.getFactorType(i) == FactorType::kPermutation;
     if (!isReplicatedFactor) {
       continue;
@@ -2227,6 +2247,13 @@ void resolvePermutationFactorsViaReplication(Operation* op,
     if (auto padOp = dyn_cast<stablehlo::PadOp>(op)) {
       if (isCommunicationFreePadDim(i, padOp, inShardings[0],
                                     meshOp.getMesh())) {
+        continue;
+      }
+    }
+    if (auto dusOp = dyn_cast<stablehlo::DynamicUpdateSliceOp>(op)) {
+      std::optional<int64_t> dimIdx = getDynamicUpdateSliceDim(rule, i);
+      if (dimIdx && isCommunicationFreeDynamicUpdateSliceDim(
+                        *dimIdx, dusOp, inShardings[0], meshOp.getMesh())) {
         continue;
       }
     }
