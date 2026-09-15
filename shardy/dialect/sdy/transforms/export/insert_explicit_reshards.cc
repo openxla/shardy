@@ -99,19 +99,20 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
   }
 }
 
-void insertExplicitReshardsOnFuncReturn(Operation* op, func::FuncOp& funcOp,
-                                        IRRewriter& rewriter,
+void insertExplicitReshardsOnFuncReturn(FuncOp funcOp, IRRewriter& rewriter,
                                         const SymbolTable& symbolTable,
                                         const bool onFullVersion) {
-  rewriter.setInsertionPoint(op);
-  for (const auto& [index, opOperand] : llvm::enumerate(op->getOpOperands())) {
+  Operation* returnOp = getBodyTerminator(funcOp);
+  rewriter.setInsertionPoint(returnOp);
+  for (const auto& [index, opOperand] :
+       llvm::enumerate(returnOp->getOpOperands())) {
     insertExplicitReshardsToTargetSharding(
         opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
         rewriter, symbolTable, /*insertAfterOperand=*/false, onFullVersion);
   }
 }
 
-void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface& op,
+void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface op,
                                         IRRewriter& rewriter,
                                         const SymbolTable& symbolTable,
                                         const bool onFullVersion) {
@@ -935,8 +936,7 @@ struct InsertExplicitReshardsPass
       // TODO(enver): Remove sharding rules from ops.
     });
 
-    insertExplicitReshardsOnFuncReturn(getBodyTerminator(funcOp), funcOp,
-                                       rewriter, symbolTable,
+    insertExplicitReshardsOnFuncReturn(funcOp, rewriter, symbolTable,
                                        enableFullVersion);
   }
 };
