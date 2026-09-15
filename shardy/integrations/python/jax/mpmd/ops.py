@@ -224,14 +224,21 @@ def named_computation_partir_lowering(
     return []
   mpmd.register_dialect(ctx.module_context.context)
 
+  constvar_values = tuple(
+      jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=v.aval)
+      for c, v in zip(call_jaxpr.consts, call_jaxpr.constvars)
+  )
+  constvar_avals = tuple(v.aval for v in call_jaxpr.constvars)
+  call_jaxpr = pe.convert_constvars_jaxpr(call_jaxpr)
+
   const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr)
   const_args, const_avals = utils.unzip2(const_args_and_avals)
-  in_avals = (*const_avals, *ctx.avals_in)
+  in_avals = (*const_avals, *constvar_avals, *ctx.avals_in)
   const_arg_values = tuple(
       jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
       for c, aval in const_args_and_avals
   )
-  args = (*const_arg_values, *args)  # pyrefly: ignore[bad-assignment]
+  args = (*const_arg_values, *constvar_values, *args)  # pyrefly: ignore[bad-assignment]
 
   if jax.__version_info__ >= (0, 10, 1):
     _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
@@ -318,6 +325,8 @@ def _named_computation_to_lojax(*hi_args, call_jaxpr, name, transpose_count):
   """Lowers the named_computation primitive to lojax."""
   lo_closed_jaxpr = pe.lower_jaxpr2(call_jaxpr)
   lo_closed_jaxpr = _prepend_name_to_jaxpr(lo_closed_jaxpr, name)
+  consts = lo_closed_jaxpr.consts
+  lo_closed_jaxpr = pe.convert_constvars_jaxpr(lo_closed_jaxpr)
 
   # pylint: disable=g-complex-comprehension
   lo_args = [
@@ -328,6 +337,7 @@ def _named_computation_to_lojax(*hi_args, call_jaxpr, name, transpose_count):
   # pylint: enable=g-complex-comprehension
 
   lo_outs = named_computation_p.bind(
+      *consts,
       *lo_args,
       call_jaxpr=lo_closed_jaxpr,
       name=name,
@@ -478,11 +488,18 @@ def call_mpmd_jit_lowering(
   name = utils.get_func_name(orig_callable, prefix='shardy_mpmd')
   effects = list(ctx.tokens_in.effects())
 
+  constvar_values = tuple(
+      jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=v.aval)
+      for c, v in zip(call_jaxpr.consts, call_jaxpr.constvars)
+  )
+  constvar_avals = tuple(v.aval for v in call_jaxpr.constvars)
+  call_jaxpr = pe.convert_constvars_jaxpr(call_jaxpr)
+
   const_args_and_avals = jax_core.jaxpr_const_args(call_jaxpr.jaxpr)
   const_args, const_arg_avals = utils.unzip2(const_args_and_avals)
   in_avals = (*const_arg_avals, *call_jaxpr.in_avals)
-  arg_shardings = (None,) * len(const_args) + tuple(
-      a.sharding for a in call_jaxpr.in_avals
+  arg_shardings = (None,) * (len(const_args) + len(constvar_avals)) + tuple(
+      a.sharding for a in call_jaxpr.in_avals[len(constvar_avals):]
   )
 
   if jax.__version_info__ >= (0, 10, 1):
@@ -516,7 +533,7 @@ def call_mpmd_jit_lowering(
       jax_mlir.ir_constant(c, const_lowering=ctx.const_lowering, aval=aval)
       for c, aval in const_args_and_avals
   ]
-  args = tuple(hoisted_const_values) + args  # pyrefly: ignore[bad-assignment]
+  args = tuple(hoisted_const_values) + constvar_values + args  # pyrefly: ignore[bad-assignment]
   flat_output_types, _ = tree_util.tree_flatten(output_types)
   flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   call_op = mpmd.CallOp(
@@ -567,230 +584,11 @@ def _call_abstract_eval(*args, call_jaxpr, **kwargs):
   return call_jaxpr.out_avals, jax_core.positional_effects(call_jaxpr)
 
 
-def _call_impl(*args, call_jaxpr, **kwargs):
-  """Implementation rule for the call op."""
-  del kwargs
-  return jex.core.jaxpr_as_fun(call_jaxpr)(*args)
-
-
 def _register_call_primitive():
   """Registers the `mpmd.call` op to JAX."""
   primitive = jex.core.Primitive('mpmd_call')
-  # Note: we do not set call_primitive = True, as the calling convention for
-  # transposition we use is the generic one. See `backward_pass()` in ad.py.
-  primitive.multiple_results = True
-  primitive.def_impl(_call_impl)
-  # Introduces the rule to lower this primitive as a call_primitive, so that
-  # jax.jit users can still lower mpmd.calls.
+  jex.core.register_call_primitive_rules(primitive)
   jax_mlir.register_lowering(primitive, _call_default_lowering)
-  pe.dce_rules[primitive] = pe.dce_jaxpr_closed_call_rule
-  primitive.def_effectful_abstract_eval(_call_abstract_eval)
-
-  # TODO(mattjj): rely on generic implementation
-  def _call_to_lojax(*hi_args, call_jaxpr, **params):
-    lo_jaxpr = pe.lower_jaxpr2(call_jaxpr)
-    # pylint: disable=g-complex-comprehension
-    lo_args = [
-        lo_val
-        for aval, x in zip(call_jaxpr.in_avals, hi_args)
-        for lo_val in aval.lower_val(x)
-    ]
-    # pylint: enable=g-complex-comprehension
-    lo_outs = primitive.bind(*lo_args, call_jaxpr=lo_jaxpr, **params)
-    lo_outs_ = iter(lo_outs)
-    return [
-        t.raise_val(*it.islice(lo_outs_, len(t.lo_ty())))
-        for t in call_jaxpr.out_avals
-    ]
-
-  primitive.to_lojax = _call_to_lojax
-
-  def _call_jvp_rule(
-      primals,
-      tangents,
-      *,
-      call_jaxpr,
-      call_counter,
-      orig_callable,
-      primitive=primitive,
-      **other_kwargs,
-  ):
-    nonzero_tangents = [not isinstance(t, ad.Zero) for t in tangents]
-    tangents = [t for t in tangents if not isinstance(t, ad.Zero)]
-    jvp_jaxpr, nonzero_output_tangents = ad.jvp_jaxpr(
-        call_jaxpr, nonzero_tangents, instantiate=False
-    )
-    out_flat = primitive.bind(
-        *primals,
-        *tangents,
-        call_jaxpr=jvp_jaxpr,
-        call_counter=call_counter,
-        orig_callable=orig_callable,
-        **other_kwargs,
-    )
-    # Split the primals and the tangents.
-    primals_out = out_flat[:len(call_jaxpr.jaxpr.outvars)]
-    tangents_out = out_flat[len(call_jaxpr.jaxpr.outvars):]
-
-    # Some tangents may be zero, so we need to add zeros for them.
-    tangents_out_it = iter(tangents_out)
-    return primals_out, [
-        next(tangents_out_it) if nz else ad.Zero(aval)
-        for nz, aval in zip(nonzero_output_tangents, call_jaxpr.out_avals)
-    ]
-
-  ad.primitive_jvps[primitive] = _call_jvp_rule
-
-  @lu.transformation2
-  def hashable_partial(f, *args):
-    return f(*args)
-
-  @lu.cache
-  def _call_transpose_trace(fun, in_avals):
-    transpose_jaxpr, _, consts, *_ = pe.trace_to_jaxpr_dynamic(fun, in_avals)
-    transpose_jaxpr = jex.core.ClosedJaxpr(transpose_jaxpr, consts)
-    return transpose_jaxpr
-
-  def _call_transpose(
-      cts_in,
-      *primals_in,
-      call_jaxpr,
-      call_counter,
-      orig_callable,
-      primitive=primitive,
-  ):
-    body = lu.wrap_init(ad.backward_pass)
-    body = hashable_partial(body, call_jaxpr, False, tuple(call_jaxpr.consts))
-    primals_and_nz_cts_in, in_treedef = jax.tree.flatten((primals_in, cts_in))
-    body, cts_out_treedef_thunk = api_util.flatten_fun_nokwargs(
-        body, in_treedef
-    )
-
-    global_cts_in_avals = tuple(
-        api_util.shaped_abstractify(ct) for ct in primals_and_nz_cts_in
-    )
-    transpose_jaxpr = _call_transpose_trace(body, global_cts_in_avals)
-    cts_out_treedef = cts_out_treedef_thunk()
-    nz_cts_out = primitive.bind(
-        *primals_and_nz_cts_in,
-        call_jaxpr=transpose_jaxpr,
-        call_counter=call_counter,
-        orig_callable=orig_callable,
-    )
-    return jax.tree.unflatten(cts_out_treedef, nz_cts_out)
-
-  ad.primitive_transposes[primitive] = _call_transpose
-
-  def _call_partial_eval(
-      trace,
-      *in_tracers,
-      call_jaxpr,
-      call_counter,
-      orig_callable,
-      primitive=primitive,
-  ):
-    in_pvals = [t.pval for t in in_tracers]
-    known_ins = tuple(pv.is_known() for pv in in_pvals)
-    unknown_ins = tuple(not k for k in known_ins)
-    known_jaxpr, unknown_jaxpr, unknown_outs, res_avals = (
-        pe.partial_eval_jaxpr_nounits(
-            call_jaxpr, unknown_ins, instantiate=False
-        )
-    )
-    num_residuals = len(res_avals)
-    num_out_primals = len(known_jaxpr.out_avals) - num_residuals
-    in_fwd = pe._jaxpr_forwarding(known_jaxpr.jaxpr)  # pylint:disable=protected-access
-    # Do not forward primal outputs at all, we only care about residuals.
-    in_fwd = [None] * num_out_primals + in_fwd[num_out_primals:]
-
-    # Compute which residuals are just primal outputs.
-    out_vars = known_jaxpr.jaxpr.outvars[:num_out_primals]
-    res_vars = known_jaxpr.jaxpr.outvars[num_out_primals:]
-
-    idx_map = {id(v): i for i, v in enumerate(out_vars)}
-    out_fwd = [None] * num_out_primals + [idx_map.get(id(v)) for v in res_vars]
-
-    # Bind known things to our primitive.
-    keep = [f1 is None and f2 is None for f1, f2 in zip(in_fwd, out_fwd)]
-    known_jaxpr = pe.prune_closed_jaxpr_outputs(known_jaxpr, keep)
-    del keep, num_out_primals
-
-    known_params = dict(
-        call_jaxpr=known_jaxpr,
-        call_counter=call_counter,
-        orig_callable=orig_callable,
-    )
-
-    known_inputs = [pv.get_known() for pv in in_pvals if pv.is_known()]
-    all_known_outs = primitive.bind(*known_inputs, **known_params)
-    all_known_outs = utils.subs_list2(
-        in_fwd, out_fwd, known_inputs, all_known_outs, all_known_outs
-    )
-    del known_inputs
-
-    num_out_vals = len(all_known_outs) - num_residuals
-    known_out_vals = all_known_outs[:num_out_vals]
-    residual_vals = all_known_outs[num_out_vals:]
-
-    residual_tracers = map(trace.new_instantiated_const, residual_vals)
-
-    # The convention of partial_eval_jaxpr_nounits is to place residual binders
-    # at the front of the jaxpr produced, but here we move them to the back
-    # following the residual-inputs-last convention. I do not think this is a
-    # load-bearing decision, just following conventions from elsewhere (mjit).
-    unknown_jaxpr = pe.move_binders_to_back(
-        unknown_jaxpr, [True] * num_residuals + [False] * sum(unknown_ins)
-    )
-    # Prepare unknown tracers
-    unknown_params = dict(
-        call_jaxpr=unknown_jaxpr,
-        call_counter=call_counter,
-        orig_callable=orig_callable,
-    )
-    unknown_tracers_in = [t for t in in_tracers if not t.pval.is_known()]
-    unknown_out_avals = unknown_jaxpr.out_avals
-    unknown_tracers_out = [
-        pe.JaxprTracer(trace, pe.PartialVal.unknown(aval), None)
-        for aval in unknown_out_avals
-    ]
-    eqn = pe.new_eqn_recipe(
-        trace,
-        (*unknown_tracers_in, *residual_tracers),
-        unknown_tracers_out,
-        primitive,
-        unknown_params,
-        unknown_jaxpr.effects,
-        siu.current(),
-    )
-    for t in unknown_tracers_out:
-      t.recipe = eqn
-    return utils.merge_lists(unknown_outs, known_out_vals, unknown_tracers_out)
-
-  pe.custom_partial_eval_rules[primitive] = _call_partial_eval
-
-  def _call_vmap(axis_data, args, dims, *, call_jaxpr, **params):
-    jaxpr_batched_, out_batched = batching.batch_jaxpr_axes(
-        call_jaxpr,
-        axis_data,
-        dims,
-        [batching.zero_if_mapped] * len(call_jaxpr.jaxpr.outvars),
-    )
-    jaxpr_batched, consts = jaxpr_batched_.jaxpr, jaxpr_batched_.consts
-    if consts:
-      jaxpr_batched = pe.convert_constvars_jaxpr(jaxpr_batched)
-    out_dims = [0 if b else None for b in out_batched]
-    return (
-        primitive.bind(
-            *consts,
-            *args,
-            call_jaxpr=pe.close_jaxpr(jaxpr_batched),
-            **params,
-        ),
-        out_dims,
-    )
-
-  batching.fancy_primitive_batchers[primitive] = _call_vmap
-
   return primitive
 
 
