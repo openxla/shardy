@@ -126,7 +126,7 @@ http_archive(
     ],
 )
 
-# Sync LLVM SHA256 checksum in workspace.bzl.
+# Sync LLVM SHA256 checksum in workspace.bzl
 load("//third_party/llvm:workspace.bzl", llvm = "repo")
 
 llvm("llvm-raw")
