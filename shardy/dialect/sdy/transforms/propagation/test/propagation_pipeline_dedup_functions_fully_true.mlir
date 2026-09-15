@@ -104,8 +104,9 @@ func.func @main(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>}) {
 func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   // CHECK-NEXT:  %[[ABS0:.*]] = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} : tensor<8x2xi32>
-  // CHECK-NEXT:  %[[RESHARD:.*]] = sdy.reshard %[[ABS0]] <@mesh, [{"b"}, {}]> : tensor<8x2xi32>
-  // CHECK-NEXT:  %[[ABS1:.*]] = stablehlo.abs %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT:  %[[RESHARD0:.*]] = sdy.reshard %[[ABS0]] <@mesh, [{"a"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:  %[[RESHARD1:.*]] = sdy.reshard %[[RESHARD0]] <@mesh, [{"b"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:  %[[ABS1:.*]] = stablehlo.abs %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
   // CHECK-NEXT:  %[[CALL0:.*]] = call @bar(%[[ABS1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT:  %[[CALL1:.*]] = call @bar(%[[ABS1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT:  return %[[CALL0]] : tensor<8x2xi32>
@@ -190,8 +191,9 @@ func.func @main(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>}) {
 func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   // CHECK-NEXT:  %[[ABS0:.*]] = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} : tensor<8x2xi32>
-  // CHECK-NEXT:  %[[RESHARD:.*]] = sdy.reshard %[[ABS0]] <@mesh, [{"b"}, {}]> : tensor<8x2xi32>
-  // CHECK-NEXT:  %[[ABS1:.*]] = stablehlo.abs %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT:  %[[RESHARD0:.*]] = sdy.reshard %[[ABS0]] <@mesh, [{"a"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:  %[[RESHARD1:.*]] = sdy.reshard %[[RESHARD0]] <@mesh, [{"b"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT:  %[[ABS1:.*]] = stablehlo.abs %[[RESHARD1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
   // CHECK-NEXT:  %[[CALL:.*]] = call @bar(%[[ABS1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT:  return %[[CALL]] : tensor<8x2xi32>
   %0 = stablehlo.abs %arg0 : tensor<8x2xi32>
@@ -266,9 +268,10 @@ sdy.mesh @mesh = <["a"=2, "b"=2]>
 // CHECK-SAME:      %arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>}, tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>})
 func.func @main(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) -> (tensor<8x2xi32>, tensor<8x2xi32>) {
-  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
-  // CHECK-NEXT: %[[CALL0:.*]] = call @foo(%[[ADD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
-  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[ADD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>} : tensor<8x2xi32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ADD]] <@mesh, [{"b"}, {}]> : tensor<8x2xi32>
+  // CHECK-NEXT: %[[CALL0:.*]] = call @foo(%[[RESHARD]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : tensor<8x2xi32>
   // CHECK-NEXT: %[[CALL1:.*]] = call @bar(%[[ABS]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"b"}, {}]>]>} : (tensor<8x2xi32>) -> tensor<8x2xi32>
   // CHECK-NEXT: return %[[CALL0]], %[[CALL1]] : tensor<8x2xi32>, tensor<8x2xi32>
   %0 = stablehlo.add %arg0, %arg0 : tensor<8x2xi32>
