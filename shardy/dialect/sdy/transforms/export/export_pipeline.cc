@@ -41,7 +41,10 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
                           const ExportOptions& options) {
   // Catch the cases where unreduced axes are dropped and cause inconsistencies.
   pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
-  pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass());
+  InsertExplicitReshardsPassOptions passOptions;
+  passOptions.enableFullVersion = options.enableInsertExplicitCollectives ||
+                                  options.enablePerInstructionPartitioning;
+  pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enablePerInstructionPartitioning) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(

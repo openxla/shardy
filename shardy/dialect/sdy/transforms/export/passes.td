@@ -130,12 +130,12 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
     operation has compatible shardings.
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
-  // TODO(b/402429253): remove once the full version has landed and been stable for some time.
+  // TODO(b/402429253): delete when explicit reshards is enabled by default.
   // The non-full version allows us to insert explicit reshards on specific
   // operations for optimizations.
   let options = [
       Option<"enableFullVersion", "enable-full-version",
-            "bool", /*default=*/"true",
+            "bool", /*default=*/"false",
             "Enable full version.">,
     ];
 }
