@@ -37,6 +37,9 @@ bool isElementwise(Operation* op) {
     return getTensorShape(bitcastConvert.getOperand()) ==
            getTensorShape(bitcastConvert.getResult());
   }
+  if (auto concat = dyn_cast<stablehlo::ConcatenateOp>(op)) {
+    return concat.getInputs().size() == 1;
+  }
   // We don't make our ops inherit the element-wise trait, because they aren't
   // really element-wise. However, we want to treat them as element-wise for
   // propagation purposes when it comes to the schedule.
