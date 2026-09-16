@@ -137,39 +137,12 @@ class PaddedTypeConverter : public TypeConverter {
       return std::nullopt;
     });
 
-    // Source materialization: converts a converted value (padded type) back to
-    // the original source type (unpadded type) via slicing.
-    addSourceMaterialization([&](OpBuilder& b, Type resultType,
-                                 ValueRange inputs, Location loc) -> Value {
-      if (auto rankedResult = dyn_cast<RankedTensorType>(resultType)) {
-        if (auto rankedInput =
-                dyn_cast<RankedTensorType>(inputs[0].getType())) {
-          if (rankedResult != rankedInput &&
-              rankedResult.getRank() == rankedInput.getRank()) {
-            return createSliceOp(b, loc, rankedResult, inputs[0]);
-          }
-        }
-      }
-      return UnrealizedConversionCastOp::create(b, loc, resultType, inputs)
-          .getResult(0);
-    });
-
-    // Target materialization: converts an original source value (unpadded type)
-    // to the converted target type (padded type) via padding.
-    addTargetMaterialization([&](OpBuilder& b, Type resultType,
-                                 ValueRange inputs, Location loc) -> Value {
-      if (auto rankedResult = dyn_cast<RankedTensorType>(resultType)) {
-        if (auto rankedInput =
-                dyn_cast<RankedTensorType>(inputs[0].getType())) {
-          if (rankedResult != rankedInput &&
-              rankedResult.getRank() == rankedInput.getRank()) {
-            return createPadOp(b, loc, rankedResult, inputs[0]);
-          }
-        }
-      }
-      return UnrealizedConversionCastOp::create(b, loc, resultType, inputs)
-          .getResult(0);
-    });
+    auto materialize = [](OpBuilder& b, Type t, ValueRange inputs,
+                          Location loc) -> Value {
+      return UnrealizedConversionCastOp::create(b, loc, t, inputs).getResult(0);
+    };
+    addSourceMaterialization(materialize);
+    addTargetMaterialization(materialize);
   }
 
   void populateArgShardings(func::FuncOp funcOp) {
@@ -181,22 +154,53 @@ class PaddedTypeConverter : public TypeConverter {
     }
   }
 
+  void populateArgShardings(ShardableDataFlowOpInterface op) {
+    for (auto [arg, sharding] :
+         llvm::zip(op.getBlockArgumentEdgeOwners(),
+                   op.getBlockArgumentEdgeOwnerShardings())) {
+      argShardings[arg] = sharding;
+    }
+  }
+
+  void populateArgShardings(stablehlo::WhileOp whileOp) {
+    for (Region* region : whileOp.getRegions()) {
+      SDY_CHECK(!region->empty());
+      for (auto [idx, arg] : llvm::enumerate(region->front().getArguments())) {
+        TensorShardingAttr sharding =
+            this->getSharding(whileOp.getOperands()[idx]);
+        if (!sharding) {
+          sharding = this->getSharding(whileOp.getResults()[idx]);
+        }
+        if (sharding) {
+          argShardings[arg] = sharding;
+        }
+      }
+    }
+  }
+
   // Returns the sharding for `value`.
   TensorShardingAttr getSharding(Value value) const {
     if (!value) {
       return nullptr;
     }
     if (auto blockArg = dyn_cast<BlockArgument>(value)) {
-      if (auto funcOp = dyn_cast_or_null<func::FuncOp>(
-              blockArg.getOwner()->getParentOp())) {
+      auto it = argShardings.find(blockArg);
+      if (it != argShardings.end()) {
+        return it->second;
+      }
+      if (!blockArg.getOwner() || !blockArg.getOwner()->getParentOp()) {
+        return nullptr;
+      }
+      Operation* parentOp = blockArg.getOwner()->getParentOp();
+      if (auto funcOp = dyn_cast<func::FuncOp>(parentOp)) {
         if (auto sharding = funcOp.getArgAttrOfType<TensorShardingAttr>(
                 blockArg.getArgNumber(), "sdy.sharding")) {
           return sharding;
         }
       }
-      auto it = argShardings.find(blockArg);
-      if (it != argShardings.end()) {
-        return it->second;
+      if (auto shardableRegionOp =
+              dyn_cast<ShardableDataFlowOpInterface>(parentOp)) {
+        return shardableRegionOp.getEdgeOwnerSharding(blockArg);
       }
       return nullptr;
     }
@@ -408,18 +412,12 @@ Value ensurePaddingWithKind(
 LogicalResult padGenericOp(Operation* op, ValueRange operands,
                            ConversionPatternRewriter& rewriter,
                            const PaddedTypeConverter* typeConverter) {
-  SmallVector<Value> shardableOperands;
-  for (Value operand : operands) {
-    shardableOperands.push_back(sdy::getShardableValue(operand));
-  }
-
   // Compute padded shapes for results.
   SmallVector<Type> inferredTypes;
   if (auto inferTypeOp = dyn_cast<InferTypeOpInterface>(op)) {
     if (failed(inferTypeOp.inferReturnTypes(
-            op->getContext(), op->getLoc(), shardableOperands,
-            op->getAttrDictionary(), op->getPropertiesStorage(),
-            op->getRegions(), inferredTypes))) {
+            op->getContext(), op->getLoc(), operands, op->getAttrDictionary(),
+            op->getPropertiesStorage(), op->getRegions(), inferredTypes))) {
       inferredTypes.clear();
     }
   }
@@ -428,7 +426,7 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
       op, inferredTypes, typeConverter->getSymbolTable());
   SDY_CHECK(newResultTypes.size() == op->getNumResults());
   OperationState state(op->getLoc(), op->getName());
-  state.addOperands(shardableOperands);
+  state.addOperands(operands);
   state.addTypes(newResultTypes);
   state.addAttributes(op->getAttrs());
   state.addSuccessors(op->getSuccessors());
@@ -440,7 +438,21 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
 
   for (auto [oldRegion, newRegion] :
        llvm::zip(op->getRegions(), newOp->getRegions())) {
+    std::optional<TypeConverter::SignatureConversion> signature;
+    if (!oldRegion.empty()) {
+      signature.emplace(oldRegion.front().getNumArguments());
+      for (auto [index, arg] :
+           llvm::enumerate(oldRegion.front().getArguments())) {
+        signature->addInputs(index, typeConverter->convertArgType(arg));
+      }
+    }
     rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
+    if (signature) {
+      if (failed(rewriter.convertRegionTypes(&newRegion, *typeConverter,
+                                             &*signature))) {
+        return failure();
+      }
+    }
   }
 
   // For now, generic ops do not propagate padding kinds, so they remain
@@ -644,16 +656,11 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
         static_cast<const PaddedTypeConverter*>(getTypeConverter());
     const SymbolTable& symbolTable = converter->getSymbolTable();
 
-    SmallVector<Value> shardableOperands;
-    for (Value operand : adaptor.getOperands()) {
-      shardableOperands.push_back(sdy::getShardableValue(operand));
-    }
-
     SmallVector<Type> inferredTypes;
-    if (failed(op.inferReturnTypes(op.getContext(), op.getLoc(),
-                                   shardableOperands, op->getAttrDictionary(),
-                                   op->getPropertiesStorage(), op->getRegions(),
-                                   inferredTypes))) {
+    if (failed(op.inferReturnTypes(
+            op.getContext(), op.getLoc(), adaptor.getOperands(),
+            op->getAttrDictionary(), op->getPropertiesStorage(),
+            op->getRegions(), inferredTypes))) {
       return failure();
     }
 
@@ -661,7 +668,7 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
         computeReconciledResultTypes(op, inferredTypes, symbolTable);
 
     OperationState state(op->getLoc(), op->getName());
-    state.addOperands(shardableOperands);
+    state.addOperands(adaptor.getOperands());
     state.addTypes(newResultTypes);
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
@@ -674,21 +681,15 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
       }
     }
 
-    auto parentFunc = op->getParentOfType<func::FuncOp>();
-    bool isSubroutine = parentFunc && !parentFunc.isPublic();
-
     SmallVector<Value> replacements;
     replacements.reserve(op->getNumResults());
     SmallVector<int64_t> trimDims = getTrimDims(op);
 
     for (int i = 0; i < op->getNumResults(); ++i) {
       Value res = newOp->getResult(i);
-      Value trimmed = res;
-      if (!isSubroutine) {
-        trimmed =
-            trimOutputForDims(res, op->getResult(i).getType(), trimDims,
-                              getSharding(res), rewriter, paddingKind, cache);
-      }
+      Value trimmed =
+          trimOutputForDims(res, op->getResult(i).getType(), trimDims,
+                            getSharding(res), rewriter, paddingKind, cache);
       replacements.push_back(trimmed);
     }
 
@@ -1108,8 +1109,7 @@ class StablehloConvolutionOpPattern
 
     // Recreate the convolution operation.
     OperationState state(op->getLoc(), op->getName());
-    state.addOperands(
-        {getShardableValue(paddedLhs), getShardableValue(paddedRhs)});
+    state.addOperands({paddedLhs, paddedRhs});
     state.addTypes(inferredResultType);
     state.addAttributes(op->getAttrs());
     Operation* newOp = rewriter.create(state);
@@ -1144,6 +1144,14 @@ struct PadForDivisibilityPass
     PaddedTypeConverter typeConverter(symbolTable);
     moduleOp.walk([&](func::FuncOp funcOp) {
       typeConverter.populateArgShardings(funcOp);
+    });
+    moduleOp.walk([&](Operation* op) {
+      if (auto dataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        typeConverter.populateArgShardings(dataFlowOp);
+      }
+      if (auto whileOp = dyn_cast<stablehlo::WhileOp>(op)) {
+        typeConverter.populateArgShardings(whileOp);
+      }
     });
 
     RewritePatternSet patterns(&getContext());
@@ -1248,7 +1256,21 @@ struct PadForDivisibilityPass
       return true;
     });
 
+    target.addIllegalOp<UnrealizedConversionCastOp>();
+
     if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
+      return signalPassFailure();
+    }
+
+    // Unrealizable cast in the context of pad-for-divisibility is typically
+    // caused by inconsistent sharding and we want to emit an error to aid
+    // debugging.
+    auto walkResult = moduleOp.walk([](UnrealizedConversionCastOp op) {
+      op.emitOpError(
+          "found unrealized_conversion_cast after pad-for-divisibility");
+      return WalkResult::interrupt();
+    });
+    if (walkResult.wasInterrupted()) {
       return signalPassFailure();
     }
   }
