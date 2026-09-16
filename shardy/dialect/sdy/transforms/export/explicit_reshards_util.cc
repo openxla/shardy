@@ -203,6 +203,7 @@ void insertExplicitReshards(Operation* op,
 namespace {
 struct FactorAxesPair {
   constexpr static int64_t kEmptyFactorIndex = -1;
+  constexpr static int64_t kTombstoneFactorIndex = -2;
 
   int64_t factorIndex = kEmptyFactorIndex;
   AxisListRef axes;
@@ -212,7 +213,7 @@ struct FactorAxesPair {
 
   // TODO(enver): Define EmptyFactorAxesPair class with overloaded methods and
   // use it when the axes is empty.
-  explicit FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
+  FactorAxesPair(int64_t factorIndex) : factorIndex(factorIndex) {}
   FactorAxesPair() = default;
 
   bool operator<(const FactorAxesPair& rhs) const {
@@ -242,7 +243,7 @@ struct FactorAxesPairInfo : public llvm::DenseMapInfo<FactorAxesPair> {
     return lhs == rhs;
   }
 
-  static FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
+  static inline FactorAxesPair getEmptyKey() { return FactorAxesPair(); }
 };
 
 struct FactorAxesCandidate {
@@ -836,8 +837,7 @@ ArrayRef<AxisRefAttr> getUnreducedAxes(Value value) {
 void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
-    MeshOp meshOp, IRRewriter& rewriter, const bool onFullVersion,
-    const bool markPartialResultWithUnreducedAxes) {
+    MeshOp meshOp, IRRewriter& rewriter, const bool onFullVersion) {
   if (op->getResults().empty()) {
     return;
   }
@@ -848,17 +848,12 @@ void insertAllReducesForReductionFactors(
   }
 
   // The first result unreduced axes is also the common one.
-  ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
-      getUnreducedAxes(op->getResult(0));
-  SmallVector<AxisRefAttr> allReduceAxes =
-      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, meshOp.getMesh());
+  SmallVector<AxisRefAttr> allReduceAxes = getAxisSetDiff(
+      reductionAxes, getUnreducedAxes(op->getResult(0)), meshOp.getMesh());
   if (allReduceAxes.empty()) {
     return;
   }
 
-  SmallVector<AxisRefAttr> unreducedAxes = allReduceAxes;
-  llvm::append_range(unreducedAxes, firstResultUnreducedAxes);
-  sortAndMergeAxes(unreducedAxes, meshOp.getMesh());
   sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
 
   std::optional<ReductionOp> reductionOp = getReductionType(op);
@@ -869,13 +864,6 @@ void insertAllReducesForReductionFactors(
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
-    if (markPartialResultWithUnreducedAxes && reductionOp) {
-      TensorShardingAttr unreducedSharding = TensorShardingAttr::get(
-          resultSharding.getContext(), resultSharding.getMeshOrRef(),
-          resultSharding.getDimShardings(), resultSharding.getReplicatedAxes(),
-          unreducedAxes, *reductionOp);
-      setSharding(result, unreducedSharding);
-    }
     auto allReduceOp = AllReduceOp::create(
         rewriter, result.getLoc(), result, allReduceAxes,
         reductionOp.value_or(ReductionOp::SUM), resultSharding);
