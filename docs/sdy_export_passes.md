@@ -108,7 +108,8 @@ operation has compatible shardings.
 #### Options
 
 ```
--enable-full-version : Enable full version.
+-enable-full-version                     : Enable full version.
+-mark-partial-result-with-unreduced-axes : Whether to mark partial reduction results with unreduced axes.
 ```
 
 ### `-sdy-insert-func-call-reshards`
