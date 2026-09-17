@@ -423,26 +423,38 @@ LogicalResult outlineInstruction(Operation* op,
     }
   }
 
+  // We slice the padded operands back to their original unpadded types, so that
+  // the outlined op preserves its shapes. We then pad the outlined op results
+  // to match the function results which are required to be divisible.
+  //
+  // We do the above to all ops except for sdy.reshard, because sdy.reshard's
+  // padded input type is computed to be jointly divisible by both its input and
+  // output shardings; slicing it back to the unpadded type along a sharded
+  // dimension can introduce a non-communication-free slice that fails
+  // pad-for-divisibility.
   Block* block = outlinedFunc.addEntryBlock();
   tempRewriter.setInsertionPointToStart(block);
-  SmallVector<Value> operands(block->getArguments().begin(),
-                              block->getArguments().end());
-  SmallVector<Type> resultTypes;
-  auto inferTypeOp = dyn_cast<InferTypeOpInterface>(op);
-  if (!inferTypeOp ||
-      failed(inferTypeOp.inferReturnTypes(
-          ctx, op->getLoc(), operands, op->getAttrDictionary(),
-          op->getPropertiesStorage(), op->getRegions(), resultTypes))) {
-    resultTypes.assign(paddedResultTypes.begin(), paddedResultTypes.end());
+  SmallVector<Value> operands;
+  operands.reserve(op->getNumOperands());
+  for (size_t i = 0; i < op->getNumOperands(); ++i) {
+    Value arg = block->getArgument(i);
+    Type origType = op->getOperand(i).getType();
+    if (!isa<ReshardOp>(op) && arg.getType() != origType) {
+      operands.push_back(sliceHighSideToType(tempRewriter, op->getLoc(), arg,
+                                             origType,
+                                             shardingInfo.inShardings[i]));
+    } else {
+      operands.push_back(arg);
+    }
   }
 
   Operation* clonedOp = tempRewriter.clone(*op);
   for (size_t i = 0; i < clonedOp->getNumOperands(); ++i) {
-    clonedOp->setOperand(i, block->getArgument(i));
+    clonedOp->setOperand(i, operands[i]);
   }
-  for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
-    if (i < resultTypes.size()) {
-      clonedOp->getResult(i).setType(resultTypes[i]);
+  if (isa<ReshardOp>(clonedOp)) {
+    for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
+      clonedOp->getResult(i).setType(paddedResultTypes[i]);
     }
   }
 
@@ -471,8 +483,8 @@ LogicalResult outlineInstruction(Operation* op,
       }
     }
   }
-  setShardings(clonedOp, shardingInfo.outShardings);
 
+  setShardings(clonedOp, shardingInfo.outShardings);
   SmallVector<Value> returnValues;
   returnValues.reserve(clonedOp->getNumResults());
   for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
