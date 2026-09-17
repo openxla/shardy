@@ -2531,11 +2531,9 @@ class StablehloScatterOpPattern
               tableConst, {partitionId}, rewriter.getDenseI64ArrayAttr({1}))
               .getResult();
 
-      isLeader = stablehlo::BroadcastInDimOp::create(
-          rewriter, loc,
-          RankedTensorType::get(localInputType.getShape(),
-                                rewriter.getI1Type()),
-          isLeader, rewriter.getDenseI64ArrayAttr({0}));
+      isLeader = stablehlo::ReshapeOp::create(
+          rewriter, loc, RankedTensorType::get({}, rewriter.getI1Type()),
+          isLeader);
       // Broadcast the scalar identity to the shape of the current local input.
       Value broadcastIdentity = stablehlo::BroadcastInDimOp::create(
           rewriter, loc, localInputs.front().getType(), identity,
