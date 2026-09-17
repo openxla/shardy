@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice" | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice,concatenate" | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
@@ -264,7 +264,54 @@ func.func @complex_indivisible_padding(%arg0: tensor<5x16xcomplex<f32>> {sdy.sha
   return %0 : tensor<5x16xcomplex<f32>>
 }
 
+// -----
 
+sdy.mesh @mesh = <["x"=2]>
 
+// CHECK-LABEL: func @concatenate_sharded_concat_dim
+func.func @concatenate_sharded_concat_dim(%arg0: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>},
+                                          %arg1: tensor<2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>})
+    -> (tensor<6xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%arg0, %arg1)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}]>, <@mesh, [{"x"}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<2xf32>, %arg3: tensor<1xf32>) {
+  // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%arg2)
+  // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%arg3)
+  // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[AG0]], %[[AG1]], dim = 0 : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i64>) -> tensor<3xf32>
+  // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
+  // CHECK-NEXT: } : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
+  return %0 : tensor<6xf32>
+}
 
+// -----
 
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @concatenate_indivisible_sharded_concat_dim
+func.func @concatenate_indivisible_sharded_concat_dim(%arg0: tensor<5xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>},
+                                                      %arg1: tensor<1xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>})
+    -> (tensor<6xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+  // CHECK:      %[[PAD0:.*]] = stablehlo.pad %arg0, {{.*}}, low = [0], high = [1], interior = [0]
+  // CHECK:      %[[PAD1:.*]] = stablehlo.pad %arg1, {{.*}}, low = [0], high = [1], interior = [0]
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[PAD0]], %[[PAD1]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}]>, <@mesh, [{"x"}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<3xf32>, %arg3: tensor<1xf32>) {
+  // CHECK:        %[[IN_SLICE0:.*]] = stablehlo.slice %arg2 [0:3] : (tensor<3xf32>) -> tensor<3xf32>
+  // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%[[IN_SLICE0]]) {{.*}} : (tensor<3xf32>) -> tensor<6xf32>
+  // CHECK:        %[[SLICE0:.*]] = stablehlo.slice %[[AG0]] [0:5] : (tensor<6xf32>) -> tensor<5xf32>
+  // CHECK:        %[[IN_SLICE1:.*]] = stablehlo.slice %arg3 [0:1] : (tensor<1xf32>) -> tensor<1xf32>
+  // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%[[IN_SLICE1]]) {{.*}} : (tensor<1xf32>) -> tensor<2xf32>
+  // CHECK:        %[[SLICE1:.*]] = stablehlo.slice %[[AG1]] [0:1] : (tensor<2xf32>) -> tensor<1xf32>
+  // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[SLICE0]], %[[SLICE1]], dim = 0 : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i64>) -> tensor<3xf32>
+  // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
+  // CHECK-NEXT: } : (tensor<6xf32>, tensor<2xf32>) -> tensor<6xf32>
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
+  return %0 : tensor<6xf32>
+}
