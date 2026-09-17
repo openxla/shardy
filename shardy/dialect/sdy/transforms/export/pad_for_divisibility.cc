@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -234,7 +235,8 @@ class PaddedTypeConverter : public TypeConverter {
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
   return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp,
-             stablehlo::ConvolutionOp, stablehlo::ReshapeOp>(op);
+             stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
+             stablehlo::GatherOp>(op);
 }
 
 class PaddingCache {
@@ -1131,6 +1133,122 @@ class StablehloConvolutionOpPattern
   PaddingCache& cache;
 };
 
+class StablehloGatherOpPattern
+    : public OpConversionPattern<stablehlo::GatherOp> {
+ public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      stablehlo::GatherOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    Value operand = adaptor.getOperand();
+    Value startIndices = adaptor.getStartIndices();
+    auto origOperandType = op.getOperand().getType();
+    auto paddedOperandType = dyn_cast<RankedTensorType>(operand.getType());
+    auto startIndicesType = dyn_cast<RankedTensorType>(startIndices.getType());
+    if (!origOperandType || !paddedOperandType || !startIndicesType) {
+      return failure();
+    }
+
+    ArrayRef<int64_t> startIndexMap =
+        op.getDimensionNumbers().getStartIndexMap();
+    int64_t indexVectorDim = op.getDimensionNumbers().getIndexVectorDim();
+
+    // An operand dim is a non-slicing dim if it is not indexed by
+    // start_index_map and preserves its size in the result. When such a dim is
+    // padded, we need to increase the corresponding slice size to maintain the
+    // same operand-to-result mapping. Also check if any indexed dimension in
+    // start_index_map is padded.
+    SmallVector<int64_t> sliceSizes(op.getSliceSizes());
+    bool needsIndexClamp = false;
+    for (int64_t d = 0; d < origOperandType.getRank(); ++d) {
+      if (paddedOperandType.getDimSize(d) > origOperandType.getDimSize(d)) {
+        if (llvm::is_contained(startIndexMap, d)) {
+          needsIndexClamp = true;
+        } else if (sliceSizes[d] == origOperandType.getDimSize(d)) {
+          sliceSizes[d] = paddedOperandType.getDimSize(d);
+        }
+      }
+    }
+
+    // StableHLO gather clamps out-of-bounds indices for dimension d to:
+    //   effective_index[d] = min(max(start_index[d], 0), dim_size(d) -
+    //   slice_size(d))
+    //
+    // If we pad an indexing dim, we apply this formula using the unpadded
+    // dimension size to preserve the semantics of the original gather.
+    if (needsIndexClamp) {
+      Location loc = op.getLoc();
+      Type elemType = startIndicesType.getElementType();
+      Value maxConst;
+      if (indexVectorDim == startIndicesType.getRank()) {
+        // Implicit 1-element index vector, splat the single scalar maxIdx to
+        // the shape of startIndices.
+        int64_t d = startIndexMap[0];
+        int64_t maxIdx = origOperandType.getDimSize(d) - op.getSliceSizes()[d];
+        auto maxAttr = DenseElementsAttr::get(
+            startIndicesType, rewriter.getIntegerAttr(elemType, maxIdx));
+        maxConst = stablehlo::ConstantOp::create(rewriter, loc, maxAttr);
+      } else {
+        // Explicit index vector, create a 1D constant and broadcast it along
+        // indexVectorDim to startIndicesType.
+        SmallVector<Attribute> maxVals;
+        for (size_t k = 0; k < startIndexMap.size(); ++k) {
+          int64_t d = startIndexMap[k];
+          int64_t maxIdx =
+              origOperandType.getDimSize(d) - op.getSliceSizes()[d];
+          maxVals.push_back(rewriter.getIntegerAttr(elemType, maxIdx));
+        }
+        auto vecType = RankedTensorType::get(
+            {static_cast<int64_t>(startIndexMap.size())}, elemType);
+        Value vecConst = stablehlo::ConstantOp::create(
+            rewriter, loc, DenseElementsAttr::get(vecType, maxVals));
+        maxConst = stablehlo::BroadcastInDimOp::create(
+            rewriter, loc, startIndicesType, vecConst,
+            rewriter.getDenseI64ArrayAttr({indexVectorDim}));
+      }
+      if (TensorShardingAttr idxSharding = getSharding(startIndices)) {
+        setSharding(maxConst, idxSharding);
+      }
+      startIndices =
+          stablehlo::MinOp::create(rewriter, loc, startIndices, maxConst);
+      if (TensorShardingAttr idxSharding =
+              getSharding(adaptor.getStartIndices())) {
+        setSharding(startIndices, idxSharding);
+      }
+    }
+
+    SmallVector<ShapedTypeComponents> inferredReturnShapes;
+    auto newSliceSizesAttr = rewriter.getDenseI64ArrayAttr(sliceSizes);
+    if (failed(mlir::hlo::inferGatherOp(
+            op.getLoc(), operand, startIndices,
+            op.getDimensionNumbers().getOffsetDims(),
+            op.getDimensionNumbers().getCollapsedSliceDims(),
+            op.getDimensionNumbers().getOperandBatchingDims(),
+            op.getDimensionNumbers().getStartIndicesBatchingDims(),
+            op.getDimensionNumbers().getStartIndexMap(),
+            op.getDimensionNumbers().getIndexVectorDim(), sliceSizes,
+            inferredReturnShapes))) {
+      return failure();
+    }
+    SmallVector<Type> inferredTypes = {RankedTensorType::get(
+        inferredReturnShapes[0].getDims(), origOperandType.getElementType())};
+    SmallVector<Type> newResultTypes = computeReconciledResultTypes(
+        op, inferredTypes, converter->getSymbolTable());
+    auto newGather = stablehlo::GatherOp::create(
+        rewriter, op.getLoc(), newResultTypes[0], operand, startIndices,
+        op.getDimensionNumbersAttr(), newSliceSizesAttr,
+        op.getIndicesAreSortedAttr());
+    if (TensorShardingAttr outSharding = getSharding(op.getResult())) {
+      setSharding(newGather.getResult(), outSharding);
+    }
+    rewriter.replaceOp(op, newGather.getResult());
+    return success();
+  }
+};
+
 struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
   using PadForDivisibilityPassBase::PadForDivisibilityPassBase;
@@ -1157,8 +1275,8 @@ struct PadForDivisibilityPass
     RewritePatternSet patterns(&getContext());
     patterns.add<FuncOpSignaturePattern>(typeConverter, &getContext(),
                                          paddingCache);
-    patterns.add<GenericOpPattern, StablehloSliceOpPattern>(typeConverter,
-                                                            &getContext());
+    patterns.add<GenericOpPattern, StablehloSliceOpPattern,
+                 StablehloGatherOpPattern>(typeConverter, &getContext());
     patterns.add<StablehloPadOpPattern, StablehloReshapeOpPattern>(
         typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
