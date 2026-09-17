@@ -899,12 +899,22 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
       .Case([conservativePropagation](stablehlo::PadOp pad) {
         // If `conservativePropagation` is false, we propagate through padded
         // dimensions, even though that would require communication.
-        return OpShardingRuleBuilder(pad)
-            .addPointwiseWithDiffTypeForMismatch(
-                getTensorShape(pad.getOperand()),
-                getTensorShape(pad.getResult()), FactorType::kPermutation,
-                /*mismatchFactorIsBlocked=*/conservativePropagation)
-            .build();
+        ArrayRef<int64_t> inShape = getTensorShape(pad.getOperand());
+        ArrayRef<int64_t> outShape = getTensorShape(pad.getResult());
+        ArrayRef<int64_t> low = pad.getEdgePaddingLow();
+        ArrayRef<int64_t> high = pad.getEdgePaddingHigh();
+        ArrayRef<int64_t> interior = pad.getInteriorPadding();
+        OpShardingRuleBuilder builder(pad);
+        for (int64_t dim = 0; dim < inShape.size(); ++dim) {
+          FactorType factorType =
+              (low[dim] == 0 && high[dim] == 0 && interior[dim] == 0)
+                  ? FactorType::kPassThrough
+                  : FactorType::kPermutation;
+          bool isBlocked =
+              (inShape[dim] != outShape[dim]) && conservativePropagation;
+          builder.addFactor(dim, inShape[dim], factorType, isBlocked);
+        }
+        return builder.build();
       })
       .Case([](stablehlo::ReduceOp reduce) {
         OpShardingRuleBuilder builder(reduce);
