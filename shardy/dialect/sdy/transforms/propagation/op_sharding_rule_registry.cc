@@ -1076,13 +1076,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
               prodFactorsIn *= nextFactorGcd;
               prodFactorsOut *= nextFactorGcd;
             } else {
-              // Otherwise, we add the next factors as unique factors, and we
-              // wouldn't be able to add a common factor until the in and out
-              // factors converge again.
+              // Otherwise, the in and out factors are coprime (nextFactorGcd ==
+              // 1). Add a single shared factor of type kPermutation between
+              // inDim and outDim to allow HALO exchange implementation.
               assert(nextInFactor > 1 && nextOutFactor > 1);
-              builder.addFactor(inDim, kNullDim, nextInFactor);
+              builder.addFactor(inDim, outDim, nextInFactor,
+                                FactorType::kPermutation);
               prodFactorsIn *= nextInFactor;
-              builder.addFactor(kNullDim, outDim, nextOutFactor);
               prodFactorsOut *= nextOutFactor;
             }
           } else if (prodFactorsIn < prodFactorsOut) {
@@ -1090,14 +1090,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             // input if its factors are behind the output factors.
             nextInFactor = getNextFactorIfDiverged(nextInFactor, prodFactorsIn,
                                                    prodFactorsOut);
-            builder.addFactor(inDim, kNullDim, nextInFactor);
+            builder.addFactor(inDim, kNullDim, nextInFactor,
+                              FactorType::kNeedReplication);
             prodFactorsIn *= nextInFactor;
           } else {
             // Similarly, add a factor for the output if its factors are behind
             // the input factors.
             nextOutFactor = getNextFactorIfDiverged(
                 nextOutFactor, prodFactorsOut, prodFactorsIn);
-            builder.addFactor(kNullDim, outDim, nextOutFactor);
+            builder.addFactor(kNullDim, outDim, nextOutFactor,
+                              FactorType::kNeedReplication);
             prodFactorsOut *= nextOutFactor;
           }
 
