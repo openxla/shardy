@@ -1859,11 +1859,58 @@ class StablehloReduceOpPattern
         !hasUnreducedResultSharding(op, reductionAxes, "reduce", converter)) {
       auto localReduceOp = cast<stablehlo::ReduceOp>(
           createLocalGenericOp(op, adaptor.getOperands(), rewriter, converter));
-      ValueRange results = createAllReduceForUnreducedAxes(
-          op.getLoc(), localReduceOp.getResults(), localReduceOp.getBody(),
-          reductionAxes, mesh, meshOrRef, enableRGV3, conversionState,
-          rewriter);
-      rewriter.replaceOp(op, results);
+      if (op.getNumResults() == 1) {
+        ValueRange results = createAllReduceForUnreducedAxes(
+            op.getLoc(), localReduceOp.getResults(), localReduceOp.getBody(),
+            reductionAxes, mesh, meshOrRef, enableRGV3, conversionState,
+            rewriter);
+        rewriter.replaceOp(op, results);
+      } else {
+        // Stablehlo.all_reduce requires a 2-parameter reduction region and
+        // does not support a variadic 2*N-parameter reduction computation.
+        // On the other hand, the reduction region of variadic stablehlo.reduce
+        // may not be separable, which prevents us from splitting the op to
+        // use multiple all_reduce ops. As such, we append a size-1 dimension
+        // to each partial result, all-gather across reductionAxes along this
+        // new dimension, and apply a second local reduce across the dimension.
+        auto [replicaGroups, numShards] = getReplicaGroupsAndSize(
+            reductionAxes, mesh, meshOrRef, enableRGV3, rewriter);
+        auto firstResType =
+            cast<RankedTensorType>(localReduceOp.getResult(0).getType());
+        int64_t gatherDim = firstResType.getRank();
+        SmallVector<Value> gatheredInputs;
+        for (int64_t i = 0; i < op.getNumResults(); ++i) {
+          Value localRes = localReduceOp.getResult(i);
+          auto localResType = cast<RankedTensorType>(localRes.getType());
+          SmallVector<int64_t> expandedShape(localResType.getShape());
+          expandedShape.push_back(1);
+          Value expanded = stablehlo::ReshapeOp::create(
+              rewriter, op.getLoc(),
+              RankedTensorType::get(expandedShape,
+                                    localResType.getElementType()),
+              localRes);
+          SmallVector<int64_t> gatheredShape = expandedShape;
+          gatheredShape[gatherDim] = numShards;
+          auto channelHandle = stablehlo::ChannelHandleAttr::get(
+              rewriter.getContext(), conversionState.getNextChannelId(),
+              kCrossPartitionChannelHandleType);
+          auto allGatherOp = stablehlo::AllGatherOp::create(
+              rewriter, op.getLoc(),
+              RankedTensorType::get(gatheredShape,
+                                    localResType.getElementType()),
+              expanded, gatherDim, replicaGroups, channelHandle,
+              /*use_global_device_ids=*/true);
+          gatheredInputs.push_back(allGatherOp.getResult(0));
+        }
+        auto finalReduceOp = stablehlo::ReduceOp::create(
+            rewriter, op.getLoc(), localReduceOp.getResultTypes(),
+            gatheredInputs, adaptor.getInitValues(),
+            rewriter.getDenseI64ArrayAttr({gatherDim}));
+        rewriter.cloneRegionBefore(localReduceOp.getBody(),
+                                   finalReduceOp.getBody(),
+                                   finalReduceOp.getBody().end());
+        rewriter.replaceOp(op, finalReduceOp.getResults());
+      }
       conversionState.removeToConvertOp(op);
       return success();
     }
