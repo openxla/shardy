@@ -42,6 +42,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -862,6 +863,10 @@ void insertAllReducesForReductionFactors(
   sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
 
   std::optional<ReductionOp> reductionOp = getReductionType(op);
+  if (!reductionOp &&
+      (isa<stablehlo::ScatterOp>(op) || op->getNumResults() > 1)) {
+    return;
+  }
 
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
@@ -869,11 +874,11 @@ void insertAllReducesForReductionFactors(
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
-    if (markPartialResultWithUnreducedAxes && reductionOp) {
+    if (markPartialResultWithUnreducedAxes) {
       TensorShardingAttr unreducedSharding = TensorShardingAttr::get(
           resultSharding.getContext(), resultSharding.getMeshOrRef(),
           resultSharding.getDimShardings(), resultSharding.getReplicatedAxes(),
-          unreducedAxes, *reductionOp);
+          unreducedAxes, reductionOp.value_or(ReductionOp::SUM));
       setSharding(result, unreducedSharding);
     }
     auto allReduceOp = AllReduceOp::create(

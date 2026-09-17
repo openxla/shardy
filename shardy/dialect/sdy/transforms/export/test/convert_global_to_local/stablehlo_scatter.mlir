@@ -384,3 +384,33 @@ func.func @scatter_replicated_bounds(
   return %1 : tensor<8x2xf32>
 }
 
+// CHECK-LABEL: func @scatter_unreduced_axes_fallback_all_reduce(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<1x1xi64> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG2:.*]]: tensor<1x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+func.func @scatter_unreduced_axes_fallback_all_reduce(
+    %arg0: tensor<8x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>},
+    %arg1: tensor<2x1xi64> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+    %arg2: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+ -> (tensor<8x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>}) {
+  // CHECK: %[[SCATTER:.*]] = "stablehlo.scatter"(%{{.*}}, %{{.*}}, %[[ARG2]])
+  // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SCATTER]])
+  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
+  // CHECK: stablehlo.minimum
+  // CHECK: return %[[RES]] : tensor<2x2xf32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+    %1 = stablehlo.minimum %arg3, %arg4 : tensor<f32>
+    stablehlo.return %1 : tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1
+    >,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"y"}, {}]>]>
+  } : (tensor<8x2xf32>, tensor<2x1xi64>, tensor<2x2xf32>) -> tensor<8x2xf32>
+  return %0 : tensor<8x2xf32>
+}
