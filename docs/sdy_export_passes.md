@@ -143,7 +143,7 @@ unwrapped global instructions.
 #### Options
 
 ```
--filter               : Filter string for selective partitioning. Can be empty (all sharded ops), comma-separated op name substrings (e.g. 'dot, pad'), or key-values like 'selectLow=0, selectHigh=10'.
+-filter               : Filter string for selective partitioning. Can be empty (all sharded ops), comma-separated op name substrings (e.g. 'dot, pad'), or key-values like 'selectLow=0, selectHigh=10, func=subroutine'.
 -enable-halo-exchange : Implement halo exchange logic for windowed operations inside the sub-pipeline.
 -replica-count        : Number of replicas (data parallelism).
 -partition-count      : Number of partitions (model parallelism).
