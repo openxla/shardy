@@ -17,10 +17,12 @@ limitations under the License.
 #include <functional>
 
 #include "llvm/ADT/STLExtras.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
@@ -105,11 +107,11 @@ bool shouldApply(Value input, TensorShardingAttr sharding) {
 // Applies the `sharding` of a sharding constraint to `input` if `shouldApply`
 // returns true.
 //
-// If `input` is a target of a data-flow edge (see `DataFlowEdgeOp::lookup`),
-// then instead of setting the ops's sharding to `sharding`, we replace all uses
-// of `input` with the `ShardingConstraintOp` returned by
-// `getConstraintAfterValue`. This is to avoid restricting the sharding of all
-// targets of the edge and to match GSPMD.
+// If `input` is produced by a `DataFlowEdgeOp` or `FuncDataFlowEdgeOp`, or is a
+// target of a data-flow edge (see `DataFlowEdgeOp::lookup`), then instead of
+// setting the op's sharding to `sharding`, we replace all uses of `input` with
+// the `ShardingConstraintOp` returned by `getConstraintAfterValue`. This is to
+// avoid restricting the sharding of all targets of the edge and to match GSPMD.
 void applyConstraint(
     Operation* op, Value input, TensorShardingAttr sharding,
     std::function<ShardingConstraintOp()> getConstraintAfterValue) {
@@ -117,7 +119,8 @@ void applyConstraint(
     return;
   }
 
-  if (input.getDefiningOp<DataFlowEdgeOp>() || DataFlowEdgeOp::lookup(input)) {
+  if (input.getDefiningOp<FuncDataFlowEdgeOp>() ||
+      input.getDefiningOp<DataFlowEdgeOp>() || DataFlowEdgeOp::lookup(input)) {
     ShardingConstraintOp shardingConstraintOp = getConstraintAfterValue();
     input.replaceAllUsesExcept(shardingConstraintOp, shardingConstraintOp);
     // If `sharding` has unreduced axes, we need to set them on the sharding of
@@ -252,56 +255,61 @@ struct ApplyShardingConstraintsPass
     // Prepare the handler and register it to the context.
     handler.prepareHandler(moduleOp);
 
-    OpBuilder builder(&context);
-    moduleOp.walk(
-        [&](Operation* op) {
-          TypeSwitch<Operation*>(op)
-              .Case([](ShardingConstraintOp shardingConstraintOp) {
-                // If `getTailOfShardingConstraintChain` returns a non-null
-                // value, we replace all uses of `head`s input that:
-                // 1. Aren't a `func.return` op.
-                // 2. Are defined after `tail` (and in same block) with `tail`.
-                //
-                // Refer to `getTailOfShardingConstraintChain` for more details.
-                ShardingConstraintOp head = shardingConstraintOp;
-                if (ShardingConstraintOp tail =
-                        getTailOfShardingConstraintChain(head)) {
-                  head.getInput().replaceUsesWithIf(
-                      tail.getResult(), [&](OpOperand& use) {
-                        return use.getOwner() != head &&
-                               !isa<func::ReturnOp>(use.getOwner()) &&
-                               tail->getBlock() == use.getOwner()->getBlock() &&
-                               tail->isBeforeInBlock(use.getOwner());
-                      });
-                }
+    SymbolTable symbolTable(moduleOp);
+    func::FuncOp mainFuncOp =
+        getMainFuncOrDie(moduleOp, symbolTable, /*useSingleFunc=*/true);
 
-                Value input = shardingConstraintOp.getInput();
-                TensorShardingAttr sharding =
-                    shardingConstraintOp.getSharding();
-                applyConstraint(shardingConstraintOp, input, sharding,
-                                /*getConstraintAfterValue=*/[&]() {
-                                  moveAfterValue(shardingConstraintOp, input);
-                                  return shardingConstraintOp;
+    OpBuilder builder(&context);
+    iterateFuncs(moduleOp, [&](func::FuncOp funcOp) {
+      funcOp.walk([&](Operation* op) {
+        TypeSwitch<Operation*>(op)
+            .Case([&](ShardingConstraintOp shardingConstraintOp) {
+              // If `getTailOfShardingConstraintChain` returns a non-null
+              // value, we replace all uses of `head`s input that:
+              // 1. Aren't the `func.return` op of the main function.
+              // 2. Are defined after `tail` (and in same block) with `tail`.
+              //
+              // Refer to `getTailOfShardingConstraintChain` for more details.
+              ShardingConstraintOp head = shardingConstraintOp;
+              if (ShardingConstraintOp tail =
+                      getTailOfShardingConstraintChain(head)) {
+                head.getInput().replaceUsesWithIf(
+                    tail.getResult(), [&](OpOperand& use) {
+                      return use.getOwner() != head &&
+                             !(funcOp == mainFuncOp &&
+                               isa<func::ReturnOp>(use.getOwner())) &&
+                             tail->getBlock() == use.getOwner()->getBlock() &&
+                             tail->isBeforeInBlock(use.getOwner());
+                    });
+              }
+
+              Value input = shardingConstraintOp.getInput();
+              TensorShardingAttr sharding = shardingConstraintOp.getSharding();
+              applyConstraint(shardingConstraintOp, input, sharding,
+                              /*getConstraintAfterValue=*/[&]() {
+                                moveAfterValue(shardingConstraintOp, input);
+                                return shardingConstraintOp;
+                              });
+            })
+            .Case([&](ManualComputationOp manualComputationOp) {
+              for (auto [operand, sharding] : llvm::zip_equal(
+                       manualComputationOp.getOperands(),
+                       manualComputationOp.getInShardings().getShardings())) {
+                applyConstraint(manualComputationOp, operand, sharding,
+                                /*getConstraintAfterValue=*/
+                                [&, operand = operand, sharding = sharding]() {
+                                  // We can't move the `ManualComputationOp`, so
+                                  // we create a new `ShardingConstraintOp`
+                                  // after the operand.
+                                  builder.setInsertionPointAfterValue(operand);
+                                  return ShardingConstraintOp::create(
+                                      builder, manualComputationOp.getLoc(),
+                                      operand, sharding);
                                 });
-              })
-              .Case([&](ManualComputationOp manualComputationOp) {
-                for (auto [operand, sharding] : llvm::zip_equal(
-                         manualComputationOp.getOperands(),
-                         manualComputationOp.getInShardings().getShardings())) {
-                  applyConstraint(
-                      manualComputationOp, operand, sharding,
-                      /*getConstraintAfterValue=*/
-                      [&, operand = operand, sharding = sharding]() {
-                        // We can't move the `ManualComputationOp`, so we create
-                        // a new `ShardingConstraintOp` after the operand.
-                        builder.setInsertionPointAfterValue(operand);
-                        return ShardingConstraintOp::create(
-                            builder, manualComputationOp.getLoc(), operand,
-                            sharding);
-                      });
-                }
-              });
-        });
+              }
+            });
+      });
+    });
 
     // Unregister the handler and save the sharding origins on the module.
     context.registerActionHandler(nullptr);

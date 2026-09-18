@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-import-func-calls -sdy-apply-sharding-constraints | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-func-data-flow-edges -sdy-apply-sharding-constraints -sdy-sink-func-data-flow-edges -sdy-import-func-calls | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
