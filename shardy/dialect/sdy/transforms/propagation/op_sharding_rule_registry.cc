@@ -666,7 +666,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          inShapeRhs[nonBatchDim1], FactorType::kNeedReplication)
               .build();
         }
-        if (callTargetName == "mhlo.topk") {
+        if (callTargetName == "mhlo.topk" || callTargetName == "TopK") {
           assert(customCall.getNumOperands() == 1 &&
                  customCall.getNumResults() == 2);
           // See `jax.lax.top_k` for more information.
