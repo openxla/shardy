@@ -87,10 +87,12 @@ struct PropagationOptions {
   // - If it contains "selectLow=<val>, selectHigh=<val>":
   //   filters operations within the specified sequential index range [low,
   //   high].
+  // - If it contains "func=<name>": selects candidates inside the specified
+  //   subroutine rather than @main.
   // - If it contains comma-separated substrings (e.g. "dot, pad"): matches and
   //   partitions any op whose name contains any of the substrings.
-  // - Can also combine range and op names (e.g. "selectLow=0, selectHigh=10,
-  // dot").
+  // - Can also combine range, func, and op names (e.g. "selectLow=0,
+  //   selectHigh=10, func=subroutine, dot").
   std::string perInstructionPartitioningFilter = "";
 
   // Whether to mark partial reduction results with unreduced axes.

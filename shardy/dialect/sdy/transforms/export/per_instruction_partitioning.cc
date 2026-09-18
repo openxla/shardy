@@ -17,9 +17,11 @@ limitations under the License.
 #include <cstdint>
 #include <numeric>
 #include <string>
+#include <utility>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MathExtras.h"
@@ -29,6 +31,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -41,6 +44,8 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "mlir/Transforms/RegionUtils.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -63,6 +68,7 @@ namespace {
 struct FilterConfig {
   int64_t selectLow = -1;
   int64_t selectHigh = -1;
+  std::string targetFunc;
   SmallVector<std::string> opNames;
   bool selectAll = false;
 };
@@ -97,6 +103,7 @@ sdy::AllReduceOp getTrailingConvAllReduce(Operation* op) {
 // The filter string format is a comma-separated list of tokens in any order:
 //    - selectLow=<N>: Only partition operations with sequence ID >= N.
 //    - selectHigh=<N>: Only partition operations with sequence ID <= N.
+//    - func=<name>: Subroutine name to select from.
 //    - <op_name>: An operation matches if its MLIR name contains any of
 //      these substrings (e.g. "dot", "add", "convolution").
 //
@@ -133,9 +140,16 @@ FilterConfig parseFilter(StringRef filterStr) {
       if (!token.trim().getAsInteger(10, val)) {
         config.selectHigh = val;
       }
+    } else if (token.consume_front("function=") ||
+               token.consume_front("func=")) {
+      config.targetFunc = token.trim().str();
     } else {
       config.opNames.push_back(token.str());
     }
+  }
+
+  if (config.opNames.empty() && config.selectLow < 0 && config.selectHigh < 0) {
+    config.selectAll = true;
   }
 
   return config;
@@ -161,6 +175,69 @@ bool matchesFilter(Operation* op, int64_t seqId, const FilterConfig& config) {
 }
 
 // =============================================================================
+// Live-In/Live-Out & Callee Analysis Helpers
+// =============================================================================
+
+// Collects all external live-in SSA values (direct operands followed by unique
+// implicit captures inside regions) for an operation.
+void collectLiveInValues(Operation* op, SmallVector<Value>& liveInValues,
+                         llvm::SetVector<Value>& implicitCaptures) {
+  for (Value operand : op->getOperands()) {
+    liveInValues.push_back(operand);
+  }
+
+  if (op->getNumRegions() > 0) {
+    llvm::SetVector<Value> usedAbove;
+    mlir::getUsedValuesDefinedAbove(op->getRegions(), usedAbove);
+    for (Value val : usedAbove) {
+      if (implicitCaptures.insert(val)) {
+        liveInValues.push_back(val);
+      }
+    }
+  }
+}
+
+void collectSymbolsFromAttr(Attribute attr,
+                            SmallVectorImpl<StringRef>& symbols) {
+  if (auto symRef = dyn_cast<SymbolRefAttr>(attr)) {
+    symbols.push_back(symRef.getRootReference().getValue());
+  } else if (auto arrayAttr = dyn_cast<ArrayAttr>(attr)) {
+    for (Attribute elem : arrayAttr) {
+      collectSymbolsFromAttr(elem, symbols);
+    }
+  } else if (auto dictAttr = dyn_cast<DictionaryAttr>(attr)) {
+    for (NamedAttribute named : dictAttr) {
+      collectSymbolsFromAttr(named.getValue(), symbols);
+    }
+  }
+}
+
+// Collects all symbol-referenced func::FuncOp callees transitively invoked by
+// op or its nested regions.
+void collectTransitiveCallees(Operation* op, const SymbolTable& symbolTable,
+                              SmallVector<func::FuncOp>& callees) {
+  llvm::DenseSet<Operation*> visited;
+  SmallVector<Operation*> worklist{op};
+  while (!worklist.empty()) {
+    Operation* curr = worklist.pop_back_val();
+    curr->walk([&](Operation* nested) {
+      SmallVector<StringRef> symbols;
+      for (NamedAttribute attr : nested->getAttrs()) {
+        collectSymbolsFromAttr(attr.getValue(), symbols);
+      }
+      for (StringRef sym : symbols) {
+        if (auto funcOp = symbolTable.lookup<func::FuncOp>(sym)) {
+          if (visited.insert(funcOp).second) {
+            callees.push_back(funcOp);
+            worklist.push_back(funcOp);
+          }
+        }
+      }
+    });
+  }
+}
+
+// =============================================================================
 // Mesh & Sharding Analysis Helpers
 // =============================================================================
 
@@ -173,22 +250,24 @@ struct InstructionShardingInfo {
 };
 
 // Returns the common mesh attribute or symbol reference attached to any
-// operand or result of op.
-Attribute getTargetMeshOrRef(Operation* op, const SymbolTable& symbolTable) {
+// live-in value or result of the operation.
+Attribute getTargetMeshOrRef(ArrayRef<Value> liveInValues, Operation* op,
+                             const SymbolTable& symbolTable) {
   SmallVector<TensorShardingAttr> inShardings;
-  for (Value operand : op->getOperands()) {
-    inShardings.push_back(getSharding(operand));
+  for (Value val : liveInValues) {
+    inShardings.push_back(getSharding(val));
   }
   SmallVector<TensorShardingAttr> outShardings;
-  for (Value result : op->getResults()) {
-    outShardings.push_back(getSharding(result));
+  for (Value val : op->getResults()) {
+    outShardings.push_back(getSharding(val));
   }
   return getCommonMeshOrRef(inShardings, outShardings, symbolTable);
 }
 
-// Collects operand and result shardings (defaulting to fully replicated if
+// Collects live-in and result shardings (defaulting to fully replicated if
 // missing) and all unique manual axes used across the instruction.
 InstructionShardingInfo getInstructionShardingInfo(Operation* op,
+                                                   ArrayRef<Value> liveInValues,
                                                    FlatSymbolRefAttr meshSym,
                                                    Attribute targetMesh) {
   MLIRContext* ctx = op->getContext();
@@ -214,8 +293,7 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
     return shardings;
   };
 
-  info.inShardings =
-      getShardings(op->getOperands(), /*clearUnreducedAxes=*/false);
+  info.inShardings = getShardings(liveInValues, /*clearUnreducedAxes=*/false);
   info.outShardings =
       getShardings(op->getResults(), /*clearUnreducedAxes=*/false);
 
@@ -349,7 +427,8 @@ RankedTensorType getUnifiedPaddedTypeForReshard(
 // For sdy.reshard, uses the unified LCM padded type. For all other ops, pads
 // each operand independently using getDivisiblePaddedType.
 SmallVector<Type> computePaddedOperandTypes(
-    Operation* op, const InstructionShardingInfo& shardingInfo,
+    Operation* op, ArrayRef<Value> liveInValues,
+    const InstructionShardingInfo& shardingInfo,
     const SymbolTable& symbolTable) {
   if (RankedTensorType unifiedType =
           getUnifiedPaddedTypeForReshard(op, shardingInfo, symbolTable)) {
@@ -357,7 +436,7 @@ SmallVector<Type> computePaddedOperandTypes(
   }
   SmallVector<Type> paddedArgTypes;
   for (auto [operand, sharding] :
-       llvm::zip_equal(op->getOperands(), shardingInfo.inShardings)) {
+       llvm::zip_equal(liveInValues, shardingInfo.inShardings)) {
     paddedArgTypes.push_back(getDivisiblePaddedType(
         operand.getType(), sharding, symbolTable, &shardingInfo.manualAxesSet));
   }
@@ -383,13 +462,15 @@ SmallVector<Type> computePaddedResultTypes(
   return paddedResultTypes;
 }
 
-// Pads indivisible operands in the parent module before manual computation.
-SmallVector<Value> padIndivisibleOperands(
-    Operation* op, const InstructionShardingInfo& shardingInfo,
-    ArrayRef<Type> paddedArgTypes, IRRewriter& rewriter) {
+// Pads indivisible live-in values in the parent module before manual
+// computation.
+SmallVector<Value> padIndivisibleLiveInValues(
+    Operation* op, ArrayRef<Value> liveInValues,
+    const InstructionShardingInfo& shardingInfo, ArrayRef<Type> paddedArgTypes,
+    IRRewriter& rewriter) {
   SmallVector<Value> manualOperands;
   for (auto [operand, paddedType, sharding] : llvm::zip_equal(
-           op->getOperands(), paddedArgTypes, shardingInfo.inShardings)) {
+           liveInValues, paddedArgTypes, shardingInfo.inShardings)) {
     manualOperands.push_back(padHighSideToType(
         rewriter, op->getLoc(), operand, paddedType, sharding,
         /*paddingValue=*/nullptr, /*allowSlicePeephole=*/true));
@@ -397,11 +478,11 @@ SmallVector<Value> padIndivisibleOperands(
   return manualOperands;
 }
 
-
-
-// Outlines the target instruction and its mesh dependencies into an ephemeral
-// module containing a single private func::FuncOp.
+// Outlines the target instruction and its mesh/callee dependencies into an
+// ephemeral module containing a single private func::FuncOp.
 LogicalResult outlineInstruction(Operation* op,
+                                 const llvm::SetVector<Value>& implicitCaptures,
+                                 ArrayRef<func::FuncOp> callees,
                                  const InstructionShardingInfo& shardingInfo,
                                  ArrayRef<Type> paddedArgTypes,
                                  ArrayRef<Type> paddedResultTypes,
@@ -415,6 +496,10 @@ LogicalResult outlineInstruction(Operation* op,
 
   for (MeshOp meshOp : op->getParentOfType<ModuleOp>().getOps<MeshOp>()) {
     tempRewriter.clone(*meshOp);
+  }
+
+  for (func::FuncOp callee : callees) {
+    tempRewriter.clone(*callee);
   }
 
   FunctionType funcType =
@@ -472,13 +557,12 @@ LogicalResult outlineInstruction(Operation* op,
 
   Block* block = outlinedFunc.addEntryBlock();
   tempRewriter.setInsertionPointToStart(block);
-  SmallVector<Value> operands;
-  operands.reserve(op->getNumOperands());
-  for (size_t i = 0; i < op->getNumOperands(); ++i) {
-    Value arg = block->getArgument(i);
-    Type origType = op->getOperand(i).getType();
-    TensorShardingAttr operandSharding = shardingInfo.inShardings[i];
-    if (!isa<ReshardOp>(op) && arg.getType() != origType) {
+  bool isReshard = isa<ReshardOp>(op);
+
+  auto getBlockArgOrSliced = [&](size_t argIdx, Type origType) -> Value {
+    Value arg = block->getArgument(argIdx);
+    TensorShardingAttr operandSharding = shardingInfo.inShardings[argIdx];
+    if (!isReshard && arg.getType() != origType) {
       arg = sliceHighSideToType(tempRewriter, op->getLoc(), arg, origType,
                                 operandSharding);
     }
@@ -490,21 +574,47 @@ LogicalResult outlineInstruction(Operation* op,
         // A concatenating dim may have a kPermutation factor before the op is
         // outlined if the operands are slice ops. In the outlined function,
         // since the operands are no longer slices, it now has a
-        // kNeedReplication factor. We need to reshard the dim to replicated to
-        // ensure sharding consistency.
+        // kNeedReplication factor. We need to reshard the dim to replicated
+        // to ensure sharding consistency.
         operandSharding = newSharding;
         arg =
             ReshardOp::create(tempRewriter, op->getLoc(), arg, operandSharding);
       }
     }
-    operands.push_back(arg);
+    return arg;
+  };
+
+  IRMapping mapping;
+  size_t implicitArgIdx = op->getNumOperands();
+  for (Value capturedVal : implicitCaptures) {
+    mapping.map(capturedVal,
+                getBlockArgOrSliced(implicitArgIdx++, capturedVal.getType()));
   }
 
-  Operation* clonedOp = tempRewriter.clone(*op);
-  for (size_t i = 0; i < clonedOp->getNumOperands(); ++i) {
-    clonedOp->setOperand(i, operands[i]);
+  SmallVector<TensorShardingAttr> opOutShardings(
+      shardingInfo.outShardings.begin(), shardingInfo.outShardings.end());
+  if (auto concatOp = dyn_cast<stablehlo::ConcatenateOp>(op)) {
+    int64_t concatDim = concatOp.getDimension();
+    if (!opOutShardings.empty() && opOutShardings[0] &&
+        concatDim < opOutShardings[0].getRank() &&
+        !opOutShardings[0].getDimShardings()[concatDim].getAxes().empty()) {
+      opOutShardings[0] = replicateDimension(opOutShardings[0], concatDim);
+    }
   }
-  if (isa<ReshardOp>(clonedOp)) {
+
+  SmallVector<Value> directOperands;
+  directOperands.reserve(op->getNumOperands());
+  for (size_t i = 0; i < op->getNumOperands(); ++i) {
+    directOperands.push_back(
+        getBlockArgOrSliced(i, op->getOperand(i).getType()));
+  }
+
+  Operation* clonedOp = tempRewriter.clone(*op, mapping);
+  for (size_t i = 0; i < op->getNumOperands(); ++i) {
+    clonedOp->setOperand(i, directOperands[i]);
+  }
+
+  if (isReshard) {
     for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
       clonedOp->getResult(i).setType(paddedResultTypes[i]);
     }
@@ -535,7 +645,6 @@ LogicalResult outlineInstruction(Operation* op,
       }
     }
   }
-
   if (trailingAllReduce) {
     setShardings(clonedOp, getShardings(op->getResults()));
     auto clonedAllReduce = AllReduceOp::create(
@@ -552,20 +661,10 @@ LogicalResult outlineInstruction(Operation* op,
     return success();
   }
 
-  SmallVector<TensorShardingAttr> opOutShardings(
-      shardingInfo.outShardings.begin(), shardingInfo.outShardings.end());
-  if (auto concatOp = dyn_cast<stablehlo::ConcatenateOp>(clonedOp)) {
-    int64_t concatDim = concatOp.getDimension();
-    if (!opOutShardings.empty() && opOutShardings[0] &&
-        concatDim < opOutShardings[0].getRank() &&
-        !opOutShardings[0].getDimShardings()[concatDim].getAxes().empty()) {
-      opOutShardings[0] = replicateDimension(opOutShardings[0], concatDim);
-    }
-  }
   setShardings(clonedOp, opOutShardings);
   SmallVector<Value> returnValues;
-  returnValues.reserve(clonedOp->getNumResults());
-  for (size_t i = 0; i < clonedOp->getNumResults(); ++i) {
+  returnValues.reserve(op->getNumResults());
+  for (size_t i = 0; i < op->getNumResults(); ++i) {
     Value res = clonedOp->getResult(i);
     if (opOutShardings[i] != shardingInfo.outShardings[i]) {
       res = ReshardOp::create(tempRewriter, op->getLoc(), res,
@@ -638,17 +737,53 @@ ManualComputationOp createManualComputationFromFunc(
 }
 
 // Slices any padded results back to their original tensor shapes in the parent
-// module and replaces uses of the original operation.
+// module and replaces uses of the original operation results.
 void sliceIndivisibleResults(Operation* op, ManualComputationOp manualCompOp,
                              ArrayRef<TensorShardingAttr> outShardings,
                              IRRewriter& rewriter) {
   for (size_t j = 0; j < op->getNumResults(); ++j) {
+    Value origRes = op->getResult(j);
     Value manualRes = manualCompOp.getResult(j);
-    Type origResType = op->getResult(j).getType();
+    Type origResType = origRes.getType();
     Value slicedRes = sliceHighSideToType(rewriter, op->getLoc(), manualRes,
                                           origResType, outShardings[j]);
-    rewriter.replaceAllUsesWith(op->getResult(j), slicedRes);
+    rewriter.replaceAllUsesWith(origRes, slicedRes);
   }
+}
+
+// =============================================================================
+// Find target region to collect operations for per-instruction partitioning:
+// - If targetFuncName is empty:
+//     - If the module contains a single FuncOp, use that FuncOp's body.
+//     - Otherwise, use @main's body (or first public FuncOp).
+// - If targetFuncName is non-empty:
+//     - Use the body of the FuncOp with that symbol name in module.
+Region* getTargetRegion(ModuleOp module, StringRef targetFuncName) {
+  auto getDefaultEntryFunc = [&]() -> func::FuncOp {
+    auto funcOps = module.getOps<func::FuncOp>();
+    if (llvm::hasSingleElement(funcOps)) {
+      return *funcOps.begin();
+    }
+    if (auto mainFunc = module.lookupSymbol<func::FuncOp>("main")) {
+      return mainFunc;
+    }
+    for (func::FuncOp funcOp : funcOps) {
+      if (!funcOp.isDeclaration() && funcOp.isPublic()) {
+        return funcOp;
+      }
+    }
+    return nullptr;
+  };
+
+  if (!targetFuncName.empty()) {
+    auto funcOp = module.lookupSymbol<func::FuncOp>(targetFuncName);
+    SDY_CHECK(funcOp) << "Target function not found: " << targetFuncName.str();
+    return &funcOp.getBody();
+  }
+
+  func::FuncOp entryFunc = getDefaultEntryFunc();
+  SDY_CHECK(entryFunc) << "No entry function found in module.";
+  return &entryFunc.getBody();
 }
 
 // =============================================================================
@@ -665,64 +800,59 @@ struct PerInstructionPartitioningPass
     ModuleOp module = getOperation();
     FilterConfig config = parseFilter(filter);
 
-    // Collect ops for partitioning.
+    Region* targetRegion = getTargetRegion(module, config.targetFunc);
+
+    // Collect ops for partitioning from target region.
     SmallVector<Operation*> opsToPartition;
     int64_t instructionSeqId = 0;
-    module.walk([&](func::FuncOp funcOp) {
-      if (funcOp.isDeclaration()) {
-        return;
-      }
-      // TODO(b/545097355): support partitioning ops nested inside control flow,
-      // such as stablehlo.while, stablehlo.if, and stablehlo.case etc.
-      for (Block& block : funcOp.getBody()) {
-        for (Operation& op : block) {
-          // Filter non-candidate / metadata from counting.
-          if (op.hasTrait<OpTrait::IsTerminator>()) {
-            continue;
-          }
-          // TODO(b/545097355): fine tune the list of ops to skip.
-          //
-          // We skip metadata/control ops and unreduced-related collective
-          // operations (sdy.replicated_to_unreduced, sdy.sharded_to_unreduced)
-          // because unreduced collectives are handled later in export.
-          if (isa<DataFlowEdgeOp, ManualComputationOp, MeshOp,
-                  PropagationBarrierOp, ReplicatedToUnreducedOp, ReturnOp,
-                  ShardedToUnreducedOp, ShardingConstraintOp, ShardingGroupOp>(
-                  &op)) {
-            continue;
-          }
-          if (auto allReduceOp = dyn_cast<sdy::AllReduceOp>(&op)) {
-            if (Operation* defOp = allReduceOp.getTensor().getDefiningOp();
-                defOp && getTrailingConvAllReduce(defOp) == allReduceOp) {
-              continue;
-            }
-          }
-          // Avoid taking a dependency on the MHLO dialect by checking operation
-          // names directly.
-          if (op.getName().getStringRef() == "mhlo.copy") {
-            continue;
-          }
-          if (auto customCall = dyn_cast<mlir::stablehlo::CustomCallOp>(&op)) {
-            if (customCall.getCallTargetName() == "Sharding" ||
-                customCall.getCallTargetName() == "mhlo.sharding") {
-              continue;
-            }
-          }
-          if (!hasAnyShardedValue(&op)) {
-            continue;
-          }
-
-          // Count the number of instructions that need to be partitioned.
-          int64_t currentId = instructionSeqId++;
-
-          if (!matchesFilter(&op, currentId, config)) {
-            continue;
-          }
-
-          opsToPartition.push_back(&op);
+    for (Block& block : *targetRegion) {
+      for (Operation& op : block) {
+        // Filter non-candidate / metadata from counting.
+        if (op.hasTrait<OpTrait::IsTerminator>()) {
+          continue;
         }
+        // TODO(b/545097355): fine tune the list of ops to skip.
+        //
+        // We skip metadata/control ops and unreduced-related collective
+        // operations (sdy.replicated_to_unreduced, sdy.sharded_to_unreduced)
+        // because unreduced collectives are handled later in export.
+        if (isa<DataFlowEdgeOp, ManualComputationOp, MeshOp,
+                PropagationBarrierOp, ReplicatedToUnreducedOp, ReturnOp,
+                ShardedToUnreducedOp, ShardingConstraintOp, ShardingGroupOp>(
+                &op)) {
+          continue;
+        }
+        // Avoid taking a dependency on the MHLO dialect by checking operation
+        // names directly.
+        if (op.getName().getStringRef() == "mhlo.copy") {
+          continue;
+        }
+        if (auto customCall = dyn_cast<mlir::stablehlo::CustomCallOp>(&op)) {
+          if (customCall.getCallTargetName() == "Sharding" ||
+              customCall.getCallTargetName() == "mhlo.sharding") {
+            continue;
+          }
+        }
+        if (auto allReduceOp = dyn_cast<sdy::AllReduceOp>(&op)) {
+          if (Operation* defOp = allReduceOp.getTensor().getDefiningOp();
+              defOp && getTrailingConvAllReduce(defOp) == allReduceOp) {
+            continue;
+          }
+        }
+        if (!hasAnyShardedValue(&op)) {
+          continue;
+        }
+
+        // Count the number of instructions that need to be partitioned.
+        int64_t currentId = instructionSeqId++;
+
+        if (!matchesFilter(&op, currentId, config)) {
+          continue;
+        }
+
+        opsToPartition.push_back(&op);
       }
-    });
+    }
 
     // Partition the ops and wrap the device code with manual_computation.
     for (Operation* op : opsToPartition) {
@@ -739,7 +869,15 @@ struct PerInstructionPartitioningPass
     IRRewriter rewriter(ctx);
     rewriter.setInsertionPoint(op);
     SymbolTable symbolTable(op->getParentOfType<ModuleOp>());
-    Attribute meshOrRef = getTargetMeshOrRef(op, symbolTable);
+
+    SmallVector<Value> liveInValues;
+    llvm::SetVector<Value> implicitCaptures;
+    collectLiveInValues(op, liveInValues, implicitCaptures);
+
+    SmallVector<func::FuncOp> callees;
+    collectTransitiveCallees(op, symbolTable, callees);
+
+    Attribute meshOrRef = getTargetMeshOrRef(liveInValues, op, symbolTable);
     if (!meshOrRef) {
       return false;
     }
@@ -750,27 +888,56 @@ struct PerInstructionPartitioningPass
 
     sdy::AllReduceOp trailingAllReduce = getTrailingConvAllReduce(op);
     InstructionShardingInfo shardingInfo =
-        getInstructionShardingInfo(op, meshSym, targetMesh);
+        getInstructionShardingInfo(op, liveInValues, meshSym, targetMesh);
     if (trailingAllReduce) {
       shardingInfo.outShardings = {trailingAllReduce.getOutSharding()};
     }
 
     SmallVector<Type> paddedArgTypes =
-        computePaddedOperandTypes(op, shardingInfo, symbolTable);
+        computePaddedOperandTypes(op, liveInValues, shardingInfo, symbolTable);
     SmallVector<Type> paddedResultTypes =
         computePaddedResultTypes(op, shardingInfo, symbolTable);
 
-    SmallVector<Value> manualOperands =
-        padIndivisibleOperands(op, shardingInfo, paddedArgTypes, rewriter);
+    SmallVector<Value> manualOperands = padIndivisibleLiveInValues(
+        op, liveInValues, shardingInfo, paddedArgTypes, rewriter);
 
     OwningOpRef<ModuleOp> tempModule;
     func::FuncOp outlinedFunc;
-    if (failed(outlineInstruction(op, shardingInfo, paddedArgTypes,
-                                  paddedResultTypes, tempModule, outlinedFunc,
-                                  trailingAllReduce)) ||
+    if (failed(outlineInstruction(op, implicitCaptures, callees, shardingInfo,
+                                  paddedArgTypes, paddedResultTypes, tempModule,
+                                  outlinedFunc, trailingAllReduce)) ||
         failed(runPartitionerPipeline(*tempModule, enableHaloExchange,
                                       replicaCount, partitionCount))) {
       return false;
+    }
+
+    // Move partitioned helper functions from tempModule into parent module
+    // with unique symbol names and update symbol references.
+    SmallVector<func::FuncOp> insertedCallees;
+    SmallVector<std::pair<StringAttr, StringAttr>> renamedCallees;
+    for (func::FuncOp localCallee : tempModule->getOps<func::FuncOp>()) {
+      if (localCallee == outlinedFunc) {
+        continue;
+      }
+      StringAttr oldSymName = localCallee.getSymNameAttr();
+      func::FuncOp clonedCallee = localCallee.clone();
+      StringAttr newSymName = symbolTable.insert(clonedCallee);
+      insertedCallees.push_back(clonedCallee);
+      if (newSymName != oldSymName) {
+        renamedCallees.emplace_back(oldSymName, newSymName);
+      }
+    }
+    for (auto [oldSymName, newSymName] : renamedCallees) {
+      if (failed(SymbolTable::replaceAllSymbolUses(oldSymName, newSymName,
+                                                   outlinedFunc))) {
+        return false;
+      }
+      for (func::FuncOp insertedFunc : insertedCallees) {
+        if (failed(SymbolTable::replaceAllSymbolUses(oldSymName, newSymName,
+                                                     insertedFunc))) {
+          return false;
+        }
+      }
     }
 
     auto manualCompOp = createManualComputationFromFunc(

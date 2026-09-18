@@ -387,7 +387,7 @@ def PerInstructionPartitioningPass : Pass<"sdy-per-instruction-partitioning", "M
             "std::string", /*default=*/"\"\"",
             "Filter string for selective partitioning. Can be empty (all sharded ops), "
             "comma-separated op name substrings (e.g. 'dot, pad'), or key-values like "
-            "'selectLow=0, selectHigh=10'.">,
+            "'selectLow=0, selectHigh=10, func=subroutine'.">,
       Option<"enableHaloExchange", "enable-halo-exchange",
             "bool", /*default=*/"true",
             "Implement halo exchange logic for windowed operations inside the sub-pipeline.">,

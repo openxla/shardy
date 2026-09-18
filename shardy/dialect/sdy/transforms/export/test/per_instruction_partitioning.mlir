@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice,concatenate,convolution" | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice,concatenate,convolution,while,call,if" | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
@@ -378,4 +378,201 @@ func.func @conv_pure_reduction_with_trailing_all_reduce(
     } : (tensor<1x8x4xf32>, tensor<8x4x4xf32>) -> tensor<1x1x4xf32>
   %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh, [{}, {}, {}]> : tensor<1x1x4xf32>
   return %1 : tensor<1x1x4xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @while_with_implicit_capture
+// CHECK-SAME: (%[[INIT_I:.*]]: tensor<i32>,
+// CHECK-SAME:  %[[INIT_VAL:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+// CHECK-SAME:  %[[OUTSIDE:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @while_with_implicit_capture(
+    %init_i: tensor<i32>,
+    %init_val: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %outside: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]]:2 = sdy.manual_computation(%[[INIT_I]], %[[INIT_VAL]], %[[OUTSIDE]])
+  // CHECK-SAME:   in_shardings=[<@mesh, []>, <@mesh, [{"x"}, {}]>, <@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, []>, <@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%[[LOCAL_I:.*]]: tensor<i32>, %[[LOCAL_VAL:.*]]: tensor<4x16xf32>, %[[LOCAL_OUTSIDE:.*]]: tensor<4x16xf32>) {
+  // CHECK:        %[[WHILE:.*]]:2 = stablehlo.while(%[[ITER_I:.*]] = %[[LOCAL_I]], %[[ITER_VAL:.*]] = %[[LOCAL_VAL]]) : tensor<i32>, tensor<4x16xf32>
+  // CHECK:          %[[ADD:.*]] = stablehlo.add %[[ITER_VAL]], %[[LOCAL_OUTSIDE]] : tensor<4x16xf32>
+  // CHECK-NEXT:     stablehlo.return %{{.*}}, %[[ADD]] : tensor<i32>, tensor<4x16xf32>
+  // CHECK-NEXT:   }
+  // CHECK-NEXT:   sdy.return %[[WHILE]]#0, %[[WHILE]]#1 : tensor<i32>, tensor<4x16xf32>
+  // CHECK-NEXT: } : (tensor<i32>, tensor<8x16xf32>, tensor<8x16xf32>) -> (tensor<i32>, tensor<8x16xf32>)
+  %0:2 = stablehlo.while(%iter_i = %init_i, %iter_val = %init_val) : tensor<i32>, tensor<8x16xf32>
+      attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>, <@mesh, [{"x"}, {}]>]>}
+    cond {
+      %limit = stablehlo.constant dense<10> : tensor<i32>
+      %cmp = stablehlo.compare LT, %iter_i, %limit : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %cmp : tensor<i1>
+    } do {
+      %step = stablehlo.constant dense<1> : tensor<i32>
+      %next_i = stablehlo.add %iter_i, %step : tensor<i32>
+      %add = stablehlo.add %iter_val, %outside {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x16xf32>
+      stablehlo.return %next_i, %add : tensor<i32>, tensor<8x16xf32>
+    }
+  return %0#1 : tensor<8x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func private @callee(
+// CHECK-SAME: %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func private @callee(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func @call_with_callee
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @call_with_callee(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[ARG0]])
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%[[LOCAL_ARG:.*]]: tensor<4x16xf32>) {
+  // CHECK-NEXT:   %[[CALL:.*]] = func.call @callee_0(%[[LOCAL_ARG]]) : (tensor<4x16xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT:   sdy.return %[[CALL]] : tensor<4x16xf32>
+  // CHECK-NEXT: } : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %0 = func.call @callee(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func private @callee_0(%arg0: tensor<4x16xf32>) -> tensor<4x16xf32> {
+// CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %arg0, %arg0 : tensor<4x16xf32>
+// CHECK-NEXT:    return %[[ADD]] : tensor<4x16xf32>
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @if_with_implicit_capture
+// CHECK-SAME: (%[[PRED:.*]]: tensor<i1>,
+// CHECK-SAME:  %[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @if_with_implicit_capture(
+    %pred: tensor<i1>,
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[PRED]], %[[ARG0]], %[[ARG1]])
+  // CHECK-SAME:   manual_axes={"x"} (%[[LOCAL_PRED:.*]]: tensor<i1>, %[[LOCAL_ARG0:.*]]: tensor<4x16xf32>, %[[LOCAL_ARG1:.*]]: tensor<4x16xf32>) {
+  // CHECK-NEXT:   %[[IF:.*]] = "stablehlo.if"(%[[LOCAL_PRED]]) ({
+  // CHECK-NEXT:     %[[ADD:.*]] = stablehlo.add %[[LOCAL_ARG0]], %[[LOCAL_ARG1]] : tensor<4x16xf32>
+  // CHECK-NEXT:     stablehlo.return %[[ADD]] : tensor<4x16xf32>
+  // CHECK-NEXT:   }, {
+  // CHECK-NEXT:     %[[SUB:.*]] = stablehlo.subtract %[[LOCAL_ARG0]], %[[LOCAL_ARG1]] : tensor<4x16xf32>
+  // CHECK-NEXT:     stablehlo.return %[[SUB]] : tensor<4x16xf32>
+  // CHECK-NEXT:   }) : (tensor<i1>) -> tensor<4x16xf32>
+  // CHECK-NEXT:   sdy.return %[[IF]] : tensor<4x16xf32>
+  // CHECK-NEXT: } : (tensor<i1>, tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  %0 = "stablehlo.if"(%pred) ({
+    %add = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x16xf32>
+    stablehlo.return %add : tensor<8x16xf32>
+  }, {
+    %sub = stablehlo.subtract %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x16xf32>
+    stablehlo.return %sub : tensor<8x16xf32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<i1>) -> tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// Tests indivisible op input (%init_val: 5x16), indivisible implicit capture
+// (%outside: 5x16), and indivisible op output (5x16) on stablehlo.while.
+// CHECK-LABEL: func @while_with_indivisible_capture_input_and_output
+// CHECK-SAME: (%[[INIT_I:.*]]: tensor<i32>,
+// CHECK-SAME:  %[[INIT_VAL:.*]]: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+// CHECK-SAME:  %[[OUTSIDE:.*]]: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @while_with_indivisible_capture_input_and_output(
+    %init_i: tensor<i32>,
+    %init_val: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %outside: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // (1) Pad high 0 to make both indivisible input and indivisible implicit capture divisible (5x16 -> 6x16):
+  // CHECK:      %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK:      %[[PAD_VAL:.*]] = stablehlo.pad %[[INIT_VAL]], %[[CST]], low = [0, 0], high = [1, 0], interior = [0, 0]
+  // CHECK:      %[[CST2:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK:      %[[PAD_OUTSIDE:.*]] = stablehlo.pad %[[OUTSIDE]], %[[CST2]], low = [0, 0], high = [1, 0], interior = [0, 0]
+  // CHECK:      %[[MANUAL:.*]]:2 = sdy.manual_computation(%[[INIT_I]], %[[PAD_VAL]], %[[PAD_OUTSIDE]])
+  // CHECK-SAME:   in_shardings=[<@mesh, []>, <@mesh, [{"x"}, {}]>, <@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, []>, <@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%[[LOCAL_I:.*]]: tensor<i32>, %[[LOCAL_VAL:.*]]: tensor<3x16xf32>, %[[LOCAL_OUTSIDE:.*]]: tensor<3x16xf32>) {
+  // (2)-(4) Inside manual_computation, local shard shape is 3x16 (from padded 6x16 / 2):
+  // CHECK:        %[[SLICE_OUTSIDE:.*]] = stablehlo.slice %[[LOCAL_OUTSIDE]] [0:3, 0:16] : (tensor<3x16xf32>) -> tensor<3x16xf32>
+  // CHECK:        %[[SLICE_VAL:.*]] = stablehlo.slice %[[LOCAL_VAL]] [0:3, 0:16] : (tensor<3x16xf32>) -> tensor<3x16xf32>
+  // CHECK:        %[[WHILE:.*]]:2 = stablehlo.while(%[[ITER_I:.*]] = %[[LOCAL_I]], %[[ITER_VAL:.*]] = %[[SLICE_VAL]]) : tensor<i32>, tensor<3x16xf32>
+  // CHECK:        sdy.return %[[WHILE]]#0, %{{.*}} : tensor<i32>, tensor<3x16xf32>
+  // CHECK-NEXT: } : (tensor<i32>, tensor<6x16xf32>, tensor<6x16xf32>) -> (tensor<i32>, tensor<6x16xf32>)
+  // (5) In outer region after manual_computation, slice result back to indivisible shape (6x16 -> 5x16):
+  // CHECK-NEXT: %[[SLICE_RES:.*]] = stablehlo.slice %[[MANUAL]]#1 [0:5, 0:16] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<6x16xf32>) -> tensor<5x16xf32>
+  // CHECK-NEXT: return %[[SLICE_RES]] : tensor<5x16xf32>
+  %0:2 = stablehlo.while(%iter_i = %init_i, %iter_val = %init_val) : tensor<i32>, tensor<5x16xf32>
+      attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>, <@mesh, [{"x"}, {}]>]>}
+    cond {
+      %limit = stablehlo.constant dense<10> : tensor<i32>
+      %cmp = stablehlo.compare LT, %iter_i, %limit : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %cmp : tensor<i1>
+    } do {
+      %step = stablehlo.constant dense<1> : tensor<i32>
+      %next_i = stablehlo.add %iter_i, %step : tensor<i32>
+      %add = stablehlo.add %iter_val, %outside {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<5x16xf32>
+      stablehlo.return %next_i, %add : tensor<i32>, tensor<5x16xf32>
+    }
+  return %0#1 : tensor<5x16xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// Tests indivisible implicit capture (%lhs: 5x16, %rhs: 5x16) and indivisible op
+// output (5x16) on stablehlo.if.
+// CHECK-LABEL: func @if_with_indivisible_capture_and_output
+// CHECK-SAME: (%[[PRED:.*]]: tensor<i1>,
+// CHECK-SAME:  %[[LHS:.*]]: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+// CHECK-SAME:  %[[RHS:.*]]: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @if_with_indivisible_capture_and_output(
+    %pred: tensor<i1>,
+    %lhs: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %rhs: tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<5x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK:      %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK:      %[[PAD_LHS:.*]] = stablehlo.pad %[[LHS]], %[[CST]], low = [0, 0], high = [1, 0], interior = [0, 0]
+  // CHECK:      %[[CST2:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK:      %[[PAD_RHS:.*]] = stablehlo.pad %[[RHS]], %[[CST2]], low = [0, 0], high = [1, 0], interior = [0, 0]
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%[[PRED]], %[[PAD_LHS]], %[[PAD_RHS]])
+  // CHECK-SAME:   in_shardings=[<@mesh, []>, <@mesh, [{"x"}, {}]>, <@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%[[LOCAL_PRED:.*]]: tensor<i1>, %[[LOCAL_LHS:.*]]: tensor<3x16xf32>, %[[LOCAL_RHS:.*]]: tensor<3x16xf32>) {
+  // CHECK:        %[[SLICE_LHS:.*]] = stablehlo.slice %[[LOCAL_LHS]] [0:3, 0:16] : (tensor<3x16xf32>) -> tensor<3x16xf32>
+  // CHECK:        %[[SLICE_RHS:.*]] = stablehlo.slice %[[LOCAL_RHS]] [0:3, 0:16] : (tensor<3x16xf32>) -> tensor<3x16xf32>
+  // CHECK:        %[[IF:.*]] = "stablehlo.if"(%[[LOCAL_PRED]]) ({
+  // CHECK:          %[[ADD:.*]] = stablehlo.add %[[SLICE_LHS]], %[[SLICE_RHS]] : tensor<3x16xf32>
+  // CHECK:          stablehlo.return %[[ADD]] : tensor<3x16xf32>
+  // CHECK:        }, {
+  // CHECK:          %[[SUB:.*]] = stablehlo.subtract %[[SLICE_LHS]], %[[SLICE_RHS]] : tensor<3x16xf32>
+  // CHECK:          stablehlo.return %[[SUB]] : tensor<3x16xf32>
+  // CHECK:        }) : (tensor<i1>) -> tensor<3x16xf32>
+  // CHECK:        sdy.return %{{.*}} : tensor<3x16xf32>
+  // CHECK-NEXT: } : (tensor<i1>, tensor<6x16xf32>, tensor<6x16xf32>) -> tensor<6x16xf32>
+  // CHECK-NEXT: %[[SLICE_RES:.*]] = stablehlo.slice %[[MANUAL]] [0:5, 0:16] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<6x16xf32>) -> tensor<5x16xf32>
+  // CHECK-NEXT: return %[[SLICE_RES]] : tensor<5x16xf32>
+  %0 = "stablehlo.if"(%pred) ({
+    %add = stablehlo.add %lhs, %rhs {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<5x16xf32>
+    stablehlo.return %add : tensor<5x16xf32>
+  }, {
+    %sub = stablehlo.subtract %lhs, %rhs {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<5x16xf32>
+    stablehlo.return %sub : tensor<5x16xf32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<i1>) -> tensor<5x16xf32>
+  return %0 : tensor<5x16xf32>
 }

@@ -83,7 +83,7 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
   Option<std::string> perInstructionPartitioningFilter{
       *this, "per-instruction-partitioning-filter",
       llvm::cl::desc("Filter string for selective partitioning (e.g. 'dot, "
-                     "pad', 'selectLow=0, selectHigh=10')."),
+                     "pad', 'selectLow=0, selectHigh=10, func=subroutine')."),
       llvm::cl::init("")};
 
   Option<bool> keepShardingRules{
