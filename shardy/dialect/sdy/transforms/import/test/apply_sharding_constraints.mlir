@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-apply-sharding-constraints | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-apply-sharding-constraints | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
@@ -10,6 +10,10 @@ func.func @input_already_has_sharding(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @input_has_one_use
 func.func @input_has_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>}
@@ -17,6 +21,10 @@ func.func @input_has_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @open_sharding_constraint
 func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
@@ -27,6 +35,10 @@ func.func @open_sharding_constraint(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   %1 = sdy.sharding_constraint %0 <@mesh, [{}, {"b", ?}]> :  tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @cannot_attach_sharding_to_input
 func.func @cannot_attach_sharding_to_input(
@@ -55,12 +67,20 @@ func.func @cannot_attach_sharding_to_input(
   return %0 : tensor<4x1000xi32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @input_is_func_input_with_one_use(
 // CHECK-SAMEL    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"b"}]>})
 func.func @input_is_func_input_with_one_use(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   %1 = sdy.sharding_constraint %arg0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @no_other_sharding_constraint_users
 func.func @no_other_sharding_constraint_users(%arg0: tensor<8x8xf32>)
@@ -71,6 +91,10 @@ func.func @no_other_sharding_constraint_users(%arg0: tensor<8x8xf32>)
   %2 = stablehlo.add %0, %0 :  tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @input_produced_by_data_flow_edge
 func.func @input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
@@ -86,6 +110,10 @@ func.func @input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
   return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @input_produced_by_data_flow_edge_constraint_after_other_user
 func.func @input_produced_by_data_flow_edge_constraint_after_other_user(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -99,6 +127,10 @@ func.func @input_produced_by_data_flow_edge_constraint_after_other_user(%arg0: t
   %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @input_non_owner_target_of_data_flow_edge
 func.func @input_non_owner_target_of_data_flow_edge(%arg0: tensor<32x96xf32>, %arg1: tensor<i32>)
@@ -124,6 +156,10 @@ func.func @input_non_owner_target_of_data_flow_edge(%arg0: tensor<32x96xf32>, %a
   return %1 : tensor<32x96xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @unreduced_sharding_input_produced_by_data_flow_edge
 func.func @unreduced_sharding_input_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -137,6 +173,10 @@ func.func @unreduced_sharding_input_produced_by_data_flow_edge(%arg0: tensor<8x8
   %2 = stablehlo.add %0, %0 :  tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @unreduced_sharding_input_non_owner_target_of_data_flow_edge
 func.func @unreduced_sharding_input_non_owner_target_of_data_flow_edge(%arg0: tensor<32x96xf32>, %arg1: tensor<i32>)
@@ -162,6 +202,10 @@ func.func @unreduced_sharding_input_non_owner_target_of_data_flow_edge(%arg0: te
   return %1 : tensor<32x96xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @has_different_sharding_constraint_user
 func.func @has_different_sharding_constraint_user(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -174,6 +218,10 @@ func.func @has_different_sharding_constraint_user(%arg0: tensor<8x8xf32>)
   return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @has_other_identical_sharding_constraint_user
 func.func @has_other_identical_sharding_constraint_user(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -183,6 +231,10 @@ func.func @has_other_identical_sharding_constraint_user(%arg0: tensor<8x8xf32>)
   %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
   return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @has_other_manual_computation_user_diff_sharding
 func.func @has_other_manual_computation_user_diff_sharding(%arg0: tensor<8x8xf32>)
@@ -199,6 +251,10 @@ func.func @has_other_manual_computation_user_diff_sharding(%arg0: tensor<8x8xf32
   return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @has_other_manual_computation_user_same_sharding
 func.func @has_other_manual_computation_user_same_sharding(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -212,6 +268,10 @@ func.func @has_other_manual_computation_user_same_sharding(%arg0: tensor<8x8xf32
   return %0, %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @dangling_and_no_other_sharding_constraint_users
 func.func @dangling_and_no_other_sharding_constraint_users(%arg0: tensor<8x8xf32>)
     -> (tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -221,6 +281,10 @@ func.func @dangling_and_no_other_sharding_constraint_users(%arg0: tensor<8x8xf32
   %2 = stablehlo.add %0, %0 :  tensor<8x8xf32>
   return %0, %2 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @dangling_and_has_other_sharding_constraint_user
 func.func @dangling_and_has_other_sharding_constraint_user(%arg0: tensor<8x8xf32>)
@@ -233,6 +297,10 @@ func.func @dangling_and_has_other_sharding_constraint_user(%arg0: tensor<8x8xf32
   %2 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @dangling_and_has_other_manual_computation_user
 func.func @dangling_and_has_other_manual_computation_user(%arg0: tensor<8x8xf32>)
@@ -249,6 +317,10 @@ func.func @dangling_and_has_other_manual_computation_user(%arg0: tensor<8x8xf32>
   return %0, %2 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @manual_computation
 func.func @manual_computation(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: stablehlo.add %arg0, %arg0
@@ -264,6 +336,10 @@ func.func @manual_computation(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) ->
   } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   func.return %0, %2: tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @manual_computation_operand_produced_by_data_flow_edge
 func.func @manual_computation_operand_produced_by_data_flow_edge(%arg0: tensor<8x8xf32>)
@@ -283,6 +359,10 @@ func.func @manual_computation_operand_produced_by_data_flow_edge(%arg0: tensor<8
   return %0, %1, %2 : tensor<8x8xf32>,  tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @chain_of_two_sharding_constraints
 func.func @chain_of_two_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
@@ -296,6 +376,10 @@ func.func @chain_of_two_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tensor<
   %3 = stablehlo.add %0, %0 :  tensor<8x8xf32>
   return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @chain_of_three_sharding_constraints
 func.func @chain_of_three_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -311,6 +395,10 @@ func.func @chain_of_three_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tenso
   return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @input_of_sharding_constraint_chain_head_has_sharding
 func.func @input_of_sharding_constraint_chain_head_has_sharding(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
@@ -324,6 +412,10 @@ func.func @input_of_sharding_constraint_chain_head_has_sharding(%arg0: tensor<8x
   %3 = stablehlo.add %0, %0 :  tensor<8x8xf32>
   return %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @chain_on_block_arg_after_other_user
 func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -340,6 +432,10 @@ func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: te
   %4 = stablehlo.multiply %arg0, %arg0 :  tensor<8x8xf32>
   return %1, %3, %4 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @chain_on_op_result_after_other_user
 func.func @chain_on_op_result_after_other_user(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -359,6 +455,10 @@ func.func @chain_on_op_result_after_other_user(%arg0: tensor<8x8xf32>, %arg1: te
   return %4, %5 : tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @chain_on_block_arg_used_by_func_return
 func.func @chain_on_block_arg_used_by_func_return(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
@@ -372,6 +472,10 @@ func.func @chain_on_block_arg_used_by_func_return(%arg0: tensor<8x8xf32>, %arg1:
   %3 = stablehlo.multiply %0, %0 :  tensor<8x8xf32>
   return %2, %0, %3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @first_constraint_in_chain_has_multiple_uses
 func.func @first_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -387,6 +491,10 @@ func.func @first_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) -
   return %0, %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @second_constraint_in_chain_has_multiple_uses
 func.func @second_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]>
@@ -400,6 +508,10 @@ func.func @second_constraint_in_chain_has_multiple_uses(%arg0: tensor<8x8xf32>) 
   %3 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
   return %1, %2, %3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @chain_input_used_by_other_constraint
 func.func @chain_input_used_by_other_constraint(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
@@ -418,6 +530,10 @@ func.func @chain_input_used_by_other_constraint(%arg0: tensor<8x8xf32>) -> (tens
   return %2, %3, %4 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // CHECK-LABEL: func @last_constraint_in_chain_used_by_manual_computation
 func.func @last_constraint_in_chain_used_by_manual_computation(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
@@ -434,4 +550,167 @@ func.func @last_constraint_in_chain_used_by_manual_computation(%arg0: tensor<8x8
     sdy.return %arg2 : tensor<4x8xf32>
   } : (tensor<8x8xf32>) -> tensor<8x8xf32>
   return %4, %3 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK: return %[[ADD]]
+  %0 = stablehlo.add %arg0, %arg0 :  tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[CALL]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[FUNC_DATA_FLOW_EDGE]], %[[FUNC_DATA_FLOW_EDGE]]
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK: return %[[ADD]]
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[FUNC_DATA_FLOW_EDGE]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.func_data_flow_edge %0 : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @bar
+func.func @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[FUNC_DATA_FLOW_EDGE]], %[[FUNC_DATA_FLOW_EDGE]]
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK: return %[[ADD]]
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 :  tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_0:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @bar(%[[FUNC_DATA_FLOW_EDGE_0]])
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_1:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[FUNC_DATA_FLOW_EDGE_1]], %[[FUNC_DATA_FLOW_EDGE_1]]
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK: return %[[ADD]]
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = call @bar(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %2 = sdy.func_data_flow_edge %1 : tensor<8x8xf32>
+  %3 = stablehlo.add %2, %2 :  tensor<8x8xf32>
+  %4 = sdy.sharding_constraint %3 <@mesh, [{"a"}, {}]> :  tensor<8x8xf32>
+  %5 = sdy.sharding_constraint %4 <@mesh, [{}, {"b"}]> :  tensor<8x8xf32>
+  return %3 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[FUNC_DATA_FLOW_EDGE]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.func_data_flow_edge %0 : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<8x8xf32>) {
+  // CHECK-NEXT:   %[[DATA_FLOW_EDGE_0:.*]] = sdy.data_flow_edge %arg1 : tensor<8x8xf32>
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[DATA_FLOW_EDGE_0]], %[[DATA_FLOW_EDGE_0]]
+  // CHECK-SAME:     {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT:   %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT:   %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT:   sdy.return %[[WSC_1]] : tensor<8x8xf32>
+  // CHECK-NEXT: } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE_1:.*]] = sdy.data_flow_edge %[[NC]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[DATA_FLOW_EDGE_1]] : tensor<8x8xf32>
+  %0 = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<8x8xf32>) {
+    %1 = sdy.data_flow_edge %arg1 : tensor<8x8xf32>
+    %2 = stablehlo.add %1, %1 : tensor<8x8xf32>
+    %3 = sdy.sharding_constraint %2 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+    %4 = sdy.sharding_constraint %3 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+    sdy.return %2 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %5 = sdy.data_flow_edge %0 : tensor<8x8xf32>
+  return %5 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FOO:.*]] = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<8x8xf32>) {
+  // CHECK-NEXT:   %[[DATA_FLOW_EDGE_0:.*]] = sdy.data_flow_edge %arg1 : tensor<8x8xf32>
+  // CHECK-NEXT:   %[[BAR:.*]] = sdy.named_computation<"bar">(%[[DATA_FLOW_EDGE_0]]) (%arg2: tensor<8x8xf32>) {
+  // CHECK-NEXT:     %[[DATA_FLOW_EDGE_1:.*]] = sdy.data_flow_edge %arg2 : tensor<8x8xf32>
+  // CHECK-NEXT:     %[[ADD_0:.*]] = stablehlo.add %[[DATA_FLOW_EDGE_1]], %[[DATA_FLOW_EDGE_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT:     %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD_0]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT:     %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT:     sdy.return %[[WSC_1]] : tensor<8x8xf32>
+  // CHECK-NEXT:   } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT:   %[[DATA_FLOW_EDGE_2:.*]] = sdy.data_flow_edge %[[BAR]] : tensor<8x8xf32>
+  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %[[DATA_FLOW_EDGE_2]], %[[DATA_FLOW_EDGE_2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT:   %[[WSC_2:.*]] = sdy.sharding_constraint %[[ADD_1]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT:   %[[WSC_3:.*]] = sdy.sharding_constraint %[[WSC_2]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT:   sdy.return %[[WSC_3]] : tensor<8x8xf32>
+  // CHECK-NEXT: } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[DATA_FLOW_EDGE_3:.*]] = sdy.data_flow_edge %[[FOO]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[DATA_FLOW_EDGE_3]] : tensor<8x8xf32>
+  %0 = sdy.named_computation<"foo">(%arg0) (%arg1: tensor<8x8xf32>) {
+    %1 = sdy.data_flow_edge %arg1 : tensor<8x8xf32>
+    %2 = sdy.named_computation<"bar">(%1) (%arg2: tensor<8x8xf32>) {
+      %3 = sdy.data_flow_edge %arg2 : tensor<8x8xf32>
+      %4 = stablehlo.add %3, %3 : tensor<8x8xf32>
+      %5 = sdy.sharding_constraint %4 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+      %6 = sdy.sharding_constraint %5 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+      sdy.return %4 : tensor<8x8xf32>
+    } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    %7 = sdy.data_flow_edge %2 : tensor<8x8xf32>
+    %8 = stablehlo.add %7, %7 : tensor<8x8xf32>
+    %9 = sdy.sharding_constraint %8 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+    %10 = sdy.sharding_constraint %9 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+    sdy.return %8 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %11 = sdy.data_flow_edge %0 : tensor<8x8xf32>
+  return %11 : tensor<8x8xf32>
 }
