@@ -49,27 +49,6 @@ namespace sdy {
 
 namespace {
 
-// Helper to check if reduction window dim can be a passthrough dim.
-// When window size is 1, stride is 1 and there is no padding on the operand, it
-// is a 1-1 mapping between operand and result.
-bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
-                            ArrayRef<int64_t> windowDimensions,
-                            ArrayRef<int64_t> windowStrides, int64_t dim) {
-  if (operandPadding.has_value()) {
-    // Check if start and end padding are 0.
-    auto paddingStart = operandPadding->getValues<int64_t>().begin() + 2 * dim;
-    if (*paddingStart != 0) {
-      return false;
-    }
-    if (*std::next(paddingStart) != 0) {
-      return false;
-    }
-  }
-  // strides and window dimensions are 1.
-  return (windowStrides.empty() || windowStrides[dim] == 1) &&
-         (windowDimensions.empty() || windowDimensions[dim] == 1);
-}
-
 bool isTranspose(stablehlo::Transpose transpose) {
   switch (transpose) {
     case stablehlo::Transpose::TRANSPOSE:
@@ -229,6 +208,28 @@ Value findOperandBeforeSlice(Value operand) {
 }
 
 }  // namespace
+
+bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
+                            ArrayRef<int64_t> windowDimensions,
+                            ArrayRef<int64_t> windowStrides, int64_t dim,
+                            ArrayRef<int64_t> lhsDilations,
+                            ArrayRef<int64_t> rhsDilations) {
+  if (operandPadding.has_value()) {
+    // Check if start and end padding are 0.
+    auto paddingStart = operandPadding->getValues<int64_t>().begin() + 2 * dim;
+    if (*paddingStart != 0) {
+      return false;
+    }
+    if (*std::next(paddingStart) != 0) {
+      return false;
+    }
+  }
+  // strides, dilations, and window dimensions are 1.
+  return (windowStrides.empty() || windowStrides[dim] == 1) &&
+         (windowDimensions.empty() || windowDimensions[dim] == 1) &&
+         (lhsDilations.empty() || lhsDilations[dim] == 1) &&
+         (rhsDilations.empty() || rhsDilations[dim] == 1);
+}
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
                                            bool conservativePropagation,

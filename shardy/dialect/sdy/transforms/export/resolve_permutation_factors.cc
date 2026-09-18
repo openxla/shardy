@@ -17,6 +17,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <utility>
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -72,6 +73,7 @@ struct ResolutionState {
   int64_t& nextChannelId;
   int64_t replicaCount = 1;
   int64_t partitionCount = 1;
+  SmallVector<Operation*> opsToErase;
 };
 
 // Returns a channel handle with handle = nextChannelId++ and type = 1
@@ -2230,6 +2232,56 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   return success();
 }
 
+// Returns true if the convolution spatial dimension `spatialDimIdx` is a pure
+// reduction dimension without sliding-window shifts (i.e., output spatial size
+// `numWindows[spatialDimIdx]` is 1, padding is 0, window stride is 1, and
+// lhs/rhs dilations are 1). When false, sharding this spatial reduction
+// dimension also requires permutation (halo exchange) across shards.
+bool isPureSpatialReductionDim(stablehlo::ConvolutionOp convOp,
+                               int64_t spatialDimIdx,
+                               ArrayRef<int64_t> numWindows) {
+  return isWindowPassthroughDim(
+      convOp.getPadding(), /*windowDimensions=*/numWindows,
+      convOp.getWindowStrides().value_or(ArrayRef<int64_t>()), spatialDimIdx,
+      convOp.getLhsDilation().value_or(ArrayRef<int64_t>()),
+      convOp.getRhsDilation().value_or(ArrayRef<int64_t>()));
+}
+
+// Returns true if factorIdx is a Reduction factor with dual kPermutation
+// semantics.
+bool isReductionFactorWithPermutationSemantics(stablehlo::ConvolutionOp convOp,
+                                               OpShardingRuleAttr rule,
+                                               int64_t factorIdx) {
+  if (rule.getFactorType(factorIdx) != FactorType::kReduction) {
+    return false;
+  }
+  stablehlo::ConvDimensionNumbersAttr dimNums = convOp.getDimensionNumbers();
+  RankedTensorType outType = convOp.getType();
+  SmallVector<int64_t> numWindows = llvm::map_to_vector(
+      dimNums.getOutputSpatialDimensions(),
+      [&](int64_t outDim) { return outType.getDimSize(outDim); });
+  for (auto [i, dims] :
+       llvm::enumerate(llvm::zip_equal(dimNums.getInputSpatialDimensions(),
+                                       dimNums.getKernelSpatialDimensions(),
+                                       dimNums.getOutputSpatialDimensions()))) {
+    auto [lhsDim, rhsDim, outDim] = dims;
+    auto lhsFactors =
+        rule.getOperandMapping(0).getDimMappings()[lhsDim].getFactorIndices();
+    auto rhsFactors =
+        rule.getOperandMapping(1).getDimMappings()[rhsDim].getFactorIndices();
+    if (llvm::is_contained(lhsFactors, factorIdx) &&
+        llvm::is_contained(rhsFactors, factorIdx)) {
+      // This is a spatial factor.
+      if (!isPureSpatialReductionDim(convOp, i, numWindows)) {
+        // If the spatial reduction dimension involves sliding windows, padding,
+        // or dilation, it has dual kPermutation semantics.
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void resolvePermutationFactorsViaReplication(Operation* op,
                                              OpShardingRuleAttr rule,
                                              ResolutionState& state) {
@@ -2250,10 +2302,19 @@ void resolvePermutationFactorsViaReplication(Operation* op,
                                 meshOp.getMesh(), /*closedIfMissing=*/true);
   UpdateTensorShardings update(op->getNumOperands(), op->getNumResults());
 
+  SmallVector<AxisRefAttr> removedReductionAxes;
   for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
     // When HALO exchange is disabled, we replication-reshard the
     // permutation factors.
     bool isReplicatedFactor = rule.getFactorType(i) == FactorType::kPermutation;
+    if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op);
+        convOp && isReductionFactorWithPermutationSemantics(convOp, rule, i)) {
+      isReplicatedFactor = true;
+      if (std::optional<ArrayRef<AxisRefAttr>> axes =
+              getCompatibleFactorSharding(projection, i)) {
+        llvm::append_range(removedReductionAxes, *axes);
+      }
+    }
     if (!isReplicatedFactor) {
       continue;
     }
@@ -2274,9 +2335,81 @@ void resolvePermutationFactorsViaReplication(Operation* op,
     update |= projection.updateSharding(i, /*axes=*/{}, /*overflowAxes=*/{});
   }
 
+  sdy::AllReduceOp remainingAllReduceOp = nullptr;
+  if (!removedReductionAxes.empty() && !outShardings.empty() &&
+      outShardings[0]) {
+    TensorShardingAttr oldOutSharding = outShardings[0];
+    ArrayRef<AxisRefAttr> oldUnreduced = oldOutSharding.getUnreducedAxes();
+    if (!oldUnreduced.empty()) {
+      SmallVector<AxisRefAttr> newUnreduced;
+      for (AxisRefAttr axis : oldUnreduced) {
+        SmallVector<AxisRefAttr> curAxes = {axis};
+        for (AxisRefAttr removed : removedReductionAxes) {
+          SmallVector<AxisRefAttr> nextAxes;
+          for (AxisRefAttr cur : curAxes) {
+            if (!cur.overlaps(removed)) {
+              nextAxes.push_back(cur);
+              continue;
+            }
+            if (auto prefix = cur.getPrefixWithoutOverlap(removed)) {
+              nextAxes.push_back(*prefix);
+            }
+            if (auto suffix =
+                    cur.getSuffixWithoutOverlap(removed, meshOp.getMesh())) {
+              nextAxes.push_back(*suffix);
+            }
+          }
+          curAxes = std::move(nextAxes);
+        }
+        llvm::append_range(newUnreduced, curAxes);
+      }
+      if (newUnreduced != oldUnreduced) {
+        // Remove the dual-semantics reduction axes from the op's result
+        // unreduced sharding annotation and update/remove its downstream
+        // sdy.all_reduce user before inserting explicit reshards.
+        outShardings[0] = oldOutSharding.replaceUnreducedAxes(newUnreduced);
+        sdy::setShardings(op, outShardings[0]);
+        projection.getMutableResult(0).unreducedAxes = newUnreduced;
+        if (op->getResult(0).hasOneUse()) {
+          if (auto allReduceOp = dyn_cast<sdy::AllReduceOp>(
+                  *op->getResult(0).getUsers().begin());
+              allReduceOp && allReduceOp.getReductionAxes() == oldUnreduced) {
+            if (newUnreduced.empty()) {
+              allReduceOp.replaceAllUsesWith(allReduceOp.getTensor());
+              state.opsToErase.push_back(allReduceOp);
+            } else {
+              allReduceOp.setReductionAxesAttr(
+                  AxisRefListAttr::get(op->getContext(), newUnreduced));
+              remainingAllReduceOp = allReduceOp;
+            }
+          }
+        }
+      }
+    }
+  }
+
   if (update.updateOperands.any() || update.updateResults.any()) {
     insertExplicitReshards(op, inShardings, outShardings, projection, update,
                            state.rewriter, rule, state.symbolTable, meshOp);
+    if (remainingAllReduceOp && update.updateResults.test(0)) {
+      if (auto reshardOp = remainingAllReduceOp.getTensor()
+                               .getDefiningOp<sdy::ReshardOp>()) {
+        // Move the result reshard after remainingAllReduceOp so that
+        // sdy.reshard operates on the reduced tensor rather than the
+        // intermediate unreduced tensor.
+        remainingAllReduceOp.getTensorMutable().assign(reshardOp.getInput());
+        remainingAllReduceOp.setOutShardingAttr(
+            getSharding(op->getResult(0)).replaceUnreducedAxes({}));
+        state.rewriter.setInsertionPointAfter(remainingAllReduceOp);
+        auto newReshardOp = sdy::ReshardOp::create(
+            state.rewriter, reshardOp.getLoc(),
+            remainingAllReduceOp.getResult(),
+            reshardOp.getSharding().replaceUnreducedAxes({}));
+        state.rewriter.replaceAllUsesExcept(remainingAllReduceOp.getResult(),
+                                            newReshardOp, newReshardOp);
+        state.opsToErase.push_back(reshardOp);
+      }
+    }
   }
 }
 
@@ -2327,12 +2460,19 @@ struct ShardyResolvePermutationFactorsPass
         return;
       }
 
-      // Identify if the op defines any permutation factors.
-      auto isPermutation = [&](int64_t i) {
-        return rule.getFactorType(i) == FactorType::kPermutation;
+      // Identify if the op defines any permutation factors or dual-semantics
+      // convolution factors.
+      auto isPermutationOrDualSemantics = [&](int64_t i) {
+        if (rule.getFactorType(i) == FactorType::kPermutation) {
+          return true;
+        }
+        if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op)) {
+          return isReductionFactorWithPermutationSemantics(convOp, rule, i);
+        }
+        return false;
       };
       if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
-                        isPermutation)) {
+                        isPermutationOrDualSemantics)) {
         return;
       }
 
@@ -2358,6 +2498,9 @@ struct ShardyResolvePermutationFactorsPass
       // Otherwise, use a generic resolution based on explicit reshards.
       resolvePermutationFactorsViaReplication(op, rule, state);
     });
+    for (Operation* opToErase : state.opsToErase) {
+      rewriter.eraseOp(opToErase);
+    }
   }
 };
 

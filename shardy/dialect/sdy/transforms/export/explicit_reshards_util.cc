@@ -60,31 +60,6 @@ bool hasShardedPermutationFactors(
                       });
 }
 
-// Returns the common axes if all operands and results have the same sharding at
-// `factorIndex`. A tensor is ignored if it does not contain the factor.
-// Otherwise, returns std::nullopt.
-std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
-    const ShardingProjection& shardingProjection, int64_t factorIndex) {
-  std::optional<ArrayRef<AxisRefAttr>> compatibleSharding;
-  bool factorSeen = false;
-  for (const TensorFactorShardings& tensorFactorSharding :
-       llvm::concat<const TensorFactorShardings>(
-           shardingProjection.getOperands(), shardingProjection.getResults())) {
-    if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
-            getFactorSharding(tensorFactorSharding, factorIndex)) {
-      if (factorSeen) {
-        if (compatibleSharding != factorSharding) {
-          return std::nullopt;
-        }
-      } else {
-        compatibleSharding = *factorSharding;
-        factorSeen = true;
-      }
-    }
-  }
-  return compatibleSharding.value_or(ArrayRef<AxisRefAttr>());
-}
-
 // Returns the common axes per factor if the factor sharding is compatible.
 // Otherwise, returns empty AxesPerFactor.
 //
@@ -172,6 +147,28 @@ bool shouldReshardToCommonMesh(TensorShardingAttr sharding, MeshOp meshOp,
              meshOp.getMesh().getDeviceIds();
 }
 }  // namespace
+
+std::optional<ArrayRef<AxisRefAttr>> getCompatibleFactorSharding(
+    const ShardingProjection& shardingProjection, int64_t factorIndex) {
+  std::optional<ArrayRef<AxisRefAttr>> compatibleSharding;
+  bool factorSeen = false;
+  for (const TensorFactorShardings& tensorFactorSharding :
+       llvm::concat<const TensorFactorShardings>(
+           shardingProjection.getOperands(), shardingProjection.getResults())) {
+    if (std::optional<ArrayRef<AxisRefAttr>> factorSharding =
+            getFactorSharding(tensorFactorSharding, factorIndex)) {
+      if (factorSeen) {
+        if (compatibleSharding != factorSharding) {
+          return std::nullopt;
+        }
+      } else {
+        compatibleSharding = *factorSharding;
+        factorSeen = true;
+      }
+    }
+  }
+  return compatibleSharding.value_or(ArrayRef<AxisRefAttr>());
+}
 
 void insertExplicitReshards(Operation* op,
                             ArrayRef<TensorShardingAttr> inShardings,

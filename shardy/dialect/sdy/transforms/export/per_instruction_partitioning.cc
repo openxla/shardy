@@ -78,6 +78,20 @@ bool hasAnyShardedValue(Operation* op) {
          llvm::any_of(op->getOperands(), isSharded);
 }
 
+// Returns the unique user that is a sdy.all_reduce for a stablehlo.convolution
+// that produces a result with unreduced_axes.
+sdy::AllReduceOp getTrailingConvAllReduce(Operation* op) {
+  auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op);
+  if (!convOp || !convOp.getResult().hasOneUse()) {
+    return nullptr;
+  }
+  TensorShardingAttr sharding = getSharding(convOp.getResult());
+  if (!sharding || sharding.getUnreducedAxes().empty()) {
+    return nullptr;
+  }
+  return dyn_cast<sdy::AllReduceOp>(*convOp.getResult().getUsers().begin());
+}
+
 // Parses a filter string that controls which operations should be partitioned.
 //
 // The filter string format is a comma-separated list of tokens in any order:
@@ -392,7 +406,8 @@ LogicalResult outlineInstruction(Operation* op,
                                  ArrayRef<Type> paddedArgTypes,
                                  ArrayRef<Type> paddedResultTypes,
                                  OwningOpRef<ModuleOp>& tempModule,
-                                 func::FuncOp& outlinedFunc) {
+                                 func::FuncOp& outlinedFunc,
+                                 sdy::AllReduceOp trailingAllReduce = nullptr) {
   MLIRContext* ctx = op->getContext();
   tempModule = ModuleOp::create(op->getLoc());
   IRRewriter tempRewriter(ctx);
@@ -519,6 +534,22 @@ LogicalResult outlineInstruction(Operation* op,
         clonedOp->getResult(0).setType(paddedRanked);
       }
     }
+  }
+
+  if (trailingAllReduce) {
+    setShardings(clonedOp, getShardings(op->getResults()));
+    auto clonedAllReduce = AllReduceOp::create(
+        tempRewriter, trailingAllReduce.getLoc(), clonedOp->getResult(0),
+        trailingAllReduce.getReductionAxes(),
+        trailingAllReduce.getReductionOp(), trailingAllReduce.getOutSharding());
+    Value res = clonedAllReduce.getResult();
+    Type targetType = paddedResultTypes[0];
+    if (res.getType() != targetType) {
+      res = padHighSideToType(tempRewriter, op->getLoc(), res, targetType,
+                              shardingInfo.outShardings[0]);
+    }
+    func::ReturnOp::create(tempRewriter, op->getLoc(), ValueRange{res});
+    return success();
   }
 
   SmallVector<TensorShardingAttr> opOutShardings(
@@ -660,6 +691,12 @@ struct PerInstructionPartitioningPass
                   &op)) {
             continue;
           }
+          if (auto allReduceOp = dyn_cast<sdy::AllReduceOp>(&op)) {
+            if (Operation* defOp = allReduceOp.getTensor().getDefiningOp();
+                defOp && getTrailingConvAllReduce(defOp) == allReduceOp) {
+              continue;
+            }
+          }
           // Avoid taking a dependency on the MHLO dialect by checking operation
           // names directly.
           if (op.getName().getStringRef() == "mhlo.copy") {
@@ -711,8 +748,12 @@ struct PerInstructionPartitioningPass
         getOrCreateMeshSymbol(op, meshOrRef, symbolTable);
     Attribute targetMesh = meshSym ? Attribute(meshSym) : meshOrRef;
 
+    sdy::AllReduceOp trailingAllReduce = getTrailingConvAllReduce(op);
     InstructionShardingInfo shardingInfo =
         getInstructionShardingInfo(op, meshSym, targetMesh);
+    if (trailingAllReduce) {
+      shardingInfo.outShardings = {trailingAllReduce.getOutSharding()};
+    }
 
     SmallVector<Type> paddedArgTypes =
         computePaddedOperandTypes(op, shardingInfo, symbolTable);
@@ -725,8 +766,8 @@ struct PerInstructionPartitioningPass
     OwningOpRef<ModuleOp> tempModule;
     func::FuncOp outlinedFunc;
     if (failed(outlineInstruction(op, shardingInfo, paddedArgTypes,
-                                  paddedResultTypes, tempModule,
-                                  outlinedFunc)) ||
+                                  paddedResultTypes, tempModule, outlinedFunc,
+                                  trailingAllReduce)) ||
         failed(runPartitionerPipeline(*tempModule, enableHaloExchange,
                                       replicaCount, partitionCount))) {
       return false;
@@ -736,9 +777,14 @@ struct PerInstructionPartitioningPass
         op, outlinedFunc, shardingInfo, manualOperands, paddedResultTypes,
         rewriter);
 
-    sliceIndivisibleResults(op, manualCompOp, shardingInfo.outShardings,
+    Operation* resultOp =
+        trailingAllReduce ? trailingAllReduce.getOperation() : op;
+    sliceIndivisibleResults(resultOp, manualCompOp, shardingInfo.outShardings,
                             rewriter);
 
+    if (trailingAllReduce) {
+      rewriter.eraseOp(trailingAllReduce);
+    }
     rewriter.eraseOp(op);
     return true;
   }

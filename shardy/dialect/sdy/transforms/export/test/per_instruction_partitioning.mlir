@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice,concatenate" | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-per-instruction-partitioning="filter=dot,constant,reshard,all_gather,all_slice,concatenate,convolution" | FileCheck %s
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
@@ -314,4 +314,68 @@ func.func @concatenate_indivisible_sharded_concat_dim(%arg0: tensor<5xf32> {sdy.
   // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
   return %0 : tensor<6xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @conv_dual_semantics_with_trailing_all_reduce
+func.func @conv_dual_semantics_with_trailing_all_reduce(
+    %arg0: tensor<1x8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>},
+    %arg1: tensor<6x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>})
+    -> (tensor<1x3x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%arg0, %arg1)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{}, {"x"}, {}]>, <@mesh, [{"x"}, {}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{}, {}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<1x4x4xf32>, %arg3: tensor<3x4x4xf32>) {
+  // CHECK-NEXT:   %[[AG0:.*]] = "stablehlo.all_gather"(%arg2)
+  // CHECK-NEXT:   %[[AG1:.*]] = "stablehlo.all_gather"(%arg3)
+  // CHECK-NEXT:   %[[CONV:.*]] = stablehlo.convolution(%[[AG0]], %[[AG1]])
+  // CHECK-NOT:    all_reduce
+  // CHECK:        sdy.return %[[CONV]] : tensor<1x3x4xf32>
+  // CHECK-NEXT: } : (tensor<1x8x4xf32>, tensor<6x4x4xf32>) -> tensor<1x3x4xf32>
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<1x3x4xf32>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {stride = [1], pad = [[0, 0]]}
+    {
+      feature_group_count = 1 : i64,
+      batch_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}], unreduced={"x"}>]>
+    } : (tensor<1x8x4xf32>, tensor<6x4x4xf32>) -> tensor<1x3x4xf32>
+  %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh, [{}, {}, {}]> : tensor<1x3x4xf32>
+  return %1 : tensor<1x3x4xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2]>
+
+// CHECK-LABEL: func @conv_pure_reduction_with_trailing_all_reduce
+func.func @conv_pure_reduction_with_trailing_all_reduce(
+    %arg0: tensor<1x8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>},
+    %arg1: tensor<8x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>})
+    -> (tensor<1x1x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%arg0, %arg1)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{}, {"x"}, {}]>, <@mesh, [{"x"}, {}, {}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{}, {}, {}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<1x4x4xf32>, %arg3: tensor<4x4x4xf32>) {
+  // CHECK-NEXT:   %[[CONV:.*]] = stablehlo.convolution(%arg2, %arg3)
+  // CHECK-NEXT:   %[[AR:.*]] = "stablehlo.all_reduce"(%[[CONV]])
+  // CHECK:        sdy.return %[[AR]] : tensor<1x1x4xf32>
+  // CHECK-NEXT: } : (tensor<1x8x4xf32>, tensor<8x4x4xf32>) -> tensor<1x1x4xf32>
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<1x1x4xf32>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {stride = [1], pad = [[0, 0]]}
+    {
+      feature_group_count = 1 : i64,
+      batch_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}], unreduced={"x"}>]>
+    } : (tensor<1x8x4xf32>, tensor<8x4x4xf32>) -> tensor<1x1x4xf32>
+  %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh, [{}, {}, {}]> : tensor<1x1x4xf32>
+  return %1 : tensor<1x1x4xf32>
 }
