@@ -40,3 +40,44 @@ func.func @unknown_dialect_op(
   // CHECK-NEXT:  return %[[ARG0]] : tensor<8xf32>
   return %arg0 : tensor<16xf32>
 }
+// CHECK-LABEL: func.func @callee_sharded
+// CHECK-SAME: (%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+func.func @callee_sharded(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : tensor<8xf32>
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : tensor<16xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8xf32>
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func.func @func_call_sharded
+// CHECK-SAME: (%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+func.func @func_call_sharded(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_sharded(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  %0 = call @callee_sharded(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : (tensor<16xf32>) -> tensor<16xf32>
+  // CHECK-NEXT: return %[[CALL]] : tensor<8xf32>
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func.func @stablehlo_while_sharded
+// CHECK-SAME: (%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+func.func @stablehlo_while_sharded(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) {
+  // CHECK-NEXT: %[[WHILE:.*]] = stablehlo.while(%iterArg = %arg0) : tensor<8xf32>
+  // CHECK-NEXT:  cond {
+  // CHECK-NEXT:    %[[PRED:.*]] = stablehlo.constant dense<false> : tensor<i1>
+  // CHECK-NEXT:    stablehlo.return %[[PRED]] : tensor<i1>
+  // CHECK-NEXT:  } do {
+  // CHECK-NEXT:    %[[ADD:.*]] = stablehlo.add %iterArg, %iterArg {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : tensor<8xf32>
+  // CHECK-NEXT:    stablehlo.return %[[ADD]] : tensor<8xf32>
+  // CHECK-NEXT:  }
+  %0 = stablehlo.while(%iterArg = %arg0) : tensor<16xf32>
+    attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>}
+    cond {
+      %pred = stablehlo.constant dense<false> : tensor<i1>
+      stablehlo.return %pred : tensor<i1>
+    } do {
+      %add = stablehlo.add %iterArg, %iterArg {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : tensor<16xf32>
+      stablehlo.return %add : tensor<16xf32>
+    }
+  // CHECK-NEXT: return %[[WHILE]] : tensor<8xf32>
+  return %0 : tensor<16xf32>
+}

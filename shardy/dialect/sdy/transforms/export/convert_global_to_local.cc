@@ -42,6 +42,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -180,6 +181,24 @@ class GlobalToLocalTypeConverter : public TypeConverter {
     }
   }
 
+  void populateArgShardings(stablehlo::WhileOp whileOp) {
+    for (Region* region : whileOp.getRegions()) {
+      if (region->empty()) {
+        continue;
+      }
+      for (auto [idx, arg] : llvm::enumerate(region->front().getArguments())) {
+        TensorShardingAttr sharding =
+            this->getSharding(whileOp.getOperands()[idx]);
+        if (!sharding) {
+          sharding = this->getSharding(whileOp.getResults()[idx]);
+        }
+        if (sharding) {
+          argShardings[arg] = sharding;
+        }
+      }
+    }
+  }
+
   // Retrieves the sharding of a value, checking the cached argShardings for
   // unlinked block args.
   TensorShardingAttr getSharding(Value value) const {
@@ -228,7 +247,21 @@ Operation* createLocalGenericOp(
   Operation* newOp = rewriter.create(state);
   for (auto [oldRegion, newRegion] :
        llvm::zip(op->getRegions(), newOp->getRegions())) {
+    std::optional<TypeConverter::SignatureConversion> signature;
+    if (!oldRegion.empty()) {
+      signature.emplace(oldRegion.front().getNumArguments());
+      for (auto [index, arg] :
+           llvm::enumerate(oldRegion.front().getArguments())) {
+        signature->addInputs(index, typeConverter->convertType(arg));
+      }
+    }
     rewriter.inlineRegionBefore(oldRegion, newRegion, newRegion.end());
+    if (signature) {
+      if (failed(rewriter.convertRegionTypes(&newRegion, *typeConverter,
+                                             &*signature))) {
+        return nullptr;
+      }
+    }
   }
   return newOp;
 }
@@ -273,7 +306,7 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
-         !isa<sdy::ReturnOp>(op)) ||
+         !isa<sdy::ReturnOp, func::CallOp, func::ReturnOp>(op)) ||
         isa<stablehlo::ConcatenateOp, stablehlo::ConvolutionOp,
             stablehlo::DotGeneralOp, stablehlo::DotOp, stablehlo::GatherOp,
             stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ReduceOp,
@@ -285,25 +318,6 @@ class GenericOpPattern : public ConversionPattern {
         op, operands, rewriter,
         static_cast<const GlobalToLocalTypeConverter*>(typeConverter),
         conversionState);
-  }
-
- private:
-  ConversionState& conversionState;
-};
-
-class ReturnOpPattern : public OpConversionPattern<func::ReturnOp> {
- public:
-  ReturnOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                  ConversionState& state)
-      : OpConversionPattern<func::ReturnOp>(converter, ctx),
-        conversionState(state) {}
-
-  LogicalResult matchAndRewrite(
-      func::ReturnOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter& rewriter) const override {
-    rewriter.replaceOpWithNewOp<func::ReturnOp>(op, adaptor.getOperands());
-    conversionState.removeToConvertOp(op);
-    return success();
   }
 
  private:
@@ -3045,11 +3059,14 @@ struct ConvertGlobalToLocalPass
     SymbolTable symbolTable(module);
     GlobalToLocalTypeConverter typeConverter(symbolTable);
 
-    module.walk([&](Operation* op) {
+    module.walk<WalkOrder::PreOrder>([&](Operation* op) {
       if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
         typeConverter.populateArgShardings(funcOp);
       } else if (auto dataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
         typeConverter.populateArgShardings(dataFlowOp);
+      }
+      if (auto whileOp = dyn_cast<stablehlo::WhileOp>(op)) {
+        typeConverter.populateArgShardings(whileOp);
       }
     });
 
@@ -3071,13 +3088,11 @@ struct ConvertGlobalToLocalPass
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
-    populateCallOpTypeConversionPattern(patterns, typeConverter);
-    populateReturnOpTypeConversionPattern(patterns, typeConverter);
     patterns.add<AllSliceOpPattern, CollectivePermuteOpPattern,
                  ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
                  ManualComputationOpPattern, NamedComputationOpPattern,
-                 ReturnOpPattern, StablehloConcatenateOpPattern,
-                 StablehloIotaOpPattern, StablehloPadOpPattern,
+                 StablehloConcatenateOpPattern, StablehloIotaOpPattern,
+                 StablehloPadOpPattern,
                  StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
                  StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
                  StablehloSliceOpPattern>(typeConverter, &getContext(),
