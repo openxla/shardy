@@ -22,7 +22,9 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/constants.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 #include "shardy/dialect/sdy/transforms/common/passes.h"
+#include "shardy/dialect/sdy/transforms/export/partitioner_pipeline.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 
 namespace mlir {
@@ -37,10 +39,9 @@ void addCanonicalizerPass(OpPassManager& pm,
                                      /*enabledPatterns=*/enabledPatterns));
 }
 
-void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
-                          const ExportOptions& options) {
-  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
-  pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
+// Preserves the legacy pipeline when partitioner stage is unspecified.
+void runLegacyShardyPartitioner(OpPassManager& pm, int& dumpIndex,
+                                const ExportOptions& options) {
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion = options.enableInsertExplicitCollectives ||
                                   options.enablePerInstructionPartitioning;
@@ -52,11 +53,11 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "before_per_instruction_partitioning",
         dumpIndex++));
-    PerInstructionPartitioningPassOptions passOptions;
-    passOptions.filter = options.perInstructionPartitioningFilter;
-    passOptions.replicaCount = options.replicaCount;
-    passOptions.partitionCount = options.partitionCount;
-    pm.addPass(createPerInstructionPartitioningPass(passOptions));
+    PerInstructionPartitioningPassOptions perInstructionOptions;
+    perInstructionOptions.filter = options.perInstructionPartitioningFilter;
+    perInstructionOptions.replicaCount = options.replicaCount;
+    perInstructionOptions.partitionCount = options.partitionCount;
+    pm.addPass(createPerInstructionPartitioningPass(perInstructionOptions));
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_per_instruction_partitioning",
         dumpIndex++));
@@ -85,6 +86,28 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
           ? "after_partitioner_with_global_shapes"
           : "after_minimal_partitioner_with_global_shapes",
       dumpIndex++));
+}
+
+void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
+                          const ExportOptions& options) {
+  // Catch the cases where unreduced axes are dropped and cause inconsistencies.
+  pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
+
+  // Per-instruction partitioning excludes stage dispatch, so it uses legacy.
+  if (options.partitionerStage == PartitionerStage::kUnspecified ||
+      options.enablePerInstructionPartitioning) {
+    runLegacyShardyPartitioner(pm, dumpIndex, options);
+    return;
+  }
+
+  PartitionerPipelineOptions pipelineOptions;
+  pipelineOptions.stage = options.partitionerStage;
+  pipelineOptions.replicaCount = options.replicaCount;
+  pipelineOptions.partitionCount = options.partitionCount;
+  pipelineOptions.removeAllGatherReduceScatterForCMV1 =
+      options.removeAllGatherReduceScatterForCMV1;
+  pipelineOptions.dumpDirectory = options.dumpDirectory;
+  addPartitionerPipeline(pm, dumpIndex, pipelineOptions);
 }
 
 }  // namespace
