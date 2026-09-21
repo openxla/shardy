@@ -31,6 +31,7 @@ limitations under the License.
 #include "mlir/Pass/PassOptions.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 
 // IWYU pragma: end_keep
 
@@ -68,6 +69,34 @@ struct ExportOptions : public PassPipelineOptions<ExportOptions> {
       *this, "enable-insert-explicit-collectives",
       llvm::cl::desc("Enable inserting explicit collective ops during export."),
       llvm::cl::init(false)};
+
+  Option<PartitionerStage> partitionerStage{
+      *this, "partitioner-stage",
+      llvm::cl::desc(
+          "How far down the Shardy partitioner pipeline to run. Each stage "
+          "also runs all earlier stages."),
+      llvm::cl::init(PartitionerStage::kUnspecified),
+      llvm::cl::values(
+          clEnumValN(
+              PartitionerStage::kUnspecified, "unspecified",
+              "Delegates to legacy enable-insert-explicit-collectives flag"),
+          clEnumValN(PartitionerStage::kResolvePermutationFactors,
+                     "resolve-permutation-factors",
+                     "Halo exchange for permutation factors"),
+          clEnumValN(PartitionerStage::kReshardToCollectives,
+                     "reshard-to-collectives",
+                     "Full reshards and collective lowering"),
+          clEnumValN(PartitionerStage::kOptimizeCollectives,
+                     "optimize-collectives",
+                     "Optimize collective communications"),
+          clEnumValN(PartitionerStage::kPadForDivisibility,
+                     "pad-for-divisibility", "Padding for divisibility"),
+          clEnumValN(PartitionerStage::kResolveSingleDeviceSharding,
+                     "resolve-single-device-sharding",
+                     "Resolve single device sharding"),
+          clEnumValN(PartitionerStage::kConvertGlobalToLocal,
+                     "convert-global-to-local",
+                     "Convert global shapes to local shapes"))};
 
   Option<bool> removeAllGatherReduceScatterForCMV1{
       *this, "remove-all-gather-reduce-scatter-for-cmv1",

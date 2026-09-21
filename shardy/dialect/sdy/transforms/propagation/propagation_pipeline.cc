@@ -42,6 +42,7 @@ void populateExportOptions(ExportOptions& options,
   options.avoidExportForPartitioning = propOptions.avoidExportForPartitioning;
   options.enableInsertExplicitCollectives =
       propOptions.enableInsertExplicitCollectives;
+  options.partitionerStage = propOptions.partitionerStage;
   options.removeAllGatherReduceScatterForCMV1 =
       propOptions.removeAllGatherReduceScatterForCMV1;
   options.dumpShardingOrigins = propOptions.debugShardingOrigins;

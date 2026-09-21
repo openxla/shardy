@@ -20,6 +20,7 @@ limitations under the License.
 #include <string>
 
 #include "llvm/ADT/StringRef.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 
 namespace mlir {
 namespace sdy {
@@ -48,6 +49,8 @@ struct PropagationOptions {
   bool avoidExportForPartitioning = false;
   // Whether to enable inserting explicit collectives.
   bool enableInsertExplicitCollectives = false;
+  // How far down the Shardy partitioner pipeline to run.
+  PartitionerStage partitionerStage = PartitionerStage::kUnspecified;
   // Whether to remove all-gather and reduce-scatter ops for CMV1.
   // TODO(b/432019089): remove this option once CMV1 is completely deprecated.
   bool removeAllGatherReduceScatterForCMV1 = false;
