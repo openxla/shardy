@@ -106,7 +106,6 @@ void buildReduceComputation(OpWithComputation opWithComputation,
   llvm_unreachable("unknown ReductionOp");
 }
 
-
 struct ConversionState {
   llvm::DenseSet<Operation*> toConvertOps;
   int64_t nextChannelId = 0;
@@ -749,9 +748,7 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
   for (int64_t i = 0; i < localResultType.getRank(); ++i) {
     ArrayRef<AxisRefAttr> axes = slicingAxesPerDim[i].getValue();
     if (axes.empty()) {
-      startIndices.push_back(stablehlo::ConstantOp::create(
-          rewriter, loc,
-          DenseIntElementsAttr::get(indexTy, static_cast<int64_t>(0))));
+      startIndices.push_back(createZeroConstant(rewriter, loc, indexTy));
       continue;
     }
 
@@ -1990,10 +1987,8 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
   for (int64_t indexedDim : startIndexMap) {
     if (!llvm::is_contained(trivialSliceDims, indexedDim)) {
       // For non-trivial dims, the bounds cover the entire global range.
-      minBounds.push_back(stablehlo::ConstantOp::create(
-          rewriter, loc,
-          DenseIntElementsAttr::get(RankedTensorType::get({}, indexEltTy),
-                                    APInt(bitWidth, 0))));
+      minBounds.push_back(createZeroConstant(
+          rewriter, loc, RankedTensorType::get({}, indexEltTy)));
       if (computeMask) {
         maxBounds.push_back(stablehlo::ConstantOp::create(
             rewriter, loc,
@@ -2057,9 +2052,10 @@ Value clampGatherIndices(Location loc, Value indices,
         return globalOperandType.getDimSize(indexedDim) - 1;
       });
 
-  return stablehlo::ClampOp::create(rewriter, loc, indicesType,
-                                    buildIndicesLikeTensor({0}), indices,
-                                    buildIndicesLikeTensor(globalMaxValues));
+  return stablehlo::ClampOp::create(
+      rewriter, loc, indicesType,
+      createZeroConstant(rewriter, loc, indicesType), indices,
+      buildIndicesLikeTensor(globalMaxValues));
 }
 
 // Computes the local indices and mask for a scatter or gather op with trivial
@@ -2182,10 +2178,7 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
         int64_t shardSize = localOperandType.getDimSize(dim);
         Value offset = getDimensionOffset(loc, mesh, axes, shardSize,
                                           conversionState, rewriter);
-        Value zero = stablehlo::ConstantOp::create(
-            rewriter, loc,
-            DenseIntElementsAttr::get(cast<RankedTensorType>(offset.getType()),
-                                      (int64_t)0));
+        Value zero = createZeroConstant(rewriter, loc, offset.getType());
         Value eqZero = stablehlo::CompareOp::create(
             rewriter, loc, offset, zero, stablehlo::ComparisonDirection::EQ);
         partitionMask =
@@ -2340,10 +2333,15 @@ class StablehloGatherOpPattern
         resSharding ? resSharding.getReductionOp() : ReductionOp::SUM;
 
     // Fill the out-of-bounds positions with the reduction identity.
-    Attribute identityAttr = getReductionIdentityAttr(
-        resultType.getElementType(), reductionOp, rewriter);
-    Value identityVal = stablehlo::ConstantOp::create(
-        rewriter, loc, DenseElementsAttr::get(resultType, identityAttr));
+    Value identityVal =
+        reductionOp == ReductionOp::SUM
+            ? createZeroConstant(rewriter, loc, resultType)
+            : stablehlo::ConstantOp::create(
+                  rewriter, loc,
+                  DenseElementsAttr::get(
+                      resultType,
+                      getReductionIdentityAttr(resultType.getElementType(),
+                                               reductionOp, rewriter)));
     result = stablehlo::SelectOp::create(rewriter, loc, bcastMask, result,
                                          identityVal);
 
@@ -2655,7 +2653,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
 
   return llvm::TypeSwitch<Operation*, Value>(reductionOp)
       .Case([&](stablehlo::AddOp) {
-        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+        return createZeroConstant(b, loc, scalarType);
       })
       .Case([&](stablehlo::AndOp) {
         return stablehlo::ConstantOp::create(
@@ -2664,7 +2662,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
                                    b.getIntegerAttr(elementType, 1)));
       })
       .Case([&](stablehlo::OrOp) {
-        return stablehlo::ConstantOp::create(b, loc, b.getZeroAttr(scalarType));
+        return createZeroConstant(b, loc, scalarType);
       })
       .Case([&](stablehlo::MulOp) {
         if (isa<FloatType>(elementType)) {
