@@ -280,19 +280,6 @@ LogicalResult localizeGenericOp(Operation* op, ValueRange operands,
   return success();
 }
 
-void checkUnreducedResultSharding(TensorShardingAttr resSharding,
-                                  ArrayRef<AxisRefAttr> expectedAxes,
-                                  StringRef opName) {
-  SDY_CHECK(resSharding && !resSharding.getUnreducedAxes().empty())
-      << "Expected sharded reduction " << opName.str()
-      << " result to have unreduced axes sharding.";
-  SDY_CHECK(resSharding.getUnreducedAxes() == expectedAxes)
-      << "The unreduced axes of the " << opName.str()
-      << " result sharding should match the sharded reduction dimensions of "
-         "the "
-      << opName.str() << ".";
-}
-
 // Pattern for generic ops that do not require special handling beyond type
 // conversion, such as StableHLO ops, sdy.all_reduce, etc.
 class GenericOpPattern : public ConversionPattern {
@@ -432,23 +419,70 @@ std::pair<Attribute, int64_t> getReplicaGroupsAndSize(
   return {replicaGroups, groupSize};
 }
 
-bool hasUnreducedResultSharding(Operation* op,
-                                ArrayRef<AxisRefAttr> reductionAxes,
-                                StringRef opName,
-                                const GlobalToLocalTypeConverter* converter) {
-  bool hasUnreducedAxes = false;
-  for (Value res : op->getResults()) {
-    TensorShardingAttr resSharding = converter->getSharding(res);
-    if (resSharding && !resSharding.getUnreducedAxes().empty()) {
-      checkUnreducedResultSharding(resSharding, reductionAxes, opName);
-      hasUnreducedAxes = true;
-    } else if (llvm::any_of(res.getUsers(), [](Operation* user) {
-                 return isa<sdy::AllReduceOp, sdy::ReduceScatterOp>(user);
-               })) {
-      hasUnreducedAxes = true;
+// Returns whether the op introduces partial results related to the given
+// reductionAxes for its operands with kReduction factors.
+//
+// The op introduces partial results if either:
+//   - The result's sharding has unreduced axes containing reductionAxes, or
+//   - the result is fed directly into an AllReduce or ReduceScatter on
+//     reductionAxes.
+//
+// We assume if an op that can introduce partial result and produce multiple
+// results, all of its results should be sharded the same way. This is the case
+// with the current StableHLO ops.
+bool doesOpIntroducePartialResult(Operation* op,
+                                  ArrayRef<AxisRefAttr> reductionAxes,
+                                  StringRef opName,
+                                  const GlobalToLocalTypeConverter* converter) {
+  auto containsReductionAxes = [&](ArrayRef<AxisRefAttr> axes, MeshAttr mesh) {
+    if (axes.empty()) {
+      return false;
     }
+    SmallVector<AxisRefAttr> missingReductionAxes =
+        getAxisSetDiff(reductionAxes, axes, mesh);
+    if (missingReductionAxes.empty()) {
+      return true;
+    }
+    // Otherwise, none of the sharded reduction axes of the op should be in
+    // `axes` (the axes only come from operands' unreduced axes).
+    SDY_CHECK(ArrayRef<AxisRefAttr>(missingReductionAxes) == reductionAxes)
+        << "The unreduced or reduction axes for the " << opName.str()
+        << " result must either contain all or none of the sharded "
+           "reduction dimensions of the "
+        << opName.str() << ".";
+    return false;
+  };
+
+  // All results of a reduction op share the same sharding and unreduced axes,
+  // so we only need to inspect the first result.
+  Value res = op->getResult(0);
+  TensorShardingAttr resSharding = converter->getSharding(res);
+  const SymbolTable& symbolTable = converter->getSymbolTable();
+  if (resSharding && containsReductionAxes(resSharding.getUnreducedAxes(),
+                                           resSharding.getMesh(symbolTable))) {
+    return true;
   }
-  return hasUnreducedAxes;
+
+  // Otherwise, if the op is fed directly into an AllReduce or ReduceScatter on
+  // reductionAxes, we consider it introduce a partial result and the upstream
+  // passes forgot to properly annotate the result with unreduced axes.
+  return llvm::any_of(res.getUsers(), [&](Operation* user) {
+    if (auto allReduce = dyn_cast<sdy::AllReduceOp>(user)) {
+      return containsReductionAxes(
+          allReduce.getReductionAxes(),
+          allReduce.getOutSharding().getMesh(symbolTable));
+    }
+    if (auto reduceScatter = dyn_cast<sdy::ReduceScatterOp>(user)) {
+      SmallVector<AxisRefAttr> reduceScatterAxes;
+      for (AxisRefListAttr axesList : reduceScatter.getReduceScatterAxes()) {
+        llvm::append_range(reduceScatterAxes, axesList.getValue());
+      }
+      return containsReductionAxes(
+          reduceScatterAxes,
+          reduceScatter.getOutSharding().getMesh(symbolTable));
+    }
+    return false;
+  });
 }
 
 ValueRange createAllReduceForUnreducedAxes(
@@ -1608,11 +1642,11 @@ class StablehloConvolutionOpPattern
       addRhsReductionAxes(spatialDim);
     }
 
-    bool hasUnreducedAxes = true;
+    bool introducesPartialResult = true;
     if (!reductionAxes.empty()) {
       sortAndMergeAxes(reductionAxes, mesh);
-      hasUnreducedAxes = hasUnreducedResultSharding(op, reductionAxes,
-                                                    "convolution", converter);
+      introducesPartialResult = doesOpIntroducePartialResult(
+          op, reductionAxes, "convolution", converter);
     }
 
     auto getAxes = [&](TensorShardingAttr sharding, int64_t dim) {
@@ -1643,7 +1677,7 @@ class StablehloConvolutionOpPattern
         localBatchGroupCount, op.getPrecisionConfigAttr());
 
     ValueRange results = localConv->getResults();
-    if (!reductionAxes.empty() && !hasUnreducedAxes) {
+    if (!reductionAxes.empty() && !introducesPartialResult) {
       Attribute meshOrRef =
           rhsSharding ? rhsSharding.getMeshOrRef() : lhsSharding.getMeshOrRef();
       results = createAllReduceForUnreducedAxes(
@@ -1727,8 +1761,8 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
 
         // Verify that an AllReduce has been inserted by a previous pass unless
         // the result is explicitly unreduced.
-        if (!hasUnreducedResultSharding(op, contractingAxes, "dot",
-                                        converter)) {
+        if (!doesOpIntroducePartialResult(op, contractingAxes, "dot",
+                                          converter)) {
           Operation* localDot = createLocalGenericOp(op, adaptor.getOperands(),
                                                      rewriter, converter);
           ValueRange results = createAllReduceForUnreducedAxes(
@@ -1804,8 +1838,8 @@ class StablehloDotGeneralOpPattern
 
         // Verify that an AllReduce has been inserted by a previous pass unless
         // the result is explicitly unreduced.
-        if (!hasUnreducedResultSharding(op, reductionAxes, "dot_general",
-                                        converter)) {
+        if (!doesOpIntroducePartialResult(op, reductionAxes, "dot_general",
+                                          converter)) {
           Operation* localDotGeneral = createLocalGenericOp(
               op, adaptor.getOperands(), rewriter, converter);
           ValueRange results = createAllReduceForUnreducedAxes(
@@ -2095,7 +2129,7 @@ class StablehloReduceOpPattern
     }
 
     if (!reductionAxes.empty() &&
-        !hasUnreducedResultSharding(op, reductionAxes, "reduce", converter)) {
+        !doesOpIntroducePartialResult(op, reductionAxes, "reduce", converter)) {
       auto localReduceOp = cast<stablehlo::ReduceOp>(
           createLocalGenericOp(op, adaptor.getOperands(), rewriter, converter));
       if (op.getNumResults() == 1) {
@@ -2555,8 +2589,8 @@ class StablehloGatherOpPattern
         mask, bcastDims);
 
     TensorShardingAttr resSharding = getSharding(op.getResult());
-    bool hasUnreducedAxes =
-        hasUnreducedResultSharding(op, reductionAxes, "gather", converter);
+    bool introducesPartialResult =
+        doesOpIntroducePartialResult(op, reductionAxes, "gather", converter);
     ReductionOp reductionOp =
         resSharding ? resSharding.getReductionOp() : ReductionOp::SUM;
 
@@ -2573,7 +2607,7 @@ class StablehloGatherOpPattern
     result = stablehlo::SelectOp::create(rewriter, loc, bcastMask, result,
                                          identityVal);
 
-    if (!hasUnreducedAxes) {
+    if (!introducesPartialResult) {
       result =
           createAllReduceForUnreducedAxes(loc, result, reductionAxes, mesh,
                                           operandSharding.getMeshOrRef(),
@@ -3207,7 +3241,8 @@ class StablehloScatterOpPattern
 
     ValueRange results = localScatter.getResults();
     if (!reductionAxes.empty() &&
-        !hasUnreducedResultSharding(op, reductionAxes, "scatter", converter)) {
+        !doesOpIntroducePartialResult(op, reductionAxes, "scatter",
+                                      converter)) {
       Attribute meshOrRef = inputSharding ? inputSharding.getMeshOrRef()
                                           : updateSharding.getMeshOrRef();
       results = createAllReduceForUnreducedAxes(
