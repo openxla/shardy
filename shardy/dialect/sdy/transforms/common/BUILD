@@ -20,9 +20,15 @@ cc_library(
 )
 
 cc_library(
+    name = "partitioner_stage",
+    hdrs = ["partitioner_stage.h"],
+)
+
+cc_library(
     name = "propagation_options",
     hdrs = ["propagation_options.h"],
     deps = [
+        ":partitioner_stage",
         "@llvm-project//llvm:Support",
     ],
 )

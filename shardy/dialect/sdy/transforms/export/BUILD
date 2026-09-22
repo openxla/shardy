@@ -72,6 +72,7 @@ cc_library(
         "//shardy/dialect/sdy/ir:axis_list_ref",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/transforms/common:op_properties",
+        "//shardy/dialect/sdy/transforms/common:partitioner_stage",
         "//shardy/dialect/sdy/transforms/common:passes",
         "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "//shardy/dialect/sdy/transforms/common:util",
