@@ -96,6 +96,12 @@ bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
 bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
                                TensorShardingAttr sharding, MeshAttr mesh);
 
+// Returns true if `dusOp` can be executed on `dimIdx` without cross-shard
+// communication (i.e. the update slice fits within a single shard).
+bool isCommunicationFreeDynamicUpdateSliceDim(
+    int64_t dimIdx, stablehlo::DynamicUpdateSliceOp dusOp,
+    TensorShardingAttr operandSharding, MeshAttr mesh);
+
 // Converts an SDY MeshAttr to a StableHLO MeshAttr.
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 

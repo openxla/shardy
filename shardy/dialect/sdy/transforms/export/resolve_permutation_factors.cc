@@ -2280,6 +2280,21 @@ bool isReductionFactorWithPermutationSemantics(stablehlo::ConvolutionOp convOp,
   return false;
 }
 
+// Returns the sliced dimension of `operand` mapped to `factorIndex`, or
+// `std::nullopt` if `factorIndex` maps to `update` instead.
+std::optional<int64_t> getDynamicUpdateSliceDim(OpShardingRuleAttr rule,
+                                                int64_t factorIndex) {
+  if (rule.getNumOperands() == 0) {
+    return std::nullopt;
+  }
+  for (auto [dimIdx, dimMapping] :
+       llvm::enumerate(rule.getOperandMapping(0).getDimMappings())) {
+    if (llvm::is_contained(dimMapping.getFactorIndices(), factorIndex)) {
+      return dimIdx;
+    }
+  }
+  return std::nullopt;
+}
 void resolvePermutationFactorsViaReplication(Operation* op,
                                              OpShardingRuleAttr rule,
                                              ResolutionState& state) {
@@ -2302,8 +2317,8 @@ void resolvePermutationFactorsViaReplication(Operation* op,
 
   SmallVector<AxisRefAttr> removedReductionAxes;
   for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
-    // When HALO exchange is disabled, we replication-reshard the
-    // permutation factors.
+    // Replicate permutation factors when halo exchange is disabled, unless the
+    // slice or dynamic-update-slice dimension is communication-free.
     bool isReplicatedFactor = rule.getFactorType(i) == FactorType::kPermutation;
     if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op);
         convOp && isReductionFactorWithPermutationSemantics(convOp, rule, i)) {
@@ -2326,6 +2341,13 @@ void resolvePermutationFactorsViaReplication(Operation* op,
     if (auto padOp = dyn_cast<stablehlo::PadOp>(op)) {
       if (isCommunicationFreePadDim(i, padOp, inShardings[0],
                                     meshOp.getMesh())) {
+        continue;
+      }
+    }
+    if (auto dusOp = dyn_cast<stablehlo::DynamicUpdateSliceOp>(op)) {
+      std::optional<int64_t> dimIdx = getDynamicUpdateSliceDim(rule, i);
+      if (dimIdx && isCommunicationFreeDynamicUpdateSliceDim(
+                        *dimIdx, dusOp, inShardings[0], meshOp.getMesh())) {
         continue;
       }
     }

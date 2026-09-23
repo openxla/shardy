@@ -36,6 +36,7 @@ limitations under the License.
 #include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -46,6 +47,23 @@ namespace mlir {
 namespace sdy {
 
 namespace {
+
+// Returns the constant integer value of `val` if it is defined by a constant
+// op. Only expects sdy::ConstantOp and stablehlo::ConstantOp.
+std::optional<int64_t> getConstantInt(Value val) {
+  ElementsAttr attr;
+  if (auto sdyConst = val.getDefiningOp<ConstantOp>()) {
+    attr = sdyConst.getValue();
+  } else if (auto shloConst = val.getDefiningOp<stablehlo::ConstantOp>()) {
+    // TODO(b/553579414): Remove stablehlo::ConstantOp check once constants are
+    // consistently represented as sdy::ConstantOp.
+    attr = shloConst.getValue();
+  }
+  if (attr) {
+    return attr.getSplatValue<APInt>().getSExtValue();
+  }
+  return std::nullopt;
+}
 
 // Returns a sorted vector containing all axes in `axesPerDim`.
 SmallVector<AxisRefAttr> getOrderedAxes(ArrayRef<AxisList> axesPerDim) {
@@ -195,6 +213,43 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
     }
   }
   return true;
+}
+
+bool isCommunicationFreeDynamicUpdateSliceDim(
+    int64_t dimIdx, stablehlo::DynamicUpdateSliceOp dusOp,
+    TensorShardingAttr operandSharding, MeshAttr mesh) {
+  ArrayRef<int64_t> operandShape = getTensorShape(dusOp.getOperand());
+  ArrayRef<int64_t> updateShape = getTensorShape(dusOp.getUpdate());
+  int64_t operandDimSize = operandShape[dimIdx];
+  int64_t updateDimSize = updateShape[dimIdx];
+  if (ShapedType::isDynamic(operandDimSize) ||
+      ShapedType::isDynamic(updateDimSize)) {
+    return false;
+  }
+
+  int64_t shardCount =
+      operandSharding.getDimShardings()[dimIdx].getShardedSize(mesh);
+  // Return true if the dimension is unsharded, not sliced, or a single-element
+  // slice.
+  if (shardCount <= 1 || operandDimSize == updateDimSize ||
+      updateDimSize == 1) {
+    return true;
+  }
+
+  std::optional<int64_t> startIndex =
+      getConstantInt(dusOp.getStartIndices()[dimIdx]);
+  if (!startIndex) {
+    return false;
+  }
+
+  // Clamp the start index to [0, operandDimSize - updateDimSize] and check if
+  // the slice fits within a single shard.
+  int64_t clampedStart = std::clamp(*startIndex, static_cast<int64_t>(0),
+                                    operandDimSize - updateDimSize);
+  int64_t shardSize = llvm::divideCeil(operandDimSize, shardCount);
+  int64_t startShard = clampedStart / shardSize;
+  int64_t endShard = (clampedStart + updateDimSize - 1) / shardSize;
+  return startShard == endShard;
 }
 
 mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh) {
@@ -801,13 +856,13 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
 
   if (isa<FloatType>(elemType)) {
     return padDenseElementsAttrImpl<APFloat>(
-        denseAttr, origType, paddedType,
-        zeroDenseAttr.getSplatValue<APFloat>(), origStrides, paddedStrides);
+        denseAttr, origType, paddedType, zeroDenseAttr.getSplatValue<APFloat>(),
+        origStrides, paddedStrides);
   }
   if (isa<IntegerType>(elemType)) {
-    return padDenseElementsAttrImpl<APInt>(
-        denseAttr, origType, paddedType, zeroDenseAttr.getSplatValue<APInt>(),
-        origStrides, paddedStrides);
+    return padDenseElementsAttrImpl<APInt>(denseAttr, origType, paddedType,
+                                           zeroDenseAttr.getSplatValue<APInt>(),
+                                           origStrides, paddedStrides);
   }
 
   return elementsAttr;
