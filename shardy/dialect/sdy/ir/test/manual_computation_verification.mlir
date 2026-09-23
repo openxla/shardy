@@ -294,3 +294,19 @@ func.func @ranked_sharding_on_token(%arg0: !stablehlo.token) -> !stablehlo.token
   } : (!stablehlo.token) -> !stablehlo.token
   return %0 : !stablehlo.token
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+// The region argument type is a token (non-ranked) while the operand is a
+// ranked tensor. This must be diagnosed rather than crash on an unchecked cast
+// of the local type to RankedTensorType.
+func.func @man_comp_operand_non_ranked_local_type(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op operand shape, corresponding sharding, and region operand shape at index 0 must match. Expected local shape 'tensor<16x32xf32>', actual local shape '!stablehlo.token'}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{}, {}]>] out_shardings=[<@mesh, [{}, {}]>] manual_axes={} (%arg1: !stablehlo.token) {
+    %1 = stablehlo.constant dense<0.000000e+00> : tensor<16x32xf32>
+    sdy.return %1 : tensor<16x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
