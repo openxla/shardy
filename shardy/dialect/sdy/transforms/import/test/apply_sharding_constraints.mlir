@@ -714,3 +714,70 @@ func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   %11 = sdy.data_flow_edge %0 : tensor<8x8xf32>
   return %11 : tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @multi_result_sharding_constraint
+func.func @multi_result_sharding_constraint(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[CALL:.*]]:2 = call @compute_on(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>, <@mesh, [{}, {"b"}]>]>}
+  // CHECK-NEXT: %[[SC0:.*]] = sdy.sharding_constraint %[[CALL]]#0 <@mesh, [{"a"}, {}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>}
+  // CHECK-NEXT: %[[SC1:.*]] = sdy.sharding_constraint %[[CALL]]#1 <@mesh, [{}, {"b"}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>}
+  // CHECK-NEXT: return %[[SC0]], %[[SC1]]
+  %0:2 = func.call @compute_on(%arg0) : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+  %1 = sdy.sharding_constraint %0#0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0#1 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %1, %2 : tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+func.func private @compute_on(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @multi_result_chain_of_two_sharding_constraints
+func.func @multi_result_chain_of_two_sharding_constraints(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  // CHECK-NEXT: %[[CUSTOM_CALL:.*]]:2 = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>, <@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[SC0:.*]] = sdy.sharding_constraint %[[CUSTOM_CALL]]#0 <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[SC1:.*]] = sdy.sharding_constraint %[[CUSTOM_CALL]]#1 <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[SC2:.*]] = sdy.sharding_constraint %[[SC1]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[SC2]], %[[SC2]]
+  // CHECK-NEXT: return %[[SC0]], %[[SC2]], %[[ADD]]
+  %0:2 = stablehlo.custom_call @foo(%arg0) : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
+  %1 = sdy.sharding_constraint %0#0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0#1 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  %4 = stablehlo.add %0#1, %0#1 : tensor<8x8xf32>
+  return %1, %3, %4 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @scalar_input_already_has_sharding(
+// CHECK-SAME:    %arg0: tensor<f32> {sdy.sharding = #sdy.sharding<@mesh, []>})
+func.func @scalar_input_already_has_sharding(%arg0: tensor<f32> {sdy.sharding = #sdy.sharding<@mesh, []>}) -> tensor<f32> {
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %arg0 <@mesh, [], unreduced={"a"}>
+  // CHECK-NEXT: return %[[SC]]
+  %0 = sdy.sharding_constraint %arg0 <@mesh, [], unreduced={"a"}> : tensor<f32>
+  return %0 : tensor<f32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @multi_result_scalar_sharding_constraint
+func.func @multi_result_scalar_sharding_constraint(%arg0: tensor<8xf32>) -> (tensor<8xf32>, tensor<f32>) {
+  // CHECK-NEXT: %[[CUSTOM_CALL:.*]]:2 = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}]>, <@mesh, [], unreduced={"b"}>]>}
+  // CHECK-NEXT: %[[SC0:.*]] = sdy.sharding_constraint %[[CUSTOM_CALL]]#0 <@mesh, [{"a"}]>
+  // CHECK-NEXT: %[[SC1:.*]] = sdy.sharding_constraint %[[CUSTOM_CALL]]#1 <@mesh, [], unreduced={"b"}>
+  // CHECK-NEXT: return %[[SC0]], %[[SC1]]
+  %0:2 = stablehlo.custom_call @foo(%arg0) : (tensor<8xf32>) -> (tensor<8xf32>, tensor<f32>)
+  %1 = sdy.sharding_constraint %0#0 <@mesh, [{"a"}]> : tensor<8xf32>
+  %2 = sdy.sharding_constraint %0#1 <@mesh, [], unreduced={"b"}> : tensor<f32>
+  return %1, %2 : tensor<8xf32>, tensor<f32>
+}

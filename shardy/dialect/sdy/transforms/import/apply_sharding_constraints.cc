@@ -76,6 +76,32 @@ void moveAfterValue(Operation* op, Value value) {
   }
 }
 
+// Returns true if `value` has a sharding that is not a fully open placeholder
+// sharding (i.e., empty replicated/unreduced axes and all dimension shardings
+// are open, empty, and without priorities; for rank 0 tensors where open and
+// closed shardings are identical, only treat as a placeholder if `value` is a
+// result of an op with multiple results).
+bool hasSharding(Value value) {
+  TensorShardingAttr sharding = getSharding(value);
+  if (!sharding) {
+    return false;
+  }
+  if (!sharding.getReplicatedAxes().empty() ||
+      !sharding.getUnreducedAxes().empty()) {
+    return true;
+  }
+  if (sharding.getRank() == 0) {
+    auto opResult = dyn_cast<OpResult>(value);
+    return !opResult || opResult.getOwner()->getNumResults() == 1;
+  }
+  return !llvm::all_of(sharding.getDimShardings(),
+                       [](const DimensionShardingAttr dimSharding) {
+                         return dimSharding.emptyAxes() &&
+                                !dimSharding.getIsClosed() &&
+                                !dimSharding.getPriority().has_value();
+                       });
+}
+
 // Returns true if `input` should have its sharding set to `sharding` of a
 // sharding constraint.
 bool shouldApply(Value input, TensorShardingAttr sharding) {
@@ -83,7 +109,7 @@ bool shouldApply(Value input, TensorShardingAttr sharding) {
     // A sharding can't be attached to `input`, it's likely a scalar block arg.
     return false;
   }
-  if (getSharding(input)) {
+  if (hasSharding(input)) {
     // `input` already has a sharding.
     return false;
   }
@@ -199,7 +225,7 @@ ShardingConstraintOp getTailOfShardingConstraintChain(
     return nullptr;
   }
 
-  if (getSharding(head.getInput())) {
+  if (hasSharding(head.getInput())) {
     // The input of the `head` already has a sharding.
     return nullptr;
   }
