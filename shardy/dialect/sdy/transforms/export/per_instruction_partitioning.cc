@@ -690,13 +690,15 @@ LogicalResult outlineInstruction(Operation* op,
 // Runs the standard Shardy export partitioner pipeline on a module.
 LogicalResult runPartitionerPipeline(ModuleOp module, bool enableHaloExchange,
                                      int64_t replicaCount = 1,
-                                     int64_t partitionCount = 1) {
+                                     int64_t partitionCount = 1,
+                                     bool rngBitGeneratorUnsafe = true) {
   MLIRContext* ctx = module.getContext();
   PassManager pm(ctx);
   ShardyResolvePermutationFactorsPassOptions resolveFactorsOptions;
   resolveFactorsOptions.enableHaloExchange = enableHaloExchange;
   resolveFactorsOptions.replicaCount = replicaCount;
   resolveFactorsOptions.partitionCount = partitionCount;
+  resolveFactorsOptions.rngBitGeneratorUnsafe = rngBitGeneratorUnsafe;
   pm.addPass(createShardyResolvePermutationFactorsPass(resolveFactorsOptions));
   pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
   pm.addNestedPass<func::FuncOp>(createOptimizeCollectivesPass());
@@ -907,7 +909,8 @@ struct PerInstructionPartitioningPass
                                   paddedArgTypes, paddedResultTypes, tempModule,
                                   outlinedFunc, trailingAllReduce)) ||
         failed(runPartitionerPipeline(*tempModule, enableHaloExchange,
-                                      replicaCount, partitionCount))) {
+                                      replicaCount, partitionCount,
+                                      rngBitGeneratorUnsafe))) {
       return false;
     }
 

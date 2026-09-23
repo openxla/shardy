@@ -2295,6 +2295,31 @@ std::optional<int64_t> getDynamicUpdateSliceDim(OpShardingRuleAttr rule,
   }
   return std::nullopt;
 }
+
+void handleRngBitGeneratorOp(stablehlo::RngBitGeneratorOp rngOp,
+                             bool rngBitGeneratorUnsafe,
+                             ResolutionState& state) {
+  Type stateElemTy = rngOp.getInitialState().getType().getElementType();
+  if (rngBitGeneratorUnsafe &&
+      (stateElemTy.isInteger(32) || stateElemTy.isInteger(64))) {
+    // Support partitioned rng op output.
+    return;
+  }
+  TensorShardingAttr outSharding = getSharding(rngOp.getOutput());
+  if (!outSharding || isFullyReplicated(outSharding)) {
+    return;
+  }
+  // Otherwise, replicate the rng op output.
+  setSharding(rngOp.getOutput(), TensorShardingAttr::getFullyClosed(
+                                     rngOp.getContext(), outSharding.getRank(),
+                                     outSharding.getMeshOrRef()));
+  state.rewriter.setInsertionPointAfter(rngOp);
+  auto reshardOp = sdy::ReshardOp::create(state.rewriter, rngOp.getLoc(),
+                                          rngOp.getOutput(), outSharding);
+  state.rewriter.replaceAllUsesExcept(rngOp.getOutput(), reshardOp.getResult(),
+                                      reshardOp);
+}
+
 void resolvePermutationFactorsViaReplication(Operation* op,
                                              OpShardingRuleAttr rule,
                                              ResolutionState& state) {
@@ -2468,13 +2493,18 @@ struct ShardyResolvePermutationFactorsPass
           !inDialect<stablehlo::StablehloDialect>(op)) {
         return;
       }
-      // Reshape op is the only op that doesn't have kPermutation factor but
-      // needs HALO exchange.
+
+      // Ops with special handlers.
       if (auto reshapeOp = dyn_cast<stablehlo::ReshapeOp>(op)) {
         SDY_CHECK(
             succeeded(handleReshapeOp(reshapeOp, enableHaloExchange, state)));
         return;
       }
+      if (auto rngOp = dyn_cast<stablehlo::RngBitGeneratorOp>(op)) {
+        handleRngBitGeneratorOp(rngOp, rngBitGeneratorUnsafe, state);
+        return;
+      }
+
       OpShardingRuleAttr rule = getOrCreateShardingRule(op, false, false);
       if (!rule || rule.isCustom()) {
         return;
