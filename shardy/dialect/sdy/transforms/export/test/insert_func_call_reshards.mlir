@@ -486,3 +486,22 @@ func.func private @baz_0(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@m
   %0 = stablehlo.multiply %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x", ?}, {?}]>]>} : tensor<8x2xi32>
   return %0 : tensor<8x2xi32>
 }
+
+// -----
+sdy.mesh @mesh = <["x"=2, "y"=2, "z"=2]>
+// CHECK-LABEL: func @call_result_unreduced_axes_mismatch_not_overwritten
+// CHECK-SAME: (%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"z"}>}) -> (tensor<8x2xi32>, tensor<8x2xi32>) {
+// CHECK-NEXT:  %0:2 = call @baz(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}], unreduced={"z"}>, <@mesh, [{"x"}, {}]>]>} : (tensor<8x2xi32>) -> (tensor<8x2xi32>, tensor<8x2xi32>)
+// CHECK-NEXT:  %1 = sdy.reshard %0#0 <@mesh, [{"x"}, {"y"}], unreduced={"z"}> : tensor<8x2xi32>
+// CHECK-NEXT:  return %1, %0#1 : tensor<8x2xi32>, tensor<8x2xi32>
+// CHECK-NEXT:}
+func.func @call_result_unreduced_axes_mismatch_not_overwritten(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"z"}>}) -> (tensor<8x2xi32>, tensor<8x2xi32>) {
+  %0:2 = call @baz(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}], unreduced={"z"}>, <@mesh, [{"x"}, {}]>]>} : (tensor<8x2xi32>) -> (tensor<8x2xi32>, tensor<8x2xi32>)
+  return %0#0, %0#1 : tensor<8x2xi32>, tensor<8x2xi32>
+}
+// CHECK-LABEL: func private @baz
+// CHECK-SAME: (%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"z"}>}) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"z"}>}, tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}], unreduced={"z"}>}) {
+func.func private @baz(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"z"}>}) -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}], unreduced={"z"}>}, tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}], unreduced={"z"}>}) {
+  return %arg0, %arg0 : tensor<8x2xi32>, tensor<8x2xi32>
+}
+

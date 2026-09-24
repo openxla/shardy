@@ -1243,9 +1243,23 @@ void insertReshardsOnFuncArguments(FuncOp funcOp, CallOp callOp,
 namespace {
 void insertReshardsOnFuncResults(TensorShardingPerValueAttr funcResultShardings,
                                  CallOp callOp, IRRewriter& rewriter) {
+  SmallVector<TensorShardingAttr> newCallResultShardings;
+  newCallResultShardings.reserve(callOp.getNumResults());
   for (auto [funcResultSharding, result] : llvm::zip_equal(
            funcResultShardings.getShardings(), callOp.getResults())) {
     TensorShardingAttr callResultSharding = getSharding(result);
+    ArrayRef<AxisRefAttr> funcResultAxes =
+        funcResultSharding.getUnreducedAxes();
+    ArrayRef<AxisRefAttr> callResultAxes =
+        callResultSharding ? callResultSharding.getUnreducedAxes()
+                           : ArrayRef<AxisRefAttr>{};
+    if (funcResultAxes != callResultAxes) {
+      newCallResultShardings.push_back(
+          callResultSharding
+              ? callResultSharding
+              : TensorShardingAttr::getFullyClosedLike(funcResultSharding));
+      continue;
+    }
     if (!funcResultSharding.isEquivalent(callResultSharding)) {
       rewriter.setInsertionPointAfterValue(result);
       auto reshardOp = ReshardOp::create(
@@ -1255,8 +1269,9 @@ void insertReshardsOnFuncResults(TensorShardingPerValueAttr funcResultShardings,
               : TensorShardingAttr::getFullyClosedLike(funcResultSharding));
       rewriter.replaceAllUsesExcept(result, reshardOp, reshardOp);
     }
+    newCallResultShardings.push_back(funcResultSharding);
   }
-  setShardings(callOp, funcResultShardings);
+  setShardings(callOp, newCallResultShardings);
 }
 }  // namespace
 

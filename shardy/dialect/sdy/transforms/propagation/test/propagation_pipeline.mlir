@@ -1188,7 +1188,7 @@ sdy.mesh @mesh = <["x"=8]>
 
 // CHECK-LABEL: func private @foo
 // CHECK-NOT:   sdy.replicated_to_unreduced
-func.func private @foo(%arg0: tensor<256x128xf32>) -> (tensor<256x128xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+func.func private @foo(%arg0: tensor<256x128xf32>) -> (tensor<256x128xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
   %0 = sdy.sharding_constraint %arg0 <@mesh, [{}, {}], unreduced={"x"}> : tensor<256x128xf32>
   return %0 : tensor<256x128xf32>
 }
