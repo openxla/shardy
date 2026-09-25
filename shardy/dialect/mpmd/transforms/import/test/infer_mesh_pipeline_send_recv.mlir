@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-infer-mesh-pipeline='infer-transfers=true infer-cross-mesh-reductions=True' 2>&1 | FileCheck %s
+// RUN: mpmd_opt %s -mpmd-infer-mesh-pipeline='infer-transfers=true infer-cross-mesh-reductions=true' 2>&1 | FileCheck %s
 
 // Test that stablehlo.send and stablehlo.create_token ops (which produce
 // !stablehlo.token types) are correctly partitioned into fragments by the

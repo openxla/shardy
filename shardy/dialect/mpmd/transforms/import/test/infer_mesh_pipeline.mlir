@@ -1,4 +1,4 @@
-// RUN: mpmd_opt %s -mpmd-infer-mesh-pipeline='infer-transfers=true infer-cross-mesh-reductions=True' 2>&1 | FileCheck %s
+// RUN: mpmd_opt %s -mpmd-infer-mesh-pipeline='infer-transfers=true infer-cross-mesh-reductions=true' 2>&1 | FileCheck %s
 
 !mesh_1_tensor_ui32 = !mpmd.mesh_tensor<"m1", tensor<ui32>>
 !mesh_1_tensor_1_ui32 = !mpmd.mesh_tensor<"m1", tensor<1xui32>>
