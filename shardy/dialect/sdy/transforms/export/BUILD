@@ -43,6 +43,7 @@ cc_library(
         "optimize_collectives.cc",
         "optimize_collectives_util.cc",
         "pad_for_divisibility.cc",
+        "partitioner_pipeline.cc",
         "per_instruction_partitioning.cc",
         "propagate_to_func_results.cc",
         "remove_ag_rs_for_cmv1.cc",
@@ -61,6 +62,7 @@ cc_library(
     ],
     hdrs = [
         "optimize_collectives_util.h",
+        "partitioner_pipeline.h",
         "passes.h",
     ],
     deps = [
