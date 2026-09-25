@@ -299,36 +299,37 @@ TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolGlobalMesh) {
   EXPECT_EQ(sym.getValue(), "global_mesh");
 }
 
-TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolMaximalMesh) {
-  // Create a maximal mesh (e.g. single-device mesh with device_ids)
-  MeshAttr maximalMeshAttr =
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolSingleDeviceMesh) {
+  // Create a single-device mesh with device_ids.
+  MeshAttr singleDeviceMeshAttr =
       MeshAttr::get(&context, /*axes=*/{}, /*deviceIds=*/{0});
   SymbolTable symbolTable(moduleOp.get());
 
   FlatSymbolRefAttr sym =
-      getOrCreateMeshSymbol(moduleOp.get(), maximalMeshAttr, symbolTable);
+      getOrCreateMeshSymbol(moduleOp.get(), singleDeviceMeshAttr, symbolTable);
   ASSERT_NE(sym, nullptr);
 
   auto meshOp = symbolTable.lookup<MeshOp>(sym.getValue());
   ASSERT_NE(meshOp, nullptr);
-  EXPECT_EQ(meshOp.getMesh(), maximalMeshAttr);
-  EXPECT_TRUE(meshOp.getMesh().isMaximal());
+  EXPECT_EQ(meshOp.getMesh(), singleDeviceMeshAttr);
+  EXPECT_TRUE(meshOp.getMesh().isSingleDevice());
 }
 
-TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolExistingMaximalMesh) {
-  MeshAttr maximalMeshAttr =
+TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolExistingSingleDeviceMesh) {
+  MeshAttr singleDeviceMeshAttr =
       MeshAttr::get(&context, /*axes=*/{}, /*deviceIds=*/{0});
   SymbolTable symbolTable(moduleOp.get());
 
   OpBuilder builder(moduleOp.get().getBodyRegion());
-  MeshOp maximalMeshOp = MeshOp::create(builder, moduleOp.get().getLoc(),
-                                        "maximal_mesh", maximalMeshAttr);
-  symbolTable.insert(maximalMeshOp);
+  MeshOp singleDeviceMeshOp =
+      MeshOp::create(builder, moduleOp.get().getLoc(), "single_device_mesh",
+                     singleDeviceMeshAttr);
+  symbolTable.insert(singleDeviceMeshOp);
 
   FlatSymbolRefAttr sym =
-      getOrCreateMeshSymbol(moduleOp.get(), maximalMeshAttr, symbolTable);
+      getOrCreateMeshSymbol(moduleOp.get(), singleDeviceMeshAttr, symbolTable);
   ASSERT_NE(sym, nullptr);
-  EXPECT_EQ(sym.getValue(), "maximal_mesh");
+  EXPECT_EQ(sym.getValue(), "single_device_mesh");
 }
 
 TEST_F(ExportUtilsTest, BuildReshapeGroupInfos) {

@@ -127,8 +127,8 @@ mlir::stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
                                                     int64_t partitionCount,
                                                     int64_t& nextChannelId);
 
-// Returns the first non-maximal MeshOp found in moduleOp, or nullptr if none
-// exists.
+// Returns the first non-single-device MeshOp found in moduleOp, or nullptr if
+// none exists.
 MeshOp getGlobalMeshOp(ModuleOp moduleOp);
 
 // Returns the logical index of the shard that the given device (`deviceId`)

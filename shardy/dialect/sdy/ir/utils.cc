@@ -964,7 +964,7 @@ mlir::Attribute getMeshOrRef(
     std::function<TensorShardingAttr(int64_t)> getSharding) {
   for (int64_t i = 0; i < numElements; ++i) {
     if (TensorShardingAttr sdySharding = getSharding(i);
-        sdySharding && !sdySharding.getMesh(symbolTable).isMaximal()) {
+        sdySharding && !sdySharding.getMesh(symbolTable).isSingleDevice()) {
       return sdySharding.getMeshOrRef();
     }
   }
@@ -977,7 +977,7 @@ bool isSingleDeviceSharding(TensorShardingAttr sharding,
     return false;
   }
   MeshAttr mesh = sharding.getMesh(symbolTable);
-  return mesh && mesh.isMaximal();
+  return mesh && mesh.isSingleDevice();
 }
 
 int64_t getFuncResultTensorRank(FuncOp funcOp, int64_t resNum) {
@@ -1223,7 +1223,7 @@ void insertReshardsOnFuncArguments(FuncOp funcOp, CallOp callOp,
         callOp.getNumOperands(), symbolTable,
         [&](int64_t i) { return getSharding(callOp.getOperand(i)); });
     // Return without inserting reshards as neither func arguments nor call
-    // operands have a sharding with non-maximal mesh.
+    // operands have a sharding with non-single-device mesh.
     if (!meshOrRef) {
       return;
     }
@@ -1284,7 +1284,7 @@ void insertReshardsOnFuncResults(FuncOp funcOp, CallOp callOp,
     TensorShardingPerValueAttr callResultShardings =
         getShardingPerValue(callOp);
     // Return without inserting reshards as neither func arguments have a
-    // sharding with non-maximal mesh nor call has non-empty shardings.
+    // sharding with non-single-device mesh nor call has non-empty shardings.
     if (!callResultShardings) {
       return;
     }

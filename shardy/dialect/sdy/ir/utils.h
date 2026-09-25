@@ -155,7 +155,7 @@ MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 // table, or nullptr otherwise.
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName);
 
-// Returns the first non-maximal mesh on the given shardings, if there is
+// Returns the first non-single-device mesh on the given shardings, if there is
 // one. Otherwise returns `nullptr`.
 Attribute getMeshOrRef(int64_t numElements, const SymbolTable& symbolTable,
                        std::function<TensorShardingAttr(int64_t)> getSharding);
@@ -225,8 +225,7 @@ std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> resultsShardings,
     const SymbolTable& symbolTable, bool ignoreDeviceIds);
 
-// Returns true if the sharding attribute is bound to a single-device (maximal)
-// mesh.
+// Returns true if the sharding attribute is bound to a single-device mesh.
 bool isSingleDeviceSharding(TensorShardingAttr sharding,
                             const SymbolTable& symbolTable);
 
