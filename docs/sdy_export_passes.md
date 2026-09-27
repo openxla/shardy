@@ -143,10 +143,11 @@ unwrapped global instructions.
 #### Options
 
 ```
--filter               : Filter string for selective partitioning. Can be empty (all sharded ops), comma-separated op name substrings (e.g. 'dot, pad'), or key-values like 'selectLow=0, selectHigh=10, func=subroutine'.
--enable-halo-exchange : Implement halo exchange logic for windowed operations inside the sub-pipeline.
--replica-count        : Number of replicas (data parallelism).
--partition-count      : Number of partitions (model parallelism).
+-filter                   : Filter string for selective partitioning. Can be empty (all sharded ops), comma-separated op name substrings (e.g. 'dot, pad'), or key-values like 'selectLow=0, selectHigh=10, func=subroutine'.
+-enable-halo-exchange     : Implement halo exchange logic for windowed operations inside the sub-pipeline.
+-replica-count            : Number of replicas (data parallelism).
+-partition-count          : Number of partitions (model parallelism).
+-rng-bit-generator-unsafe : Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.
 ```
 
 ### `-sdy-propagate-to-func-results`
@@ -240,9 +241,10 @@ default of `enableHaloExchange` is true.
 #### Options
 
 ```
--enable-halo-exchange : Implement halo exchange logic for windowed operations.
--replica-count        : Number of replicas (data parallelism).
--partition-count      : Number of partitions (model parallelism).
+-enable-halo-exchange     : Implement halo exchange logic for windowed operations.
+-replica-count            : Number of replicas (data parallelism).
+-partition-count          : Number of partitions (model parallelism).
+-rng-bit-generator-unsafe : Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.
 ```
 
 ### `-sdy-resolve-single-device-sharding`
