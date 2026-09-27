@@ -58,6 +58,7 @@ void populateExportOptions(ExportOptions& options,
       propOptions.perInstructionPartitioningFilter;
   options.markPartialResultWithUnreducedAxes =
       propOptions.markPartialResultWithUnreducedAxes;
+  options.rngBitGeneratorUnsafe = propOptions.rngBitGeneratorUnsafe;
 }
 
 }  // namespace

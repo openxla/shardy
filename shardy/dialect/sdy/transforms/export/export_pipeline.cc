@@ -56,6 +56,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     passOptions.filter = options.perInstructionPartitioningFilter;
     passOptions.replicaCount = options.replicaCount;
     passOptions.partitionCount = options.partitionCount;
+    passOptions.rngBitGeneratorUnsafe = options.rngBitGeneratorUnsafe;
     pm.addPass(createPerInstructionPartitioningPass(passOptions));
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_per_instruction_partitioning",

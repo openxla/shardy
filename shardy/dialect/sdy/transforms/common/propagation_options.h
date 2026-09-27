@@ -100,6 +100,11 @@ struct PropagationOptions {
 
   // Whether to mark partial reduction results with unreduced axes.
   bool markPartialResultWithUnreducedAxes = false;
+
+  // Whether to allow unsafe partitioning of stablehlo.rng_bit_generator. When
+  // false, the output of stablehlo.rng_bit_generator is replicated and
+  // sliced per device.
+  bool rngBitGeneratorUnsafe = true;
 };
 
 }  // namespace sdy
