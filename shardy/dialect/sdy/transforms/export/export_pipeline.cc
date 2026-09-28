@@ -22,7 +22,9 @@ limitations under the License.
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/dialect/sdy/ir/constants.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 #include "shardy/dialect/sdy/transforms/common/passes.h"
+#include "shardy/dialect/sdy/transforms/export/partitioner_pipeline.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 
 namespace mlir {
@@ -42,8 +44,10 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   // Catch the cases where unreduced axes are dropped and cause inconsistencies.
   pm.addNestedPass<func::FuncOp>(createVerifyUnreducedAxesPass());
   InsertExplicitReshardsPassOptions passOptions;
-  passOptions.enableFullVersion = options.enableInsertExplicitCollectives ||
-                                  options.enablePerInstructionPartitioning;
+  passOptions.enableFullVersion =
+      options.enableInsertExplicitCollectives ||
+      options.enablePerInstructionPartitioning ||
+      options.partitionerStage != PartitionerStage::kUnspecified;
   passOptions.markPartialResultWithUnreducedAxes =
       options.markPartialResultWithUnreducedAxes;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
@@ -52,40 +56,50 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "before_per_instruction_partitioning",
         dumpIndex++));
-    PerInstructionPartitioningPassOptions passOptions;
-    passOptions.filter = options.perInstructionPartitioningFilter;
-    passOptions.replicaCount = options.replicaCount;
-    passOptions.partitionCount = options.partitionCount;
-    passOptions.rngBitGeneratorUnsafe = options.rngBitGeneratorUnsafe;
-    pm.addPass(createPerInstructionPartitioningPass(passOptions));
+    PerInstructionPartitioningPassOptions perInstructionOptions;
+    perInstructionOptions.filter = options.perInstructionPartitioningFilter;
+    perInstructionOptions.replicaCount = options.replicaCount;
+    perInstructionOptions.partitionCount = options.partitionCount;
+    perInstructionOptions.rngBitGeneratorUnsafe = options.rngBitGeneratorUnsafe;
+    pm.addPass(createPerInstructionPartitioningPass(perInstructionOptions));
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_per_instruction_partitioning",
         dumpIndex++));
+  } else if (options.partitionerStage != PartitionerStage::kUnspecified) {
+    // `partitionerStage` takes precedence over
+    // `enableInsertExplicitCollectives`, which will be ignored if the former is
+    // specified by user.
+    pm.addPass(mlir::sdy::createSaveModuleOpPass(
+        options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
+    addCanonicalizerPass(pm, kReshardLabel);
+    PartitionerPipelineOptions pipelineOptions;
+    pipelineOptions.stage = options.partitionerStage;
+    pipelineOptions.replicaCount = options.replicaCount;
+    pipelineOptions.partitionCount = options.partitionCount;
+    pipelineOptions.rngBitGeneratorUnsafe = options.rngBitGeneratorUnsafe;
+    addPartitionerPipeline(pm, pipelineOptions);
   } else if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "after_explicit_reshards", dumpIndex++));
     addCanonicalizerPass(pm, kReshardLabel);
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
     pm.addNestedPass<func::FuncOp>(createOptimizeCollectivesPass());
-    // NOTE: ReshardToCollectives pass above generates all-slice collectives,
-    // which during the canonicalizer below may be converted to reduce scatters
-    // by potentially fusing with preceding all-reduces, which are inserted
-    // during InsertExplicitReshards pass.
   }
 
+  // NOTE: ReshardToCollectives pass above generates all-slice collectives,
+  // which during the canonicalizer below may be converted to reduce scatters
+  // by potentially fusing with preceding all-reduces, which are inserted
+  // during InsertExplicitReshards pass.
   addCanonicalizerPass(pm, kCollectiveLabel);
 
-  if (options.enableInsertExplicitCollectives &&
+  if (options.partitionerStage == PartitionerStage::kUnspecified &&
+      options.enableInsertExplicitCollectives &&
       options.removeAllGatherReduceScatterForCMV1) {
     pm.addNestedPass<func::FuncOp>(
         createRemoveAllGatherReduceScatterForCMV1Pass());
   }
   pm.addPass(mlir::sdy::createSaveModuleOpPass(
-      options.dumpDirectory,
-      options.enableInsertExplicitCollectives
-          ? "after_partitioner_with_global_shapes"
-          : "after_minimal_partitioner_with_global_shapes",
-      dumpIndex++));
+      options.dumpDirectory, "after_partitioner_passes", dumpIndex++));
 }
 
 }  // namespace

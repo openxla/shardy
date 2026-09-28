@@ -49,6 +49,8 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
+#include "shardy/dialect/sdy/transforms/export/partitioner_pipeline.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -684,30 +686,19 @@ LogicalResult outlineInstruction(Operation* op,
   return success();
 }
 
-// TODO(b/545097355): share this code with the export pipeline for whole-module
-// partitioning.
-//
-// Runs the standard Shardy export partitioner pipeline on a module.
+// Runs the Shardy partitioner pipeline to convert `module` to local shapes.
 LogicalResult runPartitionerPipeline(ModuleOp module, bool enableHaloExchange,
                                      int64_t replicaCount = 1,
                                      int64_t partitionCount = 1,
                                      bool rngBitGeneratorUnsafe = true) {
-  MLIRContext* ctx = module.getContext();
-  PassManager pm(ctx);
-  ShardyResolvePermutationFactorsPassOptions resolveFactorsOptions;
-  resolveFactorsOptions.enableHaloExchange = enableHaloExchange;
-  resolveFactorsOptions.replicaCount = replicaCount;
-  resolveFactorsOptions.partitionCount = partitionCount;
-  resolveFactorsOptions.rngBitGeneratorUnsafe = rngBitGeneratorUnsafe;
-  pm.addPass(createShardyResolvePermutationFactorsPass(resolveFactorsOptions));
-  pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
-  pm.addNestedPass<func::FuncOp>(createOptimizeCollectivesPass());
-  pm.addPass(createPadForDivisibilityPass());
-  ConvertGlobalToLocalPassOptions convertOptions;
-  convertOptions.replicaCount = replicaCount;
-  convertOptions.partitionCount = partitionCount;
-  pm.addPass(createConvertGlobalToLocalPass(convertOptions));
-  pm.addPass(createDropShardingAndMeshPass());
+  PassManager pm(module.getContext());
+  PartitionerPipelineOptions options;
+  options.stage = PartitionerStage::kConvertGlobalToLocal;
+  options.enableHaloExchange = enableHaloExchange;
+  options.replicaCount = replicaCount;
+  options.partitionCount = partitionCount;
+  options.rngBitGeneratorUnsafe = rngBitGeneratorUnsafe;
+  addPartitionerPipeline(pm, options);
   return pm.run(module);
 }
 
