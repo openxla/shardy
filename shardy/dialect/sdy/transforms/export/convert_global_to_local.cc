@@ -441,7 +441,7 @@ bool hasUnreducedResultSharding(Operation* op,
       checkUnreducedResultSharding(resSharding, reductionAxes, opName);
       hasUnreducedAxes = true;
     } else if (llvm::any_of(res.getUsers(), [](Operation* user) {
-                 return isa<sdy::AllReduceOp>(user);
+                 return isa<sdy::AllReduceOp, sdy::ReduceScatterOp>(user);
                })) {
       hasUnreducedAxes = true;
     }
