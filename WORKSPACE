@@ -126,6 +126,17 @@ http_archive(
     ],
 )
 
+http_archive(
+    name = "llvm_xz",
+    build_file = "//third_party:xz.BUILD",
+    sha256 = "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
+    strip_prefix = "xz-5.8.3",
+    urls = [
+        "https://storage.googleapis.com/mirror.tensorflow.org/github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+        "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+    ],
+)
+
 # Sync LLVM SHA256 checksum in workspace.bzl
 load("//third_party/llvm:workspace.bzl", llvm = "repo")
 
