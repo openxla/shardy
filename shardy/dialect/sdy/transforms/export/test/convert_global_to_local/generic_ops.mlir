@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-convert-global-to-local -allow-unregistered-dialect | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-convert-global-to-local -allow-unregistered-dialect | FileCheck %s
 
 // CHECK: sdy.mesh @mesh_2 = <["x"=2]>
 sdy.mesh @mesh_2 = <["x"=2]>
@@ -81,3 +81,25 @@ func.func @stablehlo_while_sharded(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sh
   // CHECK-NEXT: return %[[WHILE]] : tensor<8xf32>
   return %0 : tensor<16xf32>
 }
+
+// -----
+
+// CHECK: module attributes {sdy.output_shardings = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=4]>, [{"x"}, {}], unreduced={"y"}>]>, sdy.parameters_shardings = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=4]>, [{"x"}, {"y"}]>, <mesh<["x"=2, "y"=4]>, [{"y"}, {}]>, <mesh<["x"=2, "y"=4]>, [{}, {}]>]>} {
+sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
+
+// CHECK-LABEL: func.func @main(
+// CHECK-SAME:    %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>},
+// CHECK-SAME:    %arg1: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>},
+// CHECK-SAME:    %arg2: tensor<8x32xf32>)
+// CHECK-SAME:    -> (tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>}) {
+func.func @main(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>},
+    %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>},
+    %arg2: tensor<8x32xf32>)
+    -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT:  %[[DOT:.*]] = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>]>} : (tensor<4x4xf32>, tensor<4x32xf32>) -> tensor<4x32xf32>
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>]>} : (tensor<8x16xf32>, tensor<16x32xf32>) -> tensor<8x32xf32>
+  // CHECK-NEXT:  return %[[DOT]] : tensor<4x32xf32>
+  return %0 : tensor<8x32xf32>
+}
+

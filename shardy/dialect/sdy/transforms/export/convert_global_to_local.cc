@@ -47,6 +47,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/common/logging.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/util.h"
@@ -3385,6 +3386,44 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
   ConversionState& conversionState;
 };
 
+void recordMainFuncShardingsOnModule(ModuleOp module, func::FuncOp mainFunc,
+                                     const SymbolTable& symbolTable) {
+  MLIRContext* ctx = module.getContext();
+  MeshOp globalMeshOp = getGlobalMeshOp(module);
+  MeshAttr defaultMesh =
+      globalMeshOp ? globalMeshOp.getMesh() : MeshAttr::get(ctx, /*axes=*/{});
+
+  SmallVector<TensorShardingAttr> paramShardings;
+  paramShardings.reserve(mainFunc.getNumArguments());
+  for (Value arg : mainFunc.getArguments()) {
+    paramShardings.push_back(
+        getOrCreateSharding(arg, defaultMesh, /*closedIfMissing=*/true));
+  }
+
+  SmallVector<TensorShardingAttr> outputShardings;
+  outputShardings.reserve(mainFunc.getNumResults());
+  for (auto [j, operand] :
+       llvm::enumerate(getBodyTerminatorOperands(mainFunc))) {
+    TensorShardingAttr sharding = getFuncResultSharding(mainFunc, j);
+    outputShardings.push_back(
+        sharding ? sharding
+                 : getOrCreateSharding(operand, defaultMesh,
+                                       /*closedIfMissing=*/true));
+  }
+
+  // Inline MeshAttr into sdy.parameters_shardings and sdy.output_shardings
+  // because inline-meshes and drop-sharding-and-mesh currently do not
+  // inspect attributes attached to ModuleOp.
+  module->setAttr(
+      kParametersShardingsAttr,
+      inlineMesh(symbolTable,
+                 TensorShardingPerValueAttr::get(ctx, paramShardings)));
+  module->setAttr(
+      kOutputShardingsAttr,
+      inlineMesh(symbolTable,
+                 TensorShardingPerValueAttr::get(ctx, outputShardings)));
+}
+
 // This pass converts a Shardy module with consistent sharding notations and
 // global tensor types to a module with local tensor types.
 //
@@ -3419,6 +3458,11 @@ struct ConvertGlobalToLocalPass
     }
     SymbolTable symbolTable(module);
     GlobalToLocalTypeConverter typeConverter(symbolTable);
+
+    auto mainFunc = module.lookupSymbol<func::FuncOp>(kMainFuncName);
+    if (mainFunc) {
+      recordMainFuncShardingsOnModule(module, mainFunc, symbolTable);
+    }
 
     module.walk<WalkOrder::PreOrder>([&](Operation* op) {
       if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
