@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-pad-for-divisibility | FileCheck %s
+// RUN: sdy_opt %s -sdy-pad-for-divisibility -split-input-file -verify-diagnostics | FileCheck %s
 
 sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
 sdy.mesh @mesh_2_2 = <["x"=2, "y"=2]>
@@ -289,4 +289,118 @@ func.func @padded_conv_divisible_sharded_output(%arg0: tensor<1x4x8x3xf32>, %arg
     } {batch_group_count = 1 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_2, [{}, {}, {"x"}, {}]>]>}
     : (tensor<1x4x8x3xf32>, tensor<3x3x3x2xf32>) -> tensor<1x2x6x2xf32>
   return %conv_out : tensor<1x2x6x2xf32>
+}
+
+// CHECK-LABEL: func.func private @padded_conv_batch_group_count
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<3x1x1x2xf32>, %[[ARG1:.*]]: tensor<1x1x2x3xf32>) -> (tensor<1x1x1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{}, {}, {}, {"x"}]>})
+func.func private @padded_conv_batch_group_count(%arg0: tensor<3x1x1x2xf32>, %arg1: tensor<1x1x2x3xf32>) -> (tensor<1x1x1x3xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{}, {}, {}, {"x"}]>}) {
+  // Pad LHS input batch (dim 0) with zero from 3 to 4.
+  // CHECK: %[[CST0:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD0:.*]] = stablehlo.pad %[[ARG0]], %[[CST0]], low = [0, 0, 0, 0], high = [1, 0, 0, 0], interior = [0, 0, 0, 0] : (tensor<3x1x1x2xf32>, tensor<f32>) -> tensor<4x1x1x2xf32>
+  // CHECK: %[[SLICE0:.*]] = sdy.all_slice [{"x"}, {}, {}, {}] %[[PAD0]] out_sharding=<@mesh_4_2, [{"x"}, {}, {}, {}]> : tensor<4x1x1x2xf32>
+
+  // Pad RHS kernel output feature (dim 3) with zero from 3 to 4.
+  // CHECK: %[[CST1:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD1:.*]] = stablehlo.pad %[[ARG1]], %[[CST1]], low = [0, 0, 0, 0], high = [0, 0, 0, 1], interior = [0, 0, 0, 0] : (tensor<1x1x2x3xf32>, tensor<f32>) -> tensor<1x1x2x4xf32>
+  // CHECK: %[[SLICE1:.*]] = sdy.all_slice [{}, {}, {}, {"x"}] %[[PAD1]] out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x2x4xf32>
+
+  // Perform convolution with padded batch_group_count = 4.
+  // CHECK: %[[CONV:.*]] = stablehlo.convolution(%[[SLICE0]], %[[SLICE1]])
+  // CHECK-SAME: dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]
+  // CHECK-SAME: {batch_group_count = 4 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {"x"}]>]>}
+  // CHECK-SAME: : (tensor<4x1x1x2xf32>, tensor<1x1x2x4xf32>) -> tensor<1x1x1x4xf32>
+  // CHECK: return %[[CONV]] : tensor<1x1x1x4xf32>
+
+  %sliced_lhs = sdy.all_slice [{"x"}, {}, {}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}, {}, {}]> : tensor<3x1x1x2xf32>
+  %sliced_rhs = sdy.all_slice [{}, {}, {}, {"x"}] %arg1 out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x2x3xf32>
+  %conv_out = stablehlo.convolution(%sliced_lhs, %sliced_rhs)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {
+      stride = [1, 1],
+      pad = [[0, 0], [0, 0]],
+      lhs_dilate = [1, 1],
+      rhs_dilate = [1, 1],
+      reverse = [0, 0]
+    } {batch_group_count = 3 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {"x"}]>]>}
+    : (tensor<3x1x1x2xf32>, tensor<1x1x2x3xf32>) -> tensor<1x1x1x3xf32>
+  return %conv_out : tensor<1x1x1x3xf32>
+}
+
+// CHECK-LABEL: func.func private @padded_conv_feature_group_count
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1x1x1x3xf32>, %[[ARG1:.*]]: tensor<1x1x1x3xf32>) -> (tensor<1x1x1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{}, {}, {}, {"x"}]>})
+func.func private @padded_conv_feature_group_count(%arg0: tensor<1x1x1x3xf32>, %arg1: tensor<1x1x1x3xf32>) -> (tensor<1x1x1x3xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{}, {}, {}, {"x"}]>}) {
+  // Pad LHS input feature (dim 3) with zero from 3 to 4.
+  // CHECK: %[[CST0:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD0:.*]] = stablehlo.pad %[[ARG0]], %[[CST0]], low = [0, 0, 0, 0], high = [0, 0, 0, 1], interior = [0, 0, 0, 0] : (tensor<1x1x1x3xf32>, tensor<f32>) -> tensor<1x1x1x4xf32>
+  // CHECK: %[[SLICE0:.*]] = sdy.all_slice [{}, {}, {}, {"x"}] %[[PAD0]] out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x1x4xf32>
+
+  // Pad RHS kernel output feature (dim 3) with zero from 3 to 4.
+  // CHECK: %[[CST1:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD1:.*]] = stablehlo.pad %[[ARG1]], %[[CST1]], low = [0, 0, 0, 0], high = [0, 0, 0, 1], interior = [0, 0, 0, 0] : (tensor<1x1x1x3xf32>, tensor<f32>) -> tensor<1x1x1x4xf32>
+  // CHECK: %[[SLICE1:.*]] = sdy.all_slice [{}, {}, {}, {"x"}] %[[PAD1]] out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x1x4xf32>
+
+  // Perform convolution with padded feature_group_count = 4.
+  // CHECK: %[[CONV:.*]] = stablehlo.convolution(%[[SLICE0]], %[[SLICE1]])
+  // CHECK-SAME: dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]
+  // CHECK-SAME: {batch_group_count = 1 : i64, feature_group_count = 4 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {"x"}]>]>}
+  // CHECK-SAME: : (tensor<1x1x1x4xf32>, tensor<1x1x1x4xf32>) -> tensor<1x1x1x4xf32>
+  // CHECK: return %[[CONV]] : tensor<1x1x1x4xf32>
+
+  %sliced_lhs = sdy.all_slice [{}, {}, {}, {"x"}] %arg0 out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x1x3xf32>
+  %sliced_rhs = sdy.all_slice [{}, {}, {}, {"x"}] %arg1 out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x1x3xf32>
+  %conv_out = stablehlo.convolution(%sliced_lhs, %sliced_rhs)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {
+      stride = [1, 1],
+      pad = [[0, 0], [0, 0]],
+      lhs_dilate = [1, 1],
+      rhs_dilate = [1, 1],
+      reverse = [0, 0]
+    } {batch_group_count = 1 : i64, feature_group_count = 3 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {"x"}]>]>}
+    : (tensor<1x1x1x3xf32>, tensor<1x1x1x3xf32>) -> tensor<1x1x1x3xf32>
+  return %conv_out : tensor<1x1x1x3xf32>
+}
+
+// -----
+
+sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
+
+func.func private @padded_conv_batch_group_count_per_group_batch(%arg0: tensor<6x1x1x2xf32>, %arg1: tensor<1x1x2x3xf32>) -> (tensor<2x1x1x3xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{}, {}, {}, {"x"}]>}) {
+  %sliced_lhs = sdy.all_slice [{"x"}, {}, {}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}, {}, {}]> : tensor<6x1x1x2xf32>
+  %sliced_rhs = sdy.all_slice [{}, {}, {}, {"x"}] %arg1 out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x2x3xf32>
+  // expected-error @+2 {{grouped convolution with per-group size > 1 is not supported when padded. Sharding should have been resolved by resolve-permutation-factors.}}
+  // expected-error @+1 {{failed to legalize operation 'stablehlo.convolution'}}
+  %conv_out = stablehlo.convolution(%sliced_lhs, %sliced_rhs)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {
+      stride = [1, 1],
+      pad = [[0, 0], [0, 0]],
+      lhs_dilate = [1, 1],
+      rhs_dilate = [1, 1],
+      reverse = [0, 0]
+    } {batch_group_count = 3 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {"x"}]>]>}
+    : (tensor<6x1x1x2xf32>, tensor<1x1x2x3xf32>) -> tensor<2x1x1x3xf32>
+  return %conv_out : tensor<2x1x1x3xf32>
+}
+
+// -----
+
+sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
+
+func.func private @padded_conv_feature_group_count_per_group_feature(%arg0: tensor<1x1x1x6xf32>, %arg1: tensor<1x1x2x3xf32>) -> (tensor<1x1x1x3xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{}, {}, {}, {"x"}]>}) {
+  %sliced_lhs = sdy.all_slice [{}, {}, {}, {"x"}] %arg0 out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x1x6xf32>
+  %sliced_rhs = sdy.all_slice [{}, {}, {}, {"x"}] %arg1 out_sharding=<@mesh_4_2, [{}, {}, {}, {"x"}]> : tensor<1x1x2x3xf32>
+  // expected-error @+2 {{grouped convolution with per-group size > 1 is not supported when padded. Sharding should have been resolved by resolve-permutation-factors.}}
+  // expected-error @+1 {{failed to legalize operation 'stablehlo.convolution'}}
+  %conv_out = stablehlo.convolution(%sliced_lhs, %sliced_rhs)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {
+      stride = [1, 1],
+      pad = [[0, 0], [0, 0]],
+      lhs_dilate = [1, 1],
+      rhs_dilate = [1, 1],
+      reverse = [0, 0]
+    } {batch_group_count = 1 : i64, feature_group_count = 3 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {"x"}]>]>}
+    : (tensor<1x1x1x6xf32>, tensor<1x1x2x3xf32>) -> tensor<1x1x1x3xf32>
+  return %conv_out : tensor<1x1x1x3xf32>
 }

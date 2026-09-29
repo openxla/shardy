@@ -1067,6 +1067,53 @@ class StablehloConvolutionOpPattern
         ensurePaddingWithKind(rhs, rhsOrigType, PaddingValueKind::kZero,
                               rewriter, loc, cache, rhsEnforceDims);
 
+    int64_t newFeatureGroupCount = op.getFeatureGroupCount();
+    int64_t origInputFeatureSize =
+        lhsOrigType.getDimSize(dimNums.getInputFeatureDimension());
+    int64_t paddedInputFeatureSize =
+        cast<RankedTensorType>(paddedLhs.getType())
+            .getDimSize(dimNums.getInputFeatureDimension());
+    int64_t origKernelOutputFeatureSize =
+        rhsOrigType.getDimSize(dimNums.getKernelOutputFeatureDimension());
+    int64_t paddedKernelOutputFeatureSize =
+        cast<RankedTensorType>(paddedRhs.getType())
+            .getDimSize(dimNums.getKernelOutputFeatureDimension());
+    bool isFeatureGroupPadded =
+        paddedInputFeatureSize > origInputFeatureSize ||
+        paddedKernelOutputFeatureSize > origKernelOutputFeatureSize;
+    if (newFeatureGroupCount > 1 && isFeatureGroupPadded) {
+      if (origInputFeatureSize != newFeatureGroupCount ||
+          origKernelOutputFeatureSize != newFeatureGroupCount ||
+          paddedInputFeatureSize != paddedKernelOutputFeatureSize) {
+        return op.emitOpError(
+            "grouped convolution with per-group size > 1 is not supported "
+            "when padded. Sharding should have been resolved by "
+            "resolve-permutation-factors.");
+      }
+      newFeatureGroupCount = paddedInputFeatureSize;
+    }
+
+    int64_t newBatchGroupCount = op.getBatchGroupCount();
+    int64_t origInputBatchSize =
+        lhsOrigType.getDimSize(dimNums.getInputBatchDimension());
+    int64_t paddedInputBatchSize =
+        cast<RankedTensorType>(paddedLhs.getType())
+            .getDimSize(dimNums.getInputBatchDimension());
+    bool isBatchGroupPadded =
+        paddedInputBatchSize > origInputBatchSize ||
+        paddedKernelOutputFeatureSize > origKernelOutputFeatureSize;
+    if (newBatchGroupCount > 1 && isBatchGroupPadded) {
+      if (origInputBatchSize != newBatchGroupCount ||
+          origKernelOutputFeatureSize != newBatchGroupCount ||
+          paddedInputBatchSize != paddedKernelOutputFeatureSize) {
+        return op.emitOpError(
+            "grouped convolution with per-group size > 1 is not supported "
+            "when padded. Sharding should have been resolved by "
+            "resolve-permutation-factors.");
+      }
+      newBatchGroupCount = paddedInputBatchSize;
+    }
+
     SmallVector<ShapedTypeComponents> inferredReturnShapes;
     if (failed(mlir::hlo::inferConvolutionOp(
             op->getLoc(), paddedLhs.getType(), paddedRhs.getType(),
@@ -1080,8 +1127,8 @@ class StablehloConvolutionOpPattern
             dimNums.getKernelSpatialDimensions(),
             dimNums.getOutputBatchDimension(),
             dimNums.getOutputFeatureDimension(),
-            dimNums.getOutputSpatialDimensions(), op.getFeatureGroupCount(),
-            op.getBatchGroupCount(), op.getPrecisionConfig(),
+            dimNums.getOutputSpatialDimensions(), newFeatureGroupCount,
+            newBatchGroupCount, op.getPrecisionConfig(),
             inferredReturnShapes))) {
       return failure();
     }
@@ -1114,6 +1161,10 @@ class StablehloConvolutionOpPattern
     state.addOperands({paddedLhs, paddedRhs});
     state.addTypes(inferredResultType);
     state.addAttributes(op->getAttrs());
+    state.attributes.set(op.getFeatureGroupCountAttrName(),
+                         rewriter.getI64IntegerAttr(newFeatureGroupCount));
+    state.attributes.set(op.getBatchGroupCountAttrName(),
+                         rewriter.getI64IntegerAttr(newBatchGroupCount));
     Operation* newOp = rewriter.create(state);
 
     TensorShardingAttr outSharding = getSharding(result);
