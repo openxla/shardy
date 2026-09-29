@@ -2280,6 +2280,33 @@ bool isReductionFactorWithPermutationSemantics(stablehlo::ConvolutionOp convOp,
   return false;
 }
 
+// Returns true if factorIdx belongs to a grouped convolution dimension whose
+// per-group size is greater than 1 (i.e., decomposed into multiple factors in
+// the sharding rule).
+bool isUnsupportedGroupedConvFactor(stablehlo::ConvolutionOp convOp,
+                                    OpShardingRuleAttr rule,
+                                    int64_t factorIdx) {
+  if (convOp.getBatchGroupCount() <= 1 && convOp.getFeatureGroupCount() <= 1) {
+    return false;
+  }
+  stablehlo::ConvDimensionNumbersAttr dimNums = convOp.getDimensionNumbers();
+  int64_t lhsGroupDim = convOp.getBatchGroupCount() > 1
+                            ? dimNums.getInputBatchDimension()
+                            : dimNums.getInputFeatureDimension();
+  int64_t rhsGroupDim = dimNums.getKernelOutputFeatureDimension();
+  ArrayRef<int64_t> lhsFactors = rule.getOperandMapping(0)
+                                     .getDimMappings()[lhsGroupDim]
+                                     .getFactorIndices();
+  ArrayRef<int64_t> rhsFactors = rule.getOperandMapping(1)
+                                     .getDimMappings()[rhsGroupDim]
+                                     .getFactorIndices();
+  if (lhsFactors.size() == 1 && rhsFactors.size() == 1) {
+    return false;
+  }
+  return llvm::is_contained(lhsFactors, factorIdx) ||
+         llvm::is_contained(rhsFactors, factorIdx);
+}
+
 // Returns the sliced dimension of `operand` mapped to `factorIndex`, or
 // `std::nullopt` if `factorIndex` maps to `update` instead.
 std::optional<int64_t> getDynamicUpdateSliceDim(OpShardingRuleAttr rule,
@@ -2344,13 +2371,19 @@ void resolvePermutationFactorsViaReplication(Operation* op,
   for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
     // Replicate permutation factors when halo exchange is disabled, unless the
     // slice or dynamic-update-slice dimension is communication-free.
+    //
+    // For convolution, we also replicate unsupported parallel
+    // group-conv-factors.
     bool isReplicatedFactor = rule.getFactorType(i) == FactorType::kPermutation;
     if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op);
-        convOp && isReductionFactorWithPermutationSemantics(convOp, rule, i)) {
+        convOp && (isReductionFactorWithPermutationSemantics(convOp, rule, i) ||
+                   isUnsupportedGroupedConvFactor(convOp, rule, i))) {
       isReplicatedFactor = true;
-      if (std::optional<ArrayRef<AxisRefAttr>> axes =
-              getCompatibleFactorSharding(projection, i)) {
-        llvm::append_range(removedReductionAxes, *axes);
+      if (rule.getFactorType(i) == FactorType::kReduction) {
+        if (std::optional<ArrayRef<AxisRefAttr>> axes =
+                getCompatibleFactorSharding(projection, i)) {
+          llvm::append_range(removedReductionAxes, *axes);
+        }
       }
     }
     if (!isReplicatedFactor) {
@@ -2510,14 +2543,15 @@ struct ShardyResolvePermutationFactorsPass
         return;
       }
 
-      // Identify if the op defines any permutation factors or dual-semantics
-      // convolution factors.
+      // Identify if the op defines any permutation factors, dual-semantics
+      // convolution factors, or unsupported grouped convolution factors.
       auto isPermutationOrDualSemantics = [&](int64_t i) {
         if (rule.getFactorType(i) == FactorType::kPermutation) {
           return true;
         }
         if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op)) {
-          return isReductionFactorWithPermutationSemantics(convOp, rule, i);
+          return isReductionFactorWithPermutationSemantics(convOp, rule, i) ||
+                 isUnsupportedGroupedConvFactor(convOp, rule, i);
         }
         return false;
       };
