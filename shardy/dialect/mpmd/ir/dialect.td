@@ -34,6 +34,7 @@ def Mpmd_Dialect : Dialect {
 
   let useDefaultAttributePrinterParser = 1;
   let useDefaultTypePrinterParser = 1;
+  let useStrictPropertiesInAssemblyFormat = 0;
 }
 
 #endif
