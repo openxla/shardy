@@ -41,6 +41,8 @@ limitations under the License.
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -899,6 +901,12 @@ Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
     }
   }
   SDY_CHECK(false) << "Unsupported element type for reduction identity";
+}
+
+bool shardyGeneratesDeviceCode(const PropagationOptions& options) {
+  return !options.avoidExportForPartitioning &&
+         !options.enablePerInstructionPartitioning &&
+         options.partitionerStage == PartitionerStage::kConvertGlobalToLocal;
 }
 
 }  // namespace sdy
