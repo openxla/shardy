@@ -95,6 +95,13 @@ inline constexpr llvm::StringRef kExecutionThreadAttr = "execution_thread";
 // Attribute name of the main func.
 inline constexpr llvm::StringRef kMainFuncName = "main";
 
+// Attribute name for entry function (@main) parameter.
+inline constexpr llvm::StringRef kParametersShardingsAttr =
+    "sdy.parameters_shardings";
+
+// Attribute name for entry function (@main) output.
+inline constexpr llvm::StringRef kOutputShardingsAttr = "sdy.output_shardings";
+
 }  // namespace sdy
 }  // namespace mlir
 
