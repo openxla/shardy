@@ -837,7 +837,7 @@ func.func @reduce_window_passthrough_dim(%arg0: tensor<8x16xf32>, %arg1: tensor<
 
 // CHECK-LABEL: func @reshape_scalar
 func.func @reshape_scalar(%arg0: tensor<1x1xf32>) -> tensor<f32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([]) {i=1, j=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([]) {i=1, j=1} need_replication={i, j}>
   %0 = stablehlo.reshape %arg0 : (tensor<1x1xf32>) -> tensor<f32>
   return %0 : tensor<f32>
 }
@@ -922,28 +922,28 @@ func.func @reshape_split_swap_and_merge(%arg0: tensor<4x7x5x8xf32>) -> tensor<14
 
 // CHECK-LABEL: func @reshape_size_one_dims
 func.func @reshape_size_one_dims(%arg0: tensor<1x8x4xf32>) -> tensor<8x1x4x1xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l])->([j, k, l, m]) {i=1, j=8, k=1, l=4, m=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l])->([j, k, l, m]) {i=1, j=8, k=1, l=4, m=1} need_replication={i, k, m}>
   %0 = stablehlo.reshape %arg0 : (tensor<1x8x4xf32>) -> tensor<8x1x4x1xf32>
   return %0 : tensor<8x1x4x1xf32>
 }
 
 // CHECK-LABEL: func @reshape_merge_dim_then_size_one
 func.func @reshape_merge_dim_then_size_one(%arg0: tensor<8x4xf32>) -> tensor<32x1xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([ij, k]) {i=8, j=4, k=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([ij, k]) {i=8, j=4, k=1} need_replication={k}>
   %0 = stablehlo.reshape %arg0 : (tensor<8x4xf32>) -> tensor<32x1xf32>
   return %0 : tensor<32x1xf32>
 }
 
 // CHECK-LABEL: func @reshape_split_dim_then_size_one
 func.func @reshape_split_dim_then_size_one(%arg0: tensor<32x1xf32>) -> tensor<8x4xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k])->([i, j]) {i=8, j=4, k=1}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k])->([i, j]) {i=8, j=4, k=1} need_replication={k}>
   %0 = stablehlo.reshape %arg0 : (tensor<32x1xf32>) -> tensor<8x4xf32>
   return %0 : tensor<8x4xf32>
 }
 
 // CHECK-LABEL: func @reshape_split_dim_with_intermediate_one
 func.func @reshape_split_dim_with_intermediate_one(%arg0: tensor<32xf32>) -> tensor<8x1x4xf32> {
-  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ik])->([i, j, k]) {i=8, j=1, k=4}>
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([ik])->([i, j, k]) {i=8, j=1, k=4} need_replication={j}>
   %0 = stablehlo.reshape %arg0 : (tensor<32xf32>) -> tensor<8x1x4xf32>
   return %0 : tensor<8x1x4xf32>
 }
