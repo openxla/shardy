@@ -66,3 +66,27 @@ func.func @sharded_contracting_dim_unreduced_result(
   // CHECK: return %[[DOT]] : tensor<8x32xf32>
   return %0 : tensor<8x32xf32>
 }
+
+// CHECK-LABEL: func @sharded_contracting_dim_reduce_scatter
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+// CHECK-SAME: -> (tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+func.func @sharded_contracting_dim_reduce_scatter(
+  %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}]>},
+  %arg1: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+  -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+  // CHECK: %[[DOT:.*]] = stablehlo.dot %[[ARG0]], %[[ARG1]]
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>}
+  // CHECK-SAME: (tensor<8x8xf32>, tensor<8x32xf32>) -> tensor<8x32xf32>
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>}
+   : (tensor<8x16xf32>, tensor<16x32xf32>) -> tensor<8x32xf32>
+
+  // CHECK-NEXT: %[[RES:.*]] = "stablehlo.reduce_scatter"(%[[DOT]])
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
+  // CHECK-SAME: scatter_dimension = 0
+  %1 = sdy.reduce_scatter [{"x"}, {}] %0 out_sharding=<@mesh_2_4, [{"x"}, {}]> : tensor<8x32xf32>
+
+  // CHECK: return %[[RES]] : tensor<4x32xf32>
+  return %1 : tensor<8x32xf32>
+}
+
