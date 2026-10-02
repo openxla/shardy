@@ -356,11 +356,23 @@ func.func @reshape_size_1_dimensions_1(
 func.func @reshape_size_1_dimensions_2(
     %arg0: tensor<1x4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
     -> (tensor<4x1xi32>  {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) {
-  // CHECK: %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
-  // CHECK-NEXT: %1 = sdy.reshard %0 <@mesh, [{}, {"x"}]> : tensor<4x1xi32>
-  // CHECK-NEXT: return %1 : tensor<4x1xi32>
+  // CHECK: %0 = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<1x4xi32>
+  // CHECK-NEXT: %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<1x4xi32>) -> tensor<4x1xi32>
+  // CHECK-NEXT: %2 = sdy.reshard %1 <@mesh, [{}, {"x"}]> : tensor<4x1xi32>
+  // CHECK-NEXT: return %2 : tensor<4x1xi32>
   %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<1x4xi32>) -> tensor<4x1xi32>
   return %0 : tensor<4x1xi32>
+}
+
+// CHECK-LABEL: func @reshape_size_1_to_scalar
+func.func @reshape_size_1_to_scalar(
+    %arg0: tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>})
+    -> (tensor<i32> {sdy.sharding = #sdy.sharding<@mesh, []>}) {
+  // CHECK: %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<1xi32>
+  // CHECK-NEXT: %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>]>} : (tensor<1xi32>) -> tensor<i32>
+  // CHECK-NEXT: return %1 : tensor<i32>
+  %0 = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>]>} : (tensor<1xi32>) -> tensor<i32>
+  return %0 : tensor<i32>
 }
 
 // CHECK-LABEL: func @reshape_overflow_axes_split_shape
