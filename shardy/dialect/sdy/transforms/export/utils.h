@@ -26,6 +26,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -294,6 +295,12 @@ Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
 ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
                              RankedTensorType origType,
                              RankedTensorType paddedType);
+
+// Returns true if Shardy's propagation pipeline converts the module from
+// global to local shapes, meaning the downstream GSPMD partitioner should be
+// skipped.
+bool shardyGeneratesDeviceCode(const PropagationOptions& options);
+
 }  // namespace sdy
 }  // namespace mlir
 

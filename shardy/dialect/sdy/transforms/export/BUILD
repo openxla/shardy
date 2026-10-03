@@ -136,6 +136,8 @@ cc_library(
     deps = [
         "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/transforms/common:partitioner_stage",
+        "//shardy/dialect/sdy/transforms/common:propagation_options",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
@@ -150,6 +152,8 @@ cc_test(
         ":utils",
         "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/ir:testing_utils",
+        "//shardy/dialect/sdy/transforms/common:partitioner_stage",
+        "//shardy/dialect/sdy/transforms/common:propagation_options",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
