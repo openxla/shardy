@@ -29,6 +29,8 @@ struct DropShardingAndMeshPass
  protected:
   void runOnOperation() final {
     ModuleOp module = getOperation();
+    module->removeAttr(kParametersShardingsAttr);
+    module->removeAttr(kOutputShardingsAttr);
 
     module.walk([](Operation* op) {
       // kShardingAttr is "sdy.sharding"

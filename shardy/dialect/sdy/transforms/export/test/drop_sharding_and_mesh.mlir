@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -sdy-drop-sharding-and-mesh | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-drop-sharding-and-mesh | FileCheck %s
 
 // CHECK-NOT: sdy.mesh
 sdy.mesh @mesh_2 = <["x"=2]>
@@ -24,3 +24,19 @@ func.func @drop_multiple_sharding(
   return %0 : tensor<2x4xf32>
 }
 
+// -----
+
+// CHECK-LABEL: module @module_input_output_shardings
+// CHECK-NOT: sdy.parameters_shardings
+// CHECK-NOT: sdy.output_shardings
+// CHECK-NOT: sdy.mesh
+// CHECK:     func.func @main
+module @module_input_output_shardings attributes {
+  sdy.parameters_shardings = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>,
+  sdy.output_shardings = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>
+} {
+  sdy.mesh @mesh_2 = <["x"=2]>
+  func.func @main() {
+    return
+  }
+}
