@@ -21,6 +21,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 #include "shardy/dialect/sdy/transforms/common/passes.h"
@@ -46,13 +47,15 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   InsertExplicitReshardsPassOptions passOptions;
   passOptions.enableFullVersion =
       options.enableInsertExplicitCollectives ||
-      options.enablePerInstructionPartitioning ||
       options.partitionerStage != PartitionerStage::kUnspecified;
   passOptions.markPartialResultWithUnreducedAxes =
-      options.markPartialResultWithUnreducedAxes;
+      options.markPartialResultWithUnreducedAxes ||
+      options.partitionerStage != PartitionerStage::kUnspecified;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enablePerInstructionPartitioning) {
+    SDY_CHECK(options.partitionerStage ==
+              PartitionerStage::kConvertGlobalToLocal);
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
         options.dumpDirectory, "before_per_instruction_partitioning",
         dumpIndex++));

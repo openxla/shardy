@@ -707,31 +707,32 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
   bool enableRGV3;
 };
 
-// Returns a 0-rank i64 tensor containing the global offset for the given shard
+// Returns a 0-rank i32 tensor containing the global offset for the given shard
 // axes and local shard size.
 Value getDimensionOffset(Location loc, MeshAttr mesh,
                          ArrayRef<AxisRefAttr> axes, int64_t shardSize,
                          const ConversionState& conversionState,
                          ConversionPatternRewriter& rewriter) {
   int64_t numDevices = mesh.getTotalSize();
-  Type i64Ty = rewriter.getI64Type();
-  auto indexTy = RankedTensorType::get({}, i64Ty);
+  Type i32Ty = rewriter.getI32Type();
+  auto indexTy = RankedTensorType::get({}, i32Ty);
 
   Value deviceId = getDeviceId(loc, conversionState, rewriter);
 
   // Calculate a compile-time offset table for this dimension.
-  SmallVector<int64_t> offsetsTable = llvm::map_to_vector(
+  SmallVector<int32_t> offsetsTable = llvm::map_to_vector(
       llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
-        return getShardIndex(devId, mesh, axes) * shardSize;
+        return static_cast<int32_t>(getShardIndex(devId, mesh, axes) *
+                                    shardSize);
       });
 
   // Create the offset table and look up the value for the current device.
   auto tableConst = stablehlo::ConstantOp::create(
       rewriter, loc,
-      DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i64Ty),
+      DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i32Ty),
                                 offsetsTable));
   auto offsetSlice = stablehlo::DynamicSliceOp::create(
-      rewriter, loc, RankedTensorType::get({1}, i64Ty), tableConst,
+      rewriter, loc, RankedTensorType::get({1}, i32Ty), tableConst,
       ValueRange{deviceId}, rewriter.getDenseI64ArrayAttr({1}));
 
   return stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice);
@@ -743,7 +744,7 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
                               const ConversionState& conversionState,
                               ConversionPatternRewriter& rewriter) {
   // Generate start indices for slicing.
-  auto indexTy = RankedTensorType::get({}, rewriter.getI64Type());
+  auto indexTy = RankedTensorType::get({}, rewriter.getI32Type());
   SmallVector<Value> startIndices;
   startIndices.reserve(localResultType.getRank());
   for (int64_t i = 0; i < localResultType.getRank(); ++i) {
@@ -1882,12 +1883,12 @@ LocalIndexAndOwnership computeLocalIndexAndOwnershipForDim(
   Value clampedIndex = stablehlo::ClampOp::create(
       rewriter, loc, scalarIndexType, zeroConst, rawIndex, maxConst);
 
-  // Retrieve the current device's shard offset (as i64) and convert it to the
-  // start index element type (e.g. i32).
-  Value offsetI64 =
+  // Retrieve the current device's shard offset (as i32) and convert it to the
+  // start index element type.
+  Value offsetI32 =
       getDimensionOffset(loc, mesh, axes, shardDim, conversionState, rewriter);
   Value offset =
-      stablehlo::ConvertOp::create(rewriter, loc, scalarIndexType, offsetI64);
+      stablehlo::ConvertOp::create(rewriter, loc, scalarIndexType, offsetI32);
 
   Value isOwner = computeOwnershipPredicate(
       loc, clampedIndex, offset, sliceDim, shardDim, scalarIndexType, rewriter);
@@ -2923,26 +2924,27 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     sliceOffsets.reserve(rank);
     for (int64_t i = 0; i < rank; ++i) {
       // The relative offset in the safePad is (kLow[i] - O_local(k)).
-      SmallVector<int64_t> sliceTable = llvm::map_to_vector(
-          allOffsets[i], [&](int64_t o) { return kLow[i] - o; });
+      SmallVector<int32_t> sliceTable = llvm::map_to_vector(
+          allOffsets[i],
+          [&](int64_t o) { return static_cast<int32_t>(kLow[i] - o); });
 
-      auto getTableOffset = [&](ArrayRef<int64_t> tableData,
+      auto getTableOffset = [&](ArrayRef<int32_t> tableData,
                                 bool uniform) -> Value {
         if (uniform) {
           return stablehlo::ConstantOp::create(
-              rewriter, loc, rewriter.getI64IntegerAttr(tableData[0]));
+              rewriter, loc, rewriter.getI32IntegerAttr(tableData[0]));
         }
         auto tableType =
-            RankedTensorType::get({numDevices}, rewriter.getI64Type());
+            RankedTensorType::get({numDevices}, rewriter.getI32Type());
         auto table = stablehlo::ConstantOp::create(
             rewriter, loc, tableType,
             DenseIntElementsAttr::get(tableType, tableData));
         auto slice = stablehlo::DynamicSliceOp::create(
-            rewriter, loc, RankedTensorType::get({1}, rewriter.getI64Type()),
+            rewriter, loc, RankedTensorType::get({1}, rewriter.getI32Type()),
             table, {partitionId}, rewriter.getDenseI64ArrayAttr({1}));
         return stablehlo::ReshapeOp::create(
                    rewriter, loc,
-                   RankedTensorType::get({}, rewriter.getI64Type()), slice)
+                   RankedTensorType::get({}, rewriter.getI32Type()), slice)
             .getResult();
       };
 

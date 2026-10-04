@@ -102,9 +102,12 @@ Value createDeviceGuard(Location loc, int64_t targetDeviceId,
                         IRRewriter& rewriter) {
   Value currentDeviceId =
       getDeviceId(replicaCount, partitionCount, loc, rewriter);
-  auto scalarI64Type = RankedTensorType::get({}, rewriter.getI64Type());
+  auto scalarUI32Type = RankedTensorType::get(
+      {}, rewriter.getIntegerType(32, /*isSigned=*/false));
   Value targetDeviceIdConst = stablehlo::ConstantOp::create(
-      rewriter, loc, DenseElementsAttr::get(scalarI64Type, targetDeviceId));
+      rewriter, loc,
+      DenseElementsAttr::get(scalarUI32Type,
+                             static_cast<uint32_t>(targetDeviceId)));
   return stablehlo::CompareOp::create(rewriter, loc, currentDeviceId,
                                       targetDeviceIdConst,
                                       stablehlo::ComparisonDirection::EQ);

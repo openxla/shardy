@@ -67,20 +67,18 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // AR-DS: }) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   //
   // AR-DS: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // AR-DS: %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
   //
-  // AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]> : tensor<16xi64>
-  // AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID_I64]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
-  // AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi64>) -> tensor<i64>
+  // AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]> : tensor<16xi32>
+  // AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID]], sizes = [1] : (tensor<16xi32>, tensor<ui32>) -> tensor<1xi32>
+  // AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi32>) -> tensor<i32>
   //
   // AR-DS: %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
-  // AR-DS: %[[PID_I64_1:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i64>
   //
-  // AR-DS: %[[TABLE1:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4]> : tensor<16xi64>
-  // AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID_I64_1]], sizes = [1] : (tensor<16xi64>, tensor<i64>) -> tensor<1xi64>
-  // AR-DS: %[[IDX1:.*]] = stablehlo.reshape %[[OFF1]] : (tensor<1xi64>) -> tensor<i64>
+  // AR-DS: %[[TABLE1:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4]> : tensor<16xi32>
+  // AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID1]], sizes = [1] : (tensor<16xi32>, tensor<ui32>) -> tensor<1xi32>
+  // AR-DS: %[[IDX1:.*]] = stablehlo.reshape %[[OFF1]] : (tensor<1xi32>) -> tensor<i32>
   //
-  // AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i64>, tensor<i64>) -> tensor<2x4xf32>
+  // AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i32>, tensor<i32>) -> tensor<2x4xf32>
 
   // --- Combine Multi-Dimension Reduce Scatter (combine-multi-dimension-reduce-scatter=true) ---
   // COMBINED-NEXT: %[[RESHAPE0:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<8x8xf32>) -> tensor<4x2x2x4xf32>

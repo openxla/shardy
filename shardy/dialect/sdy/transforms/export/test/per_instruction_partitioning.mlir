@@ -279,7 +279,7 @@ func.func @concatenate_sharded_concat_dim(%arg0: tensor<4xf32> {sdy.sharding = #
   // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%arg2)
   // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%arg3)
   // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[AG0]], %[[AG1]], dim = 0 : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
-  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i64>) -> tensor<3xf32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
   // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
   // CHECK-NEXT: } : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
   // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
@@ -308,7 +308,7 @@ func.func @concatenate_indivisible_sharded_concat_dim(%arg0: tensor<5xf32> {sdy.
   // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%[[IN_SLICE1]]) {{.*}} : (tensor<1xf32>) -> tensor<2xf32>
   // CHECK:        %[[SLICE1:.*]] = stablehlo.slice %[[AG1]] [0:1] : (tensor<2xf32>) -> tensor<1xf32>
   // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[SLICE0]], %[[SLICE1]], dim = 0 : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
-  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i64>) -> tensor<3xf32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
   // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
   // CHECK-NEXT: } : (tensor<6xf32>, tensor<2xf32>) -> tensor<6xf32>
   // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>

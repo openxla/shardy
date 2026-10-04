@@ -20,11 +20,10 @@ sdy.mesh @mesh_2 = <["x"=2]>
 
 // Looks up shard start offset from partition_id.
 // CHECK-NEXT:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-// CHECK-NEXT:  %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET_TABLE:.*]] = stablehlo.constant dense<[0, 8]> : tensor<2xi64>
-// CHECK-NEXT:  %[[OFFSET_SLICE:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE]], %[[PID_I64]], sizes = [1] : (tensor<2xi64>, tensor<i64>) -> tensor<1xi64>
-// CHECK-NEXT:  %[[OFFSET_I64:.*]] = stablehlo.reshape %[[OFFSET_SLICE]] : (tensor<1xi64>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET:.*]] = stablehlo.convert %[[OFFSET_I64]] : (tensor<i64>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET_TABLE:.*]] = stablehlo.constant dense<[0, 8]> : tensor<2xi32>
+// CHECK-NEXT:  %[[OFFSET_SLICE:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE]], %[[PID]], sizes = [1] : (tensor<2xi32>, tensor<ui32>) -> tensor<1xi32>
+// CHECK-NEXT:  %[[OFFSET_I32:.*]] = stablehlo.reshape %[[OFFSET_SLICE]] : (tensor<1xi32>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET:.*]] = stablehlo.convert %[[OFFSET_I32]] : tensor<i32>
 
 // Checks if this shard owns the slice.
 // CHECK-NEXT:  %[[SLICE_SIZE:.*]] = stablehlo.constant dense<1> : tensor<i32>
@@ -74,11 +73,10 @@ sdy.mesh @mesh_2_2 = <["x"=2, "y"=2]>
 
 // Looks up shard start offset for dim 0 from partition_id.
 // CHECK-NEXT:  %[[PID_0:.*]] = stablehlo.partition_id : tensor<ui32>
-// CHECK-NEXT:  %[[PID_I64_0:.*]] = stablehlo.convert %[[PID_0]] : (tensor<ui32>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET_TABLE_0:.*]] = stablehlo.constant dense<[0, 0, 8, 8]> : tensor<4xi64>
-// CHECK-NEXT:  %[[OFFSET_SLICE_0:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE_0]], %[[PID_I64_0]], sizes = [1] : (tensor<4xi64>, tensor<i64>) -> tensor<1xi64>
-// CHECK-NEXT:  %[[OFFSET_I64_0:.*]] = stablehlo.reshape %[[OFFSET_SLICE_0]] : (tensor<1xi64>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET_0:.*]] = stablehlo.convert %[[OFFSET_I64_0]] : (tensor<i64>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET_TABLE_0:.*]] = stablehlo.constant dense<[0, 0, 8, 8]> : tensor<4xi32>
+// CHECK-NEXT:  %[[OFFSET_SLICE_0:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE_0]], %[[PID_0]], sizes = [1] : (tensor<4xi32>, tensor<ui32>) -> tensor<1xi32>
+// CHECK-NEXT:  %[[OFFSET_I32_0:.*]] = stablehlo.reshape %[[OFFSET_SLICE_0]] : (tensor<1xi32>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET_0:.*]] = stablehlo.convert %[[OFFSET_I32_0]] : tensor<i32>
 
 // Checks if this shard owns the slice along dim 0.
 // CHECK-NEXT:  %[[SLICE_SIZE_0:.*]] = stablehlo.constant dense<1> : tensor<i32>
@@ -100,11 +98,10 @@ sdy.mesh @mesh_2_2 = <["x"=2, "y"=2]>
 
 // Looks up shard start offset for dim 1 from partition_id.
 // CHECK-NEXT:  %[[PID_1:.*]] = stablehlo.partition_id : tensor<ui32>
-// CHECK-NEXT:  %[[PID_I64_1:.*]] = stablehlo.convert %[[PID_1]] : (tensor<ui32>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET_TABLE_1:.*]] = stablehlo.constant dense<[0, 8, 0, 8]> : tensor<4xi64>
-// CHECK-NEXT:  %[[OFFSET_SLICE_1:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE_1]], %[[PID_I64_1]], sizes = [1] : (tensor<4xi64>, tensor<i64>) -> tensor<1xi64>
-// CHECK-NEXT:  %[[OFFSET_I64_1:.*]] = stablehlo.reshape %[[OFFSET_SLICE_1]] : (tensor<1xi64>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET_1:.*]] = stablehlo.convert %[[OFFSET_I64_1]] : (tensor<i64>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET_TABLE_1:.*]] = stablehlo.constant dense<[0, 8, 0, 8]> : tensor<4xi32>
+// CHECK-NEXT:  %[[OFFSET_SLICE_1:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE_1]], %[[PID_1]], sizes = [1] : (tensor<4xi32>, tensor<ui32>) -> tensor<1xi32>
+// CHECK-NEXT:  %[[OFFSET_I32_1:.*]] = stablehlo.reshape %[[OFFSET_SLICE_1]] : (tensor<1xi32>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET_1:.*]] = stablehlo.convert %[[OFFSET_I32_1]] : tensor<i32>
 
 // Checks if this shard owns the slice along dim 1.
 // CHECK-NEXT:  %[[SLICE_SIZE_1:.*]] = stablehlo.constant dense<1> : tensor<i32>
@@ -155,11 +152,10 @@ sdy.mesh @mesh_2_2 = <["x"=2, "y"=2]>
 
 // Looks up shard start offset for dim 1 from partition_id.
 // CHECK-NEXT:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-// CHECK-NEXT:  %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET_TABLE:.*]] = stablehlo.constant dense<[0, 16, 0, 16]> : tensor<4xi64>
-// CHECK-NEXT:  %[[OFFSET_SLICE:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE]], %[[PID_I64]], sizes = [1] : (tensor<4xi64>, tensor<i64>) -> tensor<1xi64>
-// CHECK-NEXT:  %[[OFFSET_I64:.*]] = stablehlo.reshape %[[OFFSET_SLICE]] : (tensor<1xi64>) -> tensor<i64>
-// CHECK-NEXT:  %[[OFFSET:.*]] = stablehlo.convert %[[OFFSET_I64]] : (tensor<i64>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET_TABLE:.*]] = stablehlo.constant dense<[0, 16, 0, 16]> : tensor<4xi32>
+// CHECK-NEXT:  %[[OFFSET_SLICE:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE]], %[[PID]], sizes = [1] : (tensor<4xi32>, tensor<ui32>) -> tensor<1xi32>
+// CHECK-NEXT:  %[[OFFSET_I32:.*]] = stablehlo.reshape %[[OFFSET_SLICE]] : (tensor<1xi32>) -> tensor<i32>
+// CHECK-NEXT:  %[[OFFSET:.*]] = stablehlo.convert %[[OFFSET_I32]] : tensor<i32>
 
 // Checks if this shard owns the slice along dim 1.
 // CHECK-NEXT:  %[[SLICE_SIZE:.*]] = stablehlo.constant dense<1> : tensor<i32>
