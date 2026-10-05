@@ -17,9 +17,8 @@ func.func @custom_call_single_device_0(
         !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}) {
   // CHECK-NEXT: %[[IN_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x16xf32>
   // CHECK-NEXT: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[PART_ID_I64:.*]] = stablehlo.convert %[[PART_ID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
-  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID_I64]], %[[C0]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID]], %[[C0]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[IF_RES:.*]]:3 = "stablehlo.if"(%[[IS_DEV0]]) ({
   // CHECK-NEXT:   %[[EXEC:.*]]:3 = stablehlo.custom_call @SomeCustomCall(%[[IN_REPL]]) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, tensor<4x32xi32>, !stablehlo.token)
   // CHECK-NEXT:   stablehlo.return %[[EXEC]]#0, %[[EXEC]]#1, %[[EXEC]]#2 : tensor<8x16xf32>, tensor<4x32xi32>, !stablehlo.token
@@ -52,9 +51,8 @@ func.func @elementwise_single_device_1(
     %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
     -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
   // CHECK-NEXT: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[PART_ID_I64:.*]] = stablehlo.convert %[[PART_ID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK-NEXT: %[[C1:.*]] = stablehlo.constant dense<1> : tensor<i64>
-  // CHECK-NEXT: %[[IS_DEV1:.*]] = stablehlo.compare EQ, %[[PART_ID_I64]], %[[C1]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK-NEXT: %[[C1:.*]] = stablehlo.constant dense<1> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV1:.*]] = stablehlo.compare EQ, %[[PART_ID]], %[[C1]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[IF_RES:.*]] = "stablehlo.if"(%[[IS_DEV1]]) ({
   // CHECK-NEXT:   %[[EXEC:.*]] = stablehlo.add %[[ARG0]], %[[ARG1]] : tensor<8x16xf32>
   // CHECK-NEXT:   stablehlo.return %[[EXEC]] : tensor<8x16xf32>
@@ -82,9 +80,8 @@ func.func @single_device_op0_to_single_device_op1(
     -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
   // CHECK-NEXT: %[[IN_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x16xf32>
   // CHECK-NEXT: %[[PART_ID0:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[PART_ID_I64_0:.*]] = stablehlo.convert %[[PART_ID0]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
-  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID_I64_0]], %[[C0]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID0]], %[[C0]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[IF_RES0:.*]] = "stablehlo.if"(%[[IS_DEV0]]) ({
   // CHECK-NEXT:   %[[EXEC0:.*]] = stablehlo.custom_call @CustomOp0(%[[IN_REPL]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT:   stablehlo.return %[[EXEC0]] : tensor<8x16xf32>
@@ -94,9 +91,8 @@ func.func @single_device_op0_to_single_device_op1(
   // CHECK-NEXT: }) : (tensor<i1>) -> tensor<8x16xf32>
   // CHECK-NEXT: %[[ALL_REDUCE0:.*]] = sdy.all_reduce {"x"} %[[IF_RES0]] out_sharding=<@mesh, [{}, {}]> : tensor<8x16xf32>
   // CHECK-NEXT: %[[PART_ID1:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[PART_ID_I64_1:.*]] = stablehlo.convert %[[PART_ID1]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK-NEXT: %[[C1:.*]] = stablehlo.constant dense<1> : tensor<i64>
-  // CHECK-NEXT: %[[IS_DEV1:.*]] = stablehlo.compare EQ, %[[PART_ID_I64_1]], %[[C1]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK-NEXT: %[[C1:.*]] = stablehlo.constant dense<1> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV1:.*]] = stablehlo.compare EQ, %[[PART_ID1]], %[[C1]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[IF_RES1:.*]] = "stablehlo.if"(%[[IS_DEV1]]) ({
   // CHECK-NEXT:   %[[EXEC1:.*]] = stablehlo.custom_call @CustomOp1(%[[ALL_REDUCE0]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT:   stablehlo.return %[[EXEC1]] : tensor<8x16xf32>
@@ -131,9 +127,8 @@ func.func @single_device_op_with_token_result(
         !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}) {
   // CHECK-NEXT: %[[IN_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x16xf32>
   // CHECK-NEXT: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[PART_ID_I64:.*]] = stablehlo.convert %[[PART_ID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
-  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID_I64]], %[[C0]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID]], %[[C0]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[IF_RES:.*]]:2 = "stablehlo.if"(%[[IS_DEV0]]) ({
   // CHECK-NEXT:   %[[EXEC:.*]]:2 = stablehlo.custom_call @OpWithTokenResult(%[[IN_REPL]]) : (tensor<8x16xf32>) -> (tensor<8x16xf32>, !stablehlo.token)
   // CHECK-NEXT:   stablehlo.return %[[EXEC]]#0, %[[EXEC]]#1 : tensor<8x16xf32>, !stablehlo.token
@@ -162,9 +157,8 @@ func.func @single_device_op_reshard_to_other_replicated_mesh(
     -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh2, [{}, {}]>}) {
   // CHECK-NEXT: %[[IN_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x16xf32>
   // CHECK-NEXT: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[PART_ID_I64:.*]] = stablehlo.convert %[[PART_ID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
-  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID_I64]], %[[C0]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID]], %[[C0]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[IF_RES:.*]] = "stablehlo.if"(%[[IS_DEV0]]) ({
   // CHECK-NEXT:   %[[EXEC:.*]] = stablehlo.custom_call @SomeCustomCall(%[[IN_REPL]]) : (tensor<8x16xf32>) -> tensor<8x16xf32>
   // CHECK-NEXT:   stablehlo.return %[[EXEC]] : tensor<8x16xf32>

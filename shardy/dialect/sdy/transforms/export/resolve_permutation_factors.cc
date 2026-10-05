@@ -277,42 +277,45 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
                                     MeshAttr mesh,
                                     DimensionShardingAttr targetDimSharding,
                                     IRRewriter& rewriter) {
-  Type i64Ty = rewriter.getI64Type();
-  Value globalPartitionIdI64 = globalPartitionId;
-  if (cast<RankedTensorType>(globalPartitionId.getType()).getElementType() !=
-      i64Ty) {
-    globalPartitionIdI64 = stablehlo::ConvertOp::create(
-        rewriter, loc, RankedTensorType::get({}, i64Ty), globalPartitionId);
-  }
+  Type i32Ty = rewriter.getI32Type();
 
   // If mesh has explicit non-iota device_ids mapping, use lookup table
   // constant.
   if (!mesh.getDeviceIds().empty()) {
     int64_t totalDevices = mesh.getTotalSize();
-    SmallVector<int64_t> shardIndices;
+    SmallVector<int32_t> shardIndices;
     shardIndices.reserve(totalDevices);
     for (int64_t devId = 0; devId < totalDevices; ++devId) {
-      shardIndices.push_back(getShardIndex(devId, mesh, targetDimSharding));
+      shardIndices.push_back(
+          static_cast<int32_t>(getShardIndex(devId, mesh, targetDimSharding)));
     }
 
     auto shardIndicesConst = stablehlo::ConstantOp::create(
         rewriter, loc,
-        DenseIntElementsAttr::get(
-            RankedTensorType::get({totalDevices}, i64Ty), shardIndices));
+        DenseIntElementsAttr::get(RankedTensorType::get({totalDevices}, i32Ty),
+                                  shardIndices));
 
     auto sliceOp = stablehlo::DynamicSliceOp::create(
-        rewriter, loc, RankedTensorType::get({1}, i64Ty), shardIndicesConst,
-        globalPartitionIdI64, rewriter.getDenseI64ArrayAttr({1}));
+        rewriter, loc, RankedTensorType::get({1}, i32Ty), shardIndicesConst,
+        globalPartitionId, rewriter.getDenseI64ArrayAttr({1}));
 
     return stablehlo::ReshapeOp::create(
-        rewriter, loc, RankedTensorType::get({}, i64Ty), sliceOp);
+        rewriter, loc, RankedTensorType::get({}, i32Ty), sliceOp);
+  }
+
+  Value globalPartitionIdI32 = globalPartitionId;
+  if (cast<RankedTensorType>(globalPartitionId.getType()).getElementType() !=
+      i32Ty) {
+    globalPartitionIdI32 = stablehlo::ConvertOp::create(
+        rewriter, loc, RankedTensorType::get({}, i32Ty), globalPartitionId);
   }
 
   // Standard iota mesh: compute shard index via scalar HLO arithmetic ops.
   auto getConstVal = [&](int64_t val) -> Value {
     return stablehlo::ConstantOp::create(
         rewriter, loc,
-        DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty), {val}));
+        DenseIntElementsAttr::get(RankedTensorType::get({}, i32Ty),
+                                  {static_cast<int32_t>(val)}));
   };
 
   Value idInGroup = nullptr;
@@ -336,7 +339,7 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
     int64_t subAxisStride = fullSize / (axis.getSubAxisPreSize() * axisSize);
     int64_t divisor = suffixSize * subAxisStride;
 
-    Value coord = globalPartitionIdI64;
+    Value coord = globalPartitionIdI32;
     if (divisor > 1) {
       coord = stablehlo::DivOp::create(rewriter, loc, coord.getType(), coord,
                                        getConstVal(divisor));
@@ -399,22 +402,24 @@ DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
                                      ResolutionState& state,
                                      bool needUndilated = true) {
   IRRewriter& rewriter = state.rewriter;
-  Type i64Ty = rewriter.getI64Type();
+  Type i32Ty = rewriter.getI32Type();
   auto diffSizeVal = stablehlo::ConstantOp::create(
       rewriter, loc,
-      DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty),
-                                ArrayRef<int64_t>{diffSize}));
+      DenseIntElementsAttr::get(
+          RankedTensorType::get({}, i32Ty),
+          ArrayRef<int32_t>{static_cast<int32_t>(diffSize)}));
   auto baseOffsetVal = stablehlo::ConstantOp::create(
       rewriter, loc,
-      DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty),
-                                ArrayRef<int64_t>{baseOffset}));
+      DenseIntElementsAttr::get(
+          RankedTensorType::get({}, i32Ty),
+          ArrayRef<int32_t>{static_cast<int32_t>(baseOffset)}));
   Value offsetInPartition =
       stablehlo::MulOp::create(rewriter, loc, partitionId, diffSizeVal);
   Value dilatedOffset =
       stablehlo::AddOp::create(rewriter, loc, offsetInPartition, baseOffsetVal);
 
   auto zeroConst =
-      createZeroConstant(rewriter, loc, RankedTensorType::get({}, i64Ty));
+      createZeroConstant(rewriter, loc, RankedTensorType::get({}, i32Ty));
 
   dilatedOffset =
       stablehlo::MaxOp::create(rewriter, loc, dilatedOffset, zeroConst);
@@ -426,8 +431,9 @@ DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
     } else {
       auto baseDilationVal = stablehlo::ConstantOp::create(
           rewriter, loc,
-          DenseIntElementsAttr::get(RankedTensorType::get({}, i64Ty),
-                                    ArrayRef<int64_t>{baseDilation}));
+          DenseIntElementsAttr::get(
+              RankedTensorType::get({}, i32Ty),
+              ArrayRef<int32_t>{static_cast<int32_t>(baseDilation)}));
       undilatedOffset =
           stablehlo::DivOp::create(rewriter, loc, dilatedOffset.getType(),
                                    dilatedOffset, baseDilationVal);
@@ -882,8 +888,8 @@ Value assembleHaloExchangeBuffer(
         Value thresholdConst = stablehlo::ConstantOp::create(
             state.rewriter, loc,
             DenseIntElementsAttr::get(
-                RankedTensorType::get({}, state.rewriter.getI64Type()),
-                {thresholdVal}));
+                RankedTensorType::get({}, state.rewriter.getI32Type()),
+                {static_cast<int32_t>(thresholdVal)}));
         Value isTargetPred = stablehlo::CompareOp::create(
             state.rewriter, loc, idInPartitionGroup, thresholdConst,
             offset > 0 ? stablehlo::ComparisonDirection::GE
@@ -1014,29 +1020,29 @@ Value exchangeDimWithDynamicOffset(
   Value offset;
   Value zeroConst;
   if (dimExchange.reshapeInfo) {
-    auto i64Ty = state.rewriter.getI64Type();
+    auto i32Ty = state.rewriter.getI32Type();
     SDY_CHECK(dilatedHaloBuffer);
     SDY_CHECK_EQ(baseDilation, 1);
-    SmallVector<int64_t> offsets(dimExchange.shardExchanges.size(), 0);
+    SmallVector<int32_t> offsets(dimExchange.shardExchanges.size(), 0);
     for (int64_t t = 0; t < dimExchange.shardExchanges.size(); ++t) {
       const auto& ex = dimExchange.shardExchanges[t];
       int64_t edgePad = dimExchange.sFootprint;
       int64_t sourceId = ex.sourceId != -1 ? ex.sourceId : t;
       int64_t relativeHop = dimExchange.leftHops + sourceId - t;
       int64_t off = -padLow + edgePad + relativeHop * sIn + ex.localOffset;
-      offsets[t] = off;
+      offsets[t] = static_cast<int32_t>(off);
     }
     int64_t n = offsets.size();
     auto offsetsConst = stablehlo::ConstantOp::create(
         state.rewriter, loc,
-        DenseIntElementsAttr::get(RankedTensorType::get({n}, i64Ty), offsets));
+        DenseIntElementsAttr::get(RankedTensorType::get({n}, i32Ty), offsets));
     auto sliceOp = stablehlo::DynamicSliceOp::create(
-        state.rewriter, loc, RankedTensorType::get({1}, i64Ty), offsetsConst,
+        state.rewriter, loc, RankedTensorType::get({1}, i32Ty), offsetsConst,
         idInPartitionGroup, state.rewriter.getDenseI64ArrayAttr({1}));
     offset = stablehlo::ReshapeOp::create(
-        state.rewriter, loc, RankedTensorType::get({}, i64Ty), sliceOp);
+        state.rewriter, loc, RankedTensorType::get({}, i32Ty), sliceOp);
     zeroConst = createZeroConstant(state.rewriter, loc,
-                                   RankedTensorType::get({}, i64Ty));
+                                   RankedTensorType::get({}, i32Ty));
   } else {
     DeviceOffsetInfo offsetInfo =
         getDeviceOffsetInfo(loc, idInPartitionGroup, diffSize,

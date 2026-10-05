@@ -12,7 +12,7 @@ func.func @pad_single_left_hop_replica_id(
   // CHECK: %[[MC:.*]] = sdy.manual_computation
   // REPL: %[[RID:.*]] = stablehlo.replica_id : tensor<ui32>
   // PART: %[[RID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[CONVERT:.*]] = stablehlo.convert %[[RID]] : (tensor<ui32>) -> tensor<i64>
+  // CHECK: %[[CONVERT:.*]] = stablehlo.convert %[[RID]] : (tensor<ui32>) -> tensor<i32>
   // REPL: %[[CP:.*]] = "stablehlo.collective_permute"(%arg1) <{source_target_pairs = dense<{{\[\[}}0, 2], [1, 3], [4, 6], [5, 7]]> : tensor<4x2xi64>}> : (tensor<2x4xi32>) -> tensor<2x4xi32>
   // PART: %[[CP:.*]] = "stablehlo.collective_permute"(%arg1) <{channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>, source_target_pairs = dense<{{\[\[}}0, 2], [1, 3], [4, 6], [5, 7]]> : tensor<4x2xi64>}> : (tensor<2x4xi32>) -> tensor<2x4xi32>
   %0 = stablehlo.pad %arg0, %c, low = [3, 0], high = [0, 0], interior = [0, 0]

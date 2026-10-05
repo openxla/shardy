@@ -71,11 +71,10 @@ func.func @shard_reduction_dim_is_collapsed(
   // CHECK-DAG: %[[C7:.*]] = stablehlo.constant dense<7> : tensor<2xi64>
   // CHECK: %[[CLAMPED:.*]] = stablehlo.clamp %[[C0]], %[[ARG1]], %[[C7]] : tensor<2xi64>
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[CVT_PID:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[CVT_PID]], sizes = [1]
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i64>
   // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
@@ -119,11 +118,10 @@ func.func @shard_reduction_dim_is_collapsed_i32(
   // CHECK-DAG: %[[C7:.*]] = stablehlo.constant dense<7> : tensor<2xi32>
   // CHECK: %[[CLAMPED:.*]] = stablehlo.clamp %[[C0]], %[[ARG1]], %[[C7]] : tensor<2xi32>
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[CVT_PID:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[CVT_PID]], sizes = [1]
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i64>) -> tensor<i32>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i32>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i32>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i32>
   // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
@@ -163,12 +161,11 @@ func.func @shard_reduction_dim_is_collapsed_not_in_start_index_map(
   %arg0: tensor<8x10xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
   %arg1: tensor<2xi64>) -> tensor<2x1xf32> {
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID_I64]], sizes = [1]
-  // CHECK: %[[OFFSET:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[ZERO:.*]] = stablehlo.constant dense<0> : tensor<i64>
-  // CHECK: %[[EQ_ZERO:.*]] = stablehlo.compare EQ, %[[OFFSET]], %[[ZERO]] : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK: %[[OFFSET:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[ZERO:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK: %[[EQ_ZERO:.*]] = stablehlo.compare EQ, %[[OFFSET]], %[[ZERO]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
   // CHECK: %[[GATHER:.*]] = "stablehlo.gather"(%[[ARG0]], %[[ARG1]])
   // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [0], start_index_map = [1], index_vector_dim = 1>
   // CHECK-SAME: slice_sizes = array<i64: 1, 1>
@@ -204,11 +201,10 @@ func.func @shard_reduction_dim_is_collapsed_explicit_scalar_index_vector_dim(
   // CHECK-DAG: %[[C7:.*]] = stablehlo.constant dense<7> : tensor<2x1xi64>
   // CHECK: %[[CLAMPED:.*]] = stablehlo.clamp %[[C0]], %[[ARG1]], %[[C7]] : tensor<2x1xi64>
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[CVT_PID:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[CVT_PID]], sizes = [1]
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i64>
   // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
@@ -257,11 +253,10 @@ func.func @shard_reduction_dim_not_collapsed(
   // CHECK-DAG: %[[C7:.*]] = stablehlo.constant dense<7> : tensor<2xi64>
   // CHECK: %[[CLAMPED:.*]] = stablehlo.clamp %[[C0]], %[[ARG1]], %[[C7]] : tensor<2xi64>
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[CVT_PID:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[CVT_PID]], sizes = [1]
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i64>
   // CHECK: %[[LIMIT:.*]] = stablehlo.add %[[OFFSET]], %[[C3]] : tensor<i64>
   // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
@@ -304,11 +299,10 @@ func.func @shard_reduction_dim_explicit_scalar_indices(
   // CHECK-DAG: %[[C7:.*]] = stablehlo.constant dense<7> : tensor<i64>
   // CHECK: %[[CLAMP:.*]] = stablehlo.clamp %[[C0]], %[[ARG1]], %[[C7]] : tensor<i64>
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[PID_I64:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i64>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID_I64]], sizes = [1]
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i64>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[BCAST_OFF:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = []
   // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, []>]>} : (tensor<i64>) -> tensor<i64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMP]], %[[BCAST_OFF]] : tensor<i64>
@@ -347,12 +341,12 @@ func.func @shard_two_of_three_reduction_dims(
 
   // Offset r1 logic ("x" axis)
   // CHECK: %[[PID:.*]] = stablehlo.partition_id
-  // CHECK: %[[OFF_R1_TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[OFF_R1:.*]] = stablehlo.convert %{{.*}} : tensor<i64>
+  // CHECK: %[[OFF_R1_TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[OFF_R1:.*]] = stablehlo.convert %{{.*}} : (tensor<i32>) -> tensor<i64>
 
   // Offset r2 logic ("y:(2)2" axis)
-  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 0, 2, 0, 2]> : tensor<8xi64>
-  // CHECK: %[[OFF_R2:.*]] = stablehlo.convert %{{.*}} : tensor<i64>
+  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 0, 2, 0, 2]> : tensor<8xi32>
+  // CHECK: %[[OFF_R2:.*]] = stablehlo.convert %{{.*}} : (tensor<i32>) -> tensor<i64>
 
   // Local Coordinate Shift
   // CHECK: %[[OFF_CONCAT:.*]] = stablehlo.concatenate %{{.*}}, %{{.*}}, %{{.*}}, dim = 0 : (tensor<1xi64>, tensor<1xi64>, tensor<1xi64>) -> tensor<3xi64>
@@ -402,16 +396,16 @@ func.func @shard_two_of_three_reduction_dims_one_not_in_start_index_map(
 
   // Indexed sharded dim 0 ("x" axis) logic
   // CHECK: %[[PID0:.*]] = stablehlo.partition_id
-  // CHECK: %[[OFF_R1_TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi64>
-  // CHECK: %[[OFF_R1:.*]] = stablehlo.convert %{{.*}} : tensor<i64>
+  // CHECK: %[[OFF_R1_TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK: %[[OFF_R1:.*]] = stablehlo.convert %{{.*}} : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %{{.*}} : tensor<3x2x3xi64>
   // CHECK: %[[IDX_MASK:.*]] = stablehlo.and %{{.*}}, %{{.*}} : tensor<3x2x3xi1>
 
   // Unindexed sharded dim 2 ("y:(2)2" axis) logic
   // CHECK: %[[PID2:.*]] = stablehlo.partition_id
-  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 0, 2, 0, 2]> : tensor<8xi64>
-  // CHECK: %[[OFF_R2:.*]] = stablehlo.reshape %{{.*}} : (tensor<1xi64>) -> tensor<i64>
-  // CHECK: %[[EQ_ZERO:.*]] = stablehlo.compare EQ, %[[OFF_R2]], %{{.*}} : (tensor<i64>, tensor<i64>) -> tensor<i1>
+  // CHECK: %[[OFF_R2_TABLE:.*]] = stablehlo.constant dense<[0, 2, 0, 2, 0, 2, 0, 2]> : tensor<8xi32>
+  // CHECK: %[[OFF_R2:.*]] = stablehlo.reshape %{{.*}} : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[EQ_ZERO:.*]] = stablehlo.compare EQ, %[[OFF_R2]], %{{.*}} : (tensor<i32>, tensor<i32>) -> tensor<i1>
 
   // Mask combination and local gather
   // CHECK: %[[PART_BCAST:.*]] = stablehlo.broadcast_in_dim %[[EQ_ZERO]], dims = [] : (tensor<i1>) -> tensor<3x2x3xi1>

@@ -112,7 +112,7 @@ mlir::stablehlo::MeshAttr convertMeshAttr(MeshAttr sdyMesh);
 // TODO(b/545097355): support replica_count > 1 && partition_count > 1.
 bool usePartitionId(int64_t replicaCount, int64_t partitionCount);
 
-// Returns a scalar i64 tensor containing the device ID. Currently, the device
+// Returns a scalar ui32 tensor containing the device ID. Currently, the device
 // ID is either replica ID or partition ID, depending on the replica count and
 // partition count.
 //
