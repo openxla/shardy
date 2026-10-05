@@ -40,6 +40,12 @@ logical shapes to device-local physical shapes.
 
 _Removes the mesh op and sharding notation from the program._
 
+#### Options
+
+```
+-keep-module-sharding-metadata : Whether to keep module-level sharding metadata (sdy.parameters_shardings and sdy.output_shardings).
+```
+
 ### `-sdy-drop-sharding-rules`
 
 _Drops `OpShardingRuleAttr` from all registered ops._
