@@ -34,6 +34,8 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/testing_utils.h"
+#include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
+#include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include <gtest/gtest.h>
 
 namespace mlir {
@@ -584,6 +586,25 @@ TEST_F(ExportUtilsTest, GetDivisiblePaddedTypeDualShardingUnsharded) {
   RankedTensorType paddedType =
       getDivisiblePaddedType(origType, sharding, sharding, mesh);
   EXPECT_EQ(paddedType, origType);
+}
+
+TEST_F(ExportUtilsTest, ShardyGeneratesDeviceCode) {
+  PropagationOptions options;
+  EXPECT_FALSE(shardyGeneratesDeviceCode(options));
+
+  options.partitionerStage = PartitionerStage::kConvertGlobalToLocal;
+  EXPECT_TRUE(shardyGeneratesDeviceCode(options));
+
+  options.avoidExportForPartitioning = true;
+  EXPECT_FALSE(shardyGeneratesDeviceCode(options));
+  options.avoidExportForPartitioning = false;
+
+  options.enablePerInstructionPartitioning = true;
+  EXPECT_FALSE(shardyGeneratesDeviceCode(options));
+  options.enablePerInstructionPartitioning = false;
+
+  options.partitionerStage = PartitionerStage::kResolveSingleDeviceSharding;
+  EXPECT_FALSE(shardyGeneratesDeviceCode(options));
 }
 
 }  // namespace

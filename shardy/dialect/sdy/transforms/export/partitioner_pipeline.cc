@@ -68,7 +68,9 @@ void addPartitionerPipeline(OpPassManager& pm,
     convertOptions.replicaCount = options.replicaCount;
     convertOptions.partitionCount = options.partitionCount;
     pm.addPass(createConvertGlobalToLocalPass(convertOptions));
-    pm.addPass(createDropShardingAndMeshPass());
+    DropShardingAndMeshPassOptions dropOptions;
+    dropOptions.keepModuleShardingMetadata = true;
+    pm.addPass(createDropShardingAndMeshPass(dropOptions));
   }
 }
 

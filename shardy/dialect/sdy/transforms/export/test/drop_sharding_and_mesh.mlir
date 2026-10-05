@@ -1,4 +1,5 @@
-// RUN: sdy_opt %s -split-input-file -sdy-drop-sharding-and-mesh | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-drop-sharding-and-mesh | FileCheck %s --check-prefixes=CHECK,DROP
+// RUN: sdy_opt %s -split-input-file -sdy-drop-sharding-and-mesh="keep-module-sharding-metadata=true" | FileCheck %s --check-prefixes=CHECK,KEEP
 
 // CHECK-NOT: sdy.mesh
 sdy.mesh @mesh_2 = <["x"=2]>
@@ -27,13 +28,15 @@ func.func @drop_multiple_sharding(
 // -----
 
 // CHECK-LABEL: module @module_input_output_shardings
-// CHECK-NOT: sdy.parameters_shardings
-// CHECK-NOT: sdy.output_shardings
+// KEEP-SAME: sdy.output_shardings = #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}]>]>,
+// KEEP-SAME: sdy.parameters_shardings = #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}]>]>
+// DROP-NOT: sdy.output_shardings
+// DROP-NOT: sdy.parameters_shardings
 // CHECK-NOT: sdy.mesh
 // CHECK:     func.func @main
 module @module_input_output_shardings attributes {
-  sdy.parameters_shardings = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>,
-  sdy.output_shardings = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>
+  sdy.parameters_shardings = #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}]>]>,
+  sdy.output_shardings = #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}]>]>
 } {
   sdy.mesh @mesh_2 = <["x"=2]>
   func.func @main() {

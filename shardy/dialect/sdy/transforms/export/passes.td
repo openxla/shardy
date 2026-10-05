@@ -251,6 +251,12 @@ def DropShardingRulesPass : Pass<"sdy-drop-sharding-rules", "func::FuncOp"> {
 def DropShardingAndMeshPass : Pass<"sdy-drop-sharding-and-mesh", "ModuleOp"> {
   let summary = "Removes the mesh op and sharding notation from the program.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let options = [
+    Option<"keepModuleShardingMetadata", "keep-module-sharding-metadata",
+           "bool", /*default=*/"false",
+           "Whether to keep module-level sharding metadata "
+           "(sdy.parameters_shardings and sdy.output_shardings).">
+  ];
 }
 
 def ConstantOrScalarMergerPass : Pass<"sdy-constant-or-scalar-merger", "func::FuncOp"> {
