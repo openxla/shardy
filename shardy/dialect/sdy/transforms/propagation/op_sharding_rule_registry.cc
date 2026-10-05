@@ -1030,11 +1030,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
 
         while (inDim < inRank || outDim < outRank) {
           if (inDim < inRank && inType.getDimSize(inDim) == 1) {
-            builder.addFactor(inDim++, kNullDim, 1);
+            builder.addFactor(inDim++, kNullDim, 1,
+                              FactorType::kNeedReplication);
             continue;
           }
           if (outDim < outRank && outType.getDimSize(outDim) == 1) {
-            builder.addFactor(kNullDim, outDim++, 1);
+            builder.addFactor(kNullDim, outDim++, 1,
+                              FactorType::kNeedReplication);
             continue;
           }
 
