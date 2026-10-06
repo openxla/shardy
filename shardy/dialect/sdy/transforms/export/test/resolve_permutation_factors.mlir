@@ -1,5 +1,6 @@
 // RUN: sdy_opt %s -sdy-resolve-permutation-factors="enable-halo-exchange=false rng-bit-generator-unsafe=false" | FileCheck %s --check-prefixes=CHECK,REPL
 // RUN: sdy_opt %s -sdy-resolve-permutation-factors="enable-halo-exchange=true rng-bit-generator-unsafe=true" | FileCheck %s --check-prefixes=CHECK,HALO
+// RUN: sdy_opt %s -sdy-resolve-permutation-factors="enable-halo-exchange=true max-dynamic-slice-collective-broadcast-partitions=2" | FileCheck %s --check-prefix=BCAST_LIMIT_2
 
 // HALO-DAG: sdy.mesh @mesh_abc_reversed_1 = <["a"=2, "b"=2, "c"=4], device_ids=[9, 8, 11, 10, 13, 12, 15, 14, 1, 0, 3, 2, 5, 4, 7, 6]>
 // HALO-DAG: sdy.mesh @mesh_abc_reversed_0 = <["a"=2, "b"=2, "c"=4], device_ids=[15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]>
@@ -1804,3 +1805,234 @@ func.func @rng_bit_generator_non_32_64_bit_state_always_replicated(
   return %output_state, %output : tensor<2xui16>, tensor<8x16xf32>
 }
 
+//===----------------------------------------------------------------------===//
+// stablehlo.dynamic_slice tests
+//===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: func @dynamic_slice_collective_broadcast_dim_0
+// BCAST_LIMIT_2-LABEL: func @dynamic_slice_collective_broadcast_dim_0
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_collective_broadcast_dim_0(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}, {}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}, {}]>}) {
+  // REPL-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh_a_4, [{}, {}]> : tensor<8x4xf32>
+  // REPL-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>} : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // REPL-NEXT: return %[[DS]] : tensor<1x4xf32>
+  // BCAST_LIMIT_2: sdy.reshard %arg0 <@mesh_a_4, [{}, {}]> : tensor<8x4xf32>
+  // BCAST_LIMIT_2-NEXT: stablehlo.dynamic_slice
+
+  // HALO-NEXT: %[[MAN_COMP:.*]] = sdy.manual_computation(%[[ARG0]], %[[ARG1]]) in_shardings=[<@mesh_a_4, [{"a"}, {}]>, <@mesh_a_4, []>] out_shardings=[<@mesh_a_4, [{}, {}]>] manual_axes={"a"} (%[[LOCAL_IN:.*]]: tensor<2x4xf32>, %[[LOCAL_IDX:.*]]: tensor<i32>) {
+  // HALO-NEXT:   %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT:   %[[C7:.*]] = stablehlo.constant dense<7> : tensor<i32>
+  // HALO-NEXT:   %[[C2:.*]] = stablehlo.constant dense<2> : tensor<i32>
+  // HALO-NEXT:   %[[CLAMP:.*]] = stablehlo.clamp %[[C0]], %[[LOCAL_IDX]], %[[C7]] : tensor<i32>
+  // HALO-NEXT:   %[[OWNER:.*]] = stablehlo.divide %[[CLAMP]], %[[C2]] : tensor<i32>
+  // HALO-NEXT:   %[[OFFSET:.*]] = stablehlo.multiply %[[OWNER]], %[[C2]] : tensor<i32>
+  // HALO-NEXT:   %[[LOCAL_START:.*]] = stablehlo.subtract %[[CLAMP]], %[[OFFSET]] : tensor<i32>
+  // HALO-NEXT:   %[[LOCAL_SLICE:.*]] = stablehlo.dynamic_slice %[[LOCAL_IN]], %[[LOCAL_START]], %[[C0]], sizes = [1, 4] : (tensor<2x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // HALO-NEXT:   %[[CASE:.*]] = "stablehlo.case"(%[[OWNER]]) ({
+  // HALO-NEXT:     %[[BCAST0:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST0]] : tensor<1x4xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST1:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[1, 0, 2, 3]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST1]] : tensor<1x4xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST2:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[2, 0, 1, 3]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST2]] : tensor<1x4xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST3:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[3, 0, 1, 2]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST3]] : tensor<1x4xf32>
+  // HALO-NEXT:   }) : (tensor<i32>) -> tensor<1x4xf32>
+  // HALO-NEXT:   sdy.return %[[CASE]] : tensor<1x4xf32>
+  // HALO-NEXT: } : (tensor<8x4xf32>, tensor<i32>) -> tensor<1x4xf32>
+  // HALO-NEXT: return %[[MAN_COMP]] : tensor<1x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>
+  } : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
+}
+
+// CHECK-LABEL: func @dynamic_slice_collective_broadcast_dim_1
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x12xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}, {"a"}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_collective_broadcast_dim_1(
+    %arg0: tensor<4x12xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}, {"a"}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<4x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}, {}]>}) {
+  // REPL-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh_a_4, [{}, {}]> : tensor<4x12xf32>
+  // REPL-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [4, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>} : (tensor<4x12xf32>, tensor<i32>, tensor<i32>) -> tensor<4x1xf32>
+  // REPL-NEXT: return %[[DS]] : tensor<4x1xf32>
+
+  // HALO-NEXT: %[[MAN_COMP:.*]] = sdy.manual_computation(%[[ARG0]], %[[ARG2]]) in_shardings=[<@mesh_a_4, [{}, {"a"}]>, <@mesh_a_4, []>] out_shardings=[<@mesh_a_4, [{}, {}]>] manual_axes={"a"} (%[[LOCAL_IN:.*]]: tensor<4x3xf32>, %[[LOCAL_IDX:.*]]: tensor<i32>) {
+  // HALO-NEXT:   %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT:   %[[C11:.*]] = stablehlo.constant dense<11> : tensor<i32>
+  // HALO-NEXT:   %[[C3:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[CLAMP:.*]] = stablehlo.clamp %[[C0]], %[[LOCAL_IDX]], %[[C11]] : tensor<i32>
+  // HALO-NEXT:   %[[OWNER:.*]] = stablehlo.divide %[[CLAMP]], %[[C3]] : tensor<i32>
+  // HALO-NEXT:   %[[OFFSET:.*]] = stablehlo.multiply %[[OWNER]], %[[C3]] : tensor<i32>
+  // HALO-NEXT:   %[[LOCAL_START:.*]] = stablehlo.subtract %[[CLAMP]], %[[OFFSET]] : tensor<i32>
+  // HALO-NEXT:   %[[LOCAL_SLICE:.*]] = stablehlo.dynamic_slice %[[LOCAL_IN]], %[[C0]], %[[LOCAL_START]], sizes = [4, 1] : (tensor<4x3xf32>, tensor<i32>, tensor<i32>) -> tensor<4x1xf32>
+  // HALO-NEXT:   %[[CASE:.*]] = "stablehlo.case"(%[[OWNER]]) ({
+  // HALO-NEXT:     %[[BCAST0:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[0, 1, 2, 3]]> : tensor<1x4xi64>}> : (tensor<4x1xf32>) -> tensor<4x1xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST0]] : tensor<4x1xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST1:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[1, 0, 2, 3]]> : tensor<1x4xi64>}> : (tensor<4x1xf32>) -> tensor<4x1xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST1]] : tensor<4x1xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST2:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[2, 0, 1, 3]]> : tensor<1x4xi64>}> : (tensor<4x1xf32>) -> tensor<4x1xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST2]] : tensor<4x1xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST3:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[3, 0, 1, 2]]> : tensor<1x4xi64>}> : (tensor<4x1xf32>) -> tensor<4x1xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST3]] : tensor<4x1xf32>
+  // HALO-NEXT:   }) : (tensor<i32>) -> tensor<4x1xf32>
+  // HALO-NEXT:   sdy.return %[[CASE]] : tensor<4x1xf32>
+  // HALO-NEXT: } : (tensor<4x12xf32>, tensor<i32>) -> tensor<4x1xf32>
+  // HALO-NEXT: return %[[MAN_COMP]] : tensor<4x1xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [4, 1] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>
+  } : (tensor<4x12xf32>, tensor<i32>, tensor<i32>) -> tensor<4x1xf32>
+  return %0 : tensor<4x1xf32>
+}
+
+// Multi-axis sharding [{"b", "a"}, {}] on @mesh = <["a"=2, "b"=2]> maps
+// shard 0 -> dev 0, shard 1 -> dev 2, shard 2 -> dev 1, shard 3 -> dev 3.
+// CHECK-LABEL: func @dynamic_slice_collective_broadcast_multi_axis_transposed
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a"}, {}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_collective_broadcast_multi_axis_transposed(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a"}, {}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // REPL-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x4xf32>
+  // REPL-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // REPL-NEXT: return %[[DS]] : tensor<1x4xf32>
+
+  // HALO-NEXT: %[[MAN_COMP:.*]] = sdy.manual_computation(%[[ARG0]], %[[ARG1]]) in_shardings=[<@mesh, [{"b", "a"}, {}]>, <@mesh, []>] out_shardings=[<@mesh, [{}, {}]>] manual_axes={"a", "b"} (%[[LOCAL_IN:.*]]: tensor<2x4xf32>, %[[LOCAL_IDX:.*]]: tensor<i32>) {
+  // HALO-NEXT:   %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT:   %[[C7:.*]] = stablehlo.constant dense<7> : tensor<i32>
+  // HALO-NEXT:   %[[C2:.*]] = stablehlo.constant dense<2> : tensor<i32>
+  // HALO-NEXT:   %[[CLAMP:.*]] = stablehlo.clamp %[[C0]], %[[LOCAL_IDX]], %[[C7]] : tensor<i32>
+  // HALO-NEXT:   %[[OWNER:.*]] = stablehlo.divide %[[CLAMP]], %[[C2]] : tensor<i32>
+  // HALO-NEXT:   %[[OFFSET:.*]] = stablehlo.multiply %[[OWNER]], %[[C2]] : tensor<i32>
+  // HALO-NEXT:   %[[LOCAL_START:.*]] = stablehlo.subtract %[[CLAMP]], %[[OFFSET]] : tensor<i32>
+  // HALO-NEXT:   %[[LOCAL_SLICE:.*]] = stablehlo.dynamic_slice %[[LOCAL_IN]], %[[LOCAL_START]], %[[C0]], sizes = [1, 4] : (tensor<2x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // HALO-NEXT:   %[[CASE:.*]] = "stablehlo.case"(%[[OWNER]]) ({
+  // HALO-NEXT:     %[[BCAST0:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[0, 2, 1, 3]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST0]] : tensor<1x4xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST1:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[2, 0, 1, 3]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST1]] : tensor<1x4xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST2:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[1, 0, 2, 3]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST2]] : tensor<1x4xf32>
+  // HALO-NEXT:   }, {
+  // HALO-NEXT:     %[[BCAST3:.*]] = "stablehlo.collective_broadcast"(%[[LOCAL_SLICE]]) <{channel_handle = #stablehlo.channel_handle<handle = {{[0-9]+}}, type = 1>,
+  // HALO-SAME{LITERAL}: replica_groups = dense<[[3, 0, 2, 1]]> : tensor<1x4xi64>}> : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  // HALO-NEXT:     stablehlo.return %[[BCAST3]] : tensor<1x4xf32>
+  // HALO-NEXT:   }) : (tensor<i32>) -> tensor<1x4xf32>
+  // HALO-NEXT:   sdy.return %[[CASE]] : tensor<1x4xf32>
+  // HALO-NEXT: } : (tensor<8x4xf32>, tensor<i32>) -> tensor<1x4xf32>
+  // HALO-NEXT: return %[[MAN_COMP]] : tensor<1x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>
+  } : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
+}
+
+// Fallback when number of partitions (64) exceeds max-dynamic-slice-collective-broadcast-partitions (32).
+// CHECK-LABEL: func @dynamic_slice_exceeds_max_partitions
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<64x4xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_8, [{"x", "y"}, {}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_exceeds_max_partitions(
+    %arg0: tensor<64x4xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_8, [{"x", "y"}, {}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_8, [{}, {}]>}) {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh_xy_8, [{}, {}]> : tensor<64x4xf32>
+  // CHECK-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xy_8, [{}, {}]>]>} : (tensor<64x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // CHECK-NEXT: return %[[DS]] : tensor<1x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_xy_8, [{}, {}]>]>
+  } : (tensor<64x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
+}
+
+// Fallback when another dimension of the operand is also sharded (keeps non-sliced dim sharded).
+// CHECK-LABEL: func @dynamic_slice_other_dim_also_sharded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_other_dim_also_sharded(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"b"}]>}) {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>} : (tensor<8x8xf32>, tensor<i32>, tensor<i32>) -> tensor<1x8xf32>
+  // CHECK-NEXT: return %[[DS]] : tensor<1x8xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 8] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>
+  } : (tensor<8x8xf32>, tensor<i32>, tensor<i32>) -> tensor<1x8xf32>
+  return %0 : tensor<1x8xf32>
+}
+
+// Fallback when slicing dimension is only partially sharded across the mesh ("b" is replicated).
+// CHECK-LABEL: func @dynamic_slice_partially_sharded_mesh
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_partially_sharded_mesh(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x4xf32>
+  // CHECK-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // CHECK-NEXT: return %[[DS]] : tensor<1x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>
+  } : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
+}
+
+// Fallback when slicing dimension size (10) is not divisible by numSlicePartitions (4).
+// CHECK-LABEL: func @dynamic_slice_indivisible_dim_size
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<10x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<i32>, %[[ARG2:.*]]: tensor<i32>)
+func.func @dynamic_slice_indivisible_dim_size(
+    %arg0: tensor<10x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}, {}]>},
+    %arg1: tensor<i32>,
+    %arg2: tensor<i32>)
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}, {}]>}) {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh_a_4, [{}, {}]> : tensor<10x4xf32>
+  // CHECK-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>} : (tensor<10x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  // CHECK-NEXT: return %[[DS]] : tensor<1x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>
+  } : (tensor<10x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
+}
+
+// Fallback when start index is i64 instead of i32.
+// CHECK-LABEL: func @dynamic_slice_i64_start_index
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}, {}]>}, %[[ARG1:.*]]: tensor<i64>, %[[ARG2:.*]]: tensor<i64>)
+func.func @dynamic_slice_i64_start_index(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}, {}]>},
+    %arg1: tensor<i64>,
+    %arg2: tensor<i64>)
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}, {}]>}) {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh_a_4, [{}, {}]> : tensor<8x4xf32>
+  // CHECK-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[RESHARD]], %[[ARG1]], %[[ARG2]], sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>} : (tensor<8x4xf32>, tensor<i64>, tensor<i64>) -> tensor<1x4xf32>
+  // CHECK-NEXT: return %[[DS]] : tensor<1x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_4, [{}, {}]>]>
+  } : (tensor<8x4xf32>, tensor<i64>, tensor<i64>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
+}

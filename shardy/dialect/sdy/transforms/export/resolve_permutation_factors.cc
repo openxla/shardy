@@ -1298,6 +1298,186 @@ DataExchangeInfo buildDataExchangeInfo(TensorShardingAttr sharding,
 // =============================================================================
 
 // -----------------------------------------------------------------------------
+// stablehlo.dynamic_slice
+// -----------------------------------------------------------------------------
+
+// Special-case optimization for `stablehlo.dynamic_slice` when a single sliced
+// dimension of output size 1 is partitioned across the entire mesh: instead of
+// all-gathering the operand, each device slices its local shard and the owning
+// shard broadcasts its 1-element slice via `stablehlo.collective_broadcast`.
+//
+// Requires:
+// 1. `slicedDim` is partitioned across all devices in the mesh
+//    (`numSlicePartitions == mesh.getTotalSize()`, evenly dividing
+//    `inShape[slicedDim]`, with no other sharded dims or replicated axes).
+// 2. `numSlicePartitions <= maxDynamicSliceCollectiveBroadcastPartitions`.
+// 3. The result and `i32` start index for `slicedDim` are fully replicated.
+LogicalResult tryDynamicSliceWithCollectiveBroadcast(
+    stablehlo::DynamicSliceOp op, int64_t slicedDim,
+    TensorShardingAttr inSharding, MeshAttr mesh,
+    int64_t maxDynamicSliceCollectiveBroadcastPartitions,
+    ResolutionState& state) {
+  Value operand = op.getOperand();
+  RankedTensorType inType = op.getOperand().getType();
+  RankedTensorType outType = op.getType();
+  ArrayRef<int64_t> inShape = inType.getShape();
+  DimensionShardingAttr slicedDimSharding =
+      inSharding.getDimShardings()[slicedDim];
+  int64_t numSlicePartitions = slicedDimSharding.getShardedSize(mesh);
+  Value startIndexOperand = op.getStartIndices()[slicedDim];
+
+  // Requiring `numSlicePartitions == mesh.getTotalSize()` ensures that all
+  // mesh devices participate in a single broadcast group (no other dimension is
+  // sharded and no mesh axes are replicated or unreduced).
+  if (!isFullyReplicated(getSharding(op.getResult())) ||
+      !cast<RankedTensorType>(startIndexOperand.getType())
+           .getElementType()
+           .isSignlessInteger(32) ||
+      numSlicePartitions != mesh.getTotalSize() ||
+      numSlicePartitions > maxDynamicSliceCollectiveBroadcastPartitions ||
+      inShape[slicedDim] > std::numeric_limits<int32_t>::max() ||
+      inShape[slicedDim] % numSlicePartitions != 0) {
+    return failure();
+  }
+
+  // `slicedDim` may be sharded across multiple or transposed mesh axes (e.g.,
+  // `[{"b", "a"}]`), so logical shard `b` does not necessarily reside on
+  // physical device `b`. Invert `devId -> shardIdx` to find each shard's owner.
+  SmallVector<int64_t> ownerDeviceForShard(numSlicePartitions);
+  for (int64_t devId = 0; devId < numSlicePartitions; ++devId) {
+    ownerDeviceForShard[getShardIndex(devId, mesh, slicedDimSharding)] = devId;
+  }
+
+  IRRewriter& rewriter = state.rewriter;
+  MLIRContext* ctx = rewriter.getContext();
+  Location loc = op.getLoc();
+  rewriter.setInsertionPoint(op);
+
+  TensorShardingAttr startIndexSharding = TensorShardingAttr::getFullyClosed(
+      ctx, /*rank=*/0, inSharding.getMeshOrRef());
+  TensorShardingAttr resultSharding = TensorShardingAttr::getFullyClosed(
+      ctx, outType.getRank(), inSharding.getMeshOrRef());
+  SmallVector<StringAttr> manualAxesAttrs =
+      llvm::map_to_vector(mesh.getAxes(), [&](MeshAxisAttr axis) {
+        return rewriter.getStringAttr(axis.getName());
+      });
+
+  SmallVector<int64_t> localInShape = llvm::to_vector(inShape);
+  localInShape[slicedDim] /= numSlicePartitions;
+  auto localInType =
+      RankedTensorType::get(localInShape, inType.getElementType());
+
+  // Wrap the local slice and broadcast in a full-mesh `sdy.manual_computation`
+  // so the body can slice the local shard shape (`inShape[slicedDim] / P`)
+  // while the surrounding module is still in global tensor shapes.
+  auto manualComputationOp = ManualComputationOp::create(
+      rewriter, loc, TypeRange{outType}, ValueRange{operand, startIndexOperand},
+      TensorShardingPerValueAttr::get(ctx, {inSharding, startIndexSharding}),
+      TensorShardingPerValueAttr::get(ctx, {resultSharding}), manualAxesAttrs);
+
+  Region& body = manualComputationOp.getBody();
+  body.emplaceBlock();
+  Value localOperand = body.addArgument(localInType, loc);
+  Value localStartIndex = body.addArgument(startIndexOperand.getType(), loc);
+
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPointToStart(&body.front());
+
+  auto scalarI32Type = RankedTensorType::get({}, rewriter.getI32Type());
+  auto i32Const = [&](int64_t v) {
+    return stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseIntElementsAttr::get(scalarI32Type, static_cast<int32_t>(v)));
+  };
+  // Clamp the runtime start index to `[0, inDimSize - 1]` (matching StableHLO
+  // dynamic_slice OOB semantics for a size-1 slice), then decompose it into:
+  //   ownerShard = clampedIdx / shardSize
+  //   localIdx   = clampedIdx - ownerShard * shardSize
+  // Non-owning devices still compute a valid `localIdx` in `[0, shardSize - 1]`
+  // and extract a dummy slice that is overwritten by the broadcast below.
+  Value zero = i32Const(0);
+  Value maxIdx = i32Const(inShape[slicedDim] - 1);
+  Value shardSize = i32Const(localInShape[slicedDim]);
+  Value clampedIdx =
+      stablehlo::ClampOp::create(rewriter, loc, zero, localStartIndex, maxIdx);
+  Value ownerShard =
+      stablehlo::DivOp::create(rewriter, loc, clampedIdx, shardSize);
+  Value ownerOffset =
+      stablehlo::MulOp::create(rewriter, loc, ownerShard, shardSize);
+  Value localIdx =
+      stablehlo::SubtractOp::create(rewriter, loc, clampedIdx, ownerOffset);
+
+  SmallVector<Value> localStartIndices(inType.getRank(), zero);
+  localStartIndices[slicedDim] = localIdx;
+  auto localSlice =
+      stablehlo::DynamicSliceOp::create(rewriter, loc, outType, localOperand,
+                                        localStartIndices, op.getSliceSizes());
+
+  // `ownerShard` is replicated across all devices, so every device enters the
+  // same `case` branch `b`. Branch `b` places `ownerDeviceForShard[b]` first in
+  // the single replica group so it broadcasts its `localSlice` to all devices.
+  auto caseOp =
+      stablehlo::CaseOp::create(rewriter, loc, TypeRange{outType}, ownerShard,
+                                /*branchCount=*/numSlicePartitions);
+  auto replicaGroupsType =
+      RankedTensorType::get({1, numSlicePartitions}, rewriter.getI64Type());
+  for (int64_t b = 0; b < numSlicePartitions; ++b) {
+    rewriter.setInsertionPointToStart(&caseOp.getBranches()[b].emplaceBlock());
+    SmallVector<int64_t> group = {ownerDeviceForShard[b]};
+    for (int64_t dev : ownerDeviceForShard) {
+      if (dev != ownerDeviceForShard[b]) {
+        group.push_back(dev);
+      }
+    }
+    auto bcastOp = stablehlo::CollectiveBroadcastOp::create(
+        rewriter, loc, TypeRange{outType}, ValueRange{localSlice.getResult()},
+        DenseIntElementsAttr::get(replicaGroupsType, group),
+        getChannelHandle(state, ctx));
+    stablehlo::ReturnOp::create(rewriter, loc, bcastOp.getResults());
+  }
+
+  rewriter.setInsertionPointAfter(caseOp);
+  sdy::ReturnOp::create(rewriter, loc, caseOp.getResults());
+  rewriter.replaceOp(op, manualComputationOp.getResults());
+  return success();
+}
+
+// Resolves permutation factors on `stablehlo.dynamic_slice`. Returns `success`
+// if the sliced dimension is unsharded or lowered via collective-broadcast;
+// returns `failure` to fall back to `resolvePermutationFactorsViaReplication`.
+LogicalResult handleDynamicSliceOp(
+    stablehlo::DynamicSliceOp op,
+    int64_t maxDynamicSliceCollectiveBroadcastPartitions,
+    ResolutionState& state) {
+  Value operand = op.getOperand();
+  TensorShardingAttr inSharding = getSharding(operand);
+  if (isFullyReplicated(inSharding)) {
+    return success();
+  }
+  MeshAttr mesh = inSharding.getMesh(state.symbolTable);
+  if (!mesh || mesh.isMaximal()) {
+    return success();
+  }
+
+  // `handleDynamicSliceOp` is only invoked when the op's sharding rule has a
+  // `kPermutation` factor, which `op_sharding_rule_registry` only creates when
+  // there is a unique sliced dimension (`inShape[d] != outShape[d]`) of size 1.
+  ArrayRef<int64_t> inShape = op.getOperand().getType().getShape();
+  ArrayRef<int64_t> outShape = op.getType().getShape();
+  int64_t slicedDim = 0;
+  while (inShape[slicedDim] == outShape[slicedDim]) {
+    ++slicedDim;
+  }
+  if (inSharding.getDimShardings()[slicedDim].getShardedSize(mesh) <= 1) {
+    return success();
+  }
+
+  return tryDynamicSliceWithCollectiveBroadcast(
+      op, slicedDim, inSharding, mesh,
+      maxDynamicSliceCollectiveBroadcastPartitions, state);
+}
+
+// -----------------------------------------------------------------------------
 // stablehlo.pad
 // -----------------------------------------------------------------------------
 
@@ -2583,6 +2763,11 @@ struct ShardyResolvePermutationFactorsPass
       if (enableHaloExchange) {
         bool resolved =
             llvm::TypeSwitch<Operation*, bool>(op)
+                .Case([&](stablehlo::DynamicSliceOp dynamicSliceOp) {
+                  return succeeded(handleDynamicSliceOp(
+                      dynamicSliceOp,
+                      maxDynamicSliceCollectiveBroadcastPartitions, state));
+                })
                 .Case([&](stablehlo::PadOp padOp) {
                   return succeeded(handlePadOp(padOp, state));
                 })
