@@ -496,16 +496,23 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             auto addSpatialFactor = [&, lhsDim = lhsDim, rhsDim = rhsDim,
                                      outDim = outDim](int64_t factorSize,
                                                       bool isContracting) {
-              if (factorSize = std::min(remainingLhsSize, factorSize);
-                  factorSize > 1) {
+              if (remainingLhsSize == 1 && factorSize > 1) {
+                // Create a single-sided kPermutation factor.
+                builder.addFactor({kNullDim, isContracting ? rhsDim : kNullDim},
+                                  isContracting ? kNullDim : outDim, factorSize,
+                                  FactorType::kPermutation);
+              } else if (int64_t lhsFactorSize =
+                             std::min(remainingLhsSize, factorSize);
+                         lhsFactorSize > 1) {
                 // TODO(tomnatan): A sharded spatial dimension that needs
                 // reduction also needs permutation (halo-swap), so perhaps we
                 // should add combined type or allow having both types.
                 builder.addFactor({lhsDim, isContracting ? rhsDim : kNullDim},
-                                  isContracting ? kNullDim : outDim, factorSize,
+                                  isContracting ? kNullDim : outDim,
+                                  lhsFactorSize,
                                   isContracting ? FactorType::kReduction
                                                 : FactorType::kPermutation);
-                remainingLhsSize /= factorSize;
+                remainingLhsSize /= lhsFactorSize;
               }
             };
             auto addNumWindowsFactor = [&]() {

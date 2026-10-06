@@ -51,6 +51,29 @@ func.func @convolution_spatial_permutation(
   return %0 : tensor<1x1x14x14xf32>
 }
 
+// CHECK-LABEL: func @convolution_rhs_spatial_permutation_lhs_size_one
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16x1xf32>, %[[ARG1:.*]]: tensor<16x10x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"a"}]>})
+// CHECK-SAME: -> (tensor<8x10x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"a"}]>})
+func.func @convolution_rhs_spatial_permutation_lhs_size_one(
+    %arg0: tensor<8x16x1xf32>,
+    %arg1: tensor<16x10x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"a"}]>})
+    -> (tensor<8x10x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {"a"}]>}) {
+  // CHECK: %[[RESHARD_RHS:.*]] = sdy.reshard %[[ARG1]] <@mesh, [{}, {}, {}]> : tensor<16x10x4xf32>
+  // CHECK: %[[CONV:.*]] = stablehlo.convolution(%[[ARG0]], %[[RESHARD_RHS]])
+  // CHECK-SAME: sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}]>]>
+  // CHECK: %[[RES:.*]] = sdy.reshard %[[CONV]] <@mesh, [{}, {}, {"a"}]> : tensor<8x10x4xf32>
+  // CHECK: return %[[RES]] : tensor<8x10x4xf32>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, f, 0] x [i, o, 0] -> [b, f, 0],
+    window = {stride = [1], pad = [[3, 3]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {"a"}]>]>
+    }
+    : (tensor<8x16x1xf32>, tensor<16x10x4xf32>) -> tensor<8x10x4xf32>
+  return %0 : tensor<8x10x4xf32>
+}
+
 // CHECK-LABEL: func @convolution_batch_group_count_per_group_size_one_kept
 func.func @convolution_batch_group_count_per_group_size_one_kept(
     %arg0: tensor<3x1x1x2xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}, {}, {}, {}]>},

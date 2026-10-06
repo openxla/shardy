@@ -333,6 +333,34 @@ func.func @conv_output_feature_size_one(%arg0: tensor<8x224x224x192xf32>, %arg1:
   return %0 : tensor<8x112x112x16xf32>
 }
 
+// CHECK-LABEL: func @conv_lhs_spatial_dim_exhausted
+func.func @conv_lhs_spatial_dim_exhausted(%arg0: tensor<2x16x16x192xf32>, %arg1: tensor<3x3x192x64xf32>) -> tensor<2x16x16x64xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, l, n], [k, m, n, o])->([i, j, l, o]) {i=2, j=16, k=3, l=16, m=3, n=192, o=64} reduction={n} permutation={j, k, l, m}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [1, 1], pad = [[1, 1], [1, 1]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      lhs_dilations = dense<1> : tensor<2xi64>,
+      rhs_dilations = dense<1> : tensor<2xi64>
+    } : (tensor<2x16x16x192xf32>, tensor<3x3x192x64xf32>) -> tensor<2x16x16x64xf32>
+  return %0 : tensor<2x16x16x64xf32>
+}
+
+// CHECK-LABEL: func @conv_lhs_spatial_dim_size_one
+func.func @conv_lhs_spatial_dim_size_one(%arg0: tensor<2x1x192xf32>, %arg1: tensor<4x192x64xf32>) -> tensor<2x4x64xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, n, l], [k, l, m])->([i, j, m]) {i=2, j=4, k=4, l=192, m=64, n=1} reduction={l} permutation={j, k}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {stride = [1], pad = [[3, 3]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      lhs_dilations = dense<1> : tensor<1xi64>,
+      rhs_dilations = dense<1> : tensor<1xi64>
+    } : (tensor<2x1x192xf32>, tensor<4x192x64xf32>) -> tensor<2x4x64xf32>
+  return %0 : tensor<2x4x64xf32>
+}
+
 // CHECK-LABEL: func @custom_call_compact_wy_helper
 func.func @custom_call_compact_wy_helper(%arg0: tensor<128x128xf32>) -> tensor<128x128xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=128, j=128}>
