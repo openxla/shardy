@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include "llvm/ADT/ArrayRef.h"
@@ -102,9 +103,14 @@ Value createDeviceGuard(Location loc, int64_t targetDeviceId,
                         IRRewriter& rewriter) {
   Value currentDeviceId =
       getDeviceId(replicaCount, partitionCount, loc, rewriter);
-  auto scalarI64Type = RankedTensorType::get({}, rewriter.getI64Type());
+  auto scalarUI32Type = RankedTensorType::get(
+      {}, rewriter.getIntegerType(32, /*isSigned=*/false));
+  SDY_CHECK_GE(targetDeviceId, 0);
+  SDY_CHECK_LE(targetDeviceId, std::numeric_limits<uint32_t>::max());
   Value targetDeviceIdConst = stablehlo::ConstantOp::create(
-      rewriter, loc, DenseElementsAttr::get(scalarI64Type, targetDeviceId));
+      rewriter, loc,
+      DenseElementsAttr::get(scalarUI32Type,
+                             static_cast<uint32_t>(targetDeviceId)));
   return stablehlo::CompareOp::create(rewriter, loc, currentDeviceId,
                                       targetDeviceIdConst,
                                       stablehlo::ComparisonDirection::EQ);

@@ -280,23 +280,10 @@ bool usePartitionId(int64_t replicaCount, int64_t partitionCount) {
 
 Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
                   OpBuilder& rewriter) {
-  Type i64Ty = rewriter.getI64Type();
-  auto indexTy = RankedTensorType::get({}, i64Ty);
-  Value idOp;
   if (usePartitionId(replicaCount, partitionCount)) {
-    idOp = stablehlo::PartitionIdOp::create(rewriter, loc);
-  } else {
-    idOp = stablehlo::ReplicaIdOp::create(rewriter, loc);
+    return stablehlo::PartitionIdOp::create(rewriter, loc);
   }
-  auto idType = cast<RankedTensorType>(idOp.getType());
-  if (idType.getElementType() != i64Ty) {
-    auto destType = RankedTensorType::get(idType.getShape(), i64Ty);
-    idOp = stablehlo::ConvertOp::create(rewriter, loc, destType, idOp);
-  }
-  if (idType.getRank() != 0) {
-    idOp = stablehlo::ReshapeOp::create(rewriter, loc, indexTy, idOp);
-  }
-  return idOp;
+  return stablehlo::ReplicaIdOp::create(rewriter, loc);
 }
 
 stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
