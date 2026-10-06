@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Location.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
@@ -236,7 +237,7 @@ class PaddedTypeConverter : public TypeConverter {
 bool hasCustomPadHandling(Operation* op) {
   return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp,
              stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
-             stablehlo::GatherOp>(op);
+             stablehlo::GatherOp, stablehlo::ReduceOp>(op);
 }
 
 class PaddingCache {
@@ -1300,6 +1301,46 @@ class StablehloGatherOpPattern
   }
 };
 
+class StablehloReduceOpPattern
+    : public OpConversionPattern<stablehlo::ReduceOp> {
+ public:
+  StablehloReduceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                           PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::ReduceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    Location loc = op.getLoc();
+    int64_t numInputs = op.getInputs().size();
+
+    SmallVector<Value> allOperands;
+    allOperands.reserve(numInputs + adaptor.getInitValues().size());
+    for (int64_t i = 0; i < numInputs; ++i) {
+      Value input = adaptor.getInputs()[i];
+      Value initVal = adaptor.getInitValues()[i];
+      auto origType = cast<RankedTensorType>(op.getInputs()[i].getType());
+      if ((matchPattern(initVal, m_Zero()) ||
+           matchPattern(initVal, m_AnyZeroFloat())) &&
+          cache.getPadding(input) == PaddingValueKind::kZero) {
+        allOperands.push_back(input);
+      } else {
+        allOperands.push_back(ensurePaddingWithValue(
+            input, origType, initVal, rewriter, loc, op.getDimensions()));
+      }
+    }
+    allOperands.append(adaptor.getInitValues().begin(),
+                       adaptor.getInitValues().end());
+
+    return padGenericOp(op, allOperands, rewriter, converter);
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
 struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
   using PadForDivisibilityPassBase::PadForDivisibilityPassBase;
@@ -1333,8 +1374,8 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
-                 StablehloConvolutionOpPattern, AllToAllOpPattern,
-                 AllGatherOpPattern, ReduceScatterOpPattern>(
+                 StablehloConvolutionOpPattern, StablehloReduceOpPattern,
+                 AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern>(
         typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
