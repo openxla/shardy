@@ -243,7 +243,7 @@ def named_computation_partir_lowering(
   if jax.__version_info__ >= (0, 10, 1):
     _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
   else:
-    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
+    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pyrefly: ignore[missing-argument]
 
   input_types = list(map(_aval_to_ir_types, in_avals))
   output_types = list(map(_aval_to_ir_types, ctx.avals_out))
@@ -255,7 +255,7 @@ def named_computation_partir_lowering(
 
   flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   named_comp_op = mpmd.NamedComputationOp(
-      flat_output_types, flat_args, origin  # pytype: disable=wrong-arg-types
+      flat_output_types, flat_args, origin
   )
 
   block = named_comp_op.region.blocks.append(*flat_input_types)
@@ -505,7 +505,7 @@ def call_mpmd_jit_lowering(
   if jax.__version_info__ >= (0, 10, 1):
     _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
   else:
-    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
+    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pyrefly: ignore[missing-argument]
 
   input_types = list(map(_aval_to_ir_types, in_avals))
   output_types = list(map(_aval_to_ir_types, ctx.avals_out))
@@ -538,7 +538,7 @@ def call_mpmd_jit_lowering(
   flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   call_op = mpmd.CallOp(
       flat_output_types,
-      flat_args,  # pytype: disable=wrong-arg-types
+      flat_args,
       ir.FlatSymbolRefAttr.get(func_declaration.sym_name.value),
   )
 
@@ -903,7 +903,7 @@ def fori_loop_mpmd_jit_lowering(
   if jax.__version_info__ >= (0, 10, 1):
     _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
   else:
-    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pytype: disable=missing-parameter
+    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pyrefly: ignore[missing-argument]
 
   input_types = list(map(_aval_to_ir_types, ctx.avals_in))
   flat_input_types, _ = tree_util.tree_flatten(input_types)
@@ -913,7 +913,7 @@ def fori_loop_mpmd_jit_lowering(
   flat_args, _ = jax_mlir.ir_tree_registry.flatten(args)
   for_loop = mpmd.ForOp(
       const_types + flat_output_types,
-      flat_args,  # pytype: disable=wrong-arg-types
+      flat_args,
       num_iterations,
       unroll_factor=num_iterations,
   )
