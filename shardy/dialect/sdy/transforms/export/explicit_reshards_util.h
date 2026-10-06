@@ -182,6 +182,15 @@ TensorShardingAttr insertUnreducedCollectives(OpOperand& use,
 bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
                                           const SymbolTable& symbolTable);
 
+// Returns the sharding rule for `op` in export passes. When
+// `enableDynamicSliceCollectiveBroadcast` is true and `op` is a
+// `stablehlo.dynamic_slice` with a single sliced dimension of size 1, marks the
+// operand's sliced dimension as `kPermutation` (and the result's as
+// `kNeedReplication`) so the operand remains sharded for
+// `sdy-resolve-permutation-factors` to lower via `collective_broadcast`.
+OpShardingRuleAttr getExportShardingRule(
+    Operation* op, bool enableDynamicSliceCollectiveBroadcast);
+
 }  // namespace sdy
 }  // namespace mlir
 

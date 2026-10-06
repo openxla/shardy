@@ -918,8 +918,7 @@ struct InsertExplicitReshardsPass
 
       // NOTE: Creating a sharding rule requires data flow edges are present.
       OpShardingRuleAttr shardingRule =
-          getOrCreateShardingRule(op, /*conservativePropagation=*/false,
-                                  /*setShardingRuleOnOp=*/false);
+          getExportShardingRule(op, enableDynamicSliceCollectiveBroadcast);
 
       // TODO(b/434668939): Enable explicit reshards on custom sharding rules.
       if (!shardingRule || shardingRule.isCustom()) {

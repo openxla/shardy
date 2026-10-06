@@ -36,10 +36,13 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/axis_list_ref.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/utils.h"
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
 #include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
@@ -1003,6 +1006,49 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
   }
 
   return false;
+}
+
+OpShardingRuleAttr getExportShardingRule(
+    Operation* op, bool enableDynamicSliceCollectiveBroadcast) {
+  auto existingRule = op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr);
+  if (enableDynamicSliceCollectiveBroadcast &&
+      (!existingRule || !existingRule.isCustom())) {
+    if (auto dynamicSlice = dyn_cast<stablehlo::DynamicSliceOp>(op)) {
+      ArrayRef<int64_t> inShape = getTensorShape(dynamicSlice.getOperand());
+      ArrayRef<int64_t> outShape = getTensorShape(dynamicSlice.getResult());
+      int64_t numSlicedDims = 0;
+      int64_t slicedDim = -1;
+      for (auto [dim, inAndOutSize] :
+           llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
+        auto [inSize, outSize] = inAndOutSize;
+        if (inSize != outSize) {
+          numSlicedDims++;
+          slicedDim = dim;
+        }
+      }
+      // A size-1 slice along a single dimension is guaranteed to lie within a
+      // single shard (never straddling a shard boundary). Give the operand's
+      // sliced dimension a blocked `kPermutation` factor so
+      // `sdy-insert-explicit-reshards` does not eagerly replicate the operand
+      // via all-gather, deferring to `sdy-resolve-permutation-factors` to lower
+      // via `collective_broadcast` (or fall back to replication).
+      if (numSlicedDims == 1 && outShape[slicedDim] == 1 &&
+          !ShapedType::isDynamic(inShape[slicedDim])) {
+        return OpShardingRuleBuilder(dynamicSlice)
+            .addPointwiseIf(inShape,
+                            [&](int64_t dim) { return dim != slicedDim; })
+            .addFactorSameForAllOperands(slicedDim, inShape[slicedDim],
+                                         FactorType::kPermutation,
+                                         /*isBlocked=*/true)
+            .addFactorSameForAllResults(slicedDim, outShape[slicedDim],
+                                        FactorType::kNeedReplication,
+                                        /*isBlocked=*/true)
+            .build();
+      }
+    }
+  }
+  return getOrCreateShardingRule(op, /*conservativePropagation=*/false,
+                                 /*setShardingRuleOnOp=*/false);
 }
 
 }  // namespace sdy

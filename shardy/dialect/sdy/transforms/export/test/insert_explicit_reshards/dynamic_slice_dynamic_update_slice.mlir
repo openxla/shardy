@@ -1,4 +1,5 @@
-// RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true' | FileCheck %s
+// RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true' | FileCheck %s --check-prefixes=CHECK,DEFAULT
+// RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true enable-dynamic-slice-collective-broadcast=true' | FileCheck %s --check-prefixes=CHECK,BCAST
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
 
@@ -10,6 +11,18 @@ func.func @dynamic_slice(%arg0: tensor<32x4x8xf32> {sdy.sharding = #sdy.sharding
   // CHECK-NEXT: return %[[RESHARD2]]
   %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, %arg3, sizes = [32, 1, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {"y"}]>]>}: (tensor<32x4x8xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x1x2xf32>
   return %0 : tensor<32x1x2xf32>
+}
+
+// CHECK-LABEL: func @dynamic_slice_single_sliced_dim_size_one
+func.func @dynamic_slice_single_sliced_dim_size_one(%arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<i32>, %arg2: tensor<i32>) -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // DEFAULT-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh, [{}, {"x"}]> : tensor<8x4xf32>
+  // DEFAULT-NEXT: %[[DYNAMIC_SLICE:.*]] = stablehlo.dynamic_slice %[[RESHARD1]], %arg1, %arg2, sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>}
+  // DEFAULT-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[DYNAMIC_SLICE]] <@mesh, [{}, {}]> : tensor<1x4xf32>
+  // DEFAULT-NEXT: return %[[RESHARD2]]
+  // BCAST-NEXT: %[[DYNAMIC_SLICE:.*]] = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // BCAST-NEXT: return %[[DYNAMIC_SLICE]]
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, sizes = [1, 4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<8x4xf32>, tensor<i32>, tensor<i32>) -> tensor<1x4xf32>
+  return %0 : tensor<1x4xf32>
 }
 
 // CHECK-LABEL: func @dynamic_slice_input_output_same_sharding

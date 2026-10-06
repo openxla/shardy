@@ -19,6 +19,7 @@ set -e
 SRC=""
 TMP=""
 ENABLE_HALO_EXCHANGE=true
+ENABLE_DYNAMIC_SLICE_COLLECTIVE_BROADCAST=false
 # When replica_count=partition_count=1, the test use partition id.
 REPLICA_COUNT=1
 PARTITION_COUNT=1
@@ -30,6 +31,7 @@ for arg in "$@"; do
     --src=*)                  SRC="${arg#*=}" ;;
     --temp_dir=*)             TMP="${arg#*=}" ;;
     --enable_halo_exchange=*) ENABLE_HALO_EXCHANGE="${arg#*=}" ;;
+    --enable_dynamic_slice_collective_broadcast=*) ENABLE_DYNAMIC_SLICE_COLLECTIVE_BROADCAST="${arg#*=}" ;;
     --replica_count=*)        REPLICA_COUNT="${arg#*=}" ;;
     --partition_count=*)      PARTITION_COUNT="${arg#*=}" ;;
     --*)                      echo "Warning: Unknown flag '$arg'" >&2 ;;
@@ -58,8 +60,8 @@ STABLEHLO_TRANSLATE=${STABLEHLO_TRANSLATE:-stablehlo-translate}
 "$SPLIT_FILE" "$SRC" "$TMP"
 # Run the partitioner pipeline passes.
 "$SDY_OPT" "$TMP/part1.mlir" \
-  --sdy-insert-explicit-reshards="enable-full-version=true mark-partial-result-with-unreduced-axes=true" \
-  --sdy-resolve-permutation-factors="enable-halo-exchange=$ENABLE_HALO_EXCHANGE replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
+  --sdy-insert-explicit-reshards="enable-full-version=true mark-partial-result-with-unreduced-axes=true enable-dynamic-slice-collective-broadcast=$ENABLE_DYNAMIC_SLICE_COLLECTIVE_BROADCAST" \
+  --sdy-resolve-permutation-factors="enable-halo-exchange=$ENABLE_HALO_EXCHANGE enable-dynamic-slice-collective-broadcast=$ENABLE_DYNAMIC_SLICE_COLLECTIVE_BROADCAST replica-count=$REPLICA_COUNT partition-count=$PARTITION_COUNT" \
   --sdy-reshard-to-collectives \
   --sdy-optimize-collectives \
   --sdy-pad-for-divisibility \
