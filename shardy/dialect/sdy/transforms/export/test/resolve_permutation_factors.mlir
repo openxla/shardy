@@ -683,6 +683,16 @@ func.func @pad_sharded_indivisible_interior_low_and_high(
 // stablehlo.reshape tests
 //===----------------------------------------------------------------------===//
 
+// CHECK-LABEL: func @reshape_replicated_operand_missing_result_sharding(
+// CHECK-SAME:      %[[ARG0:.*]]: tensor<6xi32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}]>})
+func.func @reshape_replicated_operand_missing_result_sharding(%arg0: tensor<6xi32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{}]>}) -> tensor<2x3xi32> {
+  // CHECK-NEXT:     %[[RES:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<6xi32>) -> tensor<2x3xi32>
+  %0 = stablehlo.reshape %arg0 : (tensor<6xi32>) -> tensor<2x3xi32>
+
+  // CHECK-NEXT:     return %[[RES]]
+  return %0 : tensor<2x3xi32>
+}
+
 // CHECK-LABEL: func @reshape_1d_to_2d_non_divisible_comm_free(
 // CHECK-SAME:      %[[ARG0:.*]]: tensor<6xi32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>})
 func.func @reshape_1d_to_2d_non_divisible_comm_free(%arg0: tensor<6xi32> {sdy.sharding = #sdy.sharding<@mesh_a_4, [{"a"}]>}) -> tensor<1x6xi32> {
@@ -1793,3 +1803,4 @@ func.func @rng_bit_generator_non_32_64_bit_state_always_replicated(
   // CHECK-NEXT: return %[[OUT_STATE]], %[[OUT]] : tensor<2xui16>, tensor<8x16xf32>
   return %output_state, %output : tensor<2xui16>, tensor<8x16xf32>
 }
+

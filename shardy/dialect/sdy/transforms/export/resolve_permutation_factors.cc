@@ -1875,8 +1875,8 @@ LogicalResult handleReshapeOp(stablehlo::ReshapeOp reshapeOp,
   TensorShardingAttr inSharding = getSharding(operand);
   TensorShardingAttr outSharding = getSharding(reshapeOp.getResult());
   // Insert-explicit-reshard pass should have made sharding consistent.
-  SDY_CHECK((inSharding != nullptr) == (outSharding != nullptr));
-  if (!inSharding) {
+  SDY_CHECK(isFullyReplicated(inSharding) == isFullyReplicated(outSharding));
+  if (isFullyReplicated(inSharding)) {
     return success();
   }
 
