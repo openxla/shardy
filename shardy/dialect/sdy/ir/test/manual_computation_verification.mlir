@@ -294,3 +294,28 @@ func.func @ranked_sharding_on_token(%arg0: !stablehlo.token) -> !stablehlo.token
   } : (!stablehlo.token) -> !stablehlo.token
   return %0 : !stablehlo.token
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+func.func @scalar_region_arg(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op operand shape, corresponding sharding, and region operand shape at index 0 must match. Expected local shape 'tensor<8x32xf32>', actual local shape 'f32'}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a"} (%arg1: f32) {
+    %c = stablehlo.constant dense<0.000000e+00> : tensor<8x32xf32>
+    sdy.return %c : tensor<8x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+func.func @token_region_result(%arg0: tensor<16x32xf32>, %arg1: !stablehlo.token) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op result shape, corresponding sharding, and region result shape at index 0 must match. Expected local shape 'tensor<8x32xf32>', actual local shape '!stablehlo.token'}}
+  %0 = sdy.manual_computation(%arg0, %arg1) in_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a"} (%arg2: tensor<8x32xf32>, %arg3: !stablehlo.token) {
+    sdy.return %arg3 : !stablehlo.token
+  } : (tensor<16x32xf32>, !stablehlo.token) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
