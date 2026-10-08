@@ -376,7 +376,11 @@ def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors"
              "Number of partitions (model parallelism).">,
       Option<"rngBitGeneratorUnsafe", "rng-bit-generator-unsafe",
              "bool", /*default=*/"true",
-             "Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.">
+             "Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.">,
+      Option<"maxDynamicSliceCollectiveBroadcastPartitions",
+             "max-dynamic-slice-collective-broadcast-partitions",
+             "int64_t", /*default=*/"32",
+             "Maximum number of partitions to use collective-broadcast for dynamic-slice.">
     ];
 }
 

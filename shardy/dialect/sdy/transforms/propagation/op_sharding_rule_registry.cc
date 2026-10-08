@@ -32,6 +32,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -821,11 +822,43 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         return builder.build();
       })
       .Case([](stablehlo::DynamicSliceOp dynamicSlice) {
+        ArrayRef<int64_t> inShape = getTensorShape(dynamicSlice.getOperand());
+        ArrayRef<int64_t> outShape = getTensorShape(dynamicSlice.getResult());
+
+        int64_t numSlicedDims = 0;
+        int64_t slicedDim = -1;
+        for (auto [dim, inAndOutSize] :
+             llvm::enumerate(llvm::zip_equal(inShape, outShape))) {
+          auto [inSize, outSize] = inAndOutSize;
+          if (inSize != outSize) {
+            numSlicedDims++;
+            slicedDim = dim;
+          }
+        }
+
+        // A size-1 slice along a single dimension is guaranteed to lie within a
+        // single shard (never straddling a shard boundary). Give the operand's
+        // sliced dimension a blocked `kPermutation` factor so
+        // `sdy-insert-explicit-reshards` does not eagerly replicate the operand
+        // via all-gather, deferring to `sdy-resolve-permutation-factors` to
+        // lower via `collective_broadcast` (or fall back to replication).
+        if (numSlicedDims == 1 && outShape[slicedDim] == 1 &&
+            !ShapedType::isDynamic(inShape[slicedDim])) {
+          return OpShardingRuleBuilder(dynamicSlice)
+              .addPointwiseIf(inShape,
+                              [&](int64_t dim) { return dim != slicedDim; })
+              .addFactorSameForAllOperands(slicedDim, inShape[slicedDim],
+                                           FactorType::kPermutation,
+                                           /*isBlocked=*/true)
+              .addFactorSameForAllResults(slicedDim, outShape[slicedDim],
+                                          FactorType::kNeedReplication,
+                                          /*isBlocked=*/true)
+              .build();
+        }
+
         return OpShardingRuleBuilder(dynamicSlice)
             .addPointwiseWithDiffTypeForMismatch(
-                getTensorShape(dynamicSlice.getOperand()),
-                getTensorShape(dynamicSlice.getResult()),
-                FactorType::kNeedReplication,
+                inShape, outShape, FactorType::kNeedReplication,
                 /*mismatchFactorIsBlocked=*/true)
             .build();
       })

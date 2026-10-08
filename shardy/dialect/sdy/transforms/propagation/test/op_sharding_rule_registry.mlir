@@ -618,6 +618,20 @@ func.func @dynamic_slice(%arg0: tensor<32x4x8xf32>, %arg1: tensor<i32>, %arg2: t
   return %0 : tensor<32x1x2xf32>
 }
 
+// CHECK-LABEL: func @dynamic_slice_single_sliced_dim_size_one
+func.func @dynamic_slice_single_sliced_dim_size_one(%arg0: tensor<32x4x8xf32>, %arg1: tensor<i32>, %arg2: tensor<i32>, %arg3: tensor<i32>) -> tensor<32x1x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, k, j], [], [], [])->([i, l, j]) {i=32, j=8, k=4, l=1} need_replication={l} permutation={k} blocked_propagation={k, l}>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, %arg3, sizes = [32, 1, 8] : (tensor<32x4x8xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x1x8xf32>
+  return %0 : tensor<32x1x8xf32>
+}
+
+// CHECK-LABEL: func @dynamic_slice_single_sliced_dim_size_gt_one
+func.func @dynamic_slice_single_sliced_dim_size_gt_one(%arg0: tensor<32x4x8xf32>, %arg1: tensor<i32>, %arg2: tensor<i32>, %arg3: tensor<i32>) -> tensor<32x2x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [], [], [])->([i, j, k]) {i=32, j=4, k=8} need_replication={j} blocked_propagation={j}>
+  %0 = stablehlo.dynamic_slice %arg0, %arg1, %arg2, %arg3, sizes = [32, 2, 8] : (tensor<32x4x8xf32>, tensor<i32>, tensor<i32>, tensor<i32>) -> tensor<32x2x8xf32>
+  return %0 : tensor<32x2x8xf32>
+}
+
 // Slicing dimensions {j, k, l, m} are marked as permutation factors, while
 // the non-sliced dimension {i} is shared across operand, update, and result.
 // CHECK-LABEL: func @dynamic_update_slice
