@@ -1,4 +1,5 @@
 // RUN: sdy_opt %s -split-input-file -sdy-basic-propagate 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-basic-propagate="debug-propagation-edge-sharding=true" -sdy-remove-propagation-debug-info 2>&1 | FileCheck %s
 
 // Propagation tests for ops with data-flow edges like CaseOp and WhileOp
 

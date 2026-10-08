@@ -1,4 +1,5 @@
 // RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-basic-propagate -sdy-sink-data-flow-edges 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-add-data-flow-edges -sdy-basic-propagate="debug-sharding-origins=true debug-propagation-edge-sharding=true" -sdy-sink-data-flow-edges="sink-debug-sharding-origins=true sink-debug-propagation-edge-sharding=true" -sdy-remove-propagation-debug-info 2>&1 | FileCheck %s
 
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 
