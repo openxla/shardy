@@ -400,3 +400,58 @@ func.func @chain_on_block_arg_after_other_user(%arg0: tensor<8x8xf32>, %arg1: te
   %4 = stablehlo.multiply %3, %3 : tensor<8x8xf32>
   return %1, %3, %4 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
+
+// CHECK-LABEL: func.func @while_loop_with_multiple_results(
+// CHECK-SAME:    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:    %arg1: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+// CHECK-SAME:    -> (tensor<8x4xf32> {sdy.propagation_edges = #sdy.propagation_edges<[{step-0 = [{"b" = result-0 -> [operand-0]}]}, {step-4 = [{"a" = operand-0 -> [result-0]}]}]>,
+// CHECK-SAME:                         sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:        tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>}) {
+func.func @while_loop_with_multiple_results(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+    %arg1: tensor<8x4xf32>)
+    -> (tensor<8x4xf32>, tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>}) {
+  // CHECK-NEXT: %[[C:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK-NEXT: %[[C_0:.*]] = stablehlo.constant dense<1> : tensor<i32>
+  // CHECK-NEXT: %[[C_1:.*]] = stablehlo.constant dense<32> : tensor<i32>
+  // CHECK-NEXT: %[[WHILE:.*]]:3 = stablehlo.while(%iterArg = %arg0, %iterArg_2 = %arg1, %iterArg_3 = %[[C]])
+  // CHECK-SAME:   : tensor<8x4xf32>, tensor<8x4xf32>, tensor<i32> attributes {
+  // CHECK-SAME:   sdy.block_arg_propagation_edges = [],
+  // CHECK-SAME:   sdy.result_propagation_edges = [
+  // CHECK-SAME:     #sdy.propagation_edges<[{step-2 = [{"a" = operand-0 -> [operand-1, result-0]}]}]>,
+  // CHECK-SAME:     #sdy.propagation_edges<[{step-3 = [{"b" = operand-1 -> [operand-0]}]}]>,
+  // CHECK-SAME:     #sdy.propagation_edges<[]>],
+  // CHECK-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>, <@mesh, [{?}, {"b", ?}]>, <@mesh, []>]>}
+  // CHECK-NEXT: cond {
+  // CHECK-NEXT:   %[[CMP:.*]] = stablehlo.compare LT, %iterArg_3, %[[C_1]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
+  // CHECK-NEXT:   stablehlo.return %[[CMP]] : tensor<i1>
+  // CHECK-NEXT: } do {
+  // CHECK-NEXT:   %[[ADD_I:.*]] = stablehlo.add %iterArg_3, %[[C_0]] : tensor<i32>
+  // CHECK-NEXT:   %[[ADD_0:.*]] = stablehlo.add %iterArg, %iterArg {
+  // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<8x4xf32>
+  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %iterArg_2, %iterArg_2 {
+  // CHECK-SAME:     sdy.propagation_edges = #sdy.propagation_edges<[{step-1 = [{"b" = operand-0 -> [result-0]}]}]>,
+  // CHECK-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}]>]>} : tensor<8x4xf32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD_0]], %[[ADD_1]], %[[ADD_I]] : tensor<8x4xf32>, tensor<8x4xf32>, tensor<i32>
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[WHILE]]#0, %[[WHILE]]#1 : tensor<8x4xf32>, tensor<8x4xf32>
+  %c = stablehlo.constant dense<0> : tensor<i32>
+  %c_0 = stablehlo.constant dense<1> : tensor<i32>
+  %c_1 = stablehlo.constant dense<32> : tensor<i32>
+  %0:3 = stablehlo.while(%iterArg = %arg0, %iterArg_2 = %arg1, %iterArg_3 = %c) : tensor<8x4xf32>, tensor<8x4xf32>, tensor<i32>
+    cond {
+    %1 = stablehlo.compare  LT, %iterArg_3, %c_1 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    stablehlo.return %1 : tensor<i1>
+  } do {
+    %1 = stablehlo.add %iterArg_3, %c_0 : tensor<i32>
+    %2 = stablehlo.add %iterArg, %iterArg : tensor<8x4xf32>
+    %3 = stablehlo.add %iterArg_2, %iterArg_2 : tensor<8x4xf32>
+    stablehlo.return %2, %3, %1 : tensor<8x4xf32>, tensor<8x4xf32>, tensor<i32>
+  }
+  return %0#0, %0#1 : tensor<8x4xf32>, tensor<8x4xf32>
+}
+
