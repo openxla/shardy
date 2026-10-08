@@ -235,7 +235,8 @@ class PaddedTypeConverter : public TypeConverter {
 // Returns true if the operation has custom padding handling implemented in
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
-  return isa<stablehlo::SliceOp, stablehlo::DotGeneralOp, stablehlo::PadOp,
+  return isa<sdy::ConstantOp, stablehlo::ConstantOp, stablehlo::SliceOp,
+             stablehlo::DotGeneralOp, stablehlo::PadOp,
              stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
              stablehlo::GatherOp, stablehlo::ReduceOp>(op);
 }
@@ -697,6 +698,42 @@ class AllGatherOpPattern : public OpConversionPattern<sdy::AllGatherOp> {
     }
 
     rewriter.replaceOp(op, replacements);
+    return success();
+  }
+
+ private:
+  PaddingCache& cache;
+};
+
+template <typename OpTy>
+class ConstantOpPattern : public OpConversionPattern<OpTy> {
+ public:
+  ConstantOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                    PaddingCache& cache)
+      : OpConversionPattern<OpTy>(converter, ctx), cache(cache) {}
+
+  LogicalResult matchAndRewrite(
+      OpTy op, typename OpTy::Adaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(this->getTypeConverter());
+    Value result = op.getResult();
+    auto origRanked = cast<RankedTensorType>(result.getType());
+    TensorShardingAttr outSharding = getSharding(result);
+    auto paddedRanked = cast<RankedTensorType>(getDivisiblePaddedType(
+        origRanked, outSharding, converter->getSymbolTable()));
+    SDY_CHECK(origRanked != paddedRanked);
+    ElementsAttr valueAttr = op.getValue();
+    ElementsAttr paddedAttr =
+        padElementsAttr(valueAttr, origRanked, paddedRanked);
+    SDY_CHECK(paddedAttr && paddedAttr.getType() == paddedRanked);
+    auto newOp = OpTy::create(rewriter, op.getLoc(), paddedRanked, paddedAttr);
+    newOp->setAttrs(op->getAttrs());
+    newOp.setValueAttr(paddedAttr);
+    if (!valueAttr.isSplat()) {
+      cache.setPadding(newOp.getResult(), PaddingValueKind::kZero);
+    }
+    rewriter.replaceOp(op, newOp.getResult());
     return success();
   }
 
@@ -1373,9 +1410,12 @@ struct PadForDivisibilityPass
         typeConverter, &getContext());
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
+    // TODO(b/553579414): remove the pattern for stablehlo.ConstantOp.
     patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
                  StablehloConvolutionOpPattern, StablehloReduceOpPattern,
-                 AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern>(
+                 AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern,
+                 ConstantOpPattern<sdy::ConstantOp>,
+                 ConstantOpPattern<stablehlo::ConstantOp>>(
         typeConverter, &getContext(), paddingCache);
     ConversionTarget target(getContext());
 
@@ -1459,7 +1499,8 @@ struct PadForDivisibilityPass
         return llvm::all_of(op->getOperands(), isLegalValue) &&
                llvm::all_of(op->getResults(), isLegalValue);
       }
-      if (isa<AllReduceOp, ShardedToUnreducedOp, ReplicatedToUnreducedOp>(op)) {
+      if (isa<AllReduceOp, CollectivePermuteOp, ConstantOp,
+              ShardedToUnreducedOp, ReplicatedToUnreducedOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue) &&
                llvm::all_of(op->getResults(), isLegalValue);
       }
