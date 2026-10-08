@@ -510,7 +510,7 @@ func.func @sharding_bound_manual_computation(%arg0: tensor<16x32xf32>) -> tensor
 sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 func.func @maximal_sharding_with_dim_shardings(%arg0: tensor<8x8xf32>) -> tuple<tensor<8x8xf32>> {
-  // expected-error @+1 {{a maximal sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
+  // expected-error @+1 {{a single-device sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
   %0 = stablehlo.custom_call @sdy_testonly(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, [{}, {}]>]>} : (tensor<8x8xf32>) -> tuple<tensor<8x8xf32>>
   return %0 : tuple<tensor<8x8xf32>>
 }
@@ -520,7 +520,7 @@ func.func @maximal_sharding_with_dim_shardings(%arg0: tensor<8x8xf32>) -> tuple<
 sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 func.func @maximal_sharding_no_results_with_dim_shardings(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // expected-error @+1 {{a maximal sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
+  // expected-error @+1 {{a single-device sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
   stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, [{}]>]>} : (tensor<8x8xf32>) -> ()
   return %arg0 : tensor<8x8xf32>
 }
@@ -530,7 +530,7 @@ func.func @maximal_sharding_no_results_with_dim_shardings(%arg0: tensor<8x8xf32>
 sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 func.func @maximal_sharding_with_replicated_axes(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // expected-error @+1 {{a maximal sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
+  // expected-error @+1 {{a single-device sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
   stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, [], replicated={"a"}>]>} : (tensor<8x8xf32>) -> ()
   return %arg0 : tensor<8x8xf32>
 }
@@ -540,7 +540,7 @@ func.func @maximal_sharding_with_replicated_axes(%arg0: tensor<8x8xf32>) -> tens
 sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 func.func @maximal_sharding_with_unreduced_axes(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // expected-error @+1 {{a maximal sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
+  // expected-error @+1 {{a single-device sharding can only have a sharding with rank 0 and no replicated or unreduced axes}}
   stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, [], unreduced={"a"}>]>} : (tensor<8x8xf32>) -> ()
   return %arg0 : tensor<8x8xf32>
 }

@@ -1248,7 +1248,8 @@ device ordering.
 If the list of axes is empty
   - If the `device_ids` is not provided, it is an empty mesh.
   - If the `device_ids` is provided, it must be a single non-negative
-    integer, we call it a **maximal-sharding mesh**.
+    integer, we call it a **single-device mesh** (historically also called a
+    **maximal-sharding mesh**).
 
 If the list of axes is provided
   - If a device ID list is specified, the product of the axis sizes should
@@ -1257,14 +1258,14 @@ If the list of axes is provided
     iota(product(axes)). For simplicity, we also disallow specifying a
     device ID list that is the same as iota(product(axes)); in this case, a
     device ID list shouldn't be specified.
-  - It is not a maximal-sharding mesh even if the total size of axes is 1.
+  - It is not a single-device mesh even if the total size of axes is 1.
 
 Here are some examples of meshes:
 
 - An empty mesh represents a placeholder mesh that can be replaced during
   propagation: <[]>
 - A mesh without axes list and a single non-negative device ID, which is a
-  maximal-sharding mesh: <[], device_ids=[3]>
+  single-device mesh: <[], device_ids=[3]>
 - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
 - A mesh with two axes and explicit device IDs specifying the device
   ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
@@ -1272,7 +1273,7 @@ Here are some examples of meshes:
 **Constraints:**
 - Elements in `device_ids` should be non-negative.
 - If `axes` is empty, the size of `device_ids` can be 0 (empty mesh) or 1
-  (maximal-sharding mesh).
+  (single-device mesh).
 - If `axes` is not empty,
     - Elements in `axes` must not have duplicate names.
     - If `device_ids` is specified, the original `device_ids` is not
@@ -1284,7 +1285,7 @@ Here are some examples of meshes:
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
 | axes | `::llvm::ArrayRef<MeshAxisAttr>` | mesh axes |
-| device_ids | `::llvm::ArrayRef<int64_t>` | explicit device ordering or maximal device id |
+| device_ids | `::llvm::ArrayRef<int64_t>` | explicit device ordering or single device id |
 
 ### MeshAxisAttr
 

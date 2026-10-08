@@ -57,7 +57,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     If the list of axes is empty
       - If the `device_ids` is not provided, it is an empty mesh.
       - If the `device_ids` is provided, it must be a single non-negative
-        integer, we call it a **maximal-sharding mesh**.
+        integer, we call it a **single-device mesh**.
 
     If the list of axes is provided
       - If a device ID list is specified, the product of the axis sizes should
@@ -66,14 +66,14 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
         iota(product(axes)). For simplicity, we also disallow specifying a
         device ID list that is the same as iota(product(axes)); in this case, a
         device ID list shouldn't be specified.
-      - It is not a maximal-sharding mesh even if the total size of axes is 1.
+      - It is not a single-device mesh even if the total size of axes is 1.
 
     Here are some examples of meshes:
 
     - An empty mesh represents a placeholder mesh that can be replaced during
       propagation: <[]>
     - A mesh without axes list and a single non-negative device ID, which is a
-      maximal-sharding mesh: <[], device_ids=[3]>
+      single-device mesh: <[], device_ids=[3]>
     - A mesh with two axes and implicit device IDs iota(6): <["a"=2, "b"=3]>
     - A mesh with two axes and explicit device IDs specifying the device
       ordering: <["a"=3, "b"=2], device_ids=[0, 2, 4, 1, 3, 5]>
@@ -81,7 +81,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     **Constraints:**
     - Elements in `device_ids` should be non-negative.
     - If `axes` is empty, the size of `device_ids` can be 0 (empty mesh) or 1
-      (maximal-sharding mesh).
+      (single-device mesh).
     - If `axes` is not empty,
         - Elements in `axes` must not have duplicate names.
         - If `device_ids` is specified, the original `device_ids` is not
@@ -91,7 +91,7 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
   let parameters = (ins
       OptionalArrayRefParameter<"MeshAxisAttr", "mesh axes">:$axes,
       OptionalArrayRefParameter<"int64_t",
-          "explicit device ordering or maximal device id">:$device_ids
+          "explicit device ordering or single device id">:$device_ids
   );
 
   let assemblyFormat = [{
@@ -132,27 +132,37 @@ def Sdy_Mesh : AttrDef<Sdy_Dialect, "Mesh"> {
     // number of devices.
     int64_t getTotalSize() const;
 
-    // Returns whether this mesh is a maximal-sharding mesh
+    // Returns whether this mesh is a single-device mesh.
     //
-    // A maximal-sharding mesh is a mesh with an empty axis list and a single
+    // A single-device mesh is a mesh with an empty axis list and a single
     // device ID.
-    bool isMaximal() const;
+    bool isSingleDevice() const;
 
-    // Returns whether this mesh is a maximal-sharding mesh with `deviceId`.
+    // Returns whether this mesh is a single-device mesh with `deviceId`.
     //
-    // A maximal-sharding mesh is a mesh with an empty axis list and a single
+    // A single-device mesh is a mesh with an empty axis list and a single
     // device ID.
-    bool isMaximal(int64_t deviceId) const;
+    bool isSingleDevice(int64_t deviceId) const;
 
-    // Creates a maximal mesh with the given `deviceId`.
-    static MeshAttr getMaximal(MLIRContext* ctx, int64_t deviceId);
+    // Creates a single-device mesh with the given `deviceId`.
+    static MeshAttr getSingleDevice(MLIRContext* ctx, int64_t deviceId);
 
-    // If this mesh is a maximal-sharding mesh, returns the maximal device ID,
+    // If this mesh is a single-device mesh, returns the single device ID,
     // otherwise, returns std::nullopt.
     //
-    // A maximal-sharding mesh is a mesh with an empty axis list and a single
+    // A single-device mesh is a mesh with an empty axis list and a single
     // device ID.
-    std::optional<int64_t> getMaximalDeviceId() const;
+    std::optional<int64_t> getSingleDeviceId() const;
+
+    // TODO(b/391545244): Deprecated aliases for backwards compatibility. Remove once all callers are migrated.
+    bool isMaximal() const { return isSingleDevice(); }
+    bool isMaximal(int64_t deviceId) const { return isSingleDevice(deviceId); }
+    static MeshAttr getMaximal(MLIRContext* ctx, int64_t deviceId) {
+      return getSingleDevice(ctx, deviceId);
+    }
+    std::optional<int64_t> getMaximalDeviceId() const {
+      return getSingleDeviceId();
+    }
 
     // Returns a comparator that orders axis names w.r.t. their order in this
     // mesh.

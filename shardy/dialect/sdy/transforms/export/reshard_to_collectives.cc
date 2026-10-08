@@ -1254,14 +1254,14 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
         bypassedInput, outSharding.getMeshOrRef());
     if (inSharding) {
       MeshAttr inMesh = inSharding.getMesh(op);
-      if (inMesh && inMesh.isMaximal()) {
+      if (inMesh && inMesh.isSingleDevice()) {
         return rewriter.notifyMatchFailure(
             op, [](Diagnostic& diag) { diag << "Single device inSharding"; });
       }
     }
     if (outSharding) {
       MeshAttr outMesh = outSharding.getMesh(op);
-      if (outMesh && outMesh.isMaximal()) {
+      if (outMesh && outMesh.isSingleDevice()) {
         return rewriter.notifyMatchFailure(
             op, [](Diagnostic& diag) { diag << "Single device outSharding"; });
       }
@@ -1323,13 +1323,13 @@ struct ReshardToCollectivesPass
       }
       if (inSharding) {
         MeshAttr inMesh = inSharding.getMesh(op);
-        if (inMesh && inMesh.isMaximal()) {
+        if (inMesh && inMesh.isSingleDevice()) {
           return true;
         }
       }
       if (outSharding) {
         MeshAttr outMesh = outSharding.getMesh(op);
-        if (outMesh && outMesh.isMaximal()) {
+        if (outMesh && outMesh.isSingleDevice()) {
           return true;
         }
       }

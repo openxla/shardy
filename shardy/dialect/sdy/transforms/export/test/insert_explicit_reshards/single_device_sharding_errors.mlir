@@ -2,7 +2,7 @@
 
 sdy.mesh @single_dev_0 = <[], device_ids=[0]>
 
-// expected-error @+1 {{function argument 0 cannot have a single-device (maximal) sharding attribute}}
+// expected-error @+1 {{function argument 0 cannot have a single-device sharding attribute}}
 func.func @single_device_argument(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@single_dev_0, []>}) -> tensor<8x16xf32> {
   return %arg0 : tensor<8x16xf32>
 }
@@ -11,7 +11,7 @@ func.func @single_device_argument(%arg0: tensor<8x16xf32> {sdy.sharding = #sdy.s
 
 sdy.mesh @single_dev_0 = <[], device_ids=[0]>
 
-// expected-error @+1 {{function result 0 cannot have a single-device (maximal) sharding attribute}}
+// expected-error @+1 {{function result 0 cannot have a single-device sharding attribute}}
 func.func @single_device_result(%arg0: tensor<8x16xf32>) -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@single_dev_0, []>}) {
   return %arg0 : tensor<8x16xf32>
 }
