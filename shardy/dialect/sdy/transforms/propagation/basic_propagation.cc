@@ -313,7 +313,7 @@ LogicalResult propagateTensorShardings(
     PropagationDirectionAlongFactor directionAlongFactor,
     const FactorPropagation& factorPropagation, bool conservativePropagation,
     Operation* op, const SymbolTable& symbolTable, PatternRewriter* rewriter,
-    ShardingGroupMap shardingGroupMap) {
+    const ShardingGroupMap& shardingGroupMap) {
   std::optional<StringRef> meshName =
       getCommonMeshName(operandsParams.shardings, resultsParams.shardings,
                         symbolTable, /*ignoreDeviceIds=*/false);
