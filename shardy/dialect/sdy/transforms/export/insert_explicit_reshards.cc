@@ -141,7 +141,7 @@ void insertExplicitReshardsOnCallOp(CallOp callOp, IRRewriter& rewriter,
         callOp.getNumOperands(), symbolTable,
         [&](int64_t i) { return getSharding(callOp.getOperand(i)); });
     // Return without inserting reshards as neither func arguments nor call
-    // operands have a sharding with non-single-device mesh.
+    // operands have a sharding with non-maximal mesh.
     if (!meshOrRef) {
       return;
     }
@@ -336,7 +336,7 @@ MeshOp getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
 // Returns the most common mesh. Returns nullopt if any of the following holds:
 //  1. There is no tensor with a sharding attribute.
 //  2. Tensors have different meshes (ignoring device ids)
-//  3. Some tensors have single-device meshes.
+//  3. Some tensors have maximal meshes.
 std::optional<MeshOp> getMesh(ArrayRef<TensorShardingAttr> inShardings,
                               ArrayRef<TensorShardingAttr> outShardings,
                               const SymbolTable& symbolTable) {
@@ -351,7 +351,7 @@ std::optional<MeshOp> getMesh(ArrayRef<TensorShardingAttr> inShardings,
   }
   MeshOp meshOp = getMeshOp(symbolTable, *meshName);
   assert(meshOp && "unknown mesh");
-  if (meshOp.getMesh().isSingleDevice()) {
+  if (meshOp.getMesh().isMaximal()) {
     return std::nullopt;
   }
   // Return the mesh with the most common device id.
@@ -759,7 +759,7 @@ void insertSingleDeviceResultReshards(Operation* op,
         rewriter.getContext());
     MeshOp targetMeshOp =
         getMeshOpOrDefault(targetSharding, symbolTable, nullptr);
-    SDY_CHECK(targetMeshOp && !targetMeshOp.getMesh().isSingleDevice());
+    SDY_CHECK(targetMeshOp && !targetMeshOp.getMesh().isMaximal());
 
     TensorShardingAttr replicatedSharding =
         TensorShardingAttr::getFullyReplicated(
@@ -855,7 +855,7 @@ struct InsertExplicitReshardsPass
       if (isSingleDeviceSharding(sharding, symbolTable)) {
         return funcOp.emitOpError("function ")
                << type << " " << index
-               << " cannot have a single-device sharding attribute";
+               << " cannot have a single-device (maximal) sharding attribute";
       }
       return success();
     };

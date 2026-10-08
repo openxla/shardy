@@ -1410,7 +1410,7 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
 
   SymbolTable& symbolTable = state.symbolTable;
   MeshAttr mesh = inSharding.getMesh(symbolTable);
-  if (!mesh || mesh.isSingleDevice()) {
+  if (!mesh || mesh.isMaximal()) {
     return success();
   }
 
@@ -1995,7 +1995,7 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
   }
 
   MeshAttr mesh = inSharding.getMesh(state.symbolTable);
-  if (!mesh || mesh.isSingleDevice()) {
+  if (!mesh || mesh.isMaximal()) {
     return success();
   }
 
@@ -2189,7 +2189,7 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   }
 
   MeshAttr mesh = inSharding.getMesh(symbolTable);
-  if (!mesh || mesh.isSingleDevice()) {
+  if (!mesh || mesh.isMaximal()) {
     return success();
   }
 
@@ -2377,7 +2377,7 @@ void resolvePermutationFactorsViaReplication(Operation* op,
     return;
   }
   MeshOp meshOp = getMeshOp(state.symbolTable, *meshName);
-  if (!meshOp || meshOp.getMesh().isSingleDevice()) {
+  if (!meshOp || meshOp.getMesh().isMaximal()) {
     return;
   }
 

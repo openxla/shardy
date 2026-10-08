@@ -265,20 +265,20 @@ int64_t MeshAttr::getAxisSize(StringRef axisName) const {
 
 int64_t MeshAttr::getTotalSize() const { return getTotalAxesSize(getAxes()); }
 
-bool MeshAttr::isSingleDevice(int64_t deviceId) const {
-  return isSingleDevice() && getSingleDeviceId() == deviceId;
+bool MeshAttr::isMaximal(int64_t deviceId) const {
+  return isMaximal() && getMaximalDeviceId() == deviceId;
 }
 
-bool MeshAttr::isSingleDevice() const {
+bool MeshAttr::isMaximal() const {
   return getAxes().empty() && getDeviceIds().size() == 1;
 }
 
-MeshAttr MeshAttr::getSingleDevice(MLIRContext* ctx, int64_t deviceId) {
+MeshAttr MeshAttr::getMaximal(MLIRContext* ctx, int64_t deviceId) {
   return MeshAttr::get(ctx, /*axes=*/{}, deviceId);
 }
 
-std::optional<int64_t> MeshAttr::getSingleDeviceId() const {
-  if (isSingleDevice()) {
+std::optional<int64_t> MeshAttr::getMaximalDeviceId() const {
+  if (isMaximal()) {
     return getDeviceIds().front();
   }
   return std::nullopt;
@@ -319,7 +319,7 @@ bool MeshAttr::equals(MeshAttr other, const bool ignoreDeviceIds) const {
   if (!ignoreDeviceIds) {
     return *this == other;
   }
-  if (this->isSingleDevice() != other.isSingleDevice()) {
+  if (this->isMaximal() != other.isMaximal()) {
     return false;
   }
   return this->getAxes() == other.getAxes();

@@ -100,7 +100,7 @@ class GenerateSdyMeshesFromTopologyPass
       if (sharding.isFullyReplicated()) {
         sdy::MeshOp mesh_op =
             symbol_table.lookup<sdy::MeshOp>(sharding.getMeshName());
-        if (mesh_op.getMesh().empty() || mesh_op.getMesh().isSingleDevice()) {
+        if (mesh_op.getMesh().empty() || mesh_op.getMesh().isMaximal()) {
           return sharding;
         }
         return sdy::TensorShardingAttr::get(
@@ -136,9 +136,9 @@ class GenerateSdyMeshesFromTopologyPass
     });
 
     for (StringRef mesh_name : old_meshes) {
-      // TODO(petebu): Find better way to handle empty/single-device meshes.
+      // TODO(petebu): Find better way to handle empty/maximal meshes.
       auto mesh_op = symbol_table.lookup<sdy::MeshOp>(mesh_name);
-      if (mesh_op.getMesh().empty() || mesh_op.getMesh().isSingleDevice()) {
+      if (mesh_op.getMesh().empty() || mesh_op.getMesh().isMaximal()) {
         continue;
       }
       symbol_table.erase(symbol_table.lookup<sdy::MeshOp>(mesh_name));
