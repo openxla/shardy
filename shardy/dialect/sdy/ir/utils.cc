@@ -255,7 +255,7 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
            operandShardings, resultsShardings)) {
-    if (!sharding) {
+    if (!sharding || sharding.getMeshOrRef() == meshOrRef) {
       continue;
     }
     MeshAttr otherMesh = sharding.getMesh(symbolTable);
