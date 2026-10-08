@@ -246,6 +246,11 @@ bool updateTensorSharding(Value modifiedValue, const SymbolTable& symbolTable,
     if (groupValue == modifiedValue) {
       continue;
     }
+    TensorShardingAttr oldGroupSharding = getSharding(groupValue);
+    if ((!oldGroupSharding && newSharding.emptyAxes()) ||
+        newSharding == oldGroupSharding) {
+      continue;
+    }
     setSharding(groupValue, newSharding);
     if (params.notifyOpModified) {
       notifyShardingModified(groupValue, symbolTable, userMap,
@@ -314,7 +319,7 @@ LogicalResult propagateTensorShardings(
     PropagationDirectionAlongFactor directionAlongFactor,
     const FactorPropagation& factorPropagation, bool conservativePropagation,
     Operation* op, const SymbolTable& symbolTable, PatternRewriter* rewriter,
-    ShardingGroupMap shardingGroupMap) {
+    const ShardingGroupMap& shardingGroupMap) {
   std::optional<StringRef> meshName =
       getCommonMeshName(operandsParams.shardings, resultsParams.shardings,
                         symbolTable, /*ignoreDeviceIds=*/false);
@@ -328,7 +333,7 @@ LogicalResult propagateTensorShardings(
     }
     return failure();
   }
-  MeshAttr mesh = getMeshAttr(op, meshName.value());
+  MeshAttr mesh = getMeshAttr(symbolTable, meshName.value());
   SDY_CHECK(mesh) << "unknown mesh: " << std::string_view(meshName.value());
   if (mesh.isSingleDevice()) {
     // Single-device meshes and shardings are usually a placeholder for special
