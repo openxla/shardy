@@ -557,7 +557,8 @@ class GenericOpPattern : public ConversionPattern {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
          !isa<func::CallOp, func::ReturnOp, sdy::ReturnOp, sdy::AllReduceOp,
-              sdy::ShardedToUnreducedOp, sdy::ReplicatedToUnreducedOp>(op)) ||
+              sdy::CollectivePermuteOp, sdy::ShardedToUnreducedOp,
+              sdy::ReplicatedToUnreducedOp>(op)) ||
         hasCustomPadHandling(op)) {
       return failure();
     }
