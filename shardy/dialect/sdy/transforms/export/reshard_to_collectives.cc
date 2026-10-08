@@ -29,6 +29,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -96,10 +97,16 @@ AxisList concatAxisLists(MutableArrayRef<AxisList> axisLists) {
   return result;
 }
 
-// Remove the common prefix of `inAxesPerDim` and `outAxesPerDim`.
+// Remove the common prefix of `inAxesPerDim` and `outAxesPerDim` for dimensions
+// that do not need to be unsharded first.
 void removeCommonPrefix(SmallVector<AxisList>& inAxesPerDim,
-                        SmallVector<AxisList>& outAxesPerDim) {
-  for (auto [inAxes, outAxes] : llvm::zip_equal(inAxesPerDim, outAxesPerDim)) {
+                        SmallVector<AxisList>& outAxesPerDim,
+                        ArrayRef<bool> dimsToUnshard) {
+  for (auto [inAxes, outAxes, unshardDim] :
+       llvm::zip_equal(inAxesPerDim, outAxesPerDim, dimsToUnshard)) {
+    if (unshardDim) {
+      continue;
+    }
     while (!inAxes.empty() && !outAxes.empty() &&
            inAxes.front() == outAxes.front()) {
       inAxes.pop_front();
@@ -195,11 +202,16 @@ struct AllToAllInfo {
 // We define the current state of the transformation as follows:
 //
 // - `inAxesPerDim` - the axes in the current sharding per dimension, such that
-//   the common prefix with the output sharding is removed.
+//   the common prefix with the output sharding is removed (unless the
+//   dimension is in `dimsToUnshard`).
 // - `outAxesPerDim` - the axes in the output sharding per dimension, such that
-//   the common prefix with the current sharding is removed.
+//   the common prefix with the current sharding is removed (unless the
+//   dimension is in `dimsToUnshard`).
 // - `currentAxesPerDim` - the axes in the current sharding, including the
 //   common prefix with the output sharding.
+// - `dimsToUnshard` - per-dimension boolean indicating whether a dimension has
+//   different padded sizes in the input and output shardings and must first be
+//   completely unsharded before acquiring its output sharding.
 //
 // These invariants are maintained throughout the algorithm, and specifically
 // after each collective insertion.
@@ -233,21 +245,39 @@ class CollectiveInserter {
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
         currentAxesPerDim(getAxesPerDim<SmallVector<AxisRefAttr>>(inSharding)),
         capacityPerDim(inSharding.getRank(), 1),
-        collectiveAxesPerDim(inSharding.getRank()) {
+        collectiveAxesPerDim(inSharding.getRank()),
+        dimsToUnshard(inSharding.getRank(), false) {
     // Unreduced axes in the input and output sharding must match, given we
     // insert an all-reduce if an unreduced axis becomes replicated/sharded, and
     // never insert a reshard that goes from replicated/sharded to unreduced.
     assert(inSharding.getUnreducedAxes() == outSharding.getUnreducedAxes());
 
+    // If a dimension is sharded in both the input and output shardings with
+    // different padded sizes, it must first be unsharded so that downstream
+    // passes can pad or trim the dimension while it is unsharded.
+    ArrayRef<int64_t> shape = getTensorShape(result);
+    for (int64_t dim = 0; dim < getRank(); ++dim) {
+      int64_t dimSize = shape[dim];
+      int64_t inShardedSize =
+          inSharding.getDimSharding(dim).getShardedSize(mesh);
+      int64_t outShardedSize =
+          outSharding.getDimSharding(dim).getShardedSize(mesh);
+      if (dimSize > 0 && inShardedSize > 1 && outShardedSize > 1 &&
+          llvm::alignTo(dimSize, inShardedSize) !=
+              llvm::alignTo(dimSize, outShardedSize)) {
+        dimsToUnshard[dim] = true;
+      }
+    }
+
     // We align sub-axes between the input and output axes, so that we can treat
     // sub-axes like full axes and assume any two sub-axes that overlap are also
     // equal, which allows using them as keys in a hash map.
     alignSubAxesByDecomposition(inAxesPerDim, outAxesPerDim, mesh);
-    // We remove the common prefix of `inAxesPerDim` and `outAxesPerDim`, since
-    // those axes stay exactly the same during the reshard. We are left with
-    // `inAxesPerDim` and `outAxesPerDim` that need to become empty, via a
-    // sequence of collectives.
-    removeCommonPrefix(inAxesPerDim, outAxesPerDim);
+    // We remove the common prefix of `inAxesPerDim` and `outAxesPerDim` (except
+    // on dimensions in `dimsToUnshard`), since those axes stay exactly the same
+    // during the reshard. We are left with `inAxesPerDim` and `outAxesPerDim`
+    // that need to become empty, via a sequence of collectives.
+    removeCommonPrefix(inAxesPerDim, outAxesPerDim, dimsToUnshard);
 
     inAxisSet = getAxisSet(inAxesPerDim);
     outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
@@ -267,11 +297,12 @@ class CollectiveInserter {
     // can be handled by the previous collectives, so we are left with
     // all-gathering all axes in `inAxesPerDim` and we're done.
     //
-    // Otherwise, we need at most 2 iterations.
+    // Otherwise, we need at most 2 iterations (or 3 if a dimension must first
+    // be unsharded due to a padded dimension size mismatch).
 
     // TODO(tomnatan): consider looping only over all-to-all and collective
     // permute as long as one of them was inserted.
-    for (int i = 0; i < 2 && !isDone(); ++i) {
+    for (int i = 0; i < 3 && !isDone(); ++i) {
       // 1. Try to insert an all-slice, that decreases the size of the tensor.
       tryAllSlice();
 
@@ -320,9 +351,10 @@ class CollectiveInserter {
   // that dimension.
   //
   // We gather the suffix of axes (`gatheringAxes`) in `inAxesPerDim[dim]` that
-  // aren't present in `outAxesPerDim`, and update the internal state as
-  // follows: `gatheringAxes` are popped from the back of `inAxesPerDim[dim]`
-  // and `currentAxesPerDim[dim]`.
+  // aren't present in `outAxesPerDim` (or whose target dimension in
+  // `outAxesPerDim` is in `dimsToUnshard`, or all axes if `dimsToUnshard[dim]`
+  // is true), and update the internal state as follows: `gatheringAxes` are
+  // popped from the back of `inAxesPerDim[dim]` and `currentAxesPerDim[dim]`.
   //
   // For example:
   //
@@ -344,11 +376,18 @@ class CollectiveInserter {
     SmallVector<AxisRefAttr>& currentAxes = currentAxesPerDim[dim];
     SmallVector<AxisRefAttr> gatheringAxes;
     gatheringAxes.reserve(inAxes.size());
+    bool gatherAll = dimsToUnshard[dim];
+    auto shouldGatherAxis = [&](AxisRefAttr axis) {
+      if (gatherAll) {
+        return true;
+      }
+      auto it = outAxisToDimAndIndex.find(axis);
+      return it == outAxisToDimAndIndex.end() || dimsToUnshard[it->second.dim];
+    };
     auto axisRevIt = inAxes.rbegin();
-    while (axisRevIt != inAxes.rend() &&
-           !outAxisToDimAndIndex.contains(*axisRevIt)) {
+    while (axisRevIt != inAxes.rend() && shouldGatherAxis(*axisRevIt)) {
       inAxisSet.erase(*axisRevIt);
-      --axisRevIt;
+      ++axisRevIt;
     }
     auto inAxisIt = axisRevIt.base();
     popBackFromCurrentAxes(currentAxes, inAxes, inAxisIt);
@@ -368,6 +407,12 @@ class CollectiveInserter {
         hasGatheringAxes = true;
       }
       collectiveAxes = AxisRefListAttr::get(getContext(), gatheringAxes);
+    }
+    for (auto [currentAxes, unshardDim] :
+         llvm::zip_equal(currentAxesPerDim, dimsToUnshard)) {
+      if (currentAxes.empty()) {
+        unshardDim = false;
+      }
     }
     if (hasGatheringAxes) {
       result = AllGatherOp::create(rewriter, loc, result, collectiveAxesPerDim,
@@ -575,9 +620,10 @@ class CollectiveInserter {
   // We define the term capacity per dimension for all-slice - the product of
   // axis sizes in `outAxesPerDim[d]` divided by the product of axis sizes in
   // `inAxesPerDim[d]` for each dimension d, or the former divided by their GCD,
-  // if the former is not divisible by the latter (as the dimension size needs
-  // to be a multiplier of both). In other words, the capacity represents how
-  // much the output is sharded more than the input along a specific dimension.
+  // if the former is not divisible by the latter (or 1 if `dimsToUnshard[d]` is
+  // true, since dimension d must be unsharded before slicing). In other words,
+  // the capacity represents how much the output is sharded more than the input
+  // along a specific dimension.
   //
   // Constraint: we can only slice dimension d along axes whose product of
   // sizes doesn't exceed the capacity for that dimension, otherwise we will
@@ -669,8 +715,12 @@ class CollectiveInserter {
     bool hasSlicingAxes = false;
 
     // Initialize capacity per dimension.
-    for (auto [inAxes, outAxes, dimCapacity] :
-         llvm::zip_equal(inAxesPerDim, outAxesPerDim, capacityPerDim)) {
+    for (auto [inAxes, outAxes, dimCapacity, unshardDim] : llvm::zip_equal(
+             inAxesPerDim, outAxesPerDim, capacityPerDim, dimsToUnshard)) {
+      if (unshardDim) {
+        dimCapacity = 1;
+        continue;
+      }
       int64_t inShardedSize = getShardedSize(inAxes, mesh);
       int64_t outShardedSize = getShardedSize(outAxes, mesh);
       dimCapacity = outShardedSize / std::gcd(inShardedSize, outShardedSize);
@@ -698,9 +748,13 @@ class CollectiveInserter {
     // 2. Slice axes in the dimension they appear in `outAxesPerDim`, i.e. the
     // desired dimension, as long as the per-dim capacity allows.
     AxisList availableOutAxes;
-    for (auto [inAxes, outAxes, currentAxes, slicingAxes, dimCapacity] :
+    for (auto [inAxes, outAxes, currentAxes, slicingAxes, dimCapacity,
+               unshardDim] :
          llvm::zip_equal(inAxesPerDim, outAxesPerDim, currentAxesPerDim,
-                         slicingAxesPerDim, capacityPerDim)) {
+                         slicingAxesPerDim, capacityPerDim, dimsToUnshard)) {
+      if (unshardDim) {
+        continue;
+      }
       auto outIt = outAxes.begin();
       while (outIt != outAxes.end()) {
         AxisRefAttr outAxis = *outIt;
@@ -768,7 +822,8 @@ class CollectiveInserter {
     }
   }
 
-  // We should insert a collective permute if one of the following holds:
+  // We should insert a collective permute (assuming no dimension in
+  // `dimsToUnshard` still needs to be unsharded) if one of the following holds:
   //
   // 1. Both `inAxesPerDim[d]` and `outAxesPerDim[d]` aren't empty for a certain
   //    dimension d and their front axes are divisible. This means we can
@@ -801,6 +856,9 @@ class CollectiveInserter {
   //    that B is before A, and A can be moved to d2 via an all-to-all before B
   //    is all-gathered.
   bool shouldCollectivePermute() {
+    if (llvm::any_of(dimsToUnshard, [](bool b) { return b; })) {
+      return false;
+    }
     OptionalAxisRef availableInAxis;
     OptionalAxisRef availableOutAxis;
     for (auto [dim, inOutAxes] :
@@ -1065,12 +1123,15 @@ class CollectiveInserter {
   // The suffix of axes in `inAxesPerDim[srcDim]`, such that all axes within the
   // suffix are mapped to the same dimension in `outAxisToDimAndIndex`
   // (`allToAllAxes`), are all-to-all-ed with the mapped dimension as the target
-  // (`tgtDim`).
+  // (`tgtDim`), provided `dimsToUnshard[tgtDim]` is false and (if
+  // `dimsToUnshard[srcDim]` is true) `allToAllAxes` includes all axes on
+  // `srcDim` so that `srcDim` becomes completely unsharded.
   //
   // The internal state is updated as follows for `allToAllAxes` and `tgtDim`:
   //
   // - `allToAllAxes` are popped from the back of `inAxesPerDim[srcDim]` and
-  //   `currentAxesPerDim[srcDim]`.
+  //   `currentAxesPerDim[srcDim]` (and `dimsToUnshard[srcDim]` is cleared if
+  //   `currentAxesPerDim[srcDim]` becomes empty).
   // - `allToAllAxes` are appended to `inAxesPerDim[tgtDim]` and
   //   `currentAxesPerDim[tgtDim]`.
   // - The common prefix between `inAxesPerDim[tgtDim]` and
@@ -1137,7 +1198,8 @@ class CollectiveInserter {
         break;
       }
       int64_t outAxisDim = outAxisEntryIt->second.dim;
-      if (outAxisDim == srcDim || (tgtDim && outAxisDim != *tgtDim)) {
+      if (outAxisDim == srcDim || dimsToUnshard[outAxisDim] ||
+          (tgtDim && outAxisDim != *tgtDim)) {
         break;
       }
       tgtDim = outAxisDim;
@@ -1150,6 +1212,9 @@ class CollectiveInserter {
     }
 
     auto startInAxisIt = axisRevIt.base();
+    if (dimsToUnshard[srcDim] && startInAxisIt != srcInAxes.begin()) {
+      return std::nullopt;
+    }
 
     AxisList& tgtOutAxes = outAxesPerDim[*tgtDim];
     if (!allowOutOfOrderTarget &&
@@ -1166,6 +1231,9 @@ class CollectiveInserter {
     SmallVector<AxisRefAttr>& tgtCurrentAxes = currentAxesPerDim[*tgtDim];
 
     popBackFromCurrentAxes(srcCurrentAxes, srcInAxes, startInAxisIt);
+    if (srcCurrentAxes.empty()) {
+      dimsToUnshard[srcDim] = false;
+    }
 
     AxisList& tgtInAxes = inAxesPerDim[*tgtDim];
     auto srcInAxisIt = startInAxisIt;
@@ -1212,6 +1280,7 @@ class CollectiveInserter {
   AxesPerDim currentAxesPerDim;
   SmallVector<int64_t> capacityPerDim;
   SmallVector<AxisRefListAttr> collectiveAxesPerDim;
+  SmallVector<bool> dimsToUnshard;
   AxisSet inAxisSet;
   AxisToDimAndIndex outAxisToDimAndIndex;
 };
