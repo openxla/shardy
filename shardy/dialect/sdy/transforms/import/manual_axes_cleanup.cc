@@ -29,6 +29,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
@@ -162,7 +163,7 @@ struct ManualAxesCleanupPass
           getCommonMeshOrRef(inShardings, outShardings, symbolTable);
       MeshAttr mesh =
           meshOrRef ? getMeshOrLookup(symbolTable, meshOrRef) : nullptr;
-      assert(mesh && "expected inputs and outputs to have a common mesh");
+      SDY_CHECK(mesh) << "expected inputs and outputs to have a common mesh";
       sortManualAxes(op, mesh);
       addUnusedManualAxesToReplicatedAxes(op, mesh, meshOrRef, symbolTable);
     });

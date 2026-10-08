@@ -17,12 +17,14 @@ limitations under the License.
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <string_view>
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
@@ -43,7 +45,8 @@ bool hasSizeOneAxes(MeshOp meshOp) {
 TensorShardingAttr removeSizeOneAxes(TensorShardingAttr sharding,
                                      const SymbolTable& symbolTable) {
   MeshAttr mesh = sharding.getMesh(symbolTable);
-  assert(mesh && "unknown mesh");
+  SDY_CHECK(mesh) << "unknown mesh: "
+                  << std::string_view(sharding.getMeshName());
 
   auto isNotSizeOne = [&](AxisRefAttr axis) { return axis.getSize(mesh) != 1; };
 

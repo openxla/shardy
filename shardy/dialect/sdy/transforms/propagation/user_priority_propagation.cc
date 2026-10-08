@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -36,6 +37,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "shardy/common/file_utils.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
@@ -140,7 +142,8 @@ TensorShardingAttr getInitializedSharding(TensorShardingAttr originalSharding,
     }
   }
   MeshAttr mesh = originalSharding.getMesh(symbolTable);
-  assert(mesh && "unknown mesh");
+  SDY_CHECK(mesh) << "unknown mesh: "
+                  << std::string_view(originalSharding.getMeshName());
   llvm::sort(newReplicatedAxes, AxisRefAttr::getMeshComparator(mesh));
   // TODO(tomnatan): we need to merge split axes and split them again when
   // updating? or can we assume we won't see split axes?

@@ -17,6 +17,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <numeric>
+#include <string_view>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
@@ -34,6 +35,7 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 
@@ -65,7 +67,8 @@ TensorShardingAttr getEvenlySharded(TensorShardingAttr sharding,
                                     ShapedType type,
                                     const SymbolTable& symbolTable) {
   MeshAttr mesh = sharding.getMesh(symbolTable);
-  assert(mesh && "unknown mesh");
+  SDY_CHECK(mesh) << "unknown mesh: "
+                  << std::string_view(sharding.getMeshName());
   MLIRContext* ctx = sharding.getContext();
   llvm::SmallVector<DimensionShardingAttr> newDimShardings;
   newDimShardings.reserve(sharding.getRank());

@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>  // IWYU pragma: keep
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "llvm/ADT/DenseMap.h"
@@ -350,7 +351,7 @@ std::optional<MeshOp> getMesh(ArrayRef<TensorShardingAttr> inShardings,
     return std::nullopt;
   }
   MeshOp meshOp = getMeshOp(symbolTable, *meshName);
-  assert(meshOp && "unknown mesh");
+  SDY_CHECK(meshOp) << "unknown mesh: " << std::string_view(*meshName);
   if (meshOp.getMesh().isSingleDevice()) {
     return std::nullopt;
   }

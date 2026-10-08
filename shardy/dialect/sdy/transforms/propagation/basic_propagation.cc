@@ -20,6 +20,7 @@ limitations under the License.
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
@@ -328,7 +329,7 @@ LogicalResult propagateTensorShardings(
     return failure();
   }
   MeshAttr mesh = getMeshAttr(op, meshName.value());
-  assert(mesh && "unknown mesh");
+  SDY_CHECK(mesh) << "unknown mesh: " << std::string_view(meshName.value());
   if (mesh.isSingleDevice()) {
     // Single-device meshes and shardings are usually a placeholder for special
     // operations, such as send and recv. We do not propagate single-device

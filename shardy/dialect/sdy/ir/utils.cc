@@ -25,6 +25,7 @@ limitations under the License.
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -222,7 +223,7 @@ TensorShardingAttr inlineMesh(const SymbolTable& symbolTable,
                               TensorShardingAttr sharding) {
   if (auto name = dyn_cast<FlatSymbolRefAttr>(sharding.getMeshOrRef())) {
     MeshAttr mesh = getMeshAttr(symbolTable, name);
-    assert(mesh && "unknown mesh");
+    SDY_CHECK(mesh) << "unknown mesh: " << std::string_view(name.getValue());
     return TensorShardingAttr::get(
         sharding.getContext(), mesh, sharding.getDimShardings(),
         sharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
@@ -263,7 +264,7 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
       meshOrRef = sharding.getMeshOrRef();
       continue;
     }
-    if (otherMesh.empty()) {
+    if (!otherMesh || otherMesh.empty()) {
       continue;
     }
     if (!otherMesh.equals(mesh, ignoreDeviceIds)) {
@@ -963,9 +964,13 @@ mlir::Attribute getMeshOrRef(
     int64_t numElements, const SymbolTable& symbolTable,
     std::function<TensorShardingAttr(int64_t)> getSharding) {
   for (int64_t i = 0; i < numElements; ++i) {
-    if (TensorShardingAttr sdySharding = getSharding(i);
-        sdySharding && !sdySharding.getMesh(symbolTable).isSingleDevice()) {
-      return sdySharding.getMeshOrRef();
+    if (TensorShardingAttr sdySharding = getSharding(i); sdySharding) {
+      MeshAttr mesh = sdySharding.getMesh(symbolTable);
+      SDY_CHECK(mesh) << "unknown mesh: "
+                      << std::string_view(sdySharding.getMeshName());
+      if (!mesh.isSingleDevice()) {
+        return sdySharding.getMeshOrRef();
+      }
     }
   }
   return nullptr;
