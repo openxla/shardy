@@ -22,14 +22,11 @@ limitations under the License.
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Support/LLVM.h"
-#include "mlir/Support/WalkResult.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
@@ -42,8 +39,6 @@ namespace sdy {
 
 namespace {
 
-using func::CallOp;
-using func::FuncOp;
 using llvm::DenseMap;
 using llvm::EquivalenceClasses;
 using llvm::SmallDenseMap;
@@ -54,26 +49,6 @@ using GroupIdToShardingGroups = SmallVector<SmallVector<ShardingGroupOp>>;
 
 LogicalResult buildShardingGroupMappingAndValidateGroups(
     ModuleOp module, ValueToShardingGroup& tensorToGroups) {
-  // Map each function to its enclosing ManualComputationOp across function
-  // calls. Assumes the call graph is flat (each function has at most one call).
-  DenseMap<StringRef, ManualComputationOp> funcToManualComp;
-  auto getParentManualComp = [&](Operation* op) -> ManualComputationOp {
-    if (auto parent = op->getParentOfType<ManualComputationOp>()) {
-      return parent;
-    }
-    if (auto funcOp = op->getParentOfType<FuncOp>()) {
-      return funcToManualComp.lookup(funcOp.getName());
-    }
-    return nullptr;
-  };
-  walkCalls(
-      module,
-      [&](CallOp callOp) {
-        funcToManualComp[callOp.getCallee()] = getParentManualComp(callOp);
-        return WalkResult::advance();
-      },
-      /*preOrder=*/true);
-
   // Map to hold validation info for shard groups within manual computations.
   DenseMap<int64_t, ManualComputationOp> groupToManualComp;
   DenseMap<int64_t, ArrayRef<int64_t>> groupToTensorShape;
@@ -90,7 +65,7 @@ LogicalResult buildShardingGroupMappingAndValidateGroups(
     // If a group has no manual computation op parent, 'groupToManualComp'
     // will map it to nullptr and ensure all other values in that group are
     // also mapped to nullptr.
-    ManualComputationOp parent = getParentManualComp(op);
+    auto parent = op->getParentOfType<ManualComputationOp>();
     int64_t groupId = op.getGroupId();
 
     auto [it, inserted] = groupToManualComp.try_emplace(groupId, parent);

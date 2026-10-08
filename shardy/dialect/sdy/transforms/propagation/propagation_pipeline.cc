@@ -79,12 +79,12 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
             options.debugShardingOrigins,
             options.debugPropagationEdgeSharding}));
     pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
+    pm.addPass(createImportFuncCallsPass());
+    pm.addPass(createSymbolDCEPass());  // After ImportFuncCallsPass.
     // The sharding group import pass must run after applying sharding
     // constraints. This ensures we can detect sharding conflicts between group
     // members which have pre-propagation shardings due to sharding constraints.
     pm.addPass(createShardingGroupImportPass());
-    pm.addPass(createImportFuncCallsPass());
-    pm.addPass(createSymbolDCEPass());  // After ImportFuncCallsPass.
   }
   {
     PropagationOptions optionsWithKeepShardingRules = options;
