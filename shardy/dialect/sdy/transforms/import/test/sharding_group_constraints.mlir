@@ -310,3 +310,189 @@ func.func private @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
   func.return %arg0 : tensor<8x8xf32>
 }
 
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// Allows sharding groups within ManualComputationOp when group members are
+// across multiple functions called from the same ManualComputationOp.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+    %1 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    %2 = func.call @bar(%1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %2 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %0: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+func.func private @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// Allows sharding groups within ManualComputationOp when a function with group
+// members is called multiple times from the same ManualComputationOp.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+    %1 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    %2 = func.call @foo(%1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %2 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %0: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// TODO(b/569928811): Disallow sharding groups which cross the barrier of a
+// ManualComputationOp when the function is called inside and then outside the
+// ManualComputationOp.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    %1 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %1 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+
+  %2 = func.call @foo(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %2: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// TODO(b/569928811): Disallow sharding groups which cross the barrier of a
+// ManualComputationOp when the function is called inside and then outside the
+// ManualComputationOp.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    %1 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %1 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+
+  %2 = func.call @foo(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  sdy.sharding_group %2 group_id = 1234 : tensor<8x8xf32>
+  func.return %2: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// TODO(b/569928811): Disallow sharding groups which cross the barrier of a
+// ManualComputationOp when the function is called outside and then inside the
+// ManualComputationOp.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = func.call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.manual_computation(%0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+    %2 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %2 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %1: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// Allows sharding groups inside a function that is called from different
+// ManualComputationOps.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    %1 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %1 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+
+  %2 = sdy.manual_computation(%0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    %3 = func.call @foo(%arg1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+    sdy.return %3 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %2: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  func.return %arg0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// Allows sharding groups inside a ManualComputationOp within a function that
+// is called multiple times.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = func.call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = func.call @foo(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %1: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+    sdy.return %arg1 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %0 : tensor<8x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// Disallows sharding groups which have different ManualComputationOp parents
+// across different functions.
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = func.call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = func.call @bar(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %1: tensor<8x8xf32>
+}
+
+func.func private @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+    sdy.return %arg1 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %0 : tensor<8x8xf32>
+}
+
+func.func private @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{?}, {?}]>] out_shardings=[<@mesh, [{?}, {?}]>] manual_axes={} (%arg1: tensor<8x8xf32>) {
+    // expected-error@below {{ShardingGroupOps values cannot cross ManualComputationOp boundaries for groupId: 1234}}
+    sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+    sdy.return %arg1 : tensor<8x8xf32>
+  } : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  func.return %0 : tensor<8x8xf32>
+}
