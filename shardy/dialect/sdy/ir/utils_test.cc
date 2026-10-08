@@ -81,10 +81,26 @@ class UtilsTest : public ShardyTestBase {
     return symbolTableCollection.getSymbolTable(moduleOp.get());
   }
 
+  Operation* getModuleOp() { return moduleOp.get(); }
+  Operation* getNestedOp() {
+    return moduleOp->lookupSymbol<func::FuncOp>("main");
+  }
+
  private:
   OwningOpRef<ModuleOp> moduleOp;
   mlir::SymbolTableCollection symbolTableCollection;
 };
+
+TEST_F(UtilsTest, GetCommonMesh_SingleListWithOperation) {
+  EXPECT_NE(getCommonMesh({createTensorSharding("mesh_ab_23")}, getModuleOp()),
+            nullptr);
+  EXPECT_EQ(
+      getCommonMesh({createTensorSharding("mesh_ab_23")}, getModuleOp()),
+      getCommonMesh({createTensorSharding("mesh_ab_23")}, getSymbolTable()));
+  EXPECT_EQ(
+      getCommonMesh({createTensorSharding("mesh_ab_23")}, getNestedOp()),
+      getCommonMesh({createTensorSharding("mesh_ab_23")}, getSymbolTable()));
+}
 
 TEST_F(UtilsTest, GetCommonMeshName_AllSame) {
   EXPECT_EQ(getCommonMeshName({createTensorSharding("mesh_ab_23")},

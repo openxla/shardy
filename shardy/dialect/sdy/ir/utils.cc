@@ -247,10 +247,13 @@ TensorShardingPerValueAttr inlineMesh(
                                          inlinedShardings);
 }
 
-Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
-                             ArrayRef<TensorShardingAttr> resultsShardings,
-                             const SymbolTable& symbolTable,
-                             const bool ignoreDeviceIds) {
+namespace {
+
+template <typename SymbolTableOrOp>
+std::pair<Attribute, MeshAttr> getCommonMeshAndRef(
+    ArrayRef<TensorShardingAttr> operandShardings,
+    ArrayRef<TensorShardingAttr> resultsShardings,
+    SymbolTableOrOp symbolTableOrOp, const bool ignoreDeviceIds) {
   Attribute meshOrRef;
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
@@ -258,7 +261,7 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
     if (!sharding || sharding.getMeshOrRef() == meshOrRef) {
       continue;
     }
-    MeshAttr otherMesh = sharding.getMesh(symbolTable);
+    MeshAttr otherMesh = sharding.getMesh(symbolTableOrOp);
     if (!mesh || mesh.empty()) {
       mesh = otherMesh;
       meshOrRef = sharding.getMeshOrRef();
@@ -269,7 +272,7 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
     }
     if (!otherMesh.equals(mesh, ignoreDeviceIds)) {
       // Found more than one mesh name.
-      return nullptr;
+      return {nullptr, nullptr};
     }
     // Prefer iota device id over non-iota.
     if (ignoreDeviceIds && otherMesh.getDeviceIds().empty()) {
@@ -278,7 +281,18 @@ Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
     }
   }
 
-  return meshOrRef;
+  return {meshOrRef, mesh};
+}
+
+}  // namespace
+
+Attribute getCommonMeshOrRef(ArrayRef<TensorShardingAttr> operandShardings,
+                             ArrayRef<TensorShardingAttr> resultsShardings,
+                             const SymbolTable& symbolTable,
+                             const bool ignoreDeviceIds) {
+  return getCommonMeshAndRef(operandShardings, resultsShardings, symbolTable,
+                             ignoreDeviceIds)
+      .first;
 }
 
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings,
@@ -286,21 +300,24 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings,
   return getCommonMesh(shardings, {}, symbolTable);
 }
 
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings, Operation* op) {
+  return getCommonMesh(shardings, {}, op);
+}
+
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        const SymbolTable& symbolTable) {
-  if (Attribute meshOrRef =
-          getCommonMeshOrRef(operandShardings, resultsShardings, symbolTable)) {
-    return getMeshOrLookup(symbolTable, meshOrRef);
-  }
-  return nullptr;
+  return getCommonMeshAndRef(operandShardings, resultsShardings, symbolTable,
+                             /*ignoreDeviceIds=*/false)
+      .second;
 }
 
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        Operation* op) {
-  return getCommonMesh(operandShardings, resultsShardings,
-                       SymbolTable(op->getParentOfType<ModuleOp>()));
+  return getCommonMeshAndRef(operandShardings, resultsShardings, op,
+                             /*ignoreDeviceIds=*/false)
+      .second;
 }
 
 std::optional<StringRef> getCommonMeshName(
