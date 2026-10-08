@@ -1248,8 +1248,7 @@ device ordering.
 If the list of axes is empty
   - If the `device_ids` is not provided, it is an empty mesh.
   - If the `device_ids` is provided, it must be a single non-negative
-    integer, we call it a **single-device mesh** (historically also called a
-    **maximal-sharding mesh**).
+    integer, we call it a **single-device mesh**.
 
 If the list of axes is provided
   - If a device ID list is specified, the product of the axis sizes should
