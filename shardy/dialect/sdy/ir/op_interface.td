@@ -261,6 +261,70 @@ def Sdy_ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
 }
 
 //===----------------------------------------------------------------------===//
+// PartitioningOpInterface
+//===----------------------------------------------------------------------===//
+
+def Sdy_PartitioningOpInterface : OpInterface<"PartitioningOpInterface"> {
+  let description = [{
+    An op interface that allows the op to define custom partitioning logic,
+    such as resolving sharded permutation factors, padding non-divisible
+    dimensions, and converting global tensor shapes to shard-local shapes.
+  }];
+  let cppNamespace = "::mlir::sdy";
+  let methods = [
+    InterfaceMethod<
+      /*desc=*/[{
+        Resolves sharded permutation factors (`FactorType::kPermutation`) on the
+        op. By default, emits a "not implemented" error and returns `failure()`.
+      }],
+      /*retType=*/"mlir::LogicalResult",
+      /*methodName=*/"resolvePermutationFactors",
+      /*args=*/(ins "mlir::sdy::OpShardingRuleAttr":$shardingRule,
+                    "mlir::IRRewriter&":$rewriter,
+                    "const mlir::SymbolTable&":$symbolTable),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return $_op->emitOpError("resolvePermutationFactors is not implemented");
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Rewrites the op using already-padded `operands` and `newResultTypes`
+        to make sharded dimensions divisible. By default, emits a
+        "not implemented" error and returns `failure()`.
+      }],
+      /*retType=*/"mlir::LogicalResult",
+      /*methodName=*/"padForDivisibility",
+      /*args=*/(ins "mlir::ValueRange":$operands,
+                    "mlir::ArrayRef<mlir::Type>":$newResultTypes,
+                    "mlir::ConversionPatternRewriter&":$rewriter,
+                    "const mlir::TypeConverter&":$typeConverter,
+                    "const mlir::SymbolTable&":$symbolTable),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return $_op->emitOpError("padForDivisibility is not implemented");
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Converts the op from global to shard-local tensor shapes. By default,
+        emits a "not implemented" error and returns `failure()`.
+      }],
+      /*retType=*/"mlir::LogicalResult",
+      /*methodName=*/"convertGlobalToLocal",
+      /*args=*/(ins "mlir::ValueRange":$operands,
+                    "mlir::ConversionPatternRewriter&":$rewriter,
+                    "const mlir::TypeConverter&":$typeConverter,
+                    "const mlir::SymbolTable&":$symbolTable),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return $_op->emitOpError("convertGlobalToLocal is not implemented");
+      }]
+    >,
+  ];
+}
+
+//===----------------------------------------------------------------------===//
 // CollectiveOpInterface
 //===----------------------------------------------------------------------===//
 
