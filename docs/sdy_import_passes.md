@@ -147,9 +147,16 @@ deduped as well).
 
 The name of each new `MeshOp` will either be:
 
-* `maximal_mesh_{device-id}`, for a maximal mesh (i.e., empty axis list and
-  a single device ID), or
+* `single_device_{device-id}` (or `maximal_mesh_{device-id}` if
+  `use-single-device-mesh-names=false`), for a single-device mesh (i.e.,
+  empty axis list and a single device ID), or
 * The first available name in [`mesh`, `mesh_0`, `mesh_1`, ...].
+
+#### Options
+
+```
+-use-single-device-mesh-names : Whether to name single-device meshes as single_device_{id} instead of maximal_mesh_{id}.
+```
 
 ### `-sdy-manual-axes-cleanup`
 

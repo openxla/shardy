@@ -6,8 +6,8 @@ sdy.mesh @foo = <["a"=2, "c"=2, "b"=4, "d"=2]>
 // CHECK: sdy.mesh @bar = <["a"=4, "b"=2]>
 sdy.mesh @bar = <["a"=4, "b"=2]>
 
-// CHECK: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
-sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+// CHECK: sdy.mesh @single_device_mesh = <[], device_ids=[0]>
+sdy.mesh @single_device_mesh = <[], device_ids=[0]>
 
 // CHECK-LABEL: func @no_results
 func.func @no_results(%arg0 : tensor<8x8xf32>) -> tensor<8x8xf32> {
@@ -216,12 +216,12 @@ func.func @single_tuple(%arg0: tensor<8x8xf32>) -> tuple<tensor<8x8xf32>> {
   return %0 : tuple<tensor<8x8xf32>>
 }
 
-// CHECK-LABEL: func @maximal_sharding_no_results
+// CHECK-LABEL: func @single_device_sharding_no_results
 // CHECK-SAME:      (%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-func.func @maximal_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
-  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
+func.func @single_device_sharding_no_results(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@single_device_mesh, []>]>} : (tensor<8x8xf32>) -> ()
   // CHECK-NEXT: return %arg0 : tensor<8x8xf32>
-  stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>} : (tensor<8x8xf32>) -> ()
+  stablehlo.custom_call @foo(%arg0) {has_side_effect = true, sdy.sharding = #sdy.sharding_per_value<[<@single_device_mesh, []>]>} : (tensor<8x8xf32>) -> ()
   return %arg0 : tensor<8x8xf32>
 }
 

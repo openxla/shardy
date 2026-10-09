@@ -879,15 +879,15 @@ func.func @empty_mesh_all_dims_closed(
 }
 
 // -----
-sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+sdy.mesh @single_device_mesh = <[], device_ids=[0]>
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 
-// CHECK-LABEL: func @maximal_mesh_not_replaced(
+// CHECK-LABEL: func @single_device_mesh_not_replaced(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
-// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>})
-func.func @maximal_mesh_not_replaced(
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh, []>})
+func.func @single_device_mesh_not_replaced(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>},
-    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>}) -> tensor<8x8xf32> {
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh, []>}) -> tensor<8x8xf32> {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg1
   // CHECK-NOT: sdy.sharding
   %0 = stablehlo.add %arg0, %arg1 : tensor<8x8xf32>
@@ -895,25 +895,25 @@ func.func @maximal_mesh_not_replaced(
 }
 
 // -----
-sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+sdy.mesh @single_device_mesh = <[], device_ids=[0]>
 sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
 
-// CHECK-LABEL: func @do_not_propagate_along_maximal_mesh(
+// CHECK-LABEL: func @do_not_propagate_along_single_device_mesh(
 // CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>})
 // CHECK-SAME:  -> (tensor<2x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {"a"}]>}) {
-func.func @do_not_propagate_along_maximal_mesh(
+func.func @do_not_propagate_along_single_device_mesh(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"a"}, {"b"}]>})
     -> (tensor<2x2xi32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b"}, {"a"}]>}) {
   %0 = stablehlo.after_all : !stablehlo.token
   %1 = "stablehlo.send"(%arg0, %0) {
     channel_handle = #stablehlo.channel_handle<handle = 1, type = 2>,
     is_host_transfer = true,
-    sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>]>
+    sdy.sharding = #sdy.sharding_per_value<[<@single_device_mesh, []>]>
   } : (tensor<8x8xf32>, !stablehlo.token) -> !stablehlo.token
   %2:2 = "stablehlo.recv"(%1) {
     channel_handle = #stablehlo.channel_handle<handle = 1, type = 3>,
     is_host_transfer = true,
-    sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh, []>, <@maximal_mesh, []>]>
+    sdy.sharding = #sdy.sharding_per_value<[<@single_device_mesh, []>, <@single_device_mesh, []>]>
     } : (!stablehlo.token) -> (tensor<2x2xi32>, !stablehlo.token)
   // CHECK: %[[ABS:.*]] = stablehlo.abs %2#0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"b", ?}, {"a", ?}]>]>}
   %3 = stablehlo.abs %2#0 : tensor<2x2xi32>

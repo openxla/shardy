@@ -43,12 +43,15 @@ namespace sdy {
 
 namespace {
 
-MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder) {
+MeshOp createNewMeshOp(Location loc, MeshAttr mesh, OpBuilder& builder,
+                       bool useSingleDeviceMeshNames) {
   auto createMesh = [&](StringRef meshName) {
     return MeshOp::create(builder, loc, meshName, mesh);
   };
-  if (std::optional<int64_t> deviceId = mesh.getMaximalDeviceId()) {
-    std::string meshName = llvm::formatv("maximal_mesh_{0}", deviceId);
+  if (std::optional<int64_t> deviceId = mesh.getSingleDeviceId()) {
+    std::string meshName = useSingleDeviceMeshNames
+                               ? llvm::formatv("single_device_{0}", deviceId)
+                               : llvm::formatv("maximal_mesh_{0}", deviceId);
     return createMesh(meshName);
   }
   if (mesh.empty()) {
@@ -114,7 +117,7 @@ template <typename ReplicaGroupMeshAxesAttrTy>
 Attribute liftMeshInReplicaGroups(
     Attribute attr, SymbolTable& symbolTable,
     llvm::SmallDenseMap<Attribute, StringAttr>& meshOrRefToNewName,
-    OpBuilder& builder, Location loc) {
+    OpBuilder& builder, Location loc, bool useSingleDeviceMeshNames) {
   if (auto replicaGroupsAttr =
           mlir::dyn_cast<ReplicaGroupMeshAxesAttrTy>(attr)) {
     Attribute meshOrRef = replicaGroupsAttr.getMesh();
@@ -125,7 +128,8 @@ Attribute liftMeshInReplicaGroups(
           replicaGroupsAttr.getAxes());
     }
     if (auto mesh = mlir::dyn_cast<MeshAttr>(meshOrRef)) {
-      newMeshName = symbolTable.insert(createNewMeshOp(loc, mesh, builder));
+      newMeshName = symbolTable.insert(
+          createNewMeshOp(loc, mesh, builder, useSingleDeviceMeshNames));
       return ReplicaGroupMeshAxesAttrTy::get(
           replicaGroupsAttr.getContext(), FlatSymbolRefAttr::get(newMeshName),
           replicaGroupsAttr.getAxes());
@@ -196,8 +200,8 @@ struct LiftInlinedMeshesPass
         // TODO(tomnatan): give better names for meshes with device IDs, e.g.,
         // `@some_mesh_arbitrary_device_order` when there is an identical
         // `@some_mesh` without device IDs.
-        newMeshName = symbolTable.insert(
-            createNewMeshOp(moduleOp.getLoc(), mesh, builder));
+        newMeshName = symbolTable.insert(createNewMeshOp(
+            moduleOp.getLoc(), mesh, builder, useSingleDeviceMeshNames));
         return replaceMesh(sharding, newMeshName);
       }
       return sharding;
@@ -207,7 +211,8 @@ struct LiftInlinedMeshesPass
       if (auto attr = op->getAttr("replica_groups")) {
         auto newAttr =
             liftMeshInReplicaGroups<mlir::stablehlo::ReplicaGroupMeshAxesAttr>(
-                attr, symbolTable, meshOrRefToNewName, builder, op->getLoc());
+                attr, symbolTable, meshOrRefToNewName, builder, op->getLoc(),
+                useSingleDeviceMeshNames);
 
         if (newAttr != attr) {
           op->setAttr("replica_groups", newAttr);

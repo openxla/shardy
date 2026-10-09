@@ -62,11 +62,18 @@ def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
 
     The name of each new `MeshOp` will either be:
 
-    * `maximal_mesh_{device-id}`, for a maximal mesh (i.e., empty axis list and
-      a single device ID), or
+    * `single_device_{device-id}` (or `maximal_mesh_{device-id}` if
+      `use-single-device-mesh-names=false`), for a single-device mesh (i.e.,
+      empty axis list and a single device ID), or
     * The first available name in [`mesh`, `mesh_0`, `mesh_1`, ...].
   }];
   let dependentDialects = ["mlir::sdy::SdyDialect"];
+  let options = [
+    Option<"useSingleDeviceMeshNames", "use-single-device-mesh-names", "bool",
+           /*default=*/"false",
+           "Whether to name single-device meshes as `single_device_{id}` instead "
+           "of `maximal_mesh_{id}`.">
+  ];
 }
 
 def AddDataFlowEdgesPass : Pass<"sdy-add-data-flow-edges", "ModuleOp"> {

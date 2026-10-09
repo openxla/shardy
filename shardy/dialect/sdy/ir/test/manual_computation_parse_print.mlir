@@ -3,7 +3,7 @@
 // CHECK: sdy.mesh
 sdy.mesh @meshA = <["a"=2, "b"=2]>
 sdy.mesh @meshB = <["a"=4]>
-sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
+sdy.mesh @single_device_0 = <[], device_ids=[0]>
 
 // CHECK-LABEL: func @manual_computation_no_inputs_outputs_and_no_manual_axes
 func.func @manual_computation_no_inputs_outputs_and_no_manual_axes() {
@@ -220,8 +220,8 @@ func.func @manual_computation_dynamic_shapes(%arg0: tensor<16x32xf32>) -> tensor
   return %1: tensor<?x32xf32>
 }
 
-// CHECK-LABEL: func @token_with_maximal_sharding
-func.func @token_with_maximal_sharding(
+// CHECK-LABEL: func @token_with_single_device_sharding
+func.func @token_with_single_device_sharding(
     %arg0: !stablehlo.token {sdy.sharding = #sdy.sharding<@meshA, []>},
     %arg1: tensor<2xi64> {sdy.sharding = #sdy.sharding<@meshA, [{"b"}]>}
 ) -> (!stablehlo.token, tensor<2xi64>) {
@@ -229,8 +229,8 @@ func.func @token_with_maximal_sharding(
   // CHECK-SAME:     in_shardings=[<@meshA, []>, <@meshA, [{"b"}]>]
   // CHECK-SAME:     out_shardings=[<@meshA, []>, <@meshA, [{"b"}]>]
   // CHECK-SAME:     manual_axes={"b"} (%arg2: !stablehlo.token, %arg3: tensor<1xi64>) {
-  // CHECK-NEXT:   %[[TOKEN:.*]] = stablehlo.custom_call @sdy_testonly(%arg2) {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : (!stablehlo.token) -> !stablehlo.token
-  // CHECK-NEXT:   stablehlo.custom_call @sdy_testonly(%[[TOKEN]]) {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : (!stablehlo.token) -> ()
+  // CHECK-NEXT:   %[[TOKEN:.*]] = stablehlo.custom_call @sdy_testonly(%arg2) {sdy.sharding = #sdy.sharding_per_value<[<@single_device_0, []>]>} : (!stablehlo.token) -> !stablehlo.token
+  // CHECK-NEXT:   stablehlo.custom_call @sdy_testonly(%[[TOKEN]]) {sdy.sharding = #sdy.sharding_per_value<[<@single_device_0, []>]>} : (!stablehlo.token) -> ()
   // CHECK-NEXT:   sdy.return %[[TOKEN]], %arg3 : !stablehlo.token, tensor<1xi64>
   // CHECK-NEXT: } : (!stablehlo.token, tensor<2xi64>) -> (!stablehlo.token, tensor<2xi64>)
   // CHECK-NEXT: return %[[MC]]#0, %[[MC]]#1 : !stablehlo.token, tensor<2xi64>
@@ -238,8 +238,8 @@ func.func @token_with_maximal_sharding(
       in_shardings=[<@meshA, []>, <@meshA, [{"b"}]>]
       out_shardings=[<@meshA, []>, <@meshA, [{"b"}]>]
       manual_axes={"b"} (%arg2: !stablehlo.token, %arg3: tensor<1xi64>) {
-    %1 = stablehlo.custom_call @sdy_testonly(%arg2) {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : (!stablehlo.token) -> !stablehlo.token
-    stablehlo.custom_call @sdy_testonly(%1) {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : (!stablehlo.token) -> ()
+    %1 = stablehlo.custom_call @sdy_testonly(%arg2) {sdy.sharding = #sdy.sharding_per_value<[<@single_device_0, []>]>} : (!stablehlo.token) -> !stablehlo.token
+    stablehlo.custom_call @sdy_testonly(%1) {sdy.sharding = #sdy.sharding_per_value<[<@single_device_0, []>]>} : (!stablehlo.token) -> ()
     sdy.return %1, %arg3 : !stablehlo.token, tensor<1xi64>
   } : (!stablehlo.token, tensor<2xi64>) -> (!stablehlo.token, tensor<2xi64>)
   return %0#0, %0#1 : !stablehlo.token, tensor<2xi64>

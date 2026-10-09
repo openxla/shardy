@@ -3,11 +3,11 @@
 // CHECK: sdy.mesh @empty_mesh = <[]>
 sdy.mesh @empty_mesh = <[]>
 
-// CHECK: sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
-sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
+// CHECK: sdy.mesh @single_device_0 = <[], device_ids=[0]>
+sdy.mesh @single_device_0 = <[], device_ids=[0]>
 
-// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
-sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
+// CHECK: sdy.mesh @single_device_3 = <[], device_ids=[3]>
+sdy.mesh @single_device_3 = <[], device_ids=[3]>
 
 // CHECK: sdy.mesh @single_axis_of_size_1 = <["a"=1]>
 sdy.mesh @single_axis_of_size_1 = <["a"=1]>

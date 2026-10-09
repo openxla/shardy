@@ -1,4 +1,4 @@
-// RUN: sdy_opt -split-input-file %s -sdy-lift-inlined-meshes | FileCheck %s
+// RUN: sdy_opt -split-input-file %s -sdy-lift-inlined-meshes='use-single-device-mesh-names=true' | FileCheck %s
 
 // CHECK: sdy.mesh @mesh1 = <["x"=2, "y"=2]>
 sdy.mesh @mesh1 = <["x"=2, "y"=2]>
@@ -65,13 +65,13 @@ func.func @inlined_empty_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.shardi
 
 // -----
 
-// CHECK: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
-// CHECK: sdy.mesh @maximal_mesh_7 = <[], device_ids=[7]>
+// CHECK: sdy.mesh @single_device_3 = <[], device_ids=[3]>
+// CHECK: sdy.mesh @single_device_7 = <[], device_ids=[7]>
 
-// CHECK-LABEL: func @inlined_maximal_mesh(
-// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh_3, []>})
-func.func @inlined_maximal_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<[], device_ids=[3]>, []>}) -> tensor<8x8xf32> {
-  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_7, []>]>
+// CHECK-LABEL: func @inlined_single_device_mesh(
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@single_device_3, []>})
+func.func @inlined_single_device_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<[], device_ids=[3]>, []>}) -> tensor<8x8xf32> {
+  // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@single_device_7, []>]>
   %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<[], device_ids=[7]>, []>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
@@ -87,8 +87,8 @@ sdy.mesh @mesh_0 = <["x"=2], device_ids=[1, 0]>
 // CHECK-NOT: @mesh_1
 sdy.mesh @mesh_1 = <["x"=2, "y"=4]>
 
-// CHECK: sdy.mesh @some_maximal_mesh = <[], device_ids=[5]>
-sdy.mesh @some_maximal_mesh = <[], device_ids=[5]>
+// CHECK: sdy.mesh @some_single_device_mesh = <[], device_ids=[5]>
+sdy.mesh @some_single_device_mesh = <[], device_ids=[5]>
 
 // CHECK-NOT: @copy_of_mesh
 sdy.mesh @copy_of_mesh = <["x"=2, "y"=4]>
@@ -98,7 +98,7 @@ sdy.mesh @copy_of_mesh_0 = <["x"=2], device_ids=[1, 0]>
 
 // CHECK: sdy.mesh @mesh_1 = <["x"=8]>
 // CHECK: sdy.mesh @mesh_2 = <["a"=4]>
-// CHECK: sdy.mesh @maximal_mesh_2 = <[], device_ids=[2]>
+// CHECK: sdy.mesh @single_device_2 = <[], device_ids=[2]>
 
 // CHECK-LABEL: func @many_inlined_meshes_and_duplicates(
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{"x"}, {}]>},
@@ -113,7 +113,7 @@ func.func @many_inlined_meshes_and_duplicates(
   // CHECK-NEXT: %[[ADD_0:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>}
   // CHECK-NEXT: %[[ADD_1:.*]] = stablehlo.add %[[ADD_0]], %arg1 : tensor<8x8xf32>
   // CHECK-NEXT: %[[SC_0:.*]] = sdy.sharding_constraint %[[ADD_1]] <@mesh, [{}, {"y"}]>
-  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[SC_0]], %[[SC_0]] {sdy.sharding = #sdy.sharding_per_value<[<@some_maximal_mesh, []>]>}
+  // CHECK-NEXT: %[[ADD_2:.*]] = stablehlo.add %[[SC_0]], %[[SC_0]] {sdy.sharding = #sdy.sharding_per_value<[<@some_single_device_mesh, []>]>}
   // CHECK-NEXT: %[[SC_1:.*]] = sdy.sharding_constraint %[[ADD_2]] <@mesh_2, [{}, {"a"}]>
   // CHECK-NEXT: %[[ADD_3:.*]] = stablehlo.add %[[ADD_2]], %[[SC_1]] : tensor<8x8xf32>
   // CHECK-NEXT: return %[[SC_1]], %[[ADD_3]]
@@ -133,7 +133,7 @@ func.func @another_func_in_module(
     %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_0, [{}, {}]>})
     -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@copy_of_mesh_0, [{}, {}]>}) {
   // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"a"}, {}]>]>}
-  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@maximal_mesh_2, []>
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[ADD]] <@single_device_2, []>
   // CHECK-NEXT: return %[[SC]]
   %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["a"=4]>, [{"a"}, {}]>]>} : tensor<8x8xf32>
   %1 = sdy.sharding_constraint %0 <mesh<[], device_ids=[2]>, []> : tensor<8x8xf32>

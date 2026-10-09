@@ -418,10 +418,10 @@ func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<8xi32> {sdy.shardin
 // -----
 
 sdy.mesh @mesh = #sdy.mesh<["x"=2, "y"=2]>
-sdy.mesh @mesh_maximal = #sdy.mesh<[], device_ids=[0]>
+sdy.mesh @single_device_mesh = #sdy.mesh<[], device_ids=[0]>
 
-// CHECK-LABEL: func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_maximal_mesh_some_arguments_without
-func.func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_maximal_mesh_some_arguments_without(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<8x2xi32> {
+// CHECK-LABEL: func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_single_device_mesh_some_arguments_without
+func.func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_single_device_mesh_some_arguments_without(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<8x2xi32> {
   // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0, %arg0) out_shardings=[<@mesh, [{"y"}, {"x"}]>] (%arg1: tensor<8x2xi32>, %arg2: tensor<8x2xi32>) {
   // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg1 : tensor<8x2xi32>
   // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg2 : tensor<8x2xi32>
@@ -437,7 +437,7 @@ func.func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_
 }
 
 // CHECK-NOT: func private @foo
-func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_maximal, []>}) -> tensor<8x2xi32> {
+func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@single_device_mesh, []>}) -> tensor<8x2xi32> {
   %0 = stablehlo.multiply %arg0, %arg1 : tensor<8x2xi32>
   return %0 : tensor<8x2xi32>
 }
@@ -445,13 +445,13 @@ func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<8x2xi32> {sdy.shard
 // -----
 
 sdy.mesh @mesh = #sdy.mesh<["x"=2, "y"=2]>
-sdy.mesh @mesh_maximal = #sdy.mesh<[], device_ids=[0]>
+sdy.mesh @single_device_mesh = #sdy.mesh<[], device_ids=[0]>
 
-// CHECK-LABEL: func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_maximal_and_on_non_maximal_mesh_some_arguments_without
-func.func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_maximal_and_on_non_maximal_mesh_some_arguments_without(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<8x2xi32> {
-  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0, %arg0, %arg0) in_shardings=[<@mesh, [{?}, {?}]>, <@mesh_maximal, []>, <@mesh, [{}, {"y"}]>] out_shardings=[<@mesh, [{"y"}, {"x"}]>] (%arg1: tensor<8x2xi32>, %arg2: tensor<8x2xi32>, %arg3: tensor<8x2xi32>) {
+// CHECK-LABEL: func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_single_device_and_on_non_single_device_mesh_some_arguments_without
+func.func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_single_device_and_on_non_single_device_mesh_some_arguments_without(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> tensor<8x2xi32> {
+  // CHECK-NEXT: %[[NC:.*]] = sdy.named_computation<"foo">(%arg0, %arg0, %arg0) in_shardings=[<@mesh, [{?}, {?}]>, <@single_device_mesh, []>, <@mesh, [{}, {"y"}]>] out_shardings=[<@mesh, [{"y"}, {"x"}]>] (%arg1: tensor<8x2xi32>, %arg2: tensor<8x2xi32>, %arg3: tensor<8x2xi32>) {
   // CHECK-NEXT:   %[[EDGE_1:.*]] = sdy.data_flow_edge %arg1 sharding=<@mesh, [{?}, {?}]> : tensor<8x2xi32>
-  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg2 sharding=<@mesh_maximal, []> : tensor<8x2xi32>
+  // CHECK-NEXT:   %[[EDGE_2:.*]] = sdy.data_flow_edge %arg2 sharding=<@single_device_mesh, []> : tensor<8x2xi32>
   // CHECK-NEXT:   %[[EDGE_3:.*]] = sdy.data_flow_edge %arg3 sharding=<@mesh, [{}, {"y"}]> : tensor<8x2xi32>
   // CHECK-NEXT:   %[[MULTIPLY:.*]] = stablehlo.multiply %[[EDGE_1]], %[[EDGE_2]] : tensor<8x2xi32>
   // CHECK-NEXT:   sdy.return %[[MULTIPLY]] : tensor<8x2xi32>
@@ -465,7 +465,7 @@ func.func @single_call_multiple_args_func_some_arguments_with_input_sharding_on_
 }
 
 // CHECK-NOT: func private @foo
-func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh_maximal, []>}, %arg2: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>}) -> tensor<8x2xi32> {
+func.func private @foo(%arg0: tensor<8x2xi32>, %arg1: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@single_device_mesh, []>}, %arg2: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>}) -> tensor<8x2xi32> {
   %0 = stablehlo.multiply %arg0, %arg1 : tensor<8x2xi32>
   return %0 : tensor<8x2xi32>
 }

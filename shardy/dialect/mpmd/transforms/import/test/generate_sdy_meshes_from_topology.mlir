@@ -5,13 +5,13 @@ module @multiple_input_meshes {
   // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2, "tpu_y"=4]>
   // CHECK-DAG: sdy.mesh @cpu = <["cpu_z"=8]>
   // CHECK-DAG: sdy.mesh @empty_mesh = <[]>
-  // CHECK-DAG: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+  // CHECK-DAG: sdy.mesh @single_device_mesh = <[], device_ids=[0]>
   // CHECK-NOT: sdy.mesh @mesh
   // CHECK-NOT: sdy.mesh @mesh_0
   sdy.mesh @mesh = <["tpu_x"=8, "tpu_y"=8]>
   sdy.mesh @mesh_0 = <["cpu_z"=8]>
   sdy.mesh @empty_mesh = <[]>
-  sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+  sdy.mesh @single_device_mesh = <[], device_ids=[0]>
 
   // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x", "tpu_y"}]>}
   // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@cpu, [{"cpu_z":(1)2}]>}
@@ -63,19 +63,19 @@ module @empty_mesh {
 
 // -----
 
-// CHECK-LABEL: module @maximal_mesh
-module @maximal_mesh {
+// CHECK-LABEL: module @single_device_mesh
+module @single_device_mesh {
   // CHECK-DAG: sdy.mesh @tpu = <["tpu_x"=2]>
-  // CHECK-DAG: sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+  // CHECK-DAG: sdy.mesh @single_device_mesh = <[], device_ids=[0]>
   // CHECK-NOT: sdy.mesh @mesh
   sdy.mesh @mesh = <["tpu_x"=2]>
-  sdy.mesh @maximal_mesh = <[], device_ids=[0]>
+  sdy.mesh @single_device_mesh = <[], device_ids=[0]>
 
   // CHECK: %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@tpu, [{"tpu_x"}]>}
-  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>}
+  // CHECK: %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh, []>}
   func.func @main(
     %arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"tpu_x"}]>},
-    %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh, []>})
+    %arg1: tensor<16xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh, []>})
       -> (tensor<16xf32>) attributes {
       // CHECK: topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>
       topology = #mpmd.topology<<"tpu" : <["tpu_x"=2]>>>} {

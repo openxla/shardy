@@ -42,16 +42,16 @@ func.func @another_function(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding
 
 // -----
 
-// CHECK-NOT: sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
-sdy.mesh @maximal_mesh_3 = <[], device_ids=[3]>
-// CHECK-NOT: sdy.mesh @maximal_mesh_7 = <[], device_ids=[7]>
-sdy.mesh @maximal_mesh_7 = <[], device_ids=[7]>
+// CHECK-NOT: sdy.mesh @single_device_3 = <[], device_ids=[3]>
+sdy.mesh @single_device_3 = <[], device_ids=[3]>
+// CHECK-NOT: sdy.mesh @single_device_7 = <[], device_ids=[7]>
+sdy.mesh @single_device_7 = <[], device_ids=[7]>
 
-// CHECK-LABEL: func @lifted_maximal_mesh(
+// CHECK-LABEL: func @lifted_single_device_mesh(
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<[], device_ids=[3]>, []>})
-func.func @lifted_maximal_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@maximal_mesh_3, []>}) -> tensor<8x8xf32> {
+func.func @lifted_single_device_mesh(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@single_device_3, []>}) -> tensor<8x8xf32> {
   // CHECK-NEXT: stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<[], device_ids=[7]>, []>]>
-  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_7, []>]>} : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@single_device_7, []>]>} : tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
 
