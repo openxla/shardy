@@ -652,6 +652,275 @@ func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
 
 // -----
 
+// A flat call graph (@main -> @foo) without func data flow edges, applying a
+// single sharding constraint to the argument and call result. Without func data
+// flow edges, closed shardings are attached directly to the function argument
+// and call result and other uses are not replaced with the sharding constraint.
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @foo(
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) -> tensor<8x8xf32> {
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CALL]], %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[CALL]] <@mesh, [{}, {"b"}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+// A flat call graph (@main -> @foo) applying a single sharding constraint to
+// the func data flow edges. The func data flow edges is left unsharded, the
+// constraint is moved right after the edge, and other uses are replaced with
+// the constraint.
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[FUNC_DATA_FLOW_EDGE]] <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC]], %[[WSC]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[FUNC_DATA_FLOW_EDGE]] <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC]], %[[WSC]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.func_data_flow_edge %0 : tensor<8x8xf32>
+  %2 = stablehlo.add %1, %1 : tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %2 : tensor<8x8xf32>
+}
+
+// -----
+
+// A non-flat call graph (@main -> @foo -> @bar and @main -> @bar) without
+// func data flow edges, applying a single sharding constraint to the argument
+// and the call results. Without func data flow edges, closed shardings are
+// attached directly to the argument and both results, and other uses are not
+// replaced with the sharding constraint.
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @bar(
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) -> tensor<8x8xf32> {
+func.func @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %arg0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @bar(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CALL]], %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[CALL]] <@mesh, [{}, {"b"}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = call @bar(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL_0:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL_1:.*]] = call @bar(%[[CALL_0]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CALL_1]], %[[CALL_1]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[CALL_1]] <@mesh, [{"a"}, {"b"}]> {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=8}>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = call @bar(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %2 = stablehlo.add %1, %1 : tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %1 <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
+  return %2 : tensor<8x8xf32>
+}
+
+// -----
+
+// A non-flat call graph (@main -> @foo -> @bar and @main -> @bar) applying a
+// single sharding constraint to the func data flow edges on @bar's argument
+// and the call results in @foo and @main. Each func data flow edges is left
+// unsharded, the constraint is moved right after the edge, and other uses are
+// replaced with the constraint.
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @bar
+func.func @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[FUNC_DATA_FLOW_EDGE]] <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC]], %[[WSC]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_0:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @bar(%[[FUNC_DATA_FLOW_EDGE_0]])
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_1:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[FUNC_DATA_FLOW_EDGE_1]] <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC]], %[[WSC]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = call @bar(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %2 = sdy.func_data_flow_edge %1 : tensor<8x8xf32>
+  %3 = stablehlo.add %2, %2 : tensor<8x8xf32>
+  %4 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %3 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL_0:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_0:.*]] = sdy.func_data_flow_edge %[[CALL_0]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL_1:.*]] = call @bar(%[[FUNC_DATA_FLOW_EDGE_0]]) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_1:.*]] = sdy.func_data_flow_edge %[[CALL_1]] : tensor<8x8xf32>
+  // CHECK-NOT: sdy.sharding
+  // CHECK-NEXT: %[[WSC:.*]] = sdy.sharding_constraint %[[FUNC_DATA_FLOW_EDGE_1]] <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[WSC]], %[[WSC]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.func_data_flow_edge %0 : tensor<8x8xf32>
+  %2 = call @bar(%1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %3 = sdy.func_data_flow_edge %2 : tensor<8x8xf32>
+  %4 = stablehlo.add %3, %3 : tensor<8x8xf32>
+  %5 = sdy.sharding_constraint %3 <@mesh, [{"a"}, {"b"}]> : tensor<8x8xf32>
+  return %4 : tensor<8x8xf32>
+}
+
+// -----
+
+// Non-flat call graph (@main -> @foo -> @bar and @main -> @bar) without
+// func data flow edges, applying a chain of two sharding constraints
+// to stablehlo.add in @bar and @foo. Verifies that the head constraint's
+// sharding is attached to `stablehlo.add` and uses after the chain (including
+// the func returns in @bar and @foo) are replaced with the tail of the chain.
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @bar
+func.func @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: return %[[WSC_1]] : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL:.*]] = call @bar(%arg0)
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CALL]], %[[CALL]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: return %[[WSC_1]] : tensor<8x8xf32>
+  %0 = call @bar(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL_0:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL_1:.*]] = call @bar(%[[CALL_0]]) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[CALL_1]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = call @bar(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// -----
+
+// A non-flat call graph (@main -> @foo -> @bar and @main -> @bar) with func
+// data flow edges on function arguments and call results, applying a chain of
+// two sharding constraints to stablehlo.add in @bar and @foo.
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @bar
+func.func @bar(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[FUNC_DATA_FLOW_EDGE]], %[[FUNC_DATA_FLOW_EDGE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: return %[[WSC_1]] : tensor<8x8xf32>
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 : tensor<8x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @foo
+func.func @foo(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_0:.*]] = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @bar(%[[FUNC_DATA_FLOW_EDGE_0]])
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_1:.*]] = sdy.func_data_flow_edge %[[CALL]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[FUNC_DATA_FLOW_EDGE_1]], %[[FUNC_DATA_FLOW_EDGE_1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %[[ADD]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %[[WSC_0]] <@mesh, [{}, {"b"}]>
+  // CHECK-NEXT: return %[[WSC_1]] : tensor<8x8xf32>
+  %0 = sdy.func_data_flow_edge %arg0 : tensor<8x8xf32>
+  %1 = call @bar(%0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %2 = sdy.func_data_flow_edge %1 : tensor<8x8xf32>
+  %3 = stablehlo.add %2, %2 : tensor<8x8xf32>
+  %4 = sdy.sharding_constraint %3 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  %5 = sdy.sharding_constraint %4 <@mesh, [{}, {"b"}]> : tensor<8x8xf32>
+  return %3 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[CALL_0:.*]] = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_0:.*]] = sdy.func_data_flow_edge %[[CALL_0]] : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CALL_1:.*]] = call @bar(%[[FUNC_DATA_FLOW_EDGE_0]]) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[FUNC_DATA_FLOW_EDGE_1:.*]] = sdy.func_data_flow_edge %[[CALL_1]] : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[FUNC_DATA_FLOW_EDGE_1]] : tensor<8x8xf32>
+  %0 = call @foo(%arg0) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.func_data_flow_edge %0 : tensor<8x8xf32>
+  %2 = call @bar(%1) : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %3 = sdy.func_data_flow_edge %2 : tensor<8x8xf32>
+  return %3 : tensor<8x8xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
 // CHECK-LABEL: func @main
