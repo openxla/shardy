@@ -30,6 +30,14 @@ func.func @all_gather_test(
   return %0 : tensor<4x4xi32>
 }
 
+// This function gathers non-zero dims 1 and 3 of a 2x4x2x2 tensor.
+func.func @all_gather_test_non_zero_first_dim(
+  %arg0: tensor<2x4x2x2xi32> {sdy.sharding = #sdy.sharding<@mesh_2_2, [{}, {"x"}, {}, {"y"}]>}
+  ) -> tensor<2x4x2x2xi32> {
+  %0 = sdy.all_gather [{}, {"x"}, {}, {"y"}] %arg0 out_sharding=<@mesh_2_2, [{}, {}, {}, {}]> : tensor<2x4x2x2xi32>
+  return %0 : tensor<2x4x2x2xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -62,6 +70,27 @@ func.func @main() {
   // Verify consistency and correctness against original constant.
   "check.expect_eq"(%res_comb#0, %res_pdim#0) : (tensor<4x4xi32>, tensor<4x4xi32>) -> ()
   "check.expect_eq"(%res_comb#0, %cst) : (tensor<4x4xi32>, tensor<4x4xi32>) -> ()
+
+  // Test gathering on non-zero dims 1 and 3 with non-gathering dims 0 and 2.
+  %iota = stablehlo.iota dim = 0 : tensor<32xi32>
+  %cst_4d = stablehlo.reshape %iota : (tensor<32xi32>) -> tensor<2x4x2x2xi32>
+  %s0_4d = stablehlo.slice %cst_4d [0:2, 0:2, 0:2, 0:1] : (tensor<2x4x2x2xi32>) -> tensor<2x2x2x1xi32>
+  %s1_4d = stablehlo.slice %cst_4d [0:2, 0:2, 0:2, 1:2] : (tensor<2x4x2x2xi32>) -> tensor<2x2x2x1xi32>
+  %s2_4d = stablehlo.slice %cst_4d [0:2, 2:4, 0:2, 0:1] : (tensor<2x4x2x2xi32>) -> tensor<2x2x2x1xi32>
+  %s3_4d = stablehlo.slice %cst_4d [0:2, 2:4, 0:2, 1:2] : (tensor<2x4x2x2xi32>) -> tensor<2x2x2x1xi32>
+
+  %res_comb_4d:4 = "interpreter.run_parallel"(%s0_4d, %s1_4d, %s2_4d, %s3_4d) {
+    programs = [[@combined_gather_non_zero_first_dim, @combined_gather_non_zero_first_dim, @combined_gather_non_zero_first_dim, @combined_gather_non_zero_first_dim]]
+  } : (tensor<2x2x2x1xi32>, tensor<2x2x2x1xi32>, tensor<2x2x2x1xi32>, tensor<2x2x2x1xi32>) ->
+      (tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>)
+
+  %res_pdim_4d:4 = "interpreter.run_parallel"(%s0_4d, %s1_4d, %s2_4d, %s3_4d) {
+    programs = [[@per_dim_gather_non_zero_first_dim, @per_dim_gather_non_zero_first_dim, @per_dim_gather_non_zero_first_dim, @per_dim_gather_non_zero_first_dim]]
+  } : (tensor<2x2x2x1xi32>, tensor<2x2x2x1xi32>, tensor<2x2x2x1xi32>, tensor<2x2x2x1xi32>) ->
+      (tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>)
+
+  "check.expect_eq"(%res_comb_4d#0, %res_pdim_4d#0) : (tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>) -> ()
+  "check.expect_eq"(%res_comb_4d#0, %cst_4d) : (tensor<2x4x2x2xi32>, tensor<2x4x2x2xi32>) -> ()
 
   return
 }

@@ -86,3 +86,77 @@ func.func @stablehlo_reduce_multi_result_sharded(
     }
   return %0#0, %0#1 : tensor<8xf32>, tensor<8xi32>
 }
+
+// CHECK-LABEL: func.func @stablehlo_reduce_unreduced_operand_and_sharded_reduction_dim
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>})
+// CHECK-SAME: -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}], unreduced={"x", "y"}>})
+func.func @stablehlo_reduce_unreduced_operand_and_sharded_reduction_dim(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>})
+    -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}], unreduced={"x", "y"}>}) {
+  // CHECK-NEXT: %[[INIT:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[LOCAL_RED:.*]] = stablehlo.reduce(%[[ARG0]] init: %[[INIT]]) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}], unreduced={"x", "y"}>]>} : (tensor<4x16xf32>, tensor<f32>) -> tensor<16xf32>
+  // CHECK-NEXT: return %[[LOCAL_RED]] : tensor<16xf32>
+  %init = stablehlo.constant dense<0.0> : tensor<f32>
+  %0 = stablehlo.reduce(%arg0 init: %init) across dimensions = [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}], unreduced={"x", "y"}>]>}
+      : (tensor<8x16xf32>, tensor<f32>) -> tensor<16xf32>
+    reducer(%lhs: tensor<f32>, %rhs: tensor<f32>) {
+      %add = stablehlo.add %lhs, %rhs : tensor<f32>
+      stablehlo.return %add : tensor<f32>
+    }
+  return %0 : tensor<16xf32>
+}
+
+// CHECK-LABEL: func.func @stablehlo_reduce_multiple_unreduced_operands_and_sharded_reduction_dim
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>})
+// CHECK-SAME: -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}], unreduced={"x", "y"}>},
+// CHECK-SAME:     tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}], unreduced={"x", "y"}>})
+func.func @stablehlo_reduce_multiple_unreduced_operands_and_sharded_reduction_dim(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>},
+    %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>})
+    -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}], unreduced={"x", "y"}>},
+        tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}], unreduced={"x", "y"}>}) {
+  // CHECK-NEXT: %[[INIT:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[LOCAL_RED:.*]]:2 = stablehlo.reduce(%[[ARG0]] init: %[[INIT]]), (%[[ARG1]] init: %[[INIT]]) across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}], unreduced={"x", "y"}>, <@mesh_2_4, [{}], unreduced={"x", "y"}>]>} : (tensor<4x16xf32>, tensor<4x16xf32>, tensor<f32>, tensor<f32>) -> (tensor<16xf32>, tensor<16xf32>)
+  // CHECK:      return %[[LOCAL_RED]]#0, %[[LOCAL_RED]]#1 : tensor<16xf32>, tensor<16xf32>
+  %init = stablehlo.constant dense<0.0> : tensor<f32>
+  %0:2 = stablehlo.reduce(%arg0 init: %init), (%arg1 init: %init) across dimensions = [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}], unreduced={"x", "y"}>, <@mesh_2_4, [{}], unreduced={"x", "y"}>]>}
+      : (tensor<8x16xf32>, tensor<8x16xf32>, tensor<f32>, tensor<f32>) -> (tensor<16xf32>, tensor<16xf32>)
+    reducer(%lhs0: tensor<f32>, %rhs0: tensor<f32>) (%lhs1: tensor<f32>, %rhs1: tensor<f32>) {
+      %add0 = stablehlo.add %lhs0, %rhs0 : tensor<f32>
+      %add1 = stablehlo.add %lhs1, %rhs1 : tensor<f32>
+      stablehlo.return %add0, %add1 : tensor<f32>, tensor<f32>
+    }
+  return %0#0, %0#1 : tensor<16xf32>, tensor<16xf32>
+}
+
+// CHECK-LABEL: func.func @stablehlo_reduce_unreduced_operand_reduces_newly_introduced_axes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>})
+// CHECK-SAME: -> tensor<16xf32>
+func.func @stablehlo_reduce_unreduced_operand_reduces_newly_introduced_axes(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y"}>})
+    -> tensor<16xf32> {
+  // CHECK-NEXT: %[[INIT:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[LOCAL_RED:.*]] = stablehlo.reduce(%[[ARG0]] init: %[[INIT]]) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}], unreduced={"y"}>]>} : (tensor<4x16xf32>, tensor<f32>) -> tensor<16xf32>
+  // CHECK:      %[[ALL_RED_X:.*]] = "stablehlo.all_reduce"(%[[LOCAL_RED]])
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 4, type = 1>
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK:      %[[ALL_RED_Y:.*]] = "stablehlo.all_reduce"(%[[ALL_RED_X]])
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = 5, type = 1>
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "y">]>
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK:      return %[[ALL_RED_Y]] : tensor<16xf32>
+  %init = stablehlo.constant dense<0.0> : tensor<f32>
+  %0 = stablehlo.reduce(%arg0 init: %init) across dimensions = [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}], unreduced={"y"}>]>}
+      : (tensor<8x16xf32>, tensor<f32>) -> tensor<16xf32>
+    reducer(%lhs: tensor<f32>, %rhs: tensor<f32>) {
+      %add = stablehlo.add %lhs, %rhs : tensor<f32>
+      stablehlo.return %add : tensor<f32>
+    }
+  %1 = sdy.all_reduce {"y"} %0 out_sharding=<@mesh_2_4, [{}]> : tensor<16xf32>
+  return %1 : tensor<16xf32>
+}

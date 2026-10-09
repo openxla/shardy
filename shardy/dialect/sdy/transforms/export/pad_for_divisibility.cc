@@ -78,6 +78,20 @@ Value createConstant(OpBuilder& b, Location loc, Type elementType,
   llvm_unreachable("invalid PaddingValueKind");
 }
 
+// Returns the PaddingValueKind of the given scalar constant, or std::nullopt if
+// not a recognized padding value (e.g. 0 or 1).
+std::optional<PaddingValueKind> getPaddingValueKind(Value paddingValue) {
+  if (matchPattern(paddingValue, m_Zero()) ||
+      matchPattern(paddingValue, m_AnyZeroFloat())) {
+    return PaddingValueKind::kZero;
+  }
+  if (matchPattern(paddingValue, m_One()) ||
+      matchPattern(paddingValue, m_OneFloat())) {
+    return PaddingValueKind::kOne;
+  }
+  return std::nullopt;
+}
+
 // Helper methods for commonly created ops (stablehlo.slice and stablehlo.pad).
 
 // Slices a tensor to `targetType` along dimensions that need trimming.
@@ -238,7 +252,8 @@ bool hasCustomPadHandling(Operation* op) {
   return isa<sdy::ConstantOp, stablehlo::ConstantOp, stablehlo::SliceOp,
              stablehlo::DotGeneralOp, stablehlo::PadOp,
              stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
-             stablehlo::GatherOp, stablehlo::ReduceOp>(op);
+             stablehlo::GatherOp, stablehlo::ReduceOp, PartitioningOpInterface>(
+      op);
 }
 
 class PaddingCache {
@@ -411,12 +426,9 @@ Value ensurePaddingWithKind(
   return select;
 }
 
-// Converts op to its local version by replacing its operands with the already
-// converted operands.
-LogicalResult padGenericOp(Operation* op, ValueRange operands,
-                           ConversionPatternRewriter& rewriter,
-                           const PaddedTypeConverter* typeConverter) {
-  // Compute padded shapes for results.
+SmallVector<Type> computePaddedResultTypes(
+    Operation* op, ValueRange operands,
+    const PaddedTypeConverter* typeConverter) {
   SmallVector<Type> inferredTypes;
   if (auto inferTypeOp = dyn_cast<InferTypeOpInterface>(op)) {
     if (failed(inferTypeOp.inferReturnTypes(
@@ -425,9 +437,17 @@ LogicalResult padGenericOp(Operation* op, ValueRange operands,
       inferredTypes.clear();
     }
   }
+  return computeReconciledResultTypes(op, inferredTypes,
+                                      typeConverter->getSymbolTable());
+}
 
-  SmallVector<Type> newResultTypes = computeReconciledResultTypes(
-      op, inferredTypes, typeConverter->getSymbolTable());
+// Converts op to its local version by replacing its operands with the already
+// converted operands.
+LogicalResult padGenericOp(Operation* op, ValueRange operands,
+                           ConversionPatternRewriter& rewriter,
+                           const PaddedTypeConverter* typeConverter) {
+  SmallVector<Type> newResultTypes =
+      computePaddedResultTypes(op, operands, typeConverter);
   SDY_CHECK(newResultTypes.size() == op->getNumResults());
   OperationState state(op->getLoc(), op->getName());
   state.addOperands(operands);
@@ -564,6 +584,24 @@ class GenericOpPattern : public ConversionPattern {
     }
     return padGenericOp(op, operands, rewriter,
                         static_cast<const PaddedTypeConverter*>(typeConverter));
+  }
+};
+
+class PartitioningOpInterfacePattern
+    : public OpInterfaceConversionPattern<PartitioningOpInterface> {
+ public:
+  using OpInterfaceConversionPattern::OpInterfaceConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      PartitioningOpInterface op, ArrayRef<Value> operands,
+      ConversionPatternRewriter& rewriter) const override {
+    const auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    SDY_CHECK(converter);
+    SmallVector<Type> newResultTypes =
+        computePaddedResultTypes(op, operands, converter);
+    return op.padForDivisibility(operands, newResultTypes, rewriter, *converter,
+                                 converter->getSymbolTable());
   }
 };
 
@@ -946,8 +984,9 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
 
 class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
  public:
-  explicit StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx)
-      : OpConversionPattern(converter, ctx) {}
+  StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                        PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       stablehlo::PadOp op, OpAdaptor adaptor,
@@ -1017,11 +1056,20 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     // Copy sharding attribute to the new result.
     setSharding(newPadOp.getResult(), getSharding(result));
 
-    // TODO(b/537380378): We could parse the padding value from the original pad
-    // op to cache the padding kind and avoid downstream selects.
+    if (std::optional<PaddingValueKind> paddingKind =
+            getPaddingValueKind(adaptor.getOperands()[1])) {
+      if (input.getType() == op.getOperand().getType() || highPaddingReduced ||
+          cache.getPadding(input) == paddingKind) {
+        cache.setPadding(newPadOp.getResult(), *paddingKind);
+      }
+    }
+
     rewriter.replaceOp(op, newPadOp.getResult());
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class StablehloDotGeneralOpPattern
@@ -1405,10 +1453,11 @@ struct PadForDivisibilityPass
     RewritePatternSet patterns(&getContext());
     patterns.add<FuncOpSignaturePattern>(typeConverter, &getContext(),
                                          paddingCache);
-    patterns.add<GenericOpPattern, StablehloSliceOpPattern,
-                 StablehloGatherOpPattern>(typeConverter, &getContext());
-    patterns.add<StablehloPadOpPattern, StablehloReshapeOpPattern>(
-        typeConverter, &getContext());
+    patterns.add<GenericOpPattern, PartitioningOpInterfacePattern,
+                 StablehloSliceOpPattern, StablehloGatherOpPattern,
+                 StablehloReshapeOpPattern>(typeConverter, &getContext());
+    patterns.add<StablehloPadOpPattern>(typeConverter, &getContext(),
+                                        paddingCache);
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     // TODO(b/553579414): remove the pattern for stablehlo.ConstantOp.
@@ -1506,6 +1555,13 @@ struct PadForDivisibilityPass
                llvm::all_of(op->getResults(), isLegalValue);
       }
       return true;
+    });
+
+    // Register remaining ops for padding if their operands and results are
+    // illegal.
+    target.markUnknownOpDynamicallyLegal([&](Operation* op) {
+      return llvm::all_of(op->getResults(), isLegalValue) &&
+             llvm::all_of(op->getOperands(), isLegalValue);
     });
 
     target.addIllegalOp<UnrealizedConversionCastOp>();

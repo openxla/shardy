@@ -40,6 +40,17 @@ func.func @unknown_dialect_op(
   // CHECK-NEXT:  return %[[ARG0]] : tensor<8xf32>
   return %arg0 : tensor<16xf32>
 }
+
+// CHECK-LABEL: func.func @registered_non_stablehlo_dialect_op
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>}) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+func.func @registered_non_stablehlo_dialect_op(
+  %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>})
+  -> (tensor<32xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) {
+  // CHECK-NEXT: %[[COLLAPSE:.*]] = tensor.collapse_shape %[[ARG0]] {{\[\[}}0, 1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : tensor<2x8xf32> into tensor<16xf32>
+  %0 = tensor.collapse_shape %arg0 [[0, 1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>} : tensor<4x8xf32> into tensor<32xf32>
+  // CHECK-NEXT: return %[[COLLAPSE]] : tensor<16xf32>
+  return %0 : tensor<32xf32>
+}
 // CHECK-LABEL: func.func @callee_sharded
 // CHECK-SAME: (%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
 func.func @callee_sharded(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) -> (tensor<16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>}) {
