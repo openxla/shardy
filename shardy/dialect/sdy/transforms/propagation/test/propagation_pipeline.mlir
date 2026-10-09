@@ -179,6 +179,18 @@ func.func @sharding_group_on_while_result(%arg0: tensor<16x16xf32>, %arg1: tenso
 
 // -----
 
+// CHECK-LABEL: func @main
+func.func @main(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) {
+  // CHECK-NEXT: return
+  sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
+  sdy.sharding_group %arg0 group_id = 2345 : tensor<8x8xf32>
+  sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
+  sdy.sharding_group %arg1 group_id = 3456 : tensor<8x8xf32>
+  func.return
+}
+
+// -----
+
 sdy.mesh @maximal_mesh = <[], device_ids=[0]>
 
 // Nothing should be propagated, but this verifies the `transformShardings`

@@ -48,16 +48,6 @@ void addImportPipeline(OpPassManager& pm, int& dumpIndex,
       options.dumpDirectory, "before_propagation", dumpIndex++));
 
   pm.addPass(createAddDataFlowEdgesPass());
-  if (options.dedupFunctionsFully) {
-    pm.addPass(
-        createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
-            options.debugShardingOrigins,
-            options.debugPropagationEdgeSharding}));
-    // The sharding group import pass must run after applying sharding
-    // constraints. This ensures we can detect sharding conflicts between group
-    // members which have pre-propagation shardings due to sharding constraints.
-    pm.addPass(createShardingGroupImportPass());
-  }
 }
 
 void addImportPipeline(OpPassManager& pm, const PropagationOptions& options) {
