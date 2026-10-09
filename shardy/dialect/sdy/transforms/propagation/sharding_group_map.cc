@@ -15,12 +15,10 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/propagation/sharding_group_map.h"
 
-#include <algorithm>
-#include <cassert>
 #include <cstdint>
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Diagnostics.h"
@@ -36,21 +34,19 @@ namespace sdy {
 
 ShardingGroupMap::ShardingGroupMap(ModuleOp moduleOp) {
   moduleOp.walk([&](ShardingGroupOp op) {
-    // After canonicalization all group ids will take distinct values in the
-    // range 0,1,...,N. Because of this we can directly index these group ids
-    // into the shardingGroupToValues vector (resizing when necessary).
-    shardingGroupToValues.resize(
-        std::max(op.getGroupId() + 1,
-                 static_cast<uint64_t>(shardingGroupToValues.size())));
+    int64_t groupId = op.getGroupId();
     // Each value can only map to one sharding group id after
     // canonicalization.
     auto [it, inserted] =
-        valueToShardingGroup.try_emplace(op.getInput(), op.getGroupId());
-    if (!inserted && it->getSecond() != op.getGroupId()) {
-      llvm::report_fatal_error(
-          "Value can only map to one sharding group id after import.");
+        valueToShardingGroup.try_emplace(op.getInput(), groupId);
+    if (!inserted) {
+      if (it->getSecond() != groupId) {
+        llvm::report_fatal_error(
+            "Value can only map to one sharding group id after import.");
+      }
+      return;
     }
-    shardingGroupToValues[op.getGroupId()].push_back(op.getInput());
+    shardingGroupToValues[groupId].push_back(op.getInput());
   });
 }
 
@@ -100,7 +96,7 @@ CommonSharding findCommonSharding(int64_t groupId, ValueRange groupMembers) {
 }  // namespace
 
 void ShardingGroupMap::syncGroupMemberShardings(ModuleOp module) {
-  for (auto [groupId, groupMembers] : llvm::enumerate(shardingGroupToValues)) {
+  for (auto& [groupId, groupMembers] : shardingGroupToValues) {
     auto [sharding, hasConflict] = findCommonSharding(groupId, groupMembers);
     if (!sharding) {
       continue;
@@ -134,8 +130,7 @@ void ShardingGroupMap::syncGroupMemberShardings(ModuleOp module) {
 ValueRange ShardingGroupMap::getGroupMembers(const Value& value) const {
   if (auto it = valueToShardingGroup.find(value);
       it != valueToShardingGroup.end()) {
-    int64_t shardingGroupId = it->getSecond();
-    return shardingGroupToValues[shardingGroupId];
+    return shardingGroupToValues.find(it->getSecond())->second;
   }
   return {};
 }

@@ -132,6 +132,31 @@ func.func @different_group_ids_greater_group_id_first(
 }
 
 // -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @undensified_negative_and_large_group_ids
+// CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:    %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:    %arg3: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+// CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:        tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>})
+func.func @undensified_negative_and_large_group_ids(
+  %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+  %arg1: tensor<8x8xf32>,
+  %arg2: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+  %arg3: tensor<8x8xf32>)
+   -> (tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>) {
+  sdy.sharding_group %arg0 group_id=-1 : tensor<8x8xf32>
+  sdy.sharding_group %arg1 group_id=-1 : tensor<8x8xf32>
+  sdy.sharding_group %arg2 group_id=100000000000 : tensor<8x8xf32>
+  sdy.sharding_group %arg3 group_id=100000000000 : tensor<8x8xf32>
+  return %arg0, %arg1, %arg2, %arg3 : tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>, tensor<8x8xf32>
+}
+
+// -----
 
 // Tests for initial member sharding sync
 
