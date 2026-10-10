@@ -155,7 +155,7 @@ The name of each new `MeshOp` will either be:
 #### Options
 
 ```
--use-single-device-mesh-names : Whether to name single-device meshes as single_device_{id} instead of maximal_mesh_{id}.
+-use-single-device-mesh-names : Whether to name single-device meshes as `single_device_{id}` instead of `maximal_mesh_{id}`.
 ```
 
 ### `-sdy-manual-axes-cleanup`
