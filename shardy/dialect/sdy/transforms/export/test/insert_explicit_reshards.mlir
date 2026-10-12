@@ -680,3 +680,6 @@ func.func @insert_reshard_unreduced_to_fully_replicated_min(%arg0: tensor<8x8xf3
   return %arg0 : tensor<8x8xf32>
 }
 
+// CHECK-LABEL: func.func private @external_func(tensor<4x8xf32>) -> tensor<4x8xf32>
+func.func private @external_func(tensor<4x8xf32>) -> tensor<4x8xf32>
+

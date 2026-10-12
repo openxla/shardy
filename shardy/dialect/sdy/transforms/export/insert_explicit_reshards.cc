@@ -846,6 +846,9 @@ struct InsertExplicitReshardsPass
 
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
+    if (funcOp.isExternal()) {
+      return;
+    }
     IRRewriter rewriter(funcOp);
     SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
 
