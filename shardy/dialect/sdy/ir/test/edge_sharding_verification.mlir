@@ -162,3 +162,14 @@ module {
     return %0 : tensor<8x8xf32>
   }
 }
+
+// -----
+
+module {
+  sdy.mesh @mesh = <["z"=4]>
+  func.func @data_flow_edge_out_of_bounds_operand_ok(%arg0: tensor<8x8xf32>) -> (tensor<8x8xf32>) {
+    %0 = stablehlo.optimization_barrier %arg0 : tensor<8x8xf32>
+    %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{?}, {"z", ?}]> {sdy.propagation_edges = #sdy.propagation_edges<[{step-22 = [{"z" = result-0 -> [operand-3]}]}]>} : tensor<8x8xf32>
+    return %1 : tensor<8x8xf32>
+  }
+}

@@ -1111,7 +1111,7 @@ LogicalResult PropagationBarrierOp::verify() {
 namespace {
 
 LogicalResult verifyEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
-  if (isa<FuncDataFlowEdgeOp>(op)) {
+  if (isa<DataFlowEdgeOp, FuncDataFlowEdgeOp>(op)) {
     return success();
   }
 
@@ -1140,9 +1140,22 @@ Value getValueFromEdgeValueRef(EdgeValueRefAttr edgeValueRef, Operation* op) {
       edgeValueRef.getIndex() < op->getNumResults()) {
     return op->getResult(edgeValueRef.getIndex());
   }
-  if (edgeValueRef.getType() == EdgeNodeType::OPERAND &&
-      edgeValueRef.getIndex() < op->getNumOperands()) {
-    return op->getOperand(edgeValueRef.getIndex());
+  if (edgeValueRef.getType() == EdgeNodeType::OPERAND) {
+    // `DataFlowEdgeOp` has a single MLIR operand (the edge owner) and a single
+    // result (which holds the sharding of all targets), while propagation
+    // treats `dataFlowEdgeOp.getSources()` as its operands and its single
+    // result as the result. Thus only `EdgeNodeType::OPERAND` needs to look up
+    // `getSources()`.
+    if (auto dataFlowEdgeOp = dyn_cast<DataFlowEdgeOp>(op)) {
+      SmallVector<Value> sources = dataFlowEdgeOp.getSources();
+      if (edgeValueRef.getIndex() < static_cast<int64_t>(sources.size())) {
+        return sources[edgeValueRef.getIndex()];
+      }
+      return nullptr;
+    }
+    if (edgeValueRef.getIndex() < op->getNumOperands()) {
+      return op->getOperand(edgeValueRef.getIndex());
+    }
   }
   return nullptr;
 }

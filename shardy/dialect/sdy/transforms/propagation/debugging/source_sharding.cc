@@ -39,6 +39,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -501,6 +502,11 @@ DictionaryAttr convertFuncOriginsToSelf(int64_t valueIndex,
 }
 
 void setOpOriginsToSelf(Operation* op, StringRef originName) {
+  // `op` may be nullptr when `DataFlowEdgeOp::lookup` returns nullptr, e.g.,
+  // for non-shaped values such as `!stablehlo.token` in `ManualComputationOp`.
+  if (!op) {
+    return;
+  }
   MLIRContext* context = op->getContext();
   if (auto dictAttr = op->getAttrOfType<DictionaryAttr>(kShardingOriginsAttr)) {
     SmallVector<NamedAttribute> entries(dictAttr.getValue());
@@ -618,24 +624,29 @@ void prepareShardingOriginsHandler(
       // Assuming that the edges live as the only use of the block arguments.
       auto edge =
           DataFlowEdgeOp::lookup(manualComputationOp.getBody().getArgument(i));
-      assert(edge);
+      if (!edge) {
+        continue;
+      }
       saveShardingOrigins(valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_INPUT, edge.getResult(), i,
                           sourceId);
 
       // Handle input sources of ManualComputationOp
-      assert(edge.getSources().size() == 1);
-      Value src = edge.getSources().front();
-      if (TensorShardingAttr srcSharding = getSharding(src)) {
-        saveShardingOrigins(valueToOriginShardingMap, srcSharding,
-                            OriginShardingType::MC_INPUT, src, i, sourceId);
+      if (edge.getSources().size() == 1) {
+        Value src = edge.getSources().front();
+        if (TensorShardingAttr srcSharding = getSharding(src)) {
+          saveShardingOrigins(valueToOriginShardingMap, srcSharding,
+                              OriginShardingType::MC_INPUT, src, i, sourceId);
+        }
       }
     }
     for (auto [i, sharding] : llvm::enumerate(
              manualComputationOp.getOutShardings().getShardings())) {
       // Assuming that the edges live as the only use of the op results.
       auto edge = DataFlowEdgeOp::lookup(manualComputationOp.getResult(i));
-      assert(edge);
+      if (!edge) {
+        continue;
+      }
       saveShardingOrigins(valueToOriginShardingMap, sharding,
                           OriginShardingType::MC_OUTPUT, edge.getResult(), i,
                           sourceId);
@@ -686,8 +697,12 @@ OriginSharding lookUpValueOriginSharding(
   // NOTE: need to call `getShardableValue` in case the operand/result is
   // part of a `ShardableDataFlowOpInterface` and the `Value` the sharding
   // lives on is a `DataFlowEdgeOp` instead of the `edge` itself.
-  const AxisToOriginShardingMap& axisToOriginSharding =
-      valueToOriginShardingMap.at(getShardableValue(value));
+  auto valueIt = valueToOriginShardingMap.find(getShardableValue(value));
+  if (valueIt == valueToOriginShardingMap.end()) {
+    SDY_LOG(WARNING) << "Couldn't find sharding origin for value";
+    return {};
+  }
+  const AxisToOriginShardingMap& axisToOriginSharding = valueIt->second;
   if (auto it = axisToOriginSharding.find(axisRef);
       it != axisToOriginSharding.end()) {
     return it->second;
@@ -701,7 +716,7 @@ OriginSharding lookUpValueOriginSharding(
       return originSharding;
     }
   }
-  llvm_unreachable("Couldn't find sharding origin");
+  SDY_LOG(WARNING) << "Couldn't find sharding origin";
   return {};
 }
 
@@ -823,7 +838,7 @@ void pushBackDictionaryToDebugInfo(DataFlowEdgeOp dataFlowEdgeOp,
           dataFlowEdgeOp->getAttrOfType<DictionaryAttr>(debugAttrName)) {
     debugInfoDict.push_back(edgeDebugInfo);
   } else {
-    rewriter.getDictionaryAttr({});
+    debugInfoDict.push_back(rewriter.getDictionaryAttr({}));
   }
 }
 
@@ -837,11 +852,13 @@ void pushBackPropagationEdgesToDebugInfo(DataFlowEdgeOp dataFlowEdgeOp,
   assert(dataFlowEdgeOp);
   if (auto edgeDebugInfo =
           dataFlowEdgeOp->getAttrOfType<PropagationEdgesAttr>(debugAttrName)) {
-    if (auto propagationEdges = dyn_cast<PropagationEdgesAttr>(edgeDebugInfo);
-        !propagationEdges.empty()) {
+    if (!edgeDebugInfo.empty()) {
       debugInfoDict.push_back(edgeDebugInfo);
+      return;
     }
   }
+  debugInfoDict.push_back(
+      PropagationEdgesAttr::get(rewriter.getContext(), {}));
 }
 
 }  // namespace
