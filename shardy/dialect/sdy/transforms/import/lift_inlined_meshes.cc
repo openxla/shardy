@@ -220,20 +220,16 @@ struct LiftInlinedMeshesPass
       }
     };
 
-    moduleOp.walk(
-        [&](stablehlo::AllGatherOp op) { processMeshInReplicaGroups(op); });
-    moduleOp.walk(
-        [&](stablehlo::AllReduceOp op) { processMeshInReplicaGroups(op); });
-    moduleOp.walk(
-        [&](stablehlo::ReduceScatterOp op) { processMeshInReplicaGroups(op); });
-    moduleOp.walk(
-        [&](stablehlo::AllToAllOp op) { processMeshInReplicaGroups(op); });
-    moduleOp.walk([&](stablehlo::CollectiveBroadcastOp op) {
-      processMeshInReplicaGroups(op);
+    moduleOp.walk([&](Operation* op) {
+      if (isa<stablehlo::AllGatherOp, stablehlo::AllReduceOp,
+              stablehlo::ReduceScatterOp, stablehlo::AllToAllOp,
+              stablehlo::CollectiveBroadcastOp>(op)) {
+        processMeshInReplicaGroups(op);
+      }
     });
 
     // Attach discardable `stablehlo.mesh` attributes to all named meshes.
-    for (auto meshOp : llvm::make_early_inc_range(moduleOp.getOps<MeshOp>())) {
+    for (MeshOp meshOp : moduleOp.getOps<MeshOp>()) {
       if (!meshOp->hasAttr("stablehlo.mesh")) {
         meshOp->setAttr("stablehlo.mesh",
                         getStablehloMeshAttrAsDict(meshOp.getMesh()));
