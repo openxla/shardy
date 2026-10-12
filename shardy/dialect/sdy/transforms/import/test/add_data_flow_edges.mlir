@@ -55,6 +55,24 @@ func.func @case_token_result_skipped(
   return %0#0, %0#1 : !stablehlo.token, tensor<4xi64>
 }
 
+// CHECK-LABEL: func @if
+func.func @if(%arg0: tensor<i1>, %arg1: tensor<8xi64>, %arg2: tensor<8xi64>,
+              %arg3: tensor<8xi64>, %arg4: tensor<8xi64>)
+    -> (tensor<8xi64>, tensor<8xi64>) {
+  // CHECK-NEXT: %[[IF:.*]]:2 = "stablehlo.if"(%arg0)
+  // CHECK:      %[[EDGE_1:.*]] = sdy.data_flow_edge %[[IF]]#0 : tensor<8xi64>
+  // CHECK-NEXT: %[[EDGE_2:.*]] = sdy.data_flow_edge %[[IF]]#1 : tensor<8xi64>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[EDGE_2]], %[[EDGE_2]]
+  // CHECK-NEXT: return %[[EDGE_1]], %[[ADD]]
+  %0:2 = "stablehlo.if"(%arg0) ({
+    stablehlo.return %arg1, %arg2 : tensor<8xi64>, tensor<8xi64>
+  }, {
+    stablehlo.return %arg3, %arg4 : tensor<8xi64>, tensor<8xi64>
+  }) : (tensor<i1>) -> (tensor<8xi64>, tensor<8xi64>)
+  %1 = stablehlo.add %0#1, %0#1 : tensor<8xi64>
+  return %0#0, %1 : tensor<8xi64>, tensor<8xi64>
+}
+
 // CHECK-LABEL: func @optimization_barrier
 func.func @optimization_barrier(%arg0: tensor<32x96xf32>, %arg1: tensor<32x96xf32>)
     -> (tensor<32x96xf32>, tensor<32x96xf32>) {

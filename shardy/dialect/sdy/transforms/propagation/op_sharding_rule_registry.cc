@@ -1321,7 +1321,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             PropagationBarrierOp, ShardableDataFlowOpInterface, ShardingGroupOp,
             ReshardOp, stablehlo::AfterAllOp, stablehlo::CaseOp,
             stablehlo::ConstantOp, stablehlo::CreateTokenOp,
-            stablehlo::GetTupleElementOp, stablehlo::InfeedOp,
+            stablehlo::GetTupleElementOp, stablehlo::IfOp, stablehlo::InfeedOp,
             stablehlo::IotaOp, stablehlo::OutfeedOp,
             stablehlo::OptimizationBarrierOp, stablehlo::PartitionIdOp,
             stablehlo::RecvOp, stablehlo::SendOp, stablehlo::WhileOp>(

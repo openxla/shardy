@@ -70,20 +70,20 @@ struct WhileShardableDataFlowOpInterface
   }
 };
 
-struct CaseShardableDataFlowOpInterface
+template <typename OpTy>
+struct RegionBranchShardableDataFlowOpInterface
     : public ShardableDataFlowOpInterface::ExternalModel<
-          CaseShardableDataFlowOpInterface, stablehlo::CaseOp> {
+          RegionBranchShardableDataFlowOpInterface<OpTy>, OpTy> {
   ResultRange getOpResultEdgeOwners(Operation *op) const {
     return op->getResults();
   }
 
   SmallVector<OpOperand *> getEdgeSources(Operation *op, Value owner) const {
-    auto caseOp = cast<stablehlo::CaseOp>(op);
     auto opResult = dyn_cast<OpResult>(owner);
     assert(opResult && opResult.getOwner() == op);
     SmallVector<OpOperand *> sources;
-    sources.reserve(caseOp.getBranches().size());
-    for (Region &branch : caseOp.getBranches()) {
+    sources.reserve(op->getNumRegions());
+    for (Region& branch : op->getRegions()) {
       sources.push_back(&branch.front().getTerminator()->getOpOperand(
           opResult.getResultNumber()));
     }
@@ -132,7 +132,10 @@ void registerStablehloExtensions(MLIRContext *ctx) {
   // Ensure dialect is loaded before attaching interfaces.
   ctx->loadDialect<stablehlo::StablehloDialect>();
   stablehlo::WhileOp::attachInterface<WhileShardableDataFlowOpInterface>(*ctx);
-  stablehlo::CaseOp::attachInterface<CaseShardableDataFlowOpInterface>(*ctx);
+  stablehlo::CaseOp::attachInterface<
+      RegionBranchShardableDataFlowOpInterface<stablehlo::CaseOp>>(*ctx);
+  stablehlo::IfOp::attachInterface<
+      RegionBranchShardableDataFlowOpInterface<stablehlo::IfOp>>(*ctx);
   stablehlo::OptimizationBarrierOp::attachInterface<
       OptBarrierShardableDataFlowOpInterface>(*ctx);
 }
