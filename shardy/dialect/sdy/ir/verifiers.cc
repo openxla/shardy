@@ -1186,8 +1186,7 @@ LogicalResult verifyPropagationEdgesShardingAttr(
         "expected propagation edges attr to reference a sharding.");
   }
 
-  MeshAttr mesh =
-      getCommonMesh(shardings, SymbolTable(op->getParentOfType<ModuleOp>()));
+  MeshAttr mesh = getCommonMesh(shardings, op);
   if (!mesh) {
     return op->emitOpError(
         "expected a common mesh for propagation edges attr.");
@@ -1196,12 +1195,7 @@ LogicalResult verifyPropagationEdgesShardingAttr(
   for (PropagationOneStepAttr propagationEdge : propagationEdges) {
     for (AxisToPropagationDetailsAttr axisEntry :
          propagationEdge.getAxisEntries()) {
-      bool meshContainsAxis = false;
-      if (mesh.hasAxis(axisEntry.getAxisName().getName())) {
-        meshContainsAxis = true;
-      }
-
-      if (!meshContainsAxis) {
+      if (!mesh.hasAxis(axisEntry.getAxisName().getName())) {
         return op->emitOpError("expected axis ref to be in one of the meshes");
       }
 
@@ -1290,8 +1284,8 @@ LogicalResult NamedComputationOp::verifySymbolUses(
 
   // TODO(pxy): remove this once the `ShardableDataFlowOpInterface` is verified.
   // Verify the in/out shardings.
-  const SymbolTable& symbolTable =
-      SymbolTable(getOperation()->getParentOfType<ModuleOp>());
+  const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
+      getOperation()->getParentOfType<ModuleOp>());
   if (inShardings && failed(verifyTensorShardingPerValueAttr(
                          *inShardings, getOperandTypes(), *this, symbolTable,
                          [this](StringRef msg) {

@@ -199,6 +199,12 @@ MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings,
 // nullptr if there is none.
 //
 // Ignores empty meshes unless all meshes are empty.
+MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> shardings, Operation* op);
+
+// Returns the common `MeshAttr` bound by all the `TensorShardingAttr`s or
+// nullptr if there is none.
+//
+// Ignores empty meshes unless all meshes are empty.
 MeshAttr getCommonMesh(ArrayRef<TensorShardingAttr> operandShardings,
                        ArrayRef<TensorShardingAttr> resultsShardings,
                        const SymbolTable& symbolTable);
