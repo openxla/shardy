@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -45,7 +46,7 @@ class ShardingGroupMap {
   ValueRange getGroupMembers(const Value& value) const;
 
  private:
-  SmallVector<SmallVector<Value>> shardingGroupToValues;
+  llvm::MapVector<int64_t, SmallVector<Value>> shardingGroupToValues;
   llvm::SmallDenseMap<Value, int64_t> valueToShardingGroup;
 };
 
