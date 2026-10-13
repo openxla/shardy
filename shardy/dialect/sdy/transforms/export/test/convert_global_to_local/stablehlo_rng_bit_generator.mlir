@@ -32,10 +32,9 @@ func.func @sharded_1d_ui64_state(
   // UNSAFE-NEXT: %[[LOCAL_STATE:.*]], %[[LOCAL_DATA:.*]] = stablehlo.rng_bit_generator %[[ADJ_STATE]], algorithm = DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<2x16xf32>)
   // UNSAFE-NEXT: %[[LEADER_TABLE:.*]] = stablehlo.constant dense<[true, false, false, false]> : tensor<4xi1>
   // UNSAFE-NEXT: %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[LEADER_TABLE]], %[[PID]], sizes = [1] : (tensor<4xi1>, tensor<ui32>) -> tensor<1xi1>
-  // UNSAFE-NEXT: %[[IS_LEADER_SCALAR:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
-  // UNSAFE-NEXT: %[[IS_LEADER:.*]] = stablehlo.broadcast_in_dim %[[IS_LEADER_SCALAR]], dims = [] : (tensor<i1>) -> tensor<2xi1>
+  // UNSAFE-NEXT: %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
   // UNSAFE-NEXT: %[[ZERO_STATE:.*]] = stablehlo.constant dense<0> : tensor<2xui64>
-  // UNSAFE-NEXT: %[[MASKED_STATE:.*]] = stablehlo.select %[[IS_LEADER]], %[[LOCAL_STATE]], %[[ZERO_STATE]] : tensor<2xi1>, tensor<2xui64>
+  // UNSAFE-NEXT: %[[MASKED_STATE:.*]] = stablehlo.select %[[IS_LEADER]], %[[LOCAL_STATE]], %[[ZERO_STATE]] : tensor<i1>, tensor<2xui64>
   // UNSAFE-NEXT: %[[FINAL_STATE:.*]] = "stablehlo.all_reduce"(%[[MASKED_STATE]])
   // UNSAFE-SAME{LITERAL}: <{channel_handle = #stablehlo.channel_handle<handle = 1, type = 1>, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_4, axes = [#stablehlo.axis_ref<name = "x">]>, use_global_device_ids}> ({
   // UNSAFE-NEXT: ^bb0(%[[ARG0:.*]]: tensor<ui64>, %[[ARG1:.*]]: tensor<ui64>):
@@ -76,10 +75,9 @@ func.func @sharded_partial_mesh_ui32_state(
   // UNSAFE-NEXT: %[[LOCAL_STATE:.*]], %[[LOCAL_DATA:.*]] = stablehlo.rng_bit_generator %[[ADJ_STATE]], algorithm = THREE_FRY : (tensor<4xui32>) -> (tensor<4xui32>, tensor<8x8xf32>)
   // UNSAFE-NEXT: %[[LEADER_TABLE:.*]] = stablehlo.constant dense<[true, false, true, false]> : tensor<4xi1>
   // UNSAFE-NEXT: %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[LEADER_TABLE]], %[[PID]], sizes = [1] : (tensor<4xi1>, tensor<ui32>) -> tensor<1xi1>
-  // UNSAFE-NEXT: %[[IS_LEADER_SCALAR:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
-  // UNSAFE-NEXT: %[[IS_LEADER:.*]] = stablehlo.broadcast_in_dim %[[IS_LEADER_SCALAR]], dims = [] : (tensor<i1>) -> tensor<4xi1>
+  // UNSAFE-NEXT: %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
   // UNSAFE-NEXT: %[[ZERO_STATE:.*]] = stablehlo.constant dense<0> : tensor<4xui32>
-  // UNSAFE-NEXT: %[[MASKED_STATE:.*]] = stablehlo.select %[[IS_LEADER]], %[[LOCAL_STATE]], %[[ZERO_STATE]] : tensor<4xi1>, tensor<4xui32>
+  // UNSAFE-NEXT: %[[MASKED_STATE:.*]] = stablehlo.select %[[IS_LEADER]], %[[LOCAL_STATE]], %[[ZERO_STATE]] : tensor<i1>, tensor<4xui32>
   // UNSAFE-NEXT: %[[FINAL_STATE:.*]] = "stablehlo.all_reduce"(%[[MASKED_STATE]])
   // UNSAFE-SAME{LITERAL}: <{channel_handle = #stablehlo.channel_handle<handle = 2, type = 1>, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_2, axes = [#stablehlo.axis_ref<name = "y">]>, use_global_device_ids}> ({
   // UNSAFE-NEXT: ^bb0(%[[ARG0:.*]]: tensor<ui32>, %[[ARG1:.*]]: tensor<ui32>):
