@@ -691,7 +691,7 @@ void prepareFuncResultToEdgesHandler(
   }
 }
 
-OriginSharding lookUpValueOriginSharding(
+std::optional<OriginSharding> lookUpValueOriginSharding(
     Value value, AxisRefAttr axisRef,
     const ValueToOriginShardingMap& valueToOriginShardingMap) {
   // NOTE: need to call `getShardableValue` in case the operand/result is
@@ -700,7 +700,7 @@ OriginSharding lookUpValueOriginSharding(
   auto valueIt = valueToOriginShardingMap.find(getShardableValue(value));
   if (valueIt == valueToOriginShardingMap.end()) {
     SDY_LOG(WARNING) << "Couldn't find sharding origin for value";
-    return {};
+    return std::nullopt;
   }
   const AxisToOriginShardingMap& axisToOriginSharding = valueIt->second;
   if (auto it = axisToOriginSharding.find(axisRef);
@@ -717,7 +717,7 @@ OriginSharding lookUpValueOriginSharding(
     }
   }
   SDY_LOG(WARNING) << "Couldn't find sharding origin";
-  return {};
+  return std::nullopt;
 }
 
 }  // namespace
@@ -752,8 +752,9 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
   propagationStep++;
   // If the new and old shardings are different, something was propagated to it.
   // Find and save it.
-  auto lookUpOriginSharding = [&](EdgeNode edgeNode,
-                                  AxisRefAttr axisRef) -> OriginSharding {
+  auto lookUpOriginSharding =
+      [&](EdgeNode edgeNode,
+          AxisRefAttr axisRef) -> std::optional<OriginSharding> {
     switch (edgeNode.type) {
       case EdgeNodeType::OPERAND:
         return lookUpValueOriginSharding(
@@ -778,8 +779,11 @@ void SourceShardingHandler::operator()(function_ref<void()> transform,
       }
     }
     if (mappings->debugShardingOrigins) {
-      mappings->valueToOriginShardingMap[getShardableValue(value)].try_emplace(
-          axisRef, lookUpOriginSharding(edge.source, axisRef));
+      if (std::optional<OriginSharding> originSharding =
+              lookUpOriginSharding(edge.source, axisRef)) {
+        mappings->valueToOriginShardingMap[getShardableValue(value)]
+            .try_emplace(axisRef, *originSharding);
+      }
     }
   };
 
