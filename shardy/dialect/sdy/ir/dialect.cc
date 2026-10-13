@@ -969,9 +969,7 @@ Type TensorShardingAttr::getLocalType(Type globalType, MeshAttr mesh,
 RankedTensorType TensorShardingAttr::getLocalTensorType(
     RankedTensorType globalTensorType, MeshAttr mesh,
     bool allowNonDivisible) const {
-  // getLocalType should always return something castable to RankedTensorType if
-  // a RankedTensorType is passed in.
-  return cast<RankedTensorType>(
+  return dyn_cast_or_null<RankedTensorType>(
       getLocalType(globalTensorType, mesh, allowNonDivisible));
 }
 
@@ -1232,16 +1230,17 @@ TensorShardingAttr addFreeAxesToManualComputationSharding(
   TensorShardingAttr returnedSharding =
       eraseFreeAxes(outerManualSharding, manualAxes);
 
-  SmallVector<DimensionShardingAttr> resultDimShardings(
-      returnedSharding.getDimShardings());
-  for (auto [resultDimSharding, newDimSharding] :
-       llvm::zip(resultDimShardings, newSharding.getDimShardings())) {
-    resultDimSharding = DimensionShardingAttr::get(
-        resultDimSharding.getContext(),
-        llvm::to_vector(llvm::concat<const AxisRefAttr>(
-            resultDimSharding.getAxes(), newDimSharding.getAxes())),
-        newDimSharding.getIsClosed(), newDimSharding.getPriority());
-  }
+  SmallVector<DimensionShardingAttr> resultDimShardings = llvm::map_to_vector(
+      llvm::zip_equal(returnedSharding.getDimShardings(),
+                      newSharding.getDimShardings()),
+      [](auto pair) {
+        auto [returnedDimSharding, newDimSharding] = pair;
+        return DimensionShardingAttr::get(
+            returnedDimSharding.getContext(),
+            llvm::to_vector(llvm::concat<const AxisRefAttr>(
+                returnedDimSharding.getAxes(), newDimSharding.getAxes())),
+            newDimSharding.getIsClosed(), newDimSharding.getPriority());
+      });
   return TensorShardingAttr::get(newSharding.getContext(),
                                  newSharding.getMeshOrRef(), resultDimShardings,
                                  outerManualSharding.getReplicatedAxes(),

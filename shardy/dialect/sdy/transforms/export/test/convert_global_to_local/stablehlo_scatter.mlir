@@ -18,11 +18,11 @@ func.func @input_not_sharded_scatter_indices_update_sharded_on_implicit_batch_di
     %arg2: tensor<2x3x1xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>})
  -> tensor<3x4x2xf32> {
   // CHECK-DAG:  %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-DAG:  %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = []
   // CHECK-DAG:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK:      %[[TABLE:.*]] = stablehlo.constant dense<[true, true, true, true, false, false, false, false]> : tensor<8xi1>
   // CHECK:      %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
   // CHECK:      %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
-  // CHECK:      %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = []
   // CHECK:      %[[INPUT_SEL:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ID_BCAST]]
   // CHECK:      %[[SCATTER:.*]] = "stablehlo.scatter"(%[[INPUT_SEL]], %[[ARG1]], %[[ARG2]])
   // CHECK-SAME: scatter_dimension_numbers = #stablehlo.scatter<update_window_dims = [2], inserted_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1], index_vector_dim = 2>
@@ -63,11 +63,11 @@ func.func @input_scalar_scatter_indices_update_sharded_on_implicit_batch_dim(
     %arg2: tensor<2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>})
  -> tensor<f32> {
   // CHECK-DAG:  %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-DAG:  %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = []
   // CHECK-DAG:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK:      %[[TABLE:.*]] = stablehlo.constant dense<[true, true, true, true, false, false, false, false]> : tensor<8xi1>
   // CHECK:      %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
   // CHECK:      %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
-  // CHECK:      %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = []
   // CHECK:      %[[INPUT_SEL:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ID_BCAST]]
   // CHECK:      %[[SCATTER:.*]] = "stablehlo.scatter"(%[[INPUT_SEL]], %[[ARG1]], %[[ARG2]])
   // CHECK-SAME: scatter_dimension_numbers = #stablehlo.scatter<index_vector_dim = 1>
@@ -113,11 +113,11 @@ func.func @input_sharded_not_on_indexed_dim(
     %arg2: tensor<2x3x1xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>})
  -> (tensor<3x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"y":(2)2}]>}) {
   // CHECK-DAG:  %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-DAG:  %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = []
   // CHECK-DAG:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
   // CHECK:      %[[TABLE:.*]] = stablehlo.constant dense<[true, true, true, true, false, false, false, false]> : tensor<8xi1>
   // CHECK:      %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
   // CHECK:      %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
-  // CHECK:      %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[CST]], dims = []
   // CHECK:      %[[INPUT_SEL:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ID_BCAST]]
   // CHECK:      %[[SCATTER:.*]] = "stablehlo.scatter"(%[[INPUT_SEL]], %[[ARG1]], %[[ARG2]])
   // CHECK-SAME: scatter_dimension_numbers = #stablehlo.scatter<update_window_dims = [2], inserted_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1], index_vector_dim = 2>
