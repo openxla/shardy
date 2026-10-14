@@ -2604,10 +2604,6 @@ class BroadcastToTransfersPattern : public OpRewritePattern<BroadcastOp> {
  public:
   LogicalResult matchAndRewrite(BroadcastOp op,
                                 PatternRewriter& rewriter) const override {
-    auto unassign_op = op.getTensor().getDefiningOp<UnassignOp>();
-    SDY_CHECK(unassign_op)
-        << "Expected the operand of the BroadcastOp to be the "
-           "result of an UnassignOp";
     SmallVector<AssignOp> assign_users;
     for (Operation* user : op->getUsers()) {
       if (auto assign_op = dyn_cast<AssignOp>(user)) {
@@ -2615,8 +2611,15 @@ class BroadcastToTransfersPattern : public OpRewritePattern<BroadcastOp> {
       }
     }
     if (assign_users.empty()) {
-      return failure();
+      rewriter.replaceAllUsesWith(op.getResult(), op.getTensor());
+      rewriter.eraseOp(op);
+      return success();
     }
+
+    auto unassign_op = op.getTensor().getDefiningOp<UnassignOp>();
+    SDY_CHECK(unassign_op)
+        << "Expected the operand of the BroadcastOp to be the "
+           "result of an UnassignOp";
 
     ReplaceAssignsWithChainedTransfers(assign_users, unassign_op.getTensor(),
                                        rewriter);
