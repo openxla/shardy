@@ -70,10 +70,6 @@ PropagationDirection intersectionOfPropagationDirections(
                                         : std::min(d2, d1);
 }
 
-bool isFullyReplicated(TensorShardingAttr sharding) {
-  return !sharding || sharding.isFullyReplicated();
-}
-
 bool isEquivalent(TensorShardingAttr sharding,
                   TensorShardingAttr anotherSharding) {
   if (!sharding) {

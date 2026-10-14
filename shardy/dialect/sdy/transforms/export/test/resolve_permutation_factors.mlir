@@ -1760,6 +1760,22 @@ func.func @dynamic_update_slice_dynamic_operand_shape(
   return %0 : tensor<?x8xf32>
 }
 
+// CHECK-LABEL: func @dynamic_update_slice_missing_operand_sharding
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32>, %[[ARG1:.*]]: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}, %[[ARG2:.*]]: tensor<i32>, %[[ARG3:.*]]: tensor<i32>)
+// CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[ARG0]], %[[ARG1]], %[[ARG2]], %[[ARG3]]
+// CHECK-NEXT: return %[[DUS]]
+func.func @dynamic_update_slice_missing_operand_sharding(
+    %arg0: tensor<16x8xf32>,
+    %arg1: tensor<2x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+    %arg2: tensor<i32>,
+    %arg3: tensor<i32>)
+    -> tensor<16x8xf32> {
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3
+      : (tensor<16x8xf32>, tensor<2x8xf32>, tensor<i32>, tensor<i32>)
+      -> tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
 //===----------------------------------------------------------------------===//
 // stablehlo.rng_bit_generator tests
 //===----------------------------------------------------------------------===//
