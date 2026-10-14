@@ -461,6 +461,25 @@ def UniquifyFunctionInputsOutputsPass :
   let dependentDialects = ["mlir::mpmd::MpmdDialect"];
 }
 
+def UniquifyAndMergeReturnsPass :
+    PassBase<"mpmd-uniquify-and-merge-returns", "DistributedFunctionPass"> {
+  let summary = "Uniquifies return values by creating and immediately merging "
+                "identity fragments.";
+  let description = [{
+    Like `mpmd-uniquify-function-inputs-outputs`, ensures each return operand is
+    unique. Instead of creating new inferred fragments, this pass creates a tiny
+    identity fragment per value that needs
+    uniquification and immediately merges it into its producer (or a same-mesh
+    fragment for block arguments) using MergeRegionOps.
+
+    The identity fragment is never persisted in the IR — it is created and merged
+    in a single step, producing the same result as running uniquify followed by
+    merge-inferred-fragments.
+  }];
+
+  let dependentDialects = ["mlir::mpmd::MpmdDialect"];
+}
+
 def SchedulingUnitVerifierPass :
     PassBase<"mpmd-scheduling-units-verifier", "DistributedFunctionPass"> {
   let summary = "Verifies if the program contains the required scheduling units.";
