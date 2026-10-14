@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
@@ -46,9 +47,14 @@ void addPartitionerPipeline(OpPassManager& pm,
     // NOTE: run the canonicalizer to fuse all-slice collectives and preceding
     // all-reduces into reduce-scatters, fold back-to-back all-to-alls, and
     // remove no-op collectives, which ConvertGlobalToLocal requires.
-    pm.addPass(createCanonicalizerPass(GreedyRewriteConfig(),
-                                       /*disabledPatterns=*/{},
-                                       /*enabledPatterns=*/{kCollectiveLabel}));
+    pm.addPass(createCanonicalizerPass(
+        GreedyRewriteConfig()
+            .setUseTopDownTraversal(true)
+            .setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled)
+            .enableFolding(false)
+            .enableConstantCSE(false),
+        /*disabledPatterns=*/{},
+        /*enabledPatterns=*/{kCollectiveLabel}));
   }
 
   if (options.stage >= PartitionerStage::kPadForDivisibility) {

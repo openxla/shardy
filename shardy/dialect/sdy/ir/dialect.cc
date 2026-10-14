@@ -969,9 +969,7 @@ Type TensorShardingAttr::getLocalType(Type globalType, MeshAttr mesh,
 RankedTensorType TensorShardingAttr::getLocalTensorType(
     RankedTensorType globalTensorType, MeshAttr mesh,
     bool allowNonDivisible) const {
-  // getLocalType should always return something castable to RankedTensorType if
-  // a RankedTensorType is passed in.
-  return cast<RankedTensorType>(
+  return dyn_cast_or_null<RankedTensorType>(
       getLocalType(globalTensorType, mesh, allowNonDivisible));
 }
 
