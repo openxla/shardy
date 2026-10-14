@@ -280,19 +280,6 @@ LogicalResult localizeGenericOp(Operation* op, ValueRange operands,
   return success();
 }
 
-void checkUnreducedResultSharding(TensorShardingAttr resSharding,
-                                  ArrayRef<AxisRefAttr> expectedAxes,
-                                  StringRef opName) {
-  SDY_CHECK(resSharding && !resSharding.getUnreducedAxes().empty())
-      << "Expected sharded reduction " << opName.str()
-      << " result to have unreduced axes sharding.";
-  SDY_CHECK(resSharding.getUnreducedAxes() == expectedAxes)
-      << "The unreduced axes of the " << opName.str()
-      << " result sharding should match the sharded reduction dimensions of "
-         "the "
-      << opName.str() << ".";
-}
-
 // Pattern for generic ops that do not require special handling beyond type
 // conversion, such as StableHLO ops, sdy.all_reduce, etc.
 class GenericOpPattern : public ConversionPattern {
@@ -305,16 +292,15 @@ class GenericOpPattern : public ConversionPattern {
   LogicalResult matchAndRewrite(
       Operation* op, ArrayRef<Value> operands,
       ConversionPatternRewriter& rewriter) const override {
-    Dialect* dialect = op->getDialect();
-    if ((dialect && dialect->getNamespace() != "stablehlo" &&
+    if ((isa_and_nonnull<SdyDialect, func::FuncDialect>(op->getDialect()) &&
          !isa<sdy::ReturnOp, func::CallOp, func::ReturnOp>(op)) ||
         isa<stablehlo::ConcatenateOp, stablehlo::ConvolutionOp,
             stablehlo::DotGeneralOp, stablehlo::DotOp,
-            stablehlo::DynamicUpdateSliceOp, stablehlo::GatherOp,
-            stablehlo::IotaOp, stablehlo::PadOp, stablehlo::ReduceOp,
-            stablehlo::ReduceWindowOp, stablehlo::RngBitGeneratorOp,
-            stablehlo::ScatterOp, stablehlo::SelectAndScatterOp,
-            stablehlo::SliceOp>(op)) {
+            stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
+            stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp,
+            stablehlo::ReduceOp, stablehlo::ReduceWindowOp,
+            stablehlo::RngBitGeneratorOp, stablehlo::ScatterOp,
+            stablehlo::SelectAndScatterOp, stablehlo::SliceOp>(op)) {
       return failure();
     }
     return localizeGenericOp(
@@ -432,23 +418,70 @@ std::pair<Attribute, int64_t> getReplicaGroupsAndSize(
   return {replicaGroups, groupSize};
 }
 
-bool hasUnreducedResultSharding(Operation* op,
-                                ArrayRef<AxisRefAttr> reductionAxes,
-                                StringRef opName,
-                                const GlobalToLocalTypeConverter* converter) {
-  bool hasUnreducedAxes = false;
-  for (Value res : op->getResults()) {
-    TensorShardingAttr resSharding = converter->getSharding(res);
-    if (resSharding && !resSharding.getUnreducedAxes().empty()) {
-      checkUnreducedResultSharding(resSharding, reductionAxes, opName);
-      hasUnreducedAxes = true;
-    } else if (llvm::any_of(res.getUsers(), [](Operation* user) {
-                 return isa<sdy::AllReduceOp, sdy::ReduceScatterOp>(user);
-               })) {
-      hasUnreducedAxes = true;
+// Returns whether the op introduces partial results related to the given
+// reductionAxes for its operands with kReduction factors.
+//
+// The op introduces partial results if either:
+//   - The result's sharding has unreduced axes containing reductionAxes, or
+//   - the result is fed directly into an AllReduce or ReduceScatter on
+//     reductionAxes.
+//
+// We assume if an op that can introduce partial result and produce multiple
+// results, all of its results should be sharded the same way. This is the case
+// with the current StableHLO ops.
+bool doesOpIntroducePartialResult(Operation* op,
+                                  ArrayRef<AxisRefAttr> reductionAxes,
+                                  StringRef opName,
+                                  const GlobalToLocalTypeConverter* converter) {
+  auto containsReductionAxes = [&](ArrayRef<AxisRefAttr> axes, MeshAttr mesh) {
+    if (axes.empty()) {
+      return false;
     }
+    SmallVector<AxisRefAttr> missingReductionAxes =
+        getAxisSetDiff(reductionAxes, axes, mesh);
+    if (missingReductionAxes.empty()) {
+      return true;
+    }
+    // Otherwise, none of the sharded reduction axes of the op should be in
+    // `axes` (the axes only come from operands' unreduced axes).
+    SDY_CHECK(ArrayRef<AxisRefAttr>(missingReductionAxes) == reductionAxes)
+        << "The unreduced or reduction axes for the " << opName.str()
+        << " result must either contain all or none of the sharded "
+           "reduction dimensions of the "
+        << opName.str() << ".";
+    return false;
+  };
+
+  // All results of a reduction op share the same sharding and unreduced axes,
+  // so we only need to inspect the first result.
+  Value res = op->getResult(0);
+  TensorShardingAttr resSharding = converter->getSharding(res);
+  const SymbolTable& symbolTable = converter->getSymbolTable();
+  if (resSharding && containsReductionAxes(resSharding.getUnreducedAxes(),
+                                           resSharding.getMesh(symbolTable))) {
+    return true;
   }
-  return hasUnreducedAxes;
+
+  // Otherwise, if the op is fed directly into an AllReduce or ReduceScatter on
+  // reductionAxes, we consider it introduce a partial result and the upstream
+  // passes forgot to properly annotate the result with unreduced axes.
+  return llvm::any_of(res.getUsers(), [&](Operation* user) {
+    if (auto allReduce = dyn_cast<sdy::AllReduceOp>(user)) {
+      return containsReductionAxes(
+          allReduce.getReductionAxes(),
+          allReduce.getOutSharding().getMesh(symbolTable));
+    }
+    if (auto reduceScatter = dyn_cast<sdy::ReduceScatterOp>(user)) {
+      SmallVector<AxisRefAttr> reduceScatterAxes;
+      for (AxisRefListAttr axesList : reduceScatter.getReduceScatterAxes()) {
+        llvm::append_range(reduceScatterAxes, axesList.getValue());
+      }
+      return containsReductionAxes(
+          reduceScatterAxes,
+          reduceScatter.getOutSharding().getMesh(symbolTable));
+    }
+    return false;
+  });
 }
 
 ValueRange createAllReduceForUnreducedAxes(
@@ -528,18 +561,23 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     }
 
     SDY_CHECK(gatheringDims.size() > 1);
+    int64_t firstGatheringDim = gatheringDims.front();
 
-    // Add a leading dimension of size 1 to gather all partitions at once.
-    SmallVector<int64_t> tmpShape = {1};
-    llvm::append_range(tmpShape, localShape);
+    // Add a dimension of size 1 at `firstGatheringDim` to gather all
+    // partitions at once, keeping dimensions 0..firstGatheringDim-1 untouched.
+    SmallVector<int64_t> tmpShape =
+        llvm::to_vector(localShape.take_front(firstGatheringDim));
+    tmpShape.push_back(1);
+    llvm::append_range(tmpShape, localShape.drop_front(firstGatheringDim));
     Value curInput = stablehlo::ReshapeOp::create(
         rewriter, op.getLoc(),
         RankedTensorType::get(tmpShape, localType.getElementType()), input);
 
-    // Perform All-Gather on dim 0.
+    // Perform All-Gather on `firstGatheringDim`.
     Attribute replicaGroups;
-    std::tie(replicaGroups, tmpShape[0]) = getReplicaGroupsAndSize(
-        allGatheringAxes, mesh, meshOrRef, enableRGV3, rewriter);
+    std::tie(replicaGroups, tmpShape[firstGatheringDim]) =
+        getReplicaGroupsAndSize(allGatheringAxes, mesh, meshOrRef, enableRGV3,
+                                rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         ctx, /*handle=*/conversionState.getNextChannelId(),
         kCrossPartitionChannelHandleType);
@@ -548,13 +586,15 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     auto allGather = stablehlo::AllGatherOp::create(
         rewriter, op.getLoc(),
         TypeRange{RankedTensorType::get(tmpShape, localType.getElementType())},
-        curInput, /*all_gather_dim=*/0, replicaGroups, channelHandle,
-        /*use_global_device_ids=*/true);
+        curInput, /*all_gather_dim=*/firstGatheringDim, replicaGroups,
+        channelHandle, /*use_global_device_ids=*/true);
     curInput = allGather.getResult(0);
 
-    // Split the leading dimension into individual gathering factors.
-    SmallVector<int64_t> splitShape = gatheringFactors;
-    llvm::append_range(splitShape, localShape);
+    // Split `firstGatheringDim` into individual gathering factors.
+    SmallVector<int64_t> splitShape =
+        llvm::to_vector(localShape.take_front(firstGatheringDim));
+    llvm::append_range(splitShape, gatheringFactors);
+    llvm::append_range(splitShape, localShape.drop_front(firstGatheringDim));
     curInput = stablehlo::ReshapeOp::create(
         rewriter, op.getLoc(),
         RankedTensorType::get(splitShape, localType.getElementType()),
@@ -562,14 +602,16 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
 
     // Transpose factors next to their corresponding dimensions.
     SmallVector<int64_t> xposePerm;
-    int64_t nextFactorIdx = 0;
-    for (int64_t i = 0; i < rank; ++i) {
+    xposePerm.reserve(rank + gatheringDims.size());
+    for (int64_t i = 0; i < firstGatheringDim; ++i) {
+      xposePerm.push_back(i);
+    }
+    int64_t nextFactorIdx = firstGatheringDim;
+    for (int64_t i = firstGatheringDim; i < rank; ++i) {
       if (llvm::is_contained(gatheringDims, i)) {
         xposePerm.push_back(nextFactorIdx++);
-        xposePerm.push_back(i + gatheringDims.size());
-      } else {
-        xposePerm.push_back(i + gatheringDims.size());
       }
+      xposePerm.push_back(i + gatheringDims.size());
     }
     curInput = stablehlo::TransposeOp::create(
         rewriter, op.getLoc(), curInput,
@@ -708,6 +750,24 @@ class AllReduceOpPattern : public OpConversionPattern<sdy::AllReduceOp> {
   bool enableRGV3;
 };
 
+// Looks up a per-device scalar value from a 1D constant `tableAttr` indexed by
+// `deviceId` (or `getDeviceId` if `deviceId` is null).
+Value lookupPerDeviceValue(Location loc, DenseElementsAttr tableAttr,
+                           const ConversionState& conversionState,
+                           ConversionPatternRewriter& rewriter,
+                           Value deviceId = nullptr) {
+  if (!deviceId) {
+    deviceId = getDeviceId(loc, conversionState, rewriter);
+  }
+  Type elemTy = tableAttr.getElementType();
+  auto tableConst = stablehlo::ConstantOp::create(rewriter, loc, tableAttr);
+  auto slice = stablehlo::DynamicSliceOp::create(
+      rewriter, loc, RankedTensorType::get({1}, elemTy), tableConst,
+      ValueRange{deviceId}, rewriter.getDenseI64ArrayAttr({1}));
+  return stablehlo::ReshapeOp::create(rewriter, loc,
+                                      RankedTensorType::get({}, elemTy), slice);
+}
+
 // Returns a 0-rank i32 tensor containing the global offset for the given shard
 // axes and local shard size.
 Value getDimensionOffset(Location loc, MeshAttr mesh,
@@ -716,9 +776,6 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
                          ConversionPatternRewriter& rewriter) {
   int64_t numDevices = mesh.getTotalSize();
   Type i32Ty = rewriter.getI32Type();
-  auto indexTy = RankedTensorType::get({}, i32Ty);
-
-  Value deviceId = getDeviceId(loc, conversionState, rewriter);
 
   // Calculate a compile-time offset table for this dimension.
   SmallVector<int32_t> offsetsTable = llvm::map_to_vector(
@@ -728,16 +785,11 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
         return static_cast<int32_t>(offset);
       });
 
-  // Create the offset table and look up the value for the current device.
-  auto tableConst = stablehlo::ConstantOp::create(
-      rewriter, loc,
+  return lookupPerDeviceValue(
+      loc,
       DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i32Ty),
-                                offsetsTable));
-  auto offsetSlice = stablehlo::DynamicSliceOp::create(
-      rewriter, loc, RankedTensorType::get({1}, i32Ty), tableConst,
-      ValueRange{deviceId}, rewriter.getDenseI64ArrayAttr({1}));
-
-  return stablehlo::ReshapeOp::create(rewriter, loc, indexTy, offsetSlice);
+                                offsetsTable),
+      conversionState, rewriter);
 }
 
 Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
@@ -765,6 +817,43 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
                                            globalTensor, startIndices,
                                            localResultType.getShape())
       .getResult();
+}
+
+// Masks non-leader shards (where shard index across `axes` != 0) to
+// `nonLeaderVal` (or zero if `nonLeaderVal` is null).
+SmallVector<Value> maskNonLeaderShards(
+    Location loc, ValueRange inputs, MeshAttr mesh, ArrayRef<AxisRefAttr> axes,
+    const ConversionState& conversionState, ConversionPatternRewriter& rewriter,
+    Value nonLeaderVal = nullptr, Value deviceId = nullptr) {
+  int64_t numDevices = mesh.getTotalSize();
+  SmallVector<bool> leaderTable = llvm::map_to_vector(
+      llvm::seq<int64_t>(0, numDevices),
+      [&](int64_t devId) { return getShardIndex(devId, mesh, axes) == 0; });
+  Value isLeader = lookupPerDeviceValue(
+      loc,
+      DenseElementsAttr::get(
+          RankedTensorType::get({numDevices}, rewriter.getI1Type()),
+          leaderTable),
+      conversionState, rewriter, deviceId);
+  if (!nonLeaderVal) {
+    auto localType = cast<RankedTensorType>(inputs.front().getType());
+    nonLeaderVal = createZeroConstant(rewriter, loc, localType);
+  }
+  return llvm::map_to_vector(inputs, [&](Value input) -> Value {
+    return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
+                                       nonLeaderVal);
+  });
+}
+
+// Masks non-leader shards (where shard index across `axes` != 0) to zero.
+Value maskNonLeaderShardsToZero(Location loc, Value input, MeshAttr mesh,
+                                ArrayRef<AxisRefAttr> axes,
+                                const ConversionState& conversionState,
+                                ConversionPatternRewriter& rewriter,
+                                Value deviceId = nullptr) {
+  return maskNonLeaderShards(loc, input, mesh, axes, conversionState, rewriter,
+                             /*nonLeaderVal=*/nullptr, deviceId)
+      .front();
 }
 
 class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
@@ -1119,7 +1208,14 @@ class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
     auto localType = cast<RankedTensorType>(converter->convertType(op));
     ElementsAttr elementsAttr = op.getValue();
     Location loc = op.getLoc();
+    const SymbolTable& symbolTable = converter->getSymbolTable();
+    TensorShardingAttr sharding = getSharding(op.getResult());
+    MeshAttr mesh = sharding ? sharding.getMesh(symbolTable) : nullptr;
+    if (sharding && !mesh) {
+      return op.emitOpError("failed to resolve mesh for constant");
+    }
 
+    Value result;
     // Unsharded or splat constants.
     if (localType == globalType || elementsAttr.isSplat()) {
       Attribute newAttr =
@@ -1128,33 +1224,35 @@ class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
               : SplatElementsAttr::get(localType,
                                        elementsAttr.getSplatValue<Attribute>());
 
-      rewriter.replaceOp(
-          op, stablehlo::ConstantOp::create(rewriter, loc, localType,
-                                            cast<ElementsAttr>(newAttr)));
-      conversionState.removeToConvertOp(op);
-      return success();
+      result = stablehlo::ConstantOp::create(rewriter, loc, localType,
+                                             cast<ElementsAttr>(newAttr));
+    } else {
+      // Sharded dense constants.
+      auto globalConst = stablehlo::ConstantOp::create(
+          rewriter, loc, globalType, elementsAttr);
+
+      SmallVector<AxisRefListAttr> slicingAxesPerDim;
+      slicingAxesPerDim.reserve(localType.getRank());
+      for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
+        slicingAxesPerDim.push_back(
+            AxisRefListAttr::get(op.getContext(), dimSharding.getAxes()));
+      }
+
+      result =
+          emitDynamicSliceForAxes(loc, globalConst, mesh, slicingAxesPerDim,
+                                  localType, conversionState, rewriter);
     }
 
-    // Sharded dense constants.
-    const SymbolTable& symbolTable = converter->getSymbolTable();
-    TensorShardingAttr sharding = getSharding(op.getResult());
-    MeshAttr mesh = sharding.getMesh(symbolTable);
-    if (!mesh) {
-      return op.emitOpError("failed to resolve mesh for constant");
-    }
-    auto globalConst =
-        stablehlo::ConstantOp::create(rewriter, loc, globalType, elementsAttr);
-
-    SmallVector<AxisRefListAttr> slicingAxesPerDim;
-    slicingAxesPerDim.reserve(localType.getRank());
-    for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
-      slicingAxesPerDim.push_back(
-          AxisRefListAttr::get(op.getContext(), dimSharding.getAxes()));
+    if (sharding && !sharding.getUnreducedAxes().empty()) {
+      SDY_CHECK(sharding.getReductionOp() == ReductionOp::SUM)
+          << "Only SUM reduction is supported for constants with unreduced "
+             "axes.";
+      result = maskNonLeaderShardsToZero(loc, result, mesh,
+                                         sharding.getUnreducedAxes(),
+                                         conversionState, rewriter);
     }
 
-    rewriter.replaceOp(
-        op, emitDynamicSliceForAxes(loc, globalConst, mesh, slicingAxesPerDim,
-                                    localType, conversionState, rewriter));
+    rewriter.replaceOp(op, result);
     conversionState.removeToConvertOp(op);
 
     return success();
@@ -1425,6 +1523,97 @@ class ReduceScatterOpPattern : public OpConversionPattern<ReduceScatterOp> {
   bool enableRGV3;
 };
 
+class ReplicatedToUnreducedOpPattern
+    : public OpConversionPattern<ReplicatedToUnreducedOp> {
+ public:
+  ReplicatedToUnreducedOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                                 ConversionState& state)
+      : OpConversionPattern<ReplicatedToUnreducedOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      ReplicatedToUnreducedOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    TensorShardingAttr outSharding = op.getOutSharding();
+    SDY_CHECK(outSharding.getReductionOp() == ReductionOp::SUM)
+        << "Only SUM reduction is supported for ReplicatedToUnreducedOp.";
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    MeshAttr mesh = outSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    Value result =
+        maskNonLeaderShardsToZero(op.getLoc(), adaptor.getTensor(), mesh,
+                                  op.getAxes(), conversionState, rewriter);
+    rewriter.replaceOp(op, result);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+class ShardedToUnreducedOpPattern
+    : public OpConversionPattern<ShardedToUnreducedOp> {
+ public:
+  ShardedToUnreducedOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                              ConversionState& state)
+      : OpConversionPattern<ShardedToUnreducedOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      ShardedToUnreducedOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    Location loc = op.getLoc();
+    TensorShardingAttr outSharding = op.getOutSharding();
+    SDY_CHECK(outSharding.getReductionOp() == ReductionOp::SUM)
+        << "Only SUM reduction is supported for ShardedToUnreducedOp.";
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    MeshAttr mesh = outSharding.getMesh(converter->getSymbolTable());
+    if (!mesh) {
+      return op.emitOpError("failed to resolve mesh");
+    }
+
+    Value localInput = adaptor.getTensor();
+    auto localInputType = cast<RankedTensorType>(localInput.getType());
+    auto localResultType = cast<RankedTensorType>(converter->convertType(op));
+    if (!localResultType.hasStaticShape()) {
+      return op.emitOpError("dynamic shape not supported");
+    }
+    Value zeroTensor = createZeroConstant(rewriter, loc, localResultType);
+
+    auto indexTy = RankedTensorType::get({}, rewriter.getI32Type());
+    Value zeroOffset;
+    SmallVector<Value> startIndices;
+    startIndices.reserve(localResultType.getRank());
+    for (int64_t i = 0; i < localResultType.getRank(); ++i) {
+      ArrayRef<AxisRefAttr> axes = op.getAxes()[i].getValue();
+      if (axes.empty()) {
+        if (!zeroOffset) {
+          zeroOffset = createZeroConstant(rewriter, loc, indexTy);
+        }
+        startIndices.push_back(zeroOffset);
+        continue;
+      }
+      startIndices.push_back(getDimensionOffset(loc, mesh, axes,
+                                                localInputType.getDimSize(i),
+                                                conversionState, rewriter));
+    }
+
+    rewriter.replaceOpWithNewOp<stablehlo::DynamicUpdateSliceOp>(
+        op, localResultType, zeroTensor, localInput, startIndices);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 class NamedComputationOpPattern
     : public OpConversionPattern<NamedComputationOp> {
  public:
@@ -1608,11 +1797,11 @@ class StablehloConvolutionOpPattern
       addRhsReductionAxes(spatialDim);
     }
 
-    bool hasUnreducedAxes = true;
+    bool introducesPartialResult = true;
     if (!reductionAxes.empty()) {
       sortAndMergeAxes(reductionAxes, mesh);
-      hasUnreducedAxes = hasUnreducedResultSharding(op, reductionAxes,
-                                                    "convolution", converter);
+      introducesPartialResult = doesOpIntroducePartialResult(
+          op, reductionAxes, "convolution", converter);
     }
 
     auto getAxes = [&](TensorShardingAttr sharding, int64_t dim) {
@@ -1643,7 +1832,7 @@ class StablehloConvolutionOpPattern
         localBatchGroupCount, op.getPrecisionConfigAttr());
 
     ValueRange results = localConv->getResults();
-    if (!reductionAxes.empty() && !hasUnreducedAxes) {
+    if (!reductionAxes.empty() && !introducesPartialResult) {
       Attribute meshOrRef =
           rhsSharding ? rhsSharding.getMeshOrRef() : lhsSharding.getMeshOrRef();
       results = createAllReduceForUnreducedAxes(
@@ -1727,8 +1916,8 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
 
         // Verify that an AllReduce has been inserted by a previous pass unless
         // the result is explicitly unreduced.
-        if (!hasUnreducedResultSharding(op, contractingAxes, "dot",
-                                        converter)) {
+        if (!doesOpIntroducePartialResult(op, contractingAxes, "dot",
+                                          converter)) {
           Operation* localDot = createLocalGenericOp(op, adaptor.getOperands(),
                                                      rewriter, converter);
           ValueRange results = createAllReduceForUnreducedAxes(
@@ -1804,8 +1993,8 @@ class StablehloDotGeneralOpPattern
 
         // Verify that an AllReduce has been inserted by a previous pass unless
         // the result is explicitly unreduced.
-        if (!hasUnreducedResultSharding(op, reductionAxes, "dot_general",
-                                        converter)) {
+        if (!doesOpIntroducePartialResult(op, reductionAxes, "dot_general",
+                                          converter)) {
           Operation* localDotGeneral = createLocalGenericOp(
               op, adaptor.getOperands(), rewriter, converter);
           ValueRange results = createAllReduceForUnreducedAxes(
@@ -1826,6 +2015,71 @@ class StablehloDotGeneralOpPattern
  private:
   ConversionState& conversionState;
   bool enableRGV3;
+};
+
+class StablehloDynamicSliceOpPattern
+    : public OpConversionPattern<stablehlo::DynamicSliceOp> {
+ public:
+  StablehloDynamicSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                                 ConversionState& state)
+      : OpConversionPattern<stablehlo::DynamicSliceOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::DynamicSliceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr inSharding = converter->getSharding(op.getOperand());
+    TensorShardingAttr outSharding = converter->getSharding(op.getResult());
+
+    if (isFullyReplicated(inSharding) && isFullyReplicated(outSharding)) {
+      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
+                               conversionState);
+    }
+
+    auto globalInputType = op.getOperand().getType();
+    auto localResultType =
+        cast<RankedTensorType>(converter->convertType(op.getResult()));
+    MeshAttr mesh =
+        inSharding ? inSharding.getMesh(converter->getSymbolTable()) : nullptr;
+
+    for (int64_t i = 0; i < globalInputType.getRank(); ++i) {
+      ArrayRef<AxisRefAttr> inAxes =
+          inSharding ? inSharding.getDimShardings()[i].getAxes()
+                     : ArrayRef<AxisRefAttr>();
+      ArrayRef<AxisRefAttr> outAxes =
+          outSharding ? outSharding.getDimShardings()[i].getAxes()
+                      : ArrayRef<AxisRefAttr>();
+
+      if (inAxes != outAxes) {
+        return op.emitOpError()
+               << "dimension " << i << " has mismatched sharding axes ("
+               << strippedAttrsString(inAxes) << " vs "
+               << strippedAttrsString(outAxes)
+               << "). This requires a reshard which should have been handled "
+                  "by previous passes.";
+      }
+
+      int64_t globalSliceSize = op.getSliceSizes()[i];
+      if (!inAxes.empty() && globalSliceSize != globalInputType.getDimSize(i)) {
+        if (!mesh || inSharding.getDimShardings()[i].getShardedSize(mesh) > 1) {
+          return op.emitOpError() << "dimension " << i
+                                  << " is sharded but the slice is not a full "
+                                     "slice and requires device communication.";
+        }
+      }
+    }
+
+    rewriter.replaceOpWithNewOp<stablehlo::DynamicSliceOp>(
+        op, localResultType, adaptor.getOperand(), adaptor.getStartIndices(),
+        localResultType.getShape());
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
 };
 
 Value createScalarInt(OpBuilder& b, Location loc, RankedTensorType type,
@@ -2095,7 +2349,7 @@ class StablehloReduceOpPattern
     }
 
     if (!reductionAxes.empty() &&
-        !hasUnreducedResultSharding(op, reductionAxes, "reduce", converter)) {
+        !doesOpIntroducePartialResult(op, reductionAxes, "reduce", converter)) {
       auto localReduceOp = cast<stablehlo::ReduceOp>(
           createLocalGenericOp(op, adaptor.getOperands(), rewriter, converter));
       if (op.getNumResults() == 1) {
@@ -2555,8 +2809,8 @@ class StablehloGatherOpPattern
         mask, bcastDims);
 
     TensorShardingAttr resSharding = getSharding(op.getResult());
-    bool hasUnreducedAxes =
-        hasUnreducedResultSharding(op, reductionAxes, "gather", converter);
+    bool introducesPartialResult =
+        doesOpIntroducePartialResult(op, reductionAxes, "gather", converter);
     ReductionOp reductionOp =
         resSharding ? resSharding.getReductionOp() : ReductionOp::SUM;
 
@@ -2573,7 +2827,7 @@ class StablehloGatherOpPattern
     result = stablehlo::SelectOp::create(rewriter, loc, bcastMask, result,
                                          identityVal);
 
-    if (!hasUnreducedAxes) {
+    if (!introducesPartialResult) {
       result =
           createAllReduceForUnreducedAxes(loc, result, reductionAxes, mesh,
                                           operandSharding.getMeshOrRef(),
@@ -2747,30 +3001,8 @@ class StablehloRngBitGeneratorOpPattern
     // Mask non-leader shards (where shard index across dataAxes != 0) to zero
     // and all-reduce across dataAxes so all partitions receive device 0's
     // updated output_state.
-    SmallVector<bool> leaderTable = llvm::map_to_vector(
-        llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
-          return getShardIndex(devId, mesh, dataAxes) == 0;
-        });
-    auto leaderTableConst = stablehlo::ConstantOp::create(
-        rewriter, loc,
-        DenseElementsAttr::get(
-            RankedTensorType::get({numDevices}, rewriter.getI1Type()),
-            leaderTable));
-    Value isLeader = stablehlo::DynamicSliceOp::create(
-        rewriter, loc, RankedTensorType::get({1}, rewriter.getI1Type()),
-        leaderTableConst, ValueRange{deviceId},
-        rewriter.getDenseI64ArrayAttr({1}));
-    isLeader = stablehlo::ReshapeOp::create(
-        rewriter, loc, RankedTensorType::get({}, rewriter.getI1Type()),
-        isLeader);
-    isLeader = stablehlo::BroadcastInDimOp::create(
-        rewriter, loc,
-        RankedTensorType::get(localStateType.getShape(), rewriter.getI1Type()),
-        isLeader, rewriter.getDenseI64ArrayAttr({}));
-
-    Value zeroState = createZeroConstant(rewriter, loc, localStateType);
-    Value maskedState = stablehlo::SelectOp::create(rewriter, loc, isLeader,
-                                                    finalState, zeroState);
+    Value maskedState = maskNonLeaderShardsToZero(
+        loc, finalState, mesh, dataAxes, conversionState, rewriter, deviceId);
 
     finalState =
         createAllReduceForUnreducedAxes(loc, ValueRange{maskedState}, dataAxes,
@@ -3121,35 +3353,13 @@ class StablehloScatterOpPattern
       if (!identity) {
         return op.emitError("failed to get scatter reduction identity.");
       }
-      // Generate leader mask: (shardIndex(reductionAxes) == 0).
-      int64_t numDevices = mesh.getTotalSize();
-      SmallVector<bool> leaderTable = llvm::map_to_vector(
-          llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
-            return getShardIndex(devId, mesh, reductionAxes) == 0;
-          });
-      Value partitionId = getDeviceId(loc, conversionState, rewriter);
-      auto tableConst = stablehlo::ConstantOp::create(
-          rewriter, loc,
-          DenseElementsAttr::get(
-              RankedTensorType::get({numDevices}, rewriter.getI1Type()),
-              leaderTable));
-      Value isLeader =
-          stablehlo::DynamicSliceOp::create(
-              rewriter, loc, RankedTensorType::get({1}, rewriter.getI1Type()),
-              tableConst, {partitionId}, rewriter.getDenseI64ArrayAttr({1}))
-              .getResult();
-
-      isLeader = stablehlo::ReshapeOp::create(
-          rewriter, loc, RankedTensorType::get({}, rewriter.getI1Type()),
-          isLeader);
       // Broadcast the scalar identity to the shape of the current local input.
       Value broadcastIdentity = stablehlo::BroadcastInDimOp::create(
           rewriter, loc, localInputs.front().getType(), identity,
           rewriter.getDenseI64ArrayAttr({}));
-      llvm::transform(localInputs, localInputs.begin(), [&](Value input) {
-        return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
-                                           broadcastIdentity);
-      });
+      localInputs = maskNonLeaderShards(loc, localInputs, mesh, reductionAxes,
+                                        conversionState, rewriter,
+                                        broadcastIdentity);
     }
 
     auto globalInputType = cast<RankedTensorType>(input.getType());
@@ -3207,7 +3417,8 @@ class StablehloScatterOpPattern
 
     ValueRange results = localScatter.getResults();
     if (!reductionAxes.empty() &&
-        !hasUnreducedResultSharding(op, reductionAxes, "scatter", converter)) {
+        !doesOpIntroducePartialResult(op, reductionAxes, "scatter",
+                                      converter)) {
       Attribute meshOrRef = inputSharding ? inputSharding.getMeshOrRef()
                                           : updateSharding.getMeshOrRef();
       results = createAllReduceForUnreducedAxes(
@@ -3503,7 +3714,8 @@ struct ConvertGlobalToLocalPass
     patterns.add<AllSliceOpPattern, CollectivePermuteOpPattern,
                  ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
                  ManualComputationOpPattern, NamedComputationOpPattern,
-                 StablehloConcatenateOpPattern,
+                 ReplicatedToUnreducedOpPattern, ShardedToUnreducedOpPattern,
+                 StablehloConcatenateOpPattern, StablehloDynamicSliceOpPattern,
                  StablehloDynamicUpdateSliceOpPattern, StablehloIotaOpPattern,
                  StablehloPadOpPattern,
                  StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
