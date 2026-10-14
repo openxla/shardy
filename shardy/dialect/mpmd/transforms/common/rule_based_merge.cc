@@ -96,6 +96,8 @@ class RuleBasedMergingPattern : public OpRewritePattern<FragmentOp> {
       if (new_fragment_dest == merge_candidate) {
         new_fragment_dest = new_fragment_dest->getNextNode();
       }
+      // Make fragments adjacent for MergeFragments precondition.
+      new_fragment->moveBefore(merge_candidate);
       new_fragment = MergeFragments(new_fragment, merge_candidate, rewriter);
     }
     SetFragmentInfo(new_fragment, rule->target, rewriter);
