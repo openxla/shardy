@@ -78,6 +78,20 @@ Value createConstant(OpBuilder& b, Location loc, Type elementType,
   llvm_unreachable("invalid PaddingValueKind");
 }
 
+// Returns the PaddingValueKind of the given scalar constant, or std::nullopt if
+// not a recognized padding value (e.g. 0 or 1).
+std::optional<PaddingValueKind> getPaddingValueKind(Value paddingValue) {
+  if (matchPattern(paddingValue, m_Zero()) ||
+      matchPattern(paddingValue, m_AnyZeroFloat())) {
+    return PaddingValueKind::kZero;
+  }
+  if (matchPattern(paddingValue, m_One()) ||
+      matchPattern(paddingValue, m_OneFloat())) {
+    return PaddingValueKind::kOne;
+  }
+  return std::nullopt;
+}
+
 // Helper methods for commonly created ops (stablehlo.slice and stablehlo.pad).
 
 // Slices a tensor to `targetType` along dimensions that need trimming.
@@ -946,8 +960,9 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
 
 class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
  public:
-  explicit StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx)
-      : OpConversionPattern(converter, ctx) {}
+  StablehloPadOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                        PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       stablehlo::PadOp op, OpAdaptor adaptor,
@@ -1017,11 +1032,20 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     // Copy sharding attribute to the new result.
     setSharding(newPadOp.getResult(), getSharding(result));
 
-    // TODO(b/537380378): We could parse the padding value from the original pad
-    // op to cache the padding kind and avoid downstream selects.
+    if (std::optional<PaddingValueKind> paddingKind =
+            getPaddingValueKind(adaptor.getOperands()[1])) {
+      if (input.getType() == op.getOperand().getType() || highPaddingReduced ||
+          cache.getPadding(input) == paddingKind) {
+        cache.setPadding(newPadOp.getResult(), *paddingKind);
+      }
+    }
+
     rewriter.replaceOp(op, newPadOp.getResult());
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class StablehloDotGeneralOpPattern
@@ -1406,9 +1430,10 @@ struct PadForDivisibilityPass
     patterns.add<FuncOpSignaturePattern>(typeConverter, &getContext(),
                                          paddingCache);
     patterns.add<GenericOpPattern, StablehloSliceOpPattern,
-                 StablehloGatherOpPattern>(typeConverter, &getContext());
-    patterns.add<StablehloPadOpPattern, StablehloReshapeOpPattern>(
+                 StablehloGatherOpPattern, StablehloReshapeOpPattern>(
         typeConverter, &getContext());
+    patterns.add<StablehloPadOpPattern>(typeConverter, &getContext(),
+                                        paddingCache);
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     // TODO(b/553579414): remove the pattern for stablehlo.ConstantOp.
