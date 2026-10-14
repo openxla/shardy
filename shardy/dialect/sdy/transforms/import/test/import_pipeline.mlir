@@ -2,8 +2,8 @@
 
 sdy.mesh @mesh = <["a"=2]>
 
-// Verifies that `-apply-sharding-constraints` pass is applied after
-// `-add-data_flow_edges` pass
+// Verifies that `-apply-sharding-constraints` pass is not applied
+// before -add-data_flow_edges pass.
 // CHECK-LABEL: func @main
 func.func @main(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
   // CHECK-NEXT: %[[OPT_BARRIER:.*]] = stablehlo.optimization_barrier %arg0
@@ -53,11 +53,9 @@ func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
 
 sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
 
-// Due to the in_sharding being fully closed, the in_sharding is added to the
-// func arg but with the manual axis added as replicated.
-// CHECK-LABEL: func @main
-// CHECK-SAME     %arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}, {}], replicated={"a"}>}
-// CHECK-SAME     -> tensor<16x16xf32> {
+// CHECK-LABEL: func @main(
+// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}], replicated={"a"}>})
+// CHECK-SAME:      -> tensor<8xf32> {
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c"}], replicated={"a"}>] out_shardings=[<@mesh, [{"c"}], replicated={"a"}>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
   // CHECK-NEXT:   %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{}]>

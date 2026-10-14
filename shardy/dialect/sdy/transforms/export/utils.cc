@@ -77,6 +77,13 @@ SmallVector<AxisRefAttr> getOrderedAxes(ArrayRef<AxisList> axesPerDim) {
   return result;
 }
 
+// Returns the sharded size of dimension `dim` in `sharding`, or 1 if `sharding`
+// is null.
+int64_t getDimShardedSize(TensorShardingAttr sharding, int64_t dim,
+                          MeshAttr mesh) {
+  return sharding ? sharding.getDimSharding(dim).getShardedSize(mesh) : 1;
+}
+
 }  // namespace
 
 void alignSubAxesByDecomposition(AxisList& axes,
@@ -156,7 +163,7 @@ TensorShardingAttr updateSharding(TensorShardingAttr sharding,
 
 bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
                                  TensorShardingAttr sharding, MeshAttr mesh) {
-  int64_t shardCount = sharding.getDimShardings()[dimIdx].getShardedSize(mesh);
+  int64_t shardCount = getDimShardedSize(sharding, dimIdx, mesh);
 
   if (shardCount <= 1) {
     return true;
@@ -183,7 +190,7 @@ bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
 
 bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
                                TensorShardingAttr sharding, MeshAttr mesh) {
-  int64_t shardCount = sharding.getDimShardings()[dimIdx].getShardedSize(mesh);
+  int64_t shardCount = getDimShardedSize(sharding, dimIdx, mesh);
   if (shardCount <= 1) {
     return true;
   }
@@ -229,8 +236,7 @@ bool isCommunicationFreeDynamicUpdateSliceDim(
     return false;
   }
 
-  int64_t shardCount =
-      operandSharding.getDimShardings()[dimIdx].getShardedSize(mesh);
+  int64_t shardCount = getDimShardedSize(operandSharding, dimIdx, mesh);
   // Return true if the dimension is unsharded, not sliced, or a single-element
   // slice.
   if (shardCount <= 1 || operandDimSize == updateDimSize ||
@@ -408,10 +414,8 @@ RankedTensorType getDivisiblePaddedType(RankedTensorType globalType,
       paddedShape.push_back(dimSize);
       continue;
     }
-    int64_t inShardSize =
-        inSharding ? inSharding.getDimSharding(dim).getShardedSize(mesh) : 1;
-    int64_t outShardSize =
-        outSharding ? outSharding.getDimSharding(dim).getShardedSize(mesh) : 1;
+    int64_t inShardSize = getDimShardedSize(inSharding, dim, mesh);
+    int64_t outShardSize = getDimShardedSize(outSharding, dim, mesh);
     int64_t divisor = std::lcm(inShardSize, outShardSize);
     paddedShape.push_back(llvm::alignTo(dimSize, divisor));
   }
