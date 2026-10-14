@@ -19,6 +19,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -41,9 +42,6 @@ PropagationDirection unionOfPropagationDirections(PropagationDirection d1,
 // - (Any, BOTH)         -> Any
 PropagationDirection intersectionOfPropagationDirections(
     PropagationDirection d1, PropagationDirection d2);
-
-// Returns whether all dimensions are fully replicated.
-bool isFullyReplicated(TensorShardingAttr sharding);
 
 // Returns whether `sharding` and `anotherSharding` are equivalent.
 bool isEquivalent(TensorShardingAttr sharding,
