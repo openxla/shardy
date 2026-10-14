@@ -783,14 +783,17 @@ void insertSingleDeviceResultReshards(Operation* op,
 }
 
 // Sets the single-device sharding on all tensor results of a single-device
-// operation, except for token results which can only have global replicated
-// sharding.
+// operation, except for token results of non-send/recv operations which can
+// only have global replicated sharding. The current XLA compilation pipeline
+// requires the partitioner to preserve single-device sharding on send/recv,
+// including the token results.
 void updateSingleDeviceOpResultShardings(Operation* op,
                                          TensorShardingAttr singleDevSharding,
                                          MeshOp globalMeshOp,
                                          IRRewriter& rewriter) {
-  for (auto [index, res] : llvm::enumerate(op->getResults())) {
-    if (isa<RankedTensorType>(res.getType())) {
+  for (OpResult res : op->getResults()) {
+    if (isa<RankedTensorType>(res.getType()) ||
+        isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
       setSharding(res, singleDevSharding);
     } else if (isa<TokenType>(res.getType())) {
       TensorShardingAttr tokenSharding = TensorShardingAttr::getFullyReplicated(

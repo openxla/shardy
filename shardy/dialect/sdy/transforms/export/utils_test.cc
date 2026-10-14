@@ -282,7 +282,7 @@ TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolNestedOp) {
 }
 
 TEST_F(ExportUtilsTest, GetOrCreateMeshSymbolGlobalMesh) {
-  // Create a global mesh (non-maximal, non-empty axes) and add it to the
+  // Create a global mesh (non-single-device, non-empty axes) and add it to the
   // module.
   MeshAttr globalMeshAttr =
       MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 4)});

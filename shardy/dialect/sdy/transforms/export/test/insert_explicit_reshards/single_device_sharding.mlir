@@ -239,3 +239,38 @@ func.func @single_device_op_with_token_operand(
   return %0 : tensor<8x16xf32>
 }
 
+// CHECK-LABEL: func @single_device_send_and_recv
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+// CHECK-SAME:  %[[TOKEN:.*]]: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>})
+// CHECK-SAME: -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+// CHECK-SAME:     !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}) {
+func.func @single_device_send_and_recv(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %token: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+        !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}) {
+  // CHECK-NEXT: %[[SEND_IN_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[SEND_IN_SINGLE:.*]] = sdy.reshard %[[SEND_IN_REPL]] <@single_dev_0, []> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[SEND:.*]] = "stablehlo.send"(%[[SEND_IN_SINGLE]], %[[TOKEN]])
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@single_dev_0, []>]>}
+  %0 = "stablehlo.send"(%arg0, %token) <{
+    channel_handle = #stablehlo.channel_handle<handle = 1, type = 2>,
+    is_host_transfer = true
+  }> {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@single_dev_0, []>]>
+  } : (tensor<8x16xf32>, !stablehlo.token) -> !stablehlo.token
+
+  // CHECK-NEXT: %[[RECV:.*]]:2 = "stablehlo.recv"(%[[SEND]])
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@single_dev_0, []>, <@single_dev_0, []>]>}
+  // CHECK-NEXT: %[[RECV_OUT_REPL:.*]] = sdy.reshard %[[RECV]]#0 <@mesh, [{}, {}]> : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[RECV_OUT_REPL]], %[[RECV]]#1 : tensor<8x16xf32>, !stablehlo.token
+  %1:2 = "stablehlo.recv"(%0) <{
+    channel_handle = #stablehlo.channel_handle<handle = 2, type = 3>,
+    is_host_transfer = true
+  }> {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@single_dev_0, []>, #sdy.sharding<@single_dev_0, []>]>
+  } : (!stablehlo.token) -> (tensor<8x16xf32>, !stablehlo.token)
+
+  return %1#0, %1#1 : tensor<8x16xf32>, !stablehlo.token
+}
+
