@@ -178,3 +178,43 @@ func.func @single_device_op_reshard_to_other_replicated_mesh(
   // CHECK-NEXT: return %[[RESHARD_MESH2]] : tensor<8x16xf32>
   return %3 : tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func @single_device_send_and_recv
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+// CHECK-SAME:  %[[TOKEN:.*]]: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>})
+// CHECK-SAME: -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+// CHECK-SAME:     !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}) {
+func.func @single_device_send_and_recv(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>},
+    %token: !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>})
+    -> (tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+        !stablehlo.token {sdy.sharding = #sdy.sharding<@mesh, []>}) {
+  // CHECK-NEXT: %[[IN_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[SEND:.*]] = "stablehlo.send"(%[[IN_REPL]], %[[TOKEN]])
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@single_dev_0, []>]>}
+  // CHECK-NEXT: %[[RECV:.*]]:2 = "stablehlo.recv"(%[[SEND]])
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@single_dev_0, []>, <@single_dev_0, []>]>}
+  // CHECK-NEXT: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_DEV0:.*]] = stablehlo.compare EQ, %[[PART_ID]], %[[C0]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZEROS:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[SEL:.*]] = stablehlo.select %[[IS_DEV0]], %[[RECV]]#0, %[[ZEROS]] : tensor<i1>, tensor<8x16xf32>
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[SEL]] out_sharding=<@mesh, [{}, {}]> : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ALL_REDUCE]], %[[RECV]]#1 : tensor<8x16xf32>, !stablehlo.token
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x16xf32>
+  %1 = sdy.reshard %0 <@single_dev_0, []> : tensor<8x16xf32>
+  %2 = "stablehlo.send"(%1, %token) <{
+    channel_handle = #stablehlo.channel_handle<handle = 1, type = 2>,
+    is_host_transfer = true
+  }> {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@single_dev_0, []>]>
+  } : (tensor<8x16xf32>, !stablehlo.token) -> !stablehlo.token
+  %3:2 = "stablehlo.recv"(%2) <{
+    channel_handle = #stablehlo.channel_handle<handle = 2, type = 3>,
+    is_host_transfer = true
+  }> {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@single_dev_0, []>, #sdy.sharding<@single_dev_0, []>]>
+  } : (!stablehlo.token) -> (tensor<8x16xf32>, !stablehlo.token)
+  %4 = sdy.reshard %3#0 <@mesh, [{}, {}]> : tensor<8x16xf32>
+  return %4, %3#1 : tensor<8x16xf32>, !stablehlo.token
+}

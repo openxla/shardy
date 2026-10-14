@@ -231,9 +231,13 @@ std::optional<StringRef> getCommonMeshName(
     ArrayRef<TensorShardingAttr> resultsShardings,
     const SymbolTable& symbolTable, bool ignoreDeviceIds);
 
+// Returns whether all dimensions are fully replicated.
+bool isFullyReplicated(TensorShardingAttr sharding);
+
 // Returns true if the sharding attribute is bound to a single-device mesh.
 bool isSingleDeviceSharding(TensorShardingAttr sharding,
                             const SymbolTable& symbolTable);
+bool isSingleDeviceSharding(TensorShardingAttr sharding, Operation* op);
 
 // Given two shardings for a reshape between two types, returns whether the
 // shardings are equivalent:

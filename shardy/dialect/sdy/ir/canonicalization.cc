@@ -45,6 +45,23 @@ namespace sdy {
 
 namespace {
 
+// Returns true if folding tensor -> innerReshard -> outerSharding into
+// tensor -> outerSharding would directly reshard between a tiled (or
+// unreduced) sharding and a single-device sharding.
+bool isSingleDeviceAndTiledReshard(Operation* op, Value tensor,
+                                   TensorShardingAttr outerSharding) {
+  TensorShardingAttr inSharding = getShardingBypassingBarriers(tensor);
+  bool inIsSingleDevice = isSingleDeviceSharding(inSharding, op);
+  bool outIsSingleDevice = isSingleDeviceSharding(outerSharding, op);
+  if (inIsSingleDevice == outIsSingleDevice) {
+    return false;
+  }
+  TensorShardingAttr otherSharding =
+      inIsSingleDevice ? outerSharding : inSharding;
+  return otherSharding && (!isFullyReplicated(otherSharding) ||
+                           !otherSharding.getUnreducedAxes().empty());
+}
+
 #include "shardy/dialect/sdy/ir/canonicalization.cc.inc"
 
 // Pattern to remove unused block arguments and their corresponding operands
