@@ -457,5 +457,227 @@ TEST(MergeAttributes, BothCallCounterAndInferredBy) {
   EXPECT_EQ(mlir::cast<StringAttr>(merged_array[1]).getValue(), "pass_b");
 }
 
+constexpr char kTwoMeshProgram[] = R"mlir(
+  !m1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+  !m2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+  func.func @main(%arg0: !m1_tensor, %arg1: !m2_tensor)
+      -> (!m1_tensor, !m2_tensor)
+    attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=4]>>>} {
+    %0 = mpmd.fragment<mesh="m1", origin=["f0"(0)]> (%arg0)
+         (%a0: tensor<4x8xf32>) {
+      mpmd.return %a0 : tensor<4x8xf32>
+    } : (!m1_tensor) -> !m1_tensor
+
+    %1 = mpmd.fragment<mesh="m2", origin=["f1"(0)]> (%arg1)
+         (%a1: tensor<4x8xf32>) {
+      mpmd.return %a1 : tensor<4x8xf32>
+    } : (!m2_tensor) -> !m2_tensor
+
+    %2 = mpmd.fragment<mesh="m1", origin=["f2"(0)]> (%0)
+         (%a2: tensor<4x8xf32>) {
+      mpmd.return %a2 : tensor<4x8xf32>
+    } : (!m1_tensor) -> !m1_tensor
+
+    %3 = mpmd.fragment<mesh="m1", origin=["f3"(0)]> (%2)
+         (%a3: tensor<4x8xf32>) {
+      mpmd.return %a3 : tensor<4x8xf32>
+    } : (!m1_tensor) -> !m1_tensor
+
+    return %3, %1 : !m1_tensor, !m2_tensor
+  }
+)mlir";
+
+// Helper: parse the two-mesh program and return (func, {f0, f1, f2, f3}).
+struct ParsedTwoMeshProgram {
+  OwningOpRef<ModuleOp> module;
+  FuncOp func_op;
+  FragmentOp f0;  // m1
+  FragmentOp f1;  // m2
+  FragmentOp f2;  // m1
+  FragmentOp f3;  // m1
+};
+
+ParsedTwoMeshProgram ParseTwoMeshProgram(MLIRContext& context) {
+  ParsedTwoMeshProgram p;
+  p.module = parseSourceString<ModuleOp>(kTwoMeshProgram, &context);
+  p.func_op = GetMainFunction(*p.module);
+  auto it = p.func_op.getOps().begin();
+  p.f0 = mlir::cast<FragmentOp>(*it++);
+  p.f1 = mlir::cast<FragmentOp>(*it++);
+  p.f2 = mlir::cast<FragmentOp>(*it++);
+  p.f3 = mlir::cast<FragmentOp>(*it);
+  return p;
+}
+
+TEST(FindLastFragmentOnMesh, ReturnsNullptrWhenNoEarlierSameMeshFragment) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // f0 is the first m1 fragment. Other m1 fragments (f2, f3) exist after it,
+  // but the search is backward-only.
+  FragmentOp last = FindLastFragmentOnMesh(p.f0);
+  EXPECT_EQ(last, nullptr);
+}
+
+TEST(FindLastFragmentOnMesh, FindsNearestPrecedingSameMeshFragment) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // f3 is the last m1 fragment. Searching backward from f3 finds f2,
+  // skipping f1 (which is on m2).
+  FragmentOp last = FindLastFragmentOnMesh(p.f3);
+  ASSERT_NE(last, nullptr);
+  EXPECT_EQ(last, p.f2);
+}
+
+TEST(FindLatestOperandProducer, ReturnsLatestProducer) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // f3's operand is %2 (from f2). The latest operand producer should be f2.
+  Operation* latest = FindLatestOperandProducer(p.f3);
+  ASSERT_NE(latest, nullptr);
+  EXPECT_EQ(latest, p.f2.getOperation());
+}
+
+TEST(FindLatestOperandProducer, ReturnsNullptrForBlockArgOnly) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // f0's operand is %arg0 (a block argument). Should return nullptr.
+  EXPECT_EQ(FindLatestOperandProducer(p.f0), nullptr);
+}
+
+TEST(FindLatestOperandProducer, WithMultipleOperands) {
+  // Build a program where a fragment takes two op-defined operands.
+  const char kProgram[] = R"mlir(
+    !mt = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+    func.func @main(%arg0: !mt) -> !mt
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["a"(0)]> (%arg0)
+           (%a: tensor<4x8xf32>) {
+        mpmd.return %a : tensor<4x8xf32>
+      } : (!mt) -> !mt
+
+      %1 = mpmd.fragment<mesh="m1", origin=["b"(0)]> (%0)
+           (%b: tensor<4x8xf32>) {
+        mpmd.return %b : tensor<4x8xf32>
+      } : (!mt) -> !mt
+
+      %2 = mpmd.fragment<mesh="m1", origin=["c"(0)]> (%0, %1)
+           (%c: tensor<4x8xf32>, %d: tensor<4x8xf32>) {
+        mpmd.return %c : tensor<4x8xf32>
+      } : (!mt, !mt) -> !mt
+
+      return %2 : !mt
+    }
+  )mlir";
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  ++it;  // skip "a"
+  Operation* b = &*it++;
+  Operation* c = &*it;
+
+  // c takes (%0, %1). b is later than a, so latest producer should be b.
+  Operation* latest = FindLatestOperandProducer(c);
+  ASSERT_NE(latest, nullptr);
+  EXPECT_EQ(latest, b);
+}
+
+TEST(EnsureAfter, NoOpWhenAlreadyAfter) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // f2 is already after f0 — EnsureAfter should be a no-op returning true.
+  EXPECT_TRUE(EnsureAfter(p.f2, p.f0));
+  // f2 should still be after f0.
+  EXPECT_TRUE(p.f0->isBeforeInBlock(p.f2));
+}
+
+TEST(EnsureAfter, NoOpWhenSameOp) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // op == target — should be a no-op returning true.
+  EXPECT_TRUE(EnsureAfter(p.f0, p.f0));
+}
+
+TEST(EnsureAfter, NoOpWhenTargetIsNull) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // nullptr target — should return true.
+  EXPECT_TRUE(EnsureAfter(p.f0, nullptr));
+}
+
+TEST(EnsureAfter, MovesWhenSafe) {
+  // f1(m2) has no users in the block (only used by return).
+  // We can move f1 after f2 safely since f1's result is only used by return
+  // which comes after everything.
+  const char kProgram[] = R"mlir(
+    !m1 = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+
+    !m2 = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+    func.func @main(%arg0: !m1, %arg1: !m2) -> (!m1, !m2)
+      attributes {"topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["y"=4]>>>} {
+      %0 = mpmd.fragment<mesh="m1", origin=["a"(0)]> (%arg0)
+           (%a: tensor<4x8xf32>) {
+        mpmd.return %a : tensor<4x8xf32>
+      } : (!m1) -> !m1
+
+      %1 = mpmd.fragment<mesh="m2", origin=["b"(0)]> (%arg1)
+           (%b: tensor<4x8xf32>) {
+        mpmd.return %b : tensor<4x8xf32>
+      } : (!m2) -> !m2
+
+      %2 = mpmd.fragment<mesh="m1", origin=["c"(0)]> (%0)
+           (%c: tensor<4x8xf32>) {
+        mpmd.return %c : tensor<4x8xf32>
+      } : (!m1) -> !m1
+
+      return %2, %1 : !m1, !m2
+    }
+  )mlir";
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  auto it = func_op.getOps().begin();
+  ++it;  // skip "a"
+  FragmentOp b = mlir::cast<FragmentOp>(*it++);
+  FragmentOp c = mlir::cast<FragmentOp>(*it);
+
+  // b is before c; move b after c.
+  ASSERT_TRUE(b->isBeforeInBlock(c));
+  EXPECT_TRUE(EnsureAfter(b, c));
+  // Now b should be after c.
+  EXPECT_TRUE(c->isBeforeInBlock(b));
+}
+
+TEST(EnsureAfter, ReturnsFalseWhenUnsafe) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  auto p = ParseTwoMeshProgram(context);
+
+  // f2's result is used by f3. Moving f2 after f3 is unsafe.
+  EXPECT_FALSE(EnsureAfter(p.f2, p.f3));
+  // f2 should NOT have been moved — still before f3.
+  EXPECT_TRUE(p.f2->isBeforeInBlock(p.f3));
+}
+
 }  // namespace
 }  // namespace mlir::mpmd
