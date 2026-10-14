@@ -1104,3 +1104,14 @@ func.func private @foo(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mes
   %0 = stablehlo.abs %arg0 : tensor<8x8xf32>
   return %0: tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2]>
+
+func.func @tuple_not_supported(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) -> tensor<8x8xf32> {
+  // expected-error @+1 {{Shardy propagation doesn't support tuples: 'tuple<tensor<8x8xf32>>'. Please flatten or canonicalize tuples before running Shardy propagation.}}
+  %0 = stablehlo.tuple %arg0 : tuple<tensor<8x8xf32>>
+  %1 = stablehlo.get_tuple_element %0[0] : (tuple<tensor<8x8xf32>>) -> tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
