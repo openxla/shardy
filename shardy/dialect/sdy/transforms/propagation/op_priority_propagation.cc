@@ -177,18 +177,19 @@ struct OpPriorityPropagationPass
 
 LogicalResult OpPriorityPropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
-    const ShardingGroupMap& shardingGroupMap,
+    const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   if (!runOpPriorityPropagation) {
-    return AggressivePropagationPassImpl::propagate(
-        moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate);
+    return AggressivePropagationPassImpl::propagate(moduleOp, symbolTable,
+                                                    userMap, shardingGroupMap,
+                                                    getDirectionToPropagate);
   }
   // Reset currentPriority to 0. Before running the pass. This same instance
   // could have been run earlier already (e.g. with a different user priority).
   for (int64_t currentPriority = 0;
        currentPriority < opPropagationSchedule.size(); currentPriority++) {
     if (AggressivePropagationPassImpl::propagate(
-            moduleOp, symbolTable, shardingGroupMap,
+            moduleOp, symbolTable, userMap, shardingGroupMap,
             getOpBasedDirectionToPropagate(currentPriority,
                                            getDirectionToPropagate))
             .failed()) {

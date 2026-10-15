@@ -776,7 +776,9 @@ bool allValidShapes(ModuleOp moduleOp) {
                   }
                   if (auto tupleType = dyn_cast<TupleType>(type)) {
                     op->emitError("Shardy propagation doesn't support tuples: ")
-                        << tupleType;
+                        << tupleType
+                        << ". Please flatten or canonicalize tuples before "
+                           "running Shardy propagation.";
                     return WalkResult::interrupt();
                   }
                 }
@@ -793,13 +795,9 @@ PropagationDirection propagateAny(Operation*, int64_t) {
 
 LogicalResult BasicPropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
-    const ShardingGroupMap& shardingGroupMap,
+    const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
     const FactorPropagation& factorPropagation,
     GetDirectionToPropagateFn getDirectionToPropagate) {
-  IRRewriter rewriter(moduleOp);
-  SymbolTableCollection symbolTableCollection;
-  SymbolUserMap userMap(symbolTableCollection, moduleOp);
-
   // Pushes any shardings that exist on the `funcOp` result type attrs to the
   // corresponding values returned in the terminator of the body of `funcOp`,
   // for the main function.
@@ -851,9 +849,9 @@ LogicalResult BasicPropagationPassImpl::propagate(
 
 LogicalResult BasicPropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
-    const ShardingGroupMap& shardingGroupMap,
+    const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
-  return propagate(moduleOp, symbolTable, shardingGroupMap,
+  return propagate(moduleOp, symbolTable, userMap, shardingGroupMap,
                    basicFactorPropagation, getDirectionToPropagate);
 }
 
@@ -878,7 +876,9 @@ void BasicPropagationPassImpl::runOnOperation() {
   // `updateTensorShardings` can enforce the sharding group constraints.
   ShardingGroupMap shardingGroupMap(moduleOp);
   shardingGroupMap.syncGroupMemberShardings(moduleOp);
-  if (failed(propagate(moduleOp, symbolTable, shardingGroupMap))) {
+  SymbolTableCollection symbolTableCollection;
+  SymbolUserMap userMap(symbolTableCollection, moduleOp);
+  if (failed(propagate(moduleOp, symbolTable, userMap, shardingGroupMap))) {
     signalPassFailure();
     return;
   }

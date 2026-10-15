@@ -45,3 +45,18 @@ func.func @unsharded_dense() -> (tensor<4x2xi32> {sdy.sharding = #sdy.sharding<@
   // CHECK-NEXT: return %[[CST]] : tensor<4x2xi32>
   return %0 : tensor<4x2xi32>
 }
+
+// CHECK-LABEL: func.func @unreduced_splat
+// CHECK-SAME:    -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>})
+func.func @unreduced_splat() -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<1.000000e+00> : tensor<4x4xf32>
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[true, true, true, true, false, false, false, false]> : tensor<8xi1>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi1>, tensor<ui32>) -> tensor<1xi1>
+  // CHECK-NEXT: %[[SCALAR:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<4x4xf32>
+  // CHECK-NEXT: %[[RES:.*]] = stablehlo.select %[[SCALAR]], %[[CST]], %[[ZERO]] : tensor<i1>, tensor<4x4xf32>
+  %0 = sdy.constant {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>} dense<1.0> : tensor<4x4xf32>
+  // CHECK-NEXT: return %[[RES]] : tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}

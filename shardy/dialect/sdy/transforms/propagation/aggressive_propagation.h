@@ -68,7 +68,7 @@ class AggressivePropagationPassImpl : public BasicPropagationPassImpl {
   // strategy, and then the aggressive strategy to resolve conflicts.
   LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
-      const ShardingGroupMap& shardingGroupMap,
+      const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 
   Option<PropagationStrategy> propagationStrategy = {
