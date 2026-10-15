@@ -2538,11 +2538,11 @@ struct ShardyResolvePermutationFactorsPass
 
     // Walk the module to resolve permutation factors for each op.
     moduleOp.walk([&](Operation* op) {
-      // Skip terminators and any operations not in the StableHLO dialect.
-      // This prevents "unknown op" warnings for Shardy collectives or return
-      // ops.
+      // Skip terminators and any operations not in the StableHLO dialect
+      // unless they implement PartitioningOpInterface.
+      auto externalOp = dyn_cast<PartitioningOpInterface>(op);
       if (op->hasTrait<OpTrait::IsTerminator>() ||
-          !inDialect<stablehlo::StablehloDialect>(op)) {
+          (!inDialect<stablehlo::StablehloDialect>(op) && !externalOp)) {
         return;
       }
 
@@ -2576,6 +2576,15 @@ struct ShardyResolvePermutationFactorsPass
       };
       if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
                         isPermutationOrDualSemantics)) {
+        return;
+      }
+
+      if (externalOp) {
+        rewriter.setInsertionPoint(op);
+        if (failed(externalOp.resolvePermutationFactors(rule, rewriter,
+                                                        state.symbolTable))) {
+          signalPassFailure();
+        }
         return;
       }
 

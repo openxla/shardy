@@ -67,6 +67,10 @@ limitations under the License.
 // which cannot be inlined due to cyclic dependencies on helper functions.
 
 namespace mlir {
+class ConversionPatternRewriter;
+class IRRewriter;
+class TypeConverter;
+
 namespace sdy {
 namespace details {
 

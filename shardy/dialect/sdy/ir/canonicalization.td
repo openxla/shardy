@@ -25,9 +25,19 @@ def TensorShardingEquivalent : Constraint<CPred<
     "getSharding($0).isEquivalent($1)">,
     "tensor sharding equivalent">;
 
+// Prevent folding of these two SingleDevice transitioning patterns:
+//   (1) Tiled -> .. -> SingleDevice
+//   (2) SingleDevice -> .. -> Tiled
+// to produce Tiled <-> SingleDevice
+def NotSingleDeviceIntermediateReshard : Constraint<CPred<
+    "!isSingleDeviceAndTiledReshard($0.getDefiningOp(), $1, $2)">,
+    "not single-device intermediate reshard">;
+
 def ReshardOfReshardPattern :
     Pat<(Sdy_ReshardOp (Sdy_ReshardOp:$inner_reshard $tensor, $inner_sharding), $outer_sharding),
-        (Sdy_ReshardOp $tensor, $outer_sharding), [(HasOneUse:$inner_reshard)]>;
+        (Sdy_ReshardOp $tensor, $outer_sharding),
+        [(HasOneUse:$inner_reshard),
+         (NotSingleDeviceIntermediateReshard $inner_reshard, $tensor, $outer_sharding)]>;
 
 // TODO(b/390759740): Add more patterns for collectives, e.g., all-gather of
 // all-slice with matching axes.

@@ -993,12 +993,24 @@ mlir::Attribute getMeshOrRef(
   return nullptr;
 }
 
+bool isFullyReplicated(TensorShardingAttr sharding) {
+  return !sharding || sharding.isFullyReplicated();
+}
+
 bool isSingleDeviceSharding(TensorShardingAttr sharding,
                             const SymbolTable& symbolTable) {
   if (!sharding) {
     return false;
   }
   MeshAttr mesh = sharding.getMesh(symbolTable);
+  return mesh && mesh.isSingleDevice();
+}
+
+bool isSingleDeviceSharding(TensorShardingAttr sharding, Operation* op) {
+  if (!sharding) {
+    return false;
+  }
+  MeshAttr mesh = sharding.getMesh(op);
   return mesh && mesh.isSingleDevice();
 }
 
