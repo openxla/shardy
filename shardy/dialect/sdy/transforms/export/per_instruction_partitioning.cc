@@ -748,13 +748,14 @@ void sliceIndivisibleResults(Operation* op, ManualComputationOp manualCompOp,
 //     - Otherwise, use @main's body (or first public FuncOp).
 // - If targetFuncName is non-empty:
 //     - Use the body of the FuncOp with that symbol name in module.
-Region* getTargetRegion(ModuleOp module, StringRef targetFuncName) {
+Region* getTargetRegion(ModuleOp module, StringRef targetFuncName,
+                        const SymbolTable& symbolTable) {
   auto getDefaultEntryFunc = [&]() -> func::FuncOp {
     auto funcOps = module.getOps<func::FuncOp>();
     if (llvm::hasSingleElement(funcOps)) {
       return *funcOps.begin();
     }
-    if (auto mainFunc = module.lookupSymbol<func::FuncOp>("main")) {
+    if (auto mainFunc = symbolTable.lookup<func::FuncOp>("main")) {
       return mainFunc;
     }
     for (func::FuncOp funcOp : funcOps) {
@@ -766,7 +767,7 @@ Region* getTargetRegion(ModuleOp module, StringRef targetFuncName) {
   };
 
   if (!targetFuncName.empty()) {
-    auto funcOp = module.lookupSymbol<func::FuncOp>(targetFuncName);
+    auto funcOp = symbolTable.lookup<func::FuncOp>(targetFuncName);
     SDY_CHECK(funcOp) << "Target function not found: " << targetFuncName.str();
     return &funcOp.getBody();
   }
@@ -789,8 +790,10 @@ struct PerInstructionPartitioningPass
   void runOnOperation() final {
     ModuleOp module = getOperation();
     FilterConfig config = parseFilter(filter);
+    SymbolTable symbolTable(module);
 
-    Region* targetRegion = getTargetRegion(module, config.targetFunc);
+    Region* targetRegion =
+        getTargetRegion(module, config.targetFunc, symbolTable);
 
     // Collect ops for partitioning from target region.
     SmallVector<Operation*> opsToPartition;
@@ -846,7 +849,7 @@ struct PerInstructionPartitioningPass
 
     // Partition the ops and wrap the device code with manual_computation.
     for (Operation* op : opsToPartition) {
-      if (!partitionAndWrapInstruction(op)) {
+      if (!partitionAndWrapInstruction(op, symbolTable)) {
         signalPassFailure();
         return;
       }
@@ -854,11 +857,10 @@ struct PerInstructionPartitioningPass
   }
 
  private:
-  bool partitionAndWrapInstruction(Operation* op) {
+  bool partitionAndWrapInstruction(Operation* op, SymbolTable& symbolTable) {
     MLIRContext* ctx = op->getContext();
     IRRewriter rewriter(ctx);
     rewriter.setInsertionPoint(op);
-    SymbolTable symbolTable(op->getParentOfType<ModuleOp>());
 
     SmallVector<Value> liveInValues;
     llvm::SetVector<Value> implicitCaptures;
