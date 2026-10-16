@@ -571,7 +571,8 @@ TensorShardingAttr removeAxesFromSharding(
   }
   return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
                                  newDimShardings, sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes());
+                                 sharding.getUnreducedAxes(),
+                                 sharding.getReductionOp());
 }
 
 // Returns a TensorShardingAttr where all specific axis references in
@@ -593,7 +594,8 @@ TensorShardingAttr removeAxisRefsFromSharding(
   }
   return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
                                  newDimShardings, sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes());
+                                 sharding.getUnreducedAxes(),
+                                 sharding.getReductionOp());
 }
 
 // -----------------------------------------------------------------------------
@@ -2041,7 +2043,7 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
       reverseOp->getContext(),
       FlatSymbolRefAttr::get(reverseOp->getContext(), newMeshOp.getName()),
       inSharding.getDimShardings(), inSharding.getReplicatedAxes(),
-      inSharding.getUnreducedAxes());
+      inSharding.getUnreducedAxes(), inSharding.getReductionOp());
   // Replace the reverse op input with the padded/shifted input and update the
   // result sharding to reversedSharding.
   state.rewriter.modifyOpInPlace(reverseOp, [&]() {
@@ -2464,6 +2466,7 @@ void resolvePermutationFactorsViaReplication(Operation* op,
         // Remove the dual-semantics reduction axes from the op's result
         // unreduced sharding annotation and update/remove its downstream
         // sdy.all_reduce user before inserting explicit reshards.
+        SDY_CHECK(oldOutSharding.getReductionOp() == ReductionOp::SUM);
         outShardings[0] = oldOutSharding.replaceUnreducedAxes(newUnreduced);
         sdy::setShardings(op, outShardings[0]);
         projection.getMutableResult(0).unreducedAxes = newUnreduced;

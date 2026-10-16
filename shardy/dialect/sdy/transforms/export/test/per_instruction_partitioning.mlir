@@ -289,6 +289,30 @@ func.func @concatenate_sharded_concat_dim(%arg0: tensor<4xf32> {sdy.sharding = #
 
 // -----
 
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @concatenate_sharded_concat_dim_with_unreduced_max
+func.func @concatenate_sharded_concat_dim_with_unreduced_max(
+    %arg0: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}], unreduced=max{"y"}>},
+    %arg1: tensor<2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}], unreduced=max{"y"}>})
+    -> (tensor<6xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}], unreduced=max{"y"}>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%arg0, %arg1)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}], unreduced=max{"y"}>, <@mesh, [{"x"}], unreduced=max{"y"}>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}], unreduced=max{"y"}>]
+  // CHECK-SAME:   manual_axes={"x", "y"} (%arg2: tensor<2xf32>, %arg3: tensor<1xf32>) {
+  // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%arg2)
+  // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%arg3)
+  // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[AG0]], %[[AG1]], dim = 0 : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
+  // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
+  // CHECK-NEXT: } : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}], unreduced=max{"y"}>]>} : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
+  return %0 : tensor<6xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["x"=2]>
 
 // CHECK-LABEL: func @concatenate_indivisible_sharded_concat_dim

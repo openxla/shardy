@@ -418,7 +418,8 @@ TensorShardingAttr getTargetSharding(TensorShardingAttr sharding, Value v) {
       }
       sharding = TensorShardingAttr::get(
           sharding.getContext(), sharding.getMeshOrRef(), newDims,
-          sharding.getReplicatedAxes(), sharding.getUnreducedAxes());
+          sharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
+          sharding.getReductionOp());
       v = transpose.getOperand();
       continue;
     }

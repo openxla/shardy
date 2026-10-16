@@ -97,7 +97,8 @@ AllToAllStage computeAllToAllStage(TensorShardingAttr inSharding,
   }
   auto outSharding = TensorShardingAttr::get(
       ctx, inSharding.getMeshOrRef(), outDimShardings,
-      inSharding.getReplicatedAxes(), inSharding.getUnreducedAxes());
+      inSharding.getReplicatedAxes(), inSharding.getUnreducedAxes(),
+      inSharding.getReductionOp());
   return AllToAllStage{params, outSharding, inType};
 }
 
@@ -286,7 +287,8 @@ TensorShardingAttr buildDecomposedSharding(TensorShardingAttr inSharding,
   }
   return TensorShardingAttr::get(ctx, inSharding.getMeshOrRef(), dimShardings,
                                  inSharding.getReplicatedAxes(),
-                                 inSharding.getUnreducedAxes());
+                                 inSharding.getUnreducedAxes(),
+                                 inSharding.getReductionOp());
 }
 
 // Calculates axis sizes, verifies static divisibility, and constructs the

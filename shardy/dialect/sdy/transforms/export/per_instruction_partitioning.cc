@@ -275,19 +275,16 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
   MLIRContext* ctx = op->getContext();
   InstructionShardingInfo info;
 
-  auto getShardings = [&](ValueRange values, bool clearUnreducedAxes) {
+  auto getShardings = [&](ValueRange values) {
     SmallVector<TensorShardingAttr> shardings;
     shardings.reserve(values.size());
     for (Value val : values) {
       TensorShardingAttr sharding =
           getOrCreateSharding(val, targetMesh, /*closedIfMissing=*/true);
-      if (clearUnreducedAxes ||
-          (meshSym && isa<MeshAttr>(sharding.getMeshOrRef()))) {
+      if (meshSym && isa<MeshAttr>(sharding.getMeshOrRef())) {
         sharding = TensorShardingAttr::get(
             ctx, targetMesh, sharding.getDimShardings(),
-            sharding.getReplicatedAxes(),
-            clearUnreducedAxes ? ArrayRef<AxisRefAttr>{}
-                               : sharding.getUnreducedAxes(),
+            sharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
             sharding.getReductionOp());
       }
       shardings.push_back(sharding);
@@ -295,9 +292,8 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
     return shardings;
   };
 
-  info.inShardings = getShardings(liveInValues, /*clearUnreducedAxes=*/false);
-  info.outShardings =
-      getShardings(op->getResults(), /*clearUnreducedAxes=*/false);
+  info.inShardings = getShardings(liveInValues);
+  info.outShardings = getShardings(op->getResults());
 
   MeshAttr meshAttr = getMeshOrLookup(op, targetMesh);
 
@@ -554,7 +550,8 @@ LogicalResult outlineInstruction(Operation* op,
     dimShardings[dim] =
         DimensionShardingAttr::get(ctx, /*axes=*/{}, /*isClosed=*/true);
     return TensorShardingAttr::get(ctx, sharding.getMeshOrRef(), dimShardings,
-                                   replicatedAxes, sharding.getUnreducedAxes());
+                                   replicatedAxes, sharding.getUnreducedAxes(),
+                                   sharding.getReductionOp());
   };
 
   Block* block = outlinedFunc.addEntryBlock();

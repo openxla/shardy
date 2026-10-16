@@ -131,3 +131,18 @@ func.func @downstream_all_to_all_on_other_dim(%arg0: tensor<16x8x8x8xf32> {sdy.s
   return %3 : tensor<16x8x8x8xf32>
 }
 
+// CHECK-LABEL: func @two_axis_full_scatter_with_unreduced_max
+// CHECK-SAME:    %arg0: tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}, {}, {}], unreduced=max{"z"}>}
+// CHECK-NOT:   sdy.collective_permute
+// CHECK:       %[[RESHAPE_IN:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}, {}, {}, {}], unreduced=max{"z"}>]>} : (tensor<16x8x8xf32>) -> tensor<2x2x4x8x8xf32>
+// CHECK:       %[[A2A1:.*]] = sdy.all_to_all [{"x"}: 0->4] %[[RESHAPE_IN]] out_sharding=<@mesh, [{}, {"y"}, {}, {}, {"x"}], unreduced=max{"z"}> : tensor<2x2x4x8x8xf32>
+// CHECK:       %[[A2A2:.*]] = sdy.all_to_all [{"y"}: 1->3] %[[A2A1]] out_sharding=<@mesh, [{}, {}, {}, {"y"}, {"x"}], unreduced=max{"z"}> : tensor<2x2x4x8x8xf32>
+// CHECK:       %[[RESHAPE_OUT:.*]] = stablehlo.reshape %[[A2A2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {"x"}], unreduced=max{"z"}>]>} : (tensor<2x2x4x8x8xf32>) -> tensor<16x8x8xf32>
+// CHECK:       return %[[RESHAPE_OUT]] : tensor<16x8x8xf32>
+func.func @two_axis_full_scatter_with_unreduced_max(%arg0: tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x", "y"}, {}, {}], unreduced=max{"z"}>}) -> (tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}, {"x"}], unreduced=max{"z"}>}) {
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh, [{"y", "x"}, {}, {}], unreduced=max{"z"}> : tensor<16x8x8xf32>
+  %1 = sdy.all_to_all [{"x"}: 0->2] %0 out_sharding=<@mesh, [{"y"}, {}, {"x"}], unreduced=max{"z"}> : tensor<16x8x8xf32>
+  %2 = sdy.all_to_all [{"y"}: 0->1] %1 out_sharding=<@mesh, [{}, {"y"}, {"x"}], unreduced=max{"z"}> : tensor<16x8x8xf32>
+  return %2 : tensor<16x8x8xf32>
+}
+

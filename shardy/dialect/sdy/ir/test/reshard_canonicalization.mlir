@@ -320,3 +320,28 @@ func.func @reshard_of_reshard_single_device_to_replicated_to_replicated_folded(
   %1 = sdy.reshard %0 <@mesh_4, [{}]> : tensor<8xf32>
   return %1 : tensor<8xf32>
 }
+
+// CHECK-LABEL: func @reshard_cse_with_transpose_unreduced_max
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {}], unreduced=max{"b"}> : tensor<8x4xf32>
+// CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[R0]], dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+// CHECK-NEXT: return %[[R0]], %[[T]] : tensor<8x4xf32>, tensor<4x8xf32>
+func.func @reshard_cse_with_transpose_unreduced_max(%arg0: tensor<8x4xf32>)
+    -> (tensor<8x4xf32>, tensor<4x8xf32>) {
+  %0 = sdy.reshard %arg0 <@mesh, [{"a"}, {}], unreduced=max{"b"}> : tensor<8x4xf32>
+  %1 = stablehlo.transpose %arg0, dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+  %2 = sdy.reshard %1 <@mesh, [{}, {"a"}], unreduced=max{"b"}> : tensor<4x8xf32>
+  return %0, %2 : tensor<8x4xf32>, tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_cse_with_transpose_different_reduction_op_not_reused
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}, {}], unreduced={"b"}> : tensor<8x4xf32>
+// CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %arg0, dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+// CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[T]] <@mesh, [{}, {"a"}], unreduced=max{"b"}> : tensor<4x8xf32>
+// CHECK-NEXT: return %[[R0]], %[[R1]] : tensor<8x4xf32>, tensor<4x8xf32>
+func.func @reshard_cse_with_transpose_different_reduction_op_not_reused(%arg0: tensor<8x4xf32>)
+    -> (tensor<8x4xf32>, tensor<4x8xf32>) {
+  %0 = sdy.reshard %arg0 <@mesh, [{"a"}, {}], unreduced={"b"}> : tensor<8x4xf32>
+  %1 = stablehlo.transpose %arg0, dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+  %2 = sdy.reshard %1 <@mesh, [{}, {"a"}], unreduced=max{"b"}> : tensor<4x8xf32>
+  return %0, %2 : tensor<8x4xf32>, tensor<4x8xf32>
+}

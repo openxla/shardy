@@ -827,6 +827,37 @@ func.func @reshape_2d_split_with_unrelated_axis(%arg0: tensor<8x4xi32> {sdy.shar
   return %2 : tensor<2x3x4xi32>
 }
 
+// CHECK-LABEL: func @reshape_2d_split_with_unreduced_max(
+// CHECK-SAME:      %[[ARG0:.*]]: tensor<8x4xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}, {}], unreduced=max{"b"}>})
+func.func @reshape_2d_split_with_unreduced_max(%arg0: tensor<8x4xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}, {}], unreduced=max{"b"}>}) -> (tensor<2x3x4xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {}, {}], unreduced=max{"b"}>}) {
+  // CHECK:         %[[SLICE_IN:.*]] = stablehlo.slice %[[ARG0]] [0:6, 0:4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{"a"}, {}], unreduced=max{"b"}>]>} : (tensor<8x4xi32>) -> tensor<6x4xi32>
+  %0 = stablehlo.slice %arg0 [0:6, 0:4] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a"}, {}], unreduced=max{"b"}>]>} : (tensor<8x4xi32>) -> tensor<6x4xi32>
+
+  // REPL:          %[[RESHARD_IN:.*]] = sdy.reshard %[[SLICE_IN]] <@mesh_a4, [{}, {}], unreduced=max{"b"}> : tensor<6x4xi32>
+  // REPL-NEXT:     %[[RESHAPE_REPL:.*]] = stablehlo.reshape %[[RESHARD_IN]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}, {}], unreduced=max{"b"}>]>} : (tensor<6x4xi32>) -> tensor<2x3x4xi32>
+  // REPL-NEXT:     %[[RES_SHARDED:.*]] = sdy.reshard %[[RESHAPE_REPL]] <@mesh_a4, [{"a":(1)2}, {"a":(2)2}, {}], unreduced=max{"b"}> : tensor<2x3x4xi32>
+
+  // HALO:          %[[PAD:.*]] = stablehlo.pad %[[SLICE_IN]], %{{.*}}, low = [0, 0], high = [2, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{"a"}, {}], unreduced=max{"b"}>]>} : (tensor<6x4xi32>, tensor<i32>) -> tensor<8x4xi32>
+  // HALO-NEXT:     %[[MC:.*]] = sdy.manual_computation(%[[PAD]], %{{.*}}) in_shardings=[<@mesh_a4, [{"a"}, {}], unreduced=max{"b"}>, <@mesh_a4, []>] out_shardings=[<@mesh_a4, [{"a":(1)2}, {"a":(2)2}, {}], unreduced=max{"b"}>] manual_axes={"a"} (%[[ARG1:.*]]: tensor<2x4xi32>, %[[ARG2:.*]]: tensor<i32>) {
+  // HALO:            %[[CP:.*]] = "stablehlo.collective_permute"(%[[ARG1]])
+  // HALO-SAME{LITERAL}: source_target_pairs = dense<[[0, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]> : tensor<6x2xi64>
+  // HALO:            %[[SEL:.*]] = stablehlo.select {{.*}}, %[[CP]], {{.*}}
+  // HALO-NEXT:       %[[CONCAT:.*]] = stablehlo.concatenate %[[SEL]], %[[ARG1]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}], unreduced=max{"b"}>]>}
+  // HALO-NEXT:       %[[PAD_BUF:.*]] = stablehlo.pad %[[CONCAT]], %[[ARG2]], low = [2, 0], high = [2, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}], unreduced=max{"b"}>]>}
+  // HALO:            %[[SLICE_BUF:.*]] = stablehlo.dynamic_slice %[[PAD_BUF]], {{.*}} {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}], unreduced=max{"b"}>]>}
+  // HALO-NEXT:       %[[RESHAPE_LOCAL:.*]] = stablehlo.reshape %[[SLICE_BUF]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}, {}], unreduced=max{"b"}>]>} : (tensor<2x4xi32>) -> tensor<1x2x4xi32>
+  // HALO-NEXT:       sdy.return %[[RESHAPE_LOCAL]] : tensor<1x2x4xi32>
+  // HALO-NEXT:     }
+  // HALO-NEXT:     %[[RES_SHARDED:.*]] = stablehlo.slice %[[MC]] [0:2, 0:3, 0:4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{"a":(1)2}, {"a":(2)2}, {}], unreduced=max{"b"}>]>} : (tensor<2x4x4xi32>) -> tensor<2x3x4xi32>
+  %1 = stablehlo.reshape %0 {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a":(1)2}, {"a":(2)2}, {}], unreduced=max{"b"}>]>} : (tensor<6x4xi32>) -> tensor<2x3x4xi32>
+
+  // CHECK:         %[[RES:.*]] = sdy.reshard %[[RES_SHARDED]] <@mesh_a4, [{}, {}, {}], unreduced=max{"b"}> : tensor<2x3x4xi32>
+  %2 = sdy.reshard %1 <@mesh_a4, [{}, {}, {}], unreduced=max{"b"}> : tensor<2x3x4xi32>
+
+  // CHECK-NEXT:     return %[[RES]]
+  return %2 : tensor<2x3x4xi32>
+}
+
 // CHECK-LABEL: func @reshape_1d_to_2d_split_gap_2(
 // CHECK-SAME:      %[[ARG0:.*]]: tensor<14xi32> {sdy.sharding = #sdy.sharding<@mesh_a6, [{"a"}]>})
 func.func @reshape_1d_to_2d_split_gap_2(%arg0: tensor<14xi32> {sdy.sharding = #sdy.sharding<@mesh_a6, [{"a"}]>}) -> (tensor<2x7xi32> {sdy.sharding = #sdy.sharding<@mesh_a6, [{}, {}]>}) {
@@ -1005,6 +1036,28 @@ func.func @reverse_divisible(
   // HALO-NEXT: %[[RES:.*]] = sdy.reshard %[[REV]] <@mesh, [{"a"}, {"b"}]> : tensor<4x8xi32>
   %0 = stablehlo.reverse %arg0, dims = [0]
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>}
+    : tensor<4x8xi32>
+
+  // CHECK-NEXT: return %[[RES]] : tensor<4x8xi32>
+  return %0 : tensor<4x8xi32>
+}
+
+// CHECK-LABEL: func @reverse_divisible_with_unreduced_max
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}], unreduced=max{"b"}>})
+// CHECK-SAME: -> (tensor<4x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}], unreduced=max{"b"}>})
+func.func @reverse_divisible_with_unreduced_max(
+  %arg0: tensor<4x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}], unreduced=max{"b"}>})
+  -> (tensor<4x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}], unreduced=max{"b"}>}) {
+
+  // REPL: %[[REPL_IN:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}], unreduced=max{"b"}> : tensor<4x8xi32>
+  // REPL-NEXT: %[[REPL_REV:.*]] = stablehlo.reverse %[[REPL_IN]], dims = [0]
+  // REPL-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced=max{"b"}>]>}
+  // REPL-NEXT: %[[RES:.*]] = sdy.reshard %[[REPL_REV]] <@mesh, [{"a"}, {}], unreduced=max{"b"}> : tensor<4x8xi32>
+
+  // HALO: %[[REV:.*]] = stablehlo.reverse %[[ARG0]], dims = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_reversed, [{"a"}, {}], unreduced=max{"b"}>]>} : tensor<4x8xi32>
+  // HALO-NEXT: %[[RES:.*]] = sdy.reshard %[[REV]] <@mesh, [{"a"}, {}], unreduced=max{"b"}> : tensor<4x8xi32>
+  %0 = stablehlo.reverse %arg0, dims = [0]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}], unreduced=max{"b"}>]>}
     : tensor<4x8xi32>
 
   // CHECK-NEXT: return %[[RES]] : tensor<4x8xi32>
