@@ -474,7 +474,8 @@ void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
 AxesPerFactor processReshapeWithOverflowAxes(
     stablehlo::ReshapeOp op, ShardingProjection& shardingProjection,
     ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
-    OpShardingRuleAttr shardingRule, MeshOp meshOp) {
+    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+    MeshOp meshOp) {
   MeshAttr mesh = meshOp.getMesh();
   MLIRContext* ctx = op.getContext();
 
@@ -542,8 +543,7 @@ AxesPerFactor processReshapeWithOverflowAxes(
   }
   insertExplicitReshards(op, getShardings(op->getOperands()), outShardings,
                          shardingProjection, finalUpdate, rewriter,
-                         shardingRule,
-                         SymbolTable(op->getParentOfType<ModuleOp>()), meshOp);
+                         shardingRule, symbolTable, meshOp);
   // The contract of processOp requires returning AxesPerFactor representing the
   // operation's sharding.
   return commonAxes;
@@ -589,9 +589,9 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
           return shardingProjection.getGreatestCommonPrefixAxes(
               shardingRule.getNumFactors());
         }
-        return processReshapeWithOverflowAxes(reshapeOp, shardingProjection,
-                                              outShardings, rewriter,
-                                              shardingRule, meshOp);
+        return processReshapeWithOverflowAxes(
+            reshapeOp, shardingProjection, outShardings, rewriter, symbolTable,
+            shardingRule, meshOp);
       }
     }
 
@@ -814,15 +814,14 @@ void updateSingleDeviceOpResultShardings(Operation* op,
 LogicalResult processSingleDeviceOperation(
     Operation* op, ArrayRef<TensorShardingAttr> inShardings,
     ArrayRef<TensorShardingAttr> outShardings, const SymbolTable& symbolTable,
-    func::FuncOp funcOp, IRRewriter& rewriter, bool onFullVersion) {
+    MeshOp globalMeshOp, func::FuncOp funcOp, IRRewriter& rewriter,
+    bool onFullVersion) {
   FailureOr<StringRef> singleDeviceMeshName =
       getSingleDeviceMeshInfo(op, outShardings, symbolTable);
   if (failed(singleDeviceMeshName)) {
     return failure();
   }
 
-  ModuleOp moduleOp = op->getParentOfType<ModuleOp>();
-  MeshOp globalMeshOp = getGlobalMeshOp(moduleOp);
   if (!globalMeshOp) {
     return success();
   }
@@ -850,7 +849,9 @@ struct InsertExplicitReshardsPass
   void runOnOperation() final {
     func::FuncOp funcOp = getOperation();
     IRRewriter rewriter(funcOp);
-    SymbolTable symbolTable(funcOp->getParentOfType<ModuleOp>());
+    ModuleOp moduleOp = funcOp->getParentOfType<ModuleOp>();
+    SymbolTable symbolTable(moduleOp);
+    MeshOp globalMeshOp = getGlobalMeshOp(moduleOp);
 
     // Disallow single-device sharding on function inputs and outputs.
     auto verifyNoSingleDeviceSharding = [&](TensorShardingAttr sharding,
@@ -911,9 +912,9 @@ struct InsertExplicitReshardsPass
           getShardingsBypassingBarriers(op->getResults());
 
       if (isSingleDeviceOperation(outShardings, symbolTable)) {
-        if (failed(processSingleDeviceOperation(op, inShardings, outShardings,
-                                                symbolTable, funcOp, rewriter,
-                                                onFullVersion))) {
+        if (failed(processSingleDeviceOperation(
+                op, inShardings, outShardings, symbolTable, globalMeshOp,
+                funcOp, rewriter, onFullVersion))) {
           return signalPassFailure();
         }
         return;
