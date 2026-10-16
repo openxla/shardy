@@ -340,7 +340,8 @@ bool SubAxisInfoAttr::operator<(const SubAxisInfoAttr& rhs) const {
 
 std::function<bool(AxisRefAttr lhs, AxisRefAttr rhs)>
 AxisRefAttr::getMeshComparator(MeshAttr mesh) {
-  return [mesh](AxisRefAttr lhs, AxisRefAttr rhs) {
+  auto axisNameComparator = mesh.getAxisNameComparator();
+  return [axisNameComparator](AxisRefAttr lhs, AxisRefAttr rhs) {
     StringRef lhsName = lhs.getName();
     StringRef rhsName = rhs.getName();
     if (lhsName == rhsName) {
@@ -348,7 +349,7 @@ AxisRefAttr::getMeshComparator(MeshAttr mesh) {
       return lhs < rhs;
     }
 
-    return mesh.getAxisNameComparator()(lhsName, rhsName);
+    return axisNameComparator(lhsName, rhsName);
   };
 }
 

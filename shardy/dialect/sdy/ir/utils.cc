@@ -342,7 +342,7 @@ std::string factorSymbolString(int64_t factor) {
 }
 
 void sortAndMergeAxes(SmallVector<AxisRefAttr>& axes, MeshAttr mesh) {
-  if (axes.empty()) {
+  if (axes.size() <= 1) {
     return;
   }
 
