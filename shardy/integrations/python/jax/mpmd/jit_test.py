@@ -768,6 +768,61 @@ class SdyPropagationTest(parameterized.TestCase):
         [jax.ShapeDtypeStruct(x.shape, x.dtype) for x in arr]
     )
 
+  def test_donate_with_closed_over_constants(self):
+    if not jax.config.jax_use_simplified_jaxpr_constants:
+      self.skipTest('Requires jax_use_simplified_jaxpr_constants=True')
+    const_weight = np.ones((4, 4), dtype=np.float32)
+
+    def fn(x, unused, y):
+      del unused
+      return mpmd.named_computation(
+          lambda a, b: a + b + const_weight, name='stage1'
+      )(x, y)
+
+    topology = test_utils.get_two_mesh_topology()
+    mpmd_config = mpmd_types.make_config(
+        topology,
+        {'stage1': 'mesh1', 'stage2': 'mesh2'},
+        input_mesh_assignment=('mesh1', 'mesh2', 'mesh1'),
+        output_mesh_assignment='mesh1',
+    )
+    arg = jax.ShapeDtypeStruct((4, 4), dtype=jnp.float32)
+    lowered = mpmd.jit(fn, mpmd_config, donate_argnums=(0, 2)).lower(
+        arg, arg, arg
+    )
+    self.assertEqual(
+        lowered.function_mesh_assignment.input_meshes,
+        ('mesh1', 'mesh2', 'mesh1'),
+    )
+    self.assertEqual(lowered.function_mesh_assignment.output_meshes, 'mesh1')
+
+  def test_constant_in_multiple_meshes_raises_error(self):
+    if not jax.config.jax_use_simplified_jaxpr_constants:
+      self.skipTest('Requires jax_use_simplified_jaxpr_constants=True')
+    const_weight = np.ones((4, 4), dtype=np.float32)
+
+    def fn(x):
+      y = mpmd.named_computation(
+          lambda a: a + const_weight, name='stage1'
+      )(x)
+      z = mpmd.named_computation(
+          lambda b: b + const_weight, name='stage2'
+      )(y)
+      return z
+
+    topology = test_utils.get_two_mesh_topology()
+    mpmd_config = mpmd_types.make_config(
+        topology,
+        {'stage1': 'mesh1', 'stage2': 'mesh2'},
+    )
+    arg = jax.ShapeDtypeStruct((4, 4), dtype=jnp.float32)
+    with self.assertRaisesRegex(
+        ValueError,
+        r'Closed-over constant \(argument 0\) is used across multiple meshes'
+        r'.*avoid closing over constants',
+    ):
+      mpmd.jit(fn, mpmd_config).lower(arg)
+
   def test_mesh_inference_fails(self):
     mpmd_config = get_2_stage_mpmd_config()
 
