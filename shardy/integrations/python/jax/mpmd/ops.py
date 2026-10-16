@@ -269,9 +269,9 @@ def named_computation_partir_lowering(
         for arg, aval in zip(block.arguments, in_avals)
     ]
     const_lowering = {
-        (id(c), aval): c_arg
-        for (c, aval), c_arg in zip(const_args_and_avals,
-                                    sharded_args[:len(const_args)])
+        id(c): c_arg
+        for (c, _), c_arg in zip(const_args_and_avals,
+                                 sharded_args[:len(const_args)])
     }
     outs, tokens = jax_mlir.jaxpr_subcomp(
         ctx.module_context,
