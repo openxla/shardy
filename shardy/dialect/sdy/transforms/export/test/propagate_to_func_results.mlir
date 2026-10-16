@@ -175,13 +175,13 @@ func.func @main(%arg0: tensor<8xf32>) -> (tensor<8xf32> {sdy.sharding = #sdy.sha
 
 // -----
 
-// test: single-device (maximal) sharding on terminator operand is not propagated to func results.
-sdy.mesh @maximal_mesh_0 = <[], device_ids=[0]>
+// test: single-device sharding on terminator operand is not propagated to func results.
+sdy.mesh @single_device_0 = <[], device_ids=[0]>
 
 // CHECK-LABEL: func @main
 // CHECK-SAME:  -> tensor<8xf32> {
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
-  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@maximal_mesh_0, []>]>} : tensor<8xf32>
+  %0 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@single_device_0, []>]>} : tensor<8xf32>
   return %0 : tensor<8xf32>
 }
 

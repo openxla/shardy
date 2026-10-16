@@ -94,3 +94,28 @@ func.func @two_params_move_all_axes(%arg0: tensor<4x2x4x2xf32> {sdy.sharding = #
   // CHECK: return %[[RESULT]] : tensor<1x2x4x1xf32>
   return %0 : tensor<4x2x4x2xf32>
 }
+
+// CHECK-LABEL: func @two_params_non_zero_min_dim
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<3x20x7x11x26xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}, {"y"}, {}]>})
+// CHECK-SAME: -> (tensor<3x5x14x44x13xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}, {}, {}, {"x"}]>}) {
+func.func @two_params_non_zero_min_dim(%arg0: tensor<3x20x14x44x26xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}, {"y"}, {}]>})
+    -> (tensor<3x20x14x44x26xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}, {}, {}, {"x"}]>}) {
+  // CHECK: %[[RESHAPE0:.*]] = stablehlo.reshape %[[ARG0]] : (tensor<3x20x7x11x26xf32>) -> tensor<3x4x5x7x11x2x13xf32>
+  // CHECK: %[[TRANSPOSE0:.*]] = stablehlo.transpose %[[RESHAPE0]], dims = [0, 1, 5, 2, 3, 4, 6] : (tensor<3x4x5x7x11x2x13xf32>) -> tensor<3x4x2x5x7x11x13xf32>
+  // CHECK: %[[RESHAPE1:.*]] = stablehlo.reshape %[[TRANSPOSE0]] : (tensor<3x4x2x5x7x11x13xf32>) -> tensor<3x8x5x7x11x13xf32>
+  // CHECK: %[[A2A:.*]] = "stablehlo.all_to_all"(%[[RESHAPE1]]) <{
+  // PARTITION-SAME: channel_handle = #stablehlo.channel_handle<handle = 5, type = 1>,
+  // REPLICA-NOT: channel_handle
+  // CHECK-SAME: concat_dimension = 1 : i64,
+  // V1-SAME{LITERAL}: replica_groups = dense<[[0, 4, 1, 5, 2, 6, 3, 7]]>
+  // V3-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "y">, #stablehlo.axis_ref<name = "x">]>
+  // CHECK-SAME: split_count = 8 : i64,
+  // CHECK-SAME: split_dimension = 1 : i64
+  // CHECK-SAME: }> : (tensor<3x8x5x7x11x13xf32>) -> tensor<3x8x5x7x11x13xf32>
+  // CHECK: %[[RESHAPE2:.*]] = stablehlo.reshape %[[A2A]] : (tensor<3x8x5x7x11x13xf32>) -> tensor<3x4x2x5x7x11x13xf32>
+  // CHECK: %[[TRANSPOSE1:.*]] = stablehlo.transpose %[[RESHAPE2]], dims = [0, 3, 2, 4, 1, 5, 6] : (tensor<3x4x2x5x7x11x13xf32>) -> tensor<3x5x2x7x4x11x13xf32>
+  // CHECK: %[[RESULT:.*]] = stablehlo.reshape %[[TRANSPOSE1]] : (tensor<3x5x2x7x4x11x13xf32>) -> tensor<3x5x14x44x13xf32>
+  %0 = sdy.all_to_all [{"x"}: 2->4, {"y"}: 3->1] %arg0 out_sharding=<@mesh_2_4, [{}, {"y"}, {}, {}, {"x"}]> : tensor<3x20x14x44x26xf32>
+  // CHECK: return %[[RESULT]] : tensor<3x5x14x44x13xf32>
+  return %0 : tensor<3x20x14x44x26xf32>
+}

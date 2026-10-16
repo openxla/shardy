@@ -19,6 +19,7 @@ limitations under the License.
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/common/file_utils.h"
 #include "shardy/common/logging.h"
@@ -35,9 +36,14 @@ namespace {
 
 void addCanonicalizerPass(OpPassManager& pm,
                           ArrayRef<std::string> enabledPatterns) {
-  pm.addPass(createCanonicalizerPass(GreedyRewriteConfig(),
-                                     /*disabledPatterns=*/{},
-                                     /*enabledPatterns=*/enabledPatterns));
+  pm.addPass(createCanonicalizerPass(
+      GreedyRewriteConfig()
+          .setUseTopDownTraversal(true)
+          .setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled)
+          .enableFolding(false)
+          .enableConstantCSE(false),
+      /*disabledPatterns=*/{},
+      /*enabledPatterns=*/enabledPatterns));
 }
 
 void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,

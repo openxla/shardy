@@ -790,7 +790,7 @@ sdy.mesh @mesh = <["a"=2, "b"=2, "c"=8]>
 
 // CHECK-LABEL: func.func @input_already_has_sharding(
 // CHECK-SAME:    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {"b", ?}]>,
-// CHECK-SAME:                            sdy.sharding_origins = {a = "self", b = "constraint_0"}})
+// CHECK-SAME:                            sdy.sharding_origins = {b = "constraint_0"}})
 // CHECK-SAME:    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>,
 // CHECK-SAME:                         sdy.sharding_origins = {b = "constraint_0"}}) {
 func.func @input_already_has_sharding(%arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {

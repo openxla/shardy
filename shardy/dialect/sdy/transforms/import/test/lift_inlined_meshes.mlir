@@ -1,4 +1,4 @@
-// RUN: sdy_opt -split-input-file %s -sdy-lift-inlined-meshes='use-single-device-mesh-names=true' | FileCheck %s
+// RUN: sdy_opt -split-input-file %s -sdy-lift-inlined-meshes | FileCheck %s
 
 // CHECK: sdy.mesh @mesh1 = <["x"=2, "y"=2]>
 sdy.mesh @mesh1 = <["x"=2, "y"=2]>

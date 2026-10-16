@@ -624,11 +624,24 @@ TEST_F(DialectTest, TensorShardingAttrGetLocalTensorType) {
       {createDimSharding({createAxis("y")}), createDimSharding({})});
   EXPECT_EQ(sharding3.getLocalTensorType(globalType, mesh),
             RankedTensorType::get({3, 4}, builder.getI32Type()));
+  EXPECT_EQ(sharding3.getLocalTensorType(globalType, mesh,
+                                         /*allowNonDivisible=*/false),
+            nullptr);
 
   TensorShardingAttr sharding4 = createTensorSharding(
       {createDimSharding({createAxis("x"), createAxis("z")}),
        createDimSharding({createAxis("y")})});
   EXPECT_EQ(sharding4.getLocalTensorType(globalType, mesh),
+            RankedTensorType::get({1, 2}, builder.getI32Type()));
+  EXPECT_EQ(sharding4.getLocalTensorType(globalType, mesh,
+                                         /*allowNonDivisible=*/false),
+            nullptr);
+
+  TensorShardingAttr sharding5 = createTensorSharding(
+      {createDimSharding({createAxis("x"), createAxis("z")}),
+       createDimSharding({createAxis("x")})});
+  EXPECT_EQ(sharding5.getLocalTensorType(globalType, mesh,
+                                         /*allowNonDivisible=*/false),
             RankedTensorType::get({1, 2}, builder.getI32Type()));
 }
 
