@@ -3618,10 +3618,19 @@ void recordMainFuncShardingsOnModule(ModuleOp module, func::FuncOp mainFunc,
   for (auto [j, operand] :
        llvm::enumerate(getBodyTerminatorOperands(mainFunc))) {
     TensorShardingAttr sharding = getFuncResultSharding(mainFunc, j);
-    outputShardings.push_back(
-        sharding ? sharding
-                 : getOrCreateSharding(operand, defaultMesh,
-                                       /*closedIfMissing=*/true));
+    if (!sharding) {
+      sharding =
+          getOrCreateSharding(operand, defaultMesh, /*closedIfMissing=*/true);
+    }
+    // The token result of stablhlo.send preserses its SingleDevice sharding
+    // for the XLA compilation pipeline, but expects fully replicated sharding
+    // in the Shardy module meta data.
+    if (isa<stablehlo::TokenType>(operand.getType()) &&
+        isSingleDeviceSharding(sharding, symbolTable)) {
+      sharding = TensorShardingAttr::getFullyReplicated(
+          ctx, /*rank=*/0, defaultMesh, /*isClosed=*/true);
+    }
+    outputShardings.push_back(sharding);
   }
 
   // Inline MeshAttr into sdy.parameters_shardings and sdy.output_shardings
