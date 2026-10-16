@@ -891,6 +891,14 @@ func.func @out_unreduced_axes_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#
   return %0 : tensor<16x8xf32>
 }
 
+// CHECK-LABEL: func @out_fully_replicated_with_unreduced_axes_and_reduction_op_preserved
+func.func @out_fully_replicated_with_unreduced_axes_and_reduction_op_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"y"}, {}], unreduced=max{"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"y"}, {}] %arg0 out_sharding=<@mesh3d, [{}, {}], unreduced=max{"x"}>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{}, {}], unreduced=max{"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
 // TODO(b/391138813): Add proper support for axes that can't co-exist
 
 // LABEL: func @reshard_with_non_divisible_subaxes_same_pre_size

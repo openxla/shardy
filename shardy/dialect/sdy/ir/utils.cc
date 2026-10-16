@@ -676,7 +676,8 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
   return TensorShardingAttr::get(
       outerManualSharding.getContext(), outerManualSharding.getMeshOrRef(),
       newDimShardings, newReplicatedAxes, newUnreducedAxes,
-      outerManualSharding.getReductionOp());
+      newUnreducedAxes.empty() ? ReductionOp::SUM
+                               : outerManualSharding.getReductionOp());
 }
 
 }  // namespace
@@ -993,12 +994,24 @@ mlir::Attribute getMeshOrRef(
   return nullptr;
 }
 
+bool isFullyReplicated(TensorShardingAttr sharding) {
+  return !sharding || sharding.isFullyReplicated();
+}
+
 bool isSingleDeviceSharding(TensorShardingAttr sharding,
                             const SymbolTable& symbolTable) {
   if (!sharding) {
     return false;
   }
   MeshAttr mesh = sharding.getMesh(symbolTable);
+  return mesh && mesh.isSingleDevice();
+}
+
+bool isSingleDeviceSharding(TensorShardingAttr sharding, Operation* op) {
+  if (!sharding) {
+    return false;
+  }
+  MeshAttr mesh = sharding.getMesh(op);
   return mesh && mesh.isSingleDevice();
 }
 
@@ -1586,7 +1599,9 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
   if (!s1 || !s2 || s1.getMeshOrRef() != s2.getMeshOrRef()) {
     return false;
   }
-  if (s1.getReplicatedAxes() != s2.getReplicatedAxes()) {
+  if (s1.getReplicatedAxes() != s2.getReplicatedAxes() ||
+      s1.getUnreducedAxes() != s2.getUnreducedAxes() ||
+      s1.getReductionOp() != s2.getReductionOp()) {
     return false;
   }
 

@@ -811,12 +811,14 @@ def Sdy_TensorSharding : AttrDef<Sdy_Dialect, "TensorSharding"> {
     TensorShardingAttr replaceReplicatedAxes(
         ArrayRef<AxisRefAttr> replicatedAxes) const;
 
-    // Sets the unreduced axes to `unreducedAxes`.
+    // Sets the unreduced axes to `unreducedAxes`, updating `reductionOp` if
+    // specified (or resetting it to `SUM` when `unreducedAxes` is empty).
     //
     // Attributes are immutable, so we can't update the sharding in place and
     // must return a new instance.
     TensorShardingAttr replaceUnreducedAxes(
-        ArrayRef<AxisRefAttr> unreducedAxes) const;
+        ArrayRef<AxisRefAttr> unreducedAxes,
+        std::optional<ReductionOp> reductionOp = std::nullopt) const;
 
     // Shards dimension `dim` further along `axisName`.
     //

@@ -830,10 +830,21 @@ TensorShardingAttr TensorShardingAttr::replaceReplicatedAxes(
 }
 
 TensorShardingAttr TensorShardingAttr::replaceUnreducedAxes(
-    ArrayRef<AxisRefAttr> unreducedAxes) const {
-  return TensorShardingAttr::get(getContext(), getMeshOrRef(),
-                                 getDimShardings(), getReplicatedAxes(),
-                                 unreducedAxes, getReductionOp());
+    ArrayRef<AxisRefAttr> unreducedAxes,
+    std::optional<ReductionOp> reductionOp) const {
+  if (unreducedAxes.empty()) {
+    SDY_CHECK(!reductionOp.has_value() || *reductionOp == ReductionOp::SUM)
+        << "cannot set non-sum reductionOp when unreducedAxes is empty";
+    return TensorShardingAttr::get(getContext(), getMeshOrRef(),
+                                   getDimShardings(), getReplicatedAxes(),
+                                   /*unreducedAxes=*/{}, ReductionOp::SUM);
+  }
+  SDY_CHECK(!getUnreducedAxes().empty() || reductionOp.has_value())
+      << "must specify reductionOp when adding unreduced axes to a sharding "
+         "without existing unreduced axes";
+  return TensorShardingAttr::get(
+      getContext(), getMeshOrRef(), getDimShardings(), getReplicatedAxes(),
+      unreducedAxes, reductionOp.value_or(getReductionOp()));
 }
 
 TensorShardingAttr TensorShardingAttr::getSharded(int64_t dim,
@@ -1021,7 +1032,8 @@ bool TensorShardingAttr::isEquivalent(TensorShardingAttr otherSharding,
     return false;
   }
   if (!ignoreUnreducedAxes &&
-      getUnreducedAxes() != otherSharding.getUnreducedAxes()) {
+      (getUnreducedAxes() != otherSharding.getUnreducedAxes() ||
+       getReductionOp() != otherSharding.getReductionOp())) {
     return false;
   }
 
@@ -1230,20 +1242,22 @@ TensorShardingAttr addFreeAxesToManualComputationSharding(
   TensorShardingAttr returnedSharding =
       eraseFreeAxes(outerManualSharding, manualAxes);
 
-  SmallVector<DimensionShardingAttr> resultDimShardings(
-      returnedSharding.getDimShardings());
-  for (auto [resultDimSharding, newDimSharding] :
-       llvm::zip(resultDimShardings, newSharding.getDimShardings())) {
-    resultDimSharding = DimensionShardingAttr::get(
-        resultDimSharding.getContext(),
-        llvm::to_vector(llvm::concat<const AxisRefAttr>(
-            resultDimSharding.getAxes(), newDimSharding.getAxes())),
-        newDimSharding.getIsClosed(), newDimSharding.getPriority());
-  }
+  SmallVector<DimensionShardingAttr> resultDimShardings = llvm::map_to_vector(
+      llvm::zip_equal(returnedSharding.getDimShardings(),
+                      newSharding.getDimShardings()),
+      [](auto pair) {
+        auto [returnedDimSharding, newDimSharding] = pair;
+        return DimensionShardingAttr::get(
+            returnedDimSharding.getContext(),
+            llvm::to_vector(llvm::concat<const AxisRefAttr>(
+                returnedDimSharding.getAxes(), newDimSharding.getAxes())),
+            newDimSharding.getIsClosed(), newDimSharding.getPriority());
+      });
   return TensorShardingAttr::get(newSharding.getContext(),
                                  newSharding.getMeshOrRef(), resultDimShardings,
                                  outerManualSharding.getReplicatedAxes(),
-                                 outerManualSharding.getUnreducedAxes());
+                                 outerManualSharding.getUnreducedAxes(),
+                                 outerManualSharding.getReductionOp());
 }
 
 }  // namespace

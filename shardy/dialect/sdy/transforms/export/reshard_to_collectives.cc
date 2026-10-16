@@ -241,6 +241,7 @@ class CollectiveInserter {
         curMeshOrRef(inSharding.getMeshOrRef()),
         outMeshOrRef(outSharding.getMeshOrRef()),
         unreducedAxes(outSharding.getUnreducedAxes()),
+        reductionOp(outSharding.getReductionOp()),
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
         outAxesPerDim(getAxesPerDim<AxisList>(outSharding)),
         currentAxesPerDim(getAxesPerDim<SmallVector<AxisRefAttr>>(inSharding)),
@@ -343,8 +344,14 @@ class CollectiveInserter {
   int64_t getRank() const { return inAxesPerDim.size(); }
 
   TensorShardingAttr getCurrentSharding() const {
-    return TensorShardingAttr::getClosed(getContext(), curMeshOrRef,
-                                         currentAxesPerDim, unreducedAxes);
+    TensorShardingAttr sharding = TensorShardingAttr::getClosed(
+        getContext(), curMeshOrRef, currentAxesPerDim, unreducedAxes);
+    if (!unreducedAxes.empty() && reductionOp != ReductionOp::SUM) {
+      return TensorShardingAttr::get(
+          getContext(), curMeshOrRef, sharding.getDimShardings(),
+          sharding.getReplicatedAxes(), unreducedAxes, reductionOp);
+    }
+    return sharding;
   }
 
   // If an all-gather can be performed on `dim`, returns the axes to gather for
@@ -1276,6 +1283,7 @@ class CollectiveInserter {
   MeshAttr mesh;
   mlir::Attribute curMeshOrRef, outMeshOrRef;
   ArrayRef<AxisRefAttr> unreducedAxes;
+  ReductionOp reductionOp;
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;
   AxesPerDim currentAxesPerDim;
   SmallVector<int64_t> capacityPerDim;
@@ -1349,7 +1357,9 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
       // axes than the input sharding. Note that the out sharding may be fully
       // replicated and still have different unreduced axes than the input
       // sharding.
-      outSharding = TensorShardingAttr::getFullyClosedLike(inSharding);
+      outSharding = TensorShardingAttr::getFullyClosedLike(inSharding)
+                        .replaceUnreducedAxes(outSharding.getUnreducedAxes(),
+                                              outSharding.getReductionOp());
     }
     // TODO(enver): Set input mesh to output mesh if input sharding is fully
     // replicated. It requires sdy.all_slice can handle that input and output

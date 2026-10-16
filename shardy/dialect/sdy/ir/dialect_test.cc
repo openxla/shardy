@@ -863,6 +863,55 @@ TEST_F(DialectTest, MeshAttrEquals) {
   }
 }
 
+TEST_F(DialectTest, ReplaceUnreducedAxes) {
+  TensorShardingAttr base =
+      createTensorSharding({createDimSharding({}), createDimSharding({})});
+  TensorShardingAttr unreducedMax = TensorShardingAttr::get(
+      &context, "mesh", {createDimSharding({}), createDimSharding({})},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{createAxis("x")},
+      ReductionOp::MAX);
+
+  // Attaching unreduced axes to a non-unreduced sharding with explicit MAX.
+  EXPECT_EQ(base.replaceUnreducedAxes({createAxis("x")}, ReductionOp::MAX),
+            unreducedMax);
+
+  // Replacing unreduced axes on an unreduced=max sharding preserves MAX by
+  // default, and overrides when explicit reductionOp is given.
+  TensorShardingAttr replacedKeepMax =
+      unreducedMax.replaceUnreducedAxes({createAxis("y")});
+  EXPECT_EQ(replacedKeepMax.getReductionOp(), ReductionOp::MAX);
+  TensorShardingAttr replacedToMin =
+      unreducedMax.replaceUnreducedAxes({createAxis("y")}, ReductionOp::MIN);
+  EXPECT_EQ(replacedToMin.getReductionOp(), ReductionOp::MIN);
+
+  // Clearing unreduced axes resets reductionOp to SUM so attribute equality
+  // matches a standard non-unreduced sharding.
+  TensorShardingAttr cleared = unreducedMax.replaceUnreducedAxes({});
+  EXPECT_EQ(cleared.getReductionOp(), ReductionOp::SUM);
+  EXPECT_EQ(cleared, base);
+}
+
+TEST_F(DialectTest, TensorShardingAttrIsEquivalentReductionOp) {
+  TensorShardingAttr sumSharding = TensorShardingAttr::get(
+      &context, "mesh", {createDimSharding({})},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{createAxis("x")},
+      ReductionOp::SUM);
+  TensorShardingAttr maxSharding = TensorShardingAttr::get(
+      &context, "mesh", {createDimSharding({})},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{createAxis("x")},
+      ReductionOp::MAX);
+  TensorShardingAttr minSharding = TensorShardingAttr::get(
+      &context, "mesh", {createDimSharding({})},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{createAxis("x")},
+      ReductionOp::MIN);
+
+  EXPECT_TRUE(maxSharding.isEquivalent(maxSharding));
+  EXPECT_FALSE(maxSharding.isEquivalent(sumSharding));
+  EXPECT_FALSE(maxSharding.isEquivalent(minSharding));
+  EXPECT_TRUE(
+      maxSharding.isEquivalent(minSharding, /*ignoreUnreducedAxes=*/true));
+}
+
 }  // namespace
 
 }  // namespace sdy

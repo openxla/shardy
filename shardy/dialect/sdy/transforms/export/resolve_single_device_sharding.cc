@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Block.h"
@@ -53,10 +54,11 @@ namespace {
 // Returns the single device ID if sharding is placed on a single-device mesh.
 std::optional<int64_t> getSingleDeviceId(TensorShardingAttr sharding,
                                          const SymbolTable& symbolTable) {
-  if (!isSingleDeviceSharding(sharding, symbolTable)) {
+  MeshAttr mesh = sharding ? sharding.getMesh(symbolTable) : nullptr;
+  if (!mesh || !mesh.isSingleDevice()) {
     return std::nullopt;
   }
-  ArrayRef<int64_t> deviceIds = sharding.getMesh(symbolTable).getDeviceIds();
+  ArrayRef<int64_t> deviceIds = mesh.getDeviceIds();
   if (deviceIds.empty()) {
     return std::nullopt;
   }
@@ -71,9 +73,6 @@ std::optional<int64_t> getSingleDeviceIdForOp(Operation* op,
   std::optional<int64_t> targetDeviceId;
   bool hasNonReplicatedResult = false;
   for (Value result : op->getResults()) {
-    if (!isa<RankedTensorType>(result.getType())) {
-      continue;
-    }
     TensorShardingAttr sharding = getSharding(result);
     if (!sharding) {
       continue;
@@ -117,7 +116,10 @@ Value createDeviceGuard(Location loc, int64_t targetDeviceId,
 }
 
 // Lowers a single-device operation into stablehlo.if guarded by target device
-// ID, with an else-branch returning zeros or tokens.
+// ID, with an else-branch returning zeros or tokens. For stablehlo.send and
+// stablehlo.recv, keeps the op at the top level with its single-device
+// sharding attribute intact, and broadcasts any tensor results via
+// stablehlo.select + sdy.all_reduce.
 void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
                            MeshOp globalMeshOp, int64_t replicaCount,
                            int64_t partitionCount, IRRewriter& rewriter) {
@@ -126,62 +128,92 @@ void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
   SDY_CHECK(targetDeviceId.has_value());
 
   Location loc = op->getLoc();
-  rewriter.setInsertionPoint(op);
 
-  Value isTargetDevice = createDeviceGuard(loc, *targetDeviceId, replicaCount,
-                                           partitionCount, rewriter);
-
-  SmallVector<Type> resultTypes(op->getResultTypes());
-  auto ifOp =
-      stablehlo::IfOp::create(rewriter, loc, resultTypes, isTargetDevice);
-
-  // True branch: executes op
-  Block* trueBlock = new Block();
-  ifOp.getTrueBranch().push_back(trueBlock);
-  rewriter.setInsertionPointToStart(trueBlock);
-  Operation* clonedOp = rewriter.clone(*op);
-  clonedOp->removeAttr(kShardingAttr);
-  SmallVector<ReshardOp> operandReshards;
-  for (OpOperand& operand : clonedOp->getOpOperands()) {
+  llvm::SmallSetVector<ReshardOp, 4> operandReshards;
+  for (OpOperand& operand : op->getOpOperands()) {
     if (auto reshardOp = operand.get().getDefiningOp<ReshardOp>()) {
       if (isSingleDeviceSharding(reshardOp.getSharding(), symbolTable)) {
         operand.set(reshardOp.getInput());
-        operandReshards.push_back(reshardOp);
+        operandReshards.insert(reshardOp);
       }
     }
   }
-  stablehlo::ReturnOp::create(rewriter, loc, clonedOp->getResults());
 
-  // False branch: returns zero tensors or tokens
-  Block* falseBlock = new Block();
-  ifOp.getFalseBranch().push_back(falseBlock);
-  rewriter.setInsertionPointToStart(falseBlock);
-  SmallVector<Value> falseZeros;
-  for (Type type : resultTypes) {
-    if (auto rankedType = dyn_cast<RankedTensorType>(type)) {
+  // Produce zero-masked results on non-target devices:
+  // - For send/recv: keep op at the top level and mask tensor results with
+  //   stablehlo.select.
+  // - For other ops: wrap op in stablehlo.if with zeros in the false branch.
+  SmallVector<Value> maskedResults;
+  if (isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
+    rewriter.setInsertionPointAfter(op);
+    Value isTargetDevice;
+    for (Value result : op->getResults()) {
+      auto rankedType = dyn_cast<RankedTensorType>(result.getType());
+      if (!rankedType) {
+        maskedResults.push_back(result);
+        continue;
+      }
+      if (!isTargetDevice) {
+        isTargetDevice = createDeviceGuard(loc, *targetDeviceId, replicaCount,
+                                           partitionCount, rewriter);
+      }
       Value zeroConst = createZeroConstant(rewriter, loc, rankedType);
-      falseZeros.push_back(zeroConst);
-    } else if (isa<stablehlo::TokenType>(type)) {
-      Value tokenConst = stablehlo::CreateTokenOp::create(rewriter, loc);
-      falseZeros.push_back(tokenConst);
+      maskedResults.push_back(stablehlo::SelectOp::create(
+          rewriter, loc, rankedType, isTargetDevice, result, zeroConst));
     }
+  } else {
+    rewriter.setInsertionPoint(op);
+
+    Value isTargetDevice = createDeviceGuard(loc, *targetDeviceId, replicaCount,
+                                             partitionCount, rewriter);
+
+    SmallVector<Type> resultTypes(op->getResultTypes());
+    auto ifOp =
+        stablehlo::IfOp::create(rewriter, loc, resultTypes, isTargetDevice);
+
+    // True branch: executes op
+    Block* trueBlock = new Block();
+    ifOp.getTrueBranch().push_back(trueBlock);
+    rewriter.setInsertionPointToStart(trueBlock);
+    Operation* clonedOp = rewriter.clone(*op);
+    clonedOp->removeAttr(kShardingAttr);
+    stablehlo::ReturnOp::create(rewriter, loc, clonedOp->getResults());
+
+    // False branch: returns zero tensors or tokens
+    Block* falseBlock = new Block();
+    ifOp.getFalseBranch().push_back(falseBlock);
+    rewriter.setInsertionPointToStart(falseBlock);
+    SmallVector<Value> falseZeros;
+    for (Type type : resultTypes) {
+      if (auto rankedType = dyn_cast<RankedTensorType>(type)) {
+        Value zeroConst = createZeroConstant(rewriter, loc, rankedType);
+        falseZeros.push_back(zeroConst);
+      } else if (isa<stablehlo::TokenType>(type)) {
+        Value tokenConst = stablehlo::CreateTokenOp::create(rewriter, loc);
+        falseZeros.push_back(tokenConst);
+      }
+    }
+    stablehlo::ReturnOp::create(rewriter, loc, falseZeros);
+
+    rewriter.setInsertionPointAfter(ifOp);
+    maskedResults.assign(ifOp.result_begin(), ifOp.result_end());
   }
-  stablehlo::ReturnOp::create(rewriter, loc, falseZeros);
 
-  // After conditional: AllReduce to populate values to all devices.
-  rewriter.setInsertionPointAfter(ifOp);
-
+  // Broadcast ranked tensor results to all devices via all-reduce sum and
+  // replace uses of the original results.
   SmallVector<AxisRefAttr> allReduceAxes;
   for (MeshAxisAttr axis : globalMeshOp.getMesh().getAxes()) {
     allReduceAxes.push_back(
         AxisRefAttr::get(rewriter.getContext(), axis.getName()));
   }
 
-  for (auto [result, ifResult] :
-       llvm::zip(op->getResults(), ifOp.getResults())) {
-    auto rankedType = dyn_cast<RankedTensorType>(ifResult.getType());
+  for (auto [result, maskedResult] :
+       llvm::zip(op->getResults(), maskedResults)) {
+    auto rankedType = dyn_cast<RankedTensorType>(result.getType());
     if (!rankedType) {
-      result.replaceAllUsesWith(ifResult);
+      if (result != maskedResult) {
+        result.replaceAllUsesWith(maskedResult);
+      }
       continue;
     }
     TensorShardingAttr replicatedSharding =
@@ -189,9 +221,12 @@ void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
             rewriter.getContext(), rankedType.getRank(), globalMeshOp.getName(),
             /*isClosed=*/true);
     auto allReduceOp =
-        AllReduceOp::create(rewriter, loc, ifResult, allReduceAxes,
+        AllReduceOp::create(rewriter, loc, maskedResult, allReduceAxes,
                             ReductionOp::SUM, replicatedSharding);
     for (OpOperand& use : llvm::make_early_inc_range(result.getUses())) {
+      if (use.getOwner() == maskedResult.getDefiningOp()) {
+        continue;
+      }
       if (auto reshardOp = dyn_cast<ReshardOp>(use.getOwner())) {
         if (reshardOp.getSharding() == replicatedSharding) {
           reshardOp.replaceAllUsesWith(allReduceOp.getResult());
@@ -203,7 +238,9 @@ void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
     }
   }
 
-  rewriter.eraseOp(op);
+  if (!isa<stablehlo::SendOp, stablehlo::RecvOp>(op)) {
+    rewriter.eraseOp(op);
+  }
 
   for (ReshardOp reshardOp : operandReshards) {
     if (reshardOp->use_empty()) {

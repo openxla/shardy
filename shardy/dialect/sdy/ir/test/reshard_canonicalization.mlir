@@ -2,6 +2,7 @@
 
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 sdy.mesh @mesh_4 = <["a"=4]>
+sdy.mesh @single_device_mesh_0 = <[], device_ids=[0]>
 
 // CHECK-LABEL: func @reshard_of_reshard_no_other_uses
 // CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{"a", ?}, {?}]>
@@ -252,4 +253,70 @@ func.func @reshard_cse_different_blocks(%arg0: tensor<8xf32>) -> (tensor<8xf32>,
     sdy.return %2 : tensor<8xf32>
   } : (tensor<8xf32>) -> tensor<8xf32>
   return %0, %1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_tiled_to_replicated_to_single_device_not_folded
+// CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{}, {}]>
+// CHECK-NEXT: %1 = sdy.reshard %0 <@single_device_mesh_0, []>
+// CHECK-NEXT: return %1
+func.func @reshard_of_reshard_tiled_to_replicated_to_single_device_not_folded(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) -> tensor<8x8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x8xf32>
+  %1 = sdy.reshard %0 <@single_device_mesh_0, []> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_unreduced_to_replicated_to_single_device_not_folded
+// CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{}, {}]>
+// CHECK-NEXT: %1 = sdy.reshard %0 <@single_device_mesh_0, []>
+// CHECK-NEXT: return %1
+func.func @reshard_of_reshard_unreduced_to_replicated_to_single_device_not_folded(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"a"}>}) -> tensor<8x8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x8xf32>
+  %1 = sdy.reshard %0 <@single_device_mesh_0, []> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_single_device_to_replicated_to_tiled_not_folded
+// CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh, [{}, {}]>
+// CHECK-NEXT: %1 = sdy.reshard %0 <@mesh, [{"a"}, {}]>
+// CHECK-NEXT: return %1
+func.func @reshard_of_reshard_single_device_to_replicated_to_tiled_not_folded(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh_0, []>}) -> tensor<8x8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x8xf32>
+  %1 = sdy.reshard %0 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_single_device_op_to_replicated_to_tiled_not_folded
+// CHECK-NEXT: %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@single_device_mesh_0, []>]>}
+// CHECK-NEXT: %1 = sdy.reshard %0 <@mesh, [{}, {}]>
+// CHECK-NEXT: %2 = sdy.reshard %1 <@mesh, [{"a"}, {}]>
+// CHECK-NEXT: return %2
+func.func @reshard_of_reshard_single_device_op_to_replicated_to_tiled_not_folded(
+    %arg0: tensor<8x8xf32>) -> tensor<8x8xf32> {
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@single_device_mesh_0, []>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = sdy.reshard %0 <@mesh, [{}, {}]> : tensor<8x8xf32>
+  %2 = sdy.reshard %1 <@mesh, [{"a"}, {}]> : tensor<8x8xf32>
+  return %2 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_replicated_to_replicated_to_single_device_folded
+// CHECK-NEXT: %0 = sdy.reshard %arg0 <@single_device_mesh_0, []>
+// CHECK-NEXT: return %0
+func.func @reshard_of_reshard_replicated_to_replicated_to_single_device_folded(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) -> tensor<8x8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<8x8xf32>
+  %1 = sdy.reshard %0 <@single_device_mesh_0, []> : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_single_device_to_replicated_to_replicated_folded
+// CHECK-NEXT: %0 = sdy.reshard %arg0 <@mesh_4, [{}]>
+// CHECK-NEXT: return %0
+func.func @reshard_of_reshard_single_device_to_replicated_to_replicated_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh_0, []>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh_4, [{}]> : tensor<8xf32>
+  return %1 : tensor<8xf32>
 }

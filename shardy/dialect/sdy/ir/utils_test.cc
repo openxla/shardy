@@ -989,6 +989,41 @@ module {
   EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
       getArgSharding(0), getType(0), getArgSharding(2), getType(2), func));
 }
+
+TEST_F(UtilsTest,
+       IsShardingEquivalentAcrossReshapes_UnreducedAxesAndReductionOp) {
+  auto module = mlir::parseSourceString<ModuleOp>(R"mlir(
+module {
+  sdy.mesh @mesh_xy = <["x"=2, "y"=2]>
+  func.func @test(
+      %arg0: tensor<4x4xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}], unreduced=max{"x"}>},
+      %arg1: tensor<2x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}], unreduced=max{"x"}>},
+      %arg2: tensor<2x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}], unreduced=min{"x"}>},
+      %arg3: tensor<2x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}], unreduced={"x"}>},
+      %arg4: tensor<2x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}]>}) {
+    return
+  }
+}
+)mlir",
+                                                  &context);
+  auto func = cast<func::FuncOp>(module->lookupSymbol("test"));
+  auto getArgSharding = [&](int idx) {
+    return getSharding(func.getArgument(idx));
+  };
+  auto getType = [&](int idx) { return func.getArgument(idx).getType(); };
+
+  // Matching unreduced=max{"x"}: true
+  EXPECT_TRUE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(1), getType(1), func));
+  // Mismatched reduction_op (max vs min, max vs sum): false
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(2), getType(2), func));
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(3), getType(3), func));
+  // Mismatched unreduced_axes (max{"x"} vs none): false
+  EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
+      getArgSharding(0), getType(0), getArgSharding(4), getType(4), func));
+}
 }  // namespace
 
 }  // namespace sdy

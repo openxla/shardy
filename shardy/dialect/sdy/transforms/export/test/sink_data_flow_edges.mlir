@@ -208,6 +208,30 @@ func.func @manual_computation_with_manual_axes(
   return %1 : tensor<32x32xf32>
 }
 
+// CHECK-LABEL: func @manual_computation_with_manual_axes_and_unreduced_max
+func.func @manual_computation_with_manual_axes_and_unreduced_max(
+    %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}], unreduced=max{"c"}>})
+    -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"b", "a", ?}, {?}], unreduced=max{"c"}>}) {
+  // CHECK-NEXT: %0 = sdy.manual_computation(%arg0)
+  // CHECK-SAME:     in_shardings=[<@mesh, [{"b", "a", ?}, {?}], unreduced=max{"c"}>]
+  // CHECK-SAME:     out_shardings=[<@mesh, [{"b", "a", ?}, {?}], unreduced=max{"c"}>]
+  // CHECK-SAME:     manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+  // CHECK-NEXT:   %1 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
+  // CHECK-NEXT:   sdy.return %1 : tensor<16x32xf32>
+  // CHECK-NEXT: } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK-NEXT: return %0 : tensor<32x32xf32>
+  %0 = sdy.manual_computation(%arg0)
+      in_shardings=[<@mesh, [{"b", ?}, {?}], unreduced=max{"c"}>]
+      out_shardings=[<@mesh, [{"b", ?}, {?}], unreduced=max{"c"}>]
+      manual_axes={"b"} (%arg1: tensor<16x32xf32>) {
+    %2 = sdy.data_flow_edge %arg1 sharding=<@mesh, [{"a", ?}, {?}]> : tensor<16x32xf32>
+    %3 = stablehlo.add %2, %2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a", ?}, {?}]>]>} : tensor<16x32xf32>
+    sdy.return %3 : tensor<16x32xf32>
+  } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  %1 = sdy.data_flow_edge %0 sharding=<@mesh, [{"b", "a", ?}, {?}], unreduced=max{"c"}> : tensor<32x32xf32>
+  return %1 : tensor<32x32xf32>
+}
+
 // CHECK-LABEL: func @manual_computation_update_in_out_shardings
 func.func @manual_computation_update_in_out_shardings(
     %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", "b", ?}, {"c", ?}]>})

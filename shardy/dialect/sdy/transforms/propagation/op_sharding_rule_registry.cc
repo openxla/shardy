@@ -648,6 +648,46 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          FactorType::kNeedReplication)
               .build();
         }
+        if (callTargetName == "LuDecomposition" ||
+            callTargetName == "LuRealDecompositionBlock" ||
+            callTargetName == "LuComplexDecompositionBlock") {
+          int64_t numOperands = customCall.getNumOperands();
+          assert(numOperands >= 1 &&
+                 customCall.getNumResults() == numOperands + 2);
+          // See `jax.lax.linalg.lu` for more information.
+          //
+          // All but the last two dimensions of the inputs (`[...batch, M, N]`)
+          // are batch dimensions, shared with the `lu` results (`[...batch, M,
+          // N]`), `pivots` (`[...batch, min(M, N)]`), and `permutation`
+          // (`[...batch, M]`). The non-batch dimensions require replication.
+          ArrayRef<int64_t> inShape = getTensorShape(customCall.getOperand(0));
+          ArrayRef<int64_t> pivotsShape =
+              getTensorShape(customCall.getResult(numOperands));
+          int64_t nonBatchDim1 = inShape.size() - 2;
+          int64_t nonBatchDim2 = inShape.size() - 1;
+          SmallVector<int64_t> nonBatchDim1Operands(numOperands, nonBatchDim1);
+          SmallVector<int64_t> nonBatchDim1Results(numOperands + 2,
+                                                   nonBatchDim1);
+          nonBatchDim1Results[numOperands] = kNullDim;
+          SmallVector<int64_t> nonBatchDim2Operands(numOperands, nonBatchDim2);
+          SmallVector<int64_t> nonBatchDim2Results(numOperands + 2,
+                                                   nonBatchDim2);
+          nonBatchDim2Results[numOperands] = kNullDim;
+          nonBatchDim2Results[numOperands + 1] = kNullDim;
+          SmallVector<int64_t> pivotsOperands(numOperands, kNullDim);
+          SmallVector<int64_t> pivotsResults(numOperands + 2, kNullDim);
+          pivotsResults[numOperands] = nonBatchDim1;
+          return OpShardingRuleBuilder(customCall)
+              .addPointwise(inShape.drop_back(2))
+              .addFactor(nonBatchDim1Operands, nonBatchDim1Results,
+                         inShape[nonBatchDim1], FactorType::kNeedReplication)
+              .addFactor(nonBatchDim2Operands, nonBatchDim2Results,
+                         inShape[nonBatchDim2], FactorType::kNeedReplication)
+              .addFactor(pivotsOperands, pivotsResults,
+                         pivotsShape[nonBatchDim1],
+                         FactorType::kNeedReplication)
+              .build();
+        }
         if (callTargetName == "ProductOfElementaryHouseholderReflectors") {
           // See `jax.lax.linalg.householder_product` for more information.
           //

@@ -70,7 +70,7 @@ def LiftInlinedMeshesPass : Pass<"sdy-lift-inlined-meshes", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
   let options = [
     Option<"useSingleDeviceMeshNames", "use-single-device-mesh-names", "bool",
-           /*default=*/"false",
+           /*default=*/"true",
            "Whether to name single-device meshes as `single_device_{id}` instead "
            "of `maximal_mesh_{id}`.">
   ];

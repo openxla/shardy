@@ -300,3 +300,102 @@ func.func @default_op_multiple_results_conflicting_unreduced_reduction_ops(%arg0
   %0, %1 = "stablehlo.custom_call"(%arg0) {call_target_name = "foo", sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}], unreduced={"y"}>, <@mesh, [{"x"}, {}], unreduced=max{"y"}>]>} : (tensor<8x8xf32>) -> (tensor<8x8xf32>, tensor<8x8xf32>)
   return %0, %1 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @while_with_unreduced_carry(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}) {
+  %0 = stablehlo.while(%iterArg = %arg0) : tensor<8xf32>
+    attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced=max{"x"}>]>}
+    cond {
+      %cond = stablehlo.constant dense<false> : tensor<i1>
+      stablehlo.return %cond : tensor<i1>
+    } do {
+      stablehlo.return %iterArg : tensor<8xf32>
+    }
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @case_returning_conflicting_unreduced_kinds(%idx: tensor<i32> {sdy.sharding = #sdy.sharding<@mesh, []>}, %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) {
+  %0:2 = "stablehlo.case"(%idx) ({
+    stablehlo.return %arg0, %arg1 : tensor<8xf32>, tensor<8xf32>
+  }, {
+    stablehlo.return %arg0, %arg1 : tensor<8xf32>, tensor<8xf32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}], unreduced=min{"x"}>]>} : (tensor<i32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @named_computation_returning_conflicting_unreduced_kinds(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) {
+  %0:2 = sdy.named_computation<"checkpoint">(%arg0, %arg1) in_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}], unreduced=min{"x"}>] out_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}], unreduced=min{"x"}>] (%in0: tensor<8xf32>, %in1: tensor<8xf32>) {
+    sdy.return %in0, %in1 : tensor<8xf32>, tensor<8xf32>
+  } : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @manual_computation_returning_non_manual_conflicting_unreduced_kinds(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=max{"x"}>}, %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=min{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=max{"x"}>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=min{"x"}>}) {
+  %0:2 = sdy.manual_computation(%arg0, %arg1) in_shardings=[<@mesh, [{"y"}], unreduced=max{"x"}>, <@mesh, [{"y"}], unreduced=min{"x"}>] out_shardings=[<@mesh, [{"y"}], unreduced=max{"x"}>, <@mesh, [{"y"}], unreduced=min{"x"}>] manual_axes={"y"} (%in0: tensor<4xf32>, %in1: tensor<4xf32>) {
+    sdy.return %in0, %in1 : tensor<4xf32>, tensor<4xf32>
+  } : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @manual_computation_returning_manual_conflicting_unreduced_kinds(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) {
+  %0:2 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"x"}]>] out_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}], unreduced=min{"x"}>] manual_axes={"x"} (%in0: tensor<4xf32>) {
+    sdy.return %in0, %in0 : tensor<4xf32>, tensor<4xf32>
+  } : (tensor<8xf32>) -> (tensor<4xf32>, tensor<4xf32>)
+  return %0#0, %0#1 : tensor<4xf32>, tensor<4xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @manual_computation_multi_result_one_unreduced_one_plain(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) {
+  %0:2 = sdy.manual_computation(%arg0, %arg1) in_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}]>] out_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}]>] manual_axes={"x"} (%in0: tensor<8xf32>, %in1: tensor<8xf32>) {
+    sdy.return %in0, %in1 : tensor<8xf32>, tensor<8xf32>
+  } : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @manual_computation_non_manual_input_reduction_op_mismatch(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=max{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=min{"x"}>}) {
+  // expected-error@+1 {{'sdy.manual_computation' op cannot change the reduction operator of kept unreduced axes from max to min.}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"y"}], unreduced=min{"x"}>] out_shardings=[<@mesh, [{"y"}], unreduced=min{"x"}>] manual_axes={"y"} (%in0: tensor<4xf32>) {
+    sdy.return %in0 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+func.func @case_dropping_unreduced_into_unannotated_result(%idx: tensor<i32> {sdy.sharding = #sdy.sharding<@mesh, []>}, %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}) -> tensor<8xf32> {
+  %0 = "stablehlo.case"(%idx) ({
+    // expected-error@+1 {{'stablehlo.return' op has unreduced axes mismatch for 'x' at return value 0 without a blessed operation (e.g., sdy.reshard). This is an invalid transition from unreduced to reduced.}}
+    stablehlo.return %arg0 : tensor<8xf32>
+  }, {
+    stablehlo.return %arg0 : tensor<8xf32>
+  }) : (tensor<i32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
