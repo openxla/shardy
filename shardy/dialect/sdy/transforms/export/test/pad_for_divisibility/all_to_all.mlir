@@ -83,3 +83,24 @@ func.func @multiple_params(%arg0: tensor<8x8x8x8xf32> {sdy.sharding = #sdy.shard
   %3 = sdy.all_gather [{}, {}, {"x"}, {"y"}] %2 out_sharding=<@mesh_4_2, [{}, {}, {}, {}]> : tensor<7x7x7x7xf32>
   return %3 : tensor<7x7x7x7xf32>
 }
+
+sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
+
+// CHECK-LABEL: func @joint_lcm_all_to_all(
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>}) -> tensor<10x8xf32> {
+// CHECK-NEXT:    %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:10, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {"y"}]>]>} : (tensor<16x8xf32>) -> tensor<10x8xf32>
+// CHECK-NEXT:    %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+// CHECK-NEXT:    %[[PAD:.*]] = stablehlo.pad %[[SLICE]], %[[CST]], low = [0, 0], high = [6, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {"y"}]>]>} : (tensor<10x8xf32>, tensor<f32>) -> tensor<16x8xf32>
+// CHECK-NEXT:    %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y"}: 1->0] %[[PAD]] out_sharding=<@mesh_2_4, [{"x", "y"}, {}]> : tensor<16x8xf32>
+// CHECK-NEXT:    %[[ALL_GATHER:.*]] = sdy.all_gather [{"x", "y"}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh_2_4, [{}, {}]> : tensor<16x8xf32>
+// CHECK-NEXT:    %[[TRIM:.*]] = stablehlo.slice %[[ALL_GATHER]] [0:10, 0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>} : (tensor<16x8xf32>) -> tensor<10x8xf32>
+// CHECK-NEXT:    return %[[TRIM]] : tensor<10x8xf32>
+// CHECK-NEXT:  }
+func.func @joint_lcm_all_to_all(%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>}) -> tensor<10x8xf32> {
+  %0 = stablehlo.slice %arg0 [0:10, 0:8] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>]>} : (tensor<16x8xf32>) -> tensor<10x8xf32>
+  %1 = sdy.all_to_all [{"y"}: 1->0] %0 out_sharding=<@mesh_2_4, [{"x", "y"}, {}]> : tensor<10x8xf32>
+  %2 = sdy.all_gather [{"x", "y"}, {}] %1 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<10x8xf32>
+  return %2 : tensor<10x8xf32>
+}
+
+

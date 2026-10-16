@@ -862,8 +862,12 @@ class AllToAllOpPattern : public OpConversionPattern<sdy::AllToAllOp> {
     }
 
     TensorShardingAttr outSharding = op.getOutSharding();
-    RankedTensorType paddedInputType = cast<RankedTensorType>(
-        getDivisiblePaddedType(rankedInputType, outSharding, symbolTable));
+    TensorShardingAttr inSharding = getSharding(inputOrig);
+    MeshAttr mesh =
+        outSharding ? outSharding.getMesh(symbolTable)
+                    : (inSharding ? inSharding.getMesh(symbolTable) : nullptr);
+    RankedTensorType paddedInputType =
+        getDivisiblePaddedType(rankedInputType, inSharding, outSharding, mesh);
 
     std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
     Operation* newOp =
