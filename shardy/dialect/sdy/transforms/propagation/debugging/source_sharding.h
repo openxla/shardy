@@ -160,7 +160,9 @@ struct SourceShardingHandler {
   // as an action handler on the `MLIRContext` of `moduleOp`.
   void prepareHandler(ModuleOp moduleOp);
 
-  // Saves the sharding origin and edge source information on the `moduleOp`.
+  // Unregisters the action handler from the `MLIRContext` of `moduleOp` (if
+  // registered) and saves the sharding origin and edge source information on
+  // the `moduleOp`.
   void saveOnModule(ModuleOp moduleOp);
 
  private:
