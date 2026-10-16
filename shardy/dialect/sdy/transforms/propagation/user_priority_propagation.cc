@@ -188,6 +188,13 @@ getShardingReferencesPerPriorityAndInitialize(ModuleOp moduleOp,
         value && *value && DataFlowEdgeOp::lookup(*value)) {
       return sharding;
     }
+    bool hasAnyExplicitPriority = llvm::any_of(
+        sharding.getDimShardings(), [](DimensionShardingAttr dimSharding) {
+          return dimSharding.getPriority().has_value();
+        });
+    if (!hasAnyExplicitPriority) {
+      return sharding;
+    }
     clearAndAddNonZeroPriorities(sharding, prioritiesInSharding);
     for (int64_t priority : prioritiesInSharding) {
       priorityToShardingReferences[priority].emplace_back(valueOrFuncResult,
