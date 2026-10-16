@@ -107,3 +107,13 @@ func.func @funcop_result_sharding_does_not_match_and_reshard_result_twice(%arg0:
   %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}]>]>} : (tensor<8x32xf32>, tensor<32x16xf32>) -> tensor<8x16xf32>
   return %0 : tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func @reshard_unreduced_axis_transition
+func.func @reshard_unreduced_axis_transition(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"y"} %[[ALL_REDUCE]] out_sharding=<@mesh, [{}, {}], unreduced={"y"}> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}], unreduced={"y"}> : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+

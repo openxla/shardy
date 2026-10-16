@@ -990,12 +990,16 @@ TensorShardingAttr insertUnreducedCollectives(OpOperand& use,
 bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
                                           const SymbolTable& symbolTable) {
   ReshardOp reshardOp = dyn_cast<ReshardOp>(op);
-  if (!reshardOp) {
+  if (!reshardOp || reshardOp.getSharding().getUnreducedAxes().empty()) {
     return false;
   }
 
   OpOperand& input = reshardOp->getOpOperand(0);
   rewriter.setInsertionPoint(reshardOp);
+  if (TensorShardingAttr inSharding = getSharding(input.get())) {
+    insertAllReduceIfUnreducedToReplicated(
+        input, inSharding, reshardOp.getSharding(), symbolTable, rewriter);
+  }
   if (insertUnreducedCollectives(input, reshardOp.getSharding(), symbolTable,
                                  rewriter)) {
     rewriter.replaceOp(reshardOp, input.get());
