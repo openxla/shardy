@@ -45,10 +45,11 @@ std::unique_ptr<Pass> createFlattenCallGraphPass(
 // Takes the current index of the module dump, which will be included as a
 // prefix in the file name, and incremented after each stage (dumped module).
 void addImportPipeline(OpPassManager& pm, int& dumpIndex,
-                       const PropagationOptions& options);
+                       const PropagationOptions& options = {});
 
 // Same as above, but initializes a default dump index to 0.
-void addImportPipeline(OpPassManager& pm, const PropagationOptions& options);
+void addImportPipeline(OpPassManager& pm,
+                       const PropagationOptions& options = {});
 
 // Register the sdy-import-pipeline.
 void registerImportPipeline();

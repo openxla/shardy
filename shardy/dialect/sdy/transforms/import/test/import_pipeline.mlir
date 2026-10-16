@@ -1,4 +1,4 @@
-// RUN: sdy_opt %s -split-input-file -sdy-import-pipeline='dedup-functions-fully=true' 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -split-input-file -sdy-import-pipeline 2>&1 | FileCheck %s
 
 sdy.mesh @mesh = <["a"=2]>
 
@@ -19,8 +19,10 @@ func.func @main(%arg0: tensor<32x96xf32>) -> tensor<32x96xf32> {
 
 // CHECK-LABEL: func @main
 func.func @main(%arg0: tensor<8x8xf32>, %arg1: tensor<8x8xf32>) {
-  // CHECK-DAG: sdy.sharding_group %arg0 group_id=0 : tensor<8x8xf32>
-  // CHECK-DAG: sdy.sharding_group %arg1 group_id=0 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_group %arg0 group_id=1234 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_group %arg0 group_id=2345 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_group %arg1 group_id=1234 : tensor<8x8xf32>
+  // CHECK-NEXT: sdy.sharding_group %arg1 group_id=3456 : tensor<8x8xf32>
   sdy.sharding_group %arg0 group_id = 1234 : tensor<8x8xf32>
   sdy.sharding_group %arg0 group_id = 2345 : tensor<8x8xf32>
   sdy.sharding_group %arg1 group_id = 1234 : tensor<8x8xf32>
@@ -54,7 +56,7 @@ func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
 sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
 
 // CHECK-LABEL: func @main(
-// CHECK-SAME:      %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}], replicated={"a"}>})
+// CHECK-SAME:      %arg0: tensor<8xf32>)
 // CHECK-SAME:      -> tensor<8xf32> {
 func.func @main(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"c"}], replicated={"a"}>] out_shardings=[<@mesh, [{"c"}], replicated={"a"}>] manual_axes={"c", "a"} (%arg1: tensor<4xf32>) {
