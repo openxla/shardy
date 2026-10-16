@@ -338,7 +338,6 @@ struct ApplyShardingConstraintsPass
     });
 
     // Unregister the handler and save the sharding origins on the module.
-    context.registerActionHandler(nullptr);
     handler.saveOnModule(moduleOp);
   }
 };

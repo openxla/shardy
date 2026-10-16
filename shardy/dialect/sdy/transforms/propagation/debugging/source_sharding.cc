@@ -816,6 +816,10 @@ void SourceShardingHandler::prepareHandler(ModuleOp moduleOp) {
 
 void SourceShardingHandler::saveOnModule(ModuleOp moduleOp) {
   MLIRContext* context = moduleOp.getContext();
+  if (mappings->debugShardingOrigins ||
+      mappings->debugPropagationEdgeSharding) {
+    context->registerActionHandler(nullptr);
+  }
   if (mappings->debugShardingOrigins) {
     saveShardingOriginsOnModule(context, mappings->valueToOriginShardingMap);
     overrideOriginsToSelf(moduleOp);
