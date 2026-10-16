@@ -4,6 +4,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 ...
 ==============================================================================*/
 
+#include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
@@ -12,7 +13,9 @@ Licensed under the Apache License, Version 2.0 (the "License");
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -34,7 +37,17 @@ struct DropShardingAndMeshPass
       module->removeAttr(kOutputShardingsAttr);
     }
 
-    module.walk([](Operation* op) {
+    SymbolTable symbolTable(module);
+    module.walk([&](Operation* op) {
+      // Keep single-device sharding annotation on Send/Recv instructions to
+      // meet the requirement of the XLA compilation pipeline.
+      if (isa<stablehlo::SendOp, stablehlo::RecvOp>(op) &&
+          llvm::any_of(getShardings(op), [&](TensorShardingAttr sharding) {
+            return isSingleDeviceSharding(sharding, symbolTable);
+          })) {
+        return;
+      }
+
       // kShardingAttr is "sdy.sharding"
       op->removeAttr(kShardingAttr);
 

@@ -27,6 +27,37 @@ func.func @drop_multiple_sharding(
 
 // -----
 
+// CHECK-LABEL: sdy.mesh @single_dev_0 = <[], device_ids=[0]>
+// CHECK-NOT:   sdy.mesh @mesh_2
+sdy.mesh @mesh_2 = <["x"=2]>
+sdy.mesh @single_dev_0 = <[], device_ids=[0]>
+
+// CHECK-LABEL: func @keep_single_device_send_recv_sharding
+func.func @keep_single_device_send_recv_sharding(
+    %arg0: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}, {}]>},
+    %token: !stablehlo.token) -> (tensor<8x16xf32>, !stablehlo.token) {
+  // CHECK-NEXT: %[[SEND:.*]] = "stablehlo.send"(%arg0, %arg1)
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@single_dev_0, []>]>}
+  %0 = "stablehlo.send"(%arg0, %token) <{
+    channel_handle = #stablehlo.channel_handle<handle = 1, type = 2>,
+    is_host_transfer = true
+  }> {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@single_dev_0, []>]>
+  } : (tensor<8x16xf32>, !stablehlo.token) -> !stablehlo.token
+  // CHECK-NEXT: %[[RECV:.*]]:2 = "stablehlo.recv"(%[[SEND]])
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@single_dev_0, []>, <@single_dev_0, []>]>}
+  %1:2 = "stablehlo.recv"(%0) <{
+    channel_handle = #stablehlo.channel_handle<handle = 2, type = 3>,
+    is_host_transfer = true
+  }> {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@single_dev_0, []>, #sdy.sharding<@single_dev_0, []>]>
+  } : (!stablehlo.token) -> (tensor<8x16xf32>, !stablehlo.token)
+  // CHECK-NEXT: return %[[RECV]]#0, %[[RECV]]#1
+  return %1#0, %1#1 : tensor<8x16xf32>, !stablehlo.token
+}
+
+// -----
+
 // CHECK-LABEL: module @module_input_output_shardings
 // KEEP-SAME: sdy.output_shardings = #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}]>]>,
 // KEEP-SAME: sdy.parameters_shardings = #sdy.sharding_per_value<[<mesh<["x"=2]>, [{"x"}]>]>
