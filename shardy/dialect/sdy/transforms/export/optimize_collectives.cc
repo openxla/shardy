@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
@@ -41,11 +42,15 @@ namespace {
 class CollectivePermuteOptimizationPattern
     : public OpRewritePattern<CollectivePermuteOp> {
  public:
-  using OpRewritePattern<CollectivePermuteOp>::OpRewritePattern;
+  CollectivePermuteOptimizationPattern(
+      MLIRContext* context, SymbolTableCollection& symbolTableCollection)
+      : OpRewritePattern<CollectivePermuteOp>(context),
+        symbolTableCollection(symbolTableCollection) {}
 
   LogicalResult matchAndRewrite(CollectivePermuteOp cpOp,
                                 PatternRewriter& rewriter) const override {
-    SymbolTable symbolTable(cpOp->getParentOfType<ModuleOp>());
+    const SymbolTable& symbolTable =
+        symbolTableCollection.getSymbolTable(cpOp->getParentOfType<ModuleOp>());
     std::optional<int64_t> splitDim = getSplitDimension(cpOp, symbolTable);
     if (!splitDim) {
       return failure();
@@ -68,6 +73,9 @@ class CollectivePermuteOptimizationPattern
 
     return rewriteAllToAllChain(*chain, *plan, rewriter);
   }
+
+ private:
+  SymbolTableCollection& symbolTableCollection;
 };
 
 struct OptimizeCollectivesPass
@@ -76,8 +84,10 @@ struct OptimizeCollectivesPass
 
  protected:
   void runOnOperation() final {
+    SymbolTableCollection symbolTableCollection;
     RewritePatternSet patterns(&getContext());
-    patterns.add<CollectivePermuteOptimizationPattern>(patterns.getContext());
+    patterns.add<CollectivePermuteOptimizationPattern>(patterns.getContext(),
+                                                       symbolTableCollection);
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
       signalPassFailure();
     }
