@@ -171,15 +171,7 @@ class MpmdExecutable(stages.Executable):
       )
 
     if self.nr_const_args > 0:
-      const_args = args[:self.nr_const_args]
-      const_args_avals = [c.aval for c in const_args]
-      const_shardings = self.const_shardings
-      const_layouts = pjit.const_args_layouts(
-          const_args, const_args_avals, const_shardings)
-      const_args_sharded = pxla.shard_args(
-          const_shardings, const_layouts,
-          [xla_client.ArrayCopySemantics.REUSE_INPUT] * self.nr_const_args,
-          const_args)
+      const_args_sharded = self.shard_const_args(args[:self.nr_const_args])
     else:
       const_args_sharded = []
 
@@ -189,7 +181,7 @@ class MpmdExecutable(stages.Executable):
       if i < self.nr_const_args:
         assert i in self._kept_var_idx
         assert i not in self._donated_inputs_indices
-        arg_avals.append(arg.aval)
+        arg_avals.append(const_args_sharded[i].aval)
         kept_args[i] = const_args_sharded[i]
       elif i in self._kept_var_idx:
         arg_avals.append(arg.aval)
@@ -212,6 +204,19 @@ class MpmdExecutable(stages.Executable):
     )
     kept_args_tuple = tuple(v for _, v in sorted(kept_args.items()))
     return self._executable.execute(kept_args_tuple)
+
+  def shard_const_args(self, const_args: Sequence[Any]) -> list[Any]:
+    if not const_args:
+      return []
+    const_args_avals = [core.typeof(c) for c in const_args]
+    const_shardings = self.const_shardings
+    const_layouts = pjit.const_args_layouts(
+        const_args, const_args_avals, const_shardings)
+    with jax.transfer_guard_host_to_device('allow'):
+      return pxla.shard_args(
+          const_shardings, const_layouts,
+          [xla_client.ArrayCopySemantics.REUSE_INPUT] * len(const_args),
+          const_args)
 
   def create_cpp_call(
       self, params: stages.CompiledCallParams
