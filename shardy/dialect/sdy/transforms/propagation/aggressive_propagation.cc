@@ -55,7 +55,7 @@ struct AggressivePropagationPass
 
 LogicalResult AggressivePropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
-    const ShardingGroupMap& shardingGroupMap,
+    const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<const FactorPropagation*, 2> strategies;
   switch (propagationStrategy) {
@@ -75,9 +75,9 @@ LogicalResult AggressivePropagationPassImpl::propagate(
   }
 
   for (const FactorPropagation* strategy : strategies) {
-    if (failed(BasicPropagationPassImpl::propagate(moduleOp, symbolTable,
-                                                   shardingGroupMap, *strategy,
-                                                   getDirectionToPropagate))) {
+    if (failed(BasicPropagationPassImpl::propagate(
+            moduleOp, symbolTable, userMap, shardingGroupMap, *strategy,
+            getDirectionToPropagate))) {
       return failure();
     }
   }

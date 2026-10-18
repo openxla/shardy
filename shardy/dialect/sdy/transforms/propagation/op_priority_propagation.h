@@ -48,7 +48,7 @@ class OpPriorityPropagationPassImpl : public AggressivePropagationPassImpl {
   // an internally defined strategy.
   LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
-      const ShardingGroupMap& shardingGroupMap,
+      const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 
   Option<bool> runOpPriorityPropagation = {

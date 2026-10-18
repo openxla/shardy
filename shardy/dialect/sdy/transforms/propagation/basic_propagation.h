@@ -78,7 +78,7 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
   // argument) as we assume the inliner pass was called.
   LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
-      const ShardingGroupMap& shardingGroupMap,
+      const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
       const FactorPropagation& factorPropagation,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
 
@@ -87,7 +87,7 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
   // extend the propagation algorithm and define higher level strategies.
   virtual LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
-      const ShardingGroupMap& shardingGroupMap,
+      const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate = propagateAny);
 
   const BasicFactorPropagation& getBasicFactorPropagation() const {

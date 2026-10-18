@@ -233,13 +233,14 @@ void saveModuleOpAfterPriority(ModuleOp moduleOp, StringRef dumpDirectory,
 
 LogicalResult UserPriorityPropagationPassImpl::propagate(
     ModuleOp moduleOp, const SymbolTable& symbolTable,
-    const ShardingGroupMap& shardingGroupMap,
+    const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
     GetDirectionToPropagateFn getDirectionToPropagate) {
   SmallVector<PriorityShardingReferences> shardingReferencesPerPriority =
       getShardingReferencesPerPriorityAndInitialize(moduleOp, symbolTable);
   // We first run the first iteration (priority 0):
   if (failed(OpPriorityPropagationPassImpl::propagate(
-          moduleOp, symbolTable, shardingGroupMap, getDirectionToPropagate))) {
+          moduleOp, symbolTable, userMap, shardingGroupMap,
+          getDirectionToPropagate))) {
     return failure();
   }
   int64_t prevPriority = 0;
@@ -249,7 +250,7 @@ LogicalResult UserPriorityPropagationPassImpl::propagate(
     saveModuleOpAfterPriority(moduleOp, dumpDirectory, prevPriority, dumpIndex);
     updateReferencedShardingsForPriority(shardingReferences, priority);
     if (failed(OpPriorityPropagationPassImpl::propagate(
-            moduleOp, symbolTable, shardingGroupMap,
+            moduleOp, symbolTable, userMap, shardingGroupMap,
             getDirectionToPropagate))) {
       return failure();
     }

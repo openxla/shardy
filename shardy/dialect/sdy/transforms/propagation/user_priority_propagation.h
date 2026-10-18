@@ -39,7 +39,7 @@ class UserPriorityPropagationPassImpl : public OpPriorityPropagationPassImpl {
  protected:
   LogicalResult propagate(
       ModuleOp moduleOp, const SymbolTable& symbolTable,
-      const ShardingGroupMap& shardingGroupMap,
+      const SymbolUserMap& userMap, const ShardingGroupMap& shardingGroupMap,
       GetDirectionToPropagateFn getDirectionToPropagate) override;
 
   // Current module dump index.
