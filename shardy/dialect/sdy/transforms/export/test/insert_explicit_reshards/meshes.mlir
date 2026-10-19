@@ -181,3 +181,27 @@ func.func @dot_different_axes_different_device_orders_lhs_and_rhs_majority(
   %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{"y"}, {"x"}]>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
   return %0 : tensor<6x12xf32>
 }
+
+// CHECK-LABEL: func @dot_unreduced_result_different_device_orders_lhs_and_rhs_majority
+func.func @dot_unreduced_result_different_device_orders_lhs_and_rhs_majority(
+    %arg0: tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"x"}]>},
+    %arg1: tensor<24x12xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"x"}, {}]>})
+    -> (tensor<6x12xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}], unreduced={"x"}>}) {
+  // CHECK: %[[DOT:.*]] = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {}], unreduced={"x"}>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[DOT]] <@mesh_non_iota, [{}, {}], unreduced={"x"}> : tensor<6x12xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<6x12xf32>
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}], unreduced={"x"}>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
+  return %0 : tensor<6x12xf32>
+}
+
+// CHECK-LABEL: func @dot_unreduced_result_different_device_orders_rhs_and_result_majority
+func.func @dot_unreduced_result_different_device_orders_rhs_and_result_majority(
+    %arg0: tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"x"}]>},
+    %arg1: tensor<24x12xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>})
+    -> (tensor<6x12xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}], unreduced={"x"}>}) {
+  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh_non_iota, [{}, {"x"}]> : tensor<6x24xf32>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot %[[RESHARD]], %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}], unreduced={"x"}>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
+  // CHECK-NEXT: return %[[DOT]] : tensor<6x12xf32>
+  %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}], unreduced={"x"}>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
+  return %0 : tensor<6x12xf32>
+}

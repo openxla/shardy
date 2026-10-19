@@ -1024,6 +1024,29 @@ module {
   EXPECT_FALSE(isShardingEquivalentAcrossReshapes(
       getArgSharding(0), getType(0), getArgSharding(4), getType(4), func));
 }
+
+TEST_F(UtilsTest, IsFullyReplicatedWithoutUnreducedAxes) {
+  EXPECT_TRUE(isFullyReplicatedWithoutUnreducedAxes(TensorShardingAttr()));
+
+  TensorShardingAttr replicated = createTensorSharding("mesh_xy_23");
+  EXPECT_TRUE(isFullyReplicatedWithoutUnreducedAxes(replicated));
+
+  TensorShardingAttr unreduced = TensorShardingAttr::get(
+      &context, "mesh_xy_23",
+      {DimensionShardingAttr::get(&context, /*axes=*/{}, /*isClosed=*/true)},
+      /*replicatedAxes=*/{},
+      /*unreducedAxes=*/{AxisRefAttr::get(&context, "x")});
+  EXPECT_TRUE(isFullyReplicated(unreduced));
+  EXPECT_FALSE(isFullyReplicatedWithoutUnreducedAxes(unreduced));
+
+  TensorShardingAttr sharded = TensorShardingAttr::get(
+      &context, "mesh_xy_23",
+      {DimensionShardingAttr::get(&context,
+                                  /*axes=*/{AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  EXPECT_FALSE(isFullyReplicatedWithoutUnreducedAxes(sharded));
+}
 }  // namespace
 
 }  // namespace sdy

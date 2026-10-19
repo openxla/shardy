@@ -142,7 +142,7 @@ void insertExplicitReshardsOnResult(
 // If we replicate along y and only use the x in sharding.
 bool shouldReshardToCommonMesh(TensorShardingAttr sharding, MeshOp meshOp,
                                const SymbolTable& symbolTable) {
-  return !isFullyReplicated(sharding) &&
+  return !isFullyReplicatedWithoutUnreducedAxes(sharding) &&
          sharding.getMesh(symbolTable).getDeviceIds() !=
              meshOp.getMesh().getDeviceIds();
 }

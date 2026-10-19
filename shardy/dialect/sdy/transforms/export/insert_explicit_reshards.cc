@@ -321,7 +321,7 @@ MeshOp getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
   MeshOp mostCommonMesh = defaultMesh;
   for (const TensorShardingAttr sharding :
        llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
-    if (!isFullyReplicated(sharding)) {
+    if (!isFullyReplicatedWithoutUnreducedAxes(sharding)) {
       MeshOp meshOfSharding =
           getMeshOpOrDefault(sharding, symbolTable, defaultMesh);
       const int64_t meshCount = ++meshCounts[meshOfSharding.getName()];
@@ -704,7 +704,8 @@ void insertSingleDeviceOperandReshards(Operation* op,
 
     Value input = operand;
     bool isReplicatedOnGlobalMesh =
-        isFullyReplicated(operandSharding) && operandMeshOp == globalMeshOp;
+        isFullyReplicatedWithoutUnreducedAxes(operandSharding) &&
+        operandMeshOp == globalMeshOp;
     if (!isReplicatedOnGlobalMesh) {
       // Tiled / Single-Device A / Replicated on other mesh -> Replicated on
       // @mesh -> Single-Device B

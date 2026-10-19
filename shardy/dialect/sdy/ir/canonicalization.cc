@@ -58,8 +58,7 @@ bool isSingleDeviceAndTiledReshard(Operation* op, Value tensor,
   }
   TensorShardingAttr otherSharding =
       inIsSingleDevice ? outerSharding : inSharding;
-  return otherSharding && (!isFullyReplicated(otherSharding) ||
-                           !otherSharding.getUnreducedAxes().empty());
+  return !isFullyReplicatedWithoutUnreducedAxes(otherSharding);
 }
 
 #include "shardy/dialect/sdy/ir/canonicalization.cc.inc"

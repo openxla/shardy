@@ -1008,15 +1008,8 @@ bool TensorShardingAttr::isEquivalent(TensorShardingAttr otherSharding,
                                       bool ignoreUnreducedAxes) const {
   // Helper to check replication, optionally ignoring unreduced axes.
   auto isReplicated = [](TensorShardingAttr s, bool ignoreUnreduced) {
-    if (!s) {
-      return true;
-    }
-    if (!ignoreUnreduced && !s.getUnreducedAxes().empty()) {
-      return false;
-    }
-    return llvm::all_of(
-        s.getDimShardings(),
-        [](const DimensionShardingAttr& dim) { return dim.emptyAxes(); });
+    return ignoreUnreduced ? sdy::isFullyReplicated(s)
+                           : isFullyReplicatedWithoutUnreducedAxes(s);
   };
 
   // Fast path: if both are fully replicated (under our unreduced-axes policy),

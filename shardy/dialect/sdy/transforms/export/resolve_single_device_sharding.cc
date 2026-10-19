@@ -84,7 +84,7 @@ std::optional<int64_t> getSingleDeviceIdForOp(Operation* op,
       } else {
         targetDeviceId = deviceId;
       }
-    } else if (!sharding.isFullyReplicated()) {
+    } else if (!isFullyReplicatedWithoutUnreducedAxes(sharding)) {
       hasNonReplicatedResult = true;
     }
   }
