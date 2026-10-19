@@ -79,6 +79,22 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "basic_propagation_test",
+    srcs = ["basic_propagation_test.cc"],
+    deps = [
+        ":passes",
+        "//shardy/dialect/sdy/ir:testing_utils",
+        "//shardy/dialect/sdy/transforms/common:propagation_options",
+        "//shardy/dialect/sdy/transforms/import:passes",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
 cc_library(
     name = "op_sharding_rule_builder",
     srcs = ["op_sharding_rule_builder.cc"],

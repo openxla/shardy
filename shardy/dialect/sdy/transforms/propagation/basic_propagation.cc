@@ -857,7 +857,6 @@ LogicalResult BasicPropagationPassImpl::propagate(
 
 void BasicPropagationPassImpl::runOnOperation() {
   ModuleOp moduleOp = getOperation();
-  MLIRContext& context = getContext();
 
   // Prepare debugging handler for sharding origins and edge sources.
   ShardingDebugMappings mappings(debugShardingOrigins,
@@ -888,7 +887,6 @@ void BasicPropagationPassImpl::runOnOperation() {
     removeShardingRules(moduleOp);
   }
 
-  context.registerActionHandler(nullptr);
   handler.saveOnModule(moduleOp);
 }
 
