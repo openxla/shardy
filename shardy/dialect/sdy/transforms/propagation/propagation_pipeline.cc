@@ -66,6 +66,10 @@ void populateExportOptions(ExportOptions& options,
 void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
                             const PropagationOptions& options) {
   addImportPipeline(pm, dumpIndex, options);
+  if (!options.dedupFunctionsFully) {  // Conservative compilation mode.
+    pm.addPass(createFlattenCallGraphPass());
+    pm.addPass(createSymbolDCEPass());  // After FlattenCallGraphPass.
+  }
   // TODO(enver): Unify the two branches for applying sharding constraints and
   // importing sharding groups.
   if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
@@ -79,10 +83,6 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     // members which have pre-propagation shardings due to sharding constraints.
     pm.addPass(createShardingGroupImportPass());
   } else {  // Conservative compilation mode.
-    pm.addPass(createFlattenCallGraphPass());
-    pm.addPass(createSymbolDCEPass());  // After FlattenCallGraphPass.
-    // TODO(b/517993355): Move ApplyShardingConstraints and ShardingGroupImport
-    // passes back to the import pipeline and before inlining.
     pm.addPass(createAddFuncDataFlowEdgesPass());
     pm.addPass(
         createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
@@ -93,6 +93,8 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     // constraints. This ensures we can detect sharding conflicts between group
     // members which have pre-propagation shardings due to sharding constraints.
     pm.addPass(createShardingGroupImportPass());
+  }
+  if (!options.dedupFunctionsFully) {  // Conservative compilation mode.
     pm.addPass(createImportFuncCallsPass());
     pm.addPass(createSymbolDCEPass());  // After ImportFuncCallsPass.
   }
@@ -105,12 +107,12 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
-  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
-    pm.addPass(createPropagateToFuncResultsPass());
-    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-  } else {  // Conservative compilation mode.
+  if (!options.dedupFunctionsFully) {  // Conservative compilation mode.
     pm.addPass(createExportNamedComputationsPass());
-    pm.addPass(createPropagateToFuncResultsPass());
+  }
+  pm.addPass(createPropagateToFuncResultsPass());
+  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
+    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
   }
   pm.addPass(createUnflattenCallGraphPass());
   pm.addPass(createSymbolDCEPass());  // After UnflattenCallGraphPass.
