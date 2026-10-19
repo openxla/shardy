@@ -22,6 +22,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -67,6 +68,10 @@ limitations under the License.
 // which cannot be inlined due to cyclic dependencies on helper functions.
 
 namespace mlir {
+class ConversionPatternRewriter;
+class IRRewriter;
+class TypeConverter;
+
 namespace sdy {
 namespace details {
 

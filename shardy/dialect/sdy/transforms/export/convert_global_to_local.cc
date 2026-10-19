@@ -300,13 +300,43 @@ class GenericOpPattern : public ConversionPattern {
             stablehlo::GatherOp, stablehlo::IotaOp, stablehlo::PadOp,
             stablehlo::ReduceOp, stablehlo::ReduceWindowOp,
             stablehlo::RngBitGeneratorOp, stablehlo::ScatterOp,
-            stablehlo::SelectAndScatterOp, stablehlo::SliceOp>(op)) {
+            stablehlo::SelectAndScatterOp, stablehlo::SliceOp,
+            PartitioningOpInterface>(op)) {
       return failure();
     }
     return localizeGenericOp(
         op, operands, rewriter,
         static_cast<const GlobalToLocalTypeConverter*>(typeConverter),
         conversionState);
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
+class PartitioningOpInterfacePattern
+    : public OpInterfaceConversionPattern<PartitioningOpInterface> {
+ public:
+  PartitioningOpInterfacePattern(TypeConverter& converter, MLIRContext* ctx,
+                                 ConversionState& state)
+      : OpInterfaceConversionPattern<PartitioningOpInterface>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      PartitioningOpInterface op, ArrayRef<Value> operands,
+      ConversionPatternRewriter& rewriter) const override {
+    const auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    if (std::optional<LogicalResult> res = op.convertGlobalToLocal(
+            operands, rewriter, *converter, converter->getSymbolTable())) {
+      if (failed(*res)) {
+        return failure();
+      }
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+    return localizeGenericOp(op, operands, rewriter, converter,
+                             conversionState);
   }
 
  private:
@@ -3718,8 +3748,9 @@ struct ConvertGlobalToLocalPass
     patterns.add<AllSliceOpPattern, CollectivePermuteOpPattern,
                  ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
                  ManualComputationOpPattern, NamedComputationOpPattern,
-                 ReplicatedToUnreducedOpPattern, ShardedToUnreducedOpPattern,
-                 StablehloConcatenateOpPattern, StablehloDynamicSliceOpPattern,
+                 PartitioningOpInterfacePattern, ReplicatedToUnreducedOpPattern,
+                 ShardedToUnreducedOpPattern, StablehloConcatenateOpPattern,
+                 StablehloDynamicSliceOpPattern,
                  StablehloDynamicUpdateSliceOpPattern, StablehloIotaOpPattern,
                  StablehloPadOpPattern,
                  StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,

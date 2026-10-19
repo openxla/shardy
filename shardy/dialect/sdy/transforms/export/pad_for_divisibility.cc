@@ -252,7 +252,8 @@ bool hasCustomPadHandling(Operation* op) {
   return isa<sdy::ConstantOp, stablehlo::ConstantOp, stablehlo::SliceOp,
              stablehlo::DotGeneralOp, stablehlo::PadOp,
              stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
-             stablehlo::GatherOp, stablehlo::ReduceOp>(op);
+             stablehlo::GatherOp, stablehlo::ReduceOp, PartitioningOpInterface>(
+      op);
 }
 
 class PaddingCache {
@@ -578,6 +579,25 @@ class GenericOpPattern : public ConversionPattern {
     }
     return padGenericOp(op, operands, rewriter,
                         static_cast<const PaddedTypeConverter*>(typeConverter));
+  }
+};
+
+class PartitioningOpInterfacePattern
+    : public OpInterfaceConversionPattern<PartitioningOpInterface> {
+ public:
+  using OpInterfaceConversionPattern::OpInterfaceConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      PartitioningOpInterface op, ArrayRef<Value> operands,
+      ConversionPatternRewriter& rewriter) const override {
+    const auto* converter =
+        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+    SDY_CHECK(converter);
+    if (std::optional<LogicalResult> res = op.padForDivisibility(
+            operands, rewriter, *converter, converter->getSymbolTable())) {
+      return *res;
+    }
+    return padGenericOp(op, operands, rewriter, converter);
   }
 };
 
@@ -1429,9 +1449,9 @@ struct PadForDivisibilityPass
     RewritePatternSet patterns(&getContext());
     patterns.add<FuncOpSignaturePattern>(typeConverter, &getContext(),
                                          paddingCache);
-    patterns.add<GenericOpPattern, StablehloSliceOpPattern,
-                 StablehloGatherOpPattern, StablehloReshapeOpPattern>(
-        typeConverter, &getContext());
+    patterns.add<GenericOpPattern, PartitioningOpInterfacePattern,
+                 StablehloSliceOpPattern, StablehloGatherOpPattern,
+                 StablehloReshapeOpPattern>(typeConverter, &getContext());
     patterns.add<StablehloPadOpPattern>(typeConverter, &getContext(),
                                         paddingCache);
     // Sharing the padding cache reference across pattern instances is safe from
@@ -1531,6 +1551,13 @@ struct PadForDivisibilityPass
                llvm::all_of(op->getResults(), isLegalValue);
       }
       return true;
+    });
+
+    // Register remaining ops for padding if their operands and results are
+    // illegal.
+    target.markUnknownOpDynamicallyLegal([&](Operation* op) {
+      return llvm::all_of(op->getResults(), isLegalValue) &&
+             llvm::all_of(op->getOperands(), isLegalValue);
     });
 
     target.addIllegalOp<UnrealizedConversionCastOp>();

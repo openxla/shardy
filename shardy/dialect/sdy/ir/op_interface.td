@@ -261,6 +261,69 @@ def Sdy_ShardingRuleOpInterface : OpInterface<"ShardingRuleOpInterface"> {
 }
 
 //===----------------------------------------------------------------------===//
+// PartitioningOpInterface
+//===----------------------------------------------------------------------===//
+
+def Sdy_PartitioningOpInterface : OpInterface<"PartitioningOpInterface"> {
+  let description = [{
+    An op interface that allows the op to define custom partitioning logic,
+    such as resolving permutation factors, padding non-divisible
+    dimensions, and converting global tensor shapes to shard-local shapes.
+  }];
+  let cppNamespace = "::mlir::sdy";
+  let methods = [
+    InterfaceMethod<
+      /*desc=*/[{
+        Resolves ops with permutation factors. Returning `std::nullopt` falls
+        back to generic op handling.
+      }],
+      /*retType=*/"std::optional<mlir::LogicalResult>",
+      /*methodName=*/"resolvePermutationFactors",
+      /*args=*/(ins "mlir::sdy::OpShardingRuleAttr":$shardingRule,
+                    "mlir::IRRewriter&":$rewriter,
+                    "const mlir::SymbolTable&":$symbolTable),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return std::nullopt;
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Rewrites the op using already-padded `operands` to make sharded
+        dimensions divisible. Returning `std::nullopt` falls back to generic op
+        handling.
+      }],
+      /*retType=*/"std::optional<mlir::LogicalResult>",
+      /*methodName=*/"padForDivisibility",
+      /*args=*/(ins "mlir::ValueRange":$operands,
+                    "mlir::ConversionPatternRewriter&":$rewriter,
+                    "const mlir::TypeConverter&":$typeConverter,
+                    "const mlir::SymbolTable&":$symbolTable),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return std::nullopt;
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Converts the op from global to shard-local tensor shapes. Returning
+        `std::nullopt` falls back to generic op handling.
+      }],
+      /*retType=*/"std::optional<mlir::LogicalResult>",
+      /*methodName=*/"convertGlobalToLocal",
+      /*args=*/(ins "mlir::ValueRange":$operands,
+                    "mlir::ConversionPatternRewriter&":$rewriter,
+                    "const mlir::TypeConverter&":$typeConverter,
+                    "const mlir::SymbolTable&":$symbolTable),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return std::nullopt;
+      }]
+    >,
+  ];
+}
+
+//===----------------------------------------------------------------------===//
 // CollectiveOpInterface
 //===----------------------------------------------------------------------===//
 
