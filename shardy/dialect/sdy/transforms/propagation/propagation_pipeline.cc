@@ -69,11 +69,11 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
   // TODO(enver): Unify the two branches for applying sharding constraints and
   // importing sharding groups.
   if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
+    pm.addPass(createAddFuncDataFlowEdgesPass());
     pm.addPass(
         createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
             options.debugShardingOrigins,
             options.debugPropagationEdgeSharding}));
-    pm.addPass(createAddFuncDataFlowEdgesPass());
     // The sharding group import pass must run after applying sharding
     // constraints. This ensures we can detect sharding conflicts between group
     // members which have pre-propagation shardings due to sharding constraints.
