@@ -530,7 +530,8 @@ def Sdy_AllSliceOp : Sdy_Op<"all_slice",
     [SameOperandsAndResultType, InferTypeOpInterface,
      DeclareOpInterfaceMethods<SymbolUserOpInterface>,
      DeclareOpInterfaceMethods<Sdy_CollectiveOpInterface,
-         /*methodOverrides=*/["allowMissingInputSharding"]>]> {
+         /*methodOverrides=*/["allowMissingInputSharding",
+                              "allowDifferentMeshes"]>]> {
   let summary = "Performs a dynamic-slice operation along axes";
   let description = [{
     Slices chunks of a tensor along axes specified in `slicing_axes`. There is

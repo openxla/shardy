@@ -87,6 +87,22 @@ func.func @reshard_from_sharded_to_fully_replicated_different_meshes(%arg0 : ten
   return %0 : tensor<24x8xf32>
 }
 
+// CHECK-LABEL: func @reshard_from_fully_replicated_to_sharded_different_meshes
+func.func @reshard_from_fully_replicated_to_sharded_different_meshes(%arg0 : tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{}, {}]>}) -> tensor<24x8xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh1d_6, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh1d_6, [{"x"}, {}]> : tensor<24x8xf32>
+  return %0 : tensor<24x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_from_empty_mesh_to_sharded
+func.func @reshard_from_empty_mesh_to_sharded(%arg0 : tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}, {}]>}) -> tensor<24x8xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh1d_6, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh1d_6, [{"x"}, {}]> : tensor<24x8xf32>
+  return %0 : tensor<24x8xf32>
+}
+
 // CHECK-LABEL: func @reshard_from_sharded_to_sharded_different_meshes
 func.func @reshard_from_sharded_to_sharded_different_meshes(%arg0 : tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@mesh1d_6, [{"x"}, {}]>}) -> (tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{"x"}, {}]>}) {
   // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh2d_2x3, [{"x"}, {}]>
@@ -896,6 +912,14 @@ func.func @out_fully_replicated_with_unreduced_axes_and_reduction_op_preserved(%
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"y"}, {}] %arg0 out_sharding=<@mesh3d, [{}, {}], unreduced=max{"x"}>
   // CHECK-NEXT: return %[[ALL_GATHER]]
   %0 = sdy.reshard %arg0 <@mesh3d, [{}, {}], unreduced=max{"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @in_fully_replicated_with_unreduced_axes_and_reduction_op_preserved
+func.func @in_fully_replicated_with_unreduced_axes_and_reduction_op_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{}, {}], unreduced=max{"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %arg0 out_sharding=<@mesh3d, [{"y"}, {}], unreduced=max{"x"}>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"y"}, {}], unreduced=max{"x"}> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 

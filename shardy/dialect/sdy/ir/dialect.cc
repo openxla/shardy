@@ -1589,6 +1589,10 @@ LogicalResult NamedComputationOp::inferReturnTypes(
 
 bool AllSliceOp::allowMissingInputSharding() { return true; }
 
+bool AllSliceOp::allowDifferentMeshes() {
+  return isFullyReplicatedWithoutUnreducedAxes(getSharding(getTensor()));
+}
+
 Type AllSliceOp::getType() { return getResult().getType(); }
 
 //===----------------------------------------------------------------------===//

@@ -1361,9 +1361,9 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
                         .replaceUnreducedAxes(outSharding.getUnreducedAxes(),
                                               outSharding.getReductionOp());
     }
-    // TODO(enver): Set input mesh to output mesh if input sharding is fully
-    // replicated. It requires sdy.all_slice can handle that input and output
-    // has a different meshes.
+    if (isFullyReplicatedWithoutUnreducedAxes(inSharding)) {
+      inSharding = TensorShardingAttr::getFullyClosedLike(outSharding);
+    }
     if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
       // We currently only support a reshard between different meshes if
       // they have the same axes and different device ids, and at least one
@@ -1412,14 +1412,16 @@ struct ReshardToCollectivesPass
           return true;
         }
       }
-      // In case out sharding is fully replicated, the reshard is either erased
-      // (if input sharding is fully replicated too) or it adds an all gather
-      // (if input sharding is sharded), either way it is handled and it should
-      // be marked as illegal.
-      if (outSharding.isFullyReplicated()) {
+      // In case in or out sharding is fully replicated, the reshard is either
+      // erased (if both are fully replicated), or it adds an all-gather (if out
+      // sharding is fully replicated and in sharding is sharded) or an
+      // all-slice (if in sharding is fully replicated and out sharding is
+      // sharded), either way it is handled and it should be marked as illegal.
+      if (isFullyReplicatedWithoutUnreducedAxes(inSharding) ||
+          outSharding.isFullyReplicated()) {
         return false;
       }
-      if (inSharding && !isEquivalentOnMesh(inSharding, outSharding, op)) {
+      if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
         return true;
       }
       return false;

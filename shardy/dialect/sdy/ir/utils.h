@@ -234,6 +234,10 @@ std::optional<StringRef> getCommonMeshName(
 // Returns whether all dimensions are fully replicated.
 bool isFullyReplicated(TensorShardingAttr sharding);
 
+// Returns whether all dimensions are fully replicated and there are no
+// unreduced axes.
+bool isFullyReplicatedWithoutUnreducedAxes(TensorShardingAttr sharding);
+
 // Returns true if the sharding attribute is bound to a single-device mesh.
 bool isSingleDeviceSharding(TensorShardingAttr sharding,
                             const SymbolTable& symbolTable);

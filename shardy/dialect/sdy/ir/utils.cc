@@ -998,6 +998,11 @@ bool isFullyReplicated(TensorShardingAttr sharding) {
   return !sharding || sharding.isFullyReplicated();
 }
 
+bool isFullyReplicatedWithoutUnreducedAxes(TensorShardingAttr sharding) {
+  return !sharding ||
+         (sharding.isFullyReplicated() && sharding.getUnreducedAxes().empty());
+}
+
 bool isSingleDeviceSharding(TensorShardingAttr sharding,
                             const SymbolTable& symbolTable) {
   if (!sharding) {

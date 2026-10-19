@@ -100,6 +100,13 @@ func.func @all_slice_missing_in_sharding(%arg0 : tensor<16x8xf32>) -> tensor<16x
   return %0 : tensor<16x8xf32>
 }
 
+// CHECK-LABEL: func @all_slice_replicated_in_sharding_different_mesh
+func.func @all_slice_replicated_in_sharding_different_mesh(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: sdy.all_slice [{}, {"x"}] %arg0 out_sharding=<@mesh1, [{}, {"x"}]>
+  %0 = sdy.all_slice [{}, {"x"}] %arg0 out_sharding=<@mesh1, [{}, {"x"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
 // CHECK-LABEL: func @all_slice_subaxis_exact_match
 func.func @all_slice_subaxis_exact_match(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3, [{"y"}, {}]>}) -> tensor<16x8xf32> {
   // CHECK-NEXT: sdy.all_slice [{}, {"x":(1)2}] %arg0 out_sharding=<@mesh3, [{"y"}, {"x":(1)2}]>
