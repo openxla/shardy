@@ -503,10 +503,9 @@ LogicalResult outlineInstruction(Operation* op,
   FunctionType funcType =
       FunctionType::get(ctx, paddedArgTypes, paddedResultTypes);
 
-  outlinedFunc = func::FuncOp::create(
-      tempRewriter, op->getLoc(), "outlined_op", funcType,
-      tempRewriter.getStringAttr("private"),
-      /*argAttrs=*/ArrayAttr(), /*resultAttrs=*/ArrayAttr());
+  outlinedFunc =
+      func::FuncOp::create(tempRewriter, op->getLoc(), "outlined_op", funcType);
+  outlinedFunc.setPrivate();
 
   for (size_t i = 0; i < shardingInfo.inShardings.size(); ++i) {
     if (shardingInfo.inShardings[i]) {

@@ -74,9 +74,8 @@ StringAttr createFuncOp(
   FuncOp funcOp = FuncOp::create(
       rewriter, namedComputationOp.getLoc(), namedComputationOp.getName(),
       rewriter.getFunctionType(namedComputationOp.getBody().getArgumentTypes(),
-                               namedComputationOp.getResultTypes()),
-      rewriter.getStringAttr("private"),
-      /*argAttrs=*/ArrayAttr(), /*resultAttrs=*/ArrayAttr());
+                               namedComputationOp.getResultTypes()));
+  funcOp.setPrivate();
   funcOp->setAttr(kOriginalFuncName, namedComputationOp.getNameAttr());
 
   rewriter.setInsertionPointToStart(funcOp->getBlock());
