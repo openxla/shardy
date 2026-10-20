@@ -796,9 +796,7 @@ class SdyPropagationTest(parameterized.TestCase):
     )
     self.assertEqual(lowered.function_mesh_assignment.output_meshes, 'mesh1')
 
-  def test_constant_in_multiple_meshes_raises_error(self):
-    if not jax.config.jax_use_simplified_jaxpr_constants:
-      self.skipTest('Requires jax_use_simplified_jaxpr_constants=True')
+  def test_constant_in_multiple_meshes_replicated(self):
     const_weight = np.ones((4, 4), dtype=np.float32)
 
     def fn(x):
@@ -816,12 +814,9 @@ class SdyPropagationTest(parameterized.TestCase):
         {'stage1': 'mesh1', 'stage2': 'mesh2'},
     )
     arg = jax.ShapeDtypeStruct((4, 4), dtype=jnp.float32)
-    with self.assertRaisesRegex(
-        ValueError,
-        r'Closed-over constant \(argument 0\) is used across multiple meshes'
-        r'.*avoid closing over constants',
-    ):
-      mpmd.jit(fn, mpmd_config).lower(arg)
+    lowered = mpmd.jit(fn, mpmd_config).lower(arg)
+    self.assertEqual(lowered.function_mesh_assignment.input_meshes, ('mesh1',))
+    self.assertEqual(lowered.function_mesh_assignment.output_meshes, 'mesh2')
 
   def test_mesh_inference_fails(self):
     mpmd_config = get_2_stage_mpmd_config()

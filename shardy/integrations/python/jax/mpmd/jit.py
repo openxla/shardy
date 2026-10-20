@@ -203,6 +203,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
       _private_parameters = mlir.LoweringParameters()
     _private_parameters = dataclasses.replace(
         _private_parameters,
+        hoist_constants_as_args=False,
         override_lowering_rules=ops.jit_lowerings,  # pyrefly: ignore[bad-argument-type]
     )
 

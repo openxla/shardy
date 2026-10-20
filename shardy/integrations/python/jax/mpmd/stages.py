@@ -271,8 +271,12 @@ class MpmdExecutable(stages.Executable):
     """Returns the input layouts for used inputs only."""
     input_xla_layouts = self._executable.input_layouts()
     input_shardings = self._in_shardings
+    nr_kept_const_args = sum(
+        1 for i in range(self.nr_const_args) if i in self._kept_var_idx
+    )
+    input_xla_layouts = input_xla_layouts[nr_kept_const_args:]
     # Remove shardings for unused inputs.
-    if len(input_xla_layouts) < self.nr_const_args + len(input_shardings):
+    if len(input_xla_layouts) < len(input_shardings):
       iter_layouts = iter(input_xla_layouts)
       input_xla_layouts = [
           next(iter_layouts)
