@@ -1533,6 +1533,9 @@ SmallVector<AxisStrideInfo> getAxisStrides(TensorShardingAttr sharding,
                                            RankedTensorType type, MeshAttr mesh,
                                            bool allowNonDivisible) {
   SmallVector<AxisStrideInfo> axisStrides;
+  if (sharding.getRank() == 0 || mesh.isSingleDevice()) {
+    return axisStrides;
+  }
   double cumulativeDimSize = 1.0;
   for (int64_t i = type.getRank() - 1; i >= 0; --i) {
     ArrayRef<AxisRefAttr> axes = sharding.getDimShardings()[i].getAxes();
@@ -1625,6 +1628,9 @@ bool isShardingEquivalentAcrossReshapes(TensorShardingAttr s1, Type t1,
   MeshAttr mesh = s1.getMesh(op);
   if (!mesh) {
     return false;
+  }
+  if (mesh.isSingleDevice()) {
+    return true;
   }
 
   auto strides1 = getAxisStrides(s1, rt1, mesh, allowNonDivisible);

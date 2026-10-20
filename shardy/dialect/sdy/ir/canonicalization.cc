@@ -408,6 +408,10 @@ Value unwrapMetadataOp(Value v) {
 TensorShardingAttr getTargetSharding(TensorShardingAttr sharding, Value v) {
   while (Operation* op = v.getDefiningOp()) {
     if (auto transpose = dyn_cast<stablehlo::TransposeOp>(op)) {
+      if (isSingleDeviceSharding(sharding, op)) {
+        v = transpose.getOperand();
+        continue;
+      }
       ArrayRef<int64_t> perm = transpose.getPermutation();
       SDY_CHECK(sharding.getDimShardings().size() == perm.size());
 

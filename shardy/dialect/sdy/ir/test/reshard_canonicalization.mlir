@@ -345,3 +345,37 @@ func.func @reshard_cse_with_transpose_different_reduction_op_not_reused(%arg0: t
   %2 = sdy.reshard %1 <@mesh, [{}, {"a"}], unreduced=max{"b"}> : tensor<4x8xf32>
   return %0, %2 : tensor<8x4xf32>, tensor<4x8xf32>
 }
+
+// CHECK-LABEL: func @reshard_cse_with_transpose_single_device
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %arg0 <@single_device_mesh_0, []> : tensor<8x4xf32>
+// CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[R0]], dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+// CHECK-NEXT: return %[[R0]], %[[T]] : tensor<8x4xf32>, tensor<4x8xf32>
+func.func @reshard_cse_with_transpose_single_device(%arg0: tensor<8x4xf32>)
+    -> (tensor<8x4xf32>, tensor<4x8xf32>) {
+  %0 = sdy.reshard %arg0 <@single_device_mesh_0, []> : tensor<8x4xf32>
+  %1 = stablehlo.transpose %arg0, dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+  %2 = sdy.reshard %1 <@single_device_mesh_0, []> : tensor<4x8xf32>
+  return %0, %2 : tensor<8x4xf32>, tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_cse_with_reshape_single_device
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %arg0 <@single_device_mesh_0, []> : tensor<4x4xf32>
+// CHECK-NEXT: %[[RS:.*]] = stablehlo.reshape %[[R0]] : (tensor<4x4xf32>) -> tensor<16xf32>
+// CHECK-NEXT: return %[[R0]], %[[RS]] : tensor<4x4xf32>, tensor<16xf32>
+func.func @reshard_cse_with_reshape_single_device(%arg0: tensor<4x4xf32>)
+    -> (tensor<4x4xf32>, tensor<16xf32>) {
+  %0 = sdy.reshard %arg0 <@single_device_mesh_0, []> : tensor<4x4xf32>
+  %1 = stablehlo.reshape %arg0 : (tensor<4x4xf32>) -> tensor<16xf32>
+  %2 = sdy.reshard %1 <@single_device_mesh_0, []> : tensor<16xf32>
+  return %0, %2 : tensor<4x4xf32>, tensor<16xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_transpose_single_device_no_crash
+// CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %arg0, dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+// CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[T]] <@single_device_mesh_0, []> : tensor<4x8xf32>
+// CHECK-NEXT: return %[[R]] : tensor<4x8xf32>
+func.func @reshard_of_transpose_single_device_no_crash(%arg0: tensor<8x4xf32>) -> tensor<4x8xf32> {
+  %0 = stablehlo.transpose %arg0, dims = [1, 0] : (tensor<8x4xf32>) -> tensor<4x8xf32>
+  %1 = sdy.reshard %0 <@single_device_mesh_0, []> : tensor<4x8xf32>
+  return %1 : tensor<4x8xf32>
+}
