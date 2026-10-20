@@ -171,6 +171,10 @@ Removes all-gather in the pattern all-gather + dot. Removes reduce-scatter
 in the pattern dot + reduce-scatter. This pass is for compatibility with
 collective matmul V1 (CMV1). It is a temporary solution for b/432019089.
 
+### `-sdy-remove-propagation-barriers`
+
+_Removes PropagationBarrierOps after propagation._
+
 ### `-sdy-remove-propagation-debug-info`
 
 _Removes propagation debug info (propagation edges and origin shardings) during export._
