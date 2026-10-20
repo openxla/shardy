@@ -144,3 +144,17 @@ func.func private @bar_0(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mes
 func.func private @bar(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"c"}]>}) -> tensor<8xf32> {
   return %arg0 : tensor<8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @propagation_barrier_removed_before_explicit_reshards
+func.func @propagation_barrier_removed_before_explicit_reshards(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"b"}]>}) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 {sdy.sharding = #sdy.sharding_per_value<[<mesh<["a"=2, "b"=2]>, [{}, {"b"}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = sdy.propagation_barrier %arg0 allowed_direction=BACKWARD {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>} : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>} : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}

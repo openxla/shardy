@@ -180,3 +180,20 @@ func.func @reduce_unreduced_to_sharded_min(
   %reshard = sdy.reshard %0 <@mesh_rs, [{"x"}, {"y"}]> : tensor<8x8xf32>
   return %reshard : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_barrier = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @propagation_barrier_removed_before_explicit_reshards
+func.func @propagation_barrier_removed_before_explicit_reshards(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_barrier, [{"x"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_barrier, [{}, {"y"}]>}) {
+  // CHECK-NEXT: %[[ALL_SLICE_0:.*]] = sdy.all_slice [{}, {"y"}] %arg0 out_sharding=<mesh<["x"=2, "y"=2]>, [{"x"}, {"y"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ALL_SLICE_1:.*]] = sdy.all_slice [{}, {"y"}] %arg0 out_sharding=<mesh<["x"=2, "y"=2]>, [{"x"}, {"y"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[ALL_SLICE_0]], %[[ALL_SLICE_1]] {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {"y"}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[ADD]] out_sharding=<mesh<["x"=2, "y"=2]>, [{}, {"y"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ALL_GATHER]] : tensor<8x8xf32>
+  %0 = sdy.propagation_barrier %arg0 allowed_direction=BACKWARD {sdy.sharding = #sdy.sharding_per_value<[<@mesh_barrier, [{}, {"y"}]>]>} : tensor<8x8xf32>
+  %1 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_barrier, [{}, {"y"}]>]>} : tensor<8x8xf32>
+  return %1 : tensor<8x8xf32>
+}

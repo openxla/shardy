@@ -47,6 +47,7 @@ cc_library(
         "per_instruction_partitioning.cc",
         "propagate_to_func_results.cc",
         "remove_ag_rs_for_cmv1.cc",
+        "remove_propagation_barriers.cc",
         "remove_propagation_debug_info.cc",
         "remove_sharding_groups.cc",
         "remove_sub_axes_in_input_output_shardings.cc",

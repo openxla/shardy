@@ -238,6 +238,11 @@ def RemoveShardingGroupsPass : Pass<"sdy-remove-sharding-groups", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
+def RemovePropagationBarriersPass : Pass<"sdy-remove-propagation-barriers", "ModuleOp"> {
+  let summary = "Removes PropagationBarrierOps after propagation.";
+  let dependentDialects = ["mlir::sdy::SdyDialect"];
+}
+
 def CloseShardingsPass : Pass<"sdy-close-shardings", "ModuleOp"> {
   let summary = "Closes tensor shardings and drops replicated axes.";
   let dependentDialects = ["mlir::sdy::SdyDialect"];

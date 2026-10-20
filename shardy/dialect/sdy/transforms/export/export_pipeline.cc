@@ -122,6 +122,7 @@ void addExportPipeline(OpPassManager& pm, int& dumpIndex,
           /*sinkDebugPropagationEdgeSharding=*/options.dumpPropagationEdges}));
   if (!options.avoidExportForPartitioning) {
     pm.addPass(createRemoveShardingGroupsPass());
+    pm.addPass(createRemovePropagationBarriersPass());
     pm.addNestedPass<func::FuncOp>(createShardingConstraintToReshardPass());
   }
   if (options.updateNonDivisibleInputOutputShardings) {
