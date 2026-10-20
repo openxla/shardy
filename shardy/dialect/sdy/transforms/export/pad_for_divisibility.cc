@@ -1288,20 +1288,26 @@ class StablehloGatherOpPattern
 
     ArrayRef<int64_t> startIndexMap =
         op.getDimensionNumbers().getStartIndexMap();
+    ArrayRef<int64_t> collapsedSliceDims =
+        op.getDimensionNumbers().getCollapsedSliceDims();
+    ArrayRef<int64_t> operandBatchingDims =
+        op.getDimensionNumbers().getOperandBatchingDims();
     int64_t indexVectorDim = op.getDimensionNumbers().getIndexVectorDim();
 
     // An operand dim is a non-slicing dim if it is not indexed by
-    // start_index_map and preserves its size in the result. When such a dim is
-    // padded, we need to increase the corresponding slice size to maintain the
-    // same operand-to-result mapping. Also check if any indexed dimension in
-    // start_index_map is padded.
+    // start_index_map, not collapsed, and not a batching dim, and preserves its
+    // size in the result. When such a dim is padded, we need to increase the
+    // corresponding slice size to maintain the same operand-to-result mapping.
+    // Also check if any indexed dimension in start_index_map is padded.
     SmallVector<int64_t> sliceSizes(op.getSliceSizes());
     bool needsIndexClamp = false;
     for (int64_t d = 0; d < origOperandType.getRank(); ++d) {
       if (paddedOperandType.getDimSize(d) > origOperandType.getDimSize(d)) {
         if (llvm::is_contained(startIndexMap, d)) {
           needsIndexClamp = true;
-        } else if (sliceSizes[d] == origOperandType.getDimSize(d)) {
+        } else if (!llvm::is_contained(collapsedSliceDims, d) &&
+                   !llvm::is_contained(operandBatchingDims, d) &&
+                   sliceSizes[d] == origOperandType.getDimSize(d)) {
           sliceSizes[d] = paddedOperandType.getDimSize(d);
         }
       }
