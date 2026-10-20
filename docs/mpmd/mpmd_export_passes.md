@@ -176,3 +176,12 @@ By default, this pass emits a warning for each such fragment. If
 ```
 -fail-on-reshard-only-fragments : Whether to emit an error (and fail) instead of a warning.
 ```
+
+### `-mpmd-validate-single-mesh-const-args`
+
+_Validates that closed-over constant arguments are not transferred across meshes._
+
+Checks that entry-point function arguments marked with `{jax.const = true}`
+have no inter-mesh `mpmd.transfer` users (and emits a warning if an
+entry-point constant argument is unused). Closed-over constants cannot be
+shared across multiple meshes in MPMD.
