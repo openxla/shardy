@@ -79,6 +79,48 @@ sharding, i.e, implicitly fully replicated.
 
 NOTE: This method *must* be implemented by the user.
 
+## PartitioningOpInterface (`Sdy_PartitioningOpInterface`)
+
+An op interface that allows the op to define custom partitioning logic,
+such as resolving permutation factors, padding non-divisible
+dimensions, and converting global tensor shapes to shard-local shapes.
+
+### Methods:
+
+#### `resolvePermutationFactors`
+
+```c++
+std::optional<mlir::LogicalResult> resolvePermutationFactors(mlir::sdy::OpShardingRuleAttr shardingRule, mlir::IRRewriter&rewriter, const mlir::SymbolTable&symbolTable);
+```
+
+Resolves ops with permutation factors. Returning `std::nullopt` falls
+back to generic op handling.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `padForDivisibility`
+
+```c++
+std::optional<mlir::LogicalResult> padForDivisibility(mlir::ValueRange operands, mlir::ConversionPatternRewriter&rewriter, const mlir::TypeConverter&typeConverter, const mlir::SymbolTable&symbolTable);
+```
+
+Rewrites the op using already-padded `operands` to make sharded
+dimensions divisible. Returning `std::nullopt` falls back to generic op
+handling.
+
+NOTE: This method *must* be implemented by the user.
+
+#### `convertGlobalToLocal`
+
+```c++
+std::optional<mlir::LogicalResult> convertGlobalToLocal(mlir::ValueRange operands, mlir::ConversionPatternRewriter&rewriter, const mlir::TypeConverter&typeConverter, const mlir::SymbolTable&symbolTable);
+```
+
+Converts the op from global to shard-local tensor shapes. Returning
+`std::nullopt` falls back to generic op handling.
+
+NOTE: This method *must* be implemented by the user.
+
 ## ShardableDataFlowOpInterface (`Sdy_ShardableDataFlowOpInterface`)
 
 An op interface that allows shardy to propagate shardings through data flow
