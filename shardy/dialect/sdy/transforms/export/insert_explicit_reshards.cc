@@ -619,12 +619,6 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
   return AxesPerFactor();
 }
 
-SmallVector<TensorShardingAttr> getShardingsBypassingBarriers(
-    ValueRange values) {
-  return llvm::map_to_vector(
-      values, [](Value value) { return getShardingBypassingBarriers(value); });
-}
-
 // Returns true if any of the result shardings is single-device sharded, which
 // indicates that the operation needs to be guarded by a device ID check.
 bool isSingleDeviceOperation(ArrayRef<TensorShardingAttr> outShardings,
@@ -907,9 +901,9 @@ struct InsertExplicitReshardsPass
       insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable);
 
       SmallVector<TensorShardingAttr> inShardings =
-          getShardingsBypassingBarriers(op->getOperands());
+          getShardings(op->getOperands());
       SmallVector<TensorShardingAttr> outShardings =
-          getShardingsBypassingBarriers(op->getResults());
+          getShardings(op->getResults());
 
       if (isSingleDeviceOperation(outShardings, symbolTable)) {
         if (failed(processSingleDeviceOperation(op, inShardings, outShardings,

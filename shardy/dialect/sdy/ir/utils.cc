@@ -441,13 +441,6 @@ TensorShardingAttr getSharding(Value value) {
       });
 }
 
-TensorShardingAttr getShardingBypassingBarriers(Value value) {
-  while (auto barrierOp = value.getDefiningOp<PropagationBarrierOp>()) {
-    value = barrierOp.getInput();
-  }
-  return getSharding(value);
-}
-
 TensorShardingAttr getOrCreateSharding(Value value, Attribute meshOrRef,
                                        const bool closedIfMissing) {
   if (TensorShardingAttr sharding = getSharding(value)) {

@@ -798,8 +798,7 @@ LogicalResult ShardingConstraintOp::verifySymbolUses(
                                       getEmitErrorFn(*this)))) {
     return failure();
   }
-  TensorShardingAttr sourceSharding =
-      getShardingBypassingBarriers(getOperand());
+  TensorShardingAttr sourceSharding = mlir::sdy::getSharding(getOperand());
   if (!sourceSharding) {
     return success();
   }
@@ -815,8 +814,7 @@ LogicalResult ReshardOp::verifySymbolUses(
                                       getEmitErrorFn(*this)))) {
     return failure();
   }
-  TensorShardingAttr sourceSharding =
-      getShardingBypassingBarriers(getOperand());
+  TensorShardingAttr sourceSharding = mlir::sdy::getSharding(getOperand());
   if (!sourceSharding) {
     return success();
   }

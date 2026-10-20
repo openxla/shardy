@@ -810,9 +810,8 @@ struct PerInstructionPartitioningPass
         // operations (sdy.replicated_to_unreduced, sdy.sharded_to_unreduced)
         // because unreduced collectives are handled later in export.
         if (isa<DataFlowEdgeOp, ManualComputationOp, MeshOp,
-                PropagationBarrierOp, ReplicatedToUnreducedOp, ReturnOp,
-                ShardedToUnreducedOp, ShardingConstraintOp, ShardingGroupOp>(
-                &op)) {
+                ReplicatedToUnreducedOp, ReturnOp, ShardedToUnreducedOp,
+                ShardingConstraintOp, ShardingGroupOp>(&op)) {
           continue;
         }
         // Avoid taking a dependency on the MHLO dialect by checking operation

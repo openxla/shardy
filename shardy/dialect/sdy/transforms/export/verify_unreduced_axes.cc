@@ -120,9 +120,6 @@ bool isDefiningOpExplicitReshard(Value value) {
   if (!value) {
     return false;
   }
-  while (auto barrierOp = value.getDefiningOp<PropagationBarrierOp>()) {
-    value = barrierOp.getInput();
-  }
   return isExplicitReshardOp(value.getDefiningOp());
 }
 
@@ -141,9 +138,8 @@ LogicalResult verifyCall(func::CallOp callOp) {
     if (isDefiningOpExplicitReshard(operand)) {
       continue;
     }
-    TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
-    TensorShardingAttr argSharding =
-        getShardingBypassingBarriers(callee.getArgument(i));
+    TensorShardingAttr operandSharding = getSharding(operand);
+    TensorShardingAttr argSharding = getSharding(callee.getArgument(i));
     if (failed(verifyUnreducedShardingEqual(
             operandSharding, argSharding, callOp,
             llvm::Twine("' at call argument ") + llvm::Twine(i) + "."))) {
@@ -154,8 +150,7 @@ LogicalResult verifyCall(func::CallOp callOp) {
   // Verify callee results against call results.
   for (int64_t i = 0; i < callOp.getNumResults(); ++i) {
     TensorShardingAttr funcResultSharding = getFuncResultSharding(callee, i);
-    TensorShardingAttr resultSharding =
-        getShardingBypassingBarriers(callOp.getResult(i));
+    TensorShardingAttr resultSharding = getSharding(callOp.getResult(i));
     if (failed(verifyUnreducedShardingEqual(
             funcResultSharding, resultSharding, callOp,
             llvm::Twine("' at call result ") + llvm::Twine(i) + "."))) {
@@ -172,7 +167,7 @@ LogicalResult verifyReturnPair(Value operand, TensorShardingAttr resultSharding,
     return success();
   }
   return verifyUnreducedShardingEqual(
-      getShardingBypassingBarriers(operand), resultSharding, op,
+      getSharding(operand), resultSharding, op,
       llvm::Twine("' at return value ") + llvm::Twine(index) +
           " without a blessed operation (e.g., sdy.reshard). "
           "This is an invalid transition "
@@ -206,8 +201,7 @@ LogicalResult verifyTerminator(Operation* op, func::FuncOp funcOp) {
   if (auto whileOp = dyn_cast<stablehlo::WhileOp>(parentOp)) {
     if (op->getParentRegion() == &whileOp.getCond()) {
       SmallVector<AxisRefAttr> condAxes;
-      appendUnreducedAxes(getShardingBypassingBarriers(op->getOperand(0)),
-                          condAxes);
+      appendUnreducedAxes(getSharding(op->getOperand(0)), condAxes);
       return verifyEqual(
           condAxes, {}, op,
           "' at while condition return value 0 without a blessed operation.");
@@ -216,8 +210,7 @@ LogicalResult verifyTerminator(Operation* op, func::FuncOp funcOp) {
   if (parentOp->getNumResults() > 0) {
     for (int64_t i = 0; i < op->getNumOperands(); ++i) {
       if (i < parentOp->getNumResults()) {
-        TensorShardingAttr resultSharding =
-            getShardingBypassingBarriers(parentOp->getResult(i));
+        TensorShardingAttr resultSharding = getSharding(parentOp->getResult(i));
         if (auto manualCompOp = dyn_cast<sdy::ManualComputationOp>(parentOp)) {
           if (resultSharding) {
             resultSharding =
@@ -240,9 +233,8 @@ LogicalResult verifyWhileOp(stablehlo::WhileOp whileOp) {
     if (isDefiningOpExplicitReshard(operand)) {
       continue;
     }
-    TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
-    TensorShardingAttr resultSharding =
-        getShardingBypassingBarriers(whileOp->getResult(i));
+    TensorShardingAttr operandSharding = getSharding(operand);
+    TensorShardingAttr resultSharding = getSharding(whileOp->getResult(i));
     if (failed(verifyUnreducedAxesTransition(
             whileOp, {operandSharding}, {resultSharding},
             /*expectedIntroducedRedOp=*/std::nullopt))) {
@@ -260,7 +252,7 @@ LogicalResult verifyRegionBranchOp(Operation* op) {
   for (Value operand : op->getOperands()) {
     operandShardings.push_back(isDefiningOpExplicitReshard(operand)
                                    ? TensorShardingAttr()
-                                   : getShardingBypassingBarriers(operand));
+                                   : getSharding(operand));
   }
   return verifyUnreducedAxesTransition(
       op, operandShardings, {},
@@ -274,9 +266,9 @@ LogicalResult verifyNamedComputationOp(
     if (isDefiningOpExplicitReshard(operand)) {
       continue;
     }
-    TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
-    TensorShardingAttr argSharding = getShardingBypassingBarriers(
-        namedComputationOp.getBody().getArgument(i));
+    TensorShardingAttr operandSharding = getSharding(operand);
+    TensorShardingAttr argSharding =
+        getSharding(namedComputationOp.getBody().getArgument(i));
     if (failed(verifyUnreducedShardingEqual(
             operandSharding, argSharding, namedComputationOp,
             llvm::Twine("' at argument ") + llvm::Twine(i) + "."))) {
@@ -313,12 +305,12 @@ LogicalResult verifyManualComputationOp(
     if (isDefiningOpExplicitReshard(operand)) {
       continue;
     }
-    TensorShardingAttr operandSharding = getShardingBypassingBarriers(operand);
+    TensorShardingAttr operandSharding = getSharding(operand);
     TensorShardingAttr operandNonManualSharding =
         operandSharding ? eraseManualAxes(operandSharding, manualAxes)
                         : TensorShardingAttr();
-    TensorShardingAttr argSharding = getShardingBypassingBarriers(
-        manualComputationOp.getBody().getArgument(i));
+    TensorShardingAttr argSharding =
+        getSharding(manualComputationOp.getBody().getArgument(i));
     if (failed(verifyUnreducedShardingEqual(
             operandNonManualSharding, argSharding, manualComputationOp,
             llvm::Twine("' at argument ") + llvm::Twine(i) + "."))) {
@@ -350,15 +342,15 @@ LogicalResult verifyManualComputationOp(
 
   for (Value operand : manualComputationOp.getOperands()) {
     if (!isDefiningOpExplicitReshard(operand)) {
-      recordSharding(retainOnlyManualUnreducedAxes(
-                         getShardingBypassingBarriers(operand), manualAxes),
-                     operandShardingsByOp);
+      recordSharding(
+          retainOnlyManualUnreducedAxes(getSharding(operand), manualAxes),
+          operandShardingsByOp);
     }
   }
   for (Value result : manualComputationOp.getResults()) {
-    recordSharding(retainOnlyManualUnreducedAxes(
-                       getShardingBypassingBarriers(result), manualAxes),
-                   resultShardingsByOp);
+    recordSharding(
+        retainOnlyManualUnreducedAxes(getSharding(result), manualAxes),
+        resultShardingsByOp);
   }
 
   for (ReductionOp redOp : seenReductionOps) {
@@ -378,13 +370,13 @@ LogicalResult verifyDefaultOp(Operation* op, func::FuncOp funcOp) {
   for (Value operand : op->getOperands()) {
     operandShardings.push_back(isDefiningOpExplicitReshard(operand)
                                    ? TensorShardingAttr()
-                                   : getShardingBypassingBarriers(operand));
+                                   : getSharding(operand));
   }
   SmallVector<TensorShardingAttr> resultShardings;
   resultShardings.reserve(op->getNumResults());
   std::optional<ReductionOp> expectedIntroducedRedOp;
   for (Value result : op->getResults()) {
-    TensorShardingAttr resultSharding = getShardingBypassingBarriers(result);
+    TensorShardingAttr resultSharding = getSharding(result);
     resultShardings.push_back(resultSharding);
     if (resultSharding && !resultSharding.getUnreducedAxes().empty()) {
       if (expectedIntroducedRedOp &&
@@ -405,11 +397,11 @@ LogicalResult verifyReduce(stablehlo::ReduceOp reduceOp) {
   for (Value operand : reduceOp.getInputs()) {
     operandShardings.push_back(isDefiningOpExplicitReshard(operand)
                                    ? TensorShardingAttr()
-                                   : getShardingBypassingBarriers(operand));
+                                   : getSharding(operand));
   }
   SmallVector<TensorShardingAttr> resultShardings;
   for (Value result : reduceOp.getResults()) {
-    resultShardings.push_back(getShardingBypassingBarriers(result));
+    resultShardings.push_back(getSharding(result));
   }
 
   std::optional<ReductionOp> expectedBodyRedOp =
@@ -430,21 +422,19 @@ LogicalResult verifyDot(Operation* op) {
   for (Value operand : op->getOperands()) {
     operandShardings.push_back(isDefiningOpExplicitReshard(operand)
                                    ? TensorShardingAttr()
-                                   : getShardingBypassingBarriers(operand));
+                                   : getSharding(operand));
   }
   SmallVector<TensorShardingAttr> resultShardings;
   for (Value result : op->getResults()) {
-    resultShardings.push_back(getShardingBypassingBarriers(result));
+    resultShardings.push_back(getSharding(result));
   }
   return verifyUnreducedAxesTransition(op, operandShardings, resultShardings,
                                        ReductionOp::SUM);
 }
 
 LogicalResult verifyStablehloCollective(Operation* op) {
-  TensorShardingAttr operandSharding =
-      getShardingBypassingBarriers(op->getOperand(0));
-  TensorShardingAttr resultSharding =
-      getShardingBypassingBarriers(op->getResult(0));
+  TensorShardingAttr operandSharding = getSharding(op->getOperand(0));
+  TensorShardingAttr resultSharding = getSharding(op->getResult(0));
   if (!operandSharding && !resultSharding) {
     return success();
   }
@@ -488,7 +478,7 @@ struct VerifyUnreducedAxesPass
       }
 
       if (isa<sdy::AllReduceOp, sdy::ReduceScatterOp>(op)) {
-        if (!getShardingBypassingBarriers(op->getOperand(0))) {
+        if (!getSharding(op->getOperand(0))) {
           op->emitOpError("operand must be sharded.");
           return WalkResult::interrupt();
         }

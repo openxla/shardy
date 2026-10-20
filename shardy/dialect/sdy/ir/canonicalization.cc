@@ -50,7 +50,7 @@ namespace {
 // unreduced) sharding and a single-device sharding.
 bool isSingleDeviceAndTiledReshard(Operation* op, Value tensor,
                                    TensorShardingAttr outerSharding) {
-  TensorShardingAttr inSharding = getShardingBypassingBarriers(tensor);
+  TensorShardingAttr inSharding = getSharding(tensor);
   bool inIsSingleDevice = isSingleDeviceSharding(inSharding, op);
   bool outIsSingleDevice = isSingleDeviceSharding(outerSharding, op);
   if (inIsSingleDevice == outIsSingleDevice) {
