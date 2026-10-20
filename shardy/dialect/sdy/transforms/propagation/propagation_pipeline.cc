@@ -107,13 +107,13 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
+  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
+    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
+  }
   if (!options.dedupFunctionsFully) {  // Conservative compilation mode.
     pm.addPass(createExportNamedComputationsPass());
   }
   pm.addPass(createPropagateToFuncResultsPass());
-  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
-    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-  }
   pm.addPass(createUnflattenCallGraphPass());
   pm.addPass(createSymbolDCEPass());  // After UnflattenCallGraphPass.
   if (options.enableAutoPartitioning) {
