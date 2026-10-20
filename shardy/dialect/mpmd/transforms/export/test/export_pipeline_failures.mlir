@@ -84,3 +84,28 @@ func.func @has_forward_deps_only(%arg0: !mesh_1_tensor) -> !mesh_2_tensor attrib
   } : (!mesh_2_tensor) -> !mesh_2_tensor
   func.return %2 : !mesh_2_tensor
 }
+
+// -----
+
+!mesh_1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+!mesh_2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+
+sdy.mesh @mesh = <["x"=2]>
+
+// expected-error@+1 {{Closed-over constant (argument 0) is used across multiple meshes: ['m1', 'm2']. Constants cannot be shared across multiple meshes in MPMD. Please duplicate the constant in each mesh/stage where it is needed, or avoid closing over constants.}}
+func.func @has_multi_mesh_const_arg(
+    %arg0: !mesh_1_tensor {jax.const = true},
+    %arg1: !mesh_1_tensor) -> !mesh_2_tensor attributes {
+    "topology"=#mpmd.topology<<"m1": <["x"=2]>>, <"m2": <["x"=2]>>>} {
+  %0 = mpmd.fragment<mesh="m1", origin=["stage1"(0)]> (%arg0, %arg1) (%a0: tensor<4x8xf32>, %a1: tensor<4x8xf32>) {
+    %10 = stablehlo.add %a0, %a1 : tensor<4x8xf32>
+    mpmd.return %10 : tensor<4x8xf32>
+  } : (!mesh_1_tensor, !mesh_1_tensor) -> !mesh_1_tensor
+  %1 = mpmd.transfer %0 : (!mesh_1_tensor) -> !mesh_2_tensor
+  %2 = mpmd.transfer %arg0 : (!mesh_1_tensor) -> !mesh_2_tensor
+  %3 = mpmd.fragment<mesh="m2", origin=["stage2"(0)]> (%1, %2) (%b0: tensor<4x8xf32>, %b1: tensor<4x8xf32>) {
+    %20 = stablehlo.add %b0, %b1 : tensor<4x8xf32>
+    mpmd.return %20 : tensor<4x8xf32>
+  } : (!mesh_2_tensor, !mesh_2_tensor) -> !mesh_2_tensor
+  func.return %3 : !mesh_2_tensor
+}

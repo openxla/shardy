@@ -73,6 +73,7 @@ inline constexpr StringRef kLayoutModeAuto = "auto";
 inline constexpr StringRef kRematAttributeName = "remat";
 
 inline constexpr StringRef kJaxResultInfoAttr = "jax.result_info";
+inline constexpr StringRef kJaxConstAttr = "jax.const";
 
 // The attribute that holds the list of pass names that inferred a fragment.
 inline constexpr StringRef kInferredByAttr = "mpmd.inferred_by";

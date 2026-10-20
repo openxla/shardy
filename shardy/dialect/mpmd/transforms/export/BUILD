@@ -43,6 +43,7 @@ cc_library(
         "validate_no_inferred_fragments.cc",
         "validate_no_param_transfers.cc",
         "validate_no_reshards.cc",
+        "validate_single_mesh_const_args.cc",
     ],
     hdrs = [
         "passes.h",

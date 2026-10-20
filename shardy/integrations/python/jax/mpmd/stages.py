@@ -429,77 +429,6 @@ def _add_input_specs_for_removed_inputs(
   )
 
 
-# TODO(b/574445118): This probably belongs in C++
-def _validate_const_args_single_mesh(module: Any, nr_const_args: int) -> None:
-  """Validates that closed-over constants are not used across multiple meshes."""
-  if nr_const_args <= 0 or module is None:
-    return
-
-  main_func = None
-  for op in module.body.operations:
-    if (
-        hasattr(op, 'name')
-        and getattr(op.name, 'value', str(op.name)) == 'main'
-    ):
-      main_func = op
-      break
-  if (
-      main_func is None
-      or not main_func.regions
-      or not main_func.regions[0].blocks
-  ):
-    return
-
-  block = main_func.regions[0].blocks[0]
-  check_count = min(nr_const_args, len(block.arguments))
-
-  for const_idx in range(check_count):
-    c_arg = block.arguments[const_idx]
-    meshes: set[str] = set()
-    values_to_check = [c_arg]
-    visited = set()
-    while values_to_check:
-      val = values_to_check.pop()
-      for use in val.uses:
-        owner = use.owner
-        owner_name = getattr(owner, 'name', '')
-        if owner_name == 'mpmd.transfer':
-          if owner.results:
-            res = owner.results[0]
-            res_type_str = str(res.type)
-            if '!mpmd.mesh_tensor<"' in res_type_str:
-              dst_mesh = res_type_str.split('"')[1]
-              meshes.add(dst_mesh)
-            if res not in visited:
-              visited.add(res)
-              values_to_check.append(res)
-        elif owner_name == 'mpmd.fragment_call':
-          attr = owner.attributes.get('mesh_name') or owner.attributes.get(
-              'mesh'
-          )
-          if attr is not None:
-            mesh_name = getattr(attr, 'value', str(attr).strip('"'))
-            meshes.add(mesh_name)
-        else:
-          for res in owner.results:
-            res_type_str = str(res.type)
-            if '!mpmd.mesh_tensor<"' in res_type_str:
-              dst_mesh = res_type_str.split('"')[1]
-              meshes.add(dst_mesh)
-            if res not in visited:
-              visited.add(res)
-              values_to_check.append(res)
-
-    if len(meshes) > 1:
-      raise ValueError(
-          f'Closed-over constant (argument {const_idx}) is used across'
-          f' multiple meshes: {sorted(meshes)}. Constants cannot be shared'
-          ' across multiple meshes in MPMD. Please duplicate the constant in'
-          ' each mesh/stage where it is needed, or avoid closing over'
-          ' constants.'
-      )
-
-
 @dataclasses.dataclass(frozen=True)
 class PartitioningResult:
   """A wrapper of PartitioningResult, which stores MlirModules instead of ModuleOps."""
@@ -565,10 +494,6 @@ class MpmdLowered(stages.Lowered):
 
     meshes_and_specs = partitioning_result.module_io_sharding_specs_and_meshes
     nr_const_args = len(self.const_args)
-    if nr_const_args > 0:
-      _validate_const_args_single_mesh(
-          partitioning_result.mpmd_module, nr_const_args
-      )
     if len(jax_fn_info.kept_inputs_indices) != nr_const_args + len(
         jax_fn_info.global_flat_input_abstract_values
     ):

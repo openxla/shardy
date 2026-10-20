@@ -222,3 +222,14 @@ def ValidateNoParamTransfersPass :
            "tensors.">,
   ];
 }
+
+def ValidateSingleMeshConstArgsPass :
+        PassBase<"mpmd-validate-single-mesh-const-args", "DistributedFunctionPass"> {
+  let summary = "Validates that closed-over constant arguments are not transferred across meshes.";
+  let description = [{
+    Checks that entry-point function arguments marked with `{jax.const = true}`
+    have no inter-mesh `mpmd.transfer` users (and emits a warning if an
+    entry-point constant argument is unused). Closed-over constants cannot be
+    shared across multiple meshes in MPMD.
+  }];
+}

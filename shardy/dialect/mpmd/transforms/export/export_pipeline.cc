@@ -155,6 +155,9 @@ void addExportPipeline(OpPassManager& pm, const ExportOptions& options) {
   backwardDepsOptions.failOnBackwardDeps = options.failOnBackwardDeps;
   pm.addNestedPass<FuncOp>(
       createValidateNoBackwardDepsPass(std::move(backwardDepsOptions)));
+
+  // Validate that closed-over constants are not used across multiple meshes.
+  pm.addNestedPass<FuncOp>(createValidateSingleMeshConstArgsPass());
 }
 
 namespace {
