@@ -2983,10 +2983,23 @@ class StablehloRngBitGeneratorOpPattern
     Type stateElemTy = stateType.getElementType();
     SDY_CHECK(stateElemTy.isInteger(32) || stateElemTy.isInteger(64));
 
+    auto x64CombineOp = initialState.getDefiningOp<stablehlo::CustomCallOp>();
+    if (x64CombineOp && (x64CombineOp.getCallTargetName() != "X64Combine" ||
+                         x64CombineOp.getNumOperands() != 2)) {
+      x64CombineOp = nullptr;
+    }
+
+    RankedTensorType hashStateType =
+        x64CombineOp
+            ? cast<RankedTensorType>(x64CombineOp.getOperand(0).getType())
+            : stateType;
+    Type hashElemTy = hashStateType.getElementType();
+    SDY_CHECK(hashElemTy.isInteger(32) || hashElemTy.isInteger(64));
+
     int64_t numDevices = mesh.getTotalSize();
 
     // Compute per-device tile ordinal hash table.
-    unsigned bitWidth = stateElemTy.getIntOrFloatBitWidth();
+    unsigned bitWidth = hashElemTy.getIntOrFloatBitWidth();
     SmallVector<APInt> hashTable = llvm::map_to_vector(
         llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
           return hashShardOrdinal(getShardIndex(devId, mesh, dataAxes),
@@ -2995,20 +3008,27 @@ class StablehloRngBitGeneratorOpPattern
 
     Location loc = op.getLoc();
     Value deviceId = getDeviceId(loc, conversionState, rewriter);
-    auto tableConst = stablehlo::ConstantOp::create(
-        rewriter, loc,
+    Value scalarHash = lookupPerDeviceValue(
+        loc,
         DenseIntElementsAttr::get(
-            RankedTensorType::get({numDevices}, stateElemTy), hashTable));
-    Value hashSlice = stablehlo::DynamicSliceOp::create(
-        rewriter, loc, RankedTensorType::get({1}, stateElemTy), tableConst,
-        ValueRange{deviceId}, rewriter.getDenseI64ArrayAttr({1}));
-    Value scalarHash = stablehlo::ReshapeOp::create(
-        rewriter, loc, RankedTensorType::get({}, stateElemTy), hashSlice);
+            RankedTensorType::get({numDevices}, hashElemTy), hashTable),
+        conversionState, rewriter, deviceId);
     Value broadcastHash = stablehlo::BroadcastInDimOp::create(
-        rewriter, loc, stateType, scalarHash,
+        rewriter, loc, hashStateType, scalarHash,
         rewriter.getDenseI64ArrayAttr({}));
-    Value adjustedState =
-        stablehlo::AddOp::create(rewriter, loc, initialState, broadcastHash);
+    Value adjustedState;
+    if (x64CombineOp) {
+      Value lo = stablehlo::AddOp::create(
+          rewriter, loc, x64CombineOp.getOperand(0), broadcastHash);
+      Value hi = stablehlo::AddOp::create(
+          rewriter, loc, x64CombineOp.getOperand(1), broadcastHash);
+      adjustedState = createLocalGenericOp(x64CombineOp, ValueRange{lo, hi},
+                                           rewriter, converter)
+                          ->getResult(0);
+    } else {
+      adjustedState =
+          stablehlo::AddOp::create(rewriter, loc, initialState, broadcastHash);
+    }
 
     auto localStateType =
         cast<RankedTensorType>(converter->convertType(op.getOutputState()));
@@ -3019,23 +3039,32 @@ class StablehloRngBitGeneratorOpPattern
         adjustedState);
 
     Value finalState = localRng.getOutputState();
-    TensorShardingAttr outStateSharding =
-        converter->getSharding(op.getOutputState());
-    SDY_CHECK(!outStateSharding || isFullyReplicated(outStateSharding));
+    if (!op.getOutputState().use_empty()) {
+      TensorShardingAttr outStateSharding =
+          converter->getSharding(op.getOutputState());
+      SDY_CHECK(!outStateSharding || isFullyReplicated(outStateSharding));
 
-    // Mask non-leader shards (where shard index across dataAxes != 0) to zero
-    // and all-reduce across dataAxes so all partitions receive device 0's
-    // updated output_state.
-    Value maskedState = maskNonLeaderShardsToZero(
-        loc, finalState, mesh, dataAxes, conversionState, rewriter, deviceId);
+      // Mask non-leader shards (where shard index across dataAxes != 0) to zero
+      // and all-reduce across dataAxes so all partitions receive device 0's
+      // updated output_state.
+      Value maskedState = maskNonLeaderShardsToZero(
+          loc, finalState, mesh, dataAxes, conversionState, rewriter, deviceId);
 
-    finalState =
-        createAllReduceForUnreducedAxes(loc, ValueRange{maskedState}, dataAxes,
-                                        mesh, dataSharding.getMeshOrRef(),
-                                        enableRGV3, conversionState, rewriter)
-            .front();
+      finalState = createAllReduceForUnreducedAxes(
+                       loc, ValueRange{maskedState}, dataAxes, mesh,
+                       dataSharding.getMeshOrRef(), enableRGV3, conversionState,
+                       rewriter)
+                       .front();
+    }
 
+    // Erase the localized X64Combine created by GenericOpPattern if this
+    // rng_bit_generator was the only user of the original X64Combine because
+    // the localized rng_bit_generator doesn't use it.
+    bool eraseX64Combine = x64CombineOp && op.getInitialState().hasOneUse();
     rewriter.replaceOp(op, {finalState, localRng.getOutput()});
+    if (eraseX64Combine) {
+      rewriter.eraseOp(x64CombineOp);
+    }
     conversionState.removeToConvertOp(op);
     return success();
   }

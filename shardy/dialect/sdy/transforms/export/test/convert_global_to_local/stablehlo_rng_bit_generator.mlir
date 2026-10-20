@@ -122,3 +122,92 @@ func.func @sharded_1d_ui16_state_replicated(
   // CHECK-NEXT: return %[[FINAL_STATE]], %[[LOCAL_DATA]] : tensor<2xui16>, tensor<2x16xf32>
   return %output_state, %output : tensor<2xui16>, tensor<8x16xf32>
 }
+
+// CHECK-LABEL: func @sharded_1d_x64_combine_ui64_state_unused_output_state
+// CHECK-SAME: (%[[LO:.*]]: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+// CHECK-SAME:  %[[HI:.*]]: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>})
+// CHECK-SAME: -> (tensor<2x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) {
+func.func @sharded_1d_x64_combine_ui64_state_unused_output_state(
+    %arg0: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+    %arg1: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>}
+) -> (
+    tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}
+) {
+  // UNSAFE-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // UNSAFE-NEXT: %[[HASH_TABLE:.*]] = stablehlo.constant dense<[0, 885181228, 1694925799, 167303374]> : tensor<4xui32>
+  // UNSAFE-NEXT: %[[HASH_SLICE:.*]] = stablehlo.dynamic_slice %[[HASH_TABLE]], %[[PID]], sizes = [1] : (tensor<4xui32>, tensor<ui32>) -> tensor<1xui32>
+  // UNSAFE-NEXT: %[[SCALAR_HASH:.*]] = stablehlo.reshape %[[HASH_SLICE]] : (tensor<1xui32>) -> tensor<ui32>
+  // UNSAFE-NEXT: %[[BCAST_HASH:.*]] = stablehlo.broadcast_in_dim %[[SCALAR_HASH]], dims = [] : (tensor<ui32>) -> tensor<2xui32>
+  // UNSAFE-NEXT: %[[ADJ_LO:.*]] = stablehlo.add %[[LO]], %[[BCAST_HASH]] : tensor<2xui32>
+  // UNSAFE-NEXT: %[[ADJ_HI:.*]] = stablehlo.add %[[HI]], %[[BCAST_HASH]] : tensor<2xui32>
+  // UNSAFE-NEXT: %[[ADJ_STATE:.*]] = stablehlo.custom_call @X64Combine(%[[ADJ_LO]], %[[ADJ_HI]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>]>} : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  // UNSAFE-NEXT: %[[LOCAL_STATE:.*]], %[[LOCAL_DATA:.*]] = stablehlo.rng_bit_generator %[[ADJ_STATE]], algorithm = DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<2x16xf32>)
+
+  // SAFE-NEXT: %[[STATE:.*]] = stablehlo.custom_call @X64Combine(%[[LO]], %[[HI]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>]>} : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  // SAFE-NEXT: %[[FINAL_STATE:.*]], %[[GLOBAL_DATA:.*]] = stablehlo.rng_bit_generator %[[STATE]], algorithm = DEFAULT {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>, <@mesh_4, [{}, {}]>]>} : (tensor<2xui64>) -> (tensor<2xui64>, tensor<8x16xf32>)
+  // SAFE-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // SAFE-NEXT: %[[OFFSET_TABLE:.*]] = stablehlo.constant dense<[0, 2, 4, 6]> : tensor<4xi32>
+  // SAFE-NEXT: %[[SLICE_IDX:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE]], %[[PID]], sizes = [1] : (tensor<4xi32>, tensor<ui32>) -> tensor<1xi32>
+  // SAFE-NEXT: %[[OFFSET_0:.*]] = stablehlo.reshape %[[SLICE_IDX]] : (tensor<1xi32>) -> tensor<i32>
+  // SAFE-NEXT: %[[OFFSET_1:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // SAFE-NEXT: %[[LOCAL_DATA:.*]] = stablehlo.dynamic_slice %[[GLOBAL_DATA]], %[[OFFSET_0]], %[[OFFSET_1]], sizes = [2, 16] : (tensor<8x16xf32>, tensor<i32>, tensor<i32>) -> tensor<2x16xf32>
+  %0 = stablehlo.custom_call @X64Combine(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>]>
+  } : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  %output_state, %output = stablehlo.rng_bit_generator %0, algorithm = DEFAULT {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>, <@mesh_4, [{"x"}, {}]>]>
+  } : (tensor<2xui64>) -> (tensor<2xui64>, tensor<8x16xf32>)
+  // CHECK-NEXT: return %[[LOCAL_DATA]] : tensor<2x16xf32>
+  return %output : tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func @sharded_1d_x64_combine_ui64_state_used_output_state
+// CHECK-SAME: (%[[LO:.*]]: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+// CHECK-SAME:  %[[HI:.*]]: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>})
+// CHECK-SAME: -> (tensor<2xui64> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+// CHECK-SAME:     tensor<2x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) {
+func.func @sharded_1d_x64_combine_ui64_state_used_output_state(
+    %arg0: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+    %arg1: tensor<2xui32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>}
+) -> (
+    tensor<2xui64> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+    tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}
+) {
+  // UNSAFE-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // UNSAFE-NEXT: %[[HASH_TABLE:.*]] = stablehlo.constant dense<[0, 885181228, 1694925799, 167303374]> : tensor<4xui32>
+  // UNSAFE-NEXT: %[[HASH_SLICE:.*]] = stablehlo.dynamic_slice %[[HASH_TABLE]], %[[PID]], sizes = [1] : (tensor<4xui32>, tensor<ui32>) -> tensor<1xui32>
+  // UNSAFE-NEXT: %[[SCALAR_HASH:.*]] = stablehlo.reshape %[[HASH_SLICE]] : (tensor<1xui32>) -> tensor<ui32>
+  // UNSAFE-NEXT: %[[BCAST_HASH:.*]] = stablehlo.broadcast_in_dim %[[SCALAR_HASH]], dims = [] : (tensor<ui32>) -> tensor<2xui32>
+  // UNSAFE-NEXT: %[[ADJ_LO:.*]] = stablehlo.add %[[LO]], %[[BCAST_HASH]] : tensor<2xui32>
+  // UNSAFE-NEXT: %[[ADJ_HI:.*]] = stablehlo.add %[[HI]], %[[BCAST_HASH]] : tensor<2xui32>
+  // UNSAFE-NEXT: %[[ADJ_STATE:.*]] = stablehlo.custom_call @X64Combine(%[[ADJ_LO]], %[[ADJ_HI]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>]>} : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  // UNSAFE-NEXT: %[[LOCAL_STATE:.*]], %[[LOCAL_DATA:.*]] = stablehlo.rng_bit_generator %[[ADJ_STATE]], algorithm = DEFAULT : (tensor<2xui64>) -> (tensor<2xui64>, tensor<2x16xf32>)
+  // UNSAFE-NEXT: %[[LEADER_TABLE:.*]] = stablehlo.constant dense<[true, false, false, false]> : tensor<4xi1>
+  // UNSAFE-NEXT: %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[LEADER_TABLE]], %[[PID]], sizes = [1] : (tensor<4xi1>, tensor<ui32>) -> tensor<1xi1>
+  // UNSAFE-NEXT: %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // UNSAFE-NEXT: %[[ZERO_STATE:.*]] = stablehlo.constant dense<0> : tensor<2xui64>
+  // UNSAFE-NEXT: %[[MASKED_STATE:.*]] = stablehlo.select %[[IS_LEADER]], %[[LOCAL_STATE]], %[[ZERO_STATE]] : tensor<i1>, tensor<2xui64>
+  // UNSAFE-NEXT: %[[FINAL_STATE:.*]] = "stablehlo.all_reduce"(%[[MASKED_STATE]])
+  // UNSAFE-SAME{LITERAL}: <{channel_handle = #stablehlo.channel_handle<handle = 3, type = 1>, replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_4, axes = [#stablehlo.axis_ref<name = "x">]>, use_global_device_ids}> ({
+  // UNSAFE-NEXT: ^bb0(%[[ARG0:.*]]: tensor<ui64>, %[[ARG1:.*]]: tensor<ui64>):
+  // UNSAFE-NEXT:   %[[SUM:.*]] = stablehlo.add %[[ARG0]], %[[ARG1]] : tensor<ui64>
+  // UNSAFE-NEXT:   stablehlo.return %[[SUM]] : tensor<ui64>
+  // UNSAFE-NEXT: }) : (tensor<2xui64>) -> tensor<2xui64>
+
+  // SAFE-NEXT: %[[STATE:.*]] = stablehlo.custom_call @X64Combine(%[[LO]], %[[HI]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>]>} : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  // SAFE-NEXT: %[[FINAL_STATE:.*]], %[[GLOBAL_DATA:.*]] = stablehlo.rng_bit_generator %[[STATE]], algorithm = DEFAULT {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>, <@mesh_4, [{}, {}]>]>} : (tensor<2xui64>) -> (tensor<2xui64>, tensor<8x16xf32>)
+  // SAFE-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // SAFE-NEXT: %[[OFFSET_TABLE:.*]] = stablehlo.constant dense<[0, 2, 4, 6]> : tensor<4xi32>
+  // SAFE-NEXT: %[[SLICE_IDX:.*]] = stablehlo.dynamic_slice %[[OFFSET_TABLE]], %[[PID]], sizes = [1] : (tensor<4xi32>, tensor<ui32>) -> tensor<1xi32>
+  // SAFE-NEXT: %[[OFFSET_0:.*]] = stablehlo.reshape %[[SLICE_IDX]] : (tensor<1xi32>) -> tensor<i32>
+  // SAFE-NEXT: %[[OFFSET_1:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // SAFE-NEXT: %[[LOCAL_DATA:.*]] = stablehlo.dynamic_slice %[[GLOBAL_DATA]], %[[OFFSET_0]], %[[OFFSET_1]], sizes = [2, 16] : (tensor<8x16xf32>, tensor<i32>, tensor<i32>) -> tensor<2x16xf32>
+  %0 = stablehlo.custom_call @X64Combine(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>]>
+  } : (tensor<2xui32>, tensor<2xui32>) -> tensor<2xui64>
+  %output_state, %output = stablehlo.rng_bit_generator %0, algorithm = DEFAULT {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}]>, <@mesh_4, [{"x"}, {}]>]>
+  } : (tensor<2xui64>) -> (tensor<2xui64>, tensor<8x16xf32>)
+  // CHECK-NEXT: return %[[FINAL_STATE]], %[[LOCAL_DATA]] : tensor<2xui64>, tensor<2x16xf32>
+  return %output_state, %output : tensor<2xui64>, tensor<8x16xf32>
+}
