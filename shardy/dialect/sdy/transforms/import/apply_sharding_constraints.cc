@@ -21,17 +21,21 @@ limitations under the License.
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Iterators.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -256,6 +260,40 @@ ShardingConstraintOp getTailOfShardingConstraintChain(
   return tail;
 }
 
+void syncInOutUnreducedAxes(Operation* op) {
+  Value input = op->getOperand(0);
+  TensorShardingAttr outSharding = getSharding(op->getResult(0));
+  if (isa<BlockArgument>(input) ||
+      input.getDefiningOp<ShardingConstraintOp>() || !outSharding ||
+      outSharding.getUnreducedAxes().empty()) {
+    return;
+  }
+
+  TensorShardingAttr inSharding =
+      getOrCreateSharding(input, outSharding.getMeshOrRef());
+  if (!inSharding.getUnreducedAxes().empty()) {
+    return;
+  }
+
+  if (inSharding.anyOfDimShardingOrReplicatedAxis([&](AxisRefAttr inAxis) {
+        return llvm::any_of(outSharding.getUnreducedAxes(),
+                            [&](AxisRefAttr unreducedAxis) {
+                              return inAxis.overlaps(unreducedAxis);
+                            });
+      })) {
+    SDY_LOG(WARNING)
+        << op->getName().getStringRef().str()
+        << " has unreduced axes, but input is sharded along one of "
+           "those axes, this can lead to undefined behavior. Please "
+           "contact the Shardy team.";
+    return;
+  }
+
+  setSharding(input,
+              inSharding.replaceUnreducedAxes(outSharding.getUnreducedAxes(),
+                                              outSharding.getReductionOp()));
+}
+
 struct ApplyShardingConstraintsPass
     : public impl::ApplyShardingConstraintsPassBase<
           ApplyShardingConstraintsPass> {
@@ -334,6 +372,18 @@ struct ApplyShardingConstraintsPass
                                 });
               }
             });
+      });
+
+      // Do very restricted backward propagation of unreduced axes along
+      // specific ops that don't modify the data.
+      //
+      // TODO(b/576005724): We can remove this workaround after we ensure that
+      // no pre-SPMD passes would mutate unreduced-axes annotation.
+      funcOp.walk<WalkOrder::PostOrder, ReverseIterator>([&](Operation* op) {
+        if (isa<stablehlo::TransposeOp, stablehlo::ReshapeOp>(op) ||
+            op->getName().getStringRef() == "mhlo.copy") {
+          syncInOutUnreducedAxes(op);
+        }
       });
     });
 
