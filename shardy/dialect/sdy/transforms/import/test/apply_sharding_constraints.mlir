@@ -1074,3 +1074,100 @@ func.func @multi_result_scalar_sharding_constraint(%arg0: tensor<8xf32>) -> (ten
   %2 = sdy.sharding_constraint %0#1 <@mesh, [], unreduced={"b"}> : tensor<f32>
   return %1, %2 : tensor<8xf32>, tensor<f32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @unreduced_sharding_constraint_on_reshape_of_dot_without_sharding
+func.func @unreduced_sharding_constraint_on_reshape_of_dot_without_sharding(%arg0: tensor<8x4xf32>, %arg1: tensor<4x1xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {?}], unreduced={"b"}>]>}
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[DOT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}], unreduced={"b"}>]>}
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[RESHAPE]] <@mesh, [{"a"}], unreduced={"b"}>
+  // CHECK-NEXT: return %[[SC]]
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] : (tensor<8x4xf32>, tensor<4x1xf32>) -> tensor<8x1xf32>
+  %1 = stablehlo.reshape %0 : (tensor<8x1xf32>) -> tensor<8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{"a"}], unreduced={"b"}> : tensor<8xf32>
+  return %2 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @unreduced_sharding_constraint_propagates_backwards_through_reshape_and_transpose
+func.func @unreduced_sharding_constraint_propagates_backwards_through_reshape_and_transpose(%arg0: tensor<8x4xf32>, %arg1: tensor<4x2xf32>) -> tensor<2x4x2xf32> {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}], unreduced=max{"b"}>]>}
+  // CHECK-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[DOT]], dims = [1, 0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {?}], unreduced=max{"b"}>]>}
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[TRANSPOSE]]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}, {}], unreduced=max{"b"}>]>}
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[RESHAPE]] <@mesh, [{"a"}, {}, {}], unreduced=max{"b"}>
+  // CHECK-NEXT: return %[[SC]]
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : (tensor<8x4xf32>, tensor<4x2xf32>) -> tensor<8x2xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] : (tensor<8x2xf32>) -> tensor<2x8xf32>
+  %2 = stablehlo.reshape %1 : (tensor<2x8xf32>) -> tensor<2x4x2xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{"a"}, {}, {}], unreduced=max{"b"}> : tensor<2x4x2xf32>
+  return %3 : tensor<2x4x2xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @unreduced_sharding_constraint_on_transpose_of_dot_with_overlapping_dim_sharding
+func.func @unreduced_sharding_constraint_on_transpose_of_dot_with_overlapping_dim_sharding(%arg0: tensor<8x4xf32>, %arg1: tensor<4x2xf32>) -> tensor<2x8xf32> {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>}
+  // CHECK-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[DOT]], dims = [1, 0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"a", "b"}>]>}
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[TRANSPOSE]] <@mesh, [{}, {}], unreduced={"a", "b"}>
+  // CHECK-NEXT: return %[[SC]]
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"a"}]>]>} : (tensor<8x4xf32>, tensor<4x2xf32>) -> tensor<8x2xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] : (tensor<8x2xf32>) -> tensor<2x8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}, {}], unreduced={"a", "b"}> : tensor<2x8xf32>
+  return %2 : tensor<2x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @unreduced_sharding_constraint_does_not_overwrite_sharding_constraint_input
+func.func @unreduced_sharding_constraint_does_not_overwrite_sharding_constraint_input(%arg0: tensor<8x4xf32>, %arg1: tensor<4x1xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[SC0:.*]] = sdy.sharding_constraint %[[DOT]] <@mesh, [{"a"}, {}]>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[SC0]]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}], unreduced={"b"}>]>}
+  // CHECK-NEXT: %[[SC1:.*]] = sdy.sharding_constraint %[[RESHAPE]] <@mesh, [{"a"}], unreduced={"b"}>
+  // CHECK-NEXT: return %[[SC1]]
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] : (tensor<8x4xf32>, tensor<4x1xf32>) -> tensor<8x1xf32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"a"}, {}]> : tensor<8x1xf32>
+  %2 = stablehlo.reshape %1 : (tensor<8x1xf32>) -> tensor<8xf32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{"a"}], unreduced={"b"}> : tensor<8xf32>
+  return %3 : tensor<8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @unreduced_sharding_constraint_does_not_overwrite_existing_unreduced_axes
+func.func @unreduced_sharding_constraint_does_not_overwrite_existing_unreduced_axes(%arg0: tensor<8x4xf32>, %arg1: tensor<4x1xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"a"}>]>}
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[DOT]]
+  // CHECK-SAME:   {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}], unreduced={"b"}>]>}
+  // CHECK-NEXT: %[[SC:.*]] = sdy.sharding_constraint %[[RESHAPE]] <@mesh, [{}], unreduced={"b"}>
+  // CHECK-NEXT: return %[[SC]]
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}], unreduced={"a"}>]>} : (tensor<8x4xf32>, tensor<4x1xf32>) -> tensor<8x1xf32>
+  %1 = stablehlo.reshape %0 : (tensor<8x1xf32>) -> tensor<8xf32>
+  %2 = sdy.sharding_constraint %1 <@mesh, [{}], unreduced={"b"}> : tensor<8xf32>
+  return %2 : tensor<8xf32>
+}
