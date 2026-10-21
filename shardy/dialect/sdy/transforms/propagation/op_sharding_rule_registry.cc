@@ -575,6 +575,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         if (callTargetName == "annotate_device_placement" ||
             callTargetName == "Cholesky" ||
             callTargetName == "CompactWyHelper" ||
+            callTargetName == "compute-on-done" ||
             callTargetName == "InspectSharding" ||
             callTargetName == "InvertDiagBlocksLowerTriangular" ||
             callTargetName == "InvertDiagBlocksUpperTriangular" ||
