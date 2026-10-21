@@ -862,11 +862,11 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
 }
 
 // Masks non-leader shards (where shard index across `axes` != 0) to
-// `nonLeaderVal` (or zero if `nonLeaderVal` is null).
+// `nonLeaderVals` (or zeros if `nonLeaderVals` is empty).
 SmallVector<Value> maskNonLeaderShards(
     Location loc, ValueRange inputs, MeshAttr mesh, ArrayRef<AxisRefAttr> axes,
     const ConversionState& conversionState, ConversionPatternRewriter& rewriter,
-    Value nonLeaderVal = nullptr, Value deviceId = nullptr) {
+    ValueRange nonLeaderVals = {}, Value deviceId = nullptr) {
   int64_t numDevices = mesh.getTotalSize();
   SmallVector<bool> leaderTable = llvm::map_to_vector(
       llvm::seq<int64_t>(0, numDevices),
@@ -877,11 +877,15 @@ SmallVector<Value> maskNonLeaderShards(
           RankedTensorType::get({numDevices}, rewriter.getI1Type()),
           leaderTable),
       conversionState, rewriter, deviceId);
-  if (!nonLeaderVal) {
-    auto localType = cast<RankedTensorType>(inputs.front().getType());
-    nonLeaderVal = createZeroConstant(rewriter, loc, localType);
-  }
-  return llvm::map_to_vector(inputs, [&](Value input) -> Value {
+  return llvm::map_to_vector(llvm::enumerate(inputs), [&](auto item) -> Value {
+    Value input = item.value();
+    size_t index = item.index();
+    Value nonLeaderVal =
+        index < nonLeaderVals.size() ? nonLeaderVals[index] : nullptr;
+    if (!nonLeaderVal) {
+      auto localType = cast<RankedTensorType>(input.getType());
+      nonLeaderVal = createZeroConstant(rewriter, loc, localType);
+    }
     return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
                                        nonLeaderVal);
   });
@@ -894,7 +898,7 @@ Value maskNonLeaderShardsToZero(Location loc, Value input, MeshAttr mesh,
                                 ConversionPatternRewriter& rewriter,
                                 Value deviceId = nullptr) {
   return maskNonLeaderShards(loc, input, mesh, axes, conversionState, rewriter,
-                             /*nonLeaderVal=*/nullptr, deviceId)
+                             /*nonLeaderVals=*/{}, deviceId)
       .front();
 }
 
@@ -3296,15 +3300,14 @@ SmallVector<AxisRefAttr> getScatterReductionAxes(
   return reductionAxes;
 }
 
-// Returns the identity constant (as a scalar) for the scatter reduction.
-Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
-  Operation* reductionOp = getCommonSupportedReductionOp(scatter);
+// Returns the identity constant (as a scalar) for the scatter reduction on the
+// given input type.
+Value getScatterReductionIdentity(Operation* reductionOp, Type type,
+                                  Location loc, OpBuilder& b) {
   if (!reductionOp) {
     return nullptr;
   }
 
-  Location loc = scatter.getLoc();
-  Type type = scatter.getInputs().front().getType();
   Type elementType = cast<RankedTensorType>(type).getElementType();
   auto scalarType = RankedTensorType::get({}, elementType);
 
@@ -3403,17 +3406,27 @@ class StablehloScatterOpPattern
     SmallVector<Value> localInputs = adaptor.getInputs();
     auto localInputType = cast<RankedTensorType>(localInputs.front().getType());
     if (!reductionAxes.empty()) {
-      Value identity = getScatterReductionIdentity(op, rewriter);
-      if (!identity) {
+      Operation* reductionOp = getCommonSupportedReductionOp(op);
+      if (!reductionOp) {
         return op.emitError("failed to get scatter reduction identity.");
       }
-      // Broadcast the scalar identity to the shape of the current local input.
-      Value broadcastIdentity = stablehlo::BroadcastInDimOp::create(
-          rewriter, loc, localInputs.front().getType(), identity,
-          rewriter.getDenseI64ArrayAttr({}));
-      localInputs = maskNonLeaderShards(loc, localInputs, mesh, reductionAxes,
-                                        conversionState, rewriter,
-                                        broadcastIdentity);
+      SmallVector<Value> broadcastIdentities;
+      broadcastIdentities.reserve(localInputs.size());
+      for (Value localInput : localInputs) {
+        Value identity = getScatterReductionIdentity(
+            reductionOp, localInput.getType(), loc, rewriter);
+        if (!identity) {
+          return op.emitError("failed to get scatter reduction identity.");
+        }
+        // Broadcast the scalar identity to the shape of the current local
+        // input.
+        broadcastIdentities.push_back(stablehlo::BroadcastInDimOp::create(
+            rewriter, loc, localInput.getType(), identity,
+            rewriter.getDenseI64ArrayAttr({})));
+      }
+      localInputs =
+          maskNonLeaderShards(loc, localInputs, mesh, reductionAxes,
+                              conversionState, rewriter, broadcastIdentities);
     }
 
     auto globalInputType = cast<RankedTensorType>(input.getType());

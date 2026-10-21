@@ -407,3 +407,53 @@ func.func @scatter_unreduced_axes_fallback_all_reduce(
   } : (tensor<8x2xf32>, tensor<2x1xi64>, tensor<2x2xf32>) -> tensor<8x2xf32>
   return %0 : tensor<8x2xf32>
 }
+
+// CHECK-LABEL: func @multi_input_scatter_reduction_axes(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<3x4x2xf32>,
+// CHECK-SAME: %[[ARG1:.*]]: tensor<3x4x2xi32>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<1x3x2xi64> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>},
+// CHECK-SAME: %[[ARG3:.*]]: tensor<1x3x1xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>},
+// CHECK-SAME: %[[ARG4:.*]]: tensor<1x3x1xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>})
+// CHECK-SAME:  -> (tensor<3x4x2xf32>, tensor<3x4x2xi32>) {
+func.func @multi_input_scatter_reduction_axes(
+    %arg0: tensor<3x4x2xf32>,
+    %arg1: tensor<3x4x2xi32>,
+    %indices: tensor<2x3x2xi64> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>},
+    %update0: tensor<2x3x1xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>},
+    %update1: tensor<2x3x1xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>})
+ -> (tensor<3x4x2xf32>, tensor<3x4x2xi32>) {
+  // CHECK-DAG:  %[[CST_F32:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-DAG:  %[[ID_F32:.*]] = stablehlo.broadcast_in_dim %[[CST_F32]], dims = [] : (tensor<f32>) -> tensor<3x4x2xf32>
+  // CHECK-DAG:  %[[CST_I32:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK-DAG:  %[[ID_I32:.*]] = stablehlo.broadcast_in_dim %[[CST_I32]], dims = [] : (tensor<i32>) -> tensor<3x4x2xi32>
+  // CHECK-DAG:  %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK:      %[[TABLE:.*]] = stablehlo.constant dense<[true, true, true, true, false, false, false, false]> : tensor<8xi1>
+  // CHECK:      %[[IS_LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1]
+  // CHECK:      %[[IS_LEADER:.*]] = stablehlo.reshape %[[IS_LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK:      %[[INPUT_SEL0:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ID_F32]]
+  // CHECK:      %[[INPUT_SEL1:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG1]], %[[ID_I32]]
+  // CHECK:      %[[SCATTER:.*]]:2 = "stablehlo.scatter"(%[[INPUT_SEL0]], %[[INPUT_SEL1]], %[[ARG2]], %[[ARG3]], %[[ARG4]])
+  // CHECK:      %[[RES0:.*]] = "stablehlo.all_reduce"(%[[SCATTER]]#0)
+  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
+  // CHECK:      %[[RES1:.*]] = "stablehlo.all_reduce"(%[[SCATTER]]#1)
+  // CHECK-SAME: channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>
+  // CHECK-SAME: replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>
+  // CHECK:      return %[[RES0]], %[[RES1]] : tensor<3x4x2xf32>, tensor<3x4x2xi32>
+  %0:2 = "stablehlo.scatter"(%arg0, %arg1, %indices, %update0, %update1) ({
+  ^bb0(%in0: tensor<f32>, %in1: tensor<i32>, %up0: tensor<f32>, %up1: tensor<i32>):
+    %add0 = stablehlo.add %in0, %up0 : tensor<f32>
+    %add1 = stablehlo.add %in1, %up1 : tensor<i32>
+    stablehlo.return %add0, %add1 : tensor<f32>, tensor<i32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [2],
+      inserted_window_dims = [0, 1],
+      scatter_dims_to_operand_dims = [0, 1],
+      index_vector_dim = 2
+    >
+  } : (tensor<3x4x2xf32>, tensor<3x4x2xi32>, tensor<2x3x2xi64>, tensor<2x3x1xf32>, tensor<2x3x1xi32>) -> (tensor<3x4x2xf32>, tensor<3x4x2xi32>)
+  %1 = sdy.all_reduce {"x"} %0#0 out_sharding=<@mesh_2_4, [{}, {}, {}]> : tensor<3x4x2xf32>
+  %2 = sdy.all_reduce {"x"} %0#1 out_sharding=<@mesh_2_4, [{}, {}, {}]> : tensor<3x4x2xi32>
+  return %1, %2 : tensor<3x4x2xf32>, tensor<3x4x2xi32>
+}
