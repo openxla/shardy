@@ -101,7 +101,7 @@ Value createDeviceGuard(Location loc, int64_t targetDeviceId,
                         int64_t replicaCount, int64_t partitionCount,
                         IRRewriter& rewriter) {
   Value currentDeviceId =
-      getDeviceId(replicaCount, partitionCount, loc, rewriter);
+      getDeviceId(loc, replicaCount, partitionCount, rewriter);
   auto scalarUI32Type = RankedTensorType::get(
       {}, rewriter.getIntegerType(32, /*isSigned=*/false));
   SDY_CHECK_GE(targetDeviceId, 0);
@@ -157,7 +157,7 @@ void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
         isTargetDevice = createDeviceGuard(loc, *targetDeviceId, replicaCount,
                                            partitionCount, rewriter);
       }
-      Value zeroConst = createZeroConstant(rewriter, loc, rankedType);
+      Value zeroConst = createZeroConstant(loc, rankedType, rewriter);
       maskedResults.push_back(stablehlo::SelectOp::create(
           rewriter, loc, rankedType, isTargetDevice, result, zeroConst));
     }
@@ -186,7 +186,7 @@ void resolveSingleDeviceOp(Operation* op, const SymbolTable& symbolTable,
     SmallVector<Value> falseZeros;
     for (Type type : resultTypes) {
       if (auto rankedType = dyn_cast<RankedTensorType>(type)) {
-        Value zeroConst = createZeroConstant(rewriter, loc, rankedType);
+        Value zeroConst = createZeroConstant(loc, rankedType, rewriter);
         falseZeros.push_back(zeroConst);
       } else if (isa<stablehlo::TokenType>(type)) {
         Value tokenConst = stablehlo::CreateTokenOp::create(rewriter, loc);

@@ -256,7 +256,7 @@ int64_t getMeshAxisIndex(ArrayRef<MeshAxisAttr> axes, StringRef name) {
 }
 
 Value createDeviceId(Location loc, ResolutionState& state) {
-  return getDeviceId(state.replicaCount, state.partitionCount, loc,
+  return getDeviceId(loc, state.replicaCount, state.partitionCount,
                      state.rewriter);
 }
 
@@ -427,7 +427,7 @@ DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
       stablehlo::AddOp::create(rewriter, loc, offsetInPartition, baseOffsetVal);
 
   auto zeroConst =
-      createZeroConstant(rewriter, loc, RankedTensorType::get({}, i32Ty));
+      createZeroConstant(loc, RankedTensorType::get({}, i32Ty), rewriter);
 
   dilatedOffset =
       stablehlo::MaxOp::create(rewriter, loc, dilatedOffset, zeroConst);
@@ -632,25 +632,25 @@ inline int64_t getPaddedDimSize(int64_t dimSize, int64_t shardCount) {
 }
 
 // Creates a zero scalar constant of element type `elemType`.
-inline Value createZeroScalarConstant(Location loc, IRRewriter& rewriter,
-                                      Type elemType) {
-  return createZeroConstant(rewriter, loc, RankedTensorType::get({}, elemType));
+inline Value createZeroScalarConstant(Location loc, Type elemType,
+                                      IRRewriter& rewriter) {
+  return createZeroConstant(loc, RankedTensorType::get({}, elemType), rewriter);
 }
 
 // Pads the high side of `operand` with `paddingValue` (default zero if null)
 // to match the target `paddedShape`. When used to align dimensions for the
 // input sharding's own divisibility, the created pad op is a
 // communication-free operation.
-Value padHighSideToShape(Location loc, IRRewriter& rewriter, Value operand,
+Value padHighSideToShape(Location loc, Value operand,
                          ArrayRef<int64_t> paddedShape,
-                         TensorShardingAttr sharding,
+                         TensorShardingAttr sharding, IRRewriter& rewriter,
                          Value paddingValue = nullptr) {
   auto type = cast<RankedTensorType>(operand.getType());
   if (paddedShape == type.getShape()) {
     return operand;
   }
   auto paddedType = RankedTensorType::get(paddedShape, type.getElementType());
-  return padHighSideToType(rewriter, loc, operand, paddedType, sharding,
+  return padHighSideToType(loc, operand, paddedType, sharding, rewriter,
                            paddingValue);
 }
 
@@ -735,8 +735,8 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
     SmallVector<int64_t> pairs =
         getDataShiftSourceTargetPairs(mesh, manualAxesInDim, deviceOffset);
     if (pairs.empty()) {
-      Value zeroConst = createZeroScalarConstant(loc, state.rewriter,
-                                                 inputType.getElementType());
+      Value zeroConst = createZeroScalarConstant(
+          loc, inputType.getElementType(), state.rewriter);
       auto bcast = stablehlo::BroadcastInDimOp::create(
           state.rewriter, loc, cast<RankedTensorType>(piece.getType()),
           zeroConst, state.rewriter.getDenseI64ArrayAttr({}));
@@ -1052,8 +1052,8 @@ Value exchangeDimWithDynamicOffset(
         idInPartitionGroup, state.rewriter.getDenseI64ArrayAttr({1}));
     offset = stablehlo::ReshapeOp::create(
         state.rewriter, loc, RankedTensorType::get({}, i32Ty), sliceOp);
-    zeroConst = createZeroConstant(state.rewriter, loc,
-                                   RankedTensorType::get({}, i32Ty));
+    zeroConst = createZeroConstant(loc, RankedTensorType::get({}, i32Ty),
+                                   state.rewriter);
   } else {
     DeviceOffsetInfo offsetInfo =
         getDeviceOffsetInfo(loc, idInPartitionGroup, diffSize,
@@ -1411,8 +1411,8 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
   rewriter.setInsertionPoint(padOp);
   // Align logical shard sizes via high-side padding (Comm-free).
   Value divisibleInput =
-      padHighSideToShape(loc, rewriter, origInput, info.divisibleInputShape,
-                         inSharding, padOp.getPaddingValue());
+      padHighSideToShape(loc, origInput, info.divisibleInputShape, inSharding,
+                         rewriter, padOp.getPaddingValue());
 
   SmallVector<int64_t> baseDilations = llvm::map_to_vector(
       padOp.getInteriorPadding(), [](int64_t val) { return val + 1; });
@@ -1436,7 +1436,7 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
 
   // Trim final tensor shape to match expected output shape.
   result =
-      sliceHighSideToType(rewriter, loc, result, padOp.getType(), inSharding);
+      sliceHighSideToType(loc, result, padOp.getType(), inSharding, rewriter);
 
   rewriter.replaceOp(padOp, result);
   return success();
@@ -1808,12 +1808,12 @@ LogicalResult handleReshapeHaloExchange(
   IRRewriter& rewriter = state.rewriter;
   rewriter.setInsertionPoint(reshapeOp);
   Value paddingValue =
-      createZeroScalarConstant(loc, rewriter, resultType.getElementType());
+      createZeroScalarConstant(loc, resultType.getElementType(), rewriter);
   Value operand = reshapeOp.getOperand();
   auto origInputType = cast<RankedTensorType>(operand.getType());
   SmallVector<int64_t> edgePaddingLow(origInputType.getRank(), 0);
-  Value paddedInput = padHighSideToShape(loc, rewriter, operand,
-                                         divisibleInputShape, inSharding);
+  Value paddedInput = padHighSideToShape(loc, operand, divisibleInputShape,
+                                         inSharding, rewriter);
 
   auto postProcess = [&](Value exchangedLocal, Value localPaddingValue,
                          RankedTensorType paddedGlobalResultType,
@@ -1840,7 +1840,7 @@ LogicalResult handleReshapeHaloExchange(
       loc, paddedInput, divisibleInputShape, origInputType, resultType,
       inSharding, outSharding, mesh, info.manualAxes, paddingValue,
       edgePaddingLow, info.dimExchanges, postProcess, state);
-  result = sliceHighSideToType(rewriter, loc, result, resultType, outSharding);
+  result = sliceHighSideToType(loc, result, resultType, outSharding, rewriter);
   rewriter.replaceOp(reshapeOp, result);
   return success();
 }
@@ -1990,8 +1990,8 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
   // Pad indivisible dimensions on the high edge.
   if (!info->manualAxes.empty()) {
     state.rewriter.setInsertionPoint(reverseOp);
-    input = padHighSideToShape(loc, state.rewriter, operand, info->paddedShape,
-                               inSharding);
+    input = padHighSideToShape(loc, operand, info->paddedShape, inSharding,
+                               state.rewriter);
 
     SmallVector<int64_t> dimsToShift, shiftAmounts;
     int64_t rank = origType.getRank();
@@ -2037,8 +2037,8 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
 
   // Trim off the padding.
   if (!info->manualAxes.empty()) {
-    Value slicedResult = sliceHighSideToType(
-        state.rewriter, loc, reversedResult, origType, inSharding);
+    Value slicedResult = sliceHighSideToType(loc, reversedResult, origType,
+                                             inSharding, state.rewriter);
     state.rewriter.replaceAllUsesExcept(reverseOp.getResult(), slicedResult,
                                         reversedResult.getDefiningOp());
   } else {
@@ -2184,11 +2184,11 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   rewriter.setInsertionPoint(sliceOp);
   // Align logical shard sizes via high-side padding.
   Value divisibleInput =
-      padHighSideToShape(loc, rewriter, origInput, info.divisibleInputShape,
-                         inSharding, /*paddingValue=*/nullptr);
+      padHighSideToShape(loc, origInput, info.divisibleInputShape, inSharding,
+                         rewriter, /*paddingValue=*/nullptr);
 
   Value paddingValue =
-      createZeroScalarConstant(loc, rewriter, origInputType.getElementType());
+      createZeroScalarConstant(loc, origInputType.getElementType(), rewriter);
 
   int64_t rank = origInputType.getRank();
   SmallVector<int64_t> edgePaddingLow, edgePaddingHigh, interiorPadding;
@@ -2221,7 +2221,7 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
 
   // Trim final tensor shape to match expected output shape.
   result =
-      sliceHighSideToType(rewriter, loc, result, sliceOp.getType(), inSharding);
+      sliceHighSideToType(loc, result, sliceOp.getType(), inSharding, rewriter);
 
   rewriter.replaceOp(sliceOp, result);
   return success();

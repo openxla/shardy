@@ -284,7 +284,7 @@ bool usePartitionId(int64_t replicaCount, int64_t partitionCount) {
   return replicaCount == 1;
 }
 
-Value getDeviceId(int64_t replicaCount, int64_t partitionCount, Location loc,
+Value getDeviceId(Location loc, int64_t replicaCount, int64_t partitionCount,
                   OpBuilder& rewriter) {
   if (usePartitionId(replicaCount, partitionCount)) {
     return stablehlo::PartitionIdOp::create(rewriter, loc);
@@ -627,8 +627,8 @@ bool isCommunicationFreeReshape(stablehlo::ReshapeOp reshapeOp,
                                     inputType, outputType, groups);
 }
 
-Value sliceHighSideToType(OpBuilder& builder, Location loc, Value operand,
-                          Type targetType, TensorShardingAttr sharding) {
+Value sliceHighSideToType(Location loc, Value operand, Type targetType,
+                          TensorShardingAttr sharding, OpBuilder& builder) {
   Type currentType = operand.getType();
   if (currentType == targetType) {
     return operand;
@@ -648,7 +648,7 @@ Value sliceHighSideToType(OpBuilder& builder, Location loc, Value operand,
   return sliced;
 }
 
-Attribute getZeroAttr(OpBuilder& builder, Type type) {
+Attribute getZeroAttr(Type type, OpBuilder& builder) {
   if (Attribute attr = builder.getZeroAttr(type)) {
     return attr;
   }
@@ -674,14 +674,14 @@ Attribute getZeroAttr(OpBuilder& builder, Type type) {
   return nullptr;
 }
 
-Value createZeroConstant(OpBuilder& builder, Location loc, Type type) {
-  Attribute zeroAttr = getZeroAttr(builder, type);
+Value createZeroConstant(Location loc, Type type, OpBuilder& builder) {
+  Attribute zeroAttr = getZeroAttr(type, builder);
   SDY_CHECK(zeroAttr) << "Failed to create zero attribute";
   return stablehlo::ConstantOp::create(builder, loc, zeroAttr);
 }
 
-Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
-                        Type targetType, TensorShardingAttr sharding,
+Value padHighSideToType(Location loc, Value operand, Type targetType,
+                        TensorShardingAttr sharding, OpBuilder& builder,
                         Value paddingValue, bool allowSlicePeephole) {
   Type currentType = operand.getType();
   if (currentType == targetType) {
@@ -710,7 +710,7 @@ Value padHighSideToType(OpBuilder& builder, Location loc, Value operand,
   Value padVal = paddingValue;
   if (!padVal) {
     auto zeroType = RankedTensorType::get({}, targetRanked.getElementType());
-    padVal = createZeroConstant(builder, loc, zeroType);
+    padVal = createZeroConstant(loc, zeroType, builder);
   }
   Value padded = stablehlo::PadOp::create(
       builder, loc, targetRanked, operand, padVal,
@@ -815,7 +815,7 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
 
   OpBuilder builder(paddedType.getContext());
   auto zeroDenseAttr =
-      dyn_cast_or_null<DenseElementsAttr>(getZeroAttr(builder, paddedType));
+      dyn_cast_or_null<DenseElementsAttr>(getZeroAttr(paddedType, builder));
   SDY_CHECK(zeroDenseAttr) << "Failed to create zero attribute";
 
   int64_t rank = origType.getRank();

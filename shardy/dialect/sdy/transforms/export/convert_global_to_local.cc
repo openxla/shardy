@@ -122,8 +122,8 @@ struct ConversionState {
 
 Value getDeviceId(Location loc, const ConversionState& conversionState,
                   ConversionPatternRewriter& rewriter) {
-  return sdy::getDeviceId(conversionState.replicaCount,
-                          conversionState.partitionCount, loc, rewriter);
+  return sdy::getDeviceId(loc, conversionState.replicaCount,
+                          conversionState.partitionCount, rewriter);
 }
 
 // Returns a channel handle with handle = getNextChannelId() and type = 1
@@ -235,8 +235,9 @@ class GlobalToLocalTypeConverter : public TypeConverter {
 };
 
 Operation* createLocalGenericOp(
-    Operation* op, ValueRange operands, ConversionPatternRewriter& rewriter,
-    const GlobalToLocalTypeConverter* typeConverter) {
+    Operation* op, ValueRange operands,
+    const GlobalToLocalTypeConverter* typeConverter,
+    ConversionPatternRewriter& rewriter) {
   OperationState state(op->getLoc(), op->getName());
   state.addOperands(operands);
   state.addTypes(typeConverter->convertResultTypes(op->getResults()));
@@ -270,11 +271,11 @@ Operation* createLocalGenericOp(
 // Converts op to its local version by replacing its operands with the already
 // converted operands and removing the op from the toConvertOps list.
 LogicalResult localizeGenericOp(Operation* op, ValueRange operands,
-                                ConversionPatternRewriter& rewriter,
                                 const GlobalToLocalTypeConverter* typeConverter,
-                                ConversionState& conversionState) {
+                                ConversionState& conversionState,
+                                ConversionPatternRewriter& rewriter) {
   Operation* newOp =
-      createLocalGenericOp(op, operands, rewriter, typeConverter);
+      createLocalGenericOp(op, operands, typeConverter, rewriter);
   rewriter.replaceOp(op, newOp->getResults());
   conversionState.removeToConvertOp(op);
   return success();
@@ -305,9 +306,9 @@ class GenericOpPattern : public ConversionPattern {
       return failure();
     }
     return localizeGenericOp(
-        op, operands, rewriter,
+        op, operands,
         static_cast<const GlobalToLocalTypeConverter*>(typeConverter),
-        conversionState);
+        conversionState, rewriter);
   }
 
  private:
@@ -335,8 +336,8 @@ class PartitioningOpInterfacePattern
       conversionState.removeToConvertOp(op);
       return success();
     }
-    return localizeGenericOp(op, operands, rewriter, converter,
-                             conversionState);
+    return localizeGenericOp(op, operands, converter, conversionState,
+                             rewriter);
   }
 
  private:
@@ -555,10 +556,10 @@ ValueRange createAllReduceForUnreducedAxes(
 // Splits `combinedDim` of `input` into `factors`, transposes each factor
 // immediately before its corresponding dimension in `targetDims`, and reshapes
 // to merge each factor into that dimension.
-Value distributeCombinedDimToTargetDims(Value input, int64_t combinedDim,
+Value distributeCombinedDimToTargetDims(Location loc, Value input,
+                                        int64_t combinedDim,
                                         ArrayRef<int64_t> factors,
                                         ArrayRef<int64_t> targetDims,
-                                        Location loc,
                                         ConversionPatternRewriter& rewriter) {
   auto inputType = cast<RankedTensorType>(input.getType());
   ArrayRef<int64_t> combinedShape = inputType.getShape();
@@ -666,8 +667,8 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
         curInput, /*all_gather_dim=*/firstGatheringDim, replicaGroups,
         channelHandle, /*use_global_device_ids=*/true);
     curInput = distributeCombinedDimToTargetDims(
-        allGather.getResult(0), firstGatheringDim, gatheringFactors,
-        gatheringDims, op.getLoc(), rewriter);
+        op.getLoc(), allGather.getResult(0), firstGatheringDim,
+        gatheringFactors, gatheringDims, rewriter);
 
     conversionState.removeToConvertOp(op);
     rewriter.replaceOp(op, curInput);
@@ -846,7 +847,7 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
   for (int64_t i = 0; i < localResultType.getRank(); ++i) {
     ArrayRef<AxisRefAttr> axes = slicingAxesPerDim[i].getValue();
     if (axes.empty()) {
-      startIndices.push_back(createZeroConstant(rewriter, loc, indexTy));
+      startIndices.push_back(createZeroConstant(loc, indexTy, rewriter));
       continue;
     }
 
@@ -879,7 +880,7 @@ SmallVector<Value> maskNonLeaderShards(
       conversionState, rewriter, deviceId);
   if (!nonLeaderVal) {
     auto localType = cast<RankedTensorType>(inputs.front().getType());
-    nonLeaderVal = createZeroConstant(rewriter, loc, localType);
+    nonLeaderVal = createZeroConstant(loc, localType, rewriter);
   }
   return llvm::map_to_vector(inputs, [&](Value input) -> Value {
     return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
@@ -1090,8 +1091,8 @@ class AllToAllOpPattern : public OpConversionPattern<AllToAllOp> {
         /*split_count=*/numDevicesPerGroup, replicaGroups, channelHandle);
 
     Value result = distributeCombinedDimToTargetDims(
-        allToAll.getResult(0), minAllToAllDim, numDevicesPerParams, srcDims,
-        loc, rewriter);
+        loc, allToAll.getResult(0), minAllToAllDim, numDevicesPerParams,
+        srcDims, rewriter);
 
     rewriter.replaceOp(op, result);
     conversionState.removeToConvertOp(op);
@@ -1609,7 +1610,7 @@ class ShardedToUnreducedOpPattern
     if (!localResultType.hasStaticShape()) {
       return op.emitOpError("dynamic shape not supported");
     }
-    Value zeroTensor = createZeroConstant(rewriter, loc, localResultType);
+    Value zeroTensor = createZeroConstant(loc, localResultType, rewriter);
 
     auto indexTy = RankedTensorType::get({}, rewriter.getI32Type());
     Value zeroOffset;
@@ -1619,7 +1620,7 @@ class ShardedToUnreducedOpPattern
       ArrayRef<AxisRefAttr> axes = op.getAxes()[i].getValue();
       if (axes.empty()) {
         if (!zeroOffset) {
-          zeroOffset = createZeroConstant(rewriter, loc, indexTy);
+          zeroOffset = createZeroConstant(loc, indexTy, rewriter);
         }
         startIndices.push_back(zeroOffset);
         continue;
@@ -1745,8 +1746,8 @@ class StablehloConcatenateOpPattern
 
     // Since the concat dimension is replicated and others are consistent,
     // we can safely perform a local concatenation.
-    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                             conversionState);
+    return localizeGenericOp(op, adaptor.getOperands(), converter,
+                             conversionState, rewriter);
   }
 
  private:
@@ -1790,8 +1791,8 @@ class StablehloConvolutionOpPattern
 
     if (isFullyReplicated(lhsSharding) && isFullyReplicated(rhsSharding) &&
         isFullyReplicated(resultSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     MeshAttr mesh;
@@ -1944,7 +1945,7 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
         if (!doesOpIntroducePartialResult(op, contractingAxes, "dot",
                                           converter)) {
           Operation* localDot = createLocalGenericOp(op, adaptor.getOperands(),
-                                                     rewriter, converter);
+                                                     converter, rewriter);
           ValueRange results = createAllReduceForUnreducedAxes(
               op.getLoc(), localDot->getResults(), contractingAxes, mesh,
               lhsSharding.getMeshOrRef(), enableRGV3, conversionState,
@@ -1956,8 +1957,8 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
       }
     }
 
-    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                             conversionState);
+    return localizeGenericOp(op, adaptor.getOperands(), converter,
+                             conversionState, rewriter);
   }
 
  private:
@@ -2021,7 +2022,7 @@ class StablehloDotGeneralOpPattern
         if (!doesOpIntroducePartialResult(op, reductionAxes, "dot_general",
                                           converter)) {
           Operation* localDotGeneral = createLocalGenericOp(
-              op, adaptor.getOperands(), rewriter, converter);
+              op, adaptor.getOperands(), converter, rewriter);
           ValueRange results = createAllReduceForUnreducedAxes(
               op.getLoc(), localDotGeneral->getResults(), reductionAxes, mesh,
               lhsSharding.getMeshOrRef(), enableRGV3, conversionState,
@@ -2033,8 +2034,8 @@ class StablehloDotGeneralOpPattern
       }
     }
 
-    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                             conversionState);
+    return localizeGenericOp(op, adaptor.getOperands(), converter,
+                             conversionState, rewriter);
   }
 
  private:
@@ -2059,8 +2060,8 @@ class StablehloDynamicSliceOpPattern
     TensorShardingAttr outSharding = converter->getSharding(op.getResult());
 
     if (isFullyReplicated(inSharding) && isFullyReplicated(outSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     auto globalInputType = op.getOperand().getType();
@@ -2107,8 +2108,8 @@ class StablehloDynamicSliceOpPattern
   ConversionState& conversionState;
 };
 
-Value createScalarInt(OpBuilder& b, Location loc, RankedTensorType type,
-                      int64_t val) {
+Value createScalarInt(Location loc, RankedTensorType type, int64_t val,
+                      OpBuilder& b) {
   return stablehlo::ConstantOp::create(
       b, loc,
       DenseIntElementsAttr::get(type,
@@ -2124,12 +2125,12 @@ Value computeOwnershipPredicate(Location loc, Value clampedIndex, Value offset,
                                 RankedTensorType scalarIndexType,
                                 ConversionPatternRewriter& rewriter) {
   Value sliceSizeConst =
-      createScalarInt(rewriter, loc, scalarIndexType, sliceDim);
+      createScalarInt(loc, scalarIndexType, sliceDim, rewriter);
   Value clampedPlusSlice = stablehlo::AddOp::create(
       rewriter, loc, scalarIndexType, clampedIndex, sliceSizeConst);
 
   Value shardSizeConst =
-      createScalarInt(rewriter, loc, scalarIndexType, shardDim);
+      createScalarInt(loc, scalarIndexType, shardDim, rewriter);
   Value offsetPlusShard = stablehlo::AddOp::create(
       rewriter, loc, scalarIndexType, offset, shardSizeConst);
 
@@ -2158,9 +2159,9 @@ LocalIndexAndOwnership computeLocalIndexAndOwnershipForDim(
   RankedTensorType scalarIndexType = RankedTensorType::get({}, indexEltTy);
 
   // Clamp the start index to [0, globalDim - sliceDim].
-  Value zeroConst = createScalarInt(rewriter, loc, scalarIndexType, 0);
+  Value zeroConst = createScalarInt(loc, scalarIndexType, 0, rewriter);
   Value maxConst =
-      createScalarInt(rewriter, loc, scalarIndexType, globalDim - sliceDim);
+      createScalarInt(loc, scalarIndexType, globalDim - sliceDim, rewriter);
   Value clampedIndex = stablehlo::ClampOp::create(
       rewriter, loc, scalarIndexType, zeroConst, rawIndex, maxConst);
 
@@ -2275,8 +2276,8 @@ class StablehloDynamicUpdateSliceOpPattern
     TensorShardingAttr operandSharding =
         converter->getSharding(op.getOperand());
     if (!operandSharding || isFullyReplicated(operandSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     MeshAttr mesh = operandSharding.getMesh(converter->getSymbolTable());
@@ -2312,8 +2313,8 @@ class StablehloDynamicUpdateSliceOpPattern
       }
     }
     if (isPartitionedSliceDim.none()) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     RankedTensorType localOperandType =
@@ -2376,7 +2377,7 @@ class StablehloReduceOpPattern
     if (!reductionAxes.empty() &&
         !doesOpIntroducePartialResult(op, reductionAxes, "reduce", converter)) {
       auto localReduceOp = cast<stablehlo::ReduceOp>(
-          createLocalGenericOp(op, adaptor.getOperands(), rewriter, converter));
+          createLocalGenericOp(op, adaptor.getOperands(), converter, rewriter));
       if (op.getNumResults() == 1) {
         ValueRange results = createAllReduceForUnreducedAxes(
             op.getLoc(), localReduceOp.getResults(), localReduceOp.getBody(),
@@ -2433,8 +2434,8 @@ class StablehloReduceOpPattern
       return success();
     }
 
-    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                             conversionState);
+    return localizeGenericOp(op, adaptor.getOperands(), converter,
+                             conversionState, rewriter);
   }
 
  private:
@@ -2482,8 +2483,8 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
     Location loc, MeshAttr mesh, TensorShardingAttr operandSharding,
     RankedTensorType globalOperandType, RankedTensorType localOperandType,
     ArrayRef<int64_t> startIndexMap, ArrayRef<int64_t> trivialSliceDims,
-    Type indexEltTy, const ConversionState& conversionState,
-    ConversionPatternRewriter& rewriter, bool computeMask) {
+    Type indexEltTy, const ConversionState& conversionState, bool computeMask,
+    ConversionPatternRewriter& rewriter) {
   SmallVector<Value> minBounds, maxBounds;
   minBounds.reserve(startIndexMap.size());
   if (computeMask) {
@@ -2495,7 +2496,7 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
     if (!llvm::is_contained(trivialSliceDims, indexedDim)) {
       // For non-trivial dims, the bounds cover the entire global range.
       minBounds.push_back(createZeroConstant(
-          rewriter, loc, RankedTensorType::get({}, indexEltTy)));
+          loc, RankedTensorType::get({}, indexEltTy), rewriter));
       if (computeMask) {
         maxBounds.push_back(stablehlo::ConstantOp::create(
             rewriter, loc,
@@ -2561,7 +2562,7 @@ Value clampGatherIndices(Location loc, Value indices,
 
   return stablehlo::ClampOp::create(
       rewriter, loc, indicesType,
-      createZeroConstant(rewriter, loc, indicesType), indices,
+      createZeroConstant(loc, indicesType, rewriter), indices,
       buildIndicesLikeTensor(globalMaxValues));
 }
 
@@ -2610,8 +2611,8 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     }
     auto [minBounds, maxBounds] = getTrivialSliceDimBounds(
         loc, mesh, operandSharding, globalOperandType, localOperandType,
-        startIndexMap, trivialSliceDims, indexEltTy, conversionState, rewriter,
-        computeMask);
+        startIndexMap, trivialSliceDims, indexEltTy, conversionState,
+        computeMask, rewriter);
 
     // Builds bounds tensors matching the indices tensor type.
     auto buildBoundsTensor = [&](ArrayRef<Value> bounds) -> Value {
@@ -2685,7 +2686,7 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
         int64_t shardSize = localOperandType.getDimSize(dim);
         Value offset = getDimensionOffset(loc, mesh, axes, shardSize,
                                           conversionState, rewriter);
-        Value zero = createZeroConstant(rewriter, loc, offset.getType());
+        Value zero = createZeroConstant(loc, offset.getType(), rewriter);
         Value eqZero = stablehlo::CompareOp::create(
             rewriter, loc, offset, zero, stablehlo::ComparisonDirection::EQ);
         partitionMask =
@@ -2726,8 +2727,8 @@ class StablehloGatherOpPattern
         converter->getSharding(op.getOperand());
 
     if (isFullyReplicated(operandSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     MeshAttr mesh = operandSharding.getMesh(converter->getSymbolTable());
@@ -2842,7 +2843,7 @@ class StablehloGatherOpPattern
     // Fill the out-of-bounds positions with the reduction identity.
     Value identityVal =
         reductionOp == ReductionOp::SUM
-            ? createZeroConstant(rewriter, loc, resultType)
+            ? createZeroConstant(loc, resultType, rewriter)
             : stablehlo::ConstantOp::create(
                   rewriter, loc,
                   DenseElementsAttr::get(
@@ -2963,8 +2964,8 @@ class StablehloRngBitGeneratorOpPattern
         static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
     TensorShardingAttr dataSharding = converter->getSharding(op.getOutput());
     if (!dataSharding || isFullyReplicated(dataSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     MeshAttr mesh = dataSharding.getMesh(converter->getSymbolTable());
@@ -3023,7 +3024,7 @@ class StablehloRngBitGeneratorOpPattern
       Value hi = stablehlo::AddOp::create(
           rewriter, loc, x64CombineOp.getOperand(1), broadcastHash);
       adjustedState = createLocalGenericOp(x64CombineOp, ValueRange{lo, hi},
-                                           rewriter, converter)
+                                           converter, rewriter)
                           ->getResult(0);
     } else {
       adjustedState =
@@ -3093,8 +3094,8 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       // else the pad op should have been converted to a pad followed by a
       // collective to reshard its result.
       SDY_CHECK(isFullyReplicated(outSharding));
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
     const SymbolTable& symbolTable = converter->getSymbolTable();
     MeshAttr mesh = inSharding.getMesh(symbolTable);
@@ -3310,7 +3311,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
 
   return llvm::TypeSwitch<Operation*, Value>(reductionOp)
       .Case([&](stablehlo::AddOp) {
-        return createZeroConstant(b, loc, scalarType);
+        return createZeroConstant(loc, scalarType, b);
       })
       .Case([&](stablehlo::AndOp) {
         return stablehlo::ConstantOp::create(
@@ -3319,7 +3320,7 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
                                    b.getIntegerAttr(elementType, 1)));
       })
       .Case([&](stablehlo::OrOp) {
-        return createZeroConstant(b, loc, scalarType);
+        return createZeroConstant(loc, scalarType, b);
       })
       .Case([&](stablehlo::MulOp) {
         if (isa<FloatType>(elementType)) {
@@ -3381,8 +3382,8 @@ class StablehloScatterOpPattern
     TensorShardingAttr inputSharding = converter->getSharding(input);
     TensorShardingAttr updateSharding = converter->getSharding(update);
     if (isFullyReplicated(inputSharding) && isFullyReplicated(updateSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     const SymbolTable& symbolTable = converter->getSymbolTable();
@@ -3395,8 +3396,8 @@ class StablehloScatterOpPattern
     SmallVector<AxisRefAttr> reductionAxes =
         getScatterReductionAxes(op, updateSharding, inputSharding, mesh);
     if (reductionAxes.empty() && isFullyReplicated(inputSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     Location loc = op.getLoc();
@@ -3441,8 +3442,8 @@ class StablehloScatterOpPattern
     // If no indexed dims are sharded and there is no reduction axes, just
     // localize the types.
     if (indexedInputDims.empty() && reductionAxes.empty()) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     // Adjust indices for sharded dimensions (Disjoint writes are parallel).
@@ -3506,8 +3507,8 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
     TensorShardingAttr outSharding = converter->getSharding(op.getResult());
 
     if (isFullyReplicated(inSharding) && isFullyReplicated(outSharding)) {
-      return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                               conversionState);
+      return localizeGenericOp(op, adaptor.getOperands(), converter,
+                               conversionState, rewriter);
     }
 
     auto globalInputType = op.getOperand().getType();
@@ -3650,8 +3651,8 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
       }
     }
 
-    return localizeGenericOp(op, adaptor.getOperands(), rewriter, converter,
-                             conversionState);
+    return localizeGenericOp(op, adaptor.getOperands(), converter,
+                             conversionState, rewriter);
   }
 
  private:

@@ -470,7 +470,7 @@ SmallVector<Value> padIndivisibleLiveInValues(
   for (auto [operand, paddedType, sharding] : llvm::zip_equal(
            liveInValues, paddedArgTypes, shardingInfo.inShardings)) {
     manualOperands.push_back(padHighSideToType(
-        rewriter, op->getLoc(), operand, paddedType, sharding,
+        op->getLoc(), operand, paddedType, sharding, rewriter,
         /*paddingValue=*/nullptr, /*allowSlicePeephole=*/true));
   }
   return manualOperands;
@@ -561,8 +561,8 @@ LogicalResult outlineInstruction(Operation* op,
     Value arg = block->getArgument(argIdx);
     TensorShardingAttr operandSharding = shardingInfo.inShardings[argIdx];
     if (!isReshard && arg.getType() != origType) {
-      arg = sliceHighSideToType(tempRewriter, op->getLoc(), arg, origType,
-                                operandSharding);
+      arg = sliceHighSideToType(op->getLoc(), arg, origType, operandSharding,
+                                tempRewriter);
     }
     if (auto concatOp = dyn_cast<stablehlo::ConcatenateOp>(op)) {
       int64_t concatDim = concatOp.getDimension();
@@ -652,8 +652,8 @@ LogicalResult outlineInstruction(Operation* op,
     Value res = clonedAllReduce.getResult();
     Type targetType = paddedResultTypes[0];
     if (res.getType() != targetType) {
-      res = padHighSideToType(tempRewriter, op->getLoc(), res, targetType,
-                              shardingInfo.outShardings[0]);
+      res = padHighSideToType(op->getLoc(), res, targetType,
+                              shardingInfo.outShardings[0], tempRewriter);
     }
     func::ReturnOp::create(tempRewriter, op->getLoc(), ValueRange{res});
     return success();
@@ -670,9 +670,9 @@ LogicalResult outlineInstruction(Operation* op,
     }
     Type targetType = paddedResultTypes[i];
     if (res.getType() != targetType) {
-      returnValues.push_back(padHighSideToType(tempRewriter, op->getLoc(), res,
-                                               targetType,
-                                               shardingInfo.outShardings[i]));
+      returnValues.push_back(padHighSideToType(op->getLoc(), res, targetType,
+                                               shardingInfo.outShardings[i],
+                                               tempRewriter));
     } else {
       returnValues.push_back(res);
     }
@@ -734,8 +734,8 @@ void sliceIndivisibleResults(Operation* op, ManualComputationOp manualCompOp,
     Value origRes = op->getResult(j);
     Value manualRes = manualCompOp.getResult(j);
     Type origResType = origRes.getType();
-    Value slicedRes = sliceHighSideToType(rewriter, op->getLoc(), manualRes,
-                                          origResType, outShardings[j]);
+    Value slicedRes = sliceHighSideToType(op->getLoc(), manualRes, origResType,
+                                          outShardings[j], rewriter);
     rewriter.replaceAllUsesWith(origRes, slicedRes);
   }
 }
