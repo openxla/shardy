@@ -60,9 +60,10 @@ using func::FuncOp;
 using ::llvm::SmallDenseMap;
 using ::llvm::SmallDenseSet;
 
-// Mapping between an axis name to the ManualComputationOp whose body is manual
-// on.
-using ManualAxisToOwner = SmallDenseMap<StringRef, ManualComputationOp>;
+// Mapping between a manual axis to the ManualComputationOp whose body is manual
+// on it.
+using ManualAxisToOwner =
+    SmallVector<std::pair<AxisRefAttr, ManualComputationOp>>;
 
 using EmitErrorFn = std::function<InFlightDiagnostic(StringRef)>;
 
@@ -212,15 +213,15 @@ LogicalResult verifySubAxes(ArrayRef<AxisRefAttr> subAxes, StringRef axisName,
 }
 
 // ManualComputations op are allowed to be nested within each other. However,
-// they cannot operate on the same manual axes. This function creates a mapping
-// from a manual mesh axis name to the corresponding ManualComputationOp that
+// they cannot operate on overlapping manual axes. This function creates a
+// mapping from a manual mesh axis to the corresponding ManualComputationOp that
 // operates on it to help with verifying this is the case.
 ManualAxisToOwner getParentManualComputationOps(Operation* op) {
   ManualAxisToOwner alreadyManualAxes;
   auto parent = op->getParentOfType<ManualComputationOp>();
   while (parent) {
-    for (StringRef axisName : parent.getManualAxes()) {
-      alreadyManualAxes[axisName] = parent;
+    for (AxisRefAttr axis : parent.getManualAxes()) {
+      alreadyManualAxes.emplace_back(axis, parent);
     }
     parent = parent->getParentOfType<ManualComputationOp>();
   }
@@ -228,11 +229,11 @@ ManualAxisToOwner getParentManualComputationOps(Operation* op) {
 }
 
 LogicalResult emitBoundAxisInManualComputationError(EmitErrorFn emitError,
-                                                    StringRef boundAxis,
+                                                    AxisRefAttr boundAxis,
                                                     Location parentLoc) {
-  return (emitError("operates on axis \"")
-          << boundAxis
-          << "\" which is already bound by a parent sdy.manual_computation "
+  return (emitError("operates on axis ")
+          << boundAxis.toString()
+          << " which is already bound by a parent sdy.manual_computation "
              "op")
              .attachNote(parentLoc)
          << "parent bounding this axis as manual";
@@ -383,12 +384,12 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   // axis due to a parent ManualComputationOp.
   if (!alreadyManualAxes.empty()) {
     if (shardingAttr.anyOfAxisRef([&](AxisRefAttr axis) {
-          auto manualAxisIt = alreadyManualAxes.find(axis.getName());
-          if (manualAxisIt != alreadyManualAxes.end()) {
-            return emitBoundAxisInManualComputationError(
-                       emitError, axis.getName(),
-                       manualAxisIt->second->getLoc())
-                .failed();
+          for (const auto& [manualAxis, parent] : alreadyManualAxes) {
+            if (axis.overlaps(manualAxis)) {
+              return emitBoundAxisInManualComputationError(emitError, axis,
+                                                           parent->getLoc())
+                  .failed();
+            }
           }
           return false;
         })) {
@@ -893,44 +894,71 @@ namespace {
 // If an axis in dimShardingAxes belongs to manualAxes, it's an axis
 // the user is doing a manual computation on, thus the ManualComputationOp's
 // body will have tensors smaller wrt this manual axis.
-int64_t accumulatedManualAxesSize(
-    Operation* op, ArrayRef<AxisRefAttr> dimShardingAxes,
-    const llvm::SmallDenseSet<StringRef>& manualAxes, MeshAttr mesh) {
+int64_t accumulatedManualAxesSize(Operation* op,
+                                  ArrayRef<AxisRefAttr> dimShardingAxes,
+                                  ArrayRef<AxisRefAttr> manualAxes,
+                                  MeshAttr mesh) {
   int64_t axesFactor = 1;
   for (AxisRefAttr axisRef : dimShardingAxes) {
-    if (manualAxes.contains(axisRef.getName())) {
-      axesFactor *= axisRef.getSize(mesh);
+    for (AxisRefAttr manualAxis : manualAxes) {
+      if (std::optional<AxisRefAttr> overlap = axisRef.getOverlap(manualAxis)) {
+        axesFactor *= overlap->getSize(mesh);
+      }
     }
   }
 
   return axesFactor;
 }
 
-// Returns an iterator to a manual axis that comes after a free axis in `axes`.
-// If no such axis exists, returns `axes.end()`.
-ArrayRef<AxisRefAttr>::iterator findManualAxisAfterFreeAxis(
-    ArrayRef<AxisRefAttr> axes,
-    const llvm::SmallDenseSet<StringRef>& manualAxes) {
-  auto isManualAxis = [&](AxisRefAttr axisRef) {
-    return manualAxes.contains(axisRef.getName());
-    ;
-  };
-  return std::find_if(llvm::find_if_not(axes, isManualAxis), axes.end(),
-                      isManualAxis);
+// Returns a pair of (manualAxis, freeAxis) if a manual axis comes after a free
+// axis in `axes`, or `std::nullopt` if all manual axes come before free axes.
+// Assumes all axes in `axes` and `manualAxes` have already been verified to
+// coexist.
+std::optional<std::pair<AxisRefAttr, AxisRefAttr>> findManualAxisAfterFreeAxis(
+    ArrayRef<AxisRefAttr> axes, ArrayRef<AxisRefAttr> manualAxes,
+    MeshAttr mesh) {
+  std::optional<AxisRefAttr> lastFreeAxis;
+  for (AxisRefAttr axisRef : axes) {
+    AxisRefAttr curr = axisRef;
+    while (curr) {
+      AxisRefAttr earliestManualAxis;
+      for (AxisRefAttr manualAxis : manualAxes) {
+        if (manualAxis.overlaps(curr) &&
+            (!earliestManualAxis || manualAxis < earliestManualAxis)) {
+          earliestManualAxis = manualAxis;
+        }
+      }
+      if (!earliestManualAxis) {
+        lastFreeAxis = curr;
+        break;
+      }
+      AxisRefAttr overlap = *curr.getOverlap(earliestManualAxis);
+      if (lastFreeAxis) {
+        return std::make_pair(overlap, *lastFreeAxis);
+      }
+      if (std::optional<AxisRefAttr> freePrefix =
+              curr.getPrefixWithoutOverlap(earliestManualAxis)) {
+        return std::make_pair(overlap, *freePrefix);
+      }
+      curr = curr.getSuffixWithoutOverlap(earliestManualAxis, mesh)
+                 .value_or(nullptr);
+    }
+  }
+  return std::nullopt;
 }
 
 // For each set of op values (operands/results) and corresponding sharding for
 // each value, verifies:
-// 1. The sharding list itself wrt the mesh and `globalTypes`.
-// 2. The in/out shardings are valid w.r.t the corresponding global type.
-// 3. The number of global and local tensor inputs/outputs of the op region
+// 1. The number of global and local tensor inputs/outputs of the op region
 //    match.
-// 4. The manual axes come before any free axes in each dim sharding.
-// 5. The manual axes cannot introduce padding. The dimension size must be
+// 2. All axes in the sharding can coexist with `manualAxes`.
+// 3. The manual axes come before any free axes in each dim sharding.
+// 4. The manual axes cannot introduce padding. The dimension size must be
 //    divisible by the corresponding manual axes size.
-// 6. The global shape and local shapes of the op regions arguments/results
+// 5. The global shape and local shapes of the op regions arguments/results
 //    match.
 //
+// Assumes `shardingPerValueAttr` and `manualAxes` have already been verified.
 // `valueKindStr` is a string included in any verification error message
 // specifying whether the values we are verifying are the operands or results.
 // Pass in "operand" or "result".
@@ -938,26 +966,15 @@ template <typename GlobalRangeT, typename LocalRangeT>
 LogicalResult verifyManualComputationValue(
     ManualComputationOp op, GlobalRangeT globalTypes, LocalRangeT localTypes,
     TensorShardingPerValueAttr shardingPerValueAttr,
-    const SymbolTable& symbolTable,
-    const llvm::SmallDenseSet<StringRef>& manualAxesSet,
+    const SymbolTable& symbolTable, ArrayRef<AxisRefAttr> manualAxes,
     StringRef valueKindStr) {
   if (globalTypes.empty() && localTypes.empty() &&
       shardingPerValueAttr.getShardings().empty()) {
     // Nothing to verify since there are no values.
     return success();
   }
-  // 1. Verify the sharding list itself wrt the mesh and `globalTypes`.
-  // 2. Verify the in/out shardings are valid w.r.t the corresponding global
-  //    type.
-  if (failed(verifyTensorShardingPerValueAttr(
-          shardingPerValueAttr, globalTypes, op, symbolTable,
-          [op, valueKindStr](StringRef msg) {
-            return op->emitOpError(valueKindStr) << " " << msg;
-          }))) {
-    return failure();
-  }
 
-  // 3. Verify the number of global and local tensor inputs/outputs of the op
+  // 1. Verify the number of global and local tensor inputs/outputs of the op
   //    region match.
   if (globalTypes.size() != localTypes.size()) {
     return op->emitOpError("number of op ")
@@ -970,20 +987,39 @@ LogicalResult verifyManualComputationValue(
   for (auto [valueIndex, valueEntry] : llvm::enumerate(llvm::zip_equal(
            globalTypes, localTypes, shardingPerValueAttr.getShardings()))) {
     auto [globalType, localType, sharding] = valueEntry;
+    MeshAttr mesh = sharding.getMesh(symbolTable);
 
-    // 4. Verify the manual axes come before any free axes in each dim sharding.
+    // 2. Verify all axes in the sharding can coexist with `manualAxes`.
+    for (AxisRefAttr manualAxis : manualAxes) {
+      AxisRefAttr nonCoexistingAxis;
+      sharding.anyOfAxisRef([&](AxisRefAttr axisRef) {
+        if (!axisRef.canCoexist(manualAxis)) {
+          nonCoexistingAxis = axisRef;
+          return true;
+        }
+        return false;
+      });
+      if (nonCoexistingAxis) {
+        return op->emitOpError(valueKindStr)
+               << " sharding at index " << valueIndex << " has axis "
+               << nonCoexistingAxis.toString()
+               << " that cannot coexist with manual axis "
+               << manualAxis.toString();
+      }
+    }
+
+    // 3. Verify the manual axes come before any free axes in each dim sharding.
     for (auto [dim, dimSharding] :
          llvm::enumerate(sharding.getDimShardings())) {
       ArrayRef<AxisRefAttr> axes = dimSharding.getAxes();
-      if (ArrayRef<AxisRefAttr>::iterator manualAxisItr =
-              findManualAxisAfterFreeAxis(axes, manualAxesSet);
-          manualAxisItr != axes.end()) {
+      if (std::optional<std::pair<AxisRefAttr, AxisRefAttr>> manualAndFreeAxes =
+              findManualAxisAfterFreeAxis(axes, manualAxes, mesh)) {
         return op->emitOpError(valueKindStr)
                << " sharding at index " << valueIndex
                << " must have all manual axes come before free axes in its "
                << "dimension sharding at index " << dim << ". Saw manual axis "
-               << manualAxisItr->toString() << " after free axis "
-               << (manualAxisItr - 1)->toString();
+               << manualAndFreeAxes->first.toString() << " after free axis "
+               << manualAndFreeAxes->second.toString();
       }
     }
 
@@ -999,13 +1035,12 @@ LogicalResult verifyManualComputationValue(
       if (dimensionSize == ShapedType::kDynamic) {
         newDimSizes.push_back(ShapedType::kDynamic);
       } else {
-        // 5. The manual axes cannot introduce padding. The dimension size must
+        // 4. The manual axes cannot introduce padding. The dimension size must
         //    be divisible by the corresponding manual axes size.
 
         // Safe to call `getMesh` because the sharding was already verified.
-        int64_t manualAxesSize =
-            accumulatedManualAxesSize(op, dimSharding.getAxes(), manualAxesSet,
-                                      sharding.getMesh(symbolTable));
+        int64_t manualAxesSize = accumulatedManualAxesSize(
+            op, dimSharding.getAxes(), manualAxes, mesh);
         if (dimensionSize % manualAxesSize != 0) {
           return op->emitOpError(valueKindStr)
                  << " dimension size " << dimensionSize
@@ -1015,7 +1050,7 @@ LogicalResult verifyManualComputationValue(
         newDimSizes.push_back(dimensionSize / manualAxesSize);
       }
     }
-    // 6. Verify the global shape and local shapes of the op regions
+    // 5. Verify the global shape and local shapes of the op regions
     //    arguments/results match.
     auto expectedLocalRankedType =
         RankedTensorType::get(newDimSizes, globalShapedType.getElementType());
@@ -1046,38 +1081,81 @@ LogicalResult ManualComputationOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
   const SymbolTable& symbolTable = symbolTableCollection.getSymbolTable(
       getOperation()->getParentOfType<ModuleOp>());
-  llvm::SmallDenseSet<StringRef> manualAxesSet(getManualAxes().begin(),
-                                               getManualAxes().end());
-  if (failed(verifyManualComputationValue(
-          *this, getOperandTypes(), getBody().getArgumentTypes(),
-          getInShardings(), symbolTable, manualAxesSet, "operand")) ||
-      failed(verifyManualComputationValue(
-          *this, getResultTypes(), getBodyTerminatorOpOperandTypes(*this),
-          getOutShardings(), symbolTable, manualAxesSet, "result"))) {
+  auto verifyShardingPerValue =
+      [&](TypeRange globalTypes, TypeRange localTypes,
+          TensorShardingPerValueAttr shardingPerValueAttr,
+          StringRef valueKindStr) -> LogicalResult {
+    if (globalTypes.empty() && localTypes.empty() &&
+        shardingPerValueAttr.getShardings().empty()) {
+      return success();
+    }
+    return verifyTensorShardingPerValueAttr(
+        shardingPerValueAttr, globalTypes, *this, symbolTable,
+        [this, valueKindStr](StringRef msg) {
+          return emitOpError(valueKindStr) << " " << msg;
+        });
+  };
+  if (failed(verifyShardingPerValue(
+          getOperandTypes(), getBody().getArgumentTypes(), getInShardings(),
+          "operand")) ||
+      failed(verifyShardingPerValue(
+          getResultTypes(), getBodyTerminatorOpOperandTypes(*this),
+          getOutShardings(), "result"))) {
     return failure();
   }
 
-  // We don't fail verification if a manual computation has no inputs or outputs
-  // and a non-empty body. However, we may require this when running
-  // propagation.
-  if (getInShardings().empty() && getOutShardings().empty()) {
-    return success();
-  }
-
-  // We verify a common mesh here so an invalid mesh name reference will be
-  // caught before.
-  MeshAttr mesh = getCommonMesh(getInShardings().getShardings(),
-                                getOutShardings().getShardings(), symbolTable);
-  if (!mesh && !getManualAxes().empty()) {
-    return emitOpError(
-        "all in and out shardings must be bound to the same mesh or an empty "
-        "mesh.");
-  }
-
-  for (StringAttr axisName : getManualAxes()) {
-    if (mesh && !mesh.hasAxis(axisName)) {
-      return emitOpError("unknown manual axis: ") << axisName;
+  ArrayRef<AxisRefAttr> manualAxes = getManualAxes();
+  if (!getInShardings().empty() || !getOutShardings().empty()) {
+    MeshAttr mesh = getCommonMesh(getInShardings().getShardings(),
+                                  getOutShardings().getShardings(),
+                                  symbolTable);
+    if (!mesh && !manualAxes.empty()) {
+      return emitOpError(
+          "all in and out shardings must be bound to the same mesh or an empty "
+          "mesh.");
     }
+
+    for (AxisRefAttr axis : manualAxes) {
+      if (mesh && !mesh.hasAxis(axis.getName())) {
+        return emitOpError("unknown manual axis: \"") << axis.getName() << "\"";
+      }
+    }
+
+    if (mesh) {
+      SmallDenseMap<StringRef, int64_t> axisNameToSize =
+          mesh.getAxisNameToSize();
+      SmallDenseSet<AxisRefAttr> seenAxisRefs;
+      SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
+      EmitErrorFn emitError = getEmitErrorFn(*this);
+      if (failed(verifyAxisRefList(manualAxes, axisNameToSize, seenAxisRefs,
+                                   axisNameToSubAxes, emitError))) {
+        return failure();
+      }
+      for (auto& [axisName, subAxes] : axisNameToSubAxes) {
+        int64_t axisSize = axisNameToSize[axisName];
+        llvm::sort(subAxes, AxisRefAttr::getMeshComparator(mesh));
+        if (failed(verifySubAxes(subAxes, axisName, axisSize, mesh,
+                                 seenAxisRefs, emitError))) {
+          return failure();
+        }
+        for (auto [prevSubAxis, subAxis] :
+             llvm::zip(subAxes, ArrayRef<AxisRefAttr>(subAxes).drop_front())) {
+          if (prevSubAxis.canMerge(subAxis)) {
+            return emitError("two sub-axes in manual_axes can be merged: ")
+                   << prevSubAxis.toString() << ", " << subAxis.toString();
+          }
+        }
+      }
+    }
+  }
+
+  if (failed(verifyManualComputationValue(
+          *this, getOperandTypes(), getBody().getArgumentTypes(),
+          getInShardings(), symbolTable, manualAxes, "operand")) ||
+      failed(verifyManualComputationValue(
+          *this, getResultTypes(), getBodyTerminatorOpOperandTypes(*this),
+          getOutShardings(), symbolTable, manualAxes, "result"))) {
+    return failure();
   }
 
   return success();
@@ -1086,11 +1164,13 @@ LogicalResult ManualComputationOp::verifySymbolUses(
 LogicalResult ManualComputationOp::verify() {
   ManualAxisToOwner alreadyManualAxes =
       getParentManualComputationOps(getOperation());
-  for (StringRef axisName : getManualAxes()) {
-    if (alreadyManualAxes.contains(axisName)) {
-      return emitBoundAxisInManualComputationError(
-          [this](StringRef msg) { return emitOpError(msg); }, axisName,
-          alreadyManualAxes[axisName]->getLoc());
+  for (AxisRefAttr axis : getManualAxes()) {
+    for (const auto& [manualAxis, parent] : alreadyManualAxes) {
+      if (axis.overlaps(manualAxis)) {
+        return emitBoundAxisInManualComputationError(
+            [this](StringRef msg) { return emitOpError(msg); }, axis,
+            parent->getLoc());
+      }
     }
   }
 

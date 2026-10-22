@@ -93,14 +93,7 @@ addUnusedManualAxesToReplicatedAxes(ArrayRef<TensorShardingAttr> shardings,
 void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op, MeshAttr mesh,
                                          Attribute commonMeshOrRef,
                                          const SymbolTable& symbolTable) {
-  OpBuilder builder(op);
-
-  SmallVector<AxisRefAttr> manualAxes;
-  manualAxes.reserve(op.getManualAxes().size());
-  llvm::transform(op.getManualAxes(), std::back_inserter(manualAxes),
-                  [&](StringAttr axis) {
-                    return AxisRefAttr::get(builder.getContext(), axis);
-                  });
+  ArrayRef<AxisRefAttr> manualAxes = op.getManualAxes();
 
   if (std::optional<SmallVector<TensorShardingAttr>> newShardings =
           addUnusedManualAxesToReplicatedAxes(
@@ -119,13 +112,13 @@ void addUnusedManualAxesToReplicatedAxes(ManualComputationOp op, MeshAttr mesh,
 
 // Sorts the manual axes in mesh axis order.
 void sortManualAxes(ManualComputationOp op, MeshAttr mesh) {
-  ArrayRef<StringAttr> manualAxes = op.getManualAxes();
-  auto meshComparator = mesh.getAxisNameComparator();
+  ArrayRef<AxisRefAttr> manualAxes = op.getManualAxes();
+  auto meshComparator = AxisRefAttr::getMeshComparator(mesh);
 
   if (llvm::is_sorted(manualAxes, meshComparator)) {
     return;
   }
-  SmallVector<StringAttr> sortedManualAxes = llvm::to_vector(manualAxes);
+  SmallVector<AxisRefAttr> sortedManualAxes = llvm::to_vector(manualAxes);
   llvm::sort(sortedManualAxes, meshComparator);
   op.setManualAxes(sortedManualAxes);
 }

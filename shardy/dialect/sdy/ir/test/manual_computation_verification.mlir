@@ -319,3 +319,81 @@ func.func @token_region_result(%arg0: tensor<16x32xf32>, %arg1: !stablehlo.token
   } : (tensor<16x32xf32>, !stablehlo.token) -> tensor<16x32xf32>
   func.return %0: tensor<16x32xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=4]>
+
+func.func @invalid_manual_sub_axis(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{sub-axis next pre-size 8 doesn't divide the size of the full axis 4: "a":(2)4}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a":(2)4} (%arg1: tensor<4x32xf32>) {
+    sdy.return %arg1 : tensor<4x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=12]>
+
+func.func @non_coexisting_sub_axis_with_manual_sub_axis(%arg0: tensor<24x32xf32>) -> tensor<24x32xf32> {
+  // expected-error @+1 {{op operand sharding at index 0 has axis "a":(1)6 that cannot coexist with manual axis "a":(1)4}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a":(1)6}, {}]>] out_shardings=[<@mesh, [{"a":(1)4}, {}]>] manual_axes={"a":(1)4} (%arg1: tensor<6x32xf32>) {
+    sdy.return %arg1 : tensor<6x32xf32>
+  } : (tensor<24x32xf32>) -> tensor<24x32xf32>
+  func.return %0: tensor<24x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=8]>
+
+func.func @partial_non_prefix_overlap_with_manual_sub_axis(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op operand sharding at index 0 must have all manual axes come before free axes in its dimension sharding at index 0. Saw manual axis "a":(2)2 after free axis "a":(1)2}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a":(1)4}, {}]>] out_shardings=[<@mesh, [{"a":(2)4}, {}]>] manual_axes={"a":(2)4} (%arg1: tensor<4x32xf32>) {
+    sdy.return %arg1 : tensor<4x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=4]>
+
+func.func @manual_computation_nested_overlapping_sub_axis(%arg0: tensor<16x32xf32>) -> tensor<8x32xf32> {
+  // expected-note @+1 {{parent bounding this axis as manual}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a":(1)2}, {}]>] out_shardings=[<@mesh, [{}, {}], replicated={"a":(1)2}>] manual_axes={"a":(1)2} (%arg1: tensor<8x32xf32>) {
+    // expected-error @+1 {{op operates on axis "a" which is already bound by a parent sdy.manual_computation op}}
+    %1 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{}, {}]>] out_shardings=[<@mesh, [{}, {}]>] manual_axes={"a"} (%arg2: tensor<8x32xf32>) {
+      sdy.return %arg2 : tensor<8x32xf32>
+    } : (tensor<8x32xf32>) -> tensor<8x32xf32>
+    sdy.return %1 : tensor<8x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<8x32xf32>
+  func.return %0: tensor<8x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=4]>
+
+func.func @manual_computation_body_sharding_overlaps_manual_sub_axis(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-note @+1 {{parent bounding this axis as manual}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a":(1)2}, {}]>] out_shardings=[<@mesh, [{"a":(1)2}, {}]>] manual_axes={"a":(1)2} (%arg1: tensor<8x32xf32>) {
+    // expected-error @+1 {{'stablehlo.add' op result - operates on axis "a":(1)2 which is already bound by a parent sdy.manual_computation op}}
+    %1 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a":(1)2}, {}]>]>} : tensor<8x32xf32>
+    sdy.return %1 : tensor<8x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=4]>
+
+func.func @free_sub_axis_before_manual_sub_axis_in_merged_axis(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // expected-error @+1 {{op operand sharding at index 0 must have all manual axes come before free axes in its dimension sharding at index 0. Saw manual axis "a":(2)2 after free axis "a":(1)2}}
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a"}, {}]>] out_shardings=[<@mesh, [{"a":(2)2}, {}]>] manual_axes={"a":(2)2} (%arg1: tensor<8x32xf32>) {
+    sdy.return %arg1 : tensor<8x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}

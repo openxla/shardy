@@ -247,7 +247,7 @@ void collectTransitiveCallees(Operation* op, const SymbolTable& symbolTable,
 struct InstructionShardingInfo {
   SmallVector<TensorShardingAttr> inShardings;
   SmallVector<TensorShardingAttr> outShardings;
-  SmallVector<StringAttr> manualAxesList;
+  SmallVector<AxisRefAttr> manualAxesList;
   llvm::DenseSet<StringRef> manualAxesSet;
 };
 
@@ -299,19 +299,19 @@ InstructionShardingInfo getInstructionShardingInfo(Operation* op,
 
   if (meshAttr) {
     for (MeshAxisAttr axis : meshAttr.getAxes()) {
-      info.manualAxesList.push_back(StringAttr::get(ctx, axis.getName()));
+      info.manualAxesList.push_back(AxisRefAttr::get(ctx, axis.getName()));
       info.manualAxesSet.insert(axis.getName());
     }
   } else {
-    llvm::SmallDenseSet<StringAttr> seenAxes;
+    llvm::SmallDenseSet<AxisRefAttr> seenAxes;
     auto collectAxes = [&](TensorShardingAttr sharding) {
       if (!sharding) {
         return;
       }
       sharding.forEachAxisRef([&](AxisRefAttr axisRef) {
-        StringAttr axisName = StringAttr::get(ctx, axisRef.getName());
-        if (seenAxes.insert(axisName).second) {
-          info.manualAxesList.push_back(axisName);
+        AxisRefAttr fullAxis = AxisRefAttr::get(ctx, axisRef.getName());
+        if (seenAxes.insert(fullAxis).second) {
+          info.manualAxesList.push_back(fullAxis);
           info.manualAxesSet.insert(axisRef.getName());
         }
       });

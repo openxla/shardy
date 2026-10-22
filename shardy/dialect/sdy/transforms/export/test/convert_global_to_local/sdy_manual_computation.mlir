@@ -206,3 +206,20 @@ func.func @stablehlo_reduce_scatter(%arg0 : tensor<16x8xf32> {sdy.sharding = #sd
   // CHECK-NEXT: return %[[RES]] : tensor<4x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// CHECK-LABEL: func @sub_axis_manual_and_free_merged
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>})
+// CHECK-SAME: -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) {
+func.func @sub_axis_manual_and_free_merged(%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>})
+  -> (tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[TANH:.*]] = stablehlo.tanh %[[ARG0]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x":(2)2}, {}]>]>} : tensor<4x8xf32>
+  %0 = sdy.manual_computation(%arg0)
+    in_shardings=[<@mesh_4, [{"x"}, {}]>]
+    out_shardings=[<@mesh_4, [{"x"}, {}]>]
+    manual_axes={"x":(1)2} (%arg1: tensor<8x8xf32>) {
+    %1 = stablehlo.tanh %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x":(2)2}, {}]>]>} : tensor<8x8xf32>
+    sdy.return %1 : tensor<8x8xf32>
+  } : (tensor<16x8xf32>) -> tensor<16x8xf32>
+  // CHECK-NEXT: return %[[TANH]] : tensor<4x8xf32>
+  return %0 : tensor<16x8xf32>
+}

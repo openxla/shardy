@@ -42,12 +42,20 @@ def OptionalVarInt :
 // -----------------------------------------------------------------------------
 
 //===----------------------------------------------------------------------===//
-// ManualAxesAttr - assigned index 0
+// ManualAxesAttr V1 - assigned index 0
 //===----------------------------------------------------------------------===//
-def Sdy_ManualAxesAttrBc : DialectAttribute<(attr
-  Array<StringAttr>:$value
+def Sdy_StringAttrArrayBc :
+  WithParser<"succeeded($_reader.readAttributes($_var))",
+  WithBuilder<"$_args",
+  WithPrinter<"$_writer.writeAttributes<StringAttr>($_getter)",
+  WithType<"SmallVector<StringAttr>">>>>;
+
+def Sdy_ManualAxesAttrV1Bc : DialectAttribute<(attr
+  Sdy_StringAttrArrayBc:$string_value
 )> {
   let cType = "ManualAxesAttr";
+  let cBuilder = "$_resultType::get(context, $_args)";
+  let printerPredicate = "llvm::none_of($_val.getValue(), [](AxisRefAttr axis) { return static_cast<bool>(axis.getSubAxisInfo()); })";
 }
 
 //===----------------------------------------------------------------------===//
@@ -247,6 +255,16 @@ def Sdy_AllToAllParamListAttrBc: DialectAttribute<(attr
   let cType = "AllToAllParamListAttr";
 }
 
+//===----------------------------------------------------------------------===//
+// ManualAxesAttr V2 - assigned index 18
+//===----------------------------------------------------------------------===//
+def Sdy_ManualAxesAttrV2Bc : DialectAttribute<(attr
+  Array<Sdy_AxisRefAttrBc>:$value
+)> {
+  let cType = "ManualAxesAttr";
+  let printerPredicate = "llvm::any_of($_val.getValue(), [](AxisRefAttr axis) { return static_cast<bool>(axis.getSubAxisInfo()); })";
+}
+
 // This enum contains marker codes used to indicate which attribute is
 // currently being decoded, and how it should be decoded. The order of these
 // codes should generally be unchanged, as any changes will inevitably break
@@ -255,7 +273,7 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
   // Take care when chaging this list.
   // If needed to remove use ReservedOrDead
   let elems = [
-    /*index  0*/ Sdy_ManualAxesAttrBc,
+    /*index  0*/ Sdy_ManualAxesAttrV1Bc,
     /*index  1*/ Sdy_MeshAxisAttrBc,
     /*index  2*/ Sdy_MeshAttrBc,
     /*index  3*/ Sdy_SubAxisInfoAttrBc,
@@ -272,7 +290,8 @@ def SdyDialectTypes : DialectAttributes<"sdy"> {
     /*index 14*/ Sdy_AllToAllParamListAttrBc,
     /*index 15*/ Sdy_TensorShardingAttrV2Bc,
     /*index 16*/ Sdy_TensorShardingPerValueAttrV2Bc,
-    /*index 17*/ Sdy_TensorShardingAttrV3Bc
+    /*index 17*/ Sdy_TensorShardingAttrV3Bc,
+    /*index 18*/ Sdy_ManualAxesAttrV2Bc
   ];
 }
 #endif // SDY_BYTECODE

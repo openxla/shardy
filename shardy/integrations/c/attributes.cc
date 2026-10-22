@@ -436,8 +436,12 @@ bool sdyAttributeIsAManualAxesAttr(MlirAttribute attr) {
   return mlir::isa<sdy::ManualAxesAttr>(unwrap(attr));
 }
 
-MlirAttribute sdyManualAxesAttrGet(
-    MlirContext ctx, intptr_t nAxes, const MlirAttribute* axes) {
+MlirAttribute sdyManualAxesAttrGet(MlirContext ctx, intptr_t nAxes,
+                                   const MlirAttribute* axes) {
+  if (nAxes > 0 && mlir::isa<sdy::AxisRefAttr>(unwrap(axes[0]))) {
+    return wrap(sdy::ManualAxesAttr::get(
+        unwrap(ctx), unwrapAttrs<sdy::AxisRefAttr>(axes, nAxes)));
+  }
   return wrap(sdy::ManualAxesAttr::get(
       unwrap(ctx), unwrapAttrs<mlir::StringAttr>(axes, nAxes)));
 }
@@ -446,9 +450,8 @@ intptr_t sdyManualAxesAttrGetAxesSize(MlirAttribute attr) {
   return unwrapAttr<sdy::ManualAxesAttr>(attr).size();
 }
 
-MlirStringRef sdyManualAxesAttrGetAxesElem(
-  MlirAttribute attr, intptr_t pos) {
-  return wrap(unwrapAttr<sdy::ManualAxesAttr>(attr)[pos].getValue());
+MlirStringRef sdyManualAxesAttrGetAxesElem(MlirAttribute attr, intptr_t pos) {
+  return wrap(unwrapAttr<sdy::ManualAxesAttr>(attr)[pos].getName());
 }
 
 }  // extern "C"

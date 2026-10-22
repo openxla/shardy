@@ -244,3 +244,35 @@ func.func @token_with_single_device_sharding(
   } : (!stablehlo.token, tensor<2xi64>) -> (!stablehlo.token, tensor<2xi64>)
   return %0#0, %0#1 : !stablehlo.token, tensor<2xi64>
 }
+
+// CHECK-LABEL: func @manual_computation_sub_axis_manual_axes
+func.func @manual_computation_sub_axis_manual_axes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // CHECK{LITERAL}: sdy.manual_computation(%arg0) in_shardings=[<@meshB, [{"a"}, {}]>] out_shardings=[<@meshB, [{"a":(1)2}, {"a":(2)2}]>] manual_axes={"a":(1)2} (%arg1: tensor<8x32xf32>) {
+  // CHECK-NEXT:       %[[BODY_RET:.*]] = stablehlo.add
+  // CHECK-NEXT:       sdy.return %[[BODY_RET]]
+  // CHECK-NEXT:     } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@meshB, [{"a"}, {}]>] out_shardings=[<@meshB, [{"a":(1)2}, {"a":(2)2}]>] manual_axes={"a":(1)2} (%arg1: tensor<8x32xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{"a":(2)2}, {}]>]>} : tensor<8x32xf32>
+    sdy.return %1 : tensor<8x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}
+
+// CHECK-LABEL: func @manual_computation_nested_disjoint_sub_axes
+func.func @manual_computation_nested_disjoint_sub_axes(%arg0: tensor<16x32xf32>) -> tensor<16x32xf32> {
+  // CHECK{LITERAL}: sdy.manual_computation(%arg0) in_shardings=[<@meshB, [{"a"}, {}]>] out_shardings=[<@meshB, [{"a"}, {}]>] manual_axes={"a":(1)2} (%arg1: tensor<8x32xf32>) {
+  // CHECK-NEXT:       %[[INNER:.*]] = sdy.manual_computation(%arg1)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@meshB, [{"a":(2)2}, {}]>] out_shardings=[<@meshB, [{"a":(2)2}, {}]>] manual_axes={"a":(2)2} (%arg2: tensor<4x32xf32>) {
+  // CHECK-NEXT:         %[[NESTED_RET:.*]] = stablehlo.add
+  // CHECK-NEXT:         sdy.return %[[NESTED_RET]]
+  // CHECK-NEXT:       } : (tensor<8x32xf32>) -> tensor<8x32xf32>
+  // CHECK-NEXT:       sdy.return %[[INNER]]
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@meshB, [{"a"}, {}]>] out_shardings=[<@meshB, [{"a"}, {}]>] manual_axes={"a":(1)2} (%arg1: tensor<8x32xf32>) {
+    %1 = sdy.manual_computation(%arg1) in_shardings=[<@meshB, [{"a":(2)2}, {}]>] out_shardings=[<@meshB, [{"a":(2)2}, {}]>] manual_axes={"a":(2)2} (%arg2: tensor<4x32xf32>) {
+      %2 = stablehlo.add %arg2, %arg2 : tensor<4x32xf32>
+      sdy.return %2 : tensor<4x32xf32>
+    } : (tensor<8x32xf32>) -> tensor<8x32xf32>
+    sdy.return %1 : tensor<8x32xf32>
+  } : (tensor<16x32xf32>) -> tensor<16x32xf32>
+  func.return %0: tensor<16x32xf32>
+}

@@ -559,9 +559,12 @@ std::optional<AxisRefAttr> AxisRefAttr::getSuffixWithoutOverlap(
   if (!overlaps(other)) {
     return *this;
   }
+  if (!other.getSubAxisInfo() || (!getSubAxisInfo() && !mesh)) {
+    return std::nullopt;
+  }
 
   int64_t thisNextPreSize = getNextPreSizeOrFullSize(mesh);
-  int64_t otherNextPreSize = other.getNextPreSizeOrFullSize(mesh);
+  int64_t otherNextPreSize = other.getSubAxisInfo().getNextPreSize();
   if (thisNextPreSize <= otherNextPreSize) {
     return std::nullopt;
   }
@@ -1212,6 +1215,29 @@ AllToAllParamListAttr AllToAllParamListAttr::combineAndSort(
 }
 
 //===----------------------------------------------------------------------===//
+// ManualAxesAttr
+//===----------------------------------------------------------------------===//
+
+ManualAxesAttr ManualAxesAttr::getFromStringAttrs(MLIRContext* context,
+                                                  ArrayRef<StringAttr> axes) {
+  SmallVector<AxisRefAttr> axisRefs;
+  axisRefs.reserve(axes.size());
+  for (StringAttr axis : axes) {
+    axisRefs.push_back(AxisRefAttr::get(context, axis));
+  }
+  return get(context, axisRefs);
+}
+
+SmallVector<StringAttr> ManualAxesAttr::getStringValue() const {
+  SmallVector<StringAttr> stringAxes;
+  stringAxes.reserve(size());
+  for (AxisRefAttr axis : getValue()) {
+    stringAxes.push_back(StringAttr::get(getContext(), axis.getName()));
+  }
+  return stringAxes;
+}
+
+//===----------------------------------------------------------------------===//
 // ManualComputationOp
 //===----------------------------------------------------------------------===//
 
@@ -1229,21 +1255,39 @@ namespace {
 // `newSharding`.
 TensorShardingAttr addFreeAxesToManualComputationSharding(
     TensorShardingAttr outerManualSharding, TensorShardingAttr newSharding,
-    ArrayRef<StringAttr> manualAxes) {
+    ArrayRef<AxisRefAttr> manualAxes, Operation* op) {
   // Remove all existing free axes first before adding possibly extra ones in
   // `newSharding`.
   TensorShardingAttr returnedSharding =
       eraseFreeAxes(outerManualSharding, manualAxes);
 
+  MeshAttr mesh;
   SmallVector<DimensionShardingAttr> resultDimShardings = llvm::map_to_vector(
       llvm::zip_equal(returnedSharding.getDimShardings(),
                       newSharding.getDimShardings()),
-      [](auto pair) {
+      [&](auto pair) {
         auto [returnedDimSharding, newDimSharding] = pair;
+        SmallVector<AxisRefAttr> combinedAxes(
+            returnedDimSharding.getAxes().begin(),
+            returnedDimSharding.getAxes().end());
+        if (!combinedAxes.empty() && !newDimSharding.emptyAxes() &&
+            combinedAxes.back().canMerge(newDimSharding.getAxes().front())) {
+          if (!mesh) {
+            mesh = outerManualSharding.getMesh(op);
+          }
+          if (mesh) {
+            for (AxisRefAttr axis : newDimSharding.getAxes()) {
+              addAxisOrMerge(combinedAxes, axis, mesh);
+            }
+            return DimensionShardingAttr::get(
+                returnedDimSharding.getContext(), combinedAxes,
+                newDimSharding.getIsClosed(), newDimSharding.getPriority());
+          }
+        }
+        combinedAxes.append(newDimSharding.getAxes().begin(),
+                            newDimSharding.getAxes().end());
         return DimensionShardingAttr::get(
-            returnedDimSharding.getContext(),
-            llvm::to_vector(llvm::concat<const AxisRefAttr>(
-                returnedDimSharding.getAxes(), newDimSharding.getAxes())),
+            returnedDimSharding.getContext(), combinedAxes,
             newDimSharding.getIsClosed(), newDimSharding.getPriority());
       });
   return TensorShardingAttr::get(newSharding.getContext(),
@@ -1280,21 +1324,25 @@ SmallVector<TensorShardingAttr>
 ManualComputationOp::getBlockArgumentEdgeOwnerShardings() {
   SmallVector<TensorShardingAttr> shardings;
   shardings.reserve(getInShardings().size());
+  MeshAttr mesh;
   for (TensorShardingAttr sharding : getInShardings().getShardings()) {
-    shardings.push_back(eraseManualAxes(sharding, getManualAxes()));
+    if (!mesh) {
+      mesh = sharding.getMesh(*this);
+    }
+    shardings.push_back(eraseManualAxes(sharding, getManualAxes(), mesh));
   }
   return shardings;
 }
 
 void ManualComputationOp::setBlockArgumentEdgeOwnerShardings(
     ArrayRef<TensorShardingAttr> shardings) {
-  ArrayRef<StringAttr> manualAxes = getManualAxes();
+  ArrayRef<AxisRefAttr> manualAxes = getManualAxes();
   setInShardings(llvm::map_to_vector(
       llvm::zip_equal(getInShardings().getShardings(), shardings),
       [&](auto&& pair) {
         auto&& [outerSharding, newSharding] = pair;
         return addFreeAxesToManualComputationSharding(
-            outerSharding, newSharding, manualAxes);
+            outerSharding, newSharding, manualAxes, *this);
       }));
 }
 
@@ -1329,17 +1377,20 @@ TensorShardingAttr ManualComputationOp::transformTargetSharding(
     case DataFlowShardingTransformType::kBeforeEdgePropagation: {
       if (auto blockArg = dyn_cast<BlockArgument>(target)) {
         return addFreeAxesToManualComputationSharding(
-            getInSharding(blockArg.getArgNumber()), sharding, getManualAxes());
+            getInSharding(blockArg.getArgNumber()), sharding, getManualAxes(),
+            *this);
       }
-      return eraseManualAxes(sharding, getManualAxes());
+      return eraseManualAxes(sharding, getManualAxes(),
+                             sharding.getMesh(*this));
     }
     case DataFlowShardingTransformType::kAfterEdgePropagation: {
       if (isa<BlockArgument>(target)) {
-        return eraseManualAxes(sharding, getManualAxes());
+        return eraseManualAxes(sharding, getManualAxes(),
+                               sharding.getMesh(*this));
       }
       return addFreeAxesToManualComputationSharding(
           getOutSharding(cast<OpResult>(target).getResultNumber()), sharding,
-          getManualAxes());
+          getManualAxes(), *this);
     }
   }
   llvm_unreachable("received an unexpected target type.");

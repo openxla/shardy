@@ -26,15 +26,6 @@ include "shardy/dialect/sdy/ir/enums.td"
 // NOTE: we use `` in assemblyFormat to avoid whitespaces between literals and
 // parameters.
 
-// A list of axes that a ManualComputationOp is manual on. ManualComputationOp
-// doesn't use an array of AxisRefAttr since all axes must be full/can't be
-// split.
-def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
-                                 "manual_axes", "StringAttr"> {
-  let summary = "A list of axes that a ManualComputationOp is manual on";
-  let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
-}
-
 // LINT.IfChange
 def Sdy_MeshAxis : AttrDef<Sdy_Dialect, "MeshAxis"> {
   let mnemonic = "mesh_axis";
@@ -1231,6 +1222,43 @@ def Sdy_AxisRefList : ArrayOfAttr<Sdy_Dialect, "AxisRefList",
     - There are no duplicate axis-refs or sub-axes that overlap with one another.
     - No two adjacent axis-refs are consecutive sub-axes of that same full axis,
       i.e., they can be merged into one sub-axis or the full axis.
+  }];
+}
+
+// A list of axes that a ManualComputationOp is manual on.
+def Sdy_ManualAxes : ArrayOfAttr<Sdy_Dialect, "ManualAxes",
+                                 "manual_axes", "AxisRefAttr"> {
+  let summary = "A list of axes that a ManualComputationOp is manual on";
+  let assemblyFormat = "`{` (`}`) : ($value^ `` `}`)?";
+  let extraClassDeclaration = [{
+    using iterator = const AxisRefAttr*;
+    iterator begin() const { return getValue().begin(); }
+    iterator end() const { return getValue().end(); }
+    size_t size() const { return getValue().size(); }
+    bool empty() const { return getValue().empty(); }
+    const AxisRefAttr& operator[](size_t index) const {
+      return getValue()[index];
+    }
+    operator ArrayRef<AxisRefAttr>() const { return getValue(); }
+
+    template <typename RangeT,
+              typename = std::enable_if_t<
+                  std::is_convertible_v<RangeT, ArrayRef<StringAttr>>>>
+    static ManualAxesAttr get(MLIRContext* context, RangeT&& axes) {
+      return getFromStringAttrs(context, axes);
+    }
+
+    template <typename T,
+              typename = std::enable_if_t<std::is_same_v<T, StringAttr>>>
+    static ManualAxesAttr get(MLIRContext* context,
+                              std::initializer_list<T> axes) {
+      return getFromStringAttrs(context, axes);
+    }
+
+    static ManualAxesAttr getFromStringAttrs(MLIRContext* context,
+                                             ArrayRef<StringAttr> axes);
+
+    SmallVector<StringAttr> getStringValue() const;
   }];
 }
 

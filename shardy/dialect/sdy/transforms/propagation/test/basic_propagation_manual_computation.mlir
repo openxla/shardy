@@ -589,3 +589,22 @@ func.func @manual_computation_with_tokens(
   } : (!stablehlo.token, tensor<4x4xi64>) -> (!stablehlo.token, tensor<4x4xi64>)
   return %0#0, %0#1 : !stablehlo.token, tensor<4x4xi64>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=4, "b"=2]>
+
+// CHECK-LABEL: func @manual_computation_sub_axis_manual_merges_with_free_suffix(
+// CHECK-SAME:      %arg0: tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>})
+// CHECK-SAME:      -> (tensor<32x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}) {
+func.func @manual_computation_sub_axis_manual_merges_with_free_suffix(%arg0: tensor<32x32xf32>) -> tensor<32x32xf32> {
+  // CHECK:      sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}:   in_shardings=[<@mesh, [{"a", ?}, {?}]>]
+  // CHECK-SAME{LITERAL}:   out_shardings=[<@mesh, [{"a", ?}, {?}]>]
+  // CHECK-SAME{LITERAL}:   manual_axes={"a":(1)2} (%arg1: tensor<16x32xf32>) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"a":(1)2, ?}, {?}]>] out_shardings=[<@mesh, [{"a":(1)2, ?}, {?}]>] manual_axes={"a":(1)2} (%arg1: tensor<16x32xf32>) {
+    // CHECK: stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a":(2)2, ?}, {?}]>]>} : tensor<16x32xf32>
+    %1 = stablehlo.add %arg1, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a":(2)2, ?}, {?}]>]>} : tensor<16x32xf32>
+    sdy.return %1 : tensor<16x32xf32>
+  } : (tensor<32x32xf32>) -> tensor<32x32xf32>
+  func.return %0: tensor<32x32xf32>
+}

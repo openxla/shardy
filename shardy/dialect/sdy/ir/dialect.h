@@ -21,10 +21,12 @@ limitations under the License.
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"

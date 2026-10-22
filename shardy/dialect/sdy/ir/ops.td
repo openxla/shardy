@@ -207,7 +207,7 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
     OpBuilder<(ins "TypeRange":$results, "ValueRange":$tensors,
                    "ArrayRef<TensorShardingAttr>":$in_shardings,
                    "ArrayRef<TensorShardingAttr>":$out_shardings,
-                   "ArrayRef<StringAttr>":$manual_axes), [{
+                   CArg<"ArrayRef<AxisRefAttr>", "{}">:$manual_axes), [{
       MLIRContext* ctx = $_builder.getContext();
       return build($_builder, $_state, results, tensors,
                    TensorShardingPerValueAttr::get(ctx, in_shardings),
@@ -217,6 +217,71 @@ def Sdy_ManualComputationOp : Sdy_Op<"manual_computation",
   ];
 
   let extraClassDeclaration = [{
+    template <typename RangeT,
+              typename = std::enable_if_t<
+                  std::is_convertible_v<RangeT, ArrayRef<StringAttr>>>>
+    static void build(OpBuilder& odsBuilder, OperationState& odsState,
+                      TypeRange results, ValueRange tensors,
+                      TensorShardingPerValueAttr in_shardings,
+                      TensorShardingPerValueAttr out_shardings,
+                      RangeT&& manual_axes) {
+      build(odsBuilder, odsState, results, tensors, in_shardings, out_shardings,
+            ManualAxesAttr::get(odsBuilder.getContext(),
+                                ArrayRef<StringAttr>(manual_axes)));
+    }
+
+    template <typename RangeT,
+              typename = std::enable_if_t<
+                  std::is_convertible_v<RangeT, ArrayRef<StringAttr>>>>
+    static ManualComputationOp create(OpBuilder& builder, Location location,
+                                      TypeRange results, ValueRange tensors,
+                                      TensorShardingPerValueAttr in_shardings,
+                                      TensorShardingPerValueAttr out_shardings,
+                                      RangeT&& manual_axes) {
+      return create(builder, location, results, tensors, in_shardings,
+                    out_shardings,
+                    ManualAxesAttr::get(builder.getContext(),
+                                        ArrayRef<StringAttr>(manual_axes)));
+    }
+
+    template <typename RangeT,
+              typename = std::enable_if_t<
+                  std::is_convertible_v<RangeT, ArrayRef<StringAttr>>>>
+    static void build(OpBuilder& odsBuilder, OperationState& odsState,
+                      TypeRange results, ValueRange tensors,
+                      ArrayRef<TensorShardingAttr> in_shardings,
+                      ArrayRef<TensorShardingAttr> out_shardings,
+                      RangeT&& manual_axes) {
+      MLIRContext* ctx = odsBuilder.getContext();
+      build(odsBuilder, odsState, results, tensors,
+            TensorShardingPerValueAttr::get(ctx, in_shardings),
+            TensorShardingPerValueAttr::get(ctx, out_shardings),
+            ManualAxesAttr::get(ctx, ArrayRef<StringAttr>(manual_axes)));
+    }
+
+    template <typename RangeT,
+              typename = std::enable_if_t<
+                  std::is_convertible_v<RangeT, ArrayRef<StringAttr>>>>
+    static ManualComputationOp create(
+        OpBuilder& builder, Location location, TypeRange results,
+        ValueRange tensors, ArrayRef<TensorShardingAttr> in_shardings,
+        ArrayRef<TensorShardingAttr> out_shardings, RangeT&& manual_axes) {
+      MLIRContext* ctx = builder.getContext();
+      return create(
+          builder, location, results, tensors,
+          TensorShardingPerValueAttr::get(ctx, in_shardings),
+          TensorShardingPerValueAttr::get(ctx, out_shardings),
+          ManualAxesAttr::get(ctx, ArrayRef<StringAttr>(manual_axes)));
+    }
+
+    template <typename RangeT,
+              typename = std::enable_if_t<
+                  std::is_convertible_v<RangeT, ArrayRef<StringAttr>>>>
+    void setManualAxes(RangeT&& manual_axes) {
+      setManualAxesAttr(
+          ManualAxesAttr::get(getContext(), ArrayRef<StringAttr>(manual_axes)));
+    }
+
     TensorShardingAttr getInSharding(int64_t operandIndex) {
       return getInShardings().getSharding(operandIndex);
     }

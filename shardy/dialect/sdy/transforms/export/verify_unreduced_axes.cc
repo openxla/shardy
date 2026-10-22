@@ -214,7 +214,8 @@ LogicalResult verifyTerminator(Operation* op, func::FuncOp funcOp) {
         if (auto manualCompOp = dyn_cast<sdy::ManualComputationOp>(parentOp)) {
           if (resultSharding) {
             resultSharding =
-                eraseManualAxes(resultSharding, manualCompOp.getManualAxes());
+                eraseManualAxes(resultSharding, manualCompOp.getManualAxes(),
+                                resultSharding.getMesh(manualCompOp));
           }
         }
         if (failed(
@@ -279,15 +280,21 @@ LogicalResult verifyNamedComputationOp(
 }
 
 TensorShardingAttr retainOnlyManualUnreducedAxes(
-    TensorShardingAttr sharding, ArrayRef<StringAttr> manualAxes) {
+    TensorShardingAttr sharding, ArrayRef<AxisRefAttr> manualAxes,
+    Operation* op) {
   if (!sharding || sharding.getUnreducedAxes().empty()) {
     return TensorShardingAttr();
   }
   SmallVector<AxisRefAttr> manualUnreduced;
   for (AxisRefAttr axis : sharding.getUnreducedAxes()) {
-    if (llvm::is_contained(manualAxes, axis.getName())) {
-      manualUnreduced.push_back(axis);
+    for (AxisRefAttr manualAxis : manualAxes) {
+      if (std::optional<AxisRefAttr> overlap = axis.getOverlap(manualAxis)) {
+        manualUnreduced.push_back(*overlap);
+      }
     }
+  }
+  if (MeshAttr mesh = sharding.getMesh(op)) {
+    sortAndMergeAxes(manualUnreduced, mesh);
   }
   return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
                                  sharding.getDimShardings(),
@@ -297,7 +304,7 @@ TensorShardingAttr retainOnlyManualUnreducedAxes(
 
 LogicalResult verifyManualComputationOp(
     sdy::ManualComputationOp manualComputationOp) {
-  ArrayRef<StringAttr> manualAxes = manualComputationOp.getManualAxes();
+  ArrayRef<AxisRefAttr> manualAxes = manualComputationOp.getManualAxes();
   // Verify non-manual unreduced axes across the operand -> body argument
   // boundary (non-manual outputs are verified by verifyTerminator).
   for (int64_t i = 0; i < manualComputationOp.getNumOperands(); ++i) {
@@ -307,8 +314,10 @@ LogicalResult verifyManualComputationOp(
     }
     TensorShardingAttr operandSharding = getSharding(operand);
     TensorShardingAttr operandNonManualSharding =
-        operandSharding ? eraseManualAxes(operandSharding, manualAxes)
-                        : TensorShardingAttr();
+        operandSharding
+            ? eraseManualAxes(operandSharding, manualAxes,
+                              operandSharding.getMesh(manualComputationOp))
+            : TensorShardingAttr();
     TensorShardingAttr argSharding =
         getSharding(manualComputationOp.getBody().getArgument(i));
     if (failed(verifyUnreducedShardingEqual(
@@ -342,15 +351,15 @@ LogicalResult verifyManualComputationOp(
 
   for (Value operand : manualComputationOp.getOperands()) {
     if (!isDefiningOpExplicitReshard(operand)) {
-      recordSharding(
-          retainOnlyManualUnreducedAxes(getSharding(operand), manualAxes),
-          operandShardingsByOp);
+      recordSharding(retainOnlyManualUnreducedAxes(
+                         getSharding(operand), manualAxes, manualComputationOp),
+                     operandShardingsByOp);
     }
   }
   for (Value result : manualComputationOp.getResults()) {
-    recordSharding(
-        retainOnlyManualUnreducedAxes(getSharding(result), manualAxes),
-        resultShardingsByOp);
+    recordSharding(retainOnlyManualUnreducedAxes(
+                       getSharding(result), manualAxes, manualComputationOp),
+                   resultShardingsByOp);
   }
 
   for (ReductionOp redOp : seenReductionOps) {

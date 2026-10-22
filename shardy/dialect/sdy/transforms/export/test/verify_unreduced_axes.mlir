@@ -399,3 +399,15 @@ func.func @case_dropping_unreduced_into_unannotated_result(%idx: tensor<i32> {sd
   }) : (tensor<i32>) -> tensor<8xf32>
   return %0 : tensor<8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=4, "y"=2]>
+
+func.func @manual_computation_merged_unreduced_axis_with_manual_sub_axis(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"x":(1)2}>}) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{}], unreduced={"x"}>] out_shardings=[<@mesh, [{}], unreduced={"x":(1)2}>] manual_axes={"x":(1)2} (%in0: tensor<8xf32>) {
+    %1 = sdy.reshard %in0 <@mesh, [{}]> : tensor<8xf32>
+    sdy.return %1 : tensor<8xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}

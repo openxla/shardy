@@ -142,7 +142,7 @@ struct DataExchangeInfo {
   // The result shape after padding the input for sharding divisibility.
   SmallVector<int64_t> divisibleInputShape;
   // Contains the axes sharding all sharded dimensions (i.e. dim size > 1).
-  llvm::SmallDenseSet<StringRef> manualAxes;
+  llvm::SmallDenseSet<AxisRefAttr> manualAxes;
   // dimExchanges[i] contains the exchange info for the i-th sharded
   // dimension of the sharded tensor operand.
   SmallVector<DimExchangeInfo, 2> dimExchanges;
@@ -554,27 +554,6 @@ MeshOp getOrCreateMesh(Location loc, ModuleOp module, MeshAttr meshAttr,
   return emplaceResult.first->second;
 }
 
-// Returns a TensorShardingAttr where all axes in 'axes' are removed.
-TensorShardingAttr removeAxesFromSharding(
-    TensorShardingAttr sharding, const llvm::SmallDenseSet<StringRef>& axes) {
-  SmallVector<DimensionShardingAttr> newDimShardings;
-  for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
-    SmallVector<AxisRefAttr> newAxes;
-    for (AxisRefAttr axis : dimSharding.getAxes()) {
-      if (!axes.contains(axis.getName())) {
-        newAxes.push_back(axis);
-      }
-    }
-    newDimShardings.push_back(DimensionShardingAttr::get(
-        sharding.getContext(), newAxes, dimSharding.getIsClosed(),
-        dimSharding.getPriority()));
-  }
-  return TensorShardingAttr::get(sharding.getContext(), sharding.getMeshOrRef(),
-                                 newDimShardings, sharding.getReplicatedAxes(),
-                                 sharding.getUnreducedAxes(),
-                                 sharding.getReductionOp());
-}
-
 // Returns a TensorShardingAttr where all specific axis references in
 // axesToRemove are removed.
 TensorShardingAttr removeAxisRefsFromSharding(
@@ -596,6 +575,52 @@ TensorShardingAttr removeAxisRefsFromSharding(
                                  newDimShardings, sharding.getReplicatedAxes(),
                                  sharding.getUnreducedAxes(),
                                  sharding.getReductionOp());
+}
+
+// Returns a TensorShardingAttr where all axes overlapping `axes` are removed.
+TensorShardingAttr removeAxesFromSharding(
+    TensorShardingAttr sharding, const llvm::SmallDenseSet<AxisRefAttr>& axes,
+    MeshAttr mesh) {
+  SmallVector<AxisRefAttr> axesToRemove(axes.begin(), axes.end());
+  return removeAxisRefsFromSharding(sharding, axesToRemove, mesh);
+}
+
+int64_t getManualShardCount(
+    DimensionShardingAttr dimSharding, MeshAttr mesh,
+    const llvm::SmallDenseSet<AxisRefAttr>& manualAxes) {
+  int64_t count = 1;
+  for (AxisRefAttr axis : dimSharding.getAxes()) {
+    for (AxisRefAttr manualAxis : manualAxes) {
+      if (std::optional<AxisRefAttr> overlap = axis.getOverlap(manualAxis)) {
+        count *= overlap->getSize(mesh);
+      }
+    }
+  }
+  return count;
+}
+
+SmallVector<AxisRefAttr> getManualAxesAttrs(
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes) {
+  SmallVector<AxisRefAttr> manualAxesAttrs(manualAxes.begin(),
+                                           manualAxes.end());
+  sortAndMergeAxes(manualAxesAttrs, mesh);
+  return manualAxesAttrs;
+}
+
+SmallVector<AxisRefAttr> getManualAxesInDim(
+    DimensionShardingAttr dimSharding, MeshAttr mesh,
+    const llvm::SmallDenseSet<AxisRefAttr>& manualAxes) {
+  SmallVector<AxisRefAttr> sortedManualAxes =
+      getManualAxesAttrs(mesh, manualAxes);
+  SmallVector<AxisRefAttr> manualAxesInDim;
+  for (AxisRefAttr axisRef : dimSharding.getAxes()) {
+    for (AxisRefAttr manualAxis : sortedManualAxes) {
+      if (std::optional<AxisRefAttr> overlap = axisRef.getOverlap(manualAxis)) {
+        manualAxesInDim.push_back(*overlap);
+      }
+    }
+  }
+  return manualAxesInDim;
 }
 
 // -----------------------------------------------------------------------------
@@ -687,21 +712,17 @@ SmallVector<int64_t> getDataShiftSourceTargetPairs(
 // the partitioning space using HALO exchange and support multi-hop shifts.
 Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
                      TensorShardingAttr sharding, MeshAttr mesh,
-                     const llvm::SmallDenseSet<StringRef>& manualAxes,
+                     const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
                      ResolutionState& state) {
   auto inputType = cast<RankedTensorType>(input.getType());
   int64_t shardSize = inputType.getDimSize(dim);
   int64_t rank = inputType.getRank();
   TensorShardingAttr localSharding =
-      removeAxesFromSharding(sharding, manualAxes);
+      removeAxesFromSharding(sharding, manualAxes, mesh);
 
   // Parse manual axes for the sharded dimension.
-  SmallVector<AxisRefAttr> manualAxesInDim;
-  for (auto axisRef : sharding.getDimShardings()[dim].getAxes()) {
-    if (manualAxes.contains(axisRef.getName())) {
-      manualAxesInDim.push_back(axisRef);
-    }
-  }
+  SmallVector<AxisRefAttr> manualAxesInDim =
+      getManualAxesInDim(sharding.getDimShardings()[dim], mesh, manualAxes);
 
   int64_t hops = totalShift / shardSize;
   int64_t fraction = totalShift % shardSize;
@@ -777,7 +798,7 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
 // moves the padding in the operand of a reverse op from high edge to low edge.
 Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
                          TensorShardingAttr sharding, MeshAttr mesh,
-                         const llvm::SmallDenseSet<StringRef>& manualAxes,
+                         const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
                          ArrayRef<int64_t> paddedShape,
                          ArrayRef<int64_t> dimsToShift,
                          ArrayRef<int64_t> shiftAmounts,
@@ -787,22 +808,13 @@ Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
   localShape.reserve(sharding.getDimShardings().size());
   auto inputType = cast<RankedTensorType>(input.getType());
   for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
-    int64_t manualFactor = 1;
-    for (auto axis : dimSharding.getAxes()) {
-      if (manualAxes.contains(axis.getName())) {
-        manualFactor *= axis.getSize(mesh);
-      }
-    }
+    int64_t manualFactor = getManualShardCount(dimSharding, mesh, manualAxes);
     localShape.push_back(paddedShape[dim] / manualFactor);
   }
 
   // Get the manual axes for the manual computation.
-  SmallVector<StringAttr> manualAxesAttrs;
-  for (auto axis : mesh.getAxes()) {
-    if (manualAxes.contains(axis.getName())) {
-      manualAxesAttrs.push_back(state.rewriter.getStringAttr(axis.getName()));
-    }
-  }
+  SmallVector<AxisRefAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, manualAxes);
 
   // Build the manual computation.
   auto manualComp =
@@ -824,18 +836,6 @@ Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
 
   ReturnOp::create(state.rewriter, loc, shiftedLocal);
   return manualComp.getResult(0);
-}
-
-SmallVector<StringAttr> getManualAxesAttrs(
-    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
-    Builder& builder) {
-  SmallVector<StringAttr> manualAxesAttrs;
-  for (auto axis : mesh.getAxes()) {
-    if (manualAxes.contains(axis.getName())) {
-      manualAxesAttrs.push_back(builder.getStringAttr(axis.getName()));
-    }
-  }
-  return manualAxesAttrs;
 }
 
 // Returns the given input if sourceTargetPairs is empty, otherwise returns a
@@ -869,20 +869,16 @@ Value assembleHaloExchangeBuffer(
     Location loc, Value input, int64_t dim, int64_t edgePadSize,
     Value paddingValue, int64_t leftHops, int64_t rightHops,
     TensorShardingAttr sharding, MeshAttr mesh,
-    const llvm::SmallDenseSet<StringRef>& manualAxes,
+    const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     TensorShardingAttr localSharding, ResolutionState& state,
     int64_t interiorPad = 0, const DimExchangeInfo* dimExchange = nullptr,
     Value idInPartitionGroup = nullptr) {
-  SmallVector<AxisRefAttr> manualAxesInDim;
   DimensionShardingAttr activeDimSharded =
       (dimExchange && dimExchange->reshapeInfo)
           ? dimExchange->reshapeInfo->getTargetDimSharding()
           : sharding.getDimShardings()[dim];
-  for (auto axisRef : activeDimSharded.getAxes()) {
-    if (manualAxes.contains(axisRef.getName())) {
-      manualAxesInDim.push_back(axisRef);
-    }
-  }
+  SmallVector<AxisRefAttr> manualAxesInDim =
+      getManualAxesInDim(activeDimSharded, mesh, manualAxes);
 
   SmallVector<Value> concatSegments;
   concatSegments.reserve(leftHops + 1 + rightHops);
@@ -996,7 +992,7 @@ Value dynamicSliceHaloExchangeBuffer(Location loc, Value haloBuffer,
 Value exchangeDimWithDynamicOffset(
     Location loc, Value operand, Value paddingValue, int64_t dim,
     const DimExchangeInfo& dimExchange, TensorShardingAttr sharding,
-    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     TensorShardingAttr localSharding, int64_t padLow, int64_t stride,
     int64_t sOut, int64_t baseDilation, bool dilatedHaloBuffer,
     ResolutionState& state) {
@@ -1078,12 +1074,12 @@ Value exchangeDimWithDynamicOffset(
 Value exchangeDataWithDynamicOffset(
     Location loc, Value operand, Value paddingValue,
     TensorShardingAttr sharding, MeshAttr mesh,
-    const llvm::SmallDenseSet<StringRef>& manualAxes,
+    const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     ArrayRef<DimExchangeInfo> dimExchanges, ArrayRef<int64_t> edgePaddingLow,
     ArrayRef<int64_t> windowStrides, bool dilatedHaloBuffer,
     ResolutionState& state, ArrayRef<int64_t> baseDilations = {}) {
   TensorShardingAttr localSharding =
-      removeAxesFromSharding(sharding, manualAxes);
+      removeAxesFromSharding(sharding, manualAxes, mesh);
   int64_t dimExchangeIdx = -1;
   for (int64_t dim = 0; dim < sharding.getDimShardings().size(); ++dim) {
     if (sharding.getDimShardings()[dim].getShardedSize(mesh) <= 1) {
@@ -1106,17 +1102,6 @@ Value exchangeDataWithDynamicOffset(
   return operand;
 }
 
-int64_t getManualShardCount(DimensionShardingAttr dimSharding, MeshAttr mesh,
-                            const llvm::SmallDenseSet<StringRef>& manualAxes) {
-  int64_t count = 1;
-  for (AxisRefAttr axis : dimSharding.getAxes()) {
-    if (manualAxes.contains(axis.getName())) {
-      count *= axis.getSize(mesh);
-    }
-  }
-  return count;
-}
-
 // Performs HALO exchange over the sharded input inside a newly created
 // `sdy.manual_computation` block.
 //
@@ -1128,14 +1113,14 @@ Value haloDataExchange(
     Location loc, Value divisibleInput, ArrayRef<int64_t> divisibleInputShape,
     RankedTensorType origInputType, RankedTensorType origOutputType,
     TensorShardingAttr inSharding, TensorShardingAttr outSharding,
-    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     Value paddingValue, ArrayRef<int64_t> edgePaddingLow,
     ArrayRef<DimExchangeInfo> dimExchanges, const PostProcessFn& postProcess,
     ResolutionState& state, ArrayRef<int64_t> windowStrides = {},
     ArrayRef<int64_t> baseDilations = {}) {
   // Extract manual axes while preserving their original order in the mesh.
-  SmallVector<StringAttr> manualAxesAttrs =
-      getManualAxesAttrs(mesh, manualAxes, state.rewriter);
+  SmallVector<AxisRefAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, manualAxes);
 
   // Compute the local shape for input in the manual block based on
   // divisibleInputShape.
@@ -1258,7 +1243,7 @@ std::optional<ShardedDimContext> prepareShardedDimForExchange(
     return std::nullopt;
   }
   for (AxisRefAttr axis : dimSharding.getAxes()) {
-    info.manualAxes.insert(axis.getName());
+    info.manualAxes.insert(axis);
   }
   info.divisibleInputShape[dim] =
       getPaddedDimSize(info.divisibleInputShape[dim], shardCount);
@@ -1333,24 +1318,20 @@ DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
 Value handleReplicatedPadDims(
     Location loc, Value exchangedLocal, Value localPaddingValue,
     RankedTensorType paddedGlobalType, TensorShardingAttr sharding,
-    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     ArrayRef<int64_t> edgePaddingLow, ArrayRef<int64_t> edgePaddingHigh,
     ArrayRef<int64_t> interiorPadding, ResolutionState& state) {
   auto exchangedLocalType = cast<RankedTensorType>(exchangedLocal.getType());
   int64_t rank = exchangedLocalType.getRank();
   TensorShardingAttr localSharding =
-      removeAxesFromSharding(sharding, manualAxes);
+      removeAxesFromSharding(sharding, manualAxes, mesh);
 
   SmallVector<int64_t> localResultShape(rank, 0), localLow(rank, 0),
       localHigh(rank, 0), localInterior(rank, 0);
   bool needsLocalPad = false;
   for (int64_t i = 0; i < rank; ++i) {
-    int64_t manualFactor = 1;
-    for (auto axis : sharding.getDimShardings()[i].getAxes()) {
-      if (manualAxes.contains(axis.getName())) {
-        manualFactor *= axis.getSize(mesh);
-      }
-    }
+    int64_t manualFactor =
+        getManualShardCount(sharding.getDimShardings()[i], mesh, manualAxes);
     int64_t sOutLocal = paddedGlobalType.getDimSize(i) / manualFactor;
     localResultShape[i] = sOutLocal;
 
@@ -1472,7 +1453,7 @@ struct ReshapeHaloInfo {
 struct ReshapeShardingAnalysis {
   bool isEquivalent = false;
   bool isCommunicationFree = false;
-  llvm::SmallDenseSet<StringRef> nonDivisibleAxes;
+  llvm::SmallDenseSet<AxisRefAttr> nonDivisibleAxes;
   SmallVector<int64_t> paddedInputShape;
   SmallVector<int64_t> paddedOutputShape;
   SmallVector<ReshapeGroupInfo> reshapeGroups;
@@ -1599,16 +1580,11 @@ ReshapeShardingAnalysis ReshapeShardingAnalysis::run(
                 a.paddedOutputShape);
 
     if (groupHasIndivisibility) {
-      auto collectAxes = [&](int64_t startDim, int64_t lastDim,
-                             TensorShardingAttr sharding) {
-        for (int64_t d = startDim; d < lastDim; ++d) {
-          for (AxisRefAttr axis : sharding.getDimShardings()[d].getAxes()) {
-            a.nonDivisibleAxes.insert(axis.getName());
-          }
+      for (int64_t d = g.inStartDim; d < g.inLastDim; ++d) {
+        for (AxisRefAttr axis : inSharding.getDimShardings()[d].getAxes()) {
+          a.nonDivisibleAxes.insert(axis);
         }
-      };
-      collectAxes(g.inStartDim, g.inLastDim, inSharding);
-      collectAxes(g.outStartDim, g.outLastDim, outSharding);
+      }
     }
   }
 
@@ -1722,7 +1698,7 @@ DataExchangeInfo getReshapeDataExchangeInfo(
     TensorShardingAttr outSharding, MeshAttr mesh,
     ArrayRef<int64_t> divisibleInputShape, ArrayRef<int64_t> paddedOutputShape,
     const ReshapeHaloInfo& haloInfo,
-    const llvm::SmallDenseSet<StringRef>& nonDivisibleAxes) {
+    const llvm::SmallDenseSet<AxisRefAttr>& nonDivisibleAxes) {
   DataExchangeInfo info;
   info.manualAxes = nonDivisibleAxes;
   auto origInputType = reshapeOp.getOperand().getType();
@@ -1814,7 +1790,7 @@ LogicalResult handleReshapeHaloExchange(
     ArrayRef<ReshapeGroupInfo> reshapeGroups,
     ArrayRef<int64_t> divisibleInputShape, ArrayRef<int64_t> paddedOutputShape,
     ReshapeHaloInfo& haloInfo,
-    const llvm::SmallDenseSet<StringRef>& nonDivisibleAxes,
+    const llvm::SmallDenseSet<AxisRefAttr>& nonDivisibleAxes,
     ResolutionState& state) {
   SDY_CHECK(!haloInfo.activeGroups.empty());
 
@@ -1853,7 +1829,7 @@ LogicalResult handleReshapeHaloExchange(
     auto localOutputType =
         RankedTensorType::get(localOutputShape, resultType.getElementType());
     TensorShardingAttr localOutSharding =
-        removeAxesFromSharding(outSharding, info.manualAxes);
+        removeAxesFromSharding(outSharding, info.manualAxes, mesh);
     auto localReshape = stablehlo::ReshapeOp::create(
         state.rewriter, loc, localOutputType, exchangedLocal);
     setSharding(localReshape.getResult(), localOutSharding);
@@ -1937,7 +1913,7 @@ struct ReverseOpInfo {
   llvm::SmallVector<AxisRefAttr> axesToReverse;
   // Axes used to shard dimensions being reversed and also involve in
   // indivisible dimensions.
-  llvm::SmallDenseSet<StringRef> manualAxes;
+  llvm::SmallDenseSet<AxisRefAttr> manualAxes;
   // The new shape of the input tensor after all indivisible dimensions are
   // padded.
   SmallVector<int64_t> paddedShape;
@@ -1965,7 +1941,7 @@ std::optional<ReverseOpInfo> getReverseOpInfo(stablehlo::ReverseOp reverseOp,
 
     if (type.getDimSize(dim) % shardCount != 0) {
       for (AxisRefAttr axis : dimSharding.getAxes()) {
-        info.manualAxes.insert(axis.getName());
+        info.manualAxes.insert(axis);
       }
       info.paddedShape[dim] =
           getPaddedDimSize(type.getDimSize(dim), shardCount);
@@ -2115,13 +2091,13 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
 // Implements the slicing operation on replicated dimensions.
 Value handleReplicatedSliceDims(
     Location loc, Value exchangedLocal, TensorShardingAttr sharding,
-    MeshAttr mesh, const llvm::SmallDenseSet<StringRef>& manualAxes,
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     ArrayRef<int64_t> startIndices, ArrayRef<int64_t> limitIndices,
     ArrayRef<int64_t> strides, ResolutionState& state) {
   auto exchangedLocalType = cast<RankedTensorType>(exchangedLocal.getType());
   int64_t rank = exchangedLocalType.getRank();
   TensorShardingAttr localSharding =
-      removeAxesFromSharding(sharding, manualAxes);
+      removeAxesFromSharding(sharding, manualAxes, mesh);
 
   SmallVector<int64_t> localSliceStarts(rank, 0);
   SmallVector<int64_t> localSliceLimits =

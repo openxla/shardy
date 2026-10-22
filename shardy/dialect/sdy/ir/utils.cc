@@ -643,8 +643,8 @@ using ManualComputationShardingEraserFn = std::function<DimensionShardingAttr(
 // a dimension. This uses the invariant that shardings are prefixed with any
 // manual axes.
 TensorShardingAttr eraseAxesFromManualComputationSharding(
-    TensorShardingAttr outerManualSharding, ArrayRef<StringAttr> manualAxes,
-    ManualComputationShardingEraserFn shardingEraser) {
+    TensorShardingAttr outerManualSharding, ArrayRef<AxisRefAttr> manualAxes,
+    MeshAttr mesh, ManualComputationShardingEraserFn shardingEraser) {
   SmallVector<DimensionShardingAttr> newDimShardings;
   newDimShardings.reserve(outerManualSharding.getRank());
   for (DimensionShardingAttr dimSharding :
@@ -654,18 +654,10 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
         dimSharding,
         getFirstFreeAxisIter(dimAxes, manualAxes) - dimAxes.begin()));
   }
-  // Grab any replicated/unreduced axes that are not manual axes. Can't use
-  // `partition_point` as there is no defined order for replicated/unreduced
-  // axes.
-  auto isFreeAxis = [&](AxisRefAttr axis) {
-    return !llvm::is_contained(manualAxes, axis.getName());
-  };
-  SmallVector<AxisRefAttr> newReplicatedAxes;
-  llvm::copy_if(outerManualSharding.getReplicatedAxes(),
-                std::back_inserter(newReplicatedAxes), isFreeAxis);
-  SmallVector<AxisRefAttr> newUnreducedAxes;
-  llvm::copy_if(outerManualSharding.getUnreducedAxes(),
-                std::back_inserter(newUnreducedAxes), isFreeAxis);
+  SmallVector<AxisRefAttr> newReplicatedAxes =
+      getAxisSetDiff(outerManualSharding.getReplicatedAxes(), manualAxes, mesh);
+  SmallVector<AxisRefAttr> newUnreducedAxes =
+      getAxisSetDiff(outerManualSharding.getUnreducedAxes(), manualAxes, mesh);
   return TensorShardingAttr::get(
       outerManualSharding.getContext(), outerManualSharding.getMeshOrRef(),
       newDimShardings, newReplicatedAxes, newUnreducedAxes,
@@ -676,26 +668,74 @@ TensorShardingAttr eraseAxesFromManualComputationSharding(
 }  // namespace
 
 TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
-                                   ArrayRef<StringAttr> manualAxes) {
+                                   ArrayRef<AxisRefAttr> manualAxes,
+                                   MeshAttr mesh) {
   if (manualAxes.empty()) {
     return outerManualSharding;
   }
+  if (!mesh) {
+    mesh = dyn_cast<MeshAttr>(outerManualSharding.getMeshOrRef());
+  }
   return eraseAxesFromManualComputationSharding(
-      outerManualSharding, manualAxes,
-      std::mem_fn(&DimensionShardingAttr::dropFrontShardingAxes));
+      outerManualSharding, manualAxes, mesh,
+      [&](DimensionShardingAttr dimSharding, int64_t firstFreeAxisIndex) {
+        ArrayRef<AxisRefAttr> dimAxes = dimSharding.getAxes();
+        if (firstFreeAxisIndex < static_cast<int64_t>(dimAxes.size())) {
+          AxisRefAttr firstFreeAxis = dimAxes[firstFreeAxisIndex];
+          for (AxisRefAttr manualAxis : manualAxes) {
+            if (std::optional<AxisRefAttr> overlap =
+                    firstFreeAxis.getOverlap(manualAxis);
+                overlap && overlap->strictPrefixOf(firstFreeAxis)) {
+              if (std::optional<AxisRefAttr> suffix =
+                      firstFreeAxis.getSuffixWithoutOverlap(*overlap, mesh)) {
+                SmallVector<AxisRefAttr> newAxes;
+                newAxes.reserve(dimAxes.size() - firstFreeAxisIndex);
+                newAxes.push_back(*suffix);
+                newAxes.append(dimAxes.begin() + firstFreeAxisIndex + 1,
+                               dimAxes.end());
+                return DimensionShardingAttr::get(
+                    dimSharding.getContext(), newAxes,
+                    dimSharding.getIsClosed(), dimSharding.getPriority());
+              }
+            }
+          }
+        }
+        return dimSharding.dropFrontShardingAxes(firstFreeAxisIndex);
+      });
 }
 
 TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
-                                 ArrayRef<StringAttr> manualAxes) {
+                                 ArrayRef<AxisRefAttr> manualAxes) {
+  MeshAttr mesh = dyn_cast<MeshAttr>(outerManualSharding.getMeshOrRef());
   return eraseAxesFromManualComputationSharding(
-      outerManualSharding, manualAxes,
-      std::mem_fn(&DimensionShardingAttr::takeFrontShardingAxes));
+      outerManualSharding, manualAxes, mesh,
+      [&](DimensionShardingAttr dimSharding, int64_t firstFreeAxisIndex) {
+        ArrayRef<AxisRefAttr> dimAxes = dimSharding.getAxes();
+        if (firstFreeAxisIndex < static_cast<int64_t>(dimAxes.size())) {
+          AxisRefAttr firstFreeAxis = dimAxes[firstFreeAxisIndex];
+          for (AxisRefAttr manualAxis : manualAxes) {
+            if (std::optional<AxisRefAttr> overlap =
+                    firstFreeAxis.getOverlap(manualAxis);
+                overlap && overlap->strictPrefixOf(firstFreeAxis)) {
+              SmallVector<AxisRefAttr> newAxes(
+                  dimAxes.begin(), dimAxes.begin() + firstFreeAxisIndex);
+              newAxes.push_back(*overlap);
+              return DimensionShardingAttr::get(
+                  dimSharding.getContext(), newAxes, dimSharding.getIsClosed(),
+                  dimSharding.getPriority());
+            }
+          }
+        }
+        return dimSharding.takeFrontShardingAxes(firstFreeAxisIndex);
+      });
 }
 
 ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
-    ArrayRef<AxisRefAttr> dimAxes, ArrayRef<StringAttr> manualAxes) {
+    ArrayRef<AxisRefAttr> dimAxes, ArrayRef<AxisRefAttr> manualAxes) {
   return llvm::partition_point(dimAxes, [&manualAxes](AxisRefAttr axis) {
-    return llvm::is_contained(manualAxes, axis.getName());
+    return llvm::any_of(manualAxes, [axis](AxisRefAttr manualAxis) {
+      return manualAxis.contains(axis);
+    });
   });
 }
 

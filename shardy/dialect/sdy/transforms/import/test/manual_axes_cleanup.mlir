@@ -154,6 +154,18 @@ func.func @sub_axes_in_out_shardings(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   return %0 : tensor<8xf32>
 }
 
+// CHECK-LABEL: @sub_axes_in_manual_axes
+func.func @sub_axes_in_manual_axes(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NEXT: sdy.manual_computation(%arg0)
+  // CHECK-SAME{LITERAL}: in_shardings=[<@mesh_x_8_y_8, [{"y":(1)2}], replicated={"x":(2)2, "y":(2)2}>]
+  // CHECK-SAME{LITERAL}: out_shardings=[<@mesh_x_8_y_8, [{"x":(2)2}], replicated={"y":(1)4}>]
+  // CHECK-SAME{LITERAL}: manual_axes={"x":(2)2, "y":(1)4} (%arg1: tensor<4xf32>) {
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh_x_8_y_8, [{"y":(1)2}]>] out_shardings=[<@mesh_x_8_y_8, [{"x":(2)2}], replicated={"y":(1)2}>] manual_axes={"y":(1)4, "x":(2)2} (%arg1: tensor<4xf32>) {
+    sdy.return %arg1 : tensor<4xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
 // -----
 sdy.mesh @mesh = <["c"=2, "a"=2, "b"=2]>
 

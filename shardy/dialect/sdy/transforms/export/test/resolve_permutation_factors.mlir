@@ -221,7 +221,7 @@ func.func @pad_single_left_hop(
   // REPL: %[[RES:.*]] = sdy.reshard %[[PAD]] <@mesh_a4, [{"a":(2)2}, {"b"}]> : tensor<7x8xi32>
 
   // HALO: %[[CST:.*]] = stablehlo.constant dense<0> : tensor<i32>
-  // HALO: %[[MC:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST]]) in_shardings=[<@mesh_a4, [{"a":(2)2}, {"b"}]>, <@mesh_a4, []>] out_shardings=[<@mesh_a4, [{"a":(2)2}, {"b"}]>] manual_axes={"a", "b"} (%[[ARG1:.*]]: tensor<2x4xi32>, %[[ARG2:.*]]: tensor<i32>) {
+  // HALO: %[[MC:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST]]) in_shardings=[<@mesh_a4, [{"a":(2)2}, {"b"}]>, <@mesh_a4, []>] out_shardings=[<@mesh_a4, [{"a":(2)2}, {"b"}]>] manual_axes={"a":(2)2, "b"} (%[[ARG1:.*]]: tensor<2x4xi32>, %[[ARG2:.*]]: tensor<i32>) {
   // HALO: %[[PART_ID:.*]] = stablehlo.partition_id : tensor<ui32>
   // HALO: %[[CONVERT:.*]] = stablehlo.convert %[[PART_ID]] : (tensor<ui32>) -> tensor<i32>
   // HALO: %[[C_DIV:.*]] = stablehlo.constant dense<2> : tensor<i32>
@@ -1294,7 +1294,7 @@ func.func @reverse_indivisible_multiple_axes(
   // HALO-SAME: low = [0, 0], high = [0, 1]
 
   // HALO:      %[[HALO_SHIFTED:.*]] = sdy.manual_computation(%[[PAD]])
-  // HALO-SAME: manual_axes={"a", "c"}
+  // HALO-SAME: manual_axes={"a", "c":(2)2}
   // HALO-SAME: (%[[LOCAL_IN:.*]]: tensor<6x2xi32>) {
   // HALO-NEXT:   %[[CP:.*]] = "stablehlo.collective_permute"(%[[LOCAL_IN]])
   // HALO-SAME{LITERAL}:   source_target_pairs = dense<[[0, 1], [1, 8], [2, 3], [3, 10], [4, 5], [5, 12], [6, 7], [7, 14], [8, 9], [10, 11], [12, 13], [14, 15]]> : tensor<12x2xi64>
@@ -1313,6 +1313,45 @@ func.func @reverse_indivisible_multiple_axes(
 
   // CHECK: %[[AG:.*]] = sdy.all_gather [{}, {"a", "c":(2)2}] %[[RES]]
   %2 = sdy.all_gather [{}, {"a", "c":(2)2}] %1 out_sharding=<@mesh_abc, [{}, {}]> : tensor<6x7xi32>
+  // CHECK: return %[[AG]] : tensor<6x7xi32>
+  return %2 : tensor<6x7xi32>
+}
+
+// CHECK-LABEL: func @reverse_indivisible_passthrough_sub_axis
+// CHECK-SAME:  (%[[ARG0:.*]]: tensor<6x8xi32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>})
+// CHECK-SAME:  -> tensor<6x7xi32> {
+func.func @reverse_indivisible_passthrough_sub_axis(
+  %arg0: tensor<6x8xi32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>})
+  -> tensor<6x7xi32> {
+
+  // CHECK: %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:6, 0:7]
+  %0 = stablehlo.slice %arg0 [0:6, 0:7]
+    {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>]>}
+    : (tensor<6x8xi32>) -> tensor<6x7xi32>
+
+  // REPL: %[[REPL_IN:.*]] = sdy.reshard %[[SLICE]] <@mesh_abc, [{"c":(1)2}, {}]>
+  // REPL: %[[REPL_REV:.*]] = stablehlo.reverse %[[REPL_IN]], dims = [1]
+  // REPL-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"c":(1)2}, {}]>]>}
+  // REPL: %[[RES:.*]] = sdy.reshard %[[REPL_REV]] <@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>
+
+  // HALO:      %[[HALO_SHIFTED:.*]] = sdy.manual_computation
+  // HALO-SAME: in_shardings=[<@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>]
+  // HALO-SAME: out_shardings=[<@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>]
+  // HALO-SAME: manual_axes={"a", "c":(2)2}
+  // HALO-SAME: (%[[LOCAL_IN:.*]]: tensor<6x2xi32>) {
+  // HALO-NEXT:   %[[CP:.*]] = "stablehlo.collective_permute"(%[[LOCAL_IN]])
+  // HALO-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"c":(1)2}, {}]>]>
+  // HALO-NEXT:   %[[OWN_SLICE:.*]] = stablehlo.slice %[[CP]] [0:6, 1:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"c":(1)2}, {}]>]>}
+  // HALO-NEXT:   %[[HALO_SLICE:.*]] = stablehlo.slice %[[LOCAL_IN]] [0:6, 0:1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"c":(1)2}, {}]>]>}
+  // HALO-NEXT:   %[[CONCAT:.*]] = stablehlo.concatenate %[[OWN_SLICE]], %[[HALO_SLICE]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"c":(1)2}, {}]>]>}
+  // HALO-NEXT:   sdy.return %[[CONCAT]]
+  // HALO-NEXT: } : (tensor<6x8xi32>) -> tensor<6x8xi32>
+  %1 = stablehlo.reverse %0, dims = [1]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"c":(1)2}, {"a", "c":(2)2}]>]>}
+    : tensor<6x7xi32>
+
+  // CHECK: %[[AG:.*]] = sdy.all_gather [{"c":(1)2}, {"a", "c":(2)2}] %[[RES:.*]]
+  %2 = sdy.all_gather [{"c":(1)2}, {"a", "c":(2)2}] %1 out_sharding=<@mesh_abc, [{}, {}]> : tensor<6x7xi32>
   // CHECK: return %[[AG]] : tensor<6x7xi32>
   return %2 : tensor<6x7xi32>
 }

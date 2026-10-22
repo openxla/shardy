@@ -561,7 +561,8 @@ SmallVector<TensorShardingAttr> getOpenShardingsWithShardingAtIndex(
 // `ManualComputationOp` are prefixed with the manual axes. So this removes the
 // prefix of manual axes (if any exist) from each dim sharding.
 TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
-                                   ArrayRef<StringAttr> manualAxes);
+                                   ArrayRef<AxisRefAttr> manualAxes,
+                                   MeshAttr mesh = nullptr);
 
 // Removes free axes from the sharding.
 //
@@ -569,7 +570,7 @@ TensorShardingAttr eraseManualAxes(TensorShardingAttr outerManualSharding,
 // `ManualComputationOp` are prefixed with the manual axes. So this removes the
 // suffix of free axes (if any exist) from each dim sharding.
 TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
-                                 ArrayRef<StringAttr> manualAxes);
+                                 ArrayRef<AxisRefAttr> manualAxes);
 
 // `dimAxes` is assumed to be the concatenation of some manual axes and some
 // free axes. This returns an iterator to the first free axis in `dimAxes`.
@@ -577,7 +578,7 @@ TensorShardingAttr eraseFreeAxes(TensorShardingAttr outerManualSharding,
 // Axes in the range [0, firstFreeAxis) are manual axes, and
 // [firstFreeAxis, dimAxes.size()) are free axes.
 ArrayRef<AxisRefAttr>::const_iterator getFirstFreeAxisIter(
-    ArrayRef<AxisRefAttr> dimAxes, ArrayRef<StringAttr> manualAxes);
+    ArrayRef<AxisRefAttr> dimAxes, ArrayRef<AxisRefAttr> manualAxes);
 
 // Returns all axes or sub-axes in `axesA` that are not in `axesB`.
 //

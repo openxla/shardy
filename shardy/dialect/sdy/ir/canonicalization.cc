@@ -124,8 +124,8 @@ class RedundantManualComputationPattern
       MeshAttr mesh =
           getCommonMesh(inShardings, outShardings, manualComputationOp);
       SDY_CHECK(mesh) << "expected inputs and outputs to have a common mesh";
-      for (StringAttr manualAxis : manualComputationOp.getManualAxes()) {
-        manualAxesProduct *= mesh.getAxisSize(manualAxis);
+      for (AxisRefAttr manualAxis : manualComputationOp.getManualAxes()) {
+        manualAxesProduct *= manualAxis.getSize(mesh);
       }
     }
 
