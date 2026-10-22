@@ -1219,7 +1219,7 @@ Syntax:
 
 ```
 #sdy.manual_axes<
-  ::llvm::ArrayRef<StringAttr>   # value
+  ::llvm::ArrayRef<AxisRefAttr>   # value
 >
 ```
 
@@ -1227,7 +1227,7 @@ Syntax:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| value | `::llvm::ArrayRef<StringAttr>` |  |
+| value | `::llvm::ArrayRef<AxisRefAttr>` |  |
 
 ### MeshAttr
 
