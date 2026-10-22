@@ -17,7 +17,6 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_IR_UTILS_H_
 
 #include <cstdint>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -496,32 +495,6 @@ void inlineRegionAndConvertTerminatorOp(Region& src, Region& dst) {
   }
 }
 
-// Clones region `src`, inserts `src` into the start of `dst`, and converts the
-// terminator of each block in `dst` to `TerminatorOpTy`.
-template <typename TerminatorOpTy>
-void cloneRegionAndConvertTerminatorOp(Region& src, Region& dst,
-                                       RewriterBase& rewriter) {
-  Block::iterator savedInsertionPoint = rewriter.getInsertionPoint();
-  Block* savedBlock = rewriter.getInsertionBlock();
-  rewriter.cloneRegionBefore(src, dst, dst.begin());
-
-  for (auto& block : dst.getBlocks()) {
-    Operation* returnOp = block.getTerminator();
-    rewriter.setInsertionPointAfter(returnOp);
-    rewriter.replaceOpWithNewOp<TerminatorOpTy>(returnOp,
-                                                returnOp->getOperands());
-  }
-
-  rewriter.setInsertionPoint(savedBlock, savedInsertionPoint);
-}
-
-// Clones region `src`, inserts `src` into the start of `dst`, and converts the
-// terminator of each block in `dst` to `TerminatorOpTy`.
-template <typename TerminatorOpTy>
-void cloneRegionAndConvertTerminatorOp(Region& src, Region& dst) {
-  IRRewriter rewriter(src.getContext());
-  cloneRegionAndConvertTerminatorOp<TerminatorOpTy>(src, dst, rewriter);
-}
 
 // Gets the enclosing `OpTy` of the given `op`. If the `op` is already of type
 // `OpTy`, returns it.
@@ -614,42 +587,6 @@ bool hasOnlyUsersOfType(Operation* op) {
   });
 }
 
-// Helper class to insert or merge `AxisRefAttr`s into a `SmallVector`.
-// It implements the interface required by `llvm::transform` to be used as an
-// output iterator.
-class AddAxisOrMergeInserter {
- public:
-  using iterator_category = std::output_iterator_tag;
-  using value_type = void;
-  using difference_type = void;
-  using pointer = void;
-  using reference = void;
-
-  explicit AddAxisOrMergeInserter(SmallVector<AxisRefAttr>* newAxisRefs,
-                                  const MeshAttr* mesh)
-      : axisRefs(newAxisRefs), mesh(mesh) {}
-
-  AddAxisOrMergeInserter& operator=(AxisRefAttr value) {
-    sdy::addAxisOrMerge(*axisRefs, value, *mesh);
-    return *this;
-  }
-
-  AddAxisOrMergeInserter& operator=(ArrayRef<AxisRefAttr> values) {
-    for (AxisRefAttr value : values) {
-      *this = value;
-    }
-    return *this;
-  }
-
-  AddAxisOrMergeInserter& operator*() { return *this; }
-  AddAxisOrMergeInserter& operator++() { return *this; }
-  AddAxisOrMergeInserter& operator++(int) { return *this; }
-
- private:
-  // Use pointers so that callers like `llvm::transform` can copy the inserter.
-  SmallVector<AxisRefAttr>* axisRefs;
-  const MeshAttr* mesh;
-};
 
 // Returns true if `value` is used by `user`.
 bool isUsedBy(Value value, Operation* user);

@@ -22,7 +22,6 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
@@ -160,13 +159,7 @@ class AxisListRef {
                           /*isTailIterated=*/true, tailAxisRef);
   }
 
-  friend struct AxisListRefInfo;
-
  private:
-  // Creates an AxisListRef with given `axisRefs` and `tailAxisRef`.
-  AxisListRef(ArrayRef<AxisRefAttr> axisRefs, AxisRefAttr tailAxisRef)
-      : axisRefs(axisRefs), tailAxisRef(tailAxisRef) {}
-
   // Trims axes to have the first `baseSize` axes and, in case non-empty,
   // `newTail` as an additional final axis.
   //
@@ -186,16 +179,6 @@ class AxisListRef {
   AxisRefAttr tailAxisRef;
 };
 
-struct AxisListRefInfo : public llvm::DenseMapInfo<AxisListRef> {
-  static unsigned getHashValue(const AxisListRef& m) {
-    return llvm::hash_value(m.toPair());
-  }
-  static bool isEqual(const AxisListRef& lhs, const AxisListRef& rhs) {
-    return lhs == rhs;
-  }
-
-  static inline AxisListRef getEmptyKey() { return AxisListRef(); }
-};
 
 }  // namespace sdy
 }  // namespace mlir

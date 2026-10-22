@@ -472,66 +472,6 @@ TEST_F(UtilsTest, SortAndMergeAxes) {
                                 AxisRefIs("c"), SubAxisRefIs("d", 2, 4)));
 }
 
-TEST_F(UtilsTest, AddAxisOrMergeInserterSingleAxisNoMerge) {
-  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}});
-  AxisRefVector axes = {createSubAxis("a", 1, 2), createAxis("b")};
-  AxisRefVector newAxes;
-  std::transform(axes.begin(), axes.end(),
-                 AddAxisOrMergeInserter(&newAxes, &mesh),
-                 [&](AxisRefAttr axis) {
-                   if (axis.getName() == "b") {
-                     return createSubAxis("c", 4, 2);
-                   }
-                   return axis;
-                 });
-  EXPECT_THAT(newAxes,
-              ElementsAre(SubAxisRefIs("a", 1, 2), SubAxisRefIs("c", 4, 2)));
-}
-
-TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesNoMerge) {
-  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}, {"c", 8}, {"d", 8}});
-  AxisRefVector axes = {createAxis("a"), createSubAxis("b", 1, 2)};
-  AxisRefVector newAxes;
-  std::transform(axes.begin(), axes.end(),
-                 AddAxisOrMergeInserter(&newAxes, &mesh),
-                 [&](AxisRefAttr axis) -> AxisRefVector {
-                   if (axis.getName() == "b") {
-                     return {createAxis("c"), createAxis("d")};
-                   }
-                   return {};
-                 });
-  EXPECT_THAT(newAxes, ElementsAre(AxisRefIs("c"), AxisRefIs("d")));
-}
-
-TEST_F(UtilsTest, AddAxisOrMergeInserterSingleAxisMerge) {
-  MeshAttr mesh = createMesh({{"a", 8}, {"b", 8}});
-  AxisRefVector axes = {createSubAxis("a", 1, 2), createAxis("b")};
-  AxisRefVector newAxes;
-  std::transform(axes.begin(), axes.end(),
-                 AddAxisOrMergeInserter(&newAxes, &mesh),
-                 [&](AxisRefAttr axis) {
-                   if (axis.getName() == "b") {
-                     return createSubAxis("a", 2, 2);
-                   }
-                   return axis;
-                 });
-  EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("a", 1, 4)));
-}
-
-TEST_F(UtilsTest, AddAxisOrMergeInserterMultipleAxesMerge) {
-  MeshAttr mesh = createMesh({{"a", 8}, {"b", 16}});
-  AxisRefVector axes = {createAxis("a"), createSubAxis("b", 8, 2)};
-  AxisRefVector newAxes;
-  std::transform(
-      axes.begin(), axes.end(), AddAxisOrMergeInserter(&newAxes, &mesh),
-      [&](AxisRefAttr axis) -> AxisRefVector {
-        if (axis.getName() == "a") {
-          return {createSubAxis("b", 2, 2), createSubAxis("b", 4, 2)};
-        }
-        return {axis};
-      });
-  EXPECT_THAT(newAxes, ElementsAre(SubAxisRefIs("b", 2, 8)));
-}
 
 TEST_F(UtilsTest, WalkCallsPostOrder) {
   auto localModule = mlir::parseSourceString<ModuleOp>(
