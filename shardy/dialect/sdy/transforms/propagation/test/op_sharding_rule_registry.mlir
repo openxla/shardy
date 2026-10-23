@@ -432,6 +432,13 @@ func.func @custom_call_layout_constraint(%arg0: tensor<8x4xf32>) -> tensor<8x4xf
   return %0 : tensor<8x4xf32>
 }
 
+// CHECK-LABEL: func @custom_call_compute_on_done
+func.func @custom_call_compute_on_done(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}>
+  %0 = stablehlo.custom_call @"compute-on-done"(%arg0) : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
 // CHECK-LABEL: func @custom_call_eigh
 func.func @custom_call_eigh(%arg0: tensor<8x4x4xf32>) -> (tensor<8x4x4xf32>, tensor<8x4xf32>) {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k], [i, k]) {i=8, j=4, k=4}>
