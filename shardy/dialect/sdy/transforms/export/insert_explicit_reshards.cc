@@ -419,16 +419,19 @@ bool isOnFullVersion(Operation* op, const bool enableFullVersion) {
 }
 
 // A wrapper that iterates over all dimensions in a tensor mapping and calls
-// the generalized distributeAxesAcrossFactors utility for each.
+// the generalized distributeAxesAcrossFactors utility for batching factors.
 void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
-                      ArrayRef<int64_t> factorSizes, MeshAttr mesh,
+                      OpShardingRuleAttr shardingRule, MeshAttr mesh,
                       ArrayRef<AxisRefAttr> allAxes) {
   SmallVector<FactorSharding> flattenedShardings;
   SmallVector<int64_t> flattenedFactorSizes;
   SmallVector<int64_t> factorIndices;
 
-  // Flatten factors from all dimensions.
+  // Flatten batching factors from all dimensions. Once a dimension encounters a
+  // non batching factor, later factors in that dimension cannot be sharded
+  // without introducing a strided view.
   for (auto [dimIdx, dimMapping] : llvm::enumerate(mapping.getDimMappings())) {
+    bool skip = false;
     for (int64_t fIdx : dimMapping.getFactorIndices()) {
       auto it = tfs.factorIndexToSharding.find(fIdx);
       if (it == tfs.factorIndexToSharding.end()) {
@@ -439,12 +442,18 @@ void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
         continue;
       }
       FactorSharding& fs = it->second;
+      fs.axisRefs.clear();
+      fs.overflowAxes.clear();
+      if (!shardingRule.isBatchingFactor(fIdx)) {
+        skip = true;
+      }
+      if (skip) {
+        continue;
+      }
       FactorSharding localFs = fs;
-      localFs.axisRefs.clear();
-      localFs.overflowAxes.clear();
 
       flattenedShardings.push_back(localFs);
-      flattenedFactorSizes.push_back(factorSizes[fIdx]);
+      flattenedFactorSizes.push_back(shardingRule.getFactorSizes()[fIdx]);
       factorIndices.push_back(fIdx);
     }
   }
@@ -489,44 +498,57 @@ AxesPerFactor processReshapeWithOverflowAxes(
   // Redistribute axes on both sides independently.
   redistributeAxes(shardingProjection.getMutableOperand(0),
                    shardingRule.getOperandMapping(0),
-                   shardingRule.getFactorSizes(), mesh, allAxes);
+                   /*shardingRule=*/shardingRule, mesh, allAxes);
   redistributeAxes(shardingProjection.getMutableResult(0),
                    shardingRule.getResultMapping(0),
-                   shardingRule.getFactorSizes(), mesh, allAxes);
+                   /*shardingRule=*/shardingRule, mesh, allAxes);
 
   // Synchronize projection factors.
-  TensorShardingAttr inBuilt =
-      shardingProjection.getOperand(0).createTensorShardingAttr(
-          ctx, shardingRule.getOperandMapping(0), shardingRule.getFactorSizes(),
-          meshOp.getName(), mesh);
-  TensorShardingAttr outBuilt =
-      shardingProjection.getResult(0).createTensorShardingAttr(
-          ctx, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
-          meshOp.getName(), mesh);
-  ShardingProjection legalProj =
-      ShardingProjection::build({inBuilt}, {outBuilt}, shardingRule, mesh);
+  auto createInSharding = [&]() {
+    return shardingProjection.getOperand(0).createTensorShardingAttr(
+        ctx, shardingRule.getOperandMapping(0), shardingRule.getFactorSizes(),
+        meshOp.getName(), mesh);
+  };
+  auto createOutSharding = [&]() {
+    return shardingProjection.getResult(0).createTensorShardingAttr(
+        ctx, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
+        meshOp.getName(), mesh);
+  };
+  ShardingProjection legalProj = ShardingProjection::build(
+      {createInSharding()}, {createOutSharding()}, shardingRule, mesh);
 
-  // Find common axes supported by the sharding projection.
+  // Find common axes supported by the sharding projection on batching factors.
   AxesPerFactor commonAxes =
       legalProj.getGreatestCommonPrefixAxes(shardingRule.getNumFactors());
   for (int64_t f = 0; f < shardingRule.getNumFactors(); ++f) {
+    if (!shardingRule.isBatchingFactor(f)) {
+      commonAxes[f].clear();
+    }
     shardingProjection.updateSharding(f, commonAxes[f], {});
+  }
+
+  TensorShardingAttr newInSharding = createInSharding();
+  TensorShardingAttr resSharding = createOutSharding();
+
+  // Enforce sharding consistency for reshape op, which is an invariant
+  // expected by resolve permutation factors.
+  if (!isShardingEquivalentAcrossReshapes(
+          newInSharding, op.getOperand().getType(), resSharding, op.getType(),
+          op, /*allowNonDivisible=*/true)) {
+    for (int64_t f = 0; f < shardingRule.getNumFactors(); ++f) {
+      commonAxes[f].clear();
+      shardingProjection.updateSharding(f, {}, {});
+    }
+    newInSharding = createInSharding();
+    resSharding = createOutSharding();
   }
 
   // Calculate update bits and use it to insert reshards.
   UpdateTensorShardings finalUpdate(shardingRule.getNumOperands(),
                                     shardingRule.getNumResults());
-  if (!isEquivalent(
-          getSharding(op.getOperand()),
-          shardingProjection.getOperand(0).createTensorShardingAttr(
-              ctx, shardingRule.getOperandMapping(0),
-              shardingRule.getFactorSizes(), meshOp.getName(), mesh))) {
+  if (!isEquivalent(getSharding(op.getOperand()), newInSharding)) {
     finalUpdate.updateOperands.set(0);
   }
-  TensorShardingAttr resSharding =
-      shardingProjection.getResult(0).createTensorShardingAttr(
-          ctx, shardingRule.getResultMapping(0), shardingRule.getFactorSizes(),
-          meshOp.getName(), mesh);
   if (!isEquivalent(resSharding, outShardings[0])) {
     finalUpdate.updateResults.set(0);
   }

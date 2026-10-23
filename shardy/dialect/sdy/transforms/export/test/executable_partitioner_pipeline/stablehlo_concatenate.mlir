@@ -6,6 +6,7 @@
 sdy.mesh @mesh_2 = <["x"=2]>
 sdy.mesh @mesh_4 = <["x"=4]>
 sdy.mesh @mesh_2x2 = <["x"=2, "y"=2]>
+sdy.mesh @mesh_4x2 = <["x"=4, "y"=2]>
 
 func.func @parallel_concat(
   %arg0: tensor<4x2xi32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}, {"x"}]>},
@@ -99,6 +100,16 @@ func.func @parallel_rotate_right_unaligned_partial_shards(
     {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}]>]>}
     : (tensor<2xi32>, tensor<3xi32>) -> tensor<5xi32>
   return %2 : tensor<5xi32>
+}
+
+func.func @parallel_concat_whole_trailing_axis(
+  %arg0: tensor<2x8xi32> {sdy.sharding = #sdy.sharding<@mesh_4x2, [{}, {"x", "y"}]>},
+  %arg1: tensor<2x16xi32> {sdy.sharding = #sdy.sharding<@mesh_4x2, [{}, {"x", "y"}]>})
+  -> (tensor<2x24xi32> {sdy.sharding = #sdy.sharding<@mesh_4x2, [{}, {"x", "y"}]>}) {
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 1
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4x2, [{}, {"x", "y"}]>]>}
+    : (tensor<2x8xi32>, tensor<2x16xi32>) -> tensor<2x24xi32>
+  return %0 : tensor<2x24xi32>
 }
 
 //--- part2.mlir
@@ -201,6 +212,55 @@ func.func @main() {
   check.expect_eq %seq_ps, %ps_res#1 : tensor<5xi32>
   check.expect_eq %seq_ps, %ps_res#2 : tensor<5xi32>
   check.expect_eq %seq_ps, %ps_res#3 : tensor<5xi32>
+
+  // Test 6: 2D concat with {"x", "y"} on concat dim and batching dim size 2 on
+  // @mesh_4x2 = <["x"=4, "y"=2]> (places whole trailing "y" onto dim 0).
+  %w_i0 = stablehlo.iota dim = 0 : tensor<16xi32>
+  %w_c0 = stablehlo.reshape %w_i0 : (tensor<16xi32>) -> tensor<2x8xi32>
+  %w_i1 = stablehlo.iota dim = 0 : tensor<32xi32>
+  %w_k100 = stablehlo.constant dense<100> : tensor<32xi32>
+  %w_a1 = stablehlo.add %w_i1, %w_k100 : tensor<32xi32>
+  %w_c1 = stablehlo.reshape %w_a1 : (tensor<32xi32>) -> tensor<2x16xi32>
+  %seq_w = func.call @sequential_concat_whole_trailing_axis(%w_c0, %w_c1)
+      : (tensor<2x8xi32>, tensor<2x16xi32>) -> tensor<2x24xi32>
+  %w0_0 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 0>, limit_indices = array<i64: 2, 1>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_1 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 1>, limit_indices = array<i64: 2, 2>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_2 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 2>, limit_indices = array<i64: 2, 3>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_3 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 3>, limit_indices = array<i64: 2, 4>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_4 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 4>, limit_indices = array<i64: 2, 5>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_5 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 5>, limit_indices = array<i64: 2, 6>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_6 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 6>, limit_indices = array<i64: 2, 7>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w0_7 = "stablehlo.slice"(%w_c0) {start_indices = array<i64: 0, 7>, limit_indices = array<i64: 2, 8>, strides = array<i64: 1, 1>} : (tensor<2x8xi32>) -> tensor<2x1xi32>
+  %w1_0 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 0>, limit_indices = array<i64: 2, 2>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_1 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 2>, limit_indices = array<i64: 2, 4>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_2 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 4>, limit_indices = array<i64: 2, 6>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_3 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 6>, limit_indices = array<i64: 2, 8>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_4 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 8>, limit_indices = array<i64: 2, 10>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_5 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 10>, limit_indices = array<i64: 2, 12>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_6 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 12>, limit_indices = array<i64: 2, 14>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w1_7 = "stablehlo.slice"(%w_c1) {start_indices = array<i64: 0, 14>, limit_indices = array<i64: 2, 16>, strides = array<i64: 1, 1>} : (tensor<2x16xi32>) -> tensor<2x2xi32>
+  %w_res:8 = "interpreter.run_parallel"(
+      %w0_0, %w1_0, %w0_1, %w1_1,
+      %w0_2, %w1_2, %w0_3, %w1_3,
+      %w0_4, %w1_4, %w0_5, %w1_5,
+      %w0_6, %w1_6, %w0_7, %w1_7) {
+    programs = [[
+      @parallel_concat_whole_trailing_axis, @parallel_concat_whole_trailing_axis,
+      @parallel_concat_whole_trailing_axis, @parallel_concat_whole_trailing_axis,
+      @parallel_concat_whole_trailing_axis, @parallel_concat_whole_trailing_axis,
+      @parallel_concat_whole_trailing_axis, @parallel_concat_whole_trailing_axis
+    ]]
+  } : (tensor<2x1xi32>, tensor<2x2xi32>, tensor<2x1xi32>, tensor<2x2xi32>,
+       tensor<2x1xi32>, tensor<2x2xi32>, tensor<2x1xi32>, tensor<2x2xi32>,
+       tensor<2x1xi32>, tensor<2x2xi32>, tensor<2x1xi32>, tensor<2x2xi32>,
+       tensor<2x1xi32>, tensor<2x2xi32>, tensor<2x1xi32>, tensor<2x2xi32>)
+      -> (tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>,
+          tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>)
+  %w_full = stablehlo.concatenate %w_res#0, %w_res#1, %w_res#2, %w_res#3,
+      %w_res#4, %w_res#5, %w_res#6, %w_res#7, dim = 1
+      : (tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>,
+         tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>) -> tensor<2x24xi32>
+  check.expect_eq %seq_w, %w_full : tensor<2x24xi32>
 
   return
 }
