@@ -1082,6 +1082,12 @@ func.func @main(%arg0: tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a
   return %2 : tensor<8x2xi32>
 }
 
+// CHECK-LABEL: func private @bar_0(%arg0: tensor<8x2xi32>
+// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+// CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
+// CHECK-NEXT:  }
+
 // CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
@@ -1093,12 +1099,6 @@ func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   %1 = call @bar(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
   return %1 : tensor<8x2xi32>
 }
-
-// CHECK-LABEL: func private @bar_0(%arg0: tensor<8x2xi32>
-// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
-// CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
-// CHECK-NEXT:  }
 
 // CHECK-NOT: func private @bar(%arg0: tensor<8x2xi32>
 func.func private @bar(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
@@ -1124,6 +1124,12 @@ func.func @main(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   return %2 : tensor<8x2xi32>
 }
 
+// CHECK-LABEL: func private @bar_0(%arg0: tensor<8x2xi32>
+// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+// CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
+// CHECK-NEXT:  }
+
 // CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
 // CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
@@ -1135,12 +1141,6 @@ func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   %1 = call @bar(%0) : (tensor<8x2xi32>) -> tensor<8x2xi32>
   return %1 : tensor<8x2xi32>
 }
-
-// CHECK-LABEL: func private @bar_0(%arg0: tensor<8x2xi32>
-// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
-// CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
-// CHECK-NEXT:  }
 
 // CHECK-NOT: func private @bar(%arg0: tensor<8x2xi32>
 func.func private @bar(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
@@ -1165,14 +1165,11 @@ func.func @main(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   return %2 : tensor<8x2xi32>
 }
 
-// CHECK-LABEL: func private @bar(%arg0: tensor<8x2xi32>
-// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>}) {
+// CHECK-LABEL: func private @bar_0(%arg0: tensor<8x2xi32>
+// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
 // CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
 // CHECK-NEXT:  }
-func.func private @bar(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
-  return %arg0 : tensor<8x2xi32>
-}
 
 // CHECK-LABEL: func private @foo(%arg0: tensor<8x2xi32>
 // CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
@@ -1189,11 +1186,14 @@ func.func private @foo(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
   return %3 : tensor<8x2xi32>
 }
 
-// CHECK-LABEL: func private @bar_0(%arg0: tensor<8x2xi32>
-// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
-// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+// CHECK-LABEL: func private @bar(%arg0: tensor<8x2xi32>
+// CHECK-SAME:      {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>})
+// CHECK-SAME:      -> (tensor<8x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}, {}]>}) {
 // CHECK-NEXT:    return %arg0 : tensor<8x2xi32>
 // CHECK-NEXT:  }
+func.func private @bar(%arg0: tensor<8x2xi32>) -> tensor<8x2xi32> {
+  return %arg0 : tensor<8x2xi32>
+}
 
 // -----
 sdy.mesh @mesh = <["x"=8]>

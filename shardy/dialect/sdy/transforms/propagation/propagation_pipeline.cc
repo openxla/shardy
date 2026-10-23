@@ -93,11 +93,6 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     // members which have pre-propagation shardings due to sharding constraints.
     pm.addPass(createShardingGroupImportPass());
   }
-  if (!options.dedupFunctionsFully) {  // Conservative compilation mode.
-    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-    pm.addPass(createImportFuncCallsPass());
-    pm.addPass(createSymbolDCEPass());  // After ImportFuncCallsPass.
-  }
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
@@ -107,12 +102,7 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createUserPriorityPropagationPass(optionsWithKeepShardingRules,
                                                  dumpIndex));
   }
-  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
-    pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
-  }
-  if (!options.dedupFunctionsFully) {  // Conservative compilation mode.
-    pm.addPass(createExportNamedComputationsPass());
-  }
+  pm.addNestedPass<func::FuncOp>(createSinkFuncDataFlowEdgesPass());
   pm.addPass(createPropagateToFuncResultsPass());
   pm.addPass(createUnflattenCallGraphPass());
   pm.addPass(createSymbolDCEPass());  // After UnflattenCallGraphPass.
