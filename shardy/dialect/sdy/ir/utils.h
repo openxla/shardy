@@ -376,20 +376,9 @@ void setSharding(Value value, TensorShardingAttr sharding);
 // Return the sharding of the `resNum` result of the given `funcOp`.
 TensorShardingAttr getFuncResultSharding(func::FuncOp funcOp, int64_t resNum);
 
-// Returns the sharding of the `num` sharding of the given
-// `shardingPerValue`. Returns null sharding if `shardingPerValue` is null.
-TensorShardingAttr getShardingOrNull(
-    TensorShardingPerValueAttr shardingPerValue, int64_t num);
-
 // Sets the sharding of the `resNum` result of the given `funcOp` to `sharding`.
 void setFuncResultSharding(func::FuncOp funcOp, int64_t resNum,
                            TensorShardingAttr sharding);
-
-// Sets/overrides the result sharding attributes on `funcOp` to a
-// `TensorShardingPerValueAttr` named `sdy.sharding` consisting of `shardings`.
-// Clears func result sharding if `shardingPerValue` is null.
-void setFuncResultShardings(func::FuncOp funcOp,
-                            TensorShardingPerValueAttr shardingPerValue);
 
 // Returns the sharding of each value in `values`. Returns an empty array if the
 // op has no sharding attributes.
@@ -587,10 +576,6 @@ bool hasOnlyUsersOfType(Operation* op) {
   });
 }
 
-
-// Returns true if `value` is used by `user`.
-bool isUsedBy(Value value, Operation* user);
-
 // Returns the largest prefix of `axisRef` that does not overlap with any axes
 // in `otherAxisRefs`.
 template <typename Range>
@@ -705,12 +690,6 @@ mlir::sdy::TensorShardingPerValueAttr getFullyClosedLike(
 mlir::func::FuncOp getMainFuncOrDie(ModuleOp moduleOp,
                                     const SymbolTable& symbolTable,
                                     bool useSingleFunc = false);
-
-// Adds reshard operations to resolve conflicts between call argument
-// sharding and func input sharding.
-void insertReshardsOnFuncArguments(func::FuncOp funcOp, func::CallOp callOp,
-                                   const mlir::SymbolTable& symbolTable,
-                                   IRRewriter& rewriter);
 
 // Adds reshard operations to resolve conflicts between call result
 // sharding and func result sharding. Sets the call result sharding to the func
