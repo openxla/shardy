@@ -190,28 +190,21 @@ func.func @concatenate_rotate_right_multi_use_slice_not_matched(
   // HALO-NEXT: %[[CST0:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // HALO-NEXT: %[[S0:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST0]]) in_shardings=[<@mesh, [{"a"}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}]>] manual_axes={"a"} (%arg1: tensor<5xf32>, %arg2: tensor<f32>) {
   // HALO-NEXT:   %[[PID0:.*]] = stablehlo.partition_id : tensor<ui32>
-  // HALO-NEXT:   %[[PID0_I32:.*]] = stablehlo.convert %[[PID0]] : (tensor<ui32>) -> tensor<i32>
-  // HALO-NEXT:   %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[DIV0:.*]] = stablehlo.divide %[[PID0_I32]], %[[C2_0]] : tensor<i32>
-  // HALO-NEXT:   %[[C2_1:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[REM0:.*]] = stablehlo.remainder %[[DIV0]], %[[C2_1]] : tensor<i32>
-  // HALO-NEXT:   %[[CP0:.*]] = "stablehlo.collective_permute"(%arg1) <{
+  // HALO-NEXT:   %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // HALO-NEXT:   %[[DIV0:.*]] = stablehlo.divide %[[PID0]], %[[C2_0]] : tensor<ui32>
+  // HALO-NEXT:   %[[ID0:.*]] = stablehlo.convert %[[DIV0]] : (tensor<ui32>) -> tensor<i32>
+  // HALO-NEXT:   %[[SELF0:.*]] = stablehlo.slice %arg1 [2:5] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[RIGHT0:.*]] = stablehlo.slice %arg1 [0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[CP0:.*]] = "stablehlo.collective_permute"(%[[RIGHT0]]) <{
   // HALO-SAME{LITERAL}: source_target_pairs = dense<[[2, 0], [3, 1]]> : tensor<2x2xi64>
-  // HALO-SAME:   }> : (tensor<5xf32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[C1_0:.*]] = stablehlo.constant dense<1> : tensor<i32>
-  // HALO-NEXT:   %[[CMP0:.*]] = stablehlo.compare LT, %[[REM0]], %[[C1_0]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
-  // HALO-NEXT:   %[[BCAST_PAD0:.*]] = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<f32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[BCAST0:.*]] = stablehlo.broadcast_in_dim %[[CMP0]], dims = [] : (tensor<i1>) -> tensor<5xi1>
-  // HALO-NEXT:   %[[SEL0:.*]] = stablehlo.select %[[BCAST0]], %[[CP0]], %[[BCAST_PAD0]] : tensor<5xi1>, tensor<5xf32>
-  // HALO-NEXT:   %[[CONCAT0:.*]] = stablehlo.concatenate %arg1, %[[SEL0]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<5xf32>) -> tensor<10xf32>
-  // HALO-NEXT:   %[[PAD0:.*]] = stablehlo.pad %[[CONCAT0]], %arg2, low = [3], high = [3], interior = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<10xf32>, tensor<f32>) -> tensor<16xf32>
+  // HALO-SAME:   }> : (tensor<2xf32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[CONCAT0:.*]] = stablehlo.concatenate %[[SELF0]], %[[CP0]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<3xf32>, tensor<2xf32>) -> tensor<5xf32>
   // HALO-NEXT:   %[[CM2_0:.*]] = stablehlo.constant dense<-2> : tensor<i32>
-  // HALO-NEXT:   %[[C7_0:.*]] = stablehlo.constant dense<7> : tensor<i32>
-  // HALO-NEXT:   %[[MUL0:.*]] = stablehlo.multiply %[[REM0]], %[[CM2_0]] : tensor<i32>
-  // HALO-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[MUL0]], %[[C7_0]] : tensor<i32>
+  // HALO-NEXT:   %[[C2_1:.*]] = stablehlo.constant dense<2> : tensor<i32>
+  // HALO-NEXT:   %[[MUL0:.*]] = stablehlo.multiply %[[ID0]], %[[CM2_0]] : tensor<i32>
+  // HALO-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[MUL0]], %[[C2_1]] : tensor<i32>
   // HALO-NEXT:   %[[CZ0:.*]] = stablehlo.constant dense<0> : tensor<i32>
-  // HALO-NEXT:   %[[MAX0:.*]] = stablehlo.maximum %[[ADD0]], %[[CZ0]] : tensor<i32>
-  // HALO-NEXT:   %[[DS0:.*]] = stablehlo.dynamic_slice %[[PAD0]], %[[MAX0]], sizes = [3] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<16xf32>, tensor<i32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[DS0:.*]] = stablehlo.dynamic_slice %[[CONCAT0]], %[[ADD0]], sizes = [3] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<i32>) -> tensor<3xf32>
   // HALO-NEXT:   sdy.return %[[DS0]] : tensor<3xf32>
   // HALO-NEXT: } : (tensor<10xf32>, tensor<f32>) -> tensor<6xf32>
   %0 = stablehlo.slice %arg0 [4:10] {
@@ -225,28 +218,21 @@ func.func @concatenate_rotate_right_multi_use_slice_not_matched(
   // HALO-NEXT: %[[CST1:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // HALO-NEXT: %[[S1:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST1]]) in_shardings=[<@mesh, [{"a"}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}]>] manual_axes={"a"} (%arg1: tensor<5xf32>, %arg2: tensor<f32>) {
   // HALO-NEXT:   %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
-  // HALO-NEXT:   %[[PID1_I32:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i32>
-  // HALO-NEXT:   %[[C2_2:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[PID1_I32]], %[[C2_2]] : tensor<i32>
-  // HALO-NEXT:   %[[C2_3:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[REM1:.*]] = stablehlo.remainder %[[DIV1]], %[[C2_3]] : tensor<i32>
-  // HALO-NEXT:   %[[CP1:.*]] = "stablehlo.collective_permute"(%arg1) <{
+  // HALO-NEXT:   %[[C2_2:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[PID1]], %[[C2_2]] : tensor<ui32>
+  // HALO-NEXT:   %[[ID1:.*]] = stablehlo.convert %[[DIV1]] : (tensor<ui32>) -> tensor<i32>
+  // HALO-NEXT:   %[[LEFT1:.*]] = stablehlo.slice %arg1 [2:5] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[CP1:.*]] = "stablehlo.collective_permute"(%[[LEFT1]]) <{
   // HALO-SAME{LITERAL}: source_target_pairs = dense<[[0, 2], [1, 3]]> : tensor<2x2xi64>
-  // HALO-SAME:   }> : (tensor<5xf32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[C1_1:.*]] = stablehlo.constant dense<1> : tensor<i32>
-  // HALO-NEXT:   %[[CMP1:.*]] = stablehlo.compare GE, %[[REM1]], %[[C1_1]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
-  // HALO-NEXT:   %[[BCAST_PAD1:.*]] = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<f32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[BCAST1:.*]] = stablehlo.broadcast_in_dim %[[CMP1]], dims = [] : (tensor<i1>) -> tensor<5xi1>
-  // HALO-NEXT:   %[[SEL1:.*]] = stablehlo.select %[[BCAST1]], %[[CP1]], %[[BCAST_PAD1]] : tensor<5xi1>, tensor<5xf32>
-  // HALO-NEXT:   %[[CONCAT1:.*]] = stablehlo.concatenate %[[SEL1]], %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<5xf32>) -> tensor<10xf32>
-  // HALO-NEXT:   %[[PAD1:.*]] = stablehlo.pad %[[CONCAT1]], %arg2, low = [2], high = [2], interior = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<10xf32>, tensor<f32>) -> tensor<14xf32>
+  // HALO-SAME:   }> : (tensor<3xf32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[SELF1:.*]] = stablehlo.slice %arg1 [0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[CONCAT1:.*]] = stablehlo.concatenate %[[CP1]], %[[SELF1]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<3xf32>, tensor<2xf32>) -> tensor<5xf32>
   // HALO-NEXT:   %[[CM3_1:.*]] = stablehlo.constant dense<-3> : tensor<i32>
-  // HALO-NEXT:   %[[C7_1:.*]] = stablehlo.constant dense<7> : tensor<i32>
-  // HALO-NEXT:   %[[MUL1:.*]] = stablehlo.multiply %[[REM1]], %[[CM3_1]] : tensor<i32>
-  // HALO-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[MUL1]], %[[C7_1]] : tensor<i32>
+  // HALO-NEXT:   %[[C3_1:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[MUL1:.*]] = stablehlo.multiply %[[ID1]], %[[CM3_1]] : tensor<i32>
+  // HALO-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[MUL1]], %[[C3_1]] : tensor<i32>
   // HALO-NEXT:   %[[CZ1:.*]] = stablehlo.constant dense<0> : tensor<i32>
-  // HALO-NEXT:   %[[MAX1:.*]] = stablehlo.maximum %[[ADD1]], %[[CZ1]] : tensor<i32>
-  // HALO-NEXT:   %[[DS1:.*]] = stablehlo.dynamic_slice %[[PAD1]], %[[MAX1]], sizes = [2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<14xf32>, tensor<i32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[DS1:.*]] = stablehlo.dynamic_slice %[[CONCAT1]], %[[ADD1]], sizes = [2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<i32>) -> tensor<2xf32>
   // HALO-NEXT:   sdy.return %[[DS1]] : tensor<2xf32>
   // HALO-NEXT: } : (tensor<10xf32>, tensor<f32>) -> tensor<4xf32>
   %1 = stablehlo.slice %arg0 [0:4] {
@@ -276,28 +262,21 @@ func.func @concatenate_identity_order_slices_not_matched(
   // HALO-NEXT: %[[CST0:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // HALO-NEXT: %[[S0:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST0]]) in_shardings=[<@mesh, [{"a"}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}]>] manual_axes={"a"} (%arg1: tensor<5xf32>, %arg2: tensor<f32>) {
   // HALO-NEXT:   %[[PID0:.*]] = stablehlo.partition_id : tensor<ui32>
-  // HALO-NEXT:   %[[PID0_I32:.*]] = stablehlo.convert %[[PID0]] : (tensor<ui32>) -> tensor<i32>
-  // HALO-NEXT:   %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[DIV0:.*]] = stablehlo.divide %[[PID0_I32]], %[[C2_0]] : tensor<i32>
-  // HALO-NEXT:   %[[C2_1:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[REM0:.*]] = stablehlo.remainder %[[DIV0]], %[[C2_1]] : tensor<i32>
-  // HALO-NEXT:   %[[CP0:.*]] = "stablehlo.collective_permute"(%arg1) <{
+  // HALO-NEXT:   %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // HALO-NEXT:   %[[DIV0:.*]] = stablehlo.divide %[[PID0]], %[[C2_0]] : tensor<ui32>
+  // HALO-NEXT:   %[[ID0:.*]] = stablehlo.convert %[[DIV0]] : (tensor<ui32>) -> tensor<i32>
+  // HALO-NEXT:   %[[LEFT0:.*]] = stablehlo.slice %arg1 [2:5] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[CP0:.*]] = "stablehlo.collective_permute"(%[[LEFT0]]) <{
   // HALO-SAME{LITERAL}: source_target_pairs = dense<[[0, 2], [1, 3]]> : tensor<2x2xi64>
-  // HALO-SAME:   }> : (tensor<5xf32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[C1_0:.*]] = stablehlo.constant dense<1> : tensor<i32>
-  // HALO-NEXT:   %[[CMP0:.*]] = stablehlo.compare GE, %[[REM0]], %[[C1_0]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
-  // HALO-NEXT:   %[[BCAST_PAD0:.*]] = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<f32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[BCAST0:.*]] = stablehlo.broadcast_in_dim %[[CMP0]], dims = [] : (tensor<i1>) -> tensor<5xi1>
-  // HALO-NEXT:   %[[SEL0:.*]] = stablehlo.select %[[BCAST0]], %[[CP0]], %[[BCAST_PAD0]] : tensor<5xi1>, tensor<5xf32>
-  // HALO-NEXT:   %[[CONCAT0:.*]] = stablehlo.concatenate %[[SEL0]], %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<5xf32>) -> tensor<10xf32>
-  // HALO-NEXT:   %[[PAD0:.*]] = stablehlo.pad %[[CONCAT0]], %arg2, low = [2], high = [2], interior = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<10xf32>, tensor<f32>) -> tensor<14xf32>
+  // HALO-SAME:   }> : (tensor<3xf32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[SELF0:.*]] = stablehlo.slice %arg1 [0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[CONCAT0:.*]] = stablehlo.concatenate %[[CP0]], %[[SELF0]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<3xf32>, tensor<2xf32>) -> tensor<5xf32>
   // HALO-NEXT:   %[[CM3_0:.*]] = stablehlo.constant dense<-3> : tensor<i32>
-  // HALO-NEXT:   %[[C7_0:.*]] = stablehlo.constant dense<7> : tensor<i32>
-  // HALO-NEXT:   %[[MUL0:.*]] = stablehlo.multiply %[[REM0]], %[[CM3_0]] : tensor<i32>
-  // HALO-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[MUL0]], %[[C7_0]] : tensor<i32>
+  // HALO-NEXT:   %[[C3_0:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[MUL0:.*]] = stablehlo.multiply %[[ID0]], %[[CM3_0]] : tensor<i32>
+  // HALO-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[MUL0]], %[[C3_0]] : tensor<i32>
   // HALO-NEXT:   %[[CZ0:.*]] = stablehlo.constant dense<0> : tensor<i32>
-  // HALO-NEXT:   %[[MAX0:.*]] = stablehlo.maximum %[[ADD0]], %[[CZ0]] : tensor<i32>
-  // HALO-NEXT:   %[[DS0:.*]] = stablehlo.dynamic_slice %[[PAD0]], %[[MAX0]], sizes = [2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<14xf32>, tensor<i32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[DS0:.*]] = stablehlo.dynamic_slice %[[CONCAT0]], %[[ADD0]], sizes = [2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<i32>) -> tensor<2xf32>
   // HALO-NEXT:   sdy.return %[[DS0]] : tensor<2xf32>
   // HALO-NEXT: } : (tensor<10xf32>, tensor<f32>) -> tensor<4xf32>
   %0 = stablehlo.slice %arg0 [0:4] {
@@ -311,28 +290,21 @@ func.func @concatenate_identity_order_slices_not_matched(
   // HALO-NEXT: %[[CST1:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   // HALO-NEXT: %[[S1:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST1]]) in_shardings=[<@mesh, [{"a"}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}]>] manual_axes={"a"} (%arg1: tensor<5xf32>, %arg2: tensor<f32>) {
   // HALO-NEXT:   %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
-  // HALO-NEXT:   %[[PID1_I32:.*]] = stablehlo.convert %[[PID1]] : (tensor<ui32>) -> tensor<i32>
-  // HALO-NEXT:   %[[C2_3:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[PID1_I32]], %[[C2_3]] : tensor<i32>
-  // HALO-NEXT:   %[[C2_4:.*]] = stablehlo.constant dense<2> : tensor<i32>
-  // HALO-NEXT:   %[[REM1:.*]] = stablehlo.remainder %[[DIV1]], %[[C2_4]] : tensor<i32>
-  // HALO-NEXT:   %[[CP1:.*]] = "stablehlo.collective_permute"(%arg1) <{
+  // HALO-NEXT:   %[[C2_3:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[PID1]], %[[C2_3]] : tensor<ui32>
+  // HALO-NEXT:   %[[ID1:.*]] = stablehlo.convert %[[DIV1]] : (tensor<ui32>) -> tensor<i32>
+  // HALO-NEXT:   %[[SELF1:.*]] = stablehlo.slice %arg1 [2:5] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[RIGHT1:.*]] = stablehlo.slice %arg1 [0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[CP1:.*]] = "stablehlo.collective_permute"(%[[RIGHT1]]) <{
   // HALO-SAME{LITERAL}: source_target_pairs = dense<[[2, 0], [3, 1]]> : tensor<2x2xi64>
-  // HALO-SAME:   }> : (tensor<5xf32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[C1_1:.*]] = stablehlo.constant dense<1> : tensor<i32>
-  // HALO-NEXT:   %[[CMP1:.*]] = stablehlo.compare LT, %[[REM1]], %[[C1_1]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
-  // HALO-NEXT:   %[[BCAST_PAD1:.*]] = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<f32>) -> tensor<5xf32>
-  // HALO-NEXT:   %[[BCAST1:.*]] = stablehlo.broadcast_in_dim %[[CMP1]], dims = [] : (tensor<i1>) -> tensor<5xi1>
-  // HALO-NEXT:   %[[SEL1:.*]] = stablehlo.select %[[BCAST1]], %[[CP1]], %[[BCAST_PAD1]] : tensor<5xi1>, tensor<5xf32>
-  // HALO-NEXT:   %[[CONCAT1:.*]] = stablehlo.concatenate %arg1, %[[SEL1]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<5xf32>) -> tensor<10xf32>
-  // HALO-NEXT:   %[[PAD1:.*]] = stablehlo.pad %[[CONCAT1]], %arg2, low = [3], high = [3], interior = [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<10xf32>, tensor<f32>) -> tensor<16xf32>
+  // HALO-SAME:   }> : (tensor<2xf32>) -> tensor<2xf32>
+  // HALO-NEXT:   %[[CONCAT1:.*]] = stablehlo.concatenate %[[SELF1]], %[[CP1]], dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<3xf32>, tensor<2xf32>) -> tensor<5xf32>
   // HALO-NEXT:   %[[CM2_1:.*]] = stablehlo.constant dense<-2> : tensor<i32>
-  // HALO-NEXT:   %[[C7_1:.*]] = stablehlo.constant dense<7> : tensor<i32>
-  // HALO-NEXT:   %[[MUL1:.*]] = stablehlo.multiply %[[REM1]], %[[CM2_1]] : tensor<i32>
-  // HALO-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[MUL1]], %[[C7_1]] : tensor<i32>
+  // HALO-NEXT:   %[[C2_4:.*]] = stablehlo.constant dense<2> : tensor<i32>
+  // HALO-NEXT:   %[[MUL1:.*]] = stablehlo.multiply %[[ID1]], %[[CM2_1]] : tensor<i32>
+  // HALO-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[MUL1]], %[[C2_4]] : tensor<i32>
   // HALO-NEXT:   %[[CZ1:.*]] = stablehlo.constant dense<0> : tensor<i32>
-  // HALO-NEXT:   %[[MAX1:.*]] = stablehlo.maximum %[[ADD1]], %[[CZ1]] : tensor<i32>
-  // HALO-NEXT:   %[[DS1:.*]] = stablehlo.dynamic_slice %[[PAD1]], %[[MAX1]], sizes = [3] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<16xf32>, tensor<i32>) -> tensor<3xf32>
+  // HALO-NEXT:   %[[DS1:.*]] = stablehlo.dynamic_slice %[[CONCAT1]], %[[ADD1]], sizes = [3] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<5xf32>, tensor<i32>) -> tensor<3xf32>
   // HALO-NEXT:   sdy.return %[[DS1]] : tensor<3xf32>
   // HALO-NEXT: } : (tensor<10xf32>, tensor<f32>) -> tensor<6xf32>
   %1 = stablehlo.slice %arg0 [4:10] {

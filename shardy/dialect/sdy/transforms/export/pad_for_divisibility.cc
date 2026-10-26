@@ -241,8 +241,8 @@ Value createPaddedValue(Value value, RankedTensorType paddedType,
                         PaddingValueKind paddingKind,
                         std::optional<PaddingValueKind> registeredKind,
                         PaddingCache& cache, OpBuilder& rewriter) {
-  Value padding = createConstant(
-      value.getLoc(), paddedType.getElementType(), paddingKind, rewriter);
+  Value padding = createConstant(value.getLoc(), paddedType.getElementType(),
+                                 paddingKind, rewriter);
   Value padOp = padHighSideToType(value.getLoc(), value, paddedType,
                                   getSharding(value), rewriter, padding);
   if (registeredKind) {
@@ -890,8 +890,9 @@ class StablehloReshapeOpPattern
 
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
-  StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx)
-      : OpConversionPattern(converter, ctx) {}
+  StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                          PaddingCache& cache)
+      : OpConversionPattern(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
       stablehlo::SliceOp op, OpAdaptor adaptor,
@@ -916,10 +917,18 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
     TensorShardingAttr operandSharding = getSharding(adaptor.getOperand());
     MeshAttr mesh = sharding.getMesh(converter->getSymbolTable());
 
+    bool preservesOperandPadding = true;
     for (int i = 0; i < paddedShape.size(); ++i) {
+      if (paddedShape[i] == resultType.getDimSize(i)) {
+        continue;
+      }
       newLimits[i] = op.getStartIndices()[i] + paddedShape[i];
       SDY_CHECK(newLimits[i] == limitIndices[i] ||
                 isCommunicationFreeSliceDim(i, op, operandSharding, mesh));
+      if (op.getStartIndices()[i] != 0 || op.getStrides()[i] != 1 ||
+          limitIndices[i] != op.getOperand().getType().getDimSize(i)) {
+        preservesOperandPadding = false;
+      }
     }
 
     auto newOp = stablehlo::SliceOp::create(
@@ -931,9 +940,19 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
     // Copy sharding attribute to the new result.
     setSharding(newOp.getResult(), sharding);
 
+    if (preservesOperandPadding) {
+      if (std::optional<PaddingValueKind> paddingKind =
+              cache.getPadding(adaptor.getOperand())) {
+        cache.setPadding(newOp.getResult(), *paddingKind);
+      }
+    }
+
     rewriter.replaceOp(op, newOp.getResult());
     return success();
   }
+
+ private:
+  PaddingCache& cache;
 };
 
 class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
@@ -978,6 +997,7 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     SmallVector<int64_t> newHigh;
     newHigh.reserve(rankedInputType.getRank());
     bool highPaddingReduced = false;
+    bool hasNegativeHighOnPaddedDim = false;
     for (int d = 0; d < rankedInputType.getRank(); ++d) {
       int64_t paddedInputSize = rankedInputType.getDimSize(d);
       int64_t paddedResultSize = paddedType.getDimSize(d);
@@ -989,15 +1009,22 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       if (dHigh < high[d]) {
         highPaddingReduced = true;
       }
+      if (paddedResultSize > op.getResult().getType().getDimSize(d) &&
+          high[d] < 0) {
+        hasNegativeHighOnPaddedDim = true;
+      }
     }
 
-    if (highPaddingReduced) {
+    std::optional<PaddingValueKind> paddingKind =
+        getPaddingValueKind(adaptor.getOperands()[1]);
+    if (highPaddingReduced &&
+        (!paddingKind || cache.getPadding(input) != paddingKind)) {
       // When high padding is reduced, the input's padding region takes the
       // place of the trailing padding value for the pad op. As such, we need
       // to ensure the input is padded with the correct value.
-      input = ensurePaddingWithValue(op.getLoc(), input,
-                                     op.getOperand().getType(),
-                                     adaptor.getOperands()[1], rewriter);
+      input =
+          ensurePaddingWithValue(op.getLoc(), input, op.getOperand().getType(),
+                                 adaptor.getOperands()[1], rewriter);
     }
 
     auto newHighAttr = rewriter.getDenseI64ArrayAttr(newHigh);
@@ -1010,8 +1037,7 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     // Copy sharding attribute to the new result.
     setSharding(newPadOp.getResult(), getSharding(result));
 
-    if (std::optional<PaddingValueKind> paddingKind =
-            getPaddingValueKind(adaptor.getOperands()[1])) {
+    if (paddingKind && !hasNegativeHighOnPaddedDim) {
       if (input.getType() == op.getOperand().getType() || highPaddingReduced ||
           cache.getPadding(input) == paddingKind) {
         cache.setPadding(newPadOp.getResult(), *paddingKind);
@@ -1414,10 +1440,10 @@ struct PadForDivisibilityPass
     patterns.add<FuncOpSignaturePattern>(typeConverter, &getContext(),
                                          paddingCache);
     patterns.add<GenericOpPattern, PartitioningOpInterfacePattern,
-                 StablehloSliceOpPattern, StablehloGatherOpPattern,
-                 StablehloReshapeOpPattern>(typeConverter, &getContext());
-    patterns.add<StablehloPadOpPattern>(typeConverter, &getContext(),
-                                        paddingCache);
+                 StablehloGatherOpPattern, StablehloReshapeOpPattern>(
+        typeConverter, &getContext());
+    patterns.add<StablehloSliceOpPattern, StablehloPadOpPattern>(
+        typeConverter, &getContext(), paddingCache);
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     // TODO(b/553579414): remove the pattern for stablehlo.ConstantOp.

@@ -379,3 +379,87 @@ func.func @all_reduce_all_slice_fusion_min(%arg0 : tensor<16x2xf32> {sdy.shardin
   return %1 : tensor<16x2xf32>
 }
 
+// CHECK-LABEL: func @all_gather_of_broadcast_in_dim_new_dim
+func.func @all_gather_of_broadcast_in_dim_new_dim(%arg0 : tensor<4xf32>) -> tensor<3x4xf32> {
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<3x4xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  %1 = sdy.all_gather [{"x"}, {}] %0 out_sharding=<@mesh, [{}, {}]> : tensor<3x4xf32>
+  return %1 : tensor<3x4xf32>
+}
+
+// CHECK-LABEL: func @all_gather_of_broadcast_in_dim_old_dim_not_folded
+func.func @all_gather_of_broadcast_in_dim_old_dim_not_folded(%arg0 : tensor<4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}]>}) -> tensor<3x4xf32> {
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{}, {"x"}] %[[BCAST]] out_sharding=<@mesh, [{}, {}]> : tensor<3x4xf32>
+  // CHECK-NEXT: return %[[AG]] : tensor<3x4xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  %1 = sdy.all_gather [{}, {"x"}] %0 out_sharding=<@mesh, [{}, {}]> : tensor<3x4xf32>
+  return %1 : tensor<3x4xf32>
+}
+
+// CHECK-LABEL: func @all_gather_of_broadcast_in_dim_partial_gather
+func.func @all_gather_of_broadcast_in_dim_partial_gather(%arg0 : tensor<4xf32>) -> tensor<3x4xf32> {
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<3x4xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x", "y"}, {}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  %1 = sdy.all_gather [{"y"}, {}] %0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<3x4xf32>
+  return %1 : tensor<3x4xf32>
+}
+
+// CHECK-LABEL: func @all_gather_of_broadcast_in_dim_sharded_operand
+func.func @all_gather_of_broadcast_in_dim_sharded_operand(%arg0 : tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) -> tensor<3x4xf32> {
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<3x4xf32>
+  %0 = stablehlo.broadcast_in_dim %arg0, dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<4xf32>) -> tensor<3x4xf32>
+  %1 = sdy.all_gather [{"x"}, {}] %0 out_sharding=<@mesh, [{}, {"y"}]> : tensor<3x4xf32>
+  return %1 : tensor<3x4xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_of_iota
+func.func @all_to_all_of_iota() -> tensor<8x8xi32> {
+  // CHECK-NEXT: %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  // CHECK-NEXT: return %[[IOTA]] : tensor<8x8xi32>
+  %0 = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}]>]>} : tensor<8x8xi32>
+  %1 = sdy.all_to_all [{"x"}: 1->0] %0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x8xi32>
+  return %1 : tensor<8x8xi32>
+}
+
+// CHECK-LABEL: func @all_gather_of_iota
+func.func @all_gather_of_iota() -> tensor<8x8xi32> {
+  // CHECK-NEXT: %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : tensor<8x8xi32>
+  // CHECK-NEXT: return %[[IOTA]] : tensor<8x8xi32>
+  %0 = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  %1 = sdy.all_gather [{"x"}, {}] %0 out_sharding=<@mesh, [{}, {}]> : tensor<8x8xi32>
+  return %1 : tensor<8x8xi32>
+}
+
+// CHECK-LABEL: func @all_slice_of_iota
+func.func @all_slice_of_iota() -> tensor<8x8xi32> {
+  // CHECK-NEXT: %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  // CHECK-NEXT: return %[[IOTA]] : tensor<8x8xi32>
+  %0 = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : tensor<8x8xi32>
+  %1 = sdy.all_slice [{"x"}, {}] %0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<8x8xi32>
+  return %1 : tensor<8x8xi32>
+}
+
+// CHECK-LABEL: func @collective_permute_of_iota
+func.func @collective_permute_of_iota() -> tensor<8x8xi32> {
+  // CHECK-NEXT: %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  // CHECK-NEXT: return %[[IOTA]] : tensor<8x8xi32>
+  %0 = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  %1 = sdy.collective_permute %0 out_sharding=<@mesh_non_iota, [{"x"}, {}]> : tensor<8x8xi32>
+  return %1 : tensor<8x8xi32>
+}
+
+// CHECK-LABEL: func @all_gather_of_iota_multiple_uses_not_folded
+func.func @all_gather_of_iota_multiple_uses_not_folded() -> (tensor<8x8xi32>, tensor<8x8xi32>) {
+  // CHECK: %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{"x"}, {}] %[[IOTA]] out_sharding=<@mesh, [{}, {}]> : tensor<8x8xi32>
+  // CHECK-NEXT: return %[[IOTA]], %[[AG]] : tensor<8x8xi32>, tensor<8x8xi32>
+  %0 = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : tensor<8x8xi32>
+  %1 = sdy.all_gather [{"x"}, {}] %0 out_sharding=<@mesh, [{}, {}]> : tensor<8x8xi32>
+  return %0, %1 : tensor<8x8xi32>, tensor<8x8xi32>
+}
+
+
