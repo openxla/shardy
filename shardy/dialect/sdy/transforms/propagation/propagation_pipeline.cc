@@ -70,29 +70,14 @@ void addPropagationPipeline(OpPassManager& pm, int& dumpIndex,
     pm.addPass(createFlattenCallGraphPass());
     pm.addPass(createSymbolDCEPass());  // After FlattenCallGraphPass.
   }
-  // TODO(enver): Unify the two branches for applying sharding constraints and
-  // importing sharding groups.
-  if (options.dedupFunctionsFully) {  // Aggressive compilation mode.
-    pm.addPass(createAddFuncDataFlowEdgesPass());
-    pm.addPass(
-        createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
-            options.debugShardingOrigins,
-            options.debugPropagationEdgeSharding}));
-    // The sharding group import pass must run after applying sharding
-    // constraints. This ensures we can detect sharding conflicts between group
-    // members which have pre-propagation shardings due to sharding constraints.
-    pm.addPass(createShardingGroupImportPass());
-  } else {  // Conservative compilation mode.
-    pm.addPass(createAddFuncDataFlowEdgesPass());
-    pm.addPass(
-        createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
-            options.debugShardingOrigins,
-            options.debugPropagationEdgeSharding}));
-    // The sharding group import pass must run after applying sharding
-    // constraints. This ensures we can detect sharding conflicts between group
-    // members which have pre-propagation shardings due to sharding constraints.
-    pm.addPass(createShardingGroupImportPass());
-  }
+  pm.addPass(createAddFuncDataFlowEdgesPass());
+  pm.addPass(
+      createApplyShardingConstraintsPass(ApplyShardingConstraintsPassOptions{
+          options.debugShardingOrigins, options.debugPropagationEdgeSharding}));
+  // The sharding group import pass must run after applying sharding
+  // constraints. This ensures we can detect sharding conflicts between group
+  // members which have pre-propagation shardings due to sharding constraints.
+  pm.addPass(createShardingGroupImportPass());
   {
     PropagationOptions optionsWithKeepShardingRules = options;
     optionsWithKeepShardingRules.keepShardingRules = true;
