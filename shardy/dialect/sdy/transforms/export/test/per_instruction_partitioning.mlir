@@ -330,11 +330,9 @@ func.func @concatenate_indivisible_sharded_concat_dim(%arg0: tensor<5xf32> {sdy.
   // CHECK:        %[[SLICE0:.*]] = stablehlo.slice %[[AG0]] [0:5] : (tensor<6xf32>) -> tensor<5xf32>
   // CHECK:        %[[IN_SLICE1:.*]] = stablehlo.slice %arg3 [0:1] : (tensor<1xf32>) -> tensor<1xf32>
   // CHECK-NEXT:   %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT:   %[[TABLE:.*]] = stablehlo.constant dense<[true, false]> : tensor<2xi1>
-  // CHECK-NEXT:   %[[LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<2xi1>, tensor<ui32>) -> tensor<1xi1>
-  // CHECK-NEXT:   %[[IS_LEADER:.*]] = stablehlo.reshape %[[LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT:   %[[IS_NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT:   %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<1xf32>
-  // CHECK-NEXT:   %[[MASKED:.*]] = stablehlo.select %[[IS_LEADER]], %[[IN_SLICE1]], %[[ZERO]] : tensor<i1>, tensor<1xf32>
+  // CHECK-NEXT:   %[[MASKED:.*]] = stablehlo.select %[[IS_NON_LEADER]], %[[ZERO]], %[[IN_SLICE1]] : tensor<i1>, tensor<1xf32>
   // CHECK-NEXT:   %[[AR1:.*]] = "stablehlo.all_reduce"(%[[MASKED]])
   // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[SLICE0]], %[[AR1]], dim = 0 : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
   // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
