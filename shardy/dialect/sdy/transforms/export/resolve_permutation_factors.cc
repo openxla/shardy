@@ -25,16 +25,21 @@ limitations under the License.
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"  // IWYU pragma: keep
+#include "mlir/IR/Location.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
@@ -49,7 +54,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -80,10 +84,9 @@ struct ResolutionState {
 // Returns a channel handle with handle = nextChannelId++ and type = 1
 // (CROSS_PARTITION) if usePartitionId is true. Otherwise returns nullptr (to
 // perform cross-replica communication without channel handle).
-stablehlo::ChannelHandleAttr getChannelHandle(ResolutionState& state,
-                                              MLIRContext* ctx) {
-  return sdy::getChannelHandle(ctx, state.replicaCount, state.partitionCount,
-                               state.nextChannelId);
+stablehlo::ChannelHandleAttr getChannelHandle(ResolutionState& state) {
+  return sdy::getChannelHandle(state.rewriter.getContext(), state.replicaCount,
+                               state.partitionCount, state.nextChannelId);
 }
 
 // Describes the data exchange needed to perform explicit resharding for a
@@ -190,6 +193,8 @@ struct DeviceOffsetInfo {
 
 using PostProcessFn =
     std::function<Value(Value, Value, RankedTensorType, ResolutionState&)>;
+using VariadicPostProcessFn = std::function<SmallVector<Value>(
+    ValueRange, ValueRange, ArrayRef<RankedTensorType>, ResolutionState&)>;
 
 // -----------------------------------------------------------------------------
 // Coordinate math & index conversion helpers.
@@ -267,6 +272,17 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
   return getShardIndex(deviceId, mesh, dimSharding.getAxes());
 }
 
+// Creates a scalar i32 constant with the given value.
+Value createScalarI32Constant(Location loc, int64_t val, IRRewriter& rewriter) {
+  SDY_CHECK_GE(val, std::numeric_limits<int32_t>::min());
+  SDY_CHECK_LE(val, std::numeric_limits<int32_t>::max());
+  return stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseIntElementsAttr::get(
+          RankedTensorType::get({}, rewriter.getI32Type()),
+          {static_cast<int32_t>(val)}));
+}
+
 // Projects the runtime globalPartitionId to a 0-based shard index for the
 // provided targetDimSharding (which may include sub-axes or combined output
 // dimensions in a reshape group).
@@ -275,9 +291,8 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
 // indices at compile time and emits a stablehlo.dynamic_slice. For standard
 // iota meshes, emits closed-form HLO arithmetic ops (div, rem, mul, add).
 Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
-                                    MeshAttr mesh,
                                     DimensionShardingAttr targetDimSharding,
-                                    IRRewriter& rewriter) {
+                                    MeshAttr mesh, IRRewriter& rewriter) {
   Type i32Ty = rewriter.getI32Type();
 
   // If mesh has explicit non-iota device_ids mapping, use lookup table
@@ -313,15 +328,6 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
   }
 
   // Standard iota mesh: compute shard index via scalar HLO arithmetic ops.
-  auto getConstVal = [&](int64_t val) -> Value {
-    SDY_CHECK_GE(val, std::numeric_limits<int32_t>::min());
-    SDY_CHECK_LE(val, std::numeric_limits<int32_t>::max());
-    return stablehlo::ConstantOp::create(
-        rewriter, loc,
-        DenseIntElementsAttr::get(RankedTensorType::get({}, i32Ty),
-                                  {static_cast<int32_t>(val)}));
-  };
-
   Value idInGroup = nullptr;
   ArrayRef<MeshAxisAttr> meshAxes = mesh.getAxes();
   int64_t totalMeshDevices = mesh.getTotalSize();
@@ -345,25 +351,28 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
 
     Value coord = globalPartitionIdI32;
     if (divisor > 1) {
-      coord = stablehlo::DivOp::create(rewriter, loc, coord.getType(), coord,
-                                       getConstVal(divisor));
+      coord = stablehlo::DivOp::create(
+          rewriter, loc, coord.getType(), coord,
+          createScalarI32Constant(loc, divisor, rewriter));
     }
     if (axisSize < totalMeshDevices) {
-      coord = stablehlo::RemOp::create(rewriter, loc, coord.getType(), coord,
-                                       getConstVal(axisSize));
+      coord = stablehlo::RemOp::create(
+          rewriter, loc, coord.getType(), coord,
+          createScalarI32Constant(loc, axisSize, rewriter));
     }
 
     if (!idInGroup) {
       idInGroup = coord;
     } else {
-      idInGroup = stablehlo::MulOp::create(rewriter, loc, idInGroup,
-                                           getConstVal(axisSize));
+      idInGroup = stablehlo::MulOp::create(
+          rewriter, loc, idInGroup,
+          createScalarI32Constant(loc, axisSize, rewriter));
       idInGroup = stablehlo::AddOp::create(rewriter, loc, idInGroup, coord);
     }
   }
 
   if (!idInGroup) {
-    idInGroup = getConstVal(0);
+    idInGroup = createScalarI32Constant(loc, 0, rewriter);
   }
 
   return idInGroup;
@@ -402,25 +411,12 @@ Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
 //                                 + sFootprint * baseDilation
 DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
                                      int64_t diffSize, int64_t baseOffset,
-                                     int64_t baseDilation,
-                                     ResolutionState& state,
-                                     bool needUndilated = true) {
+                                     int64_t baseDilation, bool needUndilated,
+                                     ResolutionState& state) {
   IRRewriter& rewriter = state.rewriter;
   Type i32Ty = rewriter.getI32Type();
-  SDY_CHECK_GE(diffSize, std::numeric_limits<int32_t>::min());
-  SDY_CHECK_LE(diffSize, std::numeric_limits<int32_t>::max());
-  auto diffSizeVal = stablehlo::ConstantOp::create(
-      rewriter, loc,
-      DenseIntElementsAttr::get(
-          RankedTensorType::get({}, i32Ty),
-          ArrayRef<int32_t>{static_cast<int32_t>(diffSize)}));
-  SDY_CHECK_GE(baseOffset, std::numeric_limits<int32_t>::min());
-  SDY_CHECK_LE(baseOffset, std::numeric_limits<int32_t>::max());
-  auto baseOffsetVal = stablehlo::ConstantOp::create(
-      rewriter, loc,
-      DenseIntElementsAttr::get(
-          RankedTensorType::get({}, i32Ty),
-          ArrayRef<int32_t>{static_cast<int32_t>(baseOffset)}));
+  Value diffSizeVal = createScalarI32Constant(loc, diffSize, rewriter);
+  Value baseOffsetVal = createScalarI32Constant(loc, baseOffset, rewriter);
   Value offsetInPartition =
       stablehlo::MulOp::create(rewriter, loc, partitionId, diffSizeVal);
   Value dilatedOffset =
@@ -437,12 +433,8 @@ DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
     if (baseDilation == 1) {
       undilatedOffset = dilatedOffset;
     } else {
-      SDY_CHECK_LE(baseDilation, std::numeric_limits<int32_t>::max());
-      auto baseDilationVal = stablehlo::ConstantOp::create(
-          rewriter, loc,
-          DenseIntElementsAttr::get(
-              RankedTensorType::get({}, i32Ty),
-              ArrayRef<int32_t>{static_cast<int32_t>(baseDilation)}));
+      Value baseDilationVal =
+          createScalarI32Constant(loc, baseDilation, rewriter);
       undilatedOffset =
           stablehlo::DivOp::create(rewriter, loc, dilatedOffset.getType(),
                                    dilatedOffset, baseDilationVal);
@@ -450,6 +442,10 @@ DeviceOffsetInfo getDeviceOffsetInfo(Location loc, Value partitionId,
   }
   return {dilatedOffset, undilatedOffset, zeroConst};
 }
+
+// -----------------------------------------------------------------------------
+// Window and padding attribute helpers.
+// -----------------------------------------------------------------------------
 
 // Returns the value at 'dim' for an optional dimension attribute array,
 // returning the specified default value if the attribute is absent. This
@@ -487,6 +483,26 @@ SmallVector<int64_t> getSpatialProperties(const std::optional<T>& propertyAttr,
     properties[dim] = getDimProperty(propertyAttr, i, defaultValue);
   }
   return properties;
+}
+
+// Returns the low padding attribute value for a dimension, defaulting to 0.
+int64_t getPaddingLow(std::optional<DenseIntElementsAttr> paddingAttr,
+                      int64_t dim) {
+  // The padding attribute is a 2D array of shape [rank, 2], where each row
+  // contains the low and high padding values for a dimension.
+  return paddingAttr.has_value() ? paddingAttr->getValues<int64_t>()[2 * dim]
+                                 : 0;
+}
+
+// Returns the pad_low list for all dimensions of the sharded tensor.
+SmallVector<int64_t> getPaddingLows(
+    std::optional<DenseIntElementsAttr> paddingAttr, int64_t rank) {
+  SmallVector<int64_t> padLows;
+  padLows.reserve(rank);
+  for (int64_t dim = 0; dim < rank; ++dim) {
+    padLows.push_back(getPaddingLow(paddingAttr, dim));
+  }
+  return padLows;
 }
 
 // -----------------------------------------------------------------------------
@@ -599,6 +615,16 @@ int64_t getManualShardCount(
   return count;
 }
 
+// Given the padded global dimension size and the manual computation axes,
+// returns the local dimension size for the dimension inside manual computation.
+int64_t getLocalDimSize(DimensionShardingAttr dimSharding, int64_t dimSize,
+                        MeshAttr mesh,
+                        const llvm::SmallDenseSet<AxisRefAttr>& manualAxes) {
+  int64_t manualFactor = getManualShardCount(dimSharding, mesh, manualAxes);
+  SDY_CHECK(dimSize % manualFactor == 0);
+  return dimSize / manualFactor;
+}
+
 SmallVector<AxisRefAttr> getManualAxesAttrs(
     MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes) {
   SmallVector<AxisRefAttr> manualAxesAttrs(manualAxes.begin(),
@@ -675,7 +701,7 @@ SmallVector<int64_t> getDataShiftSourceTargetPairs(
 
     SmallVector<int64_t> nextCoords = coords;
     int64_t currentCarry = shardOffset;
-    for (int64_t k = (int64_t)manualAxesInDim.size() - 1;
+    for (int64_t k = static_cast<int64_t>(manualAxesInDim.size()) - 1;
          k >= 0 && currentCarry != 0; --k) {
       auto axisRef = manualAxesInDim[k];
       int64_t meshIdx = getMeshAxisIndex(manualMeshAxes, axisRef.getName());
@@ -746,7 +772,7 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
     auto pairType =
         RankedTensorType::get({static_cast<int64_t>(pairs.size()) / 2, 2},
                               state.rewriter.getI64Type());
-    auto channelAttr = getChannelHandle(state, state.rewriter.getContext());
+    auto channelAttr = getChannelHandle(state);
     auto permOp = stablehlo::CollectivePermuteOp::create(
         state.rewriter, loc, piece.getType(), piece,
         DenseIntElementsAttr::get(pairType, pairs), channelAttr);
@@ -796,10 +822,9 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
 // Generates the local device code wrapped inside a manual computation to
 // implement HALO exchange for shifting data to the right. This effectively
 // moves the padding in the operand of a reverse op from high edge to low edge.
-Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
-                         TensorShardingAttr sharding, MeshAttr mesh,
+Value haloRightShiftData(Location loc, Value input, TensorShardingAttr sharding,
+                         MeshAttr mesh,
                          const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
-                         ArrayRef<int64_t> paddedShape,
                          ArrayRef<int64_t> dimsToShift,
                          ArrayRef<int64_t> shiftAmounts,
                          ResolutionState& state) {
@@ -808,8 +833,8 @@ Value haloRightShiftData(Location loc, Value input, RankedTensorType origType,
   localShape.reserve(sharding.getDimShardings().size());
   auto inputType = cast<RankedTensorType>(input.getType());
   for (auto [dim, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
-    int64_t manualFactor = getManualShardCount(dimSharding, mesh, manualAxes);
-    localShape.push_back(paddedShape[dim] / manualFactor);
+    localShape.push_back(getLocalDimSize(dimSharding, inputType.getDimSize(dim),
+                                         mesh, manualAxes));
   }
 
   // Get the manual axes for the manual computation.
@@ -850,7 +875,7 @@ Value mayCollectivePermute(Location loc, Value input,
   auto pairType = RankedTensorType::get(
       {static_cast<int64_t>(sourceTargetPairs.size()) / 2, 2},
       state.rewriter.getI64Type());
-  auto channelAttr = getChannelHandle(state, state.rewriter.getContext());
+  auto channelAttr = getChannelHandle(state);
   auto permOp = stablehlo::CollectivePermuteOp::create(
       state.rewriter, loc, input.getType(), input,
       DenseIntElementsAttr::get(pairType, sourceTargetPairs), channelAttr);
@@ -870,13 +895,12 @@ Value assembleHaloExchangeBuffer(
     Value paddingValue, int64_t leftHops, int64_t rightHops,
     TensorShardingAttr sharding, MeshAttr mesh,
     const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
-    TensorShardingAttr localSharding, ResolutionState& state,
-    int64_t interiorPad = 0, const DimExchangeInfo* dimExchange = nullptr,
-    Value idInPartitionGroup = nullptr) {
+    TensorShardingAttr localSharding, int64_t interiorPad,
+    const DimExchangeInfo& dimExchange, Value idInPartitionGroup,
+    ResolutionState& state) {
   DimensionShardingAttr activeDimSharded =
-      (dimExchange && dimExchange->reshapeInfo)
-          ? dimExchange->reshapeInfo->getTargetDimSharding()
-          : sharding.getDimShardings()[dim];
+      dimExchange.reshapeInfo ? dimExchange.reshapeInfo->getTargetDimSharding()
+                              : sharding.getDimShardings()[dim];
   SmallVector<AxisRefAttr> manualAxesInDim =
       getManualAxesInDim(activeDimSharded, mesh, manualAxes);
 
@@ -888,17 +912,15 @@ Value assembleHaloExchangeBuffer(
       SmallVector<int64_t> pairs =
           getDataShiftSourceTargetPairs(mesh, manualAxesInDim, offset);
       Value neighborData = mayCollectivePermute(loc, input, pairs, state);
+      if (!isFullyReplicated(localSharding)) {
+        setSharding(neighborData, localSharding);
+      }
       if (paddingValue && idInPartitionGroup && !manualAxesInDim.empty()) {
         // Ensure devices not in target set use 0 instead of garbage values.
         int64_t shardCount = activeDimSharded.getShardedSize(mesh);
         int64_t thresholdVal = offset > 0 ? offset : shardCount + offset;
-        SDY_CHECK_GE(thresholdVal, std::numeric_limits<int32_t>::min());
-        SDY_CHECK_LE(thresholdVal, std::numeric_limits<int32_t>::max());
-        Value thresholdConst = stablehlo::ConstantOp::create(
-            state.rewriter, loc,
-            DenseIntElementsAttr::get(
-                RankedTensorType::get({}, state.rewriter.getI32Type()),
-                {static_cast<int32_t>(thresholdVal)}));
+        Value thresholdConst =
+            createScalarI32Constant(loc, thresholdVal, state.rewriter);
         Value isTargetPred = stablehlo::CompareOp::create(
             state.rewriter, loc, idInPartitionGroup, thresholdConst,
             offset > 0 ? stablehlo::ComparisonDirection::GE
@@ -915,6 +937,11 @@ Value assembleHaloExchangeBuffer(
         neighborData = stablehlo::SelectOp::create(
             state.rewriter, loc, inputType, broadcastPred, neighborData,
             broadcastPadding);
+        if (!isFullyReplicated(localSharding)) {
+          setSharding(broadcastPadding, localSharding);
+          setSharding(broadcastPred, localSharding);
+          setSharding(neighborData, localSharding);
+        }
       }
       concatSegments.push_back(neighborData);
     }
@@ -1001,16 +1028,16 @@ Value exchangeDimWithDynamicOffset(
       dimExchange.reshapeInfo ? dimExchange.reshapeInfo->getTargetDimSharding()
                               : sharding.getDimShardings()[dim];
   Value idInPartitionGroup = convertPartitionIdToIdInGroup(
-      loc, partitionId, mesh, activeDimShardedAttr, state.rewriter);
+      loc, partitionId, activeDimShardedAttr, mesh, state.rewriter);
 
   int64_t edgePadSize = dilatedHaloBuffer
                             ? dimExchange.sFootprint * baseDilation
                             : dimExchange.sFootprint;
   Value paddedConcat = assembleHaloExchangeBuffer(
       loc, operand, dim, edgePadSize, paddingValue, dimExchange.leftHops,
-      dimExchange.rightHops, sharding, mesh, manualAxes, localSharding, state,
-      dilatedHaloBuffer ? baseDilation - 1 : 0, &dimExchange,
-      idInPartitionGroup);
+      dimExchange.rightHops, sharding, mesh, manualAxes, localSharding,
+      dilatedHaloBuffer ? baseDilation - 1 : 0, dimExchange, idInPartitionGroup,
+      state);
 
   auto inputType = cast<RankedTensorType>(operand.getType());
   int64_t sIn = inputType.getShape()[dim];
@@ -1020,11 +1047,6 @@ Value exchangeDimWithDynamicOffset(
   int64_t baseOffsetInPaddedConcat = -padLow +
                                      dimExchange.leftHops * sInDilated +
                                      dimExchange.sFootprint * baseDilation;
-
-  llvm::SmallDenseSet<StringRef> manualAxesInDim;
-  for (AxisRefAttr axis : sharding.getDimShardings()[dim].getAxes()) {
-    manualAxesInDim.insert(axis.getName());
-  }
 
   Value offset;
   Value zeroConst;
@@ -1057,8 +1079,8 @@ Value exchangeDimWithDynamicOffset(
   } else {
     DeviceOffsetInfo offsetInfo =
         getDeviceOffsetInfo(loc, idInPartitionGroup, diffSize,
-                            baseOffsetInPaddedConcat, baseDilation, state,
-                            /*needUndilated=*/!dilatedHaloBuffer);
+                            baseOffsetInPaddedConcat, baseDilation,
+                            /*needUndilated=*/!dilatedHaloBuffer, state);
     offset = dilatedHaloBuffer ? offsetInfo.dilatedOffset
                                : offsetInfo.undilatedOffset;
     zeroConst = offsetInfo.zeroConst;
@@ -1076,8 +1098,8 @@ Value exchangeDataWithDynamicOffset(
     TensorShardingAttr sharding, MeshAttr mesh,
     const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     ArrayRef<DimExchangeInfo> dimExchanges, ArrayRef<int64_t> edgePaddingLow,
-    ArrayRef<int64_t> windowStrides, bool dilatedHaloBuffer,
-    ResolutionState& state, ArrayRef<int64_t> baseDilations = {}) {
+    ArrayRef<int64_t> windowStrides, ArrayRef<int64_t> baseDilations,
+    bool dilatedHaloBuffer, ResolutionState& state) {
   TensorShardingAttr localSharding =
       removeAxesFromSharding(sharding, manualAxes, mesh);
   int64_t dimExchangeIdx = -1;
@@ -1103,81 +1125,151 @@ Value exchangeDataWithDynamicOffset(
 }
 
 // Performs HALO exchange over the sharded input inside a newly created
-// `sdy.manual_computation` block.
+// sdy.manual_computation block.
 //
 // Inside the block, it shifts local shards along the sharded dimensions
-// specified in `dimExchanges` to align boundary requirements. It then runs
-// the user-provided `postProcess` callback to process the local result
+// specified in dimExchanges to align boundary requirements. It then runs
+// the user-provided postProcess callback to process the local result
 // before returning the output of the manual computation.
+SmallVector<Value> haloDataExchangeVariadic(
+    Location loc, ValueRange divisibleInputs,
+    ArrayRef<int64_t> divisibleInputShape,
+    ArrayRef<RankedTensorType> origInputTypes,
+    ArrayRef<RankedTensorType> origOutputTypes, TensorShardingAttr inSharding,
+    TensorShardingAttr outSharding, MeshAttr mesh,
+    const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
+    ValueRange paddingValues, ArrayRef<int64_t> edgePaddingLow,
+    ArrayRef<DimExchangeInfo> dimExchanges, ArrayRef<int64_t> windowStrides,
+    ArrayRef<int64_t> baseDilations, const VariadicPostProcessFn& postProcess,
+    ResolutionState& state) {
+  SmallVector<AxisRefAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, manualAxes);
+
+  SmallVector<int64_t> localShape;
+  for (auto [dim, dimSharding] :
+       llvm::enumerate(inSharding.getDimShardings())) {
+    localShape.push_back(getLocalDimSize(dimSharding, divisibleInputShape[dim],
+                                         mesh, manualAxes));
+  }
+
+  SmallVector<Value> operands;
+  operands.append(divisibleInputs.begin(), divisibleInputs.end());
+  operands.append(paddingValues.begin(), paddingValues.end());
+
+  SmallVector<TensorShardingAttr> inShardings;
+  inShardings.reserve(operands.size());
+  inShardings.append(divisibleInputs.size(), inSharding);
+  inShardings.append(
+      paddingValues.size(),
+      TensorShardingAttr::getFullyReplicated(
+          state.rewriter.getContext(), 0, inSharding.getMeshOrRef(),
+          /*isClosed=*/false));
+
+  SmallVector<TensorShardingAttr> outShardings(origOutputTypes.size(),
+                                               outSharding);
+
+  SmallVector<Type> resultTypes;
+  SmallVector<RankedTensorType> paddedGlobalResultTypes;
+  for (RankedTensorType origOutputType : origOutputTypes) {
+    SmallVector<int64_t> paddedGlobalResultShape;
+    paddedGlobalResultShape.reserve(origOutputType.getRank());
+    for (auto [i, dimSize] : llvm::enumerate(origOutputType.getShape())) {
+      paddedGlobalResultShape.push_back(getPaddedDimSize(
+          dimSize, outSharding.getDimShardings()[i].getShardedSize(mesh)));
+    }
+    RankedTensorType paddedGlobalResultType = RankedTensorType::get(
+        paddedGlobalResultShape, origOutputType.getElementType());
+    paddedGlobalResultTypes.push_back(paddedGlobalResultType);
+    resultTypes.push_back(paddedGlobalResultType);
+  }
+
+  auto manualComp = ManualComputationOp::create(
+      state.rewriter, loc, resultTypes, operands,
+      TensorShardingPerValueAttr::get(state.rewriter.getContext(), inShardings),
+      TensorShardingPerValueAttr::get(state.rewriter.getContext(),
+                                      outShardings),
+      manualAxesAttrs);
+
+  Region& body = manualComp.getBody();
+  body.emplaceBlock();
+  SmallVector<Value> localInputs;
+  for (RankedTensorType inputType : origInputTypes) {
+    localInputs.push_back(body.addArgument(
+        RankedTensorType::get(localShape, inputType.getElementType()), loc));
+  }
+  SmallVector<Value> localPaddingValues;
+  for (Value paddingValue : paddingValues) {
+    localPaddingValues.push_back(body.addArgument(paddingValue.getType(), loc));
+  }
+
+  OpBuilder::InsertionGuard guard(state.rewriter);
+  state.rewriter.setInsertionPointToStart(&body.front());
+
+  SmallVector<Value> exchangedLocals;
+  for (auto [localInput, localPadVal] :
+       llvm::zip_equal(localInputs, localPaddingValues)) {
+    Value exchangedLocal = exchangeDataWithDynamicOffset(
+        loc, localInput, localPadVal, inSharding, mesh, manualAxes,
+        dimExchanges, edgePaddingLow, windowStrides, baseDilations,
+        /*dilatedHaloBuffer=*/windowStrides.empty(), state);
+    exchangedLocals.push_back(exchangedLocal);
+  }
+
+  SmallVector<Value> localResults = postProcess(
+      exchangedLocals, localPaddingValues, paddedGlobalResultTypes, state);
+
+  ReturnOp::create(state.rewriter, loc, localResults);
+  return SmallVector<Value>(manualComp.getResults().begin(),
+                            manualComp.getResults().end());
+}
+
 Value haloDataExchange(
     Location loc, Value divisibleInput, ArrayRef<int64_t> divisibleInputShape,
     RankedTensorType origInputType, RankedTensorType origOutputType,
     TensorShardingAttr inSharding, TensorShardingAttr outSharding,
     MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     Value paddingValue, ArrayRef<int64_t> edgePaddingLow,
-    ArrayRef<DimExchangeInfo> dimExchanges, const PostProcessFn& postProcess,
-    ResolutionState& state, ArrayRef<int64_t> windowStrides = {},
-    ArrayRef<int64_t> baseDilations = {}) {
-  // Extract manual axes while preserving their original order in the mesh.
-  SmallVector<AxisRefAttr> manualAxesAttrs =
-      getManualAxesAttrs(mesh, manualAxes);
+    ArrayRef<DimExchangeInfo> dimExchanges, ArrayRef<int64_t> windowStrides,
+    ArrayRef<int64_t> baseDilations, const PostProcessFn& postProcess,
+    ResolutionState& state) {
+  auto variadicPostProcess = [&](ValueRange exchangedLocals,
+                                 ValueRange localPaddingValues,
+                                 ArrayRef<RankedTensorType> resultTypes,
+                                 ResolutionState& state) -> SmallVector<Value> {
+    return {postProcess(exchangedLocals[0], localPaddingValues[0],
+                        resultTypes[0], state)};
+  };
+  SmallVector<Value> results = haloDataExchangeVariadic(
+      loc, {divisibleInput}, divisibleInputShape, {origInputType},
+      {origOutputType}, inSharding, outSharding, mesh, manualAxes,
+      {paddingValue}, edgePaddingLow, dimExchanges, windowStrides,
+      baseDilations, variadicPostProcess, state);
+  return results[0];
+}
 
-  // Compute the local shape for input in the manual block based on
-  // divisibleInputShape.
-  SmallVector<int64_t> localShape;
-  auto inputType = cast<RankedTensorType>(divisibleInput.getType());
-  for (auto [dim, dimSharding] :
-       llvm::enumerate(inSharding.getDimShardings())) {
-    int64_t shardCount = getManualShardCount(dimSharding, mesh, manualAxes);
-    // Target shape is the padded shape of the input.
-    SDY_CHECK(divisibleInputShape[dim] % shardCount == 0);
-    localShape.push_back(divisibleInputShape[dim] / shardCount);
-  }
+// Computes the dynamic slice offset along a sharded output dimension when a
+// windowed op (convolution or reduce_window) with baseDilation > 1 and
+// stride == 1 produces more local output elements than dimEx.sOut:
+//   offsetOut = dilatedOffset % baseDilation
+Value computeWindowPostOpSliceOffset(
+    Location loc, Value scalarPartitionId, DimensionShardingAttr dimSharding,
+    MeshAttr mesh, const DimExchangeInfo& dimEx, int64_t sIn, int64_t padLow,
+    int64_t baseDilation, ResolutionState& state) {
+  IRRewriter& rewriter = state.rewriter;
+  int64_t sOut = dimEx.sOut;
+  int64_t footprint = dimEx.sFootprint;
+  int64_t diffSize = sOut - sIn * baseDilation;
+  int64_t baseOffsetInPaddedConcat =
+      -padLow + dimEx.leftHops * sIn * baseDilation + footprint * baseDilation;
 
-  // Build the manual computation block with required operands.
-  SmallVector<Value> operands = {divisibleInput, paddingValue};
-  SmallVector<TensorShardingAttr> inShardings = {
-      inSharding, TensorShardingAttr::getFullyReplicated(
-                      state.rewriter.getContext(), 0, inSharding.getMeshOrRef(),
-                      /*isClosed=*/false)};
-
-  SmallVector<int64_t> paddedGlobalResultShape;
-  paddedGlobalResultShape.reserve(origOutputType.getRank());
-  for (auto [i, dimSize] : llvm::enumerate(origOutputType.getShape())) {
-    paddedGlobalResultShape.push_back(getPaddedDimSize(
-        dimSize, outSharding.getDimShardings()[i].getShardedSize(mesh)));
-  }
-  RankedTensorType paddedGlobalResultType = RankedTensorType::get(
-      paddedGlobalResultShape, origOutputType.getElementType());
-
-  SmallVector<Type> resultTypes = {paddedGlobalResultType};
-  auto manualComp = ManualComputationOp::create(
-      state.rewriter, loc, resultTypes, operands,
-      TensorShardingPerValueAttr::get(state.rewriter.getContext(), inShardings),
-      TensorShardingPerValueAttr::get(state.rewriter.getContext(),
-                                      {outSharding}),
-      manualAxesAttrs);
-
-  Region& body = manualComp.getBody();
-  body.emplaceBlock();
-  Value localInput = body.addArgument(
-      RankedTensorType::get(localShape, inputType.getElementType()), loc);
-  Value localPaddingValue = body.addArgument(paddingValue.getType(), loc);
-
-  OpBuilder::InsertionGuard guard(state.rewriter);
-  state.rewriter.setInsertionPointToStart(&body.front());
-
-  Value exchangedLocal = localInput;
-  exchangedLocal = exchangeDataWithDynamicOffset(
-      loc, exchangedLocal, localPaddingValue, inSharding, mesh, manualAxes,
-      dimExchanges, edgePaddingLow, windowStrides,
-      /*dilatedHaloBuffer=*/windowStrides.empty(), state, baseDilations);
-
-  exchangedLocal = postProcess(exchangedLocal, localPaddingValue,
-                               paddedGlobalResultType, state);
-
-  ReturnOp::create(state.rewriter, loc, exchangedLocal);
-  return manualComp.getResult(0);
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, scalarPartitionId, dimSharding, mesh, rewriter);
+  DeviceOffsetInfo offsetInfo = getDeviceOffsetInfo(
+      loc, idInPartitionGroup, diffSize, baseOffsetInPaddedConcat, baseDilation,
+      /*needUndilated=*/false, state);
+  Value baseDilationVal = createScalarI32Constant(loc, baseDilation, rewriter);
+  return stablehlo::RemOp::create(rewriter, loc, offsetInfo.dilatedOffset,
+                                  baseDilationVal);
 }
 
 // Returns the data exchange info for a single sharded dimension.
@@ -1196,7 +1288,8 @@ DimExchangeInfo getDimExchangeInfo(int64_t shardCount, int64_t sIn,
     // contrast, the derived sFootprint is defined in the un-dilated (physical)
     // input space. For this reason, we map "start" and "limit" to the original
     // input space to find out which shards of the input are needed.
-    int64_t start = (t * sOut * stride - padLow) / baseDilation;
+    int64_t start =
+        llvm::divideFloorSigned(t * sOut * stride - padLow, baseDilation);
     int64_t limit = start + sFootprint - 1;
 
     int64_t validStart = std::max<int64_t>(0, start);
@@ -1231,6 +1324,73 @@ DimExchangeInfo getDimExchangeInfo(int64_t shardCount, int64_t sIn,
     dimInfo.canUseHalo = false;
   }
   return dimInfo;
+}
+
+struct WindowDimExchangeInfo {
+  DimExchangeInfo dimInfo;
+  int64_t effectivePadLow = 0;
+  int64_t localPadLow = 0;
+  int64_t localPadHigh = 0;
+  int64_t inferredOutDim = 0;
+};
+
+// Computes the per-dimension HALO exchange info, effective low padding, local
+// residual padding, and inferred local output dimension for a sharded window
+// dimension (used by reduce_window and convolution).
+WindowDimExchangeInfo getWindowDimExchangeInfo(
+    int64_t shardCount, int64_t sIn, int64_t inputDimSize,
+    int64_t outputDimSize, int64_t windowDimSize, int64_t stride,
+    int64_t winDilation, int64_t baseDilation, int64_t padLow) {
+  int64_t sOut = llvm::divideCeil(outputDimSize, shardCount);
+  int64_t dilatedSize = 1 + (windowDimSize - 1) * winDilation;
+  int64_t sFootprintDilated = (sOut - 1) * stride + dilatedSize;
+
+  int64_t localPadLow = 0;
+  int64_t localPadHigh = 0;
+  int64_t effectivePadLow = padLow;
+  int64_t sFootprint = 0;
+
+  auto cannotUseHalo = []() {
+    WindowDimExchangeInfo res;
+    res.dimInfo.canUseHalo = false;
+    res.dimInfo.needsComm = true;
+    return res;
+  };
+
+  if ((sOut * stride) % baseDilation == 0) {
+    localPadLow = llvm::mod(padLow, baseDilation);
+    effectivePadLow = padLow - localPadLow;
+    int64_t remFootprintDilated = sFootprintDilated - localPadLow;
+    if (remFootprintDilated <= 0) {
+      return cannotUseHalo();
+    }
+    sFootprint = (remFootprintDilated - 1) / baseDilation + 1;
+    localPadHigh = remFootprintDilated - ((sFootprint - 1) * baseDilation + 1);
+  } else if (stride == 1) {
+    int64_t maxRem = 0;
+    for (int64_t t = 0; t < shardCount; ++t) {
+      maxRem = std::max(maxRem, llvm::mod(t * sOut - padLow, baseDilation));
+    }
+    sFootprint =
+        llvm::divideCeil(sFootprintDilated + maxRem - 1, baseDilation) + 1;
+  } else {
+    return cannotUseHalo();
+  }
+
+  int64_t dilatedInput =
+      localPadLow + (sFootprint - 1) * baseDilation + 1 + localPadHigh;
+  int64_t inferredOutDim = (dilatedInput - dilatedSize) / stride + 1;
+
+  DimExchangeInfo dimInfo =
+      getDimExchangeInfo(shardCount, sIn, sOut, sFootprint, effectivePadLow,
+                         stride, baseDilation, inputDimSize);
+  if (padLow != 0 || localPadHigh != 0 || sFootprint != sIn ||
+      sOut * stride != sIn * baseDilation || inputDimSize % shardCount != 0 ||
+      outputDimSize % shardCount != 0) {
+    dimInfo.needsComm = true;
+  }
+  return WindowDimExchangeInfo{std::move(dimInfo), effectivePadLow, localPadLow,
+                               localPadHigh, inferredOutDim};
 }
 
 // Checks if a dimension is sharded, populates the manual axes, pads the logical
@@ -1330,9 +1490,9 @@ Value handleReplicatedPadDims(
       localHigh(rank, 0), localInterior(rank, 0);
   bool needsLocalPad = false;
   for (int64_t i = 0; i < rank; ++i) {
-    int64_t manualFactor =
-        getManualShardCount(sharding.getDimShardings()[i], mesh, manualAxes);
-    int64_t sOutLocal = paddedGlobalType.getDimSize(i) / manualFactor;
+    int64_t sOutLocal =
+        getLocalDimSize(sharding.getDimShardings()[i],
+                        paddedGlobalType.getDimSize(i), mesh, manualAxes);
     localResultShape[i] = sOutLocal;
 
     if (sharding.getDimShardings()[i].getShardedSize(mesh) > 1) {
@@ -1431,14 +1591,255 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
       loc, divisibleInput, info.divisibleInputShape, origInputType,
       padOp.getType(), inSharding, inSharding, mesh, info.manualAxes,
       padOp.getPaddingValue(), padOp.getEdgePaddingLow(), info.dimExchanges,
-      postProcess, state,
-      /*windowStrides=*/{}, baseDilations);
+      /*windowStrides=*/{}, baseDilations, postProcess, state);
 
   // Trim final tensor shape to match expected output shape.
   result =
       sliceHighSideToType(loc, result, padOp.getType(), inSharding, rewriter);
 
   rewriter.replaceOp(padOp, result);
+  return success();
+}
+
+// -----------------------------------------------------------------------------
+// stablehlo.reduce_window
+// -----------------------------------------------------------------------------
+
+struct ReduceWindowDataExchangeInfo {
+  DataExchangeInfo info;
+  SmallVector<int64_t> effectivePadLows;
+  SmallVector<int64_t> localPadding;
+  SmallVector<int64_t> inferredOutDims;
+  bool needsSlice = false;
+};
+
+ReduceWindowDataExchangeInfo getReduceWindowDataExchangeInfo(
+    stablehlo::ReduceWindowOp rwOp, TensorShardingAttr sharding, MeshAttr mesh,
+    RankedTensorType inputType) {
+  ReduceWindowDataExchangeInfo rwInfo;
+  RankedTensorType resultTy =
+      cast<RankedTensorType>(rwOp.getResult(0).getType());
+  int64_t rank = inputType.getRank();
+  rwInfo.effectivePadLows = getPaddingLows(rwOp.getPadding(), rank);
+  rwInfo.localPadding.assign(rank * 2, 0);
+  if (auto paddingAttr = rwOp.getPadding()) {
+    llvm::copy(paddingAttr->getValues<int64_t>(), rwInfo.localPadding.begin());
+  }
+  rwInfo.inferredOutDims = llvm::to_vector(resultTy.getShape());
+
+  rwInfo.info = buildDataExchangeInfo(
+      sharding, mesh, inputType,
+      [&](int64_t dim, int64_t sIn, int64_t shardCount) {
+        WindowDimExchangeInfo winDimInfo = getWindowDimExchangeInfo(
+            shardCount, sIn, inputType.getDimSize(dim),
+            resultTy.getDimSize(dim), rwOp.getWindowDimensions()[dim],
+            getDimProperty(rwOp.getWindowStrides(), dim),
+            getDimProperty(rwOp.getWindowDilations(), dim),
+            getDimProperty(rwOp.getBaseDilations(), dim),
+            rwInfo.effectivePadLows[dim]);
+        rwInfo.effectivePadLows[dim] = winDimInfo.effectivePadLow;
+        rwInfo.localPadding[2 * dim] = winDimInfo.localPadLow;
+        if (rwInfo.localPadding[2 * dim + 1] != winDimInfo.localPadHigh) {
+          winDimInfo.dimInfo.needsComm = true;
+        }
+        rwInfo.localPadding[2 * dim + 1] = winDimInfo.localPadHigh;
+        rwInfo.inferredOutDims[dim] = winDimInfo.inferredOutDim;
+        if (winDimInfo.inferredOutDim > winDimInfo.dimInfo.sOut) {
+          rwInfo.needsSlice = true;
+        }
+        return winDimInfo.dimInfo;
+      });
+  return rwInfo;
+}
+
+// Performs local reduce_window operation on the exchanged local segment inside
+// the manual computation block:
+//
+// 1. Create the local stablehlo.reduce_window operation with localPadding and
+//    inferredOutDims, cloning the original reduction body.
+// 2. If any sharded dimension with baseDilation > 1 has inferredOutDim > sOut
+//    (rwInfo.needsSlice), dynamically compute the output slice offset
+//    offsetOut = dilatedOffset % baseDilation from partitionId and
+//    dynamic-slice the output of the local reduce_window operation to sOut.
+SmallVector<Value> localReduceWindow(
+    Location loc, stablehlo::ReduceWindowOp rwOp, ValueRange exchangedLocals,
+    ValueRange localPaddingValues, ArrayRef<RankedTensorType> resultTypes,
+    TensorShardingAttr inSharding, MeshAttr mesh,
+    const ReduceWindowDataExchangeInfo& rwInfo, ResolutionState& state) {
+  const DataExchangeInfo& info = rwInfo.info;
+  RankedTensorType resultType = resultTypes[0];
+  int64_t rank = resultType.getRank();
+
+  SmallVector<Type> localResultTypes;
+  localResultTypes.reserve(resultTypes.size());
+  for (RankedTensorType resTy : resultTypes) {
+    localResultTypes.push_back(resTy.clone(rwInfo.inferredOutDims));
+  }
+
+  IRRewriter& rewriter = state.rewriter;
+  auto padType = RankedTensorType::get({rank, 2}, rewriter.getI64Type());
+  auto localPaddingAttr =
+      DenseIntElementsAttr::get(padType, rwInfo.localPadding);
+
+  TensorShardingAttr localSharding =
+      removeAxesFromSharding(inSharding, info.manualAxes, mesh);
+
+  auto newRwOp = stablehlo::ReduceWindowOp::create(
+      rewriter, loc, localResultTypes, exchangedLocals, localPaddingValues,
+      rwOp.getWindowDimensionsAttr(), rwOp.getWindowStridesAttr(),
+      rwOp.getBaseDilationsAttr(), rwOp.getWindowDilationsAttr(),
+      localPaddingAttr);
+
+  rewriter.cloneRegionBefore(rwOp.getBody(), newRwOp.getBody(),
+                             newRwOp.getBody().end());
+  for (Value res : newRwOp.getResults()) {
+    setSharding(res, localSharding);
+  }
+
+  SmallVector<Value> sliceResults(newRwOp.getResults().begin(),
+                                  newRwOp.getResults().end());
+  if (!rwInfo.needsSlice) {
+    return sliceResults;
+  }
+
+  Value zeroConst = createScalarI32Constant(loc, 0, rewriter);
+  SmallVector<Value> dynamicSliceOffsets(rank, zeroConst);
+  SmallVector<int64_t> sliceSizes(rank, 0);
+
+  Value scalarPartitionId = createDeviceId(loc, state);
+
+  int64_t dimExchangeIdx = -1;
+  for (int64_t i = 0; i < rank; ++i) {
+    int64_t shardCount = inSharding.getDimShardings()[i].getShardedSize(mesh);
+    if (shardCount <= 1) {
+      sliceSizes[i] = resultType.getDimSize(i);
+      continue;
+    }
+    dimExchangeIdx++;
+
+    int64_t sIn = info.divisibleInputShape[i] / shardCount;
+    int64_t sOut = info.dimExchanges[dimExchangeIdx].sOut;
+    sliceSizes[i] = sOut;
+    if (rwInfo.inferredOutDims[i] <= sOut) {
+      continue;
+    }
+
+    int64_t baseDilation = getDimProperty(rwOp.getBaseDilations(), i);
+    dynamicSliceOffsets[i] = computeWindowPostOpSliceOffset(
+        loc, scalarPartitionId, inSharding.getDimShardings()[i], mesh,
+        info.dimExchanges[dimExchangeIdx], sIn, rwInfo.effectivePadLows[i],
+        baseDilation, state);
+  }
+
+  SmallVector<Value> finalSliceResults;
+  for (auto [i, res] : llvm::enumerate(sliceResults)) {
+    auto sliceOp = stablehlo::DynamicSliceOp::create(
+        rewriter, loc, resultTypes[i].clone(sliceSizes), res,
+        dynamicSliceOffsets, rewriter.getDenseI64ArrayAttr(sliceSizes));
+    setSharding(sliceOp.getResult(), localSharding);
+    finalSliceResults.push_back(sliceOp.getResult());
+  }
+  return finalSliceResults;
+}
+
+// Implements a sharded reduce_window operation using HALO exchange for
+// non-uniform dimensions as follows:
+//
+// 1. Align logical input shard sizes via high-side padding.
+// 2. Use HALO exchange to implement sharded window dimensions:
+//    - Concatenate the left neighbor shard, self shard, and right neighbor
+//      shard along the sharded dimension.
+//    - Pad the concatenated buffer by sFootprint.
+//    - Slice out a local segment of shape sFootprint using a dynamic offset
+//      computed on-device via partitionId.
+// 3. Execute the local stablehlo.reduce_window operation inside the manual
+//    computation block using the extracted local segment.
+// 4. Trim final tensor shape to match expected output shape.
+LogicalResult handleReduceWindowOp(stablehlo::ReduceWindowOp rwOp,
+                                   ResolutionState& state) {
+  IRRewriter& rewriter = state.rewriter;
+  SymbolTable& symbolTable = state.symbolTable;
+
+  if (rwOp.getInputs().empty()) {
+    return failure();
+  }
+  Value operand0 = rwOp.getInputs()[0];
+  TensorShardingAttr inSharding = getSharding(operand0);
+  auto origType0 = mlir::dyn_cast<RankedTensorType>(operand0.getType());
+  if (isFullyReplicated(inSharding) || !origType0) {
+    return failure();
+  }
+  for (Value input : rwOp.getInputs().drop_front()) {
+    if (getSharding(input) != inSharding) {
+      return failure();
+    }
+  }
+  for (Value result : rwOp.getResults()) {
+    if (TensorShardingAttr outSharding = getSharding(result);
+        outSharding && outSharding != inSharding) {
+      return failure();
+    }
+  }
+
+  MeshAttr mesh = inSharding.getMesh(symbolTable);
+  if (!mesh || mesh.isSingleDevice()) {
+    return success();
+  }
+
+  ReduceWindowDataExchangeInfo rwInfo =
+      getReduceWindowDataExchangeInfo(rwOp, inSharding, mesh, origType0);
+  const DataExchangeInfo& info = rwInfo.info;
+  if (info.manualAxes.empty() || !info.needsComm()) {
+    return success();
+  }
+  if (!canUseHalo(info)) {
+    return failure();
+  }
+
+  Location loc = rwOp.getLoc();
+  rewriter.setInsertionPoint(rwOp);
+
+  SmallVector<Value> paddedInputs;
+  paddedInputs.reserve(rwOp.getInputs().size());
+  for (auto [operand, initVal] :
+       llvm::zip_equal(rwOp.getInputs(), rwOp.getInitValues())) {
+    paddedInputs.push_back(padHighSideToShape(
+        loc, operand, info.divisibleInputShape, inSharding, rewriter, initVal));
+  }
+
+  auto toRankedType = [](Value v) {
+    return cast<RankedTensorType>(v.getType());
+  };
+  SmallVector<RankedTensorType> origInputTypes =
+      llvm::map_to_vector(rwOp.getInputs(), toRankedType);
+  SmallVector<RankedTensorType> origOutputTypes =
+      llvm::map_to_vector(rwOp.getResults(), toRankedType);
+
+  SmallVector<int64_t> windowStrides =
+      getDimProperties(rwOp.getWindowStrides(), origType0.getRank());
+  auto postProcess = [&](ValueRange exchangedLocals,
+                         ValueRange localPaddingValues,
+                         ArrayRef<RankedTensorType> resultTypes,
+                         ResolutionState& state) -> SmallVector<Value> {
+    return localReduceWindow(loc, rwOp, exchangedLocals, localPaddingValues,
+                             resultTypes, inSharding, mesh, rwInfo, state);
+  };
+  SmallVector<int64_t> baseDilations =
+      getDimProperties(rwOp.getBaseDilations(), origType0.getRank());
+  SmallVector<Value> results = haloDataExchangeVariadic(
+      loc, paddedInputs, info.divisibleInputShape, origInputTypes,
+      origOutputTypes, inSharding, inSharding, mesh, info.manualAxes,
+      rwOp.getInitValues(), rwInfo.effectivePadLows, info.dimExchanges,
+      windowStrides, baseDilations, postProcess, state);
+
+  SmallVector<Value> trimmedResults;
+  trimmedResults.reserve(results.size());
+  for (auto [res, origOutputTy] : llvm::zip_equal(results, origOutputTypes)) {
+    trimmedResults.push_back(
+        sliceHighSideToType(loc, res, origOutputTy, inSharding, rewriter));
+  }
+
+  rewriter.replaceOp(rwOp, trimmedResults);
   return success();
 }
 
@@ -1597,8 +1998,6 @@ ReshapeShardingAnalysis ReshapeShardingAnalysis::run(
   return a;
 }
 
-// Computes DimExchangeInfo for a sharded reshape op dimension group
-// represented by ReshapeGroupInfo.
 DimExchangeInfo getDimExchangeInfoForReshapeGroup(
     stablehlo::ReshapeOp reshapeOp, TensorShardingAttr inSharding,
     TensorShardingAttr outSharding, MeshAttr mesh,
@@ -1696,8 +2095,7 @@ DimExchangeInfo getDimExchangeInfoForReshapeGroup(
 DataExchangeInfo getReshapeDataExchangeInfo(
     stablehlo::ReshapeOp reshapeOp, TensorShardingAttr inSharding,
     TensorShardingAttr outSharding, MeshAttr mesh,
-    ArrayRef<int64_t> divisibleInputShape, ArrayRef<int64_t> paddedOutputShape,
-    const ReshapeHaloInfo& haloInfo,
+    ArrayRef<int64_t> divisibleInputShape, const ReshapeHaloInfo& haloInfo,
     const llvm::SmallDenseSet<AxisRefAttr>& nonDivisibleAxes) {
   DataExchangeInfo info;
   info.manualAxes = nonDivisibleAxes;
@@ -1705,7 +2103,7 @@ DataExchangeInfo getReshapeDataExchangeInfo(
   int64_t activeRank = origInputType.getRank();
   TensorShardingAttr activeSharding = inSharding;
 
-  const auto *activeGroupIt = haloInfo.activeGroups.begin();
+  const auto* activeGroupIt = haloInfo.activeGroups.begin();
   for (int64_t i = 0; i < activeRank; ++i) {
     int64_t sc = activeSharding.getDimShardings()[i].getShardedSize(mesh);
     if (sc <= 1) {
@@ -1789,14 +2187,14 @@ LogicalResult handleReshapeHaloExchange(
     TensorShardingAttr outSharding, MeshAttr mesh,
     ArrayRef<ReshapeGroupInfo> reshapeGroups,
     ArrayRef<int64_t> divisibleInputShape, ArrayRef<int64_t> paddedOutputShape,
-    ReshapeHaloInfo& haloInfo,
+    const ReshapeHaloInfo& haloInfo,
     const llvm::SmallDenseSet<AxisRefAttr>& nonDivisibleAxes,
     ResolutionState& state) {
   SDY_CHECK(!haloInfo.activeGroups.empty());
 
   DataExchangeInfo info = getReshapeDataExchangeInfo(
-      reshapeOp, inSharding, outSharding, mesh, divisibleInputShape,
-      paddedOutputShape, haloInfo, nonDivisibleAxes);
+      reshapeOp, inSharding, outSharding, mesh, divisibleInputShape, haloInfo,
+      nonDivisibleAxes);
 
   RankedTensorType resultType = reshapeOp.getResult().getType();
   if (!canUseHalo(info)) {
@@ -1822,9 +2220,8 @@ LogicalResult handleReshapeHaloExchange(
     SmallVector<int64_t> localOutputShape;
     for (auto [dim, dimSharding] :
          llvm::enumerate(outSharding.getDimShardings())) {
-      localOutputShape.push_back(
-          paddedOutputShape[dim] /
-          getManualShardCount(dimSharding, mesh, info.manualAxes));
+      localOutputShape.push_back(getLocalDimSize(
+          dimSharding, paddedOutputShape[dim], mesh, info.manualAxes));
     }
     auto localOutputType =
         RankedTensorType::get(localOutputShape, resultType.getElementType());
@@ -1839,7 +2236,8 @@ LogicalResult handleReshapeHaloExchange(
   Value result = haloDataExchange(
       loc, paddedInput, divisibleInputShape, origInputType, resultType,
       inSharding, outSharding, mesh, info.manualAxes, paddingValue,
-      edgePaddingLow, info.dimExchanges, postProcess, state);
+      edgePaddingLow, info.dimExchanges, /*windowStrides=*/{},
+      /*baseDilations=*/{}, postProcess, state);
   result = sliceHighSideToType(loc, result, resultType, outSharding, rewriter);
   rewriter.replaceOp(reshapeOp, result);
   return success();
@@ -2004,9 +2402,8 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
     }
 
     // Apply HALO Exchange to shift the padding to the low edge.
-    input = haloRightShiftData(loc, input, origType, inSharding, mesh,
-                               info->manualAxes, info->paddedShape, dimsToShift,
-                               shiftAmounts, state);
+    input = haloRightShiftData(loc, input, inSharding, mesh, info->manualAxes,
+                               dimsToShift, shiftAmounts, state);
   }
 
   // Construct Reversed Mesh to represent the reverse op result sharding.
@@ -2049,16 +2446,32 @@ LogicalResult handleReverseOp(stablehlo::ReverseOp reverseOp,
   return success();
 }
 
-// Returns the maximum channel ID in `moduleOp` plus one.
-int64_t getNextChannelId(ModuleOp moduleOp) {
-  int64_t maxChannelId = 0;
-  moduleOp->walk([&](Operation* op) {
-    if (auto channelHandle =
-            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
-      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
-    }
-  });
-  return maxChannelId + 1;
+// -----------------------------------------------------------------------------
+// stablehlo.rng_bit_generator
+// -----------------------------------------------------------------------------
+
+void handleRngBitGeneratorOp(stablehlo::RngBitGeneratorOp rngOp,
+                             bool rngBitGeneratorUnsafe,
+                             ResolutionState& state) {
+  Type stateElemTy = rngOp.getInitialState().getType().getElementType();
+  if (rngBitGeneratorUnsafe &&
+      (stateElemTy.isInteger(32) || stateElemTy.isInteger(64))) {
+    // Support partitioned rng op output.
+    return;
+  }
+  TensorShardingAttr outSharding = getSharding(rngOp.getOutput());
+  if (!outSharding || isFullyReplicated(outSharding)) {
+    return;
+  }
+  // Otherwise, replicate the rng op output.
+  setSharding(rngOp.getOutput(), TensorShardingAttr::getFullyClosed(
+                                     rngOp.getContext(), outSharding.getRank(),
+                                     outSharding.getMeshOrRef()));
+  state.rewriter.setInsertionPointAfter(rngOp);
+  auto reshardOp = sdy::ReshardOp::create(state.rewriter, rngOp.getLoc(),
+                                          rngOp.getOutput(), outSharding);
+  state.rewriter.replaceAllUsesExcept(rngOp.getOutput(), reshardOp.getResult(),
+                                      reshardOp);
 }
 
 // -----------------------------------------------------------------------------
@@ -2190,19 +2603,8 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   Value paddingValue =
       createZeroScalarConstant(loc, origInputType.getElementType(), rewriter);
 
-  int64_t rank = origInputType.getRank();
-  SmallVector<int64_t> edgePaddingLow, edgePaddingHigh, interiorPadding;
-  edgePaddingLow.reserve(rank);
-  edgePaddingHigh.reserve(rank);
-  interiorPadding.reserve(rank);
-  for (int64_t dim = 0; dim < rank; ++dim) {
-    int64_t start = sliceOp.getStartIndices()[dim];
-    int64_t limit = sliceOp.getLimitIndices()[dim];
-    int64_t size = origInputType.getDimSize(dim);
-    edgePaddingLow.push_back(-start);
-    edgePaddingHigh.push_back(limit - size);
-    interiorPadding.push_back(0);
-  }
+  SmallVector<int64_t> edgePaddingLow = llvm::map_to_vector(
+      sliceOp.getStartIndices(), [](int64_t start) { return -start; });
 
   // Define step 3 as post processing inside haloDataExchange.
   auto postProcess = [&](Value exchangedLocal, Value localPaddingValue,
@@ -2217,7 +2619,8 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   Value result = haloDataExchange(
       loc, divisibleInput, info.divisibleInputShape, origInputType,
       sliceOp.getType(), inSharding, inSharding, mesh, info.manualAxes,
-      paddingValue, edgePaddingLow, info.dimExchanges, postProcess, state);
+      paddingValue, edgePaddingLow, info.dimExchanges, /*windowStrides=*/{},
+      /*baseDilations=*/{}, postProcess, state);
 
   // Trim final tensor shape to match expected output shape.
   result =
@@ -2226,6 +2629,10 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   rewriter.replaceOp(sliceOp, result);
   return success();
 }
+
+// =============================================================================
+// Replication fallback helpers.
+// =============================================================================
 
 // Returns true if the convolution spatial dimension `spatialDimIdx` is a pure
 // reduction dimension without sliding-window shifts (i.e., output spatial size
@@ -2318,30 +2725,6 @@ std::optional<int64_t> getDynamicUpdateSliceDim(OpShardingRuleAttr rule,
     }
   }
   return std::nullopt;
-}
-
-void handleRngBitGeneratorOp(stablehlo::RngBitGeneratorOp rngOp,
-                             bool rngBitGeneratorUnsafe,
-                             ResolutionState& state) {
-  Type stateElemTy = rngOp.getInitialState().getType().getElementType();
-  if (rngBitGeneratorUnsafe &&
-      (stateElemTy.isInteger(32) || stateElemTy.isInteger(64))) {
-    // Support partitioned rng op output.
-    return;
-  }
-  TensorShardingAttr outSharding = getSharding(rngOp.getOutput());
-  if (!outSharding || isFullyReplicated(outSharding)) {
-    return;
-  }
-  // Otherwise, replicate the rng op output.
-  setSharding(rngOp.getOutput(), TensorShardingAttr::getFullyClosed(
-                                     rngOp.getContext(), outSharding.getRank(),
-                                     outSharding.getMeshOrRef()));
-  state.rewriter.setInsertionPointAfter(rngOp);
-  auto reshardOp = sdy::ReshardOp::create(state.rewriter, rngOp.getLoc(),
-                                          rngOp.getOutput(), outSharding);
-  state.rewriter.replaceAllUsesExcept(rngOp.getOutput(), reshardOp.getResult(),
-                                      reshardOp);
 }
 
 void resolvePermutationFactorsViaReplication(Operation* op,
@@ -2493,6 +2876,18 @@ void resolvePermutationFactorsViaReplication(Operation* op,
 // The module pass.
 // -----------------------------------------------------------------------------
 
+// Returns the maximum channel ID in moduleOp plus one.
+int64_t getNextChannelId(ModuleOp moduleOp) {
+  int64_t maxChannelId = 0;
+  moduleOp->walk([&](Operation* op) {
+    if (auto channelHandle =
+            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
+      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
+    }
+  });
+  return maxChannelId + 1;
+}
+
 struct ShardyResolvePermutationFactorsPass
     : public impl::ShardyResolvePermutationFactorsPassBase<
           ShardyResolvePermutationFactorsPass> {
@@ -2577,6 +2972,9 @@ struct ShardyResolvePermutationFactorsPass
             llvm::TypeSwitch<Operation*, bool>(op)
                 .Case([&](stablehlo::PadOp padOp) {
                   return succeeded(handlePadOp(padOp, state));
+                })
+                .Case([&](stablehlo::ReduceWindowOp rwOp) {
+                  return succeeded(handleReduceWindowOp(rwOp, state));
                 })
                 .Case([&](stablehlo::ReverseOp reverseOp) {
                   return succeeded(handleReverseOp(reverseOp, state));
