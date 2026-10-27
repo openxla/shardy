@@ -97,24 +97,6 @@ AxisList concatAxisLists(MutableArrayRef<AxisList> axisLists) {
   return result;
 }
 
-// Remove the common prefix of `inAxesPerDim` and `outAxesPerDim` for dimensions
-// that do not need to be unsharded first.
-void removeCommonPrefix(SmallVector<AxisList>& inAxesPerDim,
-                        SmallVector<AxisList>& outAxesPerDim,
-                        ArrayRef<bool> dimsToUnshard) {
-  for (auto [inAxes, outAxes, unshardDim] :
-       llvm::zip_equal(inAxesPerDim, outAxesPerDim, dimsToUnshard)) {
-    if (unshardDim) {
-      continue;
-    }
-    while (!inAxes.empty() && !outAxes.empty() &&
-           inAxes.front() == outAxes.front()) {
-      inAxes.pop_front();
-      outAxes.pop_front();
-    }
-  }
-}
-
 // Removes the axes in `axesToPop` from the back of `currentAxes`.
 //
 // Note that `axesToPop` can have decomposed sub-axes of an axis in
@@ -240,6 +222,7 @@ class CollectiveInserter {
         mesh(inSharding.getMesh(op)),
         curMeshOrRef(inSharding.getMeshOrRef()),
         outMeshOrRef(outSharding.getMeshOrRef()),
+        outSharding(outSharding),
         unreducedAxes(outSharding.getUnreducedAxes()),
         reductionOp(outSharding.getReductionOp()),
         inAxesPerDim(getAxesPerDim<AxisList>(inSharding)),
@@ -264,8 +247,10 @@ class CollectiveInserter {
       int64_t outShardedSize =
           outSharding.getDimSharding(dim).getShardedSize(mesh);
       if (dimSize > 0 && inShardedSize > 1 && outShardedSize > 1 &&
-          llvm::alignTo(dimSize, inShardedSize) !=
-              llvm::alignTo(dimSize, outShardedSize)) {
+          (llvm::alignTo(dimSize, inShardedSize) !=
+               llvm::alignTo(dimSize, outShardedSize) ||
+           llvm::alignTo(dimSize, std::gcd(inShardedSize, outShardedSize)) !=
+               llvm::alignTo(dimSize, outShardedSize))) {
         dimsToUnshard[dim] = true;
       }
     }
@@ -275,10 +260,35 @@ class CollectiveInserter {
     // equal, which allows using them as keys in a hash map.
     alignSubAxesByDecomposition(inAxesPerDim, outAxesPerDim, mesh);
     // We remove the common prefix of `inAxesPerDim` and `outAxesPerDim` (except
-    // on dimensions in `dimsToUnshard`), since those axes stay exactly the same
-    // during the reshard. We are left with `inAxesPerDim` and `outAxesPerDim`
-    // that need to become empty, via a sequence of collectives.
-    removeCommonPrefix(inAxesPerDim, outAxesPerDim, dimsToUnshard);
+    // on dimensions in `dimsToUnshard`, and only up to a prefix whose sharded
+    // size preserves the dimension's padded size), since those axes stay
+    // exactly the same during the reshard. We are left with `inAxesPerDim` and
+    // `outAxesPerDim` that need to become empty, via a sequence of collectives.
+    for (int64_t dim = 0; dim < getRank(); ++dim) {
+      if (dimsToUnshard[dim]) {
+        continue;
+      }
+      AxisList& inAxes = inAxesPerDim[dim];
+      AxisList& outAxes = outAxesPerDim[dim];
+      auto inIt = inAxes.begin();
+      auto outIt = outAxes.begin();
+      int64_t prefixSize = 1;
+      auto validInEnd = inIt;
+      auto validOutEnd = outIt;
+      while (inIt != inAxes.end() && outIt != outAxes.end() &&
+             *inIt == *outIt) {
+        prefixSize *= inIt->getSize(mesh);
+        ++inIt;
+        ++outIt;
+        if ((inIt == inAxes.end() && outIt == outAxes.end()) ||
+            isValidShardedSizeTransition(dim, prefixSize)) {
+          validInEnd = inIt;
+          validOutEnd = outIt;
+        }
+      }
+      inAxes.erase(inAxes.begin(), validInEnd);
+      outAxes.erase(outAxes.begin(), validOutEnd);
+    }
 
     inAxisSet = getAxisSet(inAxesPerDim);
     outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
@@ -343,6 +353,28 @@ class CollectiveInserter {
 
   int64_t getRank() const { return inAxesPerDim.size(); }
 
+  // Returns true if transitioning `dim` from its current sharded size to
+  // `newShardedSize` preserves its divisible padded size across sharded states.
+  bool isValidShardedSizeTransition(int64_t dim, int64_t newShardedSize) const {
+    int64_t dimSize = getTensorShape(result)[dim];
+    if (dimSize <= 0 || newShardedSize <= 1) {
+      return true;
+    }
+    int64_t curShardedSize = getShardedSize(currentAxesPerDim[dim], mesh);
+    if (curShardedSize > 1 && llvm::alignTo(dimSize, curShardedSize) !=
+                                  llvm::alignTo(dimSize, newShardedSize)) {
+      return false;
+    }
+    int64_t outShardedSize =
+        outSharding.getDimSharding(dim).getShardedSize(mesh);
+    if (!dimsToUnshard[dim] && outShardedSize > 1 &&
+        llvm::alignTo(dimSize, newShardedSize) !=
+            llvm::alignTo(dimSize, outShardedSize)) {
+      return false;
+    }
+    return true;
+  }
+
   TensorShardingAttr getCurrentSharding() const {
     TensorShardingAttr sharding = TensorShardingAttr::getClosed(
         getContext(), curMeshOrRef, currentAxesPerDim, unreducedAxes);
@@ -384,15 +416,43 @@ class CollectiveInserter {
     SmallVector<AxisRefAttr> gatheringAxes;
     gatheringAxes.reserve(inAxes.size());
     bool gatherAll = dimsToUnshard[dim];
-    auto shouldGatherAxis = [&](AxisRefAttr axis) {
-      if (gatherAll) {
-        return true;
-      }
-      auto it = outAxisToDimAndIndex.find(axis);
-      return it == outAxisToDimAndIndex.end() || dimsToUnshard[it->second.dim];
-    };
+    int64_t curSrcShardedSize = getShardedSize(currentAxes, mesh);
+    int64_t gatheredAxesSize = 1;
     auto axisRevIt = inAxes.rbegin();
-    while (axisRevIt != inAxes.rend() && shouldGatherAxis(*axisRevIt)) {
+    while (axisRevIt != inAxes.rend()) {
+      if (!gatherAll) {
+        auto it = outAxisToDimAndIndex.find(*axisRevIt);
+        if (it != outAxisToDimAndIndex.end() &&
+            !dimsToUnshard[it->second.dim]) {
+          int64_t tgtDim = it->second.dim;
+          int64_t remSrcShardedSize = curSrcShardedSize / gatheredAxesSize;
+          bool canKeepAxis =
+              isValidShardedSizeTransition(dim, remSrcShardedSize);
+          if (canKeepAxis && tgtDim != dim) {
+            int64_t movingAxesSize = 1;
+            for (auto runIt = axisRevIt; runIt != inAxes.rend(); ++runIt) {
+              auto runOutIt = outAxisToDimAndIndex.find(*runIt);
+              if (runOutIt == outAxisToDimAndIndex.end() ||
+                  runOutIt->second.dim != tgtDim) {
+                break;
+              }
+              movingAxesSize *= runIt->getSize(mesh);
+            }
+            int64_t postAllToAllSrcShardedSize =
+                remSrcShardedSize / movingAxesSize;
+            int64_t newTgtShardedSize =
+                getShardedSize(currentAxesPerDim[tgtDim], mesh) *
+                movingAxesSize;
+            canKeepAxis =
+                isValidShardedSizeTransition(dim, postAllToAllSrcShardedSize) &&
+                isValidShardedSizeTransition(tgtDim, newTgtShardedSize);
+          }
+          if (canKeepAxis) {
+            break;
+          }
+        }
+      }
+      gatheredAxesSize *= axisRevIt->getSize(mesh);
       inAxisSet.erase(*axisRevIt);
       ++axisRevIt;
     }
@@ -614,6 +674,12 @@ class CollectiveInserter {
     if (getTensorShape(result)[srcDim] % newShardedSizeOnSrcDim != 0) {
       return std::nullopt;
     }
+    int64_t newShardedSizeOnTgtDim =
+        getShardedSize(currentAxesPerDim[tgtDim], mesh) * commonAxesSize *
+        addedSlicingAxesSize;
+    if (!isValidShardedSizeTransition(tgtDim, newShardedSizeOnTgtDim)) {
+      return std::nullopt;
+    }
 
     // Divide the capacity of `tgtDim` by the new sharded size of `srcDim`.
     capacityPerDim[tgtDim] /= commonAxesSize * addedSlicingAxesSize;
@@ -755,12 +821,29 @@ class CollectiveInserter {
     // 2. Slice axes in the dimension they appear in `outAxesPerDim`, i.e. the
     // desired dimension, as long as the per-dim capacity allows.
     AxisList availableOutAxes;
-    for (auto [inAxes, outAxes, currentAxes, slicingAxes, dimCapacity,
-               unshardDim] :
-         llvm::zip_equal(inAxesPerDim, outAxesPerDim, currentAxesPerDim,
-                         slicingAxesPerDim, capacityPerDim, dimsToUnshard)) {
-      if (unshardDim) {
+    for (int64_t dim = 0; dim < getRank(); ++dim) {
+      if (dimsToUnshard[dim]) {
         continue;
+      }
+      AxisList& inAxes = inAxesPerDim[dim];
+      AxisList& outAxes = outAxesPerDim[dim];
+      SmallVector<AxisRefAttr>& currentAxes = currentAxesPerDim[dim];
+      SmallVector<AxisRefAttr>& slicingAxes = slicingAxesPerDim[dim];
+      int64_t& dimCapacity = capacityPerDim[dim];
+      int64_t newShardedSize = getShardedSize(currentAxes, mesh);
+      int64_t simCapacity = dimCapacity;
+      for (AxisRefAttr outAxis : outAxes) {
+        if (inAxisSet.contains(outAxis)) {
+          continue;
+        }
+        auto [withinAxis, remainderAxis] =
+            getAxisWithinCapacity(outAxis, simCapacity, mesh);
+        if (withinAxis) {
+          newShardedSize *= withinAxis->getSize(mesh);
+        }
+      }
+      if (!isValidShardedSizeTransition(dim, newShardedSize)) {
+        dimCapacity = 1;
       }
       auto outIt = outAxes.begin();
       while (outIt != outAxes.end()) {
@@ -803,8 +886,30 @@ class CollectiveInserter {
 
     // 3. Slice axes in the first dimension that has enough capacity.
     distributeInAxesWithinCapacity(
-        availableOutAxes, /*addToFront=*/false,
-        /*consumeAxisToAdd=*/[&](AxisRefAttr axisToAdd, int64_t dim) {
+        /*addToFront=*/false,
+        /*getAvailableAxes=*/
+        [&](int64_t dim) -> AxisList& {
+          int64_t& dimCapacity = capacityPerDim[dim];
+          if (dimCapacity > 1) {
+            int64_t simCapacity = dimCapacity;
+            int64_t addedSize = 1;
+            for (AxisRefAttr availAxis : availableOutAxes) {
+              auto [withinAxis, remainderAxis] =
+                  getAxisWithinCapacity(availAxis, simCapacity, mesh);
+              if (withinAxis) {
+                addedSize *= withinAxis->getSize(mesh);
+              }
+            }
+            int64_t newShardedSize =
+                getShardedSize(currentAxesPerDim[dim], mesh) * addedSize;
+            if (!isValidShardedSizeTransition(dim, newShardedSize)) {
+              dimCapacity = 1;
+            }
+          }
+          return availableOutAxes;
+        },
+        /*consumeAxisToAdd=*/
+        [&](AxisRefAttr axisToAdd, int64_t dim) {
           hasSlicingAxes = true;
           addAxisOrMerge(slicingAxesPerDim[dim], axisToAdd, mesh);
           addAxisOrMerge(currentAxesPerDim[dim], axisToAdd, mesh);
@@ -1231,6 +1336,19 @@ class CollectiveInserter {
       return std::nullopt;
     }
 
+    int64_t movingAxesSize = 1;
+    for (auto it = startInAxisIt; it != srcInAxes.end(); ++it) {
+      movingAxesSize *= it->getSize(mesh);
+    }
+    int64_t newSrcShardedSize =
+        getShardedSize(currentAxesPerDim[srcDim], mesh) / movingAxesSize;
+    int64_t newTgtShardedSize =
+        getShardedSize(currentAxesPerDim[*tgtDim], mesh) * movingAxesSize;
+    if (!isValidShardedSizeTransition(srcDim, newSrcShardedSize) ||
+        !isValidShardedSizeTransition(*tgtDim, newTgtShardedSize)) {
+      return std::nullopt;
+    }
+
     AllToAllInfo result(*tgtDim);
     result.axes.reserve(numAxes);
 
@@ -1282,6 +1400,7 @@ class CollectiveInserter {
   Value result;
   MeshAttr mesh;
   mlir::Attribute curMeshOrRef, outMeshOrRef;
+  TensorShardingAttr outSharding;
   ArrayRef<AxisRefAttr> unreducedAxes;
   ReductionOp reductionOp;
   SmallVector<AxisList> inAxesPerDim, outAxesPerDim;

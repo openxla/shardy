@@ -247,12 +247,21 @@ func.func @all_to_all_subaxis_then_all_gather(%arg0 : tensor<16x8x8xf32> {sdy.sh
 
 // CHECK-LABEL: func @all_to_all_subaxis_and_full_axis_then_all_gather
 func.func @all_to_all_subaxis_and_full_axis_then_all_gather(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_z4, [{"x"}, {"z", "w", "y"}, {}]>}) -> tensor<16x8x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"z", "w", "y"}, {}] %arg0 out_sharding=<@mesh4d_z4, [{"x"}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"z":(2)2, "w"}, {}, {"y"}] %[[ALL_GATHER]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_subaxis_and_full_axis_then_all_gather_divisible
+func.func @all_to_all_subaxis_and_full_axis_then_all_gather_divisible(%arg0 : tensor<16x16x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_z4, [{"x"}, {"z", "w", "y"}, {}]>}) -> tensor<16x16x8xf32> {
   // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"y"}: 1->2] %arg0 out_sharding=<@mesh4d_z4, [{"x"}, {"z", "w"}, {"y"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"z":(2)2, "w"}: 1->0] %[[ALL_TO_ALL_0]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {"z":(1)2}, {"y"}]>
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"z":(1)2}, {}] %[[ALL_TO_ALL_1]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]>
   // CHECK-NEXT: return %[[ALL_GATHER]]
-  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x8x8xf32>
-  return %0 : tensor<16x8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x16x8xf32>
+  return %0 : tensor<16x16x8xf32>
 }
 
 // CHECK-LABEL: func @slice_on_src_dim_then_all_to_all
@@ -315,23 +324,41 @@ func.func @slice_on_src_dim_then_all_to_all_and_all_gather(%arg0: tensor<16x8xf3
 
 // CHECK-LABEL: func @slice_on_multiple_src_dims
 func.func @slice_on_multiple_src_dims(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{"z"}, {"x"}, {}]>}) -> tensor<16x8x8xf32> {
-  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"w"}, {"y"}, {}] %arg0 out_sharding=<@mesh4d, [{"z", "w"}, {"x", "y"}, {}]>
-  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"x", "y"}: 1->2] %[[ALL_SLICE]] out_sharding=<@mesh4d, [{"z", "w"}, {}, {"x", "y"}]>
-  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"z", "w"}: 0->2] %[[ALL_TO_ALL_0]] out_sharding=<@mesh4d, [{}, {}, {"x", "y", "z", "w"}]>
-  // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z"}, {"x"}, {}] %arg0 out_sharding=<@mesh4d, [{}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {}, {"x", "y", "z", "w"}] %[[ALL_GATHER]] out_sharding=<@mesh4d, [{}, {}, {"x", "y", "z", "w"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
   %0 = sdy.reshard %arg0 <@mesh4d, [{}, {}, {"x", "y", "z", "w"}]> : tensor<16x8x8xf32>
   return %0 : tensor<16x8x8xf32>
 }
 
+// CHECK-LABEL: func @slice_on_multiple_src_dims_divisible
+func.func @slice_on_multiple_src_dims_divisible(%arg0 : tensor<16x8x16xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{"z"}, {"x"}, {}]>}) -> tensor<16x8x16xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"w"}, {"y"}, {}] %arg0 out_sharding=<@mesh4d, [{"z", "w"}, {"x", "y"}, {}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"x", "y"}: 1->2] %[[ALL_SLICE]] out_sharding=<@mesh4d, [{"z", "w"}, {}, {"x", "y"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"z", "w"}: 0->2] %[[ALL_TO_ALL_0]] out_sharding=<@mesh4d, [{}, {}, {"x", "y", "z", "w"}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
+  %0 = sdy.reshard %arg0 <@mesh4d, [{}, {}, {"x", "y", "z", "w"}]> : tensor<16x8x16xf32>
+  return %0 : tensor<16x8x16xf32>
+}
+
 // CHECK-LABEL: func @slice_on_one_src_dim_but_not_other
 func.func @slice_on_one_src_dim_but_not_other(%arg0 : tensor<2x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{"z"}, {"x"}, {}]>}) -> tensor<2x8x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z"}, {"x"}, {}] %arg0 out_sharding=<@mesh4d, [{}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {}, {"x", "y", "z", "w"}] %[[ALL_GATHER]] out_sharding=<@mesh4d, [{}, {}, {"x", "y", "z", "w"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh4d, [{}, {}, {"x", "y", "z", "w"}]> : tensor<2x8x8xf32>
+  return %0 : tensor<2x8x8xf32>
+}
+
+// CHECK-LABEL: func @slice_on_one_src_dim_but_not_other_divisible
+func.func @slice_on_one_src_dim_but_not_other_divisible(%arg0 : tensor<2x8x16xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{"z"}, {"x"}, {}]>}) -> tensor<2x8x16xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"y"}, {"w"}] %arg0 out_sharding=<@mesh4d, [{"z"}, {"x", "y"}, {"w"}]>
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh4d, [{"y"}, {"z", "w"}, {"x"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"y"}: 0->2] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d, [{}, {"z", "w"}, {"x", "y"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"z", "w"}: 1->2] %[[ALL_TO_ALL_0]] out_sharding=<@mesh4d, [{}, {}, {"x", "y", "z", "w"}]>
   // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
-  %0 = sdy.reshard %arg0 <@mesh4d, [{}, {}, {"x", "y", "z", "w"}]> : tensor<2x8x8xf32>
-  return %0 : tensor<2x8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d, [{}, {}, {"x", "y", "z", "w"}]> : tensor<2x8x16xf32>
+  return %0 : tensor<2x8x16xf32>
 }
 
 // CHECK-LABEL: func @slice_on_src_dim_considering_existing_axes_on_src_dim
@@ -374,23 +401,42 @@ func.func @cannot_slice_on_src_dim_tgt_dim_sharded(%arg0 : tensor<16x8x8xf32> {s
 
 // CHECK-LABEL: func @cannot_slice_on_src_dim_axes_out_of_order
 func.func @cannot_slice_on_src_dim_axes_out_of_order(%arg0 : tensor<4x10xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{}, {"x", "z"}]>}) -> tensor<4x10xf32> {
-  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %arg0 out_sharding=<@mesh3d, [{"y"}, {"x", "z"}]>
-  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d, [{"x"}, {"y", "z"}]>
-  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y", "z"}: 1->0] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{"x", "y", "z"}, {}]>
-  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{}, {"x", "y"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"x", "y"}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x", "y", "z"}, {}] %[[ALL_GATHER]] out_sharding=<@mesh3d, [{"x", "y", "z"}, {}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
   %0 = sdy.reshard %arg0 <@mesh3d, [{"x", "y", "z"}, {}]> : tensor<4x10xf32>
   return %0 : tensor<4x10xf32>
 }
 
+// CHECK-LABEL: func @cannot_slice_on_src_dim_axes_out_of_order_divisible
+func.func @cannot_slice_on_src_dim_axes_out_of_order_divisible(%arg0 : tensor<8x10xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{}, {"x", "z"}]>}) -> tensor<8x10xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y"}, {}] %arg0 out_sharding=<@mesh3d, [{"y"}, {"x", "z"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d, [{"x"}, {"y", "z"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y", "z"}: 1->0] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{"x", "y", "z"}, {}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"x", "y", "z"}, {}]> : tensor<8x10xf32>
+  return %0 : tensor<8x10xf32>
+}
+
 // CHECK-LABEL: func @cannot_slice_on_src_dim_axes_non_contiguous
 func.func @cannot_slice_on_src_dim_axes_non_contiguous(%arg0 : tensor<4x10xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{}, {"z", "w", "y"}]>}) -> tensor<4x10xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh4d, [{}, {"x", "y", "z"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"x", "y", "z"}: 1->0] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d, [{"x", "y", "z"}, {}]>
+  // CHECK-NEXT: return %[[ALL_TO_ALL]]
+  %0 = sdy.reshard %arg0 <@mesh4d, [{"x", "y", "z"}, {}]> : tensor<4x10xf32>
+  return %0 : tensor<4x10xf32>
+}
+
+// CHECK-LABEL: func @cannot_slice_on_src_dim_axes_non_contiguous_divisible
+func.func @cannot_slice_on_src_dim_axes_non_contiguous_divisible(%arg0 : tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh4d, [{}, {"z", "w", "y"}]>}) -> tensor<8x16xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh4d, [{"x"}, {"z", "w", "y"}]>
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh4d, [{"x"}, {"w", "y", "z"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y", "z"}: 1->0] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d, [{"x", "y", "z"}, {"w"}]>
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"w"}] %[[ALL_TO_ALL]] out_sharding=<@mesh4d, [{"x", "y", "z"}, {}]>
   // CHECK-NEXT: return %[[ALL_GATHER]]
-  %0 = sdy.reshard %arg0 <@mesh4d, [{"x", "y", "z"}, {}]> : tensor<4x10xf32>
-  return %0 : tensor<4x10xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d, [{"x", "y", "z"}, {}]> : tensor<8x16xf32>
+  return %0 : tensor<8x16xf32>
 }
 
 // CHECK-LABEL: func @cannot_slice_on_src_dim_size_too_small
@@ -671,32 +717,62 @@ func.func @all_to_all_axes_at_src_and_tgt_out_of_order(%arg0 : tensor<32x8x8xf32
 // CHECK-LABEL: func @all_to_all_two_tgt_dims_src_out_of_order
 func.func @all_to_all_two_tgt_dims_src_out_of_order(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d_4x2x4, [{}, {"x", "z", "y"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d_4x2x4, [{}, {"x", "y", "z"}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"x", "y", "z"}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d_4x2x4, [{}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x", "y"}, {}, {"z"}] %[[ALL_GATHER]] out_sharding=<@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_two_tgt_dims_src_out_of_order_divisible
+func.func @all_to_all_two_tgt_dims_src_out_of_order_divisible(%arg0 : tensor<16x32x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d_4x2x4, [{}, {"x", "z", "y"}, {}]>}) -> tensor<16x32x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d_4x2x4, [{}, {"x", "y", "z"}, {}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"z"}: 1->2] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d_4x2x4, [{}, {"x", "y"}, {"z"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"x", "y"}: 1->0] %[[ALL_TO_ALL_0]] out_sharding=<@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]>
   // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
-  %0 = sdy.reshard %arg0 <@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]> : tensor<16x8x8xf32>
-  return %0 : tensor<16x8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]> : tensor<16x32x8xf32>
+  return %0 : tensor<16x32x8xf32>
 }
 
 // CHECK-LABEL: func @all_to_all_two_tgt_dims_src_out_of_order_2
 func.func @all_to_all_two_tgt_dims_src_out_of_order_2(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d_4x2x4, [{}, {"y", "z", "x"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d_4x2x4, [{}, {"x", "y", "z"}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"x", "y", "z"}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d_4x2x4, [{}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x", "y"}, {}, {"z"}] %[[ALL_GATHER]] out_sharding=<@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_two_tgt_dims_src_out_of_order_2_divisible
+func.func @all_to_all_two_tgt_dims_src_out_of_order_2_divisible(%arg0 : tensor<16x32x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d_4x2x4, [{}, {"y", "z", "x"}, {}]>}) -> tensor<16x32x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d_4x2x4, [{}, {"x", "y", "z"}, {}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"z"}: 1->2] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d_4x2x4, [{}, {"x", "y"}, {"z"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"x", "y"}: 1->0] %[[ALL_TO_ALL_0]] out_sharding=<@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]>
   // CHECK-NEXT: return %[[ALL_TO_ALL_1]]
-  %0 = sdy.reshard %arg0 <@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]> : tensor<16x8x8xf32>
-  return %0 : tensor<16x8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh3d_4x2x4, [{"x", "y"}, {}, {"z"}]> : tensor<16x32x8xf32>
+  return %0 : tensor<16x32x8xf32>
 }
 
 // CHECK-LABEL: func @all_to_all_and_gather_src_dim_out_of_order
 func.func @all_to_all_and_gather_src_dim_out_of_order(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_z4, [{"x"}, {"y", "z", "w"}, {}]>}) -> tensor<16x8x8xf32> {
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh4d_z4, [{"x"}, {"z", "w", "y"}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"z", "w", "y"}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d_z4, [{"x"}, {}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"z":(2)2, "w"}, {}, {"y"}] %[[ALL_GATHER]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// CHECK-LABEL: func @all_to_all_and_gather_src_dim_out_of_order_divisible
+func.func @all_to_all_and_gather_src_dim_out_of_order_divisible(%arg0 : tensor<16x16x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_z4, [{"x"}, {"y", "z", "w"}, {}]>}) -> tensor<16x16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh4d_z4, [{"x"}, {"z", "w", "y"}, {}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_0:.*]] = sdy.all_to_all [{"y"}: 1->2] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d_z4, [{"x"}, {"z", "w"}, {"y"}]>
   // CHECK-NEXT: %[[ALL_TO_ALL_1:.*]] = sdy.all_to_all [{"z":(2)2, "w"}: 1->0] %[[ALL_TO_ALL_0]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {"z":(1)2}, {"y"}]>
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"z":(1)2}, {}] %[[ALL_TO_ALL_1]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]>
   // CHECK-NEXT: return %[[ALL_GATHER]]
-  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x8x8xf32>
-  return %0 : tensor<16x8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x16x8xf32>
+  return %0 : tensor<16x16x8xf32>
 }
 
 // CHECK-LABEL: func @reorder_sub_axes
@@ -722,24 +798,44 @@ func.func @replace_sub_axes(%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.shardin
 
 // CHECK-LABEL: func @replace_sub_axes_2
 func.func @replace_sub_axes_2(%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_w16, [{"y", "w":(4)2, "z", "w":(1)2}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh4d_w16, [{"y", "x", "w":(2)4}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x", "w":(2)4}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d_w16, [{"y"}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"x", "w":(2)8}] %[[ALL_GATHER]] out_sharding=<@mesh4d_w16, [{"y"}, {"x", "w":(2)8}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w":(2)8}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @replace_sub_axes_2_divisible
+func.func @replace_sub_axes_2_divisible(%arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh4d_w16, [{"y", "w":(4)2, "z", "w":(1)2}, {}]>}) -> tensor<16x16xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"x", "w":(2)2, "w":(8)2}] %arg0 out_sharding=<@mesh4d_w16, [{"y", "w":(4)2, "z", "w":(1)2}, {"x", "w":(2)2, "w":(8)2}]>
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh4d_w16, [{"y", "z", "w":(1)2, "w":(8)2}, {"x", "w":(2)4}]>
   // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"w":(8)2}: 0->1] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d_w16, [{"y", "z", "w":(1)2}, {"x", "w":(2)8}]>
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z", "w":(1)2}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh4d_w16, [{"y"}, {"x", "w":(2)8}]>
   // CHECK-NEXT: return %[[ALL_GATHER]]
-  %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w":(2)8}]> : tensor<16x8xf32>
-  return %0 : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w":(2)8}]> : tensor<16x16xf32>
+  return %0 : tensor<16x16xf32>
 }
 
 // CHECK-LABEL: func @replace_sub_axes_3
 func.func @replace_sub_axes_3(%arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_w16, [{"y", "w":(4)2, "z", "w":(1)2}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh4d_w16, [{"y", "x", "w":(1)4}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x", "w":(1)4}, {}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d_w16, [{"y"}, {}]>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"x", "w"}] %[[ALL_GATHER]] out_sharding=<@mesh4d_w16, [{"y"}, {"x", "w"}]>
+  // CHECK-NEXT: return %[[ALL_SLICE]]
+  %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @replace_sub_axes_3_divisible
+func.func @replace_sub_axes_3_divisible(%arg0: tensor<16x32xf32> {sdy.sharding = #sdy.sharding<@mesh4d_w16, [{"y", "w":(4)2, "z", "w":(1)2}, {}]>}) -> tensor<16x32xf32> {
   // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"x", "w":(2)2, "w":(8)2}] %arg0 out_sharding=<@mesh4d_w16, [{"y", "w":(4)2, "z", "w":(1)2}, {"x", "w":(2)2, "w":(8)2}]>
   // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh4d_w16, [{"y", "z", "w":(4)4}, {"x", "w":(1)4}]>
   // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"w":(4)4}: 0->1] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh4d_w16, [{"y", "z"}, {"x", "w"}]>
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z"}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh4d_w16, [{"y"}, {"x", "w"}]>
   // CHECK-NEXT: return %[[ALL_GATHER]]
-  %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w"}]> : tensor<16x8xf32>
-  return %0 : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d_w16, [{"y"}, {"x", "w"}]> : tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
 }
 
 // CHECK-LABEL: func @reorder_device_ids
@@ -1004,6 +1100,34 @@ func.func @reshard_uneven_padded_size_match_swap_axes(%arg0 : tensor<19x19xf32> 
   // CHECK-NEXT: return %[[ALL_TO_ALL]] : tensor<19x19xf32>
   %0 = sdy.reshard %arg0 <@mesh2d_4x2, [{"y"}, {"x"}]> : tensor<19x19xf32>
   return %0 : tensor<19x19xf32>
+}
+
+// CHECK-LABEL: func @reshard_uneven_padded_size_mismatch_all_slice_then_all_to_all
+func.func @reshard_uneven_padded_size_mismatch_all_slice_then_all_to_all(%arg0 : tensor<65x256xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{}, {"x"}]>}) -> tensor<65x256xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"x"}] %arg0 out_sharding=<@mesh3d, [{}, {}]> : tensor<65x256xf32>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"y", "z", "x"}, {}] %[[ALL_GATHER]] out_sharding=<@mesh3d, [{"y", "z", "x"}, {}]> : tensor<65x256xf32>
+  // CHECK-NEXT: return %[[ALL_SLICE]] : tensor<65x256xf32>
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"y", "z", "x"}, {}]> : tensor<65x256xf32>
+  return %0 : tensor<65x256xf32>
+}
+
+// CHECK-LABEL: func @reshard_uneven_padded_size_mismatch_partial_all_to_all_src_dim
+func.func @reshard_uneven_padded_size_mismatch_partial_all_to_all_src_dim(%arg0 : tensor<16x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh4d_z4, [{"x"}, {"z", "w", "y"}, {}]>}) -> tensor<16x8x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"z", "w", "y"}, {}] %arg0 out_sharding=<@mesh4d_z4, [{"x"}, {}, {}]> : tensor<16x8x8xf32>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"z":(2)2, "w"}, {}, {"y"}] %[[ALL_GATHER]] out_sharding=<@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x8x8xf32>
+  // CHECK-NEXT: return %[[ALL_SLICE]] : tensor<16x8x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh4d_z4, [{"x", "z":(2)2, "w"}, {}, {"y"}]> : tensor<16x8x8xf32>
+  return %0 : tensor<16x8x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_uneven_padded_size_mismatch_stage3_available_out_axes
+func.func @reshard_uneven_padded_size_mismatch_stage3_available_out_axes(%arg0 : tensor<20x65xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{"y", "x"}, {}]>}) -> tensor<20x65xf32> {
+  // CHECK-NEXT: %[[CP:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{"z", "x"}, {}]> : tensor<20x65xf32>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[CP]] out_sharding=<@mesh3d, [{"z"}, {}]> : tensor<20x65xf32>
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"x", "y"}] %[[ALL_GATHER]] out_sharding=<@mesh3d, [{"z"}, {"x", "y"}]> : tensor<20x65xf32>
+  // CHECK-NEXT: return %[[ALL_SLICE]] : tensor<20x65xf32>
+  %0 = sdy.reshard %arg0 <@mesh3d, [{"z"}, {"x", "y"}]> : tensor<20x65xf32>
+  return %0 : tensor<20x65xf32>
 }
 
 //===----------------------------------------------------------------------===//
