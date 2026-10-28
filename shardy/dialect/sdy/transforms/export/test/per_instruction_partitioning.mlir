@@ -605,3 +605,31 @@ func.func @if_with_indivisible_capture_and_output(
   }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<i1>) -> tensor<5x16xf32>
   return %0 : tensor<5x16xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @selective_indivisible_all_gather
+func.func @selective_indivisible_all_gather(
+    %arg0: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>})
+    -> (tensor<1x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"y"}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%arg0)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}, {"y"}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{}, {"y"}]>]
+  // CHECK-SAME:   manual_axes={"x", "y"} (%[[LOCAL_ARG0:.*]]: tensor<1x2xf32>) {
+  // CHECK-NEXT:   %[[IN_SLICE:.*]] = stablehlo.slice %[[LOCAL_ARG0]] [0:1, 0:2] : (tensor<1x2xf32>) -> tensor<1x2xf32>
+  // CHECK-NEXT:   %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT:   %[[TABLE:.*]] = stablehlo.constant dense<[true, true, false, false]> : tensor<4xi1>
+  // CHECK-NEXT:   %[[LEADER_SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<4xi1>, tensor<ui32>) -> tensor<1xi1>
+  // CHECK-NEXT:   %[[IS_LEADER:.*]] = stablehlo.reshape %[[LEADER_SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT:   %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<1x2xf32>
+  // CHECK-NEXT:   %[[MASKED:.*]] = stablehlo.select %[[IS_LEADER]], %[[IN_SLICE]], %[[ZERO]] : tensor<i1>, tensor<1x2xf32>
+  // CHECK-NEXT:   %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]])
+  // CHECK:        sdy.return %[[AR]] : tensor<1x2xf32>
+  // CHECK-NEXT: } : (tensor<2x4xf32>) -> tensor<1x4xf32>
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<1x4xf32>
+  %0 = stablehlo.slice %arg0 [0:1, 0:4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {"y"}]>]>} : (tensor<2x4xf32>) -> tensor<1x4xf32>
+  %1 = sdy.all_gather [{"x"}, {}] %0 out_sharding=<@mesh, [{}, {"y"}]> : tensor<1x4xf32>
+  return %1 : tensor<1x4xf32>
+}

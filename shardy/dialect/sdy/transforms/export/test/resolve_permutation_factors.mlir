@@ -1411,6 +1411,21 @@ func.func @slice_comm_free(
   return %1 : tensor<3xi32>
 }
 
+// CHECK-LABEL: func @slice_comm_free_to_one
+// CHECK-SAME:  (%[[ARG0:.*]]: tensor<8xi32>
+func.func @slice_comm_free_to_one(
+  %arg0: tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+  -> tensor<1xi32> {
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:1]
+  %0 = stablehlo.slice %arg0 [0:1] {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{"a"}]>]>
+  } : (tensor<8xi32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[RES:.*]] = sdy.all_gather [{"a"}] %[[SLICE]]
+  %1 = sdy.all_gather [{"a"}] %0 out_sharding=<@mesh, [{}]> : tensor<1xi32>
+  // CHECK-NEXT: return %[[RES]]
+  return %1 : tensor<1xi32>
+}
+
 // CHECK-LABEL: func @slice_partition_partial_dim_with_communication
 // CHECK-SAME:  (%[[ARG0:.*]]: tensor<8xi32>
 func.func @slice_partition_partial_dim_with_communication(

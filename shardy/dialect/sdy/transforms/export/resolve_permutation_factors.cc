@@ -2071,6 +2071,9 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
   return buildDataExchangeInfo(
       sharding, mesh, inputType,
       [&](int64_t dim, int64_t sIn, int64_t shardCount) {
+        if (isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh)) {
+          return DimExchangeInfo{};
+        }
         int64_t sliceSize = sliceOp.getType().getDimSize(dim);
         int64_t sOut = llvm::divideCeil(sliceSize, shardCount);
         int64_t start = sliceOp.getStartIndices()[dim];
@@ -2080,9 +2083,7 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
             /*stride=*/1, /*baseDilation=*/1, inputType.getDimSize(dim));
         // This is a zero-hop-non-communication-free case, which doesn't
         // require collective-permute but dynamic-slice.
-        if (!isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh)) {
-          dimInfo.needsComm = true;
-        }
+        dimInfo.needsComm = true;
         return dimInfo;
       });
 }

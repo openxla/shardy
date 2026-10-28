@@ -81,11 +81,12 @@ TensorShardingAttr updateSharding(TensorShardingAttr sharding,
 
 // Returns true if the slice operation on the given dimension is
 // "communication-free". A slice is communication-free if it is not sharded, or
-// if it is sharded but the slice starts at index 0, has a stride of 1, and the
-// reduction in size does not cross any sharding boundaries.
+// if it is sharded but the slice starts at index 0, has a stride of 1, and
+// either the result dimension size is 1 or the reduction in size does not cross
+// any sharding boundaries.
 //
-// This routine assume both the operand and result have the same sharding. In
-// such cases, even the shard is not divisible, we can simply pad the operand
+// This routine assumes both the operand and result have the same sharding. In
+// such cases, even if the shard is not divisible, we can simply pad the operand
 // then perform a slice op on each device.
 bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
                                  TensorShardingAttr sharding, MeshAttr mesh);

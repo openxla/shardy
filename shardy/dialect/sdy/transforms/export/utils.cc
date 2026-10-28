@@ -184,8 +184,10 @@ bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
     return false;
   }
 
-  return llvm::divideCeil(inDimSize, shardCount) ==
-         llvm::divideCeil(outDimSize, shardCount);
+  // When outDimSize == 1, only shard 0 has non-padding output which is passed
+  // through from its local input.
+  return outDimSize == 1 || llvm::divideCeil(inDimSize, shardCount) ==
+                                llvm::divideCeil(outDimSize, shardCount);
 }
 
 bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,

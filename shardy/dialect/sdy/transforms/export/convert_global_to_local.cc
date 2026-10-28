@@ -3632,9 +3632,16 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
         newLimitIndices.push_back(globalLimit);
       } else {
         MeshAttr mesh = inSharding.getMesh(converter->getSymbolTable());
+        int64_t localOutDimSize = localResultType.getDimSize(i);
         // Sharded -> Sharded. Expect a full slice or communication-free slice.
+        // A communication-free [0:1] slice on a sharded dimension has its
+        // global limit expanded from 1 to shardCount by
+        // sdy-pad-for-divisibility so that the global result type is evenly
+        // divisible by shardCount, yielding localOutDimSize == 1 here while
+        // op.getResult() has global size shardCount > 1.
         if (globalStart != 0 ||
             (globalLimit != globalInputType.getDimSize(i) &&
+             !(localOutDimSize == 1 && op.getStrides()[i] == 1) &&
              !isCommunicationFreeSliceDim(i, op, inSharding, mesh))) {
           return op.emitOpError() << "dimension " << i
                                   << " is sharded but the slice is not a full "
@@ -3645,7 +3652,7 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
             globalLimit == globalInputType.getDimSize(i)
                 ? cast<RankedTensorType>(adaptor.getOperand().getType())
                       .getDimSize(i)
-                : localResultType.getDimSize(i));
+                : localOutDimSize);
       }
     }
 

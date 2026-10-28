@@ -36,6 +36,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/testing_utils.h"
 #include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
+#include "stablehlo/dialect/StablehloOps.h"
 #include <gtest/gtest.h>
 
 namespace mlir {
@@ -606,6 +607,51 @@ TEST_F(ExportUtilsTest, ShardyGeneratesDeviceCode) {
 
   options.partitionerStage = PartitionerStage::kResolveSingleDeviceSharding;
   EXPECT_FALSE(shardyGeneratesDeviceCode(options));
+}
+
+TEST_F(ExportUtilsTest, IsCommunicationFreeSliceDimOutSizeOne) {
+  OwningOpRef<ModuleOp> module = mlir::parseSourceString<ModuleOp>(
+      R"mlir(
+        func.func @slice_to_1(%arg0: tensor<512xf32>) -> tensor<1xf32> {
+          %0 = stablehlo.slice %arg0 [0:1] : (tensor<512xf32>) -> tensor<1xf32>
+          return %0 : tensor<1xf32>
+        }
+        func.func @slice_nonzero_start(%arg0: tensor<512xf32>) -> tensor<1xf32> {
+          %0 = stablehlo.slice %arg0 [1:2] : (tensor<512xf32>) -> tensor<1xf32>
+          return %0 : tensor<1xf32>
+        }
+        func.func @slice_nonunit_stride(%arg0: tensor<512xf32>) -> tensor<1xf32> {
+          %0 = stablehlo.slice %arg0 [0:1:2] : (tensor<512xf32>) -> tensor<1xf32>
+          return %0 : tensor<1xf32>
+        }
+      )mlir",
+      &context);
+  ASSERT_TRUE(module);
+  MeshAttr mesh =
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2)});
+  TensorShardingAttr sharding = TensorShardingAttr::get(
+      &context, mesh,
+      {DimensionShardingAttr::get(&context, {AxisRefAttr::get(&context, "x")},
+                                  /*isClosed=*/true)},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+
+  auto funcOp = cast<func::FuncOp>(module->lookupSymbol("slice_to_1"));
+  auto sliceOp = *funcOp.getOps<stablehlo::SliceOp>().begin();
+  EXPECT_TRUE(isCommunicationFreeSliceDim(0, sliceOp, sharding, mesh));
+
+  auto funcOpNonzeroStart =
+      cast<func::FuncOp>(module->lookupSymbol("slice_nonzero_start"));
+  auto sliceOpNonzeroStart =
+      *funcOpNonzeroStart.getOps<stablehlo::SliceOp>().begin();
+  EXPECT_FALSE(
+      isCommunicationFreeSliceDim(0, sliceOpNonzeroStart, sharding, mesh));
+
+  auto funcOpNonunitStride =
+      cast<func::FuncOp>(module->lookupSymbol("slice_nonunit_stride"));
+  auto sliceOpNonunitStride =
+      *funcOpNonunitStride.getOps<stablehlo::SliceOp>().begin();
+  EXPECT_FALSE(
+      isCommunicationFreeSliceDim(0, sliceOpNonunitStride, sharding, mesh));
 }
 
 }  // namespace

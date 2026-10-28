@@ -50,6 +50,18 @@ func.func @communication_free_slice_sharded_dim(%arg0: tensor<8x16xf32> {sdy.sha
   return %0 : tensor<4x16xf32>
 }
 
+// The original slice is [0:1] and pad-for-divisibility expanded it to [0:4].
+// CHECK-LABEL: func @communication_free_slice_to_1_sharded_dim
+// CHECK-SAME:    (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+// CHECK-SAME:  -> (tensor<1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>}) {
+func.func @communication_free_slice_to_1_sharded_dim(%arg0: tensor<16x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+    -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>}) {
+  // CHECK-NEXT:    %[[RES:.*]] = stablehlo.slice %[[ARG0]] [0:1, 0:8] : (tensor<4x8xf32>) -> tensor<1x8xf32>
+  %0 = stablehlo.slice %arg0 [0:4, 0:16] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<16x16xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT:    return %[[RES]] : tensor<1x8xf32>
+  return %0 : tensor<4x16xf32>
+}
+
 // CHECK-LABEL: func @all_gather_slice_to_1
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<1xf32>
 func.func @all_gather_slice_to_1(%arg0: tensor<2xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<1xf32> {
