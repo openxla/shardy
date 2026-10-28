@@ -40,6 +40,7 @@ limitations under the License.
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/ValueRange.h"
@@ -54,7 +55,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/common/util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/export/utils.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -234,10 +234,9 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   llvm::DenseMap<Value, TensorShardingAttr> argShardings;
 };
 
-Operation* createLocalGenericOp(
-    Operation* op, ValueRange operands,
-    const GlobalToLocalTypeConverter* typeConverter,
-    ConversionPatternRewriter& rewriter) {
+Operation* createLocalGenericOp(Operation* op, ValueRange operands,
+                                const GlobalToLocalTypeConverter* typeConverter,
+                                ConversionPatternRewriter& rewriter) {
   OperationState state(op->getLoc(), op->getName());
   state.addOperands(operands);
   state.addTypes(typeConverter->convertResultTypes(op->getResults()));
@@ -3412,9 +3411,9 @@ class StablehloScatterOpPattern
       Value broadcastIdentity = stablehlo::BroadcastInDimOp::create(
           rewriter, loc, localInputs.front().getType(), identity,
           rewriter.getDenseI64ArrayAttr({}));
-      localInputs = maskNonLeaderShards(loc, localInputs, mesh, reductionAxes,
-                                        conversionState, rewriter,
-                                        broadcastIdentity);
+      localInputs =
+          maskNonLeaderShards(loc, localInputs, mesh, reductionAxes,
+                              conversionState, rewriter, broadcastIdentity);
     }
 
     auto globalInputType = cast<RankedTensorType>(input.getType());
@@ -3491,6 +3490,99 @@ class StablehloScatterOpPattern
   bool enableRGV3;
 };
 
+// Implements:
+//   all_gather (single-user) => slice [0:K]
+// where the all_gather only gathers on the slicing dimension, turns that
+// dimension into a replicated dimension, and K equals the all_gather
+// local operand size on that dimension, with:
+//   maskNonLeaderShardsToZero (select) => stablehlo.all_reduce (SUM)
+//
+// This is because the op chains effectively broadcast the local slice[0:K] from
+// the leader to all shards.
+class AllGatherAndSliceViaAllReducePattern
+    : public OpConversionPattern<stablehlo::SliceOp> {
+ public:
+  AllGatherAndSliceViaAllReducePattern(TypeConverter& converter,
+                                       MLIRContext* ctx, ConversionState& state,
+                                       PatternBenefit benefit = 2)
+      : OpConversionPattern<stablehlo::SliceOp>(converter, ctx, benefit),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      stablehlo::SliceOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr inSharding = converter->getSharding(op.getOperand());
+    TensorShardingAttr outSharding = converter->getSharding(op.getResult());
+    auto localResultType =
+        cast<RankedTensorType>(converter->convertType(op.getResult()));
+
+    if (inSharding != outSharding &&
+        !(isFullyReplicated(inSharding) && isFullyReplicated(outSharding))) {
+      return failure();
+    }
+    auto sdyAllGather = op.getOperand().getDefiningOp<AllGatherOp>();
+    auto shloAllGather =
+        adaptor.getOperand().getDefiningOp<stablehlo::AllGatherOp>();
+    // sdyAllGather->hasOneUse() is the primary guard; the shloAllGather use
+    // check is a defensive guard during dialect conversion.
+    if (!sdyAllGather || !shloAllGather || !sdyAllGather->hasOneUse() ||
+        (!shloAllGather->use_empty() && !shloAllGather->hasOneUse())) {
+      return failure();
+    }
+    int64_t numGatheringDims = llvm::count_if(
+        sdyAllGather.getGatheringAxes(),
+        [](AxisRefListAttr axesList) { return !axesList.empty(); });
+    if (numGatheringDims != 1) {
+      return failure();
+    }
+    Value agInput = shloAllGather.getOperand(0);
+    auto agInputType = cast<RankedTensorType>(agInput.getType());
+    int64_t gatherDim = shloAllGather.getAllGatherDim();
+    Type elemTy = agInputType.getElementType();
+    TensorShardingAttr agOutSharding = sdyAllGather.getOutSharding();
+    MeshAttr mesh = agOutSharding.getMesh(converter->getSymbolTable());
+    ArrayRef<AxisRefAttr> axes =
+        sdyAllGather.getGatheringAxes()[gatherDim].getValue();
+    if (!mesh || axes.empty() ||
+        !agOutSharding.getDimSharding(gatherDim).emptyAxes() ||
+        agInputType != localResultType ||
+        (!isa<FloatType, IntegerType>(elemTy) || elemTy.isInteger(1))) {
+      return failure();
+    }
+    ArrayRef<int64_t> starts = op.getStartIndices();
+    ArrayRef<int64_t> limits = op.getLimitIndices();
+    ArrayRef<int64_t> strides = op.getStrides();
+    ArrayRef<int64_t> globalInShape = op.getOperand().getType().getShape();
+    for (int64_t d = 0; d < agInputType.getRank(); ++d) {
+      int64_t expectedLimit = (d == gatherDim)
+                                  ? agInputType.getDimSize(gatherDim)
+                                  : globalInShape[d];
+      if (starts[d] != 0 || strides[d] != 1 || limits[d] != expectedLimit) {
+        return failure();
+      }
+    }
+
+    Location loc = op.getLoc();
+    Value masked = maskNonLeaderShardsToZero(loc, agInput, mesh, axes,
+                                             conversionState, rewriter);
+    auto allReduce = stablehlo::AllReduceOp::create(
+        rewriter, loc, TypeRange{localResultType}, ValueRange{masked},
+        shloAllGather.getReplicaGroupsAttr(),
+        shloAllGather.getChannelHandleAttr(),
+        shloAllGather.getUseGlobalDeviceIds());
+    buildReduceComputation(allReduce, elemTy, ReductionOp::SUM, rewriter);
+    rewriter.replaceOp(op, allReduce.getResults());
+    rewriter.eraseOp(shloAllGather);
+    conversionState.removeToConvertOp(op);
+    return success();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
  public:
   StablehloSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -3505,6 +3597,8 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
         static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
     TensorShardingAttr inSharding = converter->getSharding(op.getOperand());
     TensorShardingAttr outSharding = converter->getSharding(op.getResult());
+    auto localResultType =
+        cast<RankedTensorType>(converter->convertType(op.getResult()));
 
     if (isFullyReplicated(inSharding) && isFullyReplicated(outSharding)) {
       return localizeGenericOp(op, adaptor.getOperands(), converter,
@@ -3551,18 +3645,15 @@ class StablehloSliceOpPattern : public OpConversionPattern<stablehlo::SliceOp> {
             globalLimit == globalInputType.getDimSize(i)
                 ? cast<RankedTensorType>(adaptor.getOperand().getType())
                       .getDimSize(i)
-                : cast<RankedTensorType>(converter->convertType(op.getResult()))
-                      .getDimSize(i));
+                : localResultType.getDimSize(i));
       }
     }
 
     // Generate a local slice.
     rewriter.replaceOp(
-        op, stablehlo::SliceOp::create(
-                rewriter, op.getLoc(),
-                cast<RankedTensorType>(converter->convertType(op.getResult())),
-                adaptor.getOperand(), newStartIndices, newLimitIndices,
-                op.getStrides())
+        op, stablehlo::SliceOp::create(rewriter, op.getLoc(), localResultType,
+                                       adaptor.getOperand(), newStartIndices,
+                                       newLimitIndices, op.getStrides())
                 .getResult());
 
     conversionState.removeToConvertOp(op);
@@ -3696,14 +3787,12 @@ void recordMainFuncShardingsOnModule(ModuleOp module, func::FuncOp mainFunc,
   // Inline MeshAttr into sdy.parameters_shardings and sdy.output_shardings
   // because inline-meshes and drop-sharding-and-mesh currently do not
   // inspect attributes attached to ModuleOp.
-  module->setAttr(
-      kParametersShardingsAttr,
-      inlineMesh(symbolTable,
-                 TensorShardingPerValueAttr::get(ctx, paramShardings)));
-  module->setAttr(
-      kOutputShardingsAttr,
-      inlineMesh(symbolTable,
-                 TensorShardingPerValueAttr::get(ctx, outputShardings)));
+  module->setAttr(kParametersShardingsAttr,
+                  inlineMesh(symbolTable, TensorShardingPerValueAttr::get(
+                                              ctx, paramShardings)));
+  module->setAttr(kOutputShardingsAttr,
+                  inlineMesh(symbolTable, TensorShardingPerValueAttr::get(
+                                              ctx, outputShardings)));
 }
 
 // This pass converts a Shardy module with consistent sharding notations and
@@ -3775,18 +3864,17 @@ struct ConvertGlobalToLocalPass
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
-    patterns.add<AllSliceOpPattern, CollectivePermuteOpPattern,
-                 ConstantOpPattern, FuncOpSignaturePattern, GenericOpPattern,
-                 ManualComputationOpPattern, NamedComputationOpPattern,
-                 PartitioningOpInterfacePattern, ReplicatedToUnreducedOpPattern,
-                 ShardedToUnreducedOpPattern, StablehloConcatenateOpPattern,
-                 StablehloDynamicSliceOpPattern,
-                 StablehloDynamicUpdateSliceOpPattern, StablehloIotaOpPattern,
-                 StablehloPadOpPattern,
-                 StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
-                 StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
-                 StablehloSliceOpPattern>(typeConverter, &getContext(),
-                                          conversionState);
+    patterns.add<
+        AllGatherAndSliceViaAllReducePattern, AllSliceOpPattern,
+        CollectivePermuteOpPattern, ConstantOpPattern, FuncOpSignaturePattern,
+        GenericOpPattern, ManualComputationOpPattern, NamedComputationOpPattern,
+        PartitioningOpInterfacePattern, ReplicatedToUnreducedOpPattern,
+        ShardedToUnreducedOpPattern, StablehloConcatenateOpPattern,
+        StablehloDynamicSliceOpPattern, StablehloDynamicUpdateSliceOpPattern,
+        StablehloIotaOpPattern, StablehloPadOpPattern,
+        StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
+        StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
+        StablehloSliceOpPattern>(typeConverter, &getContext(), conversionState);
     patterns.add<AllReduceOpPattern, AllToAllOpPattern,
                  StablehloConvolutionOpPattern, StablehloDotGeneralOpPattern,
                  StablehloDotOpPattern, StablehloGatherOpPattern,
