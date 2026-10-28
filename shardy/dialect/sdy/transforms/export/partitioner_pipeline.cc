@@ -15,8 +15,11 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/export/partitioner_pipeline.h"
 
+#include <string>
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "shardy/dialect/sdy/ir/constants.h"
@@ -25,6 +28,18 @@ limitations under the License.
 
 namespace mlir {
 namespace sdy {
+
+void addCanonicalizerPass(OpPassManager& pm,
+                          ArrayRef<std::string> enabledPatterns) {
+  pm.addPass(createCanonicalizerPass(
+      GreedyRewriteConfig()
+          .setUseTopDownTraversal(true)
+          .setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled)
+          .enableFolding(false)
+          .enableConstantCSE(false),
+      /*disabledPatterns=*/{},
+      /*enabledPatterns=*/enabledPatterns));
+}
 
 void addPartitionerPipeline(OpPassManager& pm,
                             const PartitionerPipelineOptions& options) {
@@ -39,6 +54,9 @@ void addPartitionerPipeline(OpPassManager& pm,
   }
 
   if (options.stage >= PartitionerStage::kReshardToCollectives) {
+    // Fold reshards from permutation factor resolution before lowering to
+    // collectives.
+    addCanonicalizerPass(pm, kReshardLabel);
     pm.addNestedPass<func::FuncOp>(createReshardToCollectivesPass());
   }
 
@@ -47,14 +65,7 @@ void addPartitionerPipeline(OpPassManager& pm,
     // NOTE: run the canonicalizer to fuse all-slice collectives and preceding
     // all-reduces into reduce-scatters, fold back-to-back all-to-alls, and
     // remove no-op collectives, which ConvertGlobalToLocal requires.
-    pm.addPass(createCanonicalizerPass(
-        GreedyRewriteConfig()
-            .setUseTopDownTraversal(true)
-            .setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled)
-            .enableFolding(false)
-            .enableConstantCSE(false),
-        /*disabledPatterns=*/{},
-        /*enabledPatterns=*/{kCollectiveLabel}));
+    addCanonicalizerPass(pm, kCollectiveLabel);
   }
 
   if (options.stage >= PartitionerStage::kPadForDivisibility) {

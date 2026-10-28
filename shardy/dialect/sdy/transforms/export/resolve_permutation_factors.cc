@@ -49,7 +49,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -1705,7 +1704,7 @@ DataExchangeInfo getReshapeDataExchangeInfo(
   int64_t activeRank = origInputType.getRank();
   TensorShardingAttr activeSharding = inSharding;
 
-  const auto *activeGroupIt = haloInfo.activeGroups.begin();
+  const auto* activeGroupIt = haloInfo.activeGroups.begin();
   for (int64_t i = 0; i < activeRank; ++i) {
     int64_t sc = activeSharding.getDimShardings()[i].getShardedSize(mesh);
     if (sc <= 1) {
@@ -2401,8 +2400,20 @@ void resolvePermutationFactorsViaReplication(Operation* op,
     }
     if (auto dusOp = dyn_cast<stablehlo::DynamicUpdateSliceOp>(op)) {
       std::optional<int64_t> dimIdx = getDynamicUpdateSliceDim(rule, i);
-      if (dimIdx && isCommunicationFreeDynamicUpdateSliceDim(
-                        *dimIdx, dusOp, inShardings[0], meshOp.getMesh())) {
+      // DynamicUpdateSliceOp must have a single use so the intermediate reshard
+      // inserted during permutation factor resolution has a single use, which
+      // is required for ReshardOfReshardPattern to fold it with the user
+      // reshard.
+      bool singleUserReplicatesDim = false;
+      if (dimIdx && dusOp->hasOneUse()) {
+        auto reshardOp = dyn_cast<ReshardOp>(*dusOp->user_begin());
+        singleUserReplicatesDim =
+            reshardOp &&
+            reshardOp.getSharding().getDimSharding(*dimIdx).emptyAxes();
+      }
+      if (dimIdx && !singleUserReplicatesDim &&
+          isCommunicationFreeDynamicUpdateSliceDim(
+              *dimIdx, dusOp, inShardings[0], meshOp.getMesh())) {
         continue;
       }
     }

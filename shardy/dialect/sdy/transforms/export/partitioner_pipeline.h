@@ -17,8 +17,10 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_PARTITIONER_PIPELINE_H_
 
 #include <cstdint>
+#include <string>
 
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/transforms/common/partitioner_stage.h"
 
 namespace mlir {
@@ -37,6 +39,10 @@ struct PartitionerPipelineOptions {
 // `options.stage`. Expects explicit reshards to already be inserted.
 void addPartitionerPipeline(OpPassManager& pm,
                             const PartitionerPipelineOptions& options = {});
+
+// Adds a canonicalizer pass with specific enabled patterns and preset config.
+void addCanonicalizerPass(OpPassManager& pm,
+                          ArrayRef<std::string> enabledPatterns);
 
 }  // namespace sdy
 }  // namespace mlir

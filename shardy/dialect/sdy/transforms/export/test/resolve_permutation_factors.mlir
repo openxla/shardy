@@ -1571,6 +1571,56 @@ func.func @dynamic_update_slice_comm_free_single_element(
   return %0 : tensor<16x8xf32>
 }
 
+// Even when a sliced dimension has update size 1, replicate it if all users of
+// the dynamic_update_slice are sdy.reshard ops that replicate that dimension.
+// CHECK-LABEL: func @dynamic_update_slice_replicated_when_all_users_replicate_dim
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x2xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}, %[[ARG1:.*]]: tensor<2x1xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}, %[[ARG2:.*]]: tensor<i32>, %[[ARG3:.*]]: tensor<i32>)
+// CHECK-SAME: -> (tensor<8x2xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+func.func @dynamic_update_slice_replicated_when_all_users_replicate_dim(
+    %arg0: tensor<8x2xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+    %arg1: tensor<2x1xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+    %arg2: tensor<i32>,
+    %arg3: tensor<i32>)
+    -> (tensor<8x2xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // CHECK:      %[[RESHARD0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x2xi64>
+  // CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD0]], %[[ARG1]], %[[ARG2]], %[[ARG3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {"b"}]> : tensor<8x2xi64>
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>
+  } : (tensor<8x2xi64>, tensor<2x1xi64>, tensor<i32>, tensor<i32>)
+      -> tensor<8x2xi64>
+  // CHECK-NEXT: %[[USER_RESHARD:.*]] = sdy.reshard %[[RESHARD_OUT]] <@mesh, [{}, {}]> : tensor<8x2xi64>
+  %1 = sdy.reshard %0 <@mesh, [{}, {}]> : tensor<8x2xi64>
+  // CHECK-NEXT: return %[[USER_RESHARD]]
+  return %1 : tensor<8x2xi64>
+}
+
+// Even when a sliced dimension has constant start indices and the update slice
+// is owned by a single shard, replicate it if all users of the
+// dynamic_update_slice are sdy.reshard ops that replicate that dimension.
+// CHECK-LABEL: func @dynamic_update_slice_replicated_when_all_users_replicate_constant_single_shard_dim
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}, %[[ARG1:.*]]: tensor<4x2xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}, %[[ARG2:.*]]: tensor<i32>)
+// CHECK-SAME: -> (tensor<8x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>})
+func.func @dynamic_update_slice_replicated_when_all_users_replicate_constant_single_shard_dim(
+    %arg0: tensor<8x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+    %arg1: tensor<4x2xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>},
+    %arg2: tensor<i32>)
+    -> (tensor<8x4xi64> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}]>}) {
+  // CHECK:      %[[C:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  %c = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<8x4xi64>
+  // CHECK-NEXT: %[[DUS:.*]] = stablehlo.dynamic_update_slice %[[RESHARD0]], %[[ARG1]], %[[ARG2]], %[[C]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[DUS]] <@mesh, [{"a"}, {"b"}]> : tensor<8x4xi64>
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %c {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}]>]>
+  } : (tensor<8x4xi64>, tensor<4x2xi64>, tensor<i32>, tensor<i32>)
+      -> tensor<8x4xi64>
+  // CHECK-NEXT: %[[USER_RESHARD:.*]] = sdy.reshard %[[RESHARD_OUT]] <@mesh, [{}, {}]> : tensor<8x4xi64>
+  %1 = sdy.reshard %0 <@mesh, [{}, {}]> : tensor<8x4xi64>
+  // CHECK-NEXT: return %[[USER_RESHARD]]
+  return %1 : tensor<8x4xi64>
+}
+
 // CHECK-LABEL: func @slice_non_communication_free_zero_hops
 func.func @slice_non_communication_free_zero_hops(
     %arg0: tensor<8x4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>})
