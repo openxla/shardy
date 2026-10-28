@@ -660,49 +660,70 @@ Value padHighSideToShape(Location loc, Value operand,
 // For each logical device i in the 'manualMesh', computes the logical device
 // j that should receive the shifted data of i if the dimension is
 // partitioned by the manual axes in 'manualAxesInDim'. The number of devices
-// to shift is given by 'shardOffset'. Returns all the (i, j) pairs where i is
-// the source device and j is the target device.
+// to shift is given by 'shardOffset'. If cyclicParticipatingShards is set,
+// shifts cyclically across the first cyclicParticipatingShards shards along
+// manualAxesInDim. Returns all the (i, j) pairs where i is the source device
+// and j is the target device.
 SmallVector<int64_t> getDataShiftSourceTargetPairs(
     MeshAttr manualMesh, ArrayRef<AxisRefAttr> manualAxesInDim,
-    int64_t shardOffset) {
+    int64_t shardOffset,
+    std::optional<int64_t> cyclicParticipatingShards = std::nullopt) {
   ArrayRef<MeshAxisAttr> manualMeshAxes = manualMesh.getAxes();
   int64_t totalSize = manualMesh.getTotalSize();
   SmallVector<int64_t> pairs;
 
+  struct AxisShiftInfo {
+    int64_t meshIdx;
+    int64_t subSize;
+    int64_t postSize;
+  };
+  SmallVector<AxisShiftInfo> axisInfos;
+  axisInfos.reserve(manualAxesInDim.size());
+  int64_t totalShardsInDim = 1;
+  for (AxisRefAttr axisRef : manualAxesInDim) {
+    int64_t meshIdx = getMeshAxisIndex(manualMeshAxes, axisRef.getName());
+    int64_t fullSize = manualMeshAxes[meshIdx].getSize();
+    int64_t subSize = axisRef.getSize(manualMesh);
+    int64_t preSize = axisRef.getSubAxisPreSize();
+    int64_t postSize = fullSize / (preSize * subSize);
+    axisInfos.push_back({meshIdx, subSize, postSize});
+    totalShardsInDim *= subSize;
+  }
+
+  ArrayRef<int64_t> deviceIds = manualMesh.getDeviceIds();
   for (int64_t i = 0; i < totalSize; ++i) {
     SmallVector<int64_t> coords = getMeshCoordinates(i, manualMeshAxes);
+    int64_t coordInDim = 0;
+    for (const AxisShiftInfo& info : axisInfos) {
+      int64_t subCoord = (coords[info.meshIdx] / info.postSize) % info.subSize;
+      coordInDim = coordInDim * info.subSize + subCoord;
+    }
+
+    int64_t targetCoordInDim = coordInDim + shardOffset;
+    if (cyclicParticipatingShards) {
+      if (coordInDim >= *cyclicParticipatingShards) {
+        continue;
+      }
+      targetCoordInDim =
+          llvm::mod(targetCoordInDim, *cyclicParticipatingShards);
+    } else if (targetCoordInDim < 0 || targetCoordInDim >= totalShardsInDim) {
+      continue;
+    }
 
     SmallVector<int64_t> nextCoords = coords;
-    int64_t currentCarry = shardOffset;
-    for (int64_t k = (int64_t)manualAxesInDim.size() - 1;
-         k >= 0 && currentCarry != 0; --k) {
-      auto axisRef = manualAxesInDim[k];
-      int64_t meshIdx = getMeshAxisIndex(manualMeshAxes, axisRef.getName());
-
-      int64_t fullSize = manualMeshAxes[meshIdx].getSize();
-      int64_t subSize = axisRef.getSize(manualMesh);
-      int64_t preSize = axisRef.getSubAxisPreSize();
-      int64_t postSize = fullSize / (preSize * subSize);
-
-      int64_t subCoord = (coords[meshIdx] / postSize) % subSize;
-      int64_t newSubCoord = subCoord + currentCarry;
-
-      currentCarry = llvm::divideFloorSigned(newSubCoord, subSize);
-      int64_t wrappedSubCoord = llvm::mod(newSubCoord, subSize);
-
-      nextCoords[meshIdx] += (wrappedSubCoord - subCoord) * postSize;
+    for (const AxisShiftInfo& info : llvm::reverse(axisInfos)) {
+      int64_t subCoord = (coords[info.meshIdx] / info.postSize) % info.subSize;
+      int64_t targetSubCoord = targetCoordInDim % info.subSize;
+      targetCoordInDim /= info.subSize;
+      nextCoords[info.meshIdx] += (targetSubCoord - subCoord) * info.postSize;
     }
 
-    if (currentCarry == 0) {
-      ArrayRef<int64_t> deviceIds = manualMesh.getDeviceIds();
-      int64_t nextFlatIndex =
-          getLinearIndexFromCoordinates(nextCoords, manualMeshAxes);
-      int64_t src = deviceIds.empty() ? i : deviceIds[i];
-      int64_t tgt =
-          deviceIds.empty() ? nextFlatIndex : deviceIds[nextFlatIndex];
-      pairs.push_back(src);
-      pairs.push_back(tgt);
-    }
+    int64_t nextFlatIndex =
+        getLinearIndexFromCoordinates(nextCoords, manualMeshAxes);
+    int64_t src = deviceIds.empty() ? i : deviceIds[i];
+    int64_t tgt = deviceIds.empty() ? nextFlatIndex : deviceIds[nextFlatIndex];
+    pairs.push_back(src);
+    pairs.push_back(tgt);
   }
   return pairs;
 }
@@ -1282,6 +1303,281 @@ DataExchangeInfo buildDataExchangeInfo(TensorShardingAttr sharding,
 // =============================================================================
 // Implementation of handleXYZOps routines in alphabetical order.
 // =============================================================================
+
+// -----------------------------------------------------------------------------
+// stablehlo.concatenate
+// -----------------------------------------------------------------------------
+
+// Returns the right-rotation amount if concatOp matches the rotate-right
+// pattern concatenate(slice(x, [k:N]), slice(x, [0:k])) along a sharded
+// dimension where both slices have a single use and share the sharding of x
+// and concatOp.
+std::optional<int64_t> findRotateRightPattern(stablehlo::ConcatenateOp concatOp,
+                                              const SymbolTable& symbolTable) {
+  if (concatOp.getInputs().size() != 2) {
+    return std::nullopt;
+  }
+  auto lhs = concatOp.getInputs()[0].getDefiningOp<stablehlo::SliceOp>();
+  auto rhs = concatOp.getInputs()[1].getDefiningOp<stablehlo::SliceOp>();
+  if (!lhs || !rhs || !lhs->hasOneUse() || !rhs->hasOneUse() ||
+      lhs.getOperand() != rhs.getOperand()) {
+    return std::nullopt;
+  }
+  Value toRotate = lhs.getOperand();
+  auto origType = dyn_cast<RankedTensorType>(toRotate.getType());
+  if (!origType || origType != concatOp.getType()) {
+    return std::nullopt;
+  }
+  TensorShardingAttr sharding = getSharding(concatOp.getResult());
+  if (isFullyReplicated(sharding) || !sharding.getUnreducedAxes().empty() ||
+      getSharding(toRotate) != sharding ||
+      getSharding(lhs.getResult()) != sharding ||
+      getSharding(rhs.getResult()) != sharding) {
+    return std::nullopt;
+  }
+  MeshAttr mesh = sharding.getMesh(symbolTable);
+  int64_t dim = concatOp.getDimension();
+  if (!mesh || mesh.isSingleDevice() ||
+      sharding.getDimShardings()[dim].getShardedSize(mesh) <= 1) {
+    return std::nullopt;
+  }
+  ArrayRef<int64_t> lhsStarts = lhs.getStartIndices();
+  ArrayRef<int64_t> lhsLimits = lhs.getLimitIndices();
+  ArrayRef<int64_t> lhsStrides = lhs.getStrides();
+  ArrayRef<int64_t> rhsStarts = rhs.getStartIndices();
+  ArrayRef<int64_t> rhsLimits = rhs.getLimitIndices();
+  ArrayRef<int64_t> rhsStrides = rhs.getStrides();
+  for (int64_t d = 0; d < origType.getRank(); ++d) {
+    if (lhsStrides[d] != 1 || rhsStrides[d] != 1) {
+      return std::nullopt;
+    }
+    int64_t dimSize = origType.getDimSize(d);
+    if (d == dim) {
+      if (rhsStarts[d] != 0 || rhsLimits[d] != lhsStarts[d] ||
+          lhsLimits[d] != dimSize) {
+        return std::nullopt;
+      }
+    } else if (lhsStarts[d] != 0 || lhsLimits[d] != dimSize ||
+               rhsStarts[d] != 0 || rhsLimits[d] != dimSize) {
+      return std::nullopt;
+    }
+  }
+  int64_t amount = lhs.getType().getDimSize(dim);
+  int64_t fullSize = origType.getDimSize(dim);
+  if (amount <= 0 || amount >= fullSize) {
+    return std::nullopt;
+  }
+  return amount;
+}
+
+// Rotates the first `participatingShards` shards of `localInput` right by
+// `rotateAmount` elements along `dim` using cyclic collective-permutes.
+Value rotatePaddedShardRight(Location loc, Value localInput, int64_t dim,
+                             int64_t rotateAmount, int64_t participatingShards,
+                             MeshAttr mesh,
+                             ArrayRef<AxisRefAttr> manualAxesInDim,
+                             TensorShardingAttr localSharding,
+                             ResolutionState& state) {
+  auto localType = cast<RankedTensorType>(localInput.getType());
+  ArrayRef<int64_t> localShape = localType.getShape();
+  int64_t rank = localType.getRank();
+  int64_t shardSize = localShape[dim];
+  rotateAmount %= (shardSize * participatingShards);
+  SDY_CHECK_GT(rotateAmount, 0);
+
+  IRRewriter& rewriter = state.rewriter;
+  int64_t currentSize = 0;
+  SmallVector<Value> concatPieces;
+  while (currentSize < shardSize) {
+    int64_t shardDistance =
+        llvm::divideCeil(rotateAmount - currentSize, shardSize);
+    int64_t offsetInShard =
+        shardDistance * shardSize - rotateAmount + currentSize;
+    int64_t haloSize =
+        std::min(shardSize - offsetInShard, shardSize - currentSize);
+    currentSize += haloSize;
+
+    Value halo = localInput;
+    if (haloSize != shardSize) {
+      SmallVector<int64_t> sliceStarts(rank, 0);
+      sliceStarts[dim] = offsetInShard;
+      SmallVector<int64_t> sliceLimits(localShape.begin(), localShape.end());
+      sliceLimits[dim] = offsetInShard + haloSize;
+      SmallVector<int64_t> sliceShape(localShape.begin(), localShape.end());
+      sliceShape[dim] = haloSize;
+      auto sliceType =
+          RankedTensorType::get(sliceShape, localType.getElementType());
+      halo = stablehlo::SliceOp::create(
+          rewriter, loc, sliceType, halo,
+          rewriter.getDenseI64ArrayAttr(sliceStarts),
+          rewriter.getDenseI64ArrayAttr(sliceLimits),
+          rewriter.getDenseI64ArrayAttr(SmallVector<int64_t>(rank, 1)));
+      setSharding(halo, localSharding);
+    }
+    int64_t effectiveDistance = shardDistance % participatingShards;
+    if (effectiveDistance != 0) {
+      SmallVector<int64_t> pairs = getDataShiftSourceTargetPairs(
+          mesh, manualAxesInDim, effectiveDistance, participatingShards);
+      halo = mayCollectivePermute(loc, halo, pairs, state);
+      setSharding(halo, localSharding);
+    }
+    concatPieces.push_back(halo);
+  }
+  if (concatPieces.size() == 1) {
+    return concatPieces[0];
+  }
+  Value concat =
+      stablehlo::ConcatenateOp::create(rewriter, loc, concatPieces, dim);
+  setSharding(concat, localSharding);
+  return concat;
+}
+
+// When `rightPadding > 0`, the `participatingShards` shards hold
+// `participatingShards * shardSize = fullSize + rightPadding` elements, with
+// `rightPadding` padding elements at the end of the last participating shard
+// `[fullSize : fullSize + rightPadding)`. In this padded cyclic buffer:
+// - The `[0:k]` suffix (`k = fullSize - amount`), which lands at global output
+//   indices `[amount:fullSize)`, does not wrap around the end of the buffer and
+//   therefore shifts right by `amount` (`rotated0`).
+// - The `[k:fullSize]` prefix, which wraps around the end of the original
+//   tensor to land at global output indices `[0:amount)`, must also jump over
+//   the `rightPadding` trailing padding elements and therefore shifts right by
+//   `amount + rightPadding` (`rotated1`).
+// On each shard with global start offset `shardOffset = shardId * shardSize`,
+// local index `i` corresponds to global output index `shardOffset + i`, so
+// `iota < amount - shardOffset` selects `rotated1` for `[0:amount)` and
+// `rotated0` for `[amount:fullSize)`.
+Value selectRotatedWithRightPadding(Location loc, Value rotated0,
+                                    Value rotated1, int64_t dim, int64_t amount,
+                                    DimensionShardingAttr dimSharding,
+                                    MeshAttr mesh,
+                                    TensorShardingAttr localSharding,
+                                    ResolutionState& state) {
+  IRRewriter& rewriter = state.rewriter;
+  auto localType = cast<RankedTensorType>(rotated0.getType());
+  ArrayRef<int64_t> localShape = localType.getShape();
+  int64_t shardSize = localShape[dim];
+
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, createDeviceId(loc, state), mesh, dimSharding, rewriter);
+  auto scalarI32Type = RankedTensorType::get({}, rewriter.getI32Type());
+  SDY_CHECK_LE(shardSize, std::numeric_limits<int32_t>::max());
+  Value shardSizeConst = stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseIntElementsAttr::get(scalarI32Type,
+                                static_cast<int32_t>(shardSize)));
+  Value shardOffset = stablehlo::MulOp::create(
+      rewriter, loc, idInPartitionGroup, shardSizeConst);
+  SDY_CHECK_LE(amount, std::numeric_limits<int32_t>::max());
+  Value amountConst = stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseIntElementsAttr::get(scalarI32Type, static_cast<int32_t>(amount)));
+  Value boundary =
+      stablehlo::SubtractOp::create(rewriter, loc, amountConst, shardOffset);
+  auto localI32Type = RankedTensorType::get(localShape, rewriter.getI32Type());
+  Value bcastBoundary = stablehlo::BroadcastInDimOp::create(
+      rewriter, loc, localI32Type, boundary, rewriter.getDenseI64ArrayAttr({}));
+  setSharding(bcastBoundary, localSharding);
+  Value iota = stablehlo::IotaOp::create(rewriter, loc, localI32Type,
+                                         rewriter.getI64IntegerAttr(dim));
+  setSharding(iota, localSharding);
+  Value pred = stablehlo::CompareOp::create(rewriter, loc, iota, bcastBoundary,
+                                            stablehlo::ComparisonDirection::LT);
+  setSharding(pred, localSharding);
+  Value selected = stablehlo::SelectOp::create(rewriter, loc, localType, pred,
+                                               rotated1, rotated0);
+  setSharding(selected, localSharding);
+  return selected;
+}
+
+// Implements rotate-right concatenate(slice(x, [k:N]), slice(x, [0:k])) along a
+// sharded dimension using cyclic collective-permutes:
+//
+// 1. Align logical input shard sizes via high-side padding.
+// 2. Inside `sdy.manual_computation`, cyclically shift the
+//    `participatingShards` shards right by `amount` (`rotated0`).
+// 3. If `rightPadding > 0`, also cyclically shift right by
+//    `amount + rightPadding` (`rotated1`) to skip the trailing padding gap for
+//    wrapped-around elements, and select between `rotated1` and `rotated0` at
+//    global boundary `amount`.
+// 4. Trim high-side padding to match the original tensor shape.
+LogicalResult handleConcatenateOp(stablehlo::ConcatenateOp concatOp,
+                                  ResolutionState& state) {
+  std::optional<int64_t> amountOpt =
+      findRotateRightPattern(concatOp, state.symbolTable);
+  if (!amountOpt) {
+    return failure();
+  }
+  int64_t amount = *amountOpt;
+  int64_t dim = concatOp.getDimension();
+  auto lhs = concatOp.getInputs()[0].getDefiningOp<stablehlo::SliceOp>();
+  auto rhs = concatOp.getInputs()[1].getDefiningOp<stablehlo::SliceOp>();
+  Value toRotate = lhs.getOperand();
+  auto origType = cast<RankedTensorType>(toRotate.getType());
+  TensorShardingAttr sharding = getSharding(concatOp.getResult());
+  MeshAttr mesh = sharding.getMesh(state.symbolTable);
+  int64_t rank = origType.getRank();
+  int64_t fullSize = origType.getDimSize(dim);
+  int64_t shardCount = sharding.getDimShardings()[dim].getShardedSize(mesh);
+  int64_t shardSize = llvm::divideCeil(fullSize, shardCount);
+  int64_t participatingShards = llvm::divideCeil(fullSize, shardSize);
+  int64_t rightPadding = participatingShards * shardSize - fullSize;
+
+  DataExchangeInfo exchangeInfo;
+  exchangeInfo.divisibleInputShape = llvm::to_vector(origType.getShape());
+  SmallVector<int64_t> localShape;
+  localShape.reserve(rank);
+  for (auto [d, dimSharding] : llvm::enumerate(sharding.getDimShardings())) {
+    if (std::optional<ShardedDimContext> ctx =
+            prepareShardedDimForExchange(d, dimSharding, mesh, exchangeInfo)) {
+      localShape.push_back(ctx->sIn);
+    } else {
+      localShape.push_back(exchangeInfo.divisibleInputShape[d]);
+    }
+  }
+
+  IRRewriter& rewriter = state.rewriter;
+  Location loc = concatOp.getLoc();
+  rewriter.setInsertionPoint(concatOp);
+  Value divisibleInput = padHighSideToShape(
+      loc, toRotate, exchangeInfo.divisibleInputShape, sharding, rewriter);
+  SmallVector<AxisRefAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, exchangeInfo.manualAxes);
+  TensorShardingAttr localSharding =
+      removeAxesFromSharding(sharding, exchangeInfo.manualAxes, mesh);
+  SmallVector<AxisRefAttr> manualAxesInDim = getManualAxesInDim(
+      sharding.getDimShardings()[dim], mesh, exchangeInfo.manualAxes);
+
+  auto manualComp = ManualComputationOp::create(
+      rewriter, loc, divisibleInput.getType(), divisibleInput, {sharding},
+      {sharding}, manualAxesAttrs);
+  Region& body = manualComp.getBody();
+  body.emplaceBlock();
+  auto localType = RankedTensorType::get(localShape, origType.getElementType());
+  Value localInput = body.addArgument(localType, loc);
+
+  rewriter.setInsertionPointToStart(&body.front());
+  Value localResult =
+      rotatePaddedShardRight(loc, localInput, dim, amount, participatingShards,
+                             mesh, manualAxesInDim, localSharding, state);
+  if (rightPadding > 0) {
+    Value rotatedWithPadding = rotatePaddedShardRight(
+        loc, localInput, dim, amount + rightPadding, participatingShards, mesh,
+        manualAxesInDim, localSharding, state);
+    localResult = selectRotatedWithRightPadding(
+        loc, localResult, rotatedWithPadding, dim, amount,
+        sharding.getDimShardings()[dim], mesh, localSharding, state);
+  }
+  ReturnOp::create(rewriter, loc, localResult);
+
+  rewriter.setInsertionPoint(concatOp);
+  Value result = sliceHighSideToType(loc, manualComp.getResult(0), origType,
+                                     sharding, rewriter);
+  rewriter.replaceOp(concatOp, result);
+  state.opsToErase.push_back(lhs.getOperation());
+  state.opsToErase.push_back(rhs.getOperation());
+  return success();
+}
 
 // -----------------------------------------------------------------------------
 // stablehlo.pad
@@ -2367,11 +2663,16 @@ void resolvePermutationFactorsViaReplication(Operation* op,
   SmallVector<AxisRefAttr> removedReductionAxes;
   for (int64_t i = 0; i < rule.getNumFactors(); ++i) {
     // Replicate permutation factors when halo exchange is disabled, unless the
-    // slice or dynamic-update-slice dimension is communication-free.
+    // slice or dynamic-update-slice dimension is communication-free. For
+    // concatenate, replicate its concatenation dimension factor when halo
+    // exchange is disabled.
     //
     // For convolution, we also replicate unsupported parallel
     // group-conv-factors.
-    bool isReplicatedFactor = rule.getFactorType(i) == FactorType::kPermutation;
+    bool isReplicatedFactor =
+        rule.getFactorType(i) == FactorType::kPermutation ||
+        (isa<stablehlo::ConcatenateOp>(op) &&
+         rule.getFactorType(i) == FactorType::kNeedReplication);
     if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op);
         convOp && (isReductionFactorWithPermutationSemantics(convOp, rule, i) ||
                    isUnsupportedGroupedConvFactor(convOp, rule, i))) {
@@ -2554,11 +2855,18 @@ struct ShardyResolvePermutationFactorsPass
         return;
       }
 
-      // Identify if the op defines any permutation factors, dual-semantics
-      // convolution factors, or unsupported grouped convolution factors.
-      auto isPermutationOrDualSemantics = [&](int64_t i) {
+      // Identify if the op defines any factor that needs resolution:
+      // permutation factors, dual-semantics convolution factors, unsupported
+      // grouped convolution factors, or concatenating factors.
+      auto shouldResolveFactor = [&](int64_t i) {
         if (rule.getFactorType(i) == FactorType::kPermutation) {
           return true;
+        }
+        if (isa<stablehlo::ConcatenateOp>(op)) {
+          // We don't check whether the concatenate operands are slices, because
+          // if they aren't the factor is true kNeedReplication and is already
+          // replicated.
+          return rule.getFactorType(i) == FactorType::kNeedReplication;
         }
         if (auto convOp = dyn_cast<stablehlo::ConvolutionOp>(op)) {
           return isReductionFactorWithPermutationSemantics(convOp, rule, i) ||
@@ -2567,7 +2875,7 @@ struct ShardyResolvePermutationFactorsPass
         return false;
       };
       if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
-                        isPermutationOrDualSemantics)) {
+                        shouldResolveFactor)) {
         return;
       }
 
@@ -2585,8 +2893,20 @@ struct ShardyResolvePermutationFactorsPass
 
       // Dispatch to HALO exchange if enabled and implemented for the op.
       if (enableHaloExchange) {
+        if (auto sliceOp = dyn_cast<stablehlo::SliceOp>(op);
+            sliceOp && sliceOp->hasOneUse()) {
+          if (auto userConcat =
+                  dyn_cast<stablehlo::ConcatenateOp>(*sliceOp->user_begin());
+              userConcat &&
+              findRotateRightPattern(userConcat, state.symbolTable)) {
+            return;
+          }
+        }
         bool resolved =
             llvm::TypeSwitch<Operation*, bool>(op)
+                .Case([&](stablehlo::ConcatenateOp concatOp) {
+                  return succeeded(handleConcatenateOp(concatOp, state));
+                })
                 .Case([&](stablehlo::PadOp padOp) {
                   return succeeded(handlePadOp(padOp, state));
                 })
