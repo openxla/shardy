@@ -13,16 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <cassert>
 #include <memory>  // IWYU pragma: keep
-#include <utility>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
-#include "mlir/Rewrite/FrozenRewritePatternSet.h"
-#include "mlir/Support/LogicalResult.h"
-#include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 
 namespace mlir {
@@ -33,51 +30,25 @@ namespace sdy {
 
 namespace {
 
-class ShardingConstraintPattern
-    : public OpConversionPattern<ShardingConstraintOp> {
- public:
-  using OpConversionPattern::OpConversionPattern;
-
- private:
-  LogicalResult matchAndRewrite(
-      ShardingConstraintOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter& rewriter) const override {
-    auto discardableAttrs = op->getDiscardableAttrDictionary();
-    auto reshardOp =
-        rewriter.replaceOpWithNewOp<ReshardOp>(op, adaptor.getInput());
-    reshardOp.setShardingAttr(adaptor.getSharding());
-    reshardOp->setDiscardableAttrs(discardableAttrs);
-    return success();
-  }
-};
-
 struct ShardingConstraintToReshardPass
     : public impl::ShardingConstraintToReshardPassBase<
           ShardingConstraintToReshardPass> {
   using ShardingConstraintToReshardPassBase::
       ShardingConstraintToReshardPassBase;
 
-  LogicalResult initialize(MLIRContext* context) final {
-    target = std::make_shared<ConversionTarget>(*context);
-    target->addIllegalOp<ShardingConstraintOp>();
-    target->addLegalOp<ReshardOp>();
-
-    RewritePatternSet patternsInternal(context);
-    patternsInternal.add<ShardingConstraintPattern>(context);
-    patterns = std::move(patternsInternal);
-
-    return success();
-  }
-
+ protected:
   void runOnOperation() final {
-    if (failed(applyPartialConversion(getOperation(), *target, patterns))) {
-      signalPassFailure();
-    }
+    IRRewriter rewriter(&getContext());
+    getOperation().walk([&](ShardingConstraintOp op) {
+      rewriter.setInsertionPoint(op);
+      Value input = op.getInput();
+      TensorShardingAttr sharding = op.getSharding();
+      DictionaryAttr discardableAttrs = op->getDiscardableAttrDictionary();
+      auto reshardOp =
+          rewriter.replaceOpWithNewOp<ReshardOp>(op, input, sharding);
+      reshardOp->setDiscardableAttrs(discardableAttrs);
+    });
   }
-
- private:
-  std::shared_ptr<ConversionTarget> target;
-  FrozenRewritePatternSet patterns;
 };
 
 }  // namespace
