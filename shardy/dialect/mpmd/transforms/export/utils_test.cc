@@ -92,6 +92,21 @@ TEST(GetDonatedBlockArguments, ShouldReturnCorrectBlockArgsToDonate) {
   EXPECT_THAT(block_args_to_donate.begin()->getArgNumber(), 1);
 }
 
+TEST(IsArgDonated, ShouldReturnTrueForAliasedOrDonatedArg) {
+  MLIRContext context;
+  loadAllRequiredDialects(&context);
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgramWithUserMarkedDonation, &context);
+  FuncOp func_op = GetMainFunction(*module);
+
+  // %arg0 has tf.aliasing_output = 1 : i32.
+  EXPECT_TRUE(IsArgDonated(func_op, 0));
+  // %arg1 has jax.buffer_donor = true.
+  EXPECT_TRUE(IsArgDonated(func_op, 1));
+  // %arg2 has no aliasing or buffer donation annotations.
+  EXPECT_FALSE(IsArgDonated(func_op, 2));
+}
+
 TEST(OperandsForDeletionMapping,
      ShouldReturnCorrectOperandsForDeletionMapping) {
   MLIRContext context;

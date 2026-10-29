@@ -275,7 +275,7 @@ func.func @donated_program_arg_is_not_counted_after_last_use(
 
   // %arg3, %arg0, and %1 are still alive.
   // CHECK: mpmd.fragment
-  // CHECK-SAME: reserved_hbm_bytes = 384
+  // CHECK-SAME: reserved_hbm_bytes = 256
   %2 = mpmd.fragment<mesh="m1", origin=["f3"]> (%arg3, %arg3) (%arg4: tensor<4x8xf32>, %arg5: tensor<4x8xf32>) {
     %14 = stablehlo.add %arg4, %arg5 : tensor<4x8xf32>
     %15 = stablehlo.abs %arg5 : tensor<4x8xf32>

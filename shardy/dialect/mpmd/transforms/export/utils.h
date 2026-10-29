@@ -95,9 +95,8 @@ inline bool IsInputOutputLayoutMatch(Operation* op, int input_index,
 
 // Checks if the arg of the function is donated or aliased.
 inline bool IsArgDonated(func::FuncOp func, int index) {
-  return func.getArgAttrOfType<StringAttr>(index, kAliasingAttrName) ||
-         func.getArgAttrOfType<BoolAttr>(index,
-                                               kBufferDonationAttrName) ==
+  return func.getArgAttrOfType<IntegerAttr>(index, kAliasingAttrName) ||
+         func.getArgAttrOfType<BoolAttr>(index, kBufferDonationAttrName) ==
              BoolAttr::get(func.getContext(), true);
 }
 

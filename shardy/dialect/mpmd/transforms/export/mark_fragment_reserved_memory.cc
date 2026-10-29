@@ -40,8 +40,6 @@ namespace mlir::mpmd {
 
 namespace {
 
-using OperandLastUseMap = DenseMap<Operation*, SmallVector<unsigned int>>;
-
 // Mapping from the mesh name to how much memory is being used on it (in bytes).
 using LiveMemoryMap = DenseMap<StringRef, double>;
 
@@ -56,8 +54,8 @@ double GetMeshTensorSize(MeshTensorType mesh_tensor_type, Operation* op) {
 // on. But any operands need to be excluded from this calculation since
 // XLA already knows about them.
 template <typename FragOpT>
-int64_t GetLiveMemoryBytes(FragOpT op, OpBuilder& builder,
-                           LiveMemoryMap current_memory_usage_per_mesh) {
+int64_t GetLiveMemoryBytes(FragOpT op,
+                           const LiveMemoryMap& current_memory_usage_per_mesh) {
   auto it_memory = current_memory_usage_per_mesh.find(op.getMeshName());
   SDY_CHECK(it_memory != current_memory_usage_per_mesh.end())
       << "Required mesh_name missing: " << std::string_view(op.getMeshName());
@@ -122,10 +120,9 @@ class MarkFragmentReservedMemoryPass
       if (auto fragment_op = dyn_cast<FragmentOp>(op)) {
         fragment_op->setAttr(
             kReservedHbmBytes,
-            IntegerAttr::get(
-                builder.getI64Type(),
-                GetLiveMemoryBytes(fragment_op, builder,
-                                   current_memory_usage_per_mesh)));
+            IntegerAttr::get(builder.getI64Type(),
+                             GetLiveMemoryBytes(
+                                 fragment_op, current_memory_usage_per_mesh)));
       }
 
       if (isa<TransferOp>(op) || isa<FragmentOp>(op)) {
@@ -139,7 +136,7 @@ class MarkFragmentReservedMemoryPass
         for (auto [index, operand] : llvm::enumerate(op.getOperands())) {
           if (!IsArgOnHost(&op, index) && already_seen.insert(operand).second &&
               liveness.isDeadAfter(operand, &op)) {
-            if (auto block_arg = dyn_cast_or_null<BlockArgument>(operand);
+            if (auto block_arg = dyn_cast<BlockArgument>(operand);
                 !block_arg ||
                 IsArgDonated(main_func, block_arg.getArgNumber())) {
               MeshTensorType mesh_tensor_type =
@@ -167,24 +164,26 @@ class MarkFragmentReservedMemoryPass
     }
   }
 
-  void AddLiveValue(MeshTensorType type,
-                    LiveMemoryMap& current_memory_usage_per_mesh,
-                    Operation* op) {
+  void UpdateLiveValue(MeshTensorType type,
+                       LiveMemoryMap& current_memory_usage_per_mesh,
+                       Operation* op, double multiplier) {
     StringRef mesh_name = type.getMeshName();
     auto it_memory = current_memory_usage_per_mesh.find(mesh_name);
     SDY_CHECK(it_memory != current_memory_usage_per_mesh.end())
         << "Required mesh_name missing: " << std::string_view(mesh_name);
-    it_memory->second += GetMeshTensorSize(type, op);
+    it_memory->second += multiplier * GetMeshTensorSize(type, op);
+  }
+
+  void AddLiveValue(MeshTensorType type,
+                    LiveMemoryMap& current_memory_usage_per_mesh,
+                    Operation* op) {
+    UpdateLiveValue(type, current_memory_usage_per_mesh, op, 1.0);
   }
 
   void SubtractLastUse(MeshTensorType type,
                        LiveMemoryMap& current_memory_usage_per_mesh,
                        Operation* op) {
-    StringRef mesh_name = type.getMeshName();
-    auto it_memory = current_memory_usage_per_mesh.find(mesh_name);
-    SDY_CHECK(it_memory != current_memory_usage_per_mesh.end())
-        << "Required mesh_name missing: " << std::string_view(mesh_name);
-    it_memory->second -= GetMeshTensorSize(type, op);
+    UpdateLiveValue(type, current_memory_usage_per_mesh, op, -1.0);
   }
 };
 
