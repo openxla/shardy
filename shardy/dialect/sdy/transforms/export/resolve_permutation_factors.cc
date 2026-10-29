@@ -1621,6 +1621,317 @@ LogicalResult handleConcatenateOp(stablehlo::ConcatenateOp concatOp,
 }
 
 // -----------------------------------------------------------------------------
+// stablehlo.convolution
+// -----------------------------------------------------------------------------
+
+struct ShardedConvSpatialDimInfo {
+  int64_t spatialIdx;
+  int64_t lhsDim;
+  int64_t outDim;
+  int64_t padLow;
+  int64_t padHigh;
+  int64_t stride;
+  int64_t sOut;
+  int64_t sFootprint;
+};
+
+// Lowers a spatially sharded `stablehlo.convolution` by all-gathering the
+// sharded spatial dimensions of the LHS, then padding, dynamically slicing each
+// device's `[id * sOut * stride : +W]` window footprint, and running a
+// zero-padded local convolution inside an `sdy.manual_computation`, matching
+// GSPMD's fallback in `PartitionConvolutionBaseCase`.
+LogicalResult handleConvolutionOp(stablehlo::ConvolutionOp convOp,
+                                  ResolutionState& state) {
+  if (convOp.getBatchGroupCount() != 1 || convOp.getFeatureGroupCount() != 1 ||
+      convOp->getParentOfType<ManualComputationOp>()) {
+    return failure();
+  }
+
+  Value lhs = convOp.getLhs();
+  Value rhs = convOp.getRhs();
+  Value out = convOp.getResult();
+  TensorShardingAttr lhsSharding = getSharding(lhs);
+  TensorShardingAttr rhsSharding = getSharding(rhs);
+  TensorShardingAttr outSharding = getSharding(out);
+  if (!lhsSharding || !rhsSharding || !outSharding ||
+      (isFullyReplicated(lhsSharding) && isFullyReplicated(outSharding))) {
+    return failure();
+  }
+  if (!lhsSharding.getUnreducedAxes().empty() ||
+      !rhsSharding.getUnreducedAxes().empty() ||
+      !outSharding.getUnreducedAxes().empty()) {
+    return failure();
+  }
+
+  MeshAttr mesh = lhsSharding.getMesh(state.symbolTable);
+  if (!mesh || mesh.isSingleDevice()) {
+    return failure();
+  }
+
+  auto lhsType = dyn_cast<RankedTensorType>(lhs.getType());
+  auto rhsType = dyn_cast<RankedTensorType>(rhs.getType());
+  auto outType = dyn_cast<RankedTensorType>(out.getType());
+  if (!lhsType || !rhsType || !outType || !lhsType.hasStaticShape() ||
+      !rhsType.hasStaticShape() || !outType.hasStaticShape()) {
+    return failure();
+  }
+
+  auto isEvenlyDivisible = [&](RankedTensorType type,
+                               TensorShardingAttr sharding) {
+    for (const auto& [dimSize, dimSharding] :
+         llvm::zip_equal(type.getShape(), sharding.getDimShardings())) {
+      int64_t shardCount = dimSharding.getShardedSize(mesh);
+      if (dimSize <= 0 || dimSize % shardCount != 0) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!isEvenlyDivisible(lhsType, lhsSharding) ||
+      !isEvenlyDivisible(rhsType, rhsSharding) ||
+      !isEvenlyDivisible(outType, outSharding)) {
+    return failure();
+  }
+
+  stablehlo::ConvDimensionNumbersAttr dimNums = convOp.getDimensionNumbers();
+  if (lhsSharding.getDimShardings()[dimNums.getInputBatchDimension()]
+              .getAxes() !=
+          outSharding.getDimShardings()[dimNums.getOutputBatchDimension()]
+              .getAxes() ||
+      lhsSharding.getDimShardings()[dimNums.getInputFeatureDimension()]
+              .getAxes() !=
+          rhsSharding
+              .getDimShardings()[dimNums.getKernelInputFeatureDimension()]
+              .getAxes() ||
+      rhsSharding.getDimShardings()[dimNums.getKernelOutputFeatureDimension()]
+              .getAxes() !=
+          outSharding.getDimShardings()[dimNums.getOutputFeatureDimension()]
+              .getAxes()) {
+    return failure();
+  }
+
+  SmallVector<AxisRefAttr> rhsAxes;
+  rhsSharding.forEachAxisRef(
+      [&](AxisRefAttr axis) { rhsAxes.push_back(axis); });
+
+  ArrayRef<int64_t> inputSpatialDims = dimNums.getInputSpatialDimensions();
+  ArrayRef<int64_t> kernelSpatialDims = dimNums.getKernelSpatialDimensions();
+  ArrayRef<int64_t> outputSpatialDims = dimNums.getOutputSpatialDimensions();
+  std::optional<ArrayRef<bool>> windowReversal = convOp.getWindowReversal();
+  int64_t numSpatialDims = inputSpatialDims.size();
+  SmallVector<int64_t> paddingValues(2 * numSpatialDims, 0);
+  if (auto paddingAttr = convOp.getPadding()) {
+    llvm::copy(paddingAttr->getValues<int64_t>(), paddingValues.begin());
+  }
+
+  SmallVector<ShardedConvSpatialDimInfo> shardedSpatialDims;
+  llvm::SmallDenseSet<AxisRefAttr> manualAxes;
+  for (auto [i, dims] : llvm::enumerate(llvm::zip_equal(
+           inputSpatialDims, kernelSpatialDims, outputSpatialDims))) {
+    auto [lhsDim, rhsDim, outDim] = dims;
+    DimensionShardingAttr lhsDimSharding =
+        lhsSharding.getDimShardings()[lhsDim];
+    DimensionShardingAttr rhsDimSharding =
+        rhsSharding.getDimShardings()[rhsDim];
+    DimensionShardingAttr outDimSharding =
+        outSharding.getDimShardings()[outDim];
+    int64_t lhsShardCount = lhsDimSharding.getShardedSize(mesh);
+    int64_t rhsShardCount = rhsDimSharding.getShardedSize(mesh);
+    int64_t outShardCount = outDimSharding.getShardedSize(mesh);
+    if (lhsShardCount == 1 && rhsShardCount == 1 && outShardCount == 1) {
+      continue;
+    }
+    if (rhsShardCount != 1 || lhsShardCount <= 1 ||
+        lhsDimSharding.getAxes() != outDimSharding.getAxes()) {
+      return failure();
+    }
+    for (AxisRefAttr axis : lhsDimSharding.getAxes()) {
+      if (axis.getSubAxisInfo() ||
+          llvm::any_of(rhsAxes, [&](AxisRefAttr rhsAxis) {
+            return axis.overlaps(rhsAxis);
+          })) {
+        return failure();
+      }
+    }
+    int64_t spatialIdx = static_cast<int64_t>(i);
+    if ((windowReversal && (*windowReversal)[spatialIdx]) ||
+        getDimProperty(convOp.getLhsDilation(), spatialIdx, 1) != 1) {
+      return failure();
+    }
+    int64_t stride = getDimProperty(convOp.getWindowStrides(), spatialIdx, 1);
+    int64_t rhsDilation =
+        getDimProperty(convOp.getRhsDilation(), spatialIdx, 1);
+    int64_t windowSize = rhsType.getDimSize(rhsDim);
+    int64_t effectiveWindowSize = (windowSize - 1) * rhsDilation + 1;
+    int64_t padLow = paddingValues[2 * spatialIdx];
+    int64_t padHigh = paddingValues[2 * spatialIdx + 1];
+    if (padLow < 0 || padHigh < 0) {
+      return failure();
+    }
+    int64_t sIn = lhsType.getDimSize(lhsDim) / lhsShardCount;
+    int64_t sOut = outType.getDimSize(outDim) / outShardCount;
+    int64_t sFootprint = (sOut - 1) * stride + effectiveWindowSize;
+    bool needsComm =
+        padLow > 0 || padHigh > 0 || sFootprint != sIn || stride != 1;
+    // Only apply the optimization when all sharded spatial dims require
+    // communication, assuming typical convolutions have spatial dims that are
+    // either all communication-free or all require communication.
+    if (!needsComm) {
+      return failure();
+    }
+    for (AxisRefAttr axis : lhsDimSharding.getAxes()) {
+      manualAxes.insert(axis);
+    }
+    shardedSpatialDims.push_back({spatialIdx, lhsDim, outDim, padLow, padHigh,
+                                  stride, sOut, sFootprint});
+  }
+
+  if (shardedSpatialDims.empty()) {
+    return failure();
+  }
+
+  TensorShardingAttr localLhsSharding =
+      removeAxesFromSharding(lhsSharding, manualAxes, mesh);
+  TensorShardingAttr localOutSharding =
+      removeAxesFromSharding(outSharding, manualAxes, mesh);
+  // If replicating the spatial dimensions matches both the input of a
+  // single-use LHS reshard and a single-use result reshard, fall back to
+  // replication so CanonicalizerPass(kReshardLabel) folds both reshards.
+  auto lhsReshard = lhs.getDefiningOp<ReshardOp>();
+  auto userReshard = convOp->hasOneUse()
+                         ? dyn_cast<ReshardOp>(*convOp->user_begin())
+                         : nullptr;
+  if (lhsReshard && lhsReshard->hasOneUse() && userReshard &&
+      getSharding(lhsReshard.getInput()) == localLhsSharding &&
+      userReshard.getSharding() == localOutSharding) {
+    return failure();
+  }
+
+  IRRewriter& rewriter = state.rewriter;
+  Location loc = convOp.getLoc();
+  rewriter.setInsertionPoint(convOp);
+  SmallVector<AxisRefListAttr> gatheringAxesPerDim(
+      lhsType.getRank(), AxisRefListAttr::get(rewriter.getContext(), {}));
+  for (const ShardedConvSpatialDimInfo& d : shardedSpatialDims) {
+    gatheringAxesPerDim[d.lhsDim] =
+        AxisRefListAttr::get(rewriter.getContext(),
+                             lhsSharding.getDimShardings()[d.lhsDim].getAxes());
+  }
+  Value gatheredLhs = sdy::AllGatherOp::create(
+      rewriter, loc, lhs, gatheringAxesPerDim, localLhsSharding);
+
+  SmallVector<AxisRefAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, manualAxes);
+  auto manualComp = ManualComputationOp::create(
+      rewriter, loc, TypeRange{outType}, ValueRange{gatheredLhs, rhs},
+      TensorShardingPerValueAttr::get(rewriter.getContext(),
+                                      {localLhsSharding, rhsSharding}),
+      TensorShardingPerValueAttr::get(rewriter.getContext(), {outSharding}),
+      manualAxesAttrs);
+
+  Region& body = manualComp.getBody();
+  body.emplaceBlock();
+  Value blockLhs = body.addArgument(lhsType, loc);
+  Value blockRhs = body.addArgument(rhsType, loc);
+
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPointToStart(&body.front());
+
+  int64_t rank = lhsType.getRank();
+  SmallVector<int64_t> edgePaddingLow(rank, 0);
+  SmallVector<int64_t> edgePaddingHigh(rank, 0);
+  SmallVector<int64_t> interiorPadding(rank, 0);
+  SmallVector<int64_t> paddedLhsShape(lhsType.getShape());
+  bool hasSpatialPadding = false;
+  for (const ShardedConvSpatialDimInfo& d : shardedSpatialDims) {
+    edgePaddingLow[d.lhsDim] = d.padLow;
+    edgePaddingHigh[d.lhsDim] = d.padHigh;
+    paddedLhsShape[d.lhsDim] += d.padLow + d.padHigh;
+    if (d.padLow > 0 || d.padHigh > 0) {
+      hasSpatialPadding = true;
+    }
+  }
+
+  Value paddedLhs = blockLhs;
+  if (hasSpatialPadding) {
+    Value zeroPad =
+        createZeroScalarConstant(loc, lhsType.getElementType(), rewriter);
+    auto paddedLhsType =
+        RankedTensorType::get(paddedLhsShape, lhsType.getElementType());
+    paddedLhs = stablehlo::PadOp::create(
+        rewriter, loc, paddedLhsType, blockLhs, zeroPad,
+        rewriter.getDenseI64ArrayAttr(edgePaddingLow),
+        rewriter.getDenseI64ArrayAttr(edgePaddingHigh),
+        rewriter.getDenseI64ArrayAttr(interiorPadding));
+    setSharding(paddedLhs, localLhsSharding);
+  }
+
+  Value partitionId = createDeviceId(loc, state);
+  int64_t totalDevices = mesh.getTotalSize();
+  Type i32Ty = rewriter.getI32Type();
+  Value zeroIdx =
+      createZeroConstant(loc, RankedTensorType::get({}, i32Ty), rewriter);
+  SmallVector<Value> startIndices(rank, zeroIdx);
+  SmallVector<int64_t> sliceSizes(paddedLhsShape);
+  for (const ShardedConvSpatialDimInfo& d : shardedSpatialDims) {
+    int64_t step = d.sOut * d.stride;
+    SmallVector<int32_t> offsetsTable;
+    offsetsTable.reserve(totalDevices);
+    for (int64_t devId = 0; devId < totalDevices; ++devId) {
+      int64_t offset =
+          getShardIndex(devId, mesh, lhsSharding.getDimShardings()[d.lhsDim]) *
+          step;
+      SDY_CHECK_LE(offset, std::numeric_limits<int32_t>::max());
+      offsetsTable.push_back(static_cast<int32_t>(offset));
+    }
+    auto offsetsConst = stablehlo::ConstantOp::create(
+        rewriter, loc,
+        DenseIntElementsAttr::get(RankedTensorType::get({totalDevices}, i32Ty),
+                                  offsetsTable));
+    auto sliceOp = stablehlo::DynamicSliceOp::create(
+        rewriter, loc, RankedTensorType::get({1}, i32Ty), offsetsConst,
+        partitionId, rewriter.getDenseI64ArrayAttr({1}));
+    startIndices[d.lhsDim] = stablehlo::ReshapeOp::create(
+        rewriter, loc, RankedTensorType::get({}, i32Ty), sliceOp);
+    sliceSizes[d.lhsDim] = d.sFootprint;
+  }
+
+  auto slicedLhsType =
+      RankedTensorType::get(sliceSizes, lhsType.getElementType());
+  Value slicedLhs = stablehlo::DynamicSliceOp::create(
+      rewriter, loc, slicedLhsType, paddedLhs, startIndices,
+      rewriter.getDenseI64ArrayAttr(sliceSizes));
+  setSharding(slicedLhs, localLhsSharding);
+
+  for (const ShardedConvSpatialDimInfo& d : shardedSpatialDims) {
+    paddingValues[2 * d.spatialIdx] = 0;
+    paddingValues[2 * d.spatialIdx + 1] = 0;
+  }
+  auto newPaddingAttr = DenseIntElementsAttr::get(
+      RankedTensorType::get({numSpatialDims, 2}, rewriter.getI64Type()),
+      paddingValues);
+
+  SmallVector<int64_t> localOutShape(outType.getShape());
+  for (const ShardedConvSpatialDimInfo& d : shardedSpatialDims) {
+    localOutShape[d.outDim] = d.sOut;
+  }
+  auto localOutType =
+      RankedTensorType::get(localOutShape, outType.getElementType());
+
+  auto localConv = stablehlo::ConvolutionOp::create(
+      rewriter, loc, localOutType, slicedLhs, blockRhs,
+      convOp.getWindowStridesAttr(), newPaddingAttr,
+      convOp.getLhsDilationAttr(), convOp.getRhsDilationAttr(),
+      convOp.getWindowReversalAttr(), dimNums, convOp.getFeatureGroupCount(),
+      convOp.getBatchGroupCount(), convOp.getPrecisionConfigAttr());
+  setSharding(localConv.getResult(), localOutSharding);
+
+  ReturnOp::create(rewriter, loc, localConv.getResult());
+  rewriter.replaceOp(convOp, manualComp.getResult(0));
+  return success();
+}
+
+// -----------------------------------------------------------------------------
 // stablehlo.pad
 // -----------------------------------------------------------------------------
 
@@ -2940,6 +3251,9 @@ struct ShardyResolvePermutationFactorsPass
             llvm::TypeSwitch<Operation*, bool>(op)
                 .Case([&](stablehlo::ConcatenateOp concatOp) {
                   return succeeded(handleConcatenateOp(concatOp, state));
+                })
+                .Case([&](stablehlo::ConvolutionOp convOp) {
+                  return succeeded(handleConvolutionOp(convOp, state));
                 })
                 .Case([&](stablehlo::PadOp padOp) {
                   return succeeded(handlePadOp(padOp, state));
