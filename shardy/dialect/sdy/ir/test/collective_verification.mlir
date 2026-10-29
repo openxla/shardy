@@ -42,6 +42,16 @@ func.func @all_gather_gathering_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy
 
 // -----
 
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @all_gather_invalid_sub_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{'sdy.all_gather' op sub-axis next pre-size 16 doesn't divide the size of the full axis 8: "x":(8)2}}
+  %0 = sdy.all_gather [{}, {"x":(8)2}] %arg0 out_sharding=<@mesh, [{"y"}, {"x":(1)4}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @all_gather_duplicate_gathering_axes_across_dims(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
@@ -159,6 +169,16 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 func.func @all_slice_gathering_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{two consecutive sub-axes can be merged: "x":(1)2, "x":(2)2}}
   %0 = sdy.all_slice [{}, {"x":(1)2, "x":(2)2}] %arg0 out_sharding=<@mesh, [{"y"}, {"x"}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @all_slice_overlapping_sub_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x":(1)2}, {}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{'sdy.all_slice' op overlapping sub-axes: "x":(2)4, "x":(4)2}}
+  %0 = sdy.all_slice [{"x":(2)4}, {"x":(4)2}] %arg0 out_sharding=<@mesh, [{"x":(1)4}, {"x":(4)2}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -302,6 +322,16 @@ func.func @all_to_all_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy.sharding=
   // expected-error @+1 {{two consecutive sub-axes can be merged: "x":(1)2, "x":(2)2}}
   %0 = sdy.all_to_all [{"x":(1)2, "x":(2)2}: 1->0] %arg0 out_sharding=<@mesh, [{"y", "x"}, {}]> :  tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @all_to_all_both_sub_axis_and_full_axis(%arg0 : tensor<16x8x8x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x":(1)2}, {}, {"x":(2)4}, {}]>}) -> tensor<16x8x8x8xf32> {
+  // expected-error @+1 {{'sdy.all_to_all' op both sub-axis and full-axis are used for axis name: "x"}}
+  %0 = sdy.all_to_all [{"x":(1)2}: 0->1, {"x"}: 2->3] %arg0 out_sharding=<@mesh, [{}, {"x":(1)2}, {}, {"x":(2)4}]> : tensor<16x8x8x8xf32>
+  return %0 : tensor<16x8x8x8xf32>
 }
 
 // -----
@@ -595,12 +625,11 @@ func.func @all_reduce_overlapping_result_unreduced_sub_axis(%arg0 : tensor<16x32
 
 sdy.mesh @mesh= <["x"=2, "y"=8, "z"=2]>
 
-// func.func @all_reduce_wrong_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y":(4)2}, {"x"}]>}) -> tensor<16x32xf32> {
-// TODO(kostiantynl): fix the sub-axis verification in the followup CL b/393057118
-// COM: {{'sdy.all_reduce' op sub-axis next pre-size 16 doesn't divide the size of the full axis 8: "y":(8)2}}
-//   %0 = sdy.all_reduce {"y":(8)2} %arg0 out_sharding=<@mesh, [{"y":(4)2}, {"x"}]> :  tensor<16x32xf32>
-//   return %0 : tensor<16x32xf32>
-// }
+func.func @all_reduce_wrong_axis(%arg0 : tensor<16x32xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y":(4)2}, {"x"}]>}) -> tensor<16x32xf32> {
+  // expected-error@+1 {{'sdy.all_reduce' op sub-axis next pre-size 16 doesn't divide the size of the full axis 8: "y":(8)2}}
+  %0 = sdy.all_reduce {"y":(8)2} %arg0 out_sharding=<@mesh, [{"y":(4)2}, {"x"}]> :  tensor<16x32xf32>
+  return %0 : tensor<16x32xf32>
+}
 
 
 // -----
@@ -717,6 +746,16 @@ func.func @reduce_scatter_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy.shard
 
 // -----
 
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @reduce_scatter_invalid_sub_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x":(1)4}, {"y"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{'sdy.reduce_scatter' op sub-axis size is equal to the full axis size: "x":(1)8}}
+  %0 = sdy.reduce_scatter [{"x":(1)8}, {}] %arg0 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
 func.func @reduce_scatter_duplicate_axes(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {"y"}]>}) -> tensor<16x8xf32> {
@@ -824,6 +863,16 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 func.func @sharded_to_unreduced_axes_can_be_merged(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
   // expected-error @+1 {{two consecutive sub-axes can be merged: "x":(1)2, "x":(2)2}}
   %0 = sdy.sharded_to_unreduced [{}, {"x":(1)2, "x":(2)2}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> :  tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @sharded_to_unreduced_invalid_sub_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {"x"}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{'sdy.sharded_to_unreduced' op sub-axis sizes must be greater than 1: "x":(4)1}}
+  %0 = sdy.sharded_to_unreduced [{}, {"x":(4)1}] %arg0 out_sharding=<@mesh, [{"y"}, {"x":(1)4}], unreduced={"x":(4)2}> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -965,6 +1014,16 @@ func.func @replicated_to_unreduced_axes_can_be_merged(%arg0 : tensor<16x2xf32> {
   // expected-error @+1 {{'sdy.replicated_to_unreduced' op two consecutive sub-axes can be merged: "x":(1)2, "x":(2)2}}
   %0 = sdy.replicated_to_unreduced {"x":(1)2, "x":(2)2} %arg0 out_sharding=<@mesh, [{"y"}, {}], unreduced={"x"}> :  tensor<16x2xf32>
   return %0 : tensor<16x2xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=8, "y"=2]>
+
+func.func @replicated_to_unreduced_invalid_sub_axis(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y"}, {}]>}) -> tensor<16x8xf32> {
+  // expected-error @+1 {{'sdy.replicated_to_unreduced' op sub-axis pre-size must be at least 1: "x":(0)2}}
+  %0 = sdy.replicated_to_unreduced {"x":(0)2} %arg0 out_sharding=<@mesh, [{"y"}, {}], unreduced={"x":(1)2}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
 }
 
 // -----
