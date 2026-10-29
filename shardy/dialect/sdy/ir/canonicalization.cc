@@ -522,6 +522,54 @@ class ReshardCommonSubexpressionEliminationPattern
   }
 };
 
+// Folds an AllGatherOp into a single-use BroadcastInDimOp when all gathering
+// dimensions are newly broadcasted dimensions (not in broadcast_dimensions).
+class AllGatherOfBroadcastInDimPattern : public OpRewritePattern<AllGatherOp> {
+ public:
+  using OpRewritePattern<AllGatherOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(AllGatherOp allGatherOp,
+                                PatternRewriter& rewriter) const override {
+    auto bcastOp =
+        allGatherOp.getTensor().getDefiningOp<stablehlo::BroadcastInDimOp>();
+    if (!bcastOp || !bcastOp->hasOneUse()) {
+      return failure();
+    }
+    ArrayRef<int64_t> bcastDims = bcastOp.getBroadcastDimensions();
+    for (auto [d, axes] : llvm::enumerate(allGatherOp.getGatheringAxes())) {
+      if (!axes.empty() && llvm::is_contained(bcastDims, d)) {
+        return failure();
+      }
+    }
+    rewriter.modifyOpInPlace(bcastOp, [&]() {
+      setSharding(bcastOp.getResult(), allGatherOp.getOutSharding());
+    });
+    rewriter.replaceOp(allGatherOp, bcastOp.getResult());
+    return success();
+  }
+};
+
+// Folds a collective op into a single-use IotaOp by updating the IotaOp sharding.
+template <typename CollectiveOpTy>
+class CollectiveOfIotaPattern : public OpRewritePattern<CollectiveOpTy> {
+ public:
+  using OpRewritePattern<CollectiveOpTy>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(CollectiveOpTy collectiveOp,
+                                PatternRewriter& rewriter) const override {
+    auto iotaOp =
+        collectiveOp.getTensor().template getDefiningOp<stablehlo::IotaOp>();
+    if (!iotaOp || !iotaOp->hasOneUse()) {
+      return failure();
+    }
+    rewriter.modifyOpInPlace(iotaOp, [&]() {
+      setSharding(iotaOp.getResult(), collectiveOp.getOutSharding());
+    });
+    rewriter.replaceOp(collectiveOp, iotaOp.getResult());
+    return success();
+  }
+};
+
 }  // namespace
 
 void ManualComputationOp::getCanonicalizationPatterns(
@@ -539,13 +587,15 @@ void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* context) {
-  results.addWithLabel<AllGatherNoopPattern>(StringRef(kCollectiveLabel),
-                                             context);
+  results.addWithLabel<AllGatherNoopPattern, AllGatherOfBroadcastInDimPattern,
+                       CollectiveOfIotaPattern<AllGatherOp>>(
+      StringRef(kCollectiveLabel), context);
 }
 
 void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.addWithLabel<AllSliceOfAllGatherPattern, AllSliceNoopPattern>(
+  results.addWithLabel<AllSliceOfAllGatherPattern, AllSliceNoopPattern,
+                       CollectiveOfIotaPattern<AllSliceOp>>(
       StringRef(kCollectiveLabel), context);
 }
 
@@ -559,13 +609,15 @@ void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.addWithLabel<AllToAllFusionPattern, AllToAllNoUsePattern>(
+  results.addWithLabel<AllToAllFusionPattern, AllToAllNoUsePattern,
+                       CollectiveOfIotaPattern<AllToAllOp>>(
       StringRef(kCollectiveLabel), context);
 }
 
 void CollectivePermuteOp::getCanonicalizationPatterns(
     RewritePatternSet& results, MLIRContext* context) {
-  results.addWithLabel<CollectivePermuteNoopPattern>(
+  results.addWithLabel<CollectivePermuteNoopPattern,
+                       CollectiveOfIotaPattern<CollectivePermuteOp>>(
       StringRef(kCollectiveLabel), context);
 }
 
