@@ -21,12 +21,15 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Block.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -36,6 +39,7 @@ limitations under the License.
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/mpmd/ir/dialect.h"
 #include "shardy/dialect/mpmd/ir/fragment_arg_res_attrs.h"
@@ -47,8 +51,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/sharding_walker.h"
-#include "mlir/Support/WalkResult.h"
-#include "llvm/Support/Casting.h"
 
 namespace mlir::mpmd {
 
@@ -350,6 +352,26 @@ class LowerToFragmentCallsPass
     SymbolTable& symbol_table =
         symbol_table_collection.getSymbolTable(module_op);
 
+    // Maps each mesh to the name of the first `sdy.mesh` op that defines it.
+    llvm::SmallDenseMap<sdy::MeshAttr, StringAttr> mesh_names;
+    for (sdy::MeshOp mesh_op : module_op.getOps<sdy::MeshOp>()) {
+      mesh_names.try_emplace(mesh_op.getMesh(), mesh_op.getSymNameAttr());
+    }
+    // Returns the name of an `sdy.mesh` op that defines `mesh`, creating one
+    // named `name` if there is none. Reusing an existing op keeps the bodies of
+    // equivalent fragments on different but equal meshes (e.g., pipeline
+    // stages) equal after this pass, so that they can be deduplicated later.
+    auto get_or_create_mesh_name = [&](sdy::MeshAttr mesh,
+                                       StringRef name) -> StringAttr {
+      auto [it, inserted] = mesh_names.try_emplace(mesh);
+      if (inserted) {
+        OpBuilder mesh_builder = OpBuilder::atBlockBegin(module_op.getBody());
+        it->second = symbol_table.insert(
+            sdy::MeshOp::create(mesh_builder, module_op.getLoc(), name, mesh));
+      }
+      return it->second;
+    };
+
     for (FragmentOp fragment : all_fragments) {
       // We use the marked attributes instead of looking up in fragment_map
       // because we will be doing rewriter replacements.
@@ -407,38 +429,29 @@ class LowerToFragmentCallsPass
         sdy::inlineRegionAndConvertTerminatorOp<func::ReturnOp>(
             fragment.getRegion(), func_op.getBody());
 
-        // After inlining the fragment body, rewrite references to the global
-        // mesh inside sdy_manual_computation ops to use the fragment mesh.
+        // After inlining the fragment body, the shardings of
+        // sdy_manual_computation ops may still reference the global mesh.
+        // Rewrite them to reference a mesh equal to the fragment mesh, since
+        // the program is now local.
         sdy::MeshAttr fragmentMesh = *mpmd::GetMeshAttr(fragment);
-        StringRef fragmentMeshName = fragment.getMeshName();
-
-        // Create an sdy.MeshOp for the fragment mesh lazily.
-        auto ensureMeshOpExists = [&]() {
-          if (!module_op.lookupSymbol<sdy::MeshOp>(fragmentMeshName)) {
-            OpBuilder meshBuilder(&ctx);
-            meshBuilder.setInsertionPointToStart(module_op.getBody());
-            sdy::MeshOp::create(meshBuilder, module_op.getLoc(),
-                                fragmentMeshName, fragmentMesh);
-          }
-        };
-
         func_op.walk([&](sdy::ManualComputationOp manualOp) {
           sdy::transformShardings(
               manualOp,
               [&](sdy::TensorShardingAttr sharding) -> sdy::TensorShardingAttr {
-                if (auto symbolRef = llvm::dyn_cast<FlatSymbolRefAttr>(
-                        sharding.getMeshOrRef())) {
-                  if (symbolRef.getValue() != fragmentMeshName) {
-                    ensureMeshOpExists();
-                    return sdy::TensorShardingAttr::get(
-                        sharding.getContext(),
-                        FlatSymbolRefAttr::get(&ctx, fragmentMeshName),
-                        sharding.getDimShardings(),
-                        sharding.getReplicatedAxes(),
-                        sharding.getUnreducedAxes());
-                  }
+                auto symbolRef =
+                    llvm::dyn_cast<FlatSymbolRefAttr>(sharding.getMeshOrRef());
+                if (!symbolRef) {
+                  return sharding;
                 }
-                return sharding;
+                StringAttr mesh_name = get_or_create_mesh_name(
+                    fragmentMesh, fragment.getMeshName());
+                if (symbolRef.getAttr() == mesh_name) {
+                  return sharding;
+                }
+                return sdy::TensorShardingAttr::get(
+                    sharding.getContext(), mesh_name,
+                    sharding.getDimShardings(), sharding.getReplicatedAxes(),
+                    sharding.getUnreducedAxes(), sharding.getReductionOp());
               });
         });
 

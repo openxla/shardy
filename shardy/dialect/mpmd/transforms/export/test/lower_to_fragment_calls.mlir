@@ -511,13 +511,13 @@ module {
 !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
 
 module {
-  // CHECK:      sdy.mesh @m1 = <["x"=2]>
-  // CHECK-NEXT: sdy.mesh @mesh = <["x"=2]>
-  sdy.mesh @mesh = <["x"=2]>
+  // CHECK:      sdy.mesh @m1 = <["stage"=1, "x"=2]>
+  // CHECK-NEXT: sdy.mesh @mesh = <["stage"=2, "x"=2]>
+  sdy.mesh @mesh = <["stage"=2, "x"=2]>
 
   // CHECK-LABEL: func @sdy_manual_computation
   func.func @sdy_manual_computation(%arg0: !mesh_tensor) -> (!mesh_tensor)
-      attributes {"topology"=#mpmd.topology< <"m1": <["x"=2]>>>} {
+      attributes {"topology"=#mpmd.topology< <"m1": <["stage"=1, "x"=2]>>>} {
     // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]>
     %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4x8xf32>) {
       %1 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}]>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
@@ -541,14 +541,139 @@ module {
 
 // -----
 
+// A shard_map on a global mesh equal to the fragment meshes keeps referencing
+// it, so that the equal fragments on m1 and m2 stay equal.
+
+!m1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+!m2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+
+// CHECK-LABEL: module
+module {
+  // CHECK-NEXT: sdy.mesh @mesh = <["x"=2]>
+  // CHECK-NEXT: func @sdy_manual_computation_on_mesh_equal_to_fragment_meshes
+  sdy.mesh @mesh = <["x"=2]>
+
+  func.func @sdy_manual_computation_on_mesh_equal_to_fragment_meshes(
+      %arg0: !m1_tensor) -> (!m2_tensor)
+      attributes {"topology"=#mpmd.topology<
+          <"m1": <["x"=2]>>, <"m2": <["x"=2]>>>} {
+    %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4x8xf32>) {
+      %1 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}]>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
+        sdy.return %arg2 : tensor<2x8xf32>
+      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+      mpmd.return %1 : tensor<4x8xf32>
+    } : (!m1_tensor) -> (!m1_tensor)
+    %2 = mpmd.transfer %0 : (!m1_tensor) -> !m2_tensor
+    %3 = mpmd.fragment<mesh="m2", origin=["f2"]> (%2) (%arg1: tensor<4x8xf32>) {
+      %4 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}]>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
+        sdy.return %arg2 : tensor<2x8xf32>
+      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+      mpmd.return %4 : tensor<4x8xf32>
+    } : (!m2_tensor) -> (!m2_tensor)
+    func.return %3 : !m2_tensor
+  }
+}
+
+// CHECK: func.func @{{.*}}(%arg0: tensor<4x8xf32>)
+// CHECK-NEXT: sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}]>]
+// CHECK: func.func @{{.*}}(%arg0: tensor<4x8xf32>)
+// CHECK-NEXT: sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}]>]
+
+// -----
+
+// The shard_maps of fragments on different but equal meshes reference the same
+// new mesh, and keep their reduction op.
+
+!m1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+!m2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+
+// CHECK-LABEL: module
+module {
+  // CHECK-NEXT: sdy.mesh @m1 = <["stage"=1, "x"=2, "y"=2]>
+  // CHECK-NEXT: sdy.mesh @mesh = <["stage"=2, "x"=2, "y"=2]>
+  // CHECK-NEXT: func @sdy_manual_computations_on_equal_fragment_meshes
+  sdy.mesh @mesh = <["stage"=2, "x"=2, "y"=2]>
+
+  func.func @sdy_manual_computations_on_equal_fragment_meshes(
+      %arg0: !m1_tensor) -> (!m2_tensor)
+      attributes {"topology"=#mpmd.topology<
+          <"m1": <["stage"=1, "x"=2, "y"=2]>>,
+          <"m2": <["stage"=1, "x"=2, "y"=2]>>>} {
+    %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4x8xf32>) {
+      %1 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}], unreduced=max{"y"}>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
+        sdy.return %arg2 : tensor<2x8xf32>
+      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+      mpmd.return %1 : tensor<4x8xf32>
+    } : (!m1_tensor) -> (!m1_tensor)
+    %2 = mpmd.transfer %0 : (!m1_tensor) -> !m2_tensor
+    %3 = mpmd.fragment<mesh="m2", origin=["f2"]> (%2) (%arg1: tensor<4x8xf32>) {
+      %4 = sdy.manual_computation(%arg1) in_shardings=[<@mesh, [{"x"}, {}]>] out_shardings=[<@mesh, [{"x"}, {}], unreduced=max{"y"}>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
+        sdy.return %arg2 : tensor<2x8xf32>
+      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+      mpmd.return %4 : tensor<4x8xf32>
+    } : (!m2_tensor) -> (!m2_tensor)
+    func.return %3 : !m2_tensor
+  }
+}
+
+// CHECK: func.func @{{.*}}(%arg0: tensor<4x8xf32>)
+// CHECK-NEXT: sdy.manual_computation(%arg0) in_shardings=[<@m1, [{"x"}, {}]>] out_shardings=[<@m1, [{"x"}, {}], unreduced=max{"y"}>]
+// CHECK: func.func @{{.*}}(%arg0: tensor<4x8xf32>)
+// CHECK-NEXT: sdy.manual_computation(%arg0) in_shardings=[<@m1, [{"x"}, {}]>] out_shardings=[<@m1, [{"x"}, {}], unreduced=max{"y"}>]
+
+// -----
+
+// Shardings on a mesh equal to the fragment mesh are rewritten to the first
+// equal mesh, so fragments that reference different but equal meshes stay
+// equal.
+
+!m1_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>>
+!m2_tensor = !mpmd.mesh_tensor<"m2", tensor<4x8xf32>>
+
+// CHECK-LABEL: module
+module {
+  // CHECK-NEXT: sdy.mesh @mesh_a = <["x"=2]>
+  // CHECK-NEXT: sdy.mesh @mesh_b = <["x"=2]>
+  // CHECK-NEXT: func @sdy_manual_computations_on_duplicate_equal_meshes
+  sdy.mesh @mesh_a = <["x"=2]>
+  sdy.mesh @mesh_b = <["x"=2]>
+
+  func.func @sdy_manual_computations_on_duplicate_equal_meshes(
+      %arg0: !m1_tensor) -> (!m2_tensor)
+      attributes {"topology"=#mpmd.topology<
+          <"m1": <["x"=2]>>, <"m2": <["x"=2]>>>} {
+    %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4x8xf32>) {
+      %1 = sdy.manual_computation(%arg1) in_shardings=[<@mesh_a, [{"x"}, {}]>] out_shardings=[<@mesh_a, [{"x"}, {}]>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
+        sdy.return %arg2 : tensor<2x8xf32>
+      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+      mpmd.return %1 : tensor<4x8xf32>
+    } : (!m1_tensor) -> (!m1_tensor)
+    %2 = mpmd.transfer %0 : (!m1_tensor) -> !m2_tensor
+    %3 = mpmd.fragment<mesh="m2", origin=["f2"]> (%2) (%arg1: tensor<4x8xf32>) {
+      %4 = sdy.manual_computation(%arg1) in_shardings=[<@mesh_b, [{"x"}, {}]>] out_shardings=[<@mesh_b, [{"x"}, {}]>] manual_axes={"x"} (%arg2: tensor<2x8xf32>) {
+        sdy.return %arg2 : tensor<2x8xf32>
+      } : (tensor<4x8xf32>) -> tensor<4x8xf32>
+      mpmd.return %4 : tensor<4x8xf32>
+    } : (!m2_tensor) -> (!m2_tensor)
+    func.return %3 : !m2_tensor
+  }
+}
+
+// CHECK: func.func @{{.*}}(%arg0: tensor<4x8xf32>)
+// CHECK-NEXT: sdy.manual_computation(%arg0) in_shardings=[<@mesh_a, [{"x"}, {}]>] out_shardings=[<@mesh_a, [{"x"}, {}]>]
+// CHECK: func.func @{{.*}}(%arg0: tensor<4x8xf32>)
+// CHECK-NEXT: sdy.manual_computation(%arg0) in_shardings=[<@mesh_a, [{"x"}, {}]>] out_shardings=[<@mesh_a, [{"x"}, {}]>]
+
+// -----
+
 !mesh_tensor = !mpmd.mesh_tensor<"m1", tensor<4x8xf32>, sharding=<@mesh, [{"x"}, {?}]>>
 
 module {
-  sdy.mesh @mesh = <["x"=2]>
+  sdy.mesh @mesh = <["stage"=2, "x"=2]>
 
   // CHECK-LABEL: func @unregistered_op_with_region
   func.func @unregistered_op_with_region(%arg0: !mesh_tensor) -> (!mesh_tensor)
-      attributes {"topology"=#mpmd.topology< <"m1": <["x"=2]>>>} {
+      attributes {"topology"=#mpmd.topology< <"m1": <["stage"=1, "x"=2]>>>} {
     // CHECK: mpmd.fragment_call<mesh="m1", origin=["f1"]>
     %0 = mpmd.fragment<mesh="m1", origin=["f1"]> (%arg0) (%arg1: tensor<4x8xf32>) {
       // An unregistered operation with a region. This tests that the pass does not
