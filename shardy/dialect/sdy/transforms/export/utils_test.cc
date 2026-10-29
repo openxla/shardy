@@ -30,6 +30,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OwningOpRef.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
@@ -654,6 +655,53 @@ TEST_F(ExportUtilsTest, IsCommunicationFreeSliceDimOutSizeOne) {
       isCommunicationFreeSliceDim(0, sliceOpNonunitStride, sharding, mesh));
 }
 
+TEST_F(ExportUtilsTest, CreateScalarIntConstant) {
+  OpBuilder builder(moduleOp.get().getBodyRegion());
+  Location loc = moduleOp.get().getLoc();
+  Type i32Type = builder.getI32Type();
+  Type u32Type = IntegerType::get(&context, 32, IntegerType::Unsigned);
+  Type i64Type = builder.getI64Type();
+
+  // Element type input (i32) with negative value.
+  Value cI32 = createScalarIntConstant(loc, i32Type, -42, builder);
+  auto constI32 = cI32.getDefiningOp<stablehlo::ConstantOp>();
+  ASSERT_NE(constI32, nullptr);
+  EXPECT_EQ(cI32.getType(), RankedTensorType::get({}, i32Type));
+  EXPECT_EQ(cast<DenseIntElementsAttr>(constI32.getValue())
+                .getSplatValue<APInt>()
+                .getSExtValue(),
+            -42);
+
+  // 0-rank tensor type input (i32) at INT32_MIN and INT32_MAX boundaries.
+  auto scalarI32TensorType = RankedTensorType::get({}, i32Type);
+  Value cMinI32 = createScalarIntConstant(
+      loc, scalarI32TensorType, std::numeric_limits<int32_t>::min(), builder);
+  EXPECT_EQ(cast<DenseIntElementsAttr>(
+                cMinI32.getDefiningOp<stablehlo::ConstantOp>().getValue())
+                .getSplatValue<APInt>()
+                .getSExtValue(),
+            std::numeric_limits<int32_t>::min());
+
+  // Unsigned element type input (ui32) at UINT32_MAX boundary.
+  Value cMaxU32 = createScalarIntConstant(
+      loc, u32Type, std::numeric_limits<uint32_t>::max(), builder);
+  auto constMaxU32 = cMaxU32.getDefiningOp<stablehlo::ConstantOp>();
+  ASSERT_NE(constMaxU32, nullptr);
+  EXPECT_EQ(cMaxU32.getType(), RankedTensorType::get({}, u32Type));
+  EXPECT_EQ(cast<DenseIntElementsAttr>(constMaxU32.getValue())
+                .getSplatValue<APInt>()
+                .getZExtValue(),
+            std::numeric_limits<uint32_t>::max());
+
+  // 64-bit signed integer input (i64).
+  int64_t largeVal = static_cast<int64_t>(1) << 40;
+  Value cI64 = createScalarIntConstant(loc, i64Type, largeVal, builder);
+  EXPECT_EQ(cast<DenseIntElementsAttr>(
+                cI64.getDefiningOp<stablehlo::ConstantOp>().getValue())
+                .getSplatValue<APInt>()
+                .getSExtValue(),
+            largeVal);
+}
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir

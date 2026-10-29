@@ -265,6 +265,11 @@ Attribute getZeroAttr(Type type, OpBuilder& builder);
 // complex).
 Value createZeroConstant(Location loc, Type type, OpBuilder& builder);
 
+// Creates a 0-rank integer constant of the given integer element type or 0-rank
+// tensor type.
+Value createScalarIntConstant(Location loc, Type type, int64_t val,
+                              OpBuilder& builder);
+
 // Zero-pads the high side of `operand` to match `targetType`. If `operand`
 // already matches `targetType`, returns `operand`. Attaches `sharding` to the
 // created pad op if non-null.
