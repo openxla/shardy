@@ -283,11 +283,19 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
 
     // Check if all uses of the allReduceOp are AllSliceOps identical to this
     // one.
+    MeshAttr allReduceMesh = allReduceOp.getOutSharding().getMesh(allReduceOp);
     for (Operation* user : allReduceOp->getUsers()) {
       auto userSliceOp = dyn_cast<AllSliceOp>(user);
       if (!userSliceOp) {
         return rewriter.notifyMatchFailure(
             allSliceOp, "sdy.all_reduce has a user that is not sdy.all_slice");
+      }
+      // An sdy.all_slice of a fully replicated tensor may switch meshes, which
+      // an sdy.reduce_scatter on the sdy.all_reduce mesh cannot express.
+      if (userSliceOp.getOutSharding().getMesh(userSliceOp) != allReduceMesh) {
+        return rewriter.notifyMatchFailure(
+            allSliceOp,
+            "sdy.all_reduce has an sdy.all_slice user on a different mesh");
       }
       // Check for identical slicing axes.
       if (userSliceOp.getSlicingAxes() != allSliceOp.getSlicingAxes()) {

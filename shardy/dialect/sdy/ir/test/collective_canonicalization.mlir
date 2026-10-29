@@ -238,6 +238,35 @@ func.func @reduce_scatter_fusion_no_subaxis_prefix_match(%arg0 : tensor<64x16xf3
   return %1 : tensor<64x16xf32>
 }
 
+// CHECK-LABEL: func @reduce_scatter_fusion_different_mesh_device_ids
+func.func @reduce_scatter_fusion_different_mesh_device_ids(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced={"x", "y"}>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"x", "y"}, {}] %[[AR]] out_sharding=<@mesh_non_iota, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<16x2xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<@mesh_non_iota, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_different_mesh_device_ids_residual_slice
+func.func @reduce_scatter_fusion_different_mesh_device_ids_residual_slice(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"x", "y"}, {}] %[[AR]] out_sharding=<@mesh_non_iota, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<16x2xf32>
+  %0 = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<@mesh_non_iota, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_inlined_equal_mesh
+func.func @reduce_scatter_fusion_inlined_equal_mesh(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced={"x", "y"}>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{"x", "y"}, {}] %arg0 out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %[[RS]] : tensor<16x2xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<mesh<["x"=2, "y"=2]>, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}
+
 // CHECK-LABEL: func @all_to_all_no_use
 func.func @all_to_all_no_use(%arg0 : tensor<64x16xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<64x16xf32> {
   // CHECK-NEXT: %0 = sdy.all_to_all [{"x"}: 0->1] %arg0 out_sharding=<@mesh, [{}, {"x"}]> : tensor<64x16xf32>
