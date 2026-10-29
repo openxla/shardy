@@ -816,22 +816,37 @@ Value getDimensionOffset(Location loc, MeshAttr mesh,
                          ArrayRef<AxisRefAttr> axes, int64_t shardSize,
                          const ConversionState& conversionState,
                          ConversionPatternRewriter& rewriter) {
-  int64_t numDevices = mesh.getTotalSize();
   Type i32Ty = rewriter.getI32Type();
+  if (shardSize == 0 || getTotalAxesSize(axes, mesh) <= 1) {
+    return createScalarIntConstant(loc, i32Ty, 0, rewriter);
+  }
 
-  // Calculate a compile-time offset table for this dimension.
-  SmallVector<int32_t> offsetsTable = llvm::map_to_vector(
-      llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
-        int64_t offset = getShardIndex(devId, mesh, axes) * shardSize;
-        SDY_CHECK_LE(offset, std::numeric_limits<int32_t>::max());
-        return static_cast<int32_t>(offset);
-      });
+  // For meshes with explicit non-iota device_ids, precompute a per-device
+  // offset lookup table.
+  if (!mesh.getDeviceIds().empty()) {
+    int64_t numDevices = mesh.getTotalSize();
+    SmallVector<int32_t> offsetsTable = llvm::map_to_vector(
+        llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
+          int64_t offset = getShardIndex(devId, mesh, axes) * shardSize;
+          SDY_CHECK_LE(offset, std::numeric_limits<int32_t>::max());
+          return static_cast<int32_t>(offset);
+        });
 
-  return lookupPerDeviceValue(
-      loc,
-      DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i32Ty),
-                                offsetsTable),
-      conversionState, rewriter);
+    return lookupPerDeviceValue(
+        loc,
+        DenseIntElementsAttr::get(RankedTensorType::get({numDevices}, i32Ty),
+                                  offsetsTable),
+        conversionState, rewriter);
+  }
+
+  Value shardIndex = convertPartitionIdToIdInGroup(
+      loc, getDeviceId(loc, conversionState, rewriter), mesh, axes, rewriter);
+  if (shardSize == 1) {
+    return shardIndex;
+  }
+  return stablehlo::MulOp::create(
+      rewriter, loc, shardIndex,
+      createScalarIntConstant(loc, i32Ty, shardSize, rewriter));
 }
 
 Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,

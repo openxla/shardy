@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <optional>
 
@@ -350,6 +351,100 @@ int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
     shardIndex = shardIndex * axisSize + axisCoord;
   }
   return shardIndex;
+}
+
+Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
+                                    MeshAttr mesh, ArrayRef<AxisRefAttr> axes,
+                                    OpBuilder& builder) {
+  Type i32Ty = builder.getI32Type();
+
+  // If mesh has explicit non-iota device_ids mapping, use lookup table
+  // constant.
+  if (!mesh.getDeviceIds().empty()) {
+    int64_t totalDevices = mesh.getTotalSize();
+    SmallVector<int32_t> shardIndices;
+    shardIndices.reserve(totalDevices);
+    for (int64_t devId = 0; devId < totalDevices; ++devId) {
+      int64_t shardIndex = getShardIndex(devId, mesh, axes);
+      SDY_CHECK_LE(shardIndex, std::numeric_limits<int32_t>::max());
+      shardIndices.push_back(static_cast<int32_t>(shardIndex));
+    }
+
+    auto shardIndicesConst = stablehlo::ConstantOp::create(
+        builder, loc,
+        DenseIntElementsAttr::get(RankedTensorType::get({totalDevices}, i32Ty),
+                                  shardIndices));
+
+    auto sliceOp = stablehlo::DynamicSliceOp::create(
+        builder, loc, RankedTensorType::get({1}, i32Ty), shardIndicesConst,
+        globalPartitionId, builder.getDenseI64ArrayAttr({1}));
+
+    return stablehlo::ReshapeOp::create(
+        builder, loc, RankedTensorType::get({}, i32Ty), sliceOp);
+  }
+
+  Type pidElemTy =
+      cast<RankedTensorType>(globalPartitionId.getType()).getElementType();
+
+  // Standard iota mesh: compute shard index via scalar HLO arithmetic ops.
+  Value idInGroup = nullptr;
+  ArrayRef<MeshAxisAttr> meshAxes = mesh.getAxes();
+  int64_t totalMeshDevices = mesh.getTotalSize();
+
+  for (AxisRefAttr axis : axes) {
+    int64_t axisSize = axis.getSize(mesh);
+    if (axisSize <= 1) {
+      continue;
+    }
+    int64_t suffixSize = 1;
+    bool foundAxis = false;
+    for (MeshAxisAttr meshAxis : meshAxes) {
+      if (foundAxis) {
+        suffixSize *= meshAxis.getSize();
+      }
+      if (meshAxis.getName() == axis.getName()) {
+        foundAxis = true;
+      }
+    }
+
+    int64_t fullSize = mesh.getAxisSize(axis.getName());
+    int64_t subAxisStride = fullSize / (axis.getSubAxisPreSize() * axisSize);
+    int64_t divisor = suffixSize * subAxisStride;
+
+    // Compute div, rem, and multi-axis accumulation in the native element type
+    // of globalPartitionId (for example, ui32) before converting to i32, and
+    // skip rem when the axis spans the most significant dimension of the mesh
+    // (axisSize * divisor == totalMeshDevices).
+    Value coord = globalPartitionId;
+    if (divisor > 1) {
+      coord = stablehlo::DivOp::create(
+          builder, loc, coord.getType(), coord,
+          createScalarIntConstant(loc, pidElemTy, divisor, builder));
+    }
+    if (axisSize * divisor < totalMeshDevices) {
+      coord = stablehlo::RemOp::create(
+          builder, loc, coord.getType(), coord,
+          createScalarIntConstant(loc, pidElemTy, axisSize, builder));
+    }
+
+    if (!idInGroup) {
+      idInGroup = coord;
+    } else {
+      idInGroup = stablehlo::MulOp::create(
+          builder, loc, idInGroup,
+          createScalarIntConstant(loc, pidElemTy, axisSize, builder));
+      idInGroup = stablehlo::AddOp::create(builder, loc, idInGroup, coord);
+    }
+  }
+
+  if (!idInGroup) {
+    idInGroup = createScalarIntConstant(loc, i32Ty, 0, builder);
+  } else if (pidElemTy != i32Ty) {
+    idInGroup = stablehlo::ConvertOp::create(
+        builder, loc, RankedTensorType::get({}, i32Ty), idInGroup);
+  }
+
+  return idInGroup;
 }
 
 Type getDivisiblePaddedType(Type type, TensorShardingAttr sharding,

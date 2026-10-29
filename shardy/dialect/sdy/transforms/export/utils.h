@@ -139,6 +139,28 @@ MeshOp getGlobalMeshOp(ModuleOp moduleOp);
 // the device's position in the logical grid formed by the sharding axes.
 int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
                       ArrayRef<AxisRefAttr> axes);
+inline int64_t getShardIndex(int64_t deviceId, MeshAttr mesh,
+                             DimensionShardingAttr dimSharding) {
+  return getShardIndex(deviceId, mesh, dimSharding.getAxes());
+}
+
+// Projects the runtime `globalPartitionId` to a 0-based `i32` shard index for
+// the provided `axes` (or `targetDimSharding`).
+//
+// For meshes with explicit `device_ids`, precomputes a lookup table of shard
+// indices at compile time and emits a `stablehlo.dynamic_slice`. For standard
+// iota meshes, emits closed-form HLO arithmetic ops (`div`, `rem`, `mul`,
+// `add`) in the native element type of `globalPartitionId` before converting to
+// `i32`.
+Value convertPartitionIdToIdInGroup(Location loc, Value globalPartitionId,
+                                    MeshAttr mesh, ArrayRef<AxisRefAttr> axes,
+                                    OpBuilder& builder);
+inline Value convertPartitionIdToIdInGroup(
+    Location loc, Value globalPartitionId, MeshAttr mesh,
+    DimensionShardingAttr targetDimSharding, OpBuilder& builder) {
+  return convertPartitionIdToIdInGroup(loc, globalPartitionId, mesh,
+                                       targetDimSharding.getAxes(), builder);
+}
 
 // Returns the padded RankedTensorType where each sharded dimension of `type`
 // is padded to be divisible by its shard count along the specified axes (or all

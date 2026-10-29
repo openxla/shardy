@@ -164,10 +164,12 @@ func.func @input_sharded_on_indexed_inserted__window_dim(
  -> (tensor<3x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}, {}]>}) {
   // CHECK: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 2, 2, 2, 2]> : tensor<8xi32>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
-  // CHECK: %[[RESHAPE_OFF:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE_OFF]] : (tensor<i32>) -> tensor<i64>
+  // CHECK: %[[C4:.*]] = stablehlo.constant dense<4> : tensor<ui32>
+  // CHECK: %[[DIV:.*]] = stablehlo.divide %[[PID]], %[[C4]] : tensor<ui32>
+  // CHECK: %[[IDX:.*]] = stablehlo.convert %[[DIV]] : (tensor<ui32>) -> tensor<i32>
+  // CHECK: %[[C2:.*]] = stablehlo.constant dense<2> : tensor<i32>
+  // CHECK: %[[OFF_I32:.*]] = stablehlo.multiply %[[IDX]], %[[C2]] : tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[OFF_I32]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[OFF0:.*]] = stablehlo.reshape %[[C0]] : (tensor<i64>) -> tensor<1xi64>
   // CHECK: %[[OFF1:.*]] = stablehlo.reshape %[[OFFSET]] : (tensor<i64>) -> tensor<1xi64>
   // CHECK: %[[CONCAT:.*]] = stablehlo.concatenate %[[OFF0]], %[[OFF1]], dim = 0 : (tensor<1xi64>, tensor<1xi64>) -> tensor<2xi64>
@@ -215,12 +217,12 @@ func.func @input_sharded_on_indexed_but_non_inserted_window_dim(
   // CHECK-DAG: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
   // CHECK-DAG: %[[C0_1:.*]] = stablehlo.constant dense<0> : tensor<i64>
 
-  // Shard offset calculation logic for sharded dimension 2 (axis "y:(2)2")
-  // CHECK-DAG: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-DAG: %[[TABLE:.*]] = stablehlo.constant dense<[0, 1, 0, 1, 0, 1, 0, 1]> : tensor<8xi32>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
-  // CHECK: %[[RESHAPE_OFF:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE_OFF]] : (tensor<i32>) -> tensor<i64>
+  // Shard offset calculation logic for sharded dimension 2 (axis "y:(2)2", local size 1)
+  // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK: %[[C2:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // CHECK: %[[REM:.*]] = stablehlo.remainder %[[PID]], %[[C2]] : tensor<ui32>
+  // CHECK: %[[IDX:.*]] = stablehlo.convert %[[REM]] : (tensor<ui32>) -> tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[IDX]] : (tensor<i32>) -> tensor<i64>
 
   // Index vector construction for [dim0_offset, dim1_offset, dim2_offset]
   // CHECK: %[[OFF0:.*]] = stablehlo.reshape %[[C0]] : (tensor<i64>) -> tensor<1xi64>
@@ -266,10 +268,14 @@ func.func @shard_indexd_dim_scalar_scatter_indices(
   %arg2: tensor<i32>)
   -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(1)2}]>}) {
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 4, 4, 0, 0, 4, 4]> : tensor<8xi32>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
+  // CHECK: %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // CHECK: %[[DIV:.*]] = stablehlo.divide %[[PID]], %[[C2_0]] : tensor<ui32>
+  // CHECK: %[[C2_1:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // CHECK: %[[REM:.*]] = stablehlo.remainder %[[DIV]], %[[C2_1]] : tensor<ui32>
+  // CHECK: %[[IDX:.*]] = stablehlo.convert %[[REM]] : (tensor<ui32>) -> tensor<i32>
+  // CHECK: %[[C4:.*]] = stablehlo.constant dense<4> : tensor<i32>
+  // CHECK: %[[OFF_I32:.*]] = stablehlo.multiply %[[IDX]], %[[C4]] : tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[OFF_I32]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[OFF_BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, []>]>} : (tensor<i64>) -> tensor<i64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[ARG1]], %[[OFF_BCAST]] : tensor<i64>
   // CHECK: %[[RES:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[LOCAL_IDX]], %[[ARG2]])
@@ -317,10 +323,14 @@ func.func @shard_indexd_dim_scalar_scatter_indices_variadic(
   %arg4: tensor<i32>)
   -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(1)2}]>}, tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(1)2}]>}) {
   // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 4, 4, 0, 0, 4, 4]> : tensor<8xi32>
-  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
-  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
-  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
+  // CHECK: %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // CHECK: %[[DIV:.*]] = stablehlo.divide %[[PID]], %[[C2_0]] : tensor<ui32>
+  // CHECK: %[[C2_1:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // CHECK: %[[REM:.*]] = stablehlo.remainder %[[DIV]], %[[C2_1]] : tensor<ui32>
+  // CHECK: %[[IDX:.*]] = stablehlo.convert %[[REM]] : (tensor<ui32>) -> tensor<i32>
+  // CHECK: %[[C4:.*]] = stablehlo.constant dense<4> : tensor<i32>
+  // CHECK: %[[OFF_I32:.*]] = stablehlo.multiply %[[IDX]], %[[C4]] : tensor<i32>
+  // CHECK: %[[OFFSET:.*]] = stablehlo.convert %[[OFF_I32]] : (tensor<i32>) -> tensor<i64>
   // CHECK: %[[OFF_BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, []>]>} : (tensor<i64>) -> tensor<i64>
   // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[ARG2]], %[[OFF_BCAST]] : tensor<i64>
   // CHECK: %[[RES:.*]]:2 = "stablehlo.scatter"(%arg0, %[[ARG1]], %[[LOCAL_IDX]], %[[ARG3]], %[[ARG4]])

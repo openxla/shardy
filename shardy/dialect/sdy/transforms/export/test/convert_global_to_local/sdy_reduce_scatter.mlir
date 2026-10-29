@@ -66,17 +66,26 @@ func.func @two_dim_add_suffix_of_full(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // AR-DS-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
   // AR-DS: }) : (tensor<8x8xf32>) -> tensor<8x8xf32>
   //
-  // AR-DS: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  //
-  // AR-DS: %[[TABLE0:.*]] = stablehlo.constant dense<[0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6]> : tensor<16xi32>
-  // AR-DS: %[[OFF0:.*]] = stablehlo.dynamic_slice %[[TABLE0]], %[[PID]], sizes = [1] : (tensor<16xi32>, tensor<ui32>) -> tensor<1xi32>
-  // AR-DS: %[[IDX0:.*]] = stablehlo.reshape %[[OFF0]] : (tensor<1xi32>) -> tensor<i32>
+  // AR-DS: %[[PID0:.*]] = stablehlo.partition_id : tensor<ui32>
+  // AR-DS: %[[C2_0:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // AR-DS: %[[DIV0:.*]] = stablehlo.divide %[[PID0]], %[[C2_0]] : tensor<ui32>
+  // AR-DS: %[[C2_1:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // AR-DS: %[[REM0:.*]] = stablehlo.remainder %[[DIV0]], %[[C2_1]] : tensor<ui32>
+  // AR-DS: %[[C2_3:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // AR-DS: %[[REM1:.*]] = stablehlo.remainder %[[PID0]], %[[C2_3]] : tensor<ui32>
+  // AR-DS: %[[C2_2:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // AR-DS: %[[MUL0:.*]] = stablehlo.multiply %[[REM0]], %[[C2_2]] : tensor<ui32>
+  // AR-DS: %[[ADD0:.*]] = stablehlo.add %[[MUL0]], %[[REM1]] : tensor<ui32>
+  // AR-DS: %[[CONV0:.*]] = stablehlo.convert %[[ADD0]] : (tensor<ui32>) -> tensor<i32>
+  // AR-DS: %[[C2_I32:.*]] = stablehlo.constant dense<2> : tensor<i32>
+  // AR-DS: %[[IDX0:.*]] = stablehlo.multiply %[[CONV0]], %[[C2_I32]] : tensor<i32>
   //
   // AR-DS: %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
-  //
-  // AR-DS: %[[TABLE1:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4]> : tensor<16xi32>
-  // AR-DS: %[[OFF1:.*]] = stablehlo.dynamic_slice %[[TABLE1]], %[[PID1]], sizes = [1] : (tensor<16xi32>, tensor<ui32>) -> tensor<1xi32>
-  // AR-DS: %[[IDX1:.*]] = stablehlo.reshape %[[OFF1]] : (tensor<1xi32>) -> tensor<i32>
+  // AR-DS: %[[C8_UI32:.*]] = stablehlo.constant dense<8> : tensor<ui32>
+  // AR-DS: %[[DIV1:.*]] = stablehlo.divide %[[PID1]], %[[C8_UI32]] : tensor<ui32>
+  // AR-DS: %[[CONV1:.*]] = stablehlo.convert %[[DIV1]] : (tensor<ui32>) -> tensor<i32>
+  // AR-DS: %[[C4_I32:.*]] = stablehlo.constant dense<4> : tensor<i32>
+  // AR-DS: %[[IDX1:.*]] = stablehlo.multiply %[[CONV1]], %[[C4_I32]] : tensor<i32>
   //
   // AR-DS: %[[RESULT:.*]] = stablehlo.dynamic_slice %[[ALL_REDUCE]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<8x8xf32>, tensor<i32>, tensor<i32>) -> tensor<2x4xf32>
 
