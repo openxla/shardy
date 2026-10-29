@@ -2107,14 +2107,6 @@ class StablehloDynamicSliceOpPattern
   ConversionState& conversionState;
 };
 
-Value createScalarInt(Location loc, RankedTensorType type, int64_t val,
-                      OpBuilder& b) {
-  return stablehlo::ConstantOp::create(
-      b, loc,
-      DenseIntElementsAttr::get(type,
-                                APInt(type.getElementTypeBitWidth(), val)));
-}
-
 // Computes the predicate indicating whether the current shard owns the
 // update slice in a single dimension:
 // `(clampedIndex >= offset) && (clampedIndex + sliceDim <= offset +
@@ -2124,12 +2116,12 @@ Value computeOwnershipPredicate(Location loc, Value clampedIndex, Value offset,
                                 RankedTensorType scalarIndexType,
                                 ConversionPatternRewriter& rewriter) {
   Value sliceSizeConst =
-      createScalarInt(loc, scalarIndexType, sliceDim, rewriter);
+      createScalarIntConstant(loc, scalarIndexType, sliceDim, rewriter);
   Value clampedPlusSlice = stablehlo::AddOp::create(
       rewriter, loc, scalarIndexType, clampedIndex, sliceSizeConst);
 
   Value shardSizeConst =
-      createScalarInt(loc, scalarIndexType, shardDim, rewriter);
+      createScalarIntConstant(loc, scalarIndexType, shardDim, rewriter);
   Value offsetPlusShard = stablehlo::AddOp::create(
       rewriter, loc, scalarIndexType, offset, shardSizeConst);
 
@@ -2158,9 +2150,9 @@ LocalIndexAndOwnership computeLocalIndexAndOwnershipForDim(
   RankedTensorType scalarIndexType = RankedTensorType::get({}, indexEltTy);
 
   // Clamp the start index to [0, globalDim - sliceDim].
-  Value zeroConst = createScalarInt(loc, scalarIndexType, 0, rewriter);
-  Value maxConst =
-      createScalarInt(loc, scalarIndexType, globalDim - sliceDim, rewriter);
+  Value zeroConst = createScalarIntConstant(loc, scalarIndexType, 0, rewriter);
+  Value maxConst = createScalarIntConstant(loc, scalarIndexType,
+                                           globalDim - sliceDim, rewriter);
   Value clampedIndex = stablehlo::ClampOp::create(
       rewriter, loc, scalarIndexType, zeroConst, rawIndex, maxConst);
 
@@ -2490,19 +2482,15 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
     maxBounds.reserve(startIndexMap.size());
   }
 
-  unsigned bitWidth = indexEltTy.getIntOrFloatBitWidth();
   for (int64_t indexedDim : startIndexMap) {
     if (!llvm::is_contained(trivialSliceDims, indexedDim)) {
       // For non-trivial dims, the bounds cover the entire global range.
       minBounds.push_back(createZeroConstant(
           loc, RankedTensorType::get({}, indexEltTy), rewriter));
       if (computeMask) {
-        maxBounds.push_back(stablehlo::ConstantOp::create(
-            rewriter, loc,
-            DenseIntElementsAttr::get(
-                RankedTensorType::get({}, indexEltTy),
-                APInt(bitWidth,
-                      globalOperandType.getDimSize(indexedDim) - 1))));
+        maxBounds.push_back(createScalarIntConstant(
+            loc, indexEltTy, globalOperandType.getDimSize(indexedDim) - 1,
+            rewriter));
       }
       continue;
     }
@@ -2517,10 +2505,8 @@ std::pair<SmallVector<Value>, SmallVector<Value>> getTrivialSliceDimBounds(
 
     minBounds.push_back(offset);
     if (computeMask) {
-      Value shardSizeMinus1 = stablehlo::ConstantOp::create(
-          rewriter, loc,
-          DenseIntElementsAttr::get(RankedTensorType::get({}, indexEltTy),
-                                    APInt(bitWidth, shardSize - 1)));
+      Value shardSizeMinus1 =
+          createScalarIntConstant(loc, indexEltTy, shardSize - 1, rewriter);
       maxBounds.push_back(stablehlo::AddOp::create(
           rewriter, loc, RankedTensorType::get({}, indexEltTy), offset,
           shardSizeMinus1));
