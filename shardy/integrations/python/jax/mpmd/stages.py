@@ -222,7 +222,7 @@ class MpmdExecutable(stages.Executable):
       self, params: stages.CompiledCallParams
   ) -> Callable[..., Sequence[Any]] | None:
     # TODO(b/434270189): handle const args fast path
-    if params.const_args:
+    if params.const_args or params.is_high:
       return None
 
     def cache_miss(*args, **kwargs):
@@ -344,8 +344,18 @@ class MpmdCompiled(jax.stages.Compiled):
       out_tree: jax.tree_util.PyTreeDef,
       const_args: list[ArrayLike],
       no_kwargs: bool = False,
+      in_types: Any = None,
+      out_types: Any = None,
   ):
-    super().__init__(executable, const_args, args_info, out_tree, no_kwargs)
+    super().__init__(
+        executable,
+        const_args,
+        args_info,
+        out_tree,
+        no_kwargs,
+        in_types=in_types,
+        out_types=out_types,
+    )
     assert isinstance(executable, MpmdExecutable)
     self._mpmd_executable = executable
 
@@ -458,6 +468,8 @@ class MpmdLowered(stages.Lowered):
       name_to_mesh_map: mpmd_types.NameToMeshAssignment,
       flat_input_mesh_assignment: Sequence[str] | None = None,
       host_callbacks: tuple[Any, ...] = (),
+      in_types: Any = None,
+      out_types: Any = None,
   ):
     """Initializes an MpmdLowered object.
 
@@ -547,6 +559,8 @@ class MpmdLowered(stages.Lowered):
 
     self.mpmd_module = partitioning_result.mpmd_module
     self.host_callbacks = list(host_callbacks)
+    self._in_types = in_types
+    self._out_types = out_types
 
   def _get_compile_options(
       self,
@@ -700,6 +714,8 @@ class MpmdLowered(stages.Lowered):
         out_tree=self.output_tree,
         const_args=self.const_args,
         no_kwargs=self.no_kwargs,
+        in_types=self._in_types,
+        out_types=self._out_types,
     )
 
   def as_text(

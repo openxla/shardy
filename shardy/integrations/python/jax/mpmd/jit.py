@@ -115,6 +115,8 @@ class MpmdLoweredArgs:
   name_to_mesh_map: types.NameToMeshAssignment
   flat_input_mesh_assignment: Sequence[str] | None = None
   host_callbacks: tuple[Any, ...] = ()
+  in_types: Any = None
+  out_types: Any = None
 
 
 def _get_fragment_info(
@@ -226,10 +228,16 @@ class MpmdGspmdTraced(jax.stages.Traced):
     # Flatten in the inputs and outputs, preserving the structures of the
     # respective trees. Note the flattened input shapes contain all inputs,
     # including the unused ones.
-    flat_in_shaped, in_tree = jax.tree.flatten(args)
-    global_flat_in_abstract_values = [
-        _shaped_abstractify(shaped) for shaped in flat_in_shaped
-    ]
+    if (lowered_computation._in_types is not None and  # pylint: disable=protected-access
+        any(a.is_high for a in lowered_computation._in_types[1])):  # pylint: disable=protected-access
+      flat_in_info, in_tree = jax.tree.flatten(lowered_computation.args_info[0])
+      flat_in_shaped = flat_in_info
+      global_flat_in_abstract_values = [x._aval for x in flat_in_info]  # pylint: disable=protected-access
+    else:
+      flat_in_shaped, in_tree = jax.tree.flatten(args)
+      global_flat_in_abstract_values = [
+          _shaped_abstractify(shaped) for shaped in flat_in_shaped
+      ]
     flat_out_shaped, out_tree = jax.tree.flatten(lowered_computation.out_info)
     global_flat_out_abstract_values = [
         _shaped_abstractify(shaped) for shaped in flat_out_shaped
@@ -347,6 +355,8 @@ class MpmdGspmdTraced(jax.stages.Traced):
         host_callbacks=lowered_computation._lowering.compile_args.get(  # pylint: disable=protected-access
             'host_callbacks', []
         ),
+        in_types=lowered_computation._in_types,  # pylint: disable=protected-access
+        out_types=lowered_computation._out_types,  # pylint: disable=protected-access
     )
     return mlir_module, partitioning_args, lowered_args
 
@@ -476,6 +486,8 @@ class MpmdGspmdTraced(jax.stages.Traced):
         name_to_mesh_map=lowered_args.name_to_mesh_map,
         flat_input_mesh_assignment=lowered_args.flat_input_mesh_assignment,
         host_callbacks=lowered_args.host_callbacks,
+        in_types=lowered_args.in_types,
+        out_types=lowered_args.out_types,
     )
 
 
