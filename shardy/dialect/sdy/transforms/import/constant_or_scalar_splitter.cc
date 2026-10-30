@@ -33,7 +33,6 @@ limitations under the License.
 #include "mlir/Rewrite/FrozenRewritePatternSet.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
-#include "mlir/Support/WalkResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -67,20 +66,13 @@ void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
 // given op is either:
 // - A broadcast, reshape or slice op.
 // - An elementwise op.
-// - A named computation all operations are constant preserving.
 // - A call to a func that all operations are constant preserving.
 // Assumes the op is not constant or iota.
-bool isConstantPreserving(
-    Operation* op,
-    const llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps,
-    const llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
-    const SymbolTable& symbolTable) {
+bool isConstantPreserving(Operation* op,
+                          const llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
+                          const SymbolTable& symbolTable) {
   if (CallOp callOp = dyn_cast<CallOp>(op)) {
     return !nonConstFuncOps.contains(getOriginalFuncName(callOp, symbolTable));
-  }
-  if (auto namedComputationOp = dyn_cast<NamedComputationOp>(op)) {
-    return !nonConstantNamedComputationOps.contains(
-        namedComputationOp.getName());
   }
   if (!isPure(op)) {
     return false;
@@ -99,16 +91,14 @@ bool isConstantPreserving(
 // - A constant or iota op.
 // - A constant preserving op. (see isConstantPreserving) and all operands are
 // constants, that is, exist in `constantOps`.
-bool isConstantExpression(
-    Operation* op, const llvm::SetVector<Operation*>& constantOps,
-    const llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps,
-    const llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
-    const SymbolTable& symbolTable) {
+bool isConstantExpression(Operation* op,
+                          const llvm::SetVector<Operation*>& constantOps,
+                          const llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
+                          const SymbolTable& symbolTable) {
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
-  return isConstantPreserving(op, nonConstantNamedComputationOps,
-                              nonConstFuncOps, symbolTable) &&
+  return isConstantPreserving(op, nonConstFuncOps, symbolTable) &&
          llvm::all_of(op->getOperands(), [&](Value operand) {
            return operand.getDefiningOp() &&
                   constantOps.contains(operand.getDefiningOp());
@@ -186,29 +176,22 @@ void cloneSubComputationOnOperands(
 void processOp(Operation* op, FuncOp funcOp,
                llvm::SetVector<Operation*>& constantOps,
                llvm::SetVector<Operation*>& scalarExpansionOps,
-               llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps,
                llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
                SymbolTable& symbolTable) {
   if (isa<FuncOp, ShardingGroupOp>(op)) {
     return;
   }
-  if (isConstantExpression(op, constantOps, nonConstantNamedComputationOps,
-                           nonConstFuncOps, symbolTable)) {
+  if (isConstantExpression(op, constantOps, nonConstFuncOps, symbolTable)) {
     constantOps.insert(op);
     return;
   }
   // NOTE: There are cases that op is an constant expression but may not pass
   // the following check such as constant and iota ops. That is fine because if
   // the op is a constant expression it is a stronger condition than being just
-  // constant preserving and it does not make the parent named computation or
-  // the `funcOp` non-const, and at this point, it is guaranteed that the op is
-  // not constant expression.
-  if (!isConstantPreserving(op, nonConstantNamedComputationOps, nonConstFuncOps,
-                            symbolTable) &&
+  // constant preserving and it does not make the `funcOp` non-const, and at
+  // this point, it is guaranteed that the op is not constant expression.
+  if (!isConstantPreserving(op, nonConstFuncOps, symbolTable) &&
       !op->hasTrait<OpTrait::IsTerminator>()) {
-    if (auto namedCompuationOp = op->getParentOfType<NamedComputationOp>()) {
-      nonConstantNamedComputationOps.insert(namedCompuationOp.getName());
-    }
     nonConstFuncOps.insert(getOriginalFuncName(funcOp));
   }
   if (isScalarExpansion(op)) {
@@ -265,21 +248,14 @@ struct ConstantOrScalarSplitterPass
     }
   }
 
-  void walkOnRegion(
-      mlir::Region& region, FuncOp funcOp,
-      llvm::SmallDenseSet<StringRef>& nonConstantNamedComputationOps,
-      llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
-      SymbolTable& symbolTable) {
+  void walkOnRegion(mlir::Region& region, FuncOp funcOp,
+                    llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
+                    SymbolTable& symbolTable) {
     llvm::SetVector<Operation*> constantOps;
     llvm::SetVector<Operation*> scalarExpansionOps;
     region.walk<WalkOrder::PreOrder>([&](Operation* op) {
-      processOp(op, funcOp, constantOps, scalarExpansionOps,
-                nonConstantNamedComputationOps, nonConstFuncOps, symbolTable);
-      // Skip walking on the `NamedComputationOp`.
-      if (isa<NamedComputationOp>(op)) {
-        return WalkResult::skip();
-      }
-      return WalkResult::advance();
+      processOp(op, funcOp, constantOps, scalarExpansionOps, nonConstFuncOps,
+                symbolTable);
     });
     // Since for every op in `constantOps` that has a use that isn't in
     // `constantOps`, we replaced the use with a clone of the entire
@@ -301,16 +277,9 @@ struct ConstantOrScalarSplitterPass
     }
 
     // Then we split constant sub-computations for each non-constant user.
-    llvm::SmallDenseSet<StringRef> nonConstantNamedComputationOps;
     llvm::SmallDenseSet<StringRef> nonConstFuncOps;
     iterateFuncs(moduleOp, [&](FuncOp funcOp) {
-      funcOp.walk([&](NamedComputationOp namedComputationOp) {
-        walkOnRegion(namedComputationOp.getBody(), funcOp,
-                     nonConstantNamedComputationOps, nonConstFuncOps,
-                     symbolTable);
-      });
-      walkOnRegion(funcOp.getBody(), funcOp, nonConstantNamedComputationOps,
-                   nonConstFuncOps, symbolTable);
+      walkOnRegion(funcOp.getBody(), funcOp, nonConstFuncOps, symbolTable);
     });
   }
 

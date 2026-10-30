@@ -173,7 +173,7 @@ class GlobalToLocalTypeConverter : public TypeConverter {
   }
 
   // Collects block arguments for ShardableDataFlowOp, such as
-  // manual_computation and named_computation.
+  // manual_computation.
   void populateArgShardings(ShardableDataFlowOpInterface op) {
     for (auto [arg, sharding] :
          llvm::zip(op.getBlockArgumentEdgeOwners(),
@@ -1631,50 +1631,6 @@ class ShardedToUnreducedOpPattern
 
     rewriter.replaceOpWithNewOp<stablehlo::DynamicUpdateSliceOp>(
         op, localResultType, zeroTensor, localInput, startIndices);
-    conversionState.removeToConvertOp(op);
-    return success();
-  }
-
- private:
-  ConversionState& conversionState;
-};
-
-class NamedComputationOpPattern
-    : public OpConversionPattern<NamedComputationOp> {
- public:
-  NamedComputationOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                            ConversionState& state)
-      : OpConversionPattern<NamedComputationOp>(converter, ctx),
-        conversionState(state) {}
-
-  LogicalResult matchAndRewrite(
-      NamedComputationOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter& rewriter) const override {
-    auto* converter =
-        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
-
-    // Prepare signature conversion for the internal region.
-    TypeConverter::SignatureConversion signature(
-        op.getBody().getNumArguments());
-    for (auto [index, arg] : llvm::enumerate(op.getBody().getArguments())) {
-      signature.addInputs(index, converter->convertType(arg));
-    }
-
-    auto newOp = NamedComputationOp::create(
-        rewriter, op.getLoc(), converter->convertResultTypes(op.getResults()),
-        op.getName(), adaptor.getOperands(),
-        op.getInShardings().value_or(nullptr),
-        op.getOutShardings().value_or(nullptr));
-
-    // Move and convert the region.
-    rewriter.inlineRegionBefore(op.getBody(), newOp.getBody(),
-                                newOp.getBody().end());
-    if (failed(rewriter.convertRegionTypes(&newOp.getBody(), *converter,
-                                           &signature))) {
-      return failure();
-    }
-
-    rewriter.replaceOp(op, newOp.getResults());
     conversionState.removeToConvertOp(op);
     return success();
   }
@@ -3857,17 +3813,18 @@ struct ConvertGlobalToLocalPass
     RewritePatternSet patterns(&getContext());
     populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
         patterns, typeConverter);
-    patterns.add<
-        AllGatherAndSliceViaAllReducePattern, AllSliceOpPattern,
-        CollectivePermuteOpPattern, ConstantOpPattern, FuncOpSignaturePattern,
-        GenericOpPattern, ManualComputationOpPattern, NamedComputationOpPattern,
-        PartitioningOpInterfacePattern, ReplicatedToUnreducedOpPattern,
-        ShardedToUnreducedOpPattern, StablehloConcatenateOpPattern,
-        StablehloDynamicSliceOpPattern, StablehloDynamicUpdateSliceOpPattern,
-        StablehloIotaOpPattern, StablehloPadOpPattern,
-        StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
-        StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
-        StablehloSliceOpPattern>(typeConverter, &getContext(), conversionState);
+    patterns.add<AllGatherAndSliceViaAllReducePattern, AllSliceOpPattern,
+                 CollectivePermuteOpPattern, ConstantOpPattern,
+                 FuncOpSignaturePattern, GenericOpPattern,
+                 ManualComputationOpPattern, PartitioningOpInterfacePattern,
+                 ReplicatedToUnreducedOpPattern, ShardedToUnreducedOpPattern,
+                 StablehloConcatenateOpPattern, StablehloDynamicSliceOpPattern,
+                 StablehloDynamicUpdateSliceOpPattern, StablehloIotaOpPattern,
+                 StablehloPadOpPattern,
+                 StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,
+                 StablehloWindowedOpPattern<stablehlo::SelectAndScatterOp>,
+                 StablehloSliceOpPattern>(typeConverter, &getContext(),
+                                          conversionState);
     patterns.add<AllReduceOpPattern, AllToAllOpPattern,
                  StablehloConvolutionOpPattern, StablehloDotGeneralOpPattern,
                  StablehloDotOpPattern, StablehloGatherOpPattern,

@@ -39,7 +39,6 @@ cc_library(
         "constant_or_scalar_splitter.cc",
         "explicit_gather_scatter_batching.cc",
         "flatten_call_graph.cc",
-        "import_func_calls.cc",
         "import_pipeline.cc",
         "lift_inlined_meshes.cc",
         "manual_axes_cleanup.cc",

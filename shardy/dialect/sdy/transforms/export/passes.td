@@ -309,20 +309,6 @@ def ConvertGlobalToLocalPass : Pass<"sdy-convert-global-to-local", "ModuleOp"> {
     ];
 }
 
-def ExportNamedComputationsPass : Pass<"sdy-export-named-computations", "ModuleOp"> {
-  let summary = "Outline calls from `NamedComputationOp`.";
-  let description = [{
-    Creates a pass that converts a `NamedComputationOp` to a `CallOp` with a new
-    private function called the `NamedComputationOp`'s `name`. The new `FuncOp`
-    and `CallOp` have the same shardings as the original `NamedComputationOp`s
-    operands/results.
-
-    If there is a function with the same name as the `NamedComputationOp` in the
-    module, the MLIR symbol table will change it to `{name}_#`.
-  }];
-  let dependentDialects = ["mlir::sdy::SdyDialect"];
-}
-
 def PropagateToFuncResultsPass : Pass<"sdy-propagate-to-func-results", "ModuleOp"> {
   let summary = "Propagate shardings from the func terminator to func results.";
   let description = [{

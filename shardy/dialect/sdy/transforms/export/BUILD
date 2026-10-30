@@ -36,7 +36,6 @@ cc_library(
         "convert_global_to_local.cc",
         "drop_sharding_and_mesh.cc",
         "drop_sharding_rules.cc",
-        "export_named_computations.cc",
         "export_pipeline.cc",
         "insert_explicit_reshards.cc",
         "insert_func_call_reshards.cc",

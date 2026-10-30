@@ -260,25 +260,6 @@ LogicalResult verifyRegionBranchOp(Operation* op) {
       /*expectedIntroducedRedOp=*/std::nullopt);
 }
 
-LogicalResult verifyNamedComputationOp(
-    sdy::NamedComputationOp namedComputationOp) {
-  for (int64_t i = 0; i < namedComputationOp.getNumOperands(); ++i) {
-    Value operand = namedComputationOp.getOperand(i);
-    if (isDefiningOpExplicitReshard(operand)) {
-      continue;
-    }
-    TensorShardingAttr operandSharding = getSharding(operand);
-    TensorShardingAttr argSharding =
-        getSharding(namedComputationOp.getBody().getArgument(i));
-    if (failed(verifyUnreducedShardingEqual(
-            operandSharding, argSharding, namedComputationOp,
-            llvm::Twine("' at argument ") + llvm::Twine(i) + "."))) {
-      return failure();
-    }
-  }
-  return success();
-}
-
 TensorShardingAttr retainOnlyManualUnreducedAxes(
     TensorShardingAttr sharding, ArrayRef<AxisRefAttr> manualAxes,
     Operation* op) {
@@ -525,13 +506,6 @@ struct VerifyUnreducedAxesPass
         return WalkResult::advance();
       }
 
-      if (auto namedCompOp = dyn_cast<sdy::NamedComputationOp>(op)) {
-        if (failed(verifyNamedComputationOp(namedCompOp))) {
-          return WalkResult::interrupt();
-        }
-        return WalkResult::advance();
-      }
-
       if (auto manualCompOp = dyn_cast<sdy::ManualComputationOp>(op)) {
         if (failed(verifyManualComputationOp(manualCompOp))) {
           return WalkResult::interrupt();
@@ -541,8 +515,7 @@ struct VerifyUnreducedAxesPass
 
       if (op->hasTrait<OpTrait::IsTerminator>()) {
         if (isa<func::FuncOp, stablehlo::WhileOp, stablehlo::CaseOp,
-                stablehlo::IfOp, sdy::NamedComputationOp,
-                sdy::ManualComputationOp>(op->getParentOp())) {
+                stablehlo::IfOp, sdy::ManualComputationOp>(op->getParentOp())) {
           if (failed(verifyTerminator(op, funcOp))) {
             return WalkResult::interrupt();
           }

@@ -97,29 +97,6 @@ func.func @manual_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>
 
 // -----
 
-// CHECK-NOT: sdy.mesh @mesh = <["x"=4]>
-sdy.mesh @mesh = <["x"=4]>
-
-// CHECK-NOT: sdy.mesh @mesh_0 = <["y"=8]>
-sdy.mesh @mesh_0 = <["y"=8]>
-
-// CHECK-LABEL: func @named_computation
-func.func @named_computation(%arg0: tensor<16x32xf32>, %arg1: tensor<16x32xf32>) -> tensor<16x32xf32> {
-  // CHECK-NEXT: sdy.named_computation<"foo">(%arg0, %arg1)
-  // CHECK-SAME:   in_shardings=[<mesh<["x"=4]>, [{"x"}, {}]>, <mesh<["x"=4]>, [{?}, {?}]>]
-  // CHECK-SAME:   out_shardings=[<mesh<["y"=8]>, [{}, {"y"}]>]
-  %0 = sdy.named_computation<"foo">(%arg0, %arg1)
-      in_shardings=[<@mesh, [{"x"}, {}]>, <mesh<["x"=4]>, [{?}, {?}]>]
-      out_shardings=[<mesh<["y"=8]>, [{}, {"y"}]>]
-      (%arg2: tensor<16x32xf32>, %arg3: tensor<16x32xf32>) {
-    %1 = stablehlo.add %arg2, %arg3 : tensor<16x32xf32>
-    sdy.return %1 : tensor<16x32xf32>
-  } : (tensor<16x32xf32>, tensor<16x32xf32>) -> tensor<16x32xf32>
-  func.return %0: tensor<16x32xf32>
-}
-
-// -----
-
 // CHECK-NOT: sdy.mesh @mesh_0 = <["x"=2]>
 sdy.mesh @mesh_0 = <["x"=2]>
 // CHECK-NOT: sdy.mesh @mesh_1 = <["x"=2], device_ids=[1, 0]>

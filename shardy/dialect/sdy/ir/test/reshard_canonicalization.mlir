@@ -242,16 +242,18 @@ func.func @reshard_cse_with_reshape_and_transpose_not_redundant_reshard(%arg0: t
 }
 
 // CHECK-LABEL: func @reshard_cse_different_blocks
-func.func @reshard_cse_different_blocks(%arg0: tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>) {
+func.func @reshard_cse_different_blocks(%arg0: tensor<8xf32>, %pred: tensor<i1>) -> (tensor<8xf32>, tensor<8xf32>) {
   // CHECK: %[[R0:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}]>
   %0 = sdy.reshard %arg0 <@mesh, [{"a"}]> : tensor<8xf32>
-  %1 = sdy.named_computation<"my_comp">(%arg0) in_shardings=[<@mesh, [{"a"}]>]
-      out_shardings=[<@mesh, [{"a"}]>] (%arg1: tensor<8xf32>) {
-    // CHECK: %[[R_INNER:.*]] = sdy.reshard %arg1 <@mesh, [{"a"}]>
-    // CHECK: sdy.return %[[R_INNER]]
-    %2 = sdy.reshard %arg1 <@mesh, [{"a"}]> : tensor<8xf32>
-    sdy.return %2 : tensor<8xf32>
-  } : (tensor<8xf32>) -> tensor<8xf32>
+  %1 = "stablehlo.if"(%pred) ({
+    // CHECK: %[[R_INNER:.*]] = sdy.reshard %arg0 <@mesh, [{"a"}]>
+    // CHECK: stablehlo.return %[[R_INNER]]
+    %2 = sdy.reshard %arg0 <@mesh, [{"a"}]> : tensor<8xf32>
+    stablehlo.return %2 : tensor<8xf32>
+  }, {
+    // CHECK: stablehlo.return %arg0
+    stablehlo.return %arg0 : tensor<8xf32>
+  }) : (tensor<i1>) -> tensor<8xf32>
   return %0, %1 : tensor<8xf32>, tensor<8xf32>
 }
 

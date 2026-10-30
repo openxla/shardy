@@ -23,24 +23,6 @@ def FlattenCallGraphPass : Pass<"sdy-flatten-call-graph", "ModuleOp"> {
   let dependentDialects = ["mlir::sdy::SdyDialect"];
 }
 
-def ImportFuncCallsPass : Pass<"sdy-import-func-calls", "ModuleOp"> {
-  let summary = "Inline calls into `NamedComputationOp`.";
-  let description = [{
-     Creates a pass to convert a CallOp to a NamedComputationOp with the
-     function body inlined and the name of the callee. Note that the func bodies
-     are cloned if the func is used by multiple calls.
-
-     In case there are multiple call ops for the same callee, we will clone the
-     function body for each call op and emit a warning.
-  }];
-  let dependentDialects = ["mlir::sdy::SdyDialect"];
-  let options = [
-    Option<"addDataFlowEdgesOnNamedComputations", "add-data-flow-edges-on-named-computations", "bool",
-           /*default=*/"true",
-           "Whether to add data flow edges on named computations.">
-  ];
-}
-
 def PropagateShardingFromFuncToCallPass : Pass<"sdy-propagate-sharding-from-func-to-call", "ModuleOp"> {
   let summary = "Set call result shardings as the func result shardings, if empty.";
   let description = [{

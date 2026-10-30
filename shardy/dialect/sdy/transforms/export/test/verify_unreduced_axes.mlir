@@ -334,17 +334,6 @@ func.func @case_returning_conflicting_unreduced_kinds(%idx: tensor<i32> {sdy.sha
 
 sdy.mesh @mesh = <["x"=2, "y"=2]>
 
-func.func @named_computation_returning_conflicting_unreduced_kinds(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=max{"x"}>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced=min{"x"}>}) {
-  %0:2 = sdy.named_computation<"checkpoint">(%arg0, %arg1) in_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}], unreduced=min{"x"}>] out_shardings=[<@mesh, [{}], unreduced=max{"x"}>, <@mesh, [{}], unreduced=min{"x"}>] (%in0: tensor<8xf32>, %in1: tensor<8xf32>) {
-    sdy.return %in0, %in1 : tensor<8xf32>, tensor<8xf32>
-  } : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
-  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
-}
-
-// -----
-
-sdy.mesh @mesh = <["x"=2, "y"=2]>
-
 func.func @manual_computation_returning_non_manual_conflicting_unreduced_kinds(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=max{"x"}>}, %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=min{"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=max{"x"}>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}], unreduced=min{"x"}>}) {
   %0:2 = sdy.manual_computation(%arg0, %arg1) in_shardings=[<@mesh, [{"y"}], unreduced=max{"x"}>, <@mesh, [{"y"}], unreduced=min{"x"}>] out_shardings=[<@mesh, [{"y"}], unreduced=max{"x"}>, <@mesh, [{"y"}], unreduced=min{"x"}>] manual_axes={"y"} (%in0: tensor<4xf32>, %in1: tensor<4xf32>) {
     sdy.return %in0, %in1 : tensor<4xf32>, tensor<4xf32>
