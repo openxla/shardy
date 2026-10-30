@@ -212,6 +212,22 @@ LogicalResult verifySubAxes(ArrayRef<AxisRefAttr> subAxes, StringRef axisName,
   return success();
 }
 
+LogicalResult verifySubAxes(
+    SmallDenseMap<StringRef, SmallVector<AxisRefAttr>>& axisNameToSubAxes,
+    const SmallDenseMap<StringRef, int64_t>& axisNameToSize, MeshAttr mesh,
+    const SmallDenseSet<AxisRefAttr>& seenAxisRefs, EmitErrorFn emitError) {
+  for (auto& [axisName, subAxes] : axisNameToSubAxes) {
+    int64_t axisSize = axisNameToSize.lookup(axisName);
+    // We need to sort the sub-axes since this is assumed by `verifySubAxes`.
+    llvm::sort(subAxes, AxisRefAttr::getMeshComparator(mesh));
+    if (failed(verifySubAxes(subAxes, axisName, axisSize, mesh, seenAxisRefs,
+                             emitError))) {
+      return failure();
+    }
+  }
+  return success();
+}
+
 // ManualComputations op are allowed to be nested within each other. However,
 // they cannot operate on overlapping manual axes. This function creates a
 // mapping from a manual mesh axis to the corresponding ManualComputationOp that
@@ -370,14 +386,9 @@ LogicalResult verifyTensorShardingAttr(TensorShardingAttr shardingAttr,
   }
 
   // Verify all sub-axes are valid.
-  for (auto& [axisName, subAxes] : axisNameToSubAxes) {
-    int64_t axisSize = axisNameToSize[axisName];
-    // We need to sort the sub-axes since this is assumed by `verifySubAxes`.
-    llvm::sort(subAxes, AxisRefAttr::getMeshComparator(mesh));
-    if (failed(verifySubAxes(subAxes, axisName, axisSize, mesh, seenAxisRefs,
-                             emitError))) {
-      return failure();
-    }
+  if (failed(verifySubAxes(axisNameToSubAxes, axisNameToSize, mesh,
+                           seenAxisRefs, emitError))) {
+    return failure();
   }
 
   // Verify all sharding and replicated axes don't already exist as a manual
@@ -1128,16 +1139,12 @@ LogicalResult ManualComputationOp::verifySymbolUses(
       SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
       EmitErrorFn emitError = getEmitErrorFn(*this);
       if (failed(verifyAxisRefList(manualAxes, axisNameToSize, seenAxisRefs,
-                                   axisNameToSubAxes, emitError))) {
+                                   axisNameToSubAxes, emitError)) ||
+          failed(verifySubAxes(axisNameToSubAxes, axisNameToSize, mesh,
+                               seenAxisRefs, emitError))) {
         return failure();
       }
-      for (auto& [axisName, subAxes] : axisNameToSubAxes) {
-        int64_t axisSize = axisNameToSize[axisName];
-        llvm::sort(subAxes, AxisRefAttr::getMeshComparator(mesh));
-        if (failed(verifySubAxes(subAxes, axisName, axisSize, mesh,
-                                 seenAxisRefs, emitError))) {
-          return failure();
-        }
+      for (const auto& [axisName, subAxes] : axisNameToSubAxes) {
         for (auto [prevSubAxis, subAxis] :
              llvm::zip(subAxes, ArrayRef<AxisRefAttr>(subAxes).drop_front())) {
           if (prevSubAxis.canMerge(subAxis)) {
@@ -1419,12 +1426,16 @@ LogicalResult verifyCollectiveWithAxesPerDim(
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
+  EmitErrorFn emitError = getEmitErrorFn(op);
   for (AxisRefListAttr axisRefList : collectiveAxesPerDim) {
     if (failed(verifyAxisRefList(axisRefList.getValue(), axisNameToSize,
-                                 seenAxisRefs, axisNameToSubAxes,
-                                 getEmitErrorFn(op)))) {
+                                 seenAxisRefs, axisNameToSubAxes, emitError))) {
       return failure();
     }
+  }
+  if (failed(verifySubAxes(axisNameToSubAxes, axisNameToSize, mesh,
+                           seenAxisRefs, emitError))) {
+    return failure();
   }
 
   // 2. Verify that applying `collectiveAxesPerDim` to the operand gets
@@ -1591,11 +1602,13 @@ LogicalResult ReplicatedToUnreducedOp::verifySymbolUses(
   SmallDenseSet<AxisRefAttr> seenAxisRefs;
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
-  if (auto res = verifySortedAxisRefList(r2uAxes, axisNameToSize, seenAxisRefs,
-                                         axisNameToSubAxes,
-                                         getEmitErrorFn(*this), mesh, "r2u");
-      failed(res)) {
-    return res;
+  EmitErrorFn emitError = getEmitErrorFn(*this);
+  if (failed(verifySortedAxisRefList(r2uAxes, axisNameToSize, seenAxisRefs,
+                                     axisNameToSubAxes, emitError, mesh,
+                                     "r2u")) ||
+      failed(verifySubAxes(axisNameToSubAxes, axisNameToSize, mesh,
+                           seenAxisRefs, emitError))) {
+    return failure();
   }
 
   // Verify that `axes` are implicitly or explicitly replicated in the operand
@@ -1719,6 +1732,10 @@ LogicalResult AllToAllOp::verifySymbolUses(
     }
     prevSrcDim = srcDim;
   }
+  if (failed(verifySubAxes(axisNameToSubAxes, axisNameToSize, mesh,
+                           seenAxisRefs, getEmitErrorFn(*this)))) {
+    return failure();
+  }
   // Move axes in another loop to avoid the overlapping dimensions error being
   // covered by the dim sharding verification.
   auto verifyDimSharding =
@@ -1830,11 +1847,13 @@ LogicalResult AllReduceOp::verifySymbolUses(
   SmallDenseMap<StringRef, SmallVector<AxisRefAttr>> axisNameToSubAxes;
   ArrayRef<AxisRefAttr> reductionAxes = getReductionAxes();
   SmallDenseMap<StringRef, int64_t> axisNameToSize = mesh.getAxisNameToSize();
-  if (auto res = verifySortedAxisRefList(
-          reductionAxes, axisNameToSize, seenAxisRefs, axisNameToSubAxes,
-          getEmitErrorFn(*this), mesh, "reduction");
-      failed(res)) {
-    return res;
+  EmitErrorFn emitError = getEmitErrorFn(*this);
+  if (failed(verifySortedAxisRefList(reductionAxes, axisNameToSize,
+                                     seenAxisRefs, axisNameToSubAxes, emitError,
+                                     mesh, "reduction")) ||
+      failed(verifySubAxes(axisNameToSubAxes, axisNameToSize, mesh,
+                           seenAxisRefs, emitError))) {
+    return failure();
   }
 
   for (AxisRefAttr reductionAxisRef : reductionAxes) {
