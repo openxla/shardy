@@ -26,6 +26,7 @@ limitations under the License.
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
@@ -233,13 +234,14 @@ bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
                                            bool conservativePropagation,
-                                           bool setShardingRuleOnOp) {
+                                           bool setShardingRuleOnOp,
+                                           bool shardyGeneratesDeviceCode) {
   if (auto shardingRule =
           op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr)) {
     return shardingRule;
   }
-  OpShardingRuleAttr shardingRule =
-      createOpShardingRule(op, conservativePropagation);
+  OpShardingRuleAttr shardingRule = createOpShardingRule(
+      op, conservativePropagation, shardyGeneratesDeviceCode);
   if (setShardingRuleOnOp && shardingRule) {
     op->setAttr(kShardingRuleAttr, shardingRule);
   }
@@ -247,7 +249,9 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
 }
 
 OpShardingRuleAttr createOpShardingRule(Operation* op,
-                                        const bool conservativePropagation) {
+                                        const bool conservativePropagation,
+                                        const bool shardyGeneratesDeviceCode) {
+  (void)shardyGeneratesDeviceCode;
   return TypeSwitch<Operation*, OpShardingRuleAttr>(op)
       .Case<ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
             stablehlo::AllReduceOp, stablehlo::AndOp, stablehlo::Atan2Op,
@@ -478,10 +482,20 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         if (!conservativePropagation) {
           // Only add a factor for spatial dimensions if we are not in
           // conservative mode.
-          for (auto [lhsDim, rhsDim, outDim] :
-               llvm::zip_equal(dimNums.getInputSpatialDimensions(),
-                               dimNums.getKernelSpatialDimensions(),
-                               dimNums.getOutputSpatialDimensions())) {
+          SmallVector<int64_t> kernelSpatialDims = llvm::map_to_vector(
+              dimNums.getKernelSpatialDimensions(),
+              [&](int64_t rhsDim) { return rhsType.getDimSize(rhsDim); });
+          ArrayRef<int64_t> windowStrides =
+              conv.getWindowStrides().value_or(ArrayRef<int64_t>());
+          ArrayRef<int64_t> lhsDilation =
+              conv.getLhsDilation().value_or(ArrayRef<int64_t>());
+          ArrayRef<int64_t> rhsDilation =
+              conv.getRhsDilation().value_or(ArrayRef<int64_t>());
+          for (auto [spatialDimIdx, dims] : llvm::enumerate(
+                   llvm::zip_equal(dimNums.getInputSpatialDimensions(),
+                                   dimNums.getKernelSpatialDimensions(),
+                                   dimNums.getOutputSpatialDimensions()))) {
+            auto [lhsDim, rhsDim, outDim] = dims;
             // The input spatial dimension can be sharded along either the
             // number of windows (corresponds to the output spatial dimension)
             // or the window size (corresponds to the kernel spatial dimension),
@@ -493,6 +507,12 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             int64_t numWindows = outType.getDimSize(outDim);
             int64_t windowSize = rhsType.getDimSize(rhsDim);
             int64_t remainingLhsSize = lhsType.getDimSize(lhsDim);
+            FactorType nonContractingFactorType =
+                isWindowPassthroughDim(conv.getPadding(), kernelSpatialDims,
+                                       windowStrides, spatialDimIdx,
+                                       lhsDilation, rhsDilation)
+                    ? FactorType::kPassThrough
+                    : FactorType::kPermutation;
             auto addSpatialFactor = [&, lhsDim = lhsDim, rhsDim = rhsDim,
                                      outDim = outDim](int64_t factorSize,
                                                       bool isContracting) {
@@ -511,7 +531,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                                   isContracting ? kNullDim : outDim,
                                   lhsFactorSize,
                                   isContracting ? FactorType::kReduction
-                                                : FactorType::kPermutation);
+                                                : nonContractingFactorType);
                 remainingLhsSize /= lhsFactorSize;
               }
             };

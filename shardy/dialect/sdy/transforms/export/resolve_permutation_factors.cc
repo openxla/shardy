@@ -3473,7 +3473,9 @@ struct ShardyResolvePermutationFactorsPass
         return;
       }
 
-      OpShardingRuleAttr rule = getOrCreateShardingRule(op, false, false);
+      OpShardingRuleAttr rule = getOrCreateShardingRule(
+          op, /*conservativePropagation=*/false,
+          /*setShardingRuleOnOp=*/false, shardyGeneratesDeviceCode);
       if (!rule || rule.isCustom()) {
         return;
       }

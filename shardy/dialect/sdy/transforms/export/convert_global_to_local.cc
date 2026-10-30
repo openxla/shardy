@@ -638,23 +638,25 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     }
 
     SDY_CHECK(gatheringDims.size() > 1);
-    int64_t firstGatheringDim = gatheringDims.front();
 
-    // Add a dimension of size 1 at `firstGatheringDim` to gather all
-    // partitions at once, keeping dimensions 0..firstGatheringDim-1 untouched.
-    SmallVector<int64_t> tmpShape =
-        llvm::to_vector(localShape.take_front(firstGatheringDim));
+    // Always add a leading dimension of size 1 at dimension 0 to perform the
+    // All-Gather along dimension 0. Even when firstGatheringDim > 0, gathering
+    // along dimension 0 is preferred over gathering along firstGatheringDim
+    // because dimension 0 is contiguous in major-to-minor memory layout,
+    // allowing the hardware collective engine to transfer full contiguous
+    // buffers without strided slice interleaving or memory re-packing.
+    SmallVector<int64_t> tmpShape;
+    tmpShape.reserve(localShape.size() + 1);
     tmpShape.push_back(1);
-    llvm::append_range(tmpShape, localShape.drop_front(firstGatheringDim));
+    llvm::append_range(tmpShape, localShape);
     Value curInput = stablehlo::ReshapeOp::create(
         rewriter, op.getLoc(),
         RankedTensorType::get(tmpShape, localType.getElementType()), input);
 
-    // Perform All-Gather on `firstGatheringDim`.
+    // Perform All-Gather on dimension 0.
     Attribute replicaGroups;
-    std::tie(replicaGroups, tmpShape[firstGatheringDim]) =
-        getReplicaGroupsAndSize(allGatheringAxes, mesh, meshOrRef, enableRGV3,
-                                rewriter);
+    std::tie(replicaGroups, tmpShape[0]) = getReplicaGroupsAndSize(
+        allGatheringAxes, mesh, meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         ctx, /*handle=*/conversionState.getNextChannelId(),
         kCrossPartitionChannelHandleType);
@@ -663,10 +665,10 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     auto allGather = stablehlo::AllGatherOp::create(
         rewriter, op.getLoc(),
         TypeRange{RankedTensorType::get(tmpShape, localType.getElementType())},
-        curInput, /*all_gather_dim=*/firstGatheringDim, replicaGroups,
-        channelHandle, /*use_global_device_ids=*/true);
+        curInput, /*all_gather_dim=*/0, replicaGroups, channelHandle,
+        /*use_global_device_ids=*/true);
     curInput = distributeCombinedDimToTargetDims(
-        op.getLoc(), allGather.getResult(0), firstGatheringDim,
+        op.getLoc(), allGather.getResult(0), /*combinedDim=*/0,
         gatheringFactors, gatheringDims, rewriter);
 
     conversionState.removeToConvertOp(op);
@@ -871,17 +873,49 @@ SmallVector<Value> maskNonLeaderShards(
   SmallVector<bool> leaderTable = llvm::map_to_vector(
       llvm::seq<int64_t>(0, numDevices),
       [&](int64_t devId) { return getShardIndex(devId, mesh, axes) == 0; });
-  Value isLeader = lookupPerDeviceValue(
-      loc,
-      DenseElementsAttr::get(
-          RankedTensorType::get({numDevices}, rewriter.getI1Type()),
-          leaderTable),
-      conversionState, rewriter, deviceId);
+  bool singleLeader = llvm::count(leaderTable, true) == 1;
+  bool onlyDeviceZeroIsLeader = singleLeader && leaderTable[0];
+  Value isLeader;
+  Value isNonLeader;
+  if (singleLeader) {
+    if (!deviceId) {
+      deviceId = getDeviceId(loc, conversionState, rewriter);
+    }
+    if (onlyDeviceZeroIsLeader) {
+      // For device 0 as sole leader, convert partition ID (ui32) directly to
+      // i1. 0 converts to false (not non-leader, i.e. leader), and non-zero
+      // device IDs convert to true (isNonLeader = true). We intentionally use
+      // convert instead of compare EQ against a 0 constant to avoid
+      // materializing an extra constant buffer, which causes performance
+      // regressions on hardware (e.g. TPU LLO).
+      isNonLeader = stablehlo::ConvertOp::create(rewriter, loc, deviceId,
+                                                 rewriter.getI1Type());
+    } else {
+      int64_t leaderId = llvm::find(leaderTable, true) - leaderTable.begin();
+      Value leaderConst =
+          createScalarIntConstant(loc, deviceId.getType(), leaderId, rewriter);
+      isLeader =
+          stablehlo::CompareOp::create(rewriter, loc, deviceId, leaderConst,
+                                       stablehlo::ComparisonDirection::EQ);
+    }
+  } else {
+    isLeader = lookupPerDeviceValue(
+        loc,
+        DenseElementsAttr::get(
+            RankedTensorType::get({numDevices}, rewriter.getI1Type()),
+            leaderTable),
+        conversionState, rewriter, deviceId);
+  }
   if (!nonLeaderVal) {
     auto localType = cast<RankedTensorType>(inputs.front().getType());
     nonLeaderVal = createZeroConstant(loc, localType, rewriter);
   }
   return llvm::map_to_vector(inputs, [&](Value input) -> Value {
+    if (isNonLeader) {
+      // isNonLeader is true for non-leader shards (pid != 0).
+      return stablehlo::SelectOp::create(rewriter, loc, isNonLeader,
+                                         nonLeaderVal, input);
+    }
     return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
                                        nonLeaderVal);
   });
@@ -3445,9 +3479,8 @@ class AllGatherAndSliceViaAllReducePattern
     : public OpConversionPattern<stablehlo::SliceOp> {
  public:
   AllGatherAndSliceViaAllReducePattern(TypeConverter& converter,
-                                       MLIRContext* ctx, ConversionState& state,
-                                       PatternBenefit benefit = 2)
-      : OpConversionPattern<stablehlo::SliceOp>(converter, ctx, benefit),
+                                       MLIRContext* ctx, ConversionState& state)
+      : OpConversionPattern<stablehlo::SliceOp>(converter, ctx, /*benefit=*/2),
         conversionState(state) {}
 
   LogicalResult matchAndRewrite(
