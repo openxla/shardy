@@ -182,6 +182,36 @@ func.func @reduce_scatter_fusion_with_replicated_axis(%arg0 : tensor<16x16xf32> 
   return %1 : tensor<16x16xf32>
 }
 
+// CHECK-LABEL: func @reduce_scatter_fusion_subaxis_prefix_of_slicing_axis
+func.func @reduce_scatter_fusion_subaxis_prefix_of_slicing_axis(%arg0 : tensor<64x16xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<64x16xf32> {
+  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"x", "r":(1)2}, {"y"}] %arg0 out_sharding=<@mesh2, [{"x", "r":(1)2}, {"y"}]> : tensor<64x16xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{"r":(2)4, "z"}, {"q"}] %0 out_sharding=<@mesh2, [{"x", "r", "z"}, {"y", "q"}]> : tensor<64x16xf32>
+  // CHECK-NEXT: return %1 : tensor<64x16xf32>
+  %0 = sdy.all_reduce {"x", "y", "r":(1)2} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x16xf32>
+  %1 = sdy.all_slice [{"x", "r", "z"}, {"y", "q"}] %0 out_sharding=<@mesh2, [{"x", "r", "z"}, {"y", "q"}]> : tensor<64x16xf32>
+  return %1 : tensor<64x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_full_reduction_axis_split_across_dims
+func.func @reduce_scatter_fusion_full_reduction_axis_split_across_dims(%arg0 : tensor<64x64xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<64x64xf32> {
+  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"r":(2)4, "x"}, {"r":(1)2, "q":(1)4}] %arg0 out_sharding=<@mesh2, [{"r":(2)4, "x"}, {"r":(1)2, "q":(1)4}]> : tensor<64x64xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{"z"}, {"q":(4)2, "y"}] %0 out_sharding=<@mesh2, [{"r":(2)4, "x", "z"}, {"r":(1)2, "q", "y"}]> : tensor<64x64xf32>
+  // CHECK-NEXT: return %1 : tensor<64x64xf32>
+  %0 = sdy.all_reduce {"x", "q":(1)4, "r"} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x64xf32>
+  %1 = sdy.all_slice [{"r":(2)4, "x", "z"}, {"r":(1)2, "q", "y"}] %0 out_sharding=<@mesh2, [{"r":(2)4, "x", "z"}, {"r":(1)2, "q", "y"}]> : tensor<64x64xf32>
+  return %1 : tensor<64x64xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_overlapping_subaxes
+func.func @reduce_scatter_fusion_overlapping_subaxes(%arg0 : tensor<64x64xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<64x64xf32> {
+  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"r":(1)2}, {"r":(2)2}] %arg0 out_sharding=<@mesh2, [{"r":(1)2}, {"r":(2)2}]> : tensor<64x64xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{}, {"r":(4)2}] %0 out_sharding=<@mesh2, [{"r":(1)2}, {"r":(2)4}]> : tensor<64x64xf32>
+  // CHECK-NEXT: return %1 : tensor<64x64xf32>
+  %0 = sdy.all_reduce {"r":(1)4} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<64x64xf32>
+  %1 = sdy.all_slice [{"r":(1)2}, {"r":(2)4}] %0 out_sharding=<@mesh2, [{"r":(1)2}, {"r":(2)4}]> : tensor<64x64xf32>
+  return %1 : tensor<64x64xf32>
+}
+
 // CHECK-LABEL: func @reduce_scatter_fusion_multiple_different_uses
 func.func @reduce_scatter_fusion_multiple_different_uses(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}]>}) -> tensor<16x8xf32> {
   // CHECK-NEXT: %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<16x8xf32>

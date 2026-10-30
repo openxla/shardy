@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -169,8 +170,8 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
   MeshAttr mesh = allReduceOp.getOutSharding().getMesh(allReduceOp);
   ArrayRef<AxisRefAttr> reductionAxes = allReduceOp.getReductionAxes();
   ArrayRef<AxisRefListAttr> slicingAxes = allSliceOp.getSlicingAxes();
-  llvm::SmallDenseSet<AxisRefAttr> remainingReductionAxes(reductionAxes.begin(),
-                                                          reductionAxes.end());
+  llvm::SmallSetVector<AxisRefAttr, 4> remainingReductionAxes(
+      reductionAxes.begin(), reductionAxes.end());
 
   int64_t rank = slicingAxes.size();
   bool hasResidualSlicingAxes = false;
@@ -187,12 +188,45 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
     const auto* it = axes.begin();
     const auto* end = axes.end();
 
-    // Find the longest prefix of slicing axes for this dimension that are
-    // also present in the remaining reduction axes.
-    while (it != end && remainingReductionAxes.contains(*it)) {
-      reduceScatterAxesPerDim.push_back(*it);
-      remainingReductionAxes.erase(*it);
+    // Find the longest prefix of slicing axes for this dimension that can be
+    // consumed from the remaining reduction axes (including sub-axis prefixes).
+    while (it != end) {
+      AxisRefAttr slicingAxis = *it;
+      if (remainingReductionAxes.remove(slicingAxis)) {
+        reduceScatterAxesPerDim.push_back(slicingAxis);
+        ++it;
+        continue;
+      }
+      AxisRefAttr matchedRedAxis;
+      AxisRefAttr overlapAxis;
+      for (AxisRefAttr redAxis : remainingReductionAxes) {
+        if (std::optional<AxisRefAttr> overlap =
+                redAxis.getOverlap(slicingAxis);
+            overlap && overlap->prefixOf(slicingAxis)) {
+          matchedRedAxis = redAxis;
+          overlapAxis = *overlap;
+          break;
+        }
+      }
+      if (!matchedRedAxis) {
+        break;
+      }
+      reduceScatterAxesPerDim.push_back(overlapAxis);
+      remainingReductionAxes.remove(matchedRedAxis);
+      if (std::optional<AxisRefAttr> redPrefix =
+              matchedRedAxis.getPrefixWithoutOverlap(overlapAxis)) {
+        remainingReductionAxes.insert(*redPrefix);
+      }
+      if (std::optional<AxisRefAttr> redSuffix =
+              matchedRedAxis.getSuffixWithoutOverlap(overlapAxis, mesh)) {
+        remainingReductionAxes.insert(*redSuffix);
+      }
       ++it;
+      if (std::optional<AxisRefAttr> slicingSuffix =
+              slicingAxis.getSuffixWithoutOverlap(overlapAxis, mesh)) {
+        residualSlicingAxesPerDim.push_back(*slicingSuffix);
+        break;
+      }
     }
 
     // Any remaining slicing axes for this dims become residual slicing axes.
