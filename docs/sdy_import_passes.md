@@ -119,23 +119,6 @@ _Flattens the call graph._
 
 Flattens the call graph.
 
-### `-sdy-import-func-calls`
-
-_Inline calls into `NamedComputationOp`._
-
-Creates a pass to convert a CallOp to a NamedComputationOp with the
-function body inlined and the name of the callee. Note that the func bodies
-are cloned if the func is used by multiple calls.
-
-In case there are multiple call ops for the same callee, we will clone the
-function body for each call op and emit a warning.
-
-#### Options
-
-```
--add-data-flow-edges-on-named-computations : Whether to add data flow edges on named computations.
-```
-
 ### `-sdy-lift-inlined-meshes`
 
 _Lifts inlined `MeshAttr`s in shardings as symbol `MeshOp`s._

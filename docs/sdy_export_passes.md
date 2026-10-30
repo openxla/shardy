@@ -50,18 +50,6 @@ _Removes the mesh op and sharding notation from the program._
 
 _Drops `OpShardingRuleAttr` from all registered ops._
 
-### `-sdy-export-named-computations`
-
-_Outline calls from `NamedComputationOp`._
-
-Creates a pass that converts a `NamedComputationOp` to a `CallOp` with a new
-private function called the `NamedComputationOp`'s `name`. The new `FuncOp`
-and `CallOp` have the same shardings as the original `NamedComputationOp`s
-operands/results.
-
-If there is a function with the same name as the `NamedComputationOp` in the
-module, the MLIR symbol table will change it to `{name}_#`.
-
 ### `-sdy-insert-explicit-reshards`
 
 _Inserts explicit reshards to make all operations have compatible shardings._
