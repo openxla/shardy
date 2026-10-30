@@ -206,8 +206,7 @@ func.func @slice_non_communication_free_zero_hops(
   // HALO-NEXT: %[[MC:.*]] = sdy.manual_computation(%arg0, %[[CST_0]]) in_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a"} (%arg1: tensor<4x4xi32>, %arg2: tensor<i32>) {
   // HALO-NOT:    collective_permute
   // HALO:        %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // HALO:        %[[CONCAT:.*]] = stablehlo.concatenate %arg1, dim = 0
-  // HALO:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3, 4]
+  // HALO:        %[[SLICE:.*]] = stablehlo.dynamic_slice %arg1, {{.*}}, sizes = [3, 4]
   // HALO-NEXT:   sdy.return %[[SLICE]] : tensor<3x4xi32>
   // HALO-NEXT: }
   %0 = stablehlo.slice %arg0 [1:7, 0:4] {

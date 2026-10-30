@@ -153,7 +153,7 @@ struct DimExchangeInfo {
   int64_t getBaseOffsetInConcat(int64_t edgePadSize, int64_t sIn) const {
     if (useSlicedHalo) {
       int64_t hLeft = leftHops > 0 ? leftHaloSize : 0;
-      return edgePadLow + hLeft;
+      return (edgePadSize == 0 ? 0 : edgePadLow) + hLeft;
     }
     return edgePadSize + leftHops * sIn;
   }
@@ -985,6 +985,10 @@ Value assembleHaloExchangeBuffer(
     return neighborData;
   };
 
+  auto getSegmentInput = [&](Value val, int64_t offset) -> Value {
+    return sliceSegment ? sliceSegment(val, offset) : val;
+  };
+
   SmallVector<Value> concatSegments;
   if (dimExchange.useSlicedHalo) {
     int64_t hLeft = leftHops > 0 ? dimExchange.leftHaloSize : 0;
@@ -993,29 +997,22 @@ Value assembleHaloExchangeBuffer(
     auto fetchSlicedNeighbor = [&](int64_t sliceStart, int64_t sliceSize,
                                    int64_t shardOffset, int64_t thresholdVal,
                                    stablehlo::ComparisonDirection direction) {
-      SmallVector<int64_t> starts(rank, 0);
-      starts[dim] = sliceStart;
-      SmallVector<int64_t> limits = llvm::to_vector(inputType.getShape());
-      limits[dim] = sliceStart + sliceSize;
-      SmallVector<int64_t> sliceShape = llvm::to_vector(inputType.getShape());
-      sliceShape[dim] = sliceSize;
-      auto sliceType =
-          RankedTensorType::get(sliceShape, inputType.getElementType());
-      auto sliceToSend = stablehlo::SliceOp::create(
-          state.rewriter, loc, sliceType, input,
-          state.rewriter.getDenseI64ArrayAttr(starts),
-          state.rewriter.getDenseI64ArrayAttr(limits),
-          state.rewriter.getDenseI64ArrayAttr(SmallVector<int64_t>(rank, 1)));
-      setSharding(sliceToSend.getResult(), localSharding);
+      Value sliceToSend = sliceAlongDim(
+          loc, input, dim, sliceStart, sliceStart + sliceSize, localSharding,
+          state.rewriter, /*skipFullDimSlice=*/edgePadSize == 0);
 
       SmallVector<int64_t> pairs =
           getDataShiftSourceTargetPairs(mesh, manualAxesInDim, shardOffset);
       Value neighborData =
-          mayCollectivePermute(loc, sliceToSend.getResult(), pairs, state);
+          mayCollectivePermute(loc, sliceToSend, pairs, state);
       if (!isFullyReplicated(localSharding)) {
         setSharding(neighborData, localSharding);
       }
-      return maskNeighborData(neighborData, thresholdVal, direction);
+      if (edgePadSize > 0 || !shouldMaskNonTarget ||
+          shouldMaskNonTarget(shardOffset)) {
+        neighborData = maskNeighborData(neighborData, thresholdVal, direction);
+      }
+      return neighborData;
     };
 
     // 1. Fetch Left Neighbor (offset = 1):
@@ -1027,7 +1024,7 @@ Value assembleHaloExchangeBuffer(
     }
 
     // 2. Local Shard
-    concatSegments.push_back(input);
+    concatSegments.push_back(getSegmentInput(input, /*offset=*/0));
 
     // 3. Fetch Right Neighbor (offset = -1):
     // Source t sends its leftmost hRight elements to target t - 1.
@@ -1038,10 +1035,6 @@ Value assembleHaloExchangeBuffer(
     }
   } else {
     concatSegments.reserve(leftHops + 1 + rightHops);
-
-    auto getSegmentInput = [&](Value val, int64_t offset) -> Value {
-      return sliceSegment ? sliceSegment(val, offset) : val;
-    };
 
     auto fetchNeighbors = [&](int64_t start, int64_t end) {
       for (int64_t offset = start; offset >= end; --offset) {
@@ -1081,17 +1074,22 @@ Value assembleHaloExchangeBuffer(
     setSharding(concat, localSharding);
   }
 
-  int64_t lowPad = dimExchange.useSlicedHalo
-                       ? dimExchange.edgePadLow * (interiorPad + 1)
-                       : edgePadSize;
+  int64_t lowPad =
+      edgePadSize == 0
+          ? 0
+          : (dimExchange.useSlicedHalo
+                 ? dimExchange.edgePadLow * (interiorPad + 1)
+                 : edgePadSize);
   int64_t highPad =
-      dimExchange.useSlicedHalo
-          ? dimExchange.edgePadHigh * (interiorPad + 1) + interiorPad
-          : edgePadSize;
-  if (!dimExchange.useSlicedHalo && lowPad == 0 && highPad == 0 &&
-      interiorPad == 0) {
+      edgePadSize == 0
+          ? 0
+          : (dimExchange.useSlicedHalo
+                 ? dimExchange.edgePadHigh * (interiorPad + 1) + interiorPad
+                 : edgePadSize);
+  if (lowPad == 0 && highPad == 0 && interiorPad == 0) {
     return concat;
   }
+
   auto concatType = cast<RankedTensorType>(concat.getType());
   SmallVector<int64_t> concatLow(rank, 0), concatHigh(rank, 0),
       concatInterior(rank, 0);
@@ -1164,7 +1162,15 @@ Value exchangeDimWithDynamicOffset(
   int64_t sInDilated = sIn * baseDilation;
   int64_t activeSOut = sOut == 0 ? dimExchange.sFootprint : sOut;
   int64_t diffSize = activeSOut * stride - sInDilated;
-  int64_t unpaddedBaseOffset = -padLow + dimExchange.leftHops * sInDilated;
+  int64_t leftHaloOrHopsSize =
+      dimExchange.useSlicedHalo
+          ? (dimExchange.leftHops > 0 ? dimExchange.leftHaloSize : 0)
+          : dimExchange.leftHops * sIn;
+  int64_t rightHaloOrHopsSize =
+      dimExchange.useSlicedHalo
+          ? (dimExchange.rightHops > 0 ? dimExchange.rightHaloSize : 0)
+          : dimExchange.rightHops * sIn;
+  int64_t unpaddedBaseOffset = -padLow + leftHaloOrHopsSize * baseDilation;
   int64_t interiorPad = dilatedHaloBuffer ? baseDilation - 1 : 0;
 
   int64_t edgePadSize = dilatedHaloBuffer
@@ -1174,13 +1180,13 @@ Value exchangeDimWithDynamicOffset(
   int64_t endOffset = (shardCount - 1) * diffSize + unpaddedBaseOffset;
   int64_t minUnpaddedOff = std::min(unpaddedBaseOffset, endOffset);
   int64_t maxUnpaddedOff = std::max(unpaddedBaseOffset, endOffset);
-  int64_t concatDimSize =
-      (dimExchange.leftHops + 1 + dimExchange.rightHops) * sIn;
+  int64_t concatDimSize = leftHaloOrHopsSize + sIn + rightHaloOrHopsSize;
   int64_t dilatedConcatSize = (concatDimSize - 1) * (interiorPad + 1) + 1;
   // Skip edge padding when every shard's slice window [offset, offset +
   // dilatedFootprint] lies entirely within the concatenated segments [0,
   // dilatedConcatSize].
-  if (!dimExchange.reshapeInfo) {
+  if (!dimExchange.reshapeInfo &&
+      (!dimExchange.useSlicedHalo || interiorPad == 0)) {
     int64_t dilatedFootprint = dilatedHaloBuffer
                                    ? dimExchange.sFootprint
                                    : dimExchange.sFootprint * baseDilation;
@@ -1197,11 +1203,19 @@ Value exchangeDimWithDynamicOffset(
   // and unused suffix of the last segment before collective-permute.
   int64_t totalSegments = dimExchange.leftHops + 1 + dimExchange.rightHops;
   int64_t maxEnd = maxUnpaddedOff + dimExchange.sFootprint;
+  int64_t firstSegSize =
+      (dimExchange.useSlicedHalo && dimExchange.leftHops > 0)
+          ? leftHaloOrHopsSize
+          : sIn;
+  int64_t lastSegSize =
+      (dimExchange.useSlicedHalo && dimExchange.rightHops > 0)
+          ? rightHaloOrHopsSize
+          : sIn;
   bool canTrimSegments =
       !dimExchange.reshapeInfo && edgePadSize == 0 && interiorPad == 0 &&
       baseDilation == 1 && totalSegments > 1 && minUnpaddedOff >= 0 &&
-      minUnpaddedOff < sIn && maxEnd > (totalSegments - 1) * sIn &&
-      maxEnd <= totalSegments * sIn;
+      minUnpaddedOff < firstSegSize && maxEnd > concatDimSize - lastSegSize &&
+      maxEnd <= concatDimSize;
   int64_t untrimmedOffsetInConcat =
       unpaddedBaseOffset + edgePadSize * (dilatedHaloBuffer ? 1 : baseDilation);
   // Returns true if any non-target shard for hop offset has a dynamic slice
@@ -1210,12 +1224,23 @@ Value exchangeDimWithDynamicOffset(
     if (dimExchange.reshapeInfo) {
       return true;
     }
-    int64_t segStart =
-        edgePadSize + (dimExchange.leftHops - offset) * sIn * (interiorPad + 1);
-    int64_t segEnd =
-        edgePadSize +
-        (dimExchange.leftHops - offset + 1) * sIn * (interiorPad + 1) -
-        interiorPad;
+    int64_t segStart;
+    int64_t segEnd;
+    if (dimExchange.useSlicedHalo) {
+      segStart = edgePadSize +
+                 (offset > 0 ? 0 : (leftHaloOrHopsSize + sIn)) *
+                     (interiorPad + 1);
+      segEnd = edgePadSize +
+               (offset > 0 ? leftHaloOrHopsSize : concatDimSize) *
+                   (interiorPad + 1) -
+               interiorPad;
+    } else {
+      segStart = edgePadSize +
+                 (dimExchange.leftHops - offset) * sIn * (interiorPad + 1);
+      segEnd = edgePadSize +
+               (dimExchange.leftHops - offset + 1) * sIn * (interiorPad + 1) -
+               interiorPad;
+    }
     int64_t nonTargetStart =
         offset > 0 ? 0 : std::max<int64_t>(0, shardCount + offset);
     int64_t nonTargetEnd =
@@ -1238,8 +1263,11 @@ Value exchangeDimWithDynamicOffset(
       return val;
     }
     int64_t k = dimExchange.leftHops - offset;
+    int64_t segOffset =
+        dimExchange.useSlicedHalo ? leftHaloOrHopsSize : k * sIn;
     int64_t sliceStart = (k == 0) ? minUnpaddedOff : 0;
-    int64_t sliceLimit = (k == totalSegments - 1) ? (maxEnd - k * sIn) : sIn;
+    int64_t sliceLimit =
+        (k == totalSegments - 1) ? (maxEnd - segOffset) : sIn;
     return sliceAlongDim(loc, val, dim, sliceStart, sliceLimit, localSharding,
                          state.rewriter);
   };
@@ -1250,9 +1278,12 @@ Value exchangeDimWithDynamicOffset(
       sliceSegment, state);
   int64_t bufferBaseOffset;
   if (dimExchange.useSlicedHalo) {
+    int64_t localTrimStart =
+        (canTrimSegments && dimExchange.leftHops == 0) ? minUnpaddedOff : 0;
     bufferBaseOffset =
         -padLow +
-        dimExchange.getBaseOffsetInConcat(edgePadSize, sIn) * baseDilation;
+        (dimExchange.getBaseOffsetInConcat(edgePadSize, sIn) - localTrimStart) *
+            baseDilation;
   } else {
     bufferBaseOffset =
         untrimmedOffsetInConcat - (canTrimSegments ? minUnpaddedOff : 0);
@@ -2976,7 +3007,6 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
             shardCount, sIn, sOut,
             /*sFootprint=*/sOut, /*padLow=*/-start,
             /*stride=*/1, /*baseDilation=*/1, inputType.getDimSize(dim));
-        dimInfo.useSlicedHalo = false;
         // This is a zero-hop-non-communication-free case, which doesn't
         // require collective-permute but dynamic-slice.
         dimInfo.needsComm = true;
