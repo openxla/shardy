@@ -29,6 +29,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
@@ -42,7 +43,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -756,32 +756,33 @@ SmallVector<int64_t> getTensorSizes(Operation* op) {
 
 namespace {
 
-// Returns reduction axes that are the union of all axes on reduction factors.
-// The result axes are not necessarily canonicalized.
+// Returns reduction axes per reduction factor (for factors with non-empty
+// axes). The axes within each factor are not necessarily canonicalized.
 //
 // If `onFullVersion` is true, assumes `commonAxesPerFactor` is not empty.
 //
 // If `onFullVersion` is false and op results do not have unreduced axes,
-// returns empty axes.
+// returns empty.
 //
 // Hard fails if some reduction factors do not have compatible shardings.
-SmallVector<AxisRefAttr> getReductionAxes(
+AxesPerFactor getReductionAxesPerFactor(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
     const bool onFullVersion) {
+  AxesPerFactor reductionAxesPerFactor;
   if (onFullVersion) {
-    SmallVector<AxisRefAttr> reductionAxes;
     for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
-      reductionAxes.append(commonAxesPerFactor[reductionFactor]);
+      if (!commonAxesPerFactor[reductionFactor].empty()) {
+        reductionAxesPerFactor.push_back(commonAxesPerFactor[reductionFactor]);
+      }
     }
-    return reductionAxes;
+    return reductionAxesPerFactor;
   }
 
   if (getUnreducedAxes(op->getResult(0)).empty()) {
     return {};
   }
 
-  SmallVector<AxisRefAttr> axesAlongAllReductionFactors;
   for (int64_t reductionFactor : shardingRule.getReductionFactors()) {
     std::optional<ArrayRef<AxisRefAttr>> factorSharding =
         getCompatibleFactorSharding(shardingProjection, reductionFactor);
@@ -789,10 +790,24 @@ SmallVector<AxisRefAttr> getReductionAxes(
         << "For the operation " << op
         << ", the result has unreduced axes while the operand has "
            "incompatible sharding along reduction factors.";
-    axesAlongAllReductionFactors.append(factorSharding->begin(),
-                                        factorSharding->end());
+    if (!factorSharding->empty()) {
+      reductionAxesPerFactor.emplace_back(factorSharding->begin(),
+                                          factorSharding->end());
+    }
   }
-  return axesAlongAllReductionFactors;
+  return reductionAxesPerFactor;
+}
+
+bool isLocalEffectiveScalar(Value value, TensorShardingAttr sharding,
+                            MeshAttr mesh) {
+  auto rankedType = dyn_cast<RankedTensorType>(value.getType());
+  if (!rankedType || !rankedType.hasStaticShape()) {
+    return false;
+  }
+  RankedTensorType localType =
+      sharding.getLocalTensorType(rankedType, mesh, /*allowNonDivisible=*/true);
+  return localType && localType.hasStaticShape() &&
+         localType.getNumElements() == 1;
 }
 }  // namespace
 
@@ -856,32 +871,59 @@ void insertAllReducesForReductionFactors(
   if (op->getResults().empty()) {
     return;
   }
-  SmallVector<AxisRefAttr> reductionAxes = getReductionAxes(
+  std::optional<ReductionOp> reductionOp = getReductionType(op);
+  if (!reductionOp &&
+      (isa<stablehlo::ScatterOp>(op) || op->getNumResults() > 1)) {
+    return;
+  }
+  AxesPerFactor reductionAxesPerFactor = getReductionAxesPerFactor(
       op, shardingProjection, commonAxesPerFactor, shardingRule, onFullVersion);
-  if (reductionAxes.empty()) {
+  if (reductionAxesPerFactor.empty()) {
     return;
   }
 
+  MeshAttr mesh = meshOp.getMesh();
   // The first result unreduced axes is also the common one.
   ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
       getUnreducedAxes(op->getResult(0));
+  SmallVector<AxisRefAttr> reductionAxes;
+  for (ArrayRef<AxisRefAttr> factorAxes : reductionAxesPerFactor) {
+    llvm::append_range(reductionAxes, factorAxes);
+  }
   SmallVector<AxisRefAttr> allReduceAxes =
-      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, meshOp.getMesh());
+      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, mesh);
   if (allReduceAxes.empty()) {
     return;
   }
 
   SmallVector<AxisRefAttr> unreducedAxes = allReduceAxes;
   llvm::append_range(unreducedAxes, firstResultUnreducedAxes);
-  sortAndMergeAxes(unreducedAxes, meshOp.getMesh());
-  sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
+  sortAndMergeAxes(unreducedAxes, mesh);
+  sortAndMergeAxes(allReduceAxes, mesh);
 
-  std::optional<ReductionOp> reductionOp = getReductionType(op);
-  if (!reductionOp &&
-      (isa<stablehlo::ScatterOp>(op) || op->getNumResults() > 1)) {
-    return;
+  // Split sub-mesh local-scalar reductions per factor (minor-to-major) so
+  // AllReduceCombiner doesn't group unrelated regions sharing combined axes.
+  // Skip ConvolutionOp as getTrailingConvAllReduce expects one all-reduce.
+  AxesPerFactor allReduceAxesPerFactor;
+  if (markPartialResultWithUnreducedAxes && reductionOp.has_value() &&
+      !isa<stablehlo::ConvolutionOp>(op) && reductionAxesPerFactor.size() > 1 &&
+      AxisListRef(allReduceAxes).getShardingSize(mesh) < mesh.getTotalSize()) {
+    SmallVector<AxisRefAttr> handledAxes(firstResultUnreducedAxes.begin(),
+                                         firstResultUnreducedAxes.end());
+    for (ArrayRef<AxisRefAttr> factorAxes :
+         llvm::reverse(reductionAxesPerFactor)) {
+      SmallVector<AxisRefAttr> stepAxes =
+          getAxisSetDiff(factorAxes, handledAxes, mesh);
+      if (!stepAxes.empty()) {
+        sortAndMergeAxes(stepAxes, mesh);
+        llvm::append_range(handledAxes, stepAxes);
+        sortAndMergeAxes(handledAxes, mesh);
+        allReduceAxesPerFactor.push_back(std::move(stepAxes));
+      }
+    }
   }
 
+  ReductionOp redOp = reductionOp.value_or(ReductionOp::SUM);
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
@@ -889,15 +931,36 @@ void insertAllReducesForReductionFactors(
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
     if (markPartialResultWithUnreducedAxes) {
-      TensorShardingAttr unreducedSharding = TensorShardingAttr::get(
-          resultSharding.getContext(), resultSharding.getMeshOrRef(),
-          resultSharding.getDimShardings(), resultSharding.getReplicatedAxes(),
-          unreducedAxes, reductionOp.value_or(ReductionOp::SUM));
-      setSharding(result, unreducedSharding);
+      setSharding(result,
+                  resultSharding.replaceUnreducedAxes(unreducedAxes, redOp));
     }
-    auto allReduceOp = AllReduceOp::create(
-        rewriter, result.getLoc(), result, allReduceAxes,
-        reductionOp.value_or(ReductionOp::SUM), resultSharding);
+    if (allReduceAxesPerFactor.size() > 1 &&
+        isLocalEffectiveScalar(result, resultSharding, mesh)) {
+      Value curValue = result;
+      Operation* firstAllReduceOp = nullptr;
+      SmallVector<AxisRefAttr> curUnreducedAxes = unreducedAxes;
+      for (const auto& [idx, stepAxes] :
+           llvm::enumerate(allReduceAxesPerFactor)) {
+        TensorShardingAttr stepOutSharding = resultSharding;
+        if (idx + 1 < allReduceAxesPerFactor.size()) {
+          curUnreducedAxes = getAxisSetDiff(curUnreducedAxes, stepAxes, mesh);
+          stepOutSharding =
+              resultSharding.replaceUnreducedAxes(curUnreducedAxes, redOp);
+        }
+        auto allReduceOp =
+            AllReduceOp::create(rewriter, result.getLoc(), curValue, stepAxes,
+                                redOp, stepOutSharding);
+        if (!firstAllReduceOp) {
+          firstAllReduceOp = allReduceOp;
+        }
+        curValue = allReduceOp;
+      }
+      rewriter.replaceAllUsesExcept(result, curValue, firstAllReduceOp);
+      continue;
+    }
+    auto allReduceOp =
+        AllReduceOp::create(rewriter, result.getLoc(), result, allReduceAxes,
+                            redOp, resultSharding);
     rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
   }
 }
