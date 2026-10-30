@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <numeric>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -633,48 +634,64 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
 }
 
 void distributeAxisRefsToBatchingFactors(
-    ArrayRef<AxisRefAttr> axisRefsToDistribute, OpShardingRuleAttr shardingRule,
-    MeshOp meshOp, AxesPerFactor& factorCommonAxes) {
+    MutableArrayRef<AxisRefAttr> axisRefsToDistribute,
+    OpShardingRuleAttr shardingRule, MeshOp meshOp,
+    AxesPerFactor& factorCommonAxes) {
   // TODO(enver): Instead iterate batching factors in the order of their
   // available capacity, the one with largest available capacity being the
   // first one to distribute `axisRefsToDistribute`. Sort first, and then
   // iterate over sorted list.
-  for (const int64_t factorIndex : shardingRule.getBatchingFactors()) {
-    const int64_t factorSize = shardingRule.getFactorSizes()[factorIndex];
-    // Skip if a factor has size zero which could happen if the corresponding
-    // dimension has zero size.
-    if (factorSize == 0) {
-      continue;
-    }
-    SmallVector<AxisRefAttr>& factorSharding = factorCommonAxes[factorIndex];
-    const int64_t factorShardingSize =
-        AxisListRef(factorSharding).getShardingSize(meshOp.getMesh());
-    // NOTE: Here, `factorSize` can be smaller than `factorShardingSize` as in
-    // some cases it is allowed to have shardings larger than its size.
-    if ((factorSize % factorShardingSize) != 0) {
-      // Skip the factor if factor size does not divide its sharding size,
-      // hence a new axis can not be appended properly.
-      continue;
-    }
-    int64_t factorCapacity = factorSize / factorShardingSize;
-    while (!axisRefsToDistribute.empty()) {
-      AxisRefAttr axisRef = axisRefsToDistribute.front();
-      const int64_t axisSize = axisRef.getSize(meshOp.getMesh());
-      // TODO(enver): Split `axisRef` to fit it into the batching factor's
-      // available space. The gcd of `axisSize` and `factorCapacity` should fit
-      // to the batching factor.
-      // The following check also guarantees that `factorCapacity` is not
-      // smaller than `axisSize`.
-      if (factorCapacity % axisSize != 0) {
-        break;
+  for (bool allowSplitting : {false, true}) {
+    for (const int64_t factorIndex : shardingRule.getBatchingFactors()) {
+      const int64_t factorSize = shardingRule.getFactorSizes()[factorIndex];
+      // Skip if a factor has size zero which could happen if the corresponding
+      // dimension has zero size.
+      if (factorSize == 0) {
+        continue;
       }
-      addAxisOrMerge(factorSharding, axisRef, meshOp.getMesh());
+      SmallVector<AxisRefAttr>& factorSharding = factorCommonAxes[factorIndex];
+      const int64_t factorShardingSize =
+          AxisListRef(factorSharding).getShardingSize(meshOp.getMesh());
+      // NOTE: Here, `factorSize` can be smaller than `factorShardingSize` as in
+      // some cases it is allowed to have shardings larger than its size.
+      if ((factorSize % factorShardingSize) != 0) {
+        // Skip the factor if factor size does not divide its sharding size,
+        // hence a new axis can not be appended properly.
+        continue;
+      }
+      int64_t factorCapacity = factorSize / factorShardingSize;
+      while (!axisRefsToDistribute.empty()) {
+        AxisRefAttr axisRef = axisRefsToDistribute.front();
+        const int64_t axisSize = axisRef.getSize(meshOp.getMesh());
+        if (!allowSplitting) {
+          if (factorCapacity % axisSize != 0) {
+            break;
+          }
+        } else {
+          const int64_t gcd = std::gcd(factorCapacity, axisSize);
+          if (gcd == 1) {
+            break;
+          }
+          if (gcd != axisSize) {
+            addAxisOrMerge(
+                factorSharding,
+                AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
+                                 axisRef.getSubAxisPreSize(), gcd),
+                meshOp.getMesh());
+            axisRefsToDistribute.front() = AxisRefAttr::get(
+                meshOp.getContext(), axisRef.getName(),
+                axisRef.getSubAxisPreSize() * gcd, axisSize / gcd);
+            break;
+          }
+        }
+        addAxisOrMerge(factorSharding, axisRef, meshOp.getMesh());
 
-      factorCapacity /= axisSize;
-      axisRefsToDistribute = axisRefsToDistribute.drop_front();
-    }
-    if (axisRefsToDistribute.empty()) {
-      break;
+        factorCapacity /= axisSize;
+        axisRefsToDistribute = axisRefsToDistribute.drop_front();
+      }
+      if (axisRefsToDistribute.empty()) {
+        return;
+      }
     }
   }
 }

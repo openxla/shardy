@@ -43,10 +43,9 @@ func.func @fft_inverse_real_expanded_result(%arg0: tensor<128x32x33xcomplex<f32>
 }
 
 // CHECK-LABEL: func @fft_small_batch_dimension
-// TODO(enver): Subaxes of "z" should be distributed to the batching dimension.
 func.func @fft_small_batch_dimension(%arg0: tensor<16x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) -> (tensor<16x32x64xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>}) {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzp, [{"x", "y"}, {}, {}]> : tensor<16x32x64xcomplex<f32>>
-  // CHECK-NEXT: %[[FFT:.*]] = stablehlo.fft %[[RESHARD1]], type =  FFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x", "y"}, {}, {}]>]>} : (tensor<16x32x64xcomplex<f32>>) -> tensor<16x32x64xcomplex<f32>>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzp, [{"x", "y", "z":(1)2}, {}, {}]> : tensor<16x32x64xcomplex<f32>>
+  // CHECK-NEXT: %[[FFT:.*]] = stablehlo.fft %[[RESHARD1]], type =  FFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x", "y", "z":(1)2}, {}, {}]>]>} : (tensor<16x32x64xcomplex<f32>>) -> tensor<16x32x64xcomplex<f32>>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[FFT]] <@mesh_xyzp, [{"x"}, {"y"}, {"z"}]> : tensor<16x32x64xcomplex<f32>>
   // CHECK-NEXT: return %[[RESHARD2]] : tensor<16x32x64xcomplex<f32>>
   %0  = stablehlo.fft %arg0, type = FFT, length = [32, 64] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzp, [{"x"}, {"y"}, {"z"}]>]>} : (tensor<16x32x64xcomplex<f32>>) -> tensor<16x32x64xcomplex<f32>>

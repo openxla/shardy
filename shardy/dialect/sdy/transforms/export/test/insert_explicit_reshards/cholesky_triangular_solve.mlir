@@ -111,11 +111,10 @@ func.func @cholesky_sharded_same_both_cholesky_dimensions(%arg0: tensor<128x4x8x
 
 // CHECK-LABEL: func @cholesky_sharded_same_both_cholesky_dimensions_small_batch_dim
 func.func @cholesky_sharded_same_both_cholesky_dimensions_small_batch_dim(%arg0: tensor<16x2x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x"}, {}, {"y"}, {"z"}]>}) -> (tensor<16x2x8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x"}, {}, {"y"}, {"z"}]>}){
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyz, [{"x", "y"}, {}, {}, {}]> : tensor<16x2x8x8xf32>
-  // CHECK-NEXT: %[[CHOLESKY:.*]] = stablehlo.cholesky %[[RESHARD1]], lower = true {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "y"}, {}, {}, {}]>]>} : tensor<16x2x8x8xf32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyz, [{"x", "y", "z":(1)2}, {"z":(2)2}, {}, {}]> : tensor<16x2x8x8xf32>
+  // CHECK-NEXT: %[[CHOLESKY:.*]] = stablehlo.cholesky %[[RESHARD1]], lower = true {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "y", "z":(1)2}, {"z":(2)2}, {}, {}]>]>} : tensor<16x2x8x8xf32>
   // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[CHOLESKY]] <@mesh_xyz, [{"x"}, {}, {"y"}, {"z"}]> : tensor<16x2x8x8xf32>
   // CHECK-NEXT: return %[[RESHARD2]] : tensor<16x2x8x8xf32>
-  // TODO(enver): Instead reshard to [{"x", "y", "z":1(2)}, {}, {}, {}].
   %0 = stablehlo.cholesky %arg0, lower = true {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x"}, {}, {"y"}, {"z"}]>]>} : (tensor<16x2x8x8xf32>) -> tensor<16x2x8x8xf32>
   return %0 :  tensor<16x2x8x8xf32>
 }
