@@ -301,9 +301,12 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
                              RankedTensorType origType,
                              RankedTensorType paddedType);
 
-// Returns true if Shardy's propagation pipeline converts the module from
+// Returns true if Shardy's propagation/export pipeline converts the module from
 // global to local shapes, meaning the downstream GSPMD partitioner should be
 // skipped.
+bool shardyGeneratesDeviceCode(bool avoidExportForPartitioning,
+                               bool enablePerInstructionPartitioning,
+                               PartitionerStage partitionerStage);
 bool shardyGeneratesDeviceCode(const PropagationOptions& options);
 
 }  // namespace sdy

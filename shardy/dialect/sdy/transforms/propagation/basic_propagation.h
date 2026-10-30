@@ -134,6 +134,12 @@ class BasicPropagationPassImpl : public OperationPass<ModuleOp> {
           "operand/result a sharding was propagated to a given op."),
       llvm::cl::init(false)};
 
+  Option<bool> shardyGeneratesDeviceCode{
+      *this, "shardy-generates-device-code",
+      llvm::cl::desc("whether Shardy generates device code (i.e. "
+                     "sdy-convert-global-to-local)"),
+      llvm::cl::init(false)};
+
  private:
   // This class owns the basic factor propagation strategy.
   BasicFactorPropagation basicFactorPropagation;

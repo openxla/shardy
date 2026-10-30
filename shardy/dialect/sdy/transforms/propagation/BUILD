@@ -63,6 +63,7 @@ cc_library(
         "//shardy/dialect/sdy/transforms/common:propagation_options",
         "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "//shardy/dialect/sdy/transforms/export:passes",
+        "//shardy/dialect/sdy/transforms/export:utils",
         "//shardy/dialect/sdy/transforms/import:passes",
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
         "@llvm-project//llvm:Support",

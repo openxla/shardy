@@ -66,11 +66,9 @@ func.func @communication_free_slice_to_1_sharded_dim(%arg0: tensor<16x16xf32> {s
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<1xf32>
 func.func @all_gather_slice_to_1(%arg0: tensor<2xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<1xf32> {
   // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[true, false]> : tensor<2xi1>
-  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<2xi1>, tensor<ui32>) -> tensor<1xi1>
-  // CHECK-NEXT: %[[IS_LEADER:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT: %[[NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<1xf32>
-  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ZERO]] : tensor<i1>, tensor<1xf32>
+  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[NON_LEADER]], %[[ZERO]], %[[ARG0]] : tensor<i1>, tensor<1xf32>
   // CHECK-NEXT: %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]]) <{
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>,
   // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_1_2, axes = [#stablehlo.axis_ref<name = "y">]>,
@@ -118,11 +116,9 @@ func.func @all_gather_slice_to_local_shard_size_2d(
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<2xi32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x", "y"}]>}) -> tensor<2xi32>
 func.func @all_gather_slice_multi_axis_i32(%arg0: tensor<16xi32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x", "y"}]>}) -> tensor<2xi32> {
   // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[true, false, false, false, false, false, false, false]> : tensor<8xi1>
-  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi1>, tensor<ui32>) -> tensor<1xi1>
-  // CHECK-NEXT: %[[IS_LEADER:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT: %[[NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0> : tensor<2xi32>
-  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ZERO]] : tensor<i1>, tensor<2xi32>
+  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[NON_LEADER]], %[[ZERO]], %[[ARG0]] : tensor<i1>, tensor<2xi32>
   // CHECK-NEXT: %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]]) <{
   // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>,
   // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_4_2, axes = [#stablehlo.axis_ref<name = "x">, #stablehlo.axis_ref<name = "y">]>,

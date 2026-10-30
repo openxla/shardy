@@ -36,7 +36,9 @@ struct PopulateOpShardingRulesPass
 
   void runOnOperation() final {
     getOperation().walk([this](Operation* op) {
-      (void)getOrCreateShardingRule(op, conservativePropagation);
+      (void)getOrCreateShardingRule(op, conservativePropagation,
+                                    /*setShardingRuleOnOp=*/true,
+                                    shardyGeneratesDeviceCode);
     });
   }
 };

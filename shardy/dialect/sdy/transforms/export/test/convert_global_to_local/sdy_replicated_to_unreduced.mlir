@@ -2,6 +2,8 @@
 
 // CHECK: sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
 sdy.mesh @mesh_2_4 = <["x"=2, "y"=4]>
+// CHECK: sdy.mesh @mesh_non_iota = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
+sdy.mesh @mesh_non_iota = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
 
 // CHECK-LABEL: func.func @partial_mesh_major_axis
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"y"}]>})
@@ -44,12 +46,26 @@ func.func @full_mesh_axes(
     %arg0: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}]>})
     -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x", "y"}>}) {
   // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[true, false, false, false, false, false, false, false]> : tensor<8xi1>
-  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi1>, tensor<ui32>) -> tensor<1xi1>
-  // CHECK-NEXT: %[[SCALAR:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT: %[[IS_NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
   // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<4x16xf32>
-  // CHECK-NEXT: %[[RES:.*]] = stablehlo.select %[[SCALAR]], %[[ARG0]], %[[ZERO]] : tensor<i1>, tensor<4x16xf32>
+  // CHECK-NEXT: %[[RES:.*]] = stablehlo.select %[[IS_NON_LEADER]], %[[ZERO]], %[[ARG0]] : tensor<i1>, tensor<4x16xf32>
   %0 = sdy.replicated_to_unreduced {"x", "y"} %arg0 out_sharding=<@mesh_2_4, [{}, {}], unreduced={"x", "y"}> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[RES]] : tensor<4x16xf32>
+  return %0 : tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func.func @full_mesh_axes_non_zero_leader
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}]>})
+// CHECK-SAME: -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}], unreduced={"x", "y"}>})
+func.func @full_mesh_axes_non_zero_leader(
+    %arg0: tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}]>})
+    -> (tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}], unreduced={"x", "y"}>}) {
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[LEADER:.*]] = stablehlo.constant dense<3> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_LEADER:.*]] = stablehlo.compare EQ, %[[PID]], %[[LEADER]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<4x16xf32>
+  // CHECK-NEXT: %[[RES:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ZERO]] : tensor<i1>, tensor<4x16xf32>
+  %0 = sdy.replicated_to_unreduced {"x", "y"} %arg0 out_sharding=<@mesh_non_iota, [{}, {}], unreduced={"x", "y"}> : tensor<4x16xf32>
   // CHECK-NEXT: return %[[RES]] : tensor<4x16xf32>
   return %0 : tensor<4x16xf32>
 }

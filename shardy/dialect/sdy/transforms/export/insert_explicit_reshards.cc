@@ -369,7 +369,7 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
     };
     SDY_CHECK(!llvm::any_of(op->getOpOperands(), operandHasUnreducedAxes))
         << "Some operands have unreduced axes but the operation has no "
-          "results. ";
+           "results. ";
     return;
   }
 
@@ -889,8 +889,8 @@ struct InsertExplicitReshardsPass
       }
 
       if (CallOp callOp = dyn_cast<CallOp>(op)) {
-          insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
-                                         onFullVersion);
+        insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
+                                       onFullVersion);
         return;
       }
 
@@ -915,9 +915,9 @@ struct InsertExplicitReshardsPass
       }
 
       // NOTE: Creating a sharding rule requires data flow edges are present.
-      OpShardingRuleAttr shardingRule =
-          getOrCreateShardingRule(op, /*conservativePropagation=*/false,
-                                  /*setShardingRuleOnOp=*/false);
+      OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
+          op, /*conservativePropagation=*/false, /*setShardingRuleOnOp=*/false,
+          shardyGeneratesDeviceCode);
 
       // TODO(b/434668939): Enable explicit reshards on custom sharding rules.
       if (!shardingRule || shardingRule.isCustom()) {
