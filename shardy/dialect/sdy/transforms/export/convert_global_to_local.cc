@@ -871,17 +871,49 @@ SmallVector<Value> maskNonLeaderShards(
   SmallVector<bool> leaderTable = llvm::map_to_vector(
       llvm::seq<int64_t>(0, numDevices),
       [&](int64_t devId) { return getShardIndex(devId, mesh, axes) == 0; });
-  Value isLeader = lookupPerDeviceValue(
-      loc,
-      DenseElementsAttr::get(
-          RankedTensorType::get({numDevices}, rewriter.getI1Type()),
-          leaderTable),
-      conversionState, rewriter, deviceId);
+  bool singleLeader = llvm::count(leaderTable, true) == 1;
+  bool onlyDeviceZeroIsLeader = singleLeader && leaderTable[0];
+  Value isLeader;
+  Value isNonLeader;
+  if (singleLeader) {
+    if (!deviceId) {
+      deviceId = getDeviceId(loc, conversionState, rewriter);
+    }
+    if (onlyDeviceZeroIsLeader) {
+      // For device 0 as sole leader, convert partition ID (ui32) directly to
+      // i1. 0 converts to false (not non-leader, i.e. leader), and non-zero
+      // device IDs convert to true (isNonLeader = true). We intentionally use
+      // convert instead of compare EQ against a 0 constant to avoid
+      // materializing an extra constant buffer, which causes performance
+      // regressions on hardware (e.g. TPU LLO).
+      isNonLeader = stablehlo::ConvertOp::create(rewriter, loc, deviceId,
+                                                 rewriter.getI1Type());
+    } else {
+      int64_t leaderId = llvm::find(leaderTable, true) - leaderTable.begin();
+      Value leaderConst =
+          createScalarIntConstant(loc, deviceId.getType(), leaderId, rewriter);
+      isLeader =
+          stablehlo::CompareOp::create(rewriter, loc, deviceId, leaderConst,
+                                       stablehlo::ComparisonDirection::EQ);
+    }
+  } else {
+    isLeader = lookupPerDeviceValue(
+        loc,
+        DenseElementsAttr::get(
+            RankedTensorType::get({numDevices}, rewriter.getI1Type()),
+            leaderTable),
+        conversionState, rewriter, deviceId);
+  }
   if (!nonLeaderVal) {
     auto localType = cast<RankedTensorType>(inputs.front().getType());
     nonLeaderVal = createZeroConstant(loc, localType, rewriter);
   }
   return llvm::map_to_vector(inputs, [&](Value input) -> Value {
+    if (isNonLeader) {
+      // isNonLeader is true for non-leader shards (pid != 0).
+      return stablehlo::SelectOp::create(rewriter, loc, isNonLeader,
+                                         nonLeaderVal, input);
+    }
     return stablehlo::SelectOp::create(rewriter, loc, isLeader, input,
                                        nonLeaderVal);
   });
@@ -3445,9 +3477,8 @@ class AllGatherAndSliceViaAllReducePattern
     : public OpConversionPattern<stablehlo::SliceOp> {
  public:
   AllGatherAndSliceViaAllReducePattern(TypeConverter& converter,
-                                       MLIRContext* ctx, ConversionState& state,
-                                       PatternBenefit benefit = 2)
-      : OpConversionPattern<stablehlo::SliceOp>(converter, ctx, benefit),
+                                       MLIRContext* ctx, ConversionState& state)
+      : OpConversionPattern<stablehlo::SliceOp>(converter, ctx, /*benefit=*/2),
         conversionState(state) {}
 
   LogicalResult matchAndRewrite(
