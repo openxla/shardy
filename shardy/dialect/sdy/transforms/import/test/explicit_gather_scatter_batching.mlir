@@ -229,19 +229,42 @@ func.func @gather_already_explicit_batching(
   return %result : tensor<4x1xf32>
 }
 
-// ===== Test 9: Index vector dim size 1 (no transformation) =====
-// If the index vector dim has size 1, removing the batch component would
-// leave it empty; the pass should bail out.
+// ===== Test 9: Index vector dim size 1 with iota (degenerate gather -> broadcast) =====
+// Single index component originating from iota is rewritten to broadcast_in_dim.
 
-// CHECK-LABEL: func @gather_single_index_dim_no_transform
-func.func @gather_single_index_dim_no_transform(
+// CHECK-LABEL: func @gather_single_index_dim_iota_to_broadcast
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>) -> tensor<4x8xf32>
+func.func @gather_single_index_dim_iota_to_broadcast(
     %operand: tensor<4x8xf32>) -> tensor<4x8xf32> {
   %iota = stablehlo.iota dim = 0 : tensor<4x1xi32>
-  // CHECK: "stablehlo.gather"
+  // The canonicalizer would replace this broadcast_in_dim with its operand.
+  //
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[OPERAND]], dims = [0, 1] : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<4x8xf32>
+  %result = "stablehlo.gather"(%operand, %iota) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [0],
+      start_index_map = [0],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 8>,
+    indices_are_sorted = false
+  } : (tensor<4x8xf32>, tensor<4x1xi32>) -> tensor<4x8xf32>
+  return %result : tensor<4x8xf32>
+}
+
+// ===== Test 9b: Index vector dim size 1 with non-iota (no transformation) =====
+// If the single index component is not an iota, the pass should bail out.
+
+// CHECK-LABEL: func @gather_single_index_dim_no_iota_no_transform
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>, %[[OFFSET:.*]]: tensor<4x1xi32>) -> tensor<4x8xf32>
+func.func @gather_single_index_dim_no_iota_no_transform(
+    %operand: tensor<4x8xf32>, %offset: tensor<4x1xi32>) -> tensor<4x8xf32> {
+  // CHECK-NEXT: %[[RES:.*]] = "stablehlo.gather"(%[[OPERAND]], %[[OFFSET]])
   // CHECK-SAME: collapsed_slice_dims = [0]
   // CHECK-SAME: start_index_map = [0]
   // CHECK-NOT: operand_batching_dims
-  %result = "stablehlo.gather"(%operand, %iota) {
+  %result = "stablehlo.gather"(%operand, %offset) {
     dimension_numbers = #stablehlo.gather<
       offset_dims = [1],
       collapsed_slice_dims = [0],
@@ -338,4 +361,211 @@ func.func @scatter_dim0_not_inserted_no_transform(
   }) : (tensor<4x8xi32>, tensor<4x2xi32>, tensor<4x4xi32>) -> tensor<4x8xi32>
 
   return %result : tensor<4x8xi32>
+}
+
+// ===== Test 13: Degenerate gather to broadcast_in_dim =====
+// All mapped indices originate from an identity iota. The gather is rewritten directly
+// to stablehlo.broadcast_in_dim.
+
+// CHECK-LABEL: func @gather_degenerate_iota_to_broadcast
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4xf32>) -> tensor<4x8xf32>
+func.func @gather_degenerate_iota_to_broadcast(%operand: tensor<4xf32>) -> tensor<4x8xf32> {
+  %iota = stablehlo.iota dim = 0 : tensor<4x8xi32>
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[OPERAND]], dims = [0] : (tensor<4xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<4x8xf32>
+  %result = "stablehlo.gather"(%operand, %iota) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [],
+      collapsed_slice_dims = [0],
+      start_index_map = [0],
+      index_vector_dim = 2>,
+    slice_sizes = array<i64: 1>,
+    indices_are_sorted = false
+  } : (tensor<4xf32>, tensor<4x8xi32>) -> tensor<4x8xf32>
+  return %result : tensor<4x8xf32>
+}
+
+// ===== Test 14: Degenerate scatter to reduce + add =====
+// All mapped scatter indices originate from identity iota, with extra non-batch dimension.
+// The update is reduced across the extra dimension and added to the operand.
+
+// CHECK-LABEL: func @scatter_degenerate_iota_to_reduce_add
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<8x2x2xi32>, %[[UPDATE:.*]]: tensor<8x4x2x2xi32>) -> tensor<8x2x2xi32>
+func.func @scatter_degenerate_iota_to_reduce_add(
+    %operand: tensor<8x2x2xi32>, %update: tensor<8x4x2x2xi32>) -> tensor<8x2x2xi32> {
+  %iota = stablehlo.iota dim = 1 : tensor<1x8x4xi32>
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK-NEXT: %[[REDUCE:.*]] = stablehlo.reduce(%[[UPDATE]] init: %[[CST]]) applies stablehlo.add across dimensions = [1] : (tensor<8x4x2x2xi32>, tensor<i32>) -> tensor<8x2x2xi32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[OPERAND]], %[[REDUCE]] : tensor<8x2x2xi32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x2x2xi32>
+  %result = "stablehlo.scatter"(%operand, %iota, %update) <{
+    indices_are_sorted = false,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [2, 3],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 0>,
+    unique_indices = false
+  }> ({
+  ^bb0(%arg0: tensor<i32>, %arg1: tensor<i32>):
+    %sum = stablehlo.add %arg0, %arg1 : tensor<i32>
+    stablehlo.return %sum : tensor<i32>
+  }) : (tensor<8x2x2xi32>, tensor<1x8x4xi32>, tensor<8x4x2x2xi32>) -> tensor<8x2x2xi32>
+  return %result : tensor<8x2x2xi32>
+}
+
+// ===== Test 15: Degenerate scatter to add directly (no extra non-batch dim) =====
+// All mapped scatter indices originate from identity iota, with no extra non-batch dimension.
+// The update is combined with the operand directly.
+
+// CHECK-LABEL: func @scatter_degenerate_iota_to_add_direct
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<8x2x2xi32>, %[[UPDATE:.*]]: tensor<8x2x2xi32>) -> tensor<8x2x2xi32>
+func.func @scatter_degenerate_iota_to_add_direct(
+    %operand: tensor<8x2x2xi32>, %update: tensor<8x2x2xi32>) -> tensor<8x2x2xi32> {
+  %iota = stablehlo.iota dim = 0 : tensor<8x1xi32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[OPERAND]], %[[UPDATE]] : tensor<8x2x2xi32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x2x2xi32>
+  %result = "stablehlo.scatter"(%operand, %iota, %update) <{
+    indices_are_sorted = false,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1, 2],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>,
+    unique_indices = false
+  }> ({
+  ^bb0(%arg0: tensor<i32>, %arg1: tensor<i32>):
+    %sum = stablehlo.add %arg0, %arg1 : tensor<i32>
+    stablehlo.return %sum : tensor<i32>
+  }) : (tensor<8x2x2xi32>, tensor<8x1xi32>, tensor<8x2x2xi32>) -> tensor<8x2x2xi32>
+  return %result : tensor<8x2x2xi32>
+}
+
+// ===== Test 16: Degenerate scatter with float max reduction =====
+// Verifies reduction constant for float max is -infinity.
+
+// CHECK-LABEL: func @scatter_degenerate_float_max
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<8x2xf32>, %[[UPDATE:.*]]: tensor<8x4x2xf32>) -> tensor<8x2xf32>
+func.func @scatter_degenerate_float_max(
+    %operand: tensor<8x2xf32>, %update: tensor<8x4x2xf32>) -> tensor<8x2xf32> {
+  %iota = stablehlo.iota dim = 1 : tensor<1x8x4xi32>
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0xFF800000> : tensor<f32>
+  // CHECK-NEXT: %[[REDUCE:.*]] = stablehlo.reduce(%[[UPDATE]] init: %[[CST]]) applies stablehlo.maximum across dimensions = [1] : (tensor<8x4x2xf32>, tensor<f32>) -> tensor<8x2xf32>
+  // CHECK-NEXT: %[[MAX:.*]] = stablehlo.maximum %[[OPERAND]], %[[REDUCE]] : tensor<8x2xf32>
+  // CHECK-NEXT: return %[[MAX]] : tensor<8x2xf32>
+  %result = "stablehlo.scatter"(%operand, %iota, %update) <{
+    indices_are_sorted = false,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [2],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 0>,
+    unique_indices = false
+  }> ({
+  ^bb0(%arg0: tensor<f32>, %arg1: tensor<f32>):
+    %max = stablehlo.maximum %arg0, %arg1 : tensor<f32>
+    stablehlo.return %max : tensor<f32>
+  }) : (tensor<8x2xf32>, tensor<1x8x4xi32>, tensor<8x4x2xf32>) -> tensor<8x2xf32>
+  return %result : tensor<8x2xf32>
+}
+
+// ===== Test 17: Degenerate scatter with operandDim = 1 (transposition) =====
+// Verifies that when operandDim != 0, dimensions are transposed to align with operand.
+
+// CHECK-LABEL: func @scatter_degenerate_dim1_transpose
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<2x4xi32>, %[[UPDATE:.*]]: tensor<4x2xi32>) -> tensor<2x4xi32>
+func.func @scatter_degenerate_dim1_transpose(
+    %operand: tensor<2x4xi32>, %update: tensor<4x2xi32>) -> tensor<2x4xi32> {
+  %iota = stablehlo.iota dim = 0 : tensor<4x1xi32>
+  // CHECK-NEXT: %[[TRANSPOSE:.*]] = stablehlo.transpose %[[UPDATE]], dims = [1, 0] : (tensor<4x2xi32>) -> tensor<2x4xi32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[OPERAND]], %[[TRANSPOSE]] : tensor<2x4xi32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<2x4xi32>
+  %result = "stablehlo.scatter"(%operand, %iota, %update) <{
+    indices_are_sorted = false,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [1],
+      scatter_dims_to_operand_dims = [1],
+      index_vector_dim = 1>,
+    unique_indices = false
+  }> ({
+  ^bb0(%arg0: tensor<i32>, %arg1: tensor<i32>):
+    %sum = stablehlo.add %arg0, %arg1 : tensor<i32>
+    stablehlo.return %sum : tensor<i32>
+  }) : (tensor<2x4xi32>, tensor<4x1xi32>, tensor<4x2xi32>) -> tensor<2x4xi32>
+  return %result : tensor<2x4xi32>
+}
+
+// ===== Test 18: Degenerate gather with iota wrapped in convert =====
+// Verifies that stablehlo.convert (e.g. i32 -> i64) in index chain is traced to iota.
+
+// CHECK-LABEL: func @gather_iota_with_convert
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>) -> tensor<4x8xf32>
+func.func @gather_iota_with_convert(
+    %operand: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  %iota = stablehlo.iota dim = 0 : tensor<4x1xi32>
+  %conv = stablehlo.convert %iota : (tensor<4x1xi32>) -> tensor<4x1xi64>
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[OPERAND]], dims = [0, 1] : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<4x8xf32>
+  %result = "stablehlo.gather"(%operand, %conv) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [0],
+      start_index_map = [0],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 8>,
+    indices_are_sorted = false
+  } : (tensor<4x8xf32>, tensor<4x1xi64>) -> tensor<4x8xf32>
+  return %result : tensor<4x8xf32>
+}
+
+// ===== Test 19: Degenerate gather with nested single-input concatenate =====
+// Verifies that a single-input concatenate nested before a convert is traced to iota.
+
+// CHECK-LABEL: func @gather_iota_nested_single_concat
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>) -> tensor<4x8xf32>
+func.func @gather_iota_nested_single_concat(
+    %operand: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  %iota = stablehlo.iota dim = 0 : tensor<4x1xi32>
+  %concat = stablehlo.concatenate %iota, dim = 1 : (tensor<4x1xi32>) -> tensor<4x1xi32>
+  %conv = stablehlo.convert %concat : (tensor<4x1xi32>) -> tensor<4x1xi64>
+  // CHECK-NEXT: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[OPERAND]], dims = [0, 1] : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: return %[[BCAST]] : tensor<4x8xf32>
+  %result = "stablehlo.gather"(%operand, %conv) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [0],
+      start_index_map = [0],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 8>,
+    indices_are_sorted = false
+  } : (tensor<4x8xf32>, tensor<4x1xi64>) -> tensor<4x8xf32>
+  return %result : tensor<4x8xf32>
+}
+
+// ===== Test 20: Scatter with partial window size is not rewritten to combiner =====
+// Verifies that a scatter whose update window size does not match the operand
+// dimension size is not rewritten into a combiner reduction.
+
+// CHECK-LABEL: func @scatter_iota_partial_window_not_rewritten
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>, %[[UPDATES:.*]]: tensor<4x4xf32>) -> tensor<4x8xf32>
+func.func @scatter_iota_partial_window_not_rewritten(
+    %operand: tensor<4x8xf32>, %updates: tensor<4x4xf32>) -> tensor<4x8xf32> {
+  %indices = stablehlo.iota dim = 0 : tensor<4x1xi32>
+  // CHECK: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[OPERAND]],
+  // CHECK: return %[[SCATTER]] : tensor<4x8xf32>
+  %result = "stablehlo.scatter"(%operand, %indices, %updates) ({
+  ^bb0(%arg0: tensor<f32>, %arg1: tensor<f32>):
+    %add = stablehlo.add %arg0, %arg1 : tensor<f32>
+    stablehlo.return %add : tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>,
+    indices_are_sorted = false,
+    unique_indices = false
+  } : (tensor<4x8xf32>, tensor<4x1xi32>, tensor<4x4xf32>) -> tensor<4x8xf32>
+  return %result : tensor<4x8xf32>
 }
