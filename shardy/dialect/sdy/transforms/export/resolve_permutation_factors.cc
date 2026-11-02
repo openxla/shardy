@@ -3002,11 +3002,13 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
         }
         int64_t sliceSize = sliceOp.getType().getDimSize(dim);
         int64_t sOut = llvm::divideCeil(sliceSize, shardCount);
+        int64_t stride =
+            sliceOp.getStrides().empty() ? 1 : sliceOp.getStrides()[dim];
+        int64_t sFootprint = sOut > 0 ? (sOut - 1) * stride + 1 : 0;
         int64_t start = sliceOp.getStartIndices()[dim];
         DimExchangeInfo dimInfo = getDimExchangeInfo(
-            shardCount, sIn, sOut,
-            /*sFootprint=*/sOut, /*padLow=*/-start,
-            /*stride=*/1, /*baseDilation=*/1, inputType.getDimSize(dim));
+            shardCount, sIn, sOut, sFootprint, /*padLow=*/-start, stride,
+            /*baseDilation=*/1, inputType.getDimSize(dim));
         // This is a zero-hop-non-communication-free case, which doesn't
         // require collective-permute but dynamic-slice.
         dimInfo.needsComm = true;
@@ -3014,12 +3016,15 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
       });
 }
 
-// Implements the slicing operation on replicated dimensions.
-Value handleReplicatedSliceDims(
-    Location loc, Value exchangedLocal, TensorShardingAttr sharding,
-    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
-    ArrayRef<int64_t> startIndices, ArrayRef<int64_t> limitIndices,
-    ArrayRef<int64_t> strides, ResolutionState& state) {
+// Implements local slicing on replicated or communication-free sharded
+// dimensions and strided downsampling on HALO-exchanged sharded dimensions.
+Value handleLocalSliceDims(Location loc, Value exchangedLocal,
+                           RankedTensorType paddedGlobalResultType,
+                           TensorShardingAttr sharding, MeshAttr mesh,
+                           const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
+                           ArrayRef<int64_t> startIndices,
+                           ArrayRef<int64_t> limitIndices,
+                           ArrayRef<int64_t> strides, ResolutionState& state) {
   auto exchangedLocalType = cast<RankedTensorType>(exchangedLocal.getType());
   int64_t rank = exchangedLocalType.getRank();
   TensorShardingAttr localSharding =
@@ -3031,12 +3036,26 @@ Value handleReplicatedSliceDims(
   SmallVector<int64_t> localSliceStrides(rank, 1);
   bool needsLocalSlice = false;
   for (int64_t i = 0; i < rank; ++i) {
+    int64_t stride = strides.empty() ? 1 : strides[i];
     if (sharding.getDimShardings()[i].getShardedSize(mesh) > 1) {
+      int64_t expectedLocalSize = getLocalDimSize(
+          sharding.getDimShardings()[i], paddedGlobalResultType.getDimSize(i),
+          mesh, manualAxes);
+      if (stride != 1) {
+        localSliceStarts[i] = 0;
+        localSliceLimits[i] = exchangedLocalType.getDimSize(i);
+        localSliceStrides[i] = stride;
+        needsLocalSlice = true;
+      } else if (exchangedLocalType.getDimSize(i) != expectedLocalSize) {
+        localSliceStarts[i] = 0;
+        localSliceLimits[i] = expectedLocalSize;
+        localSliceStrides[i] = 1;
+        needsLocalSlice = true;
+      }
       continue;
     }
     int64_t start = startIndices[i];
     int64_t limit = limitIndices[i];
-    int64_t stride = strides.empty() ? 1 : strides[i];
     if (start != 0 || limit != exchangedLocalType.getDimSize(i) ||
         stride != 1) {
       localSliceStarts[i] = start;
@@ -3075,10 +3094,12 @@ Value handleReplicatedSliceDims(
 // 2. Use HALO exchange to implement sharded slice dimensions:
 //    - Concatenate the left neighbor shard, self shard, and right neighbor
 //      shard along the sharded dimension.
-//    - Pad the concatenated buffer by sOut.
-//    - Slice out a local segment of shape sOut using a dynamic offset computed
-//      on-device via partitionId.
-// 3. Implement replicated slice dimensions:
+//    - Pad the concatenated buffer by sFootprint.
+//    - Slice out a local segment of shape sFootprint using a dynamic offset
+//      computed on-device via partitionId.
+// 3. Implement local slicing on replicated/communication-free dimensions and
+//    strided downsampling ([0 : sFootprint : stride] -> sOut) via
+//    handleLocalSliceDims.
 // 4. Trim final tensor shape to match expected output shape.
 LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
                             ResolutionState& state) {
@@ -3120,9 +3141,8 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   SmallVector<int64_t> edgePaddingLow;
   edgePaddingLow.reserve(rank);
   for (int64_t dim = 0; dim < rank; ++dim) {
-    // Unsharded dimensions are sliced in postProcess
-    // (handleReplicatedSliceDims) and do not participate in HALO exchange
-    // padding.
+    // Unsharded dimensions are sliced in postProcess (handleLocalSliceDims)
+    // and do not participate in HALO exchange padding.
     if (inSharding.getDimShardings()[dim].getShardedSize(mesh) <= 1) {
       edgePaddingLow.push_back(0);
       continue;
@@ -3132,18 +3152,24 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   }
 
   auto postProcess = [&](Value exchangedLocal, Value /*localPaddingValue*/,
-                         RankedTensorType /*unused paddedGlobalResultType*/,
+                         RankedTensorType paddedGlobalResultType,
                          ResolutionState& state) -> Value {
-    return handleReplicatedSliceDims(loc, exchangedLocal, inSharding, mesh,
-                                     info.manualAxes, sliceOp.getStartIndices(),
-                                     sliceOp.getLimitIndices(),
-                                     sliceOp.getStrides(), state);
+    return handleLocalSliceDims(
+        loc, exchangedLocal, paddedGlobalResultType, inSharding, mesh,
+        info.manualAxes, sliceOp.getStartIndices(), sliceOp.getLimitIndices(),
+        sliceOp.getStrides(), state);
   };
+
+  ArrayRef<int64_t> strides = sliceOp.getStrides();
+  ArrayRef<int64_t> windowStrides =
+      llvm::any_of(strides, [](int64_t s) { return s != 1; })
+          ? strides
+          : ArrayRef<int64_t>{};
 
   Value result = haloDataExchange(
       loc, divisibleInput, info.divisibleInputShape, origInputType,
       sliceOp.getType(), inSharding, inSharding, mesh, info.manualAxes,
-      paddingValue, edgePaddingLow, info.dimExchanges, /*windowStrides=*/{},
+      paddingValue, edgePaddingLow, info.dimExchanges, windowStrides,
       /*baseDilations=*/{}, postProcess, state);
 
   // Trim final tensor shape to match expected output shape.
