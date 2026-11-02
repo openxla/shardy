@@ -399,8 +399,7 @@ class AllReduceOfShardedToUnreducedPattern
 
   LogicalResult matchAndRewrite(AllReduceOp allReduceOp,
                                 PatternRewriter& rewriter) const override {
-    auto s2uOp =
-        allReduceOp.getTensor().getDefiningOp<ShardedToUnreducedOp>();
+    auto s2uOp = allReduceOp.getTensor().getDefiningOp<ShardedToUnreducedOp>();
     if (!s2uOp) {
       return failure();
     }
@@ -417,9 +416,9 @@ class AllReduceOfShardedToUnreducedPattern
       return failure();
     }
 
-    rewriter.replaceOpWithNewOp<AllGatherOp>(
-        allReduceOp, s2uOp.getTensor(), s2uOp.getAxesAttr(),
-        allReduceOp.getOutSharding());
+    rewriter.replaceOpWithNewOp<AllGatherOp>(allReduceOp, s2uOp.getTensor(),
+                                             s2uOp.getAxesAttr(),
+                                             allReduceOp.getOutSharding());
     return success();
   }
 };
@@ -630,16 +629,18 @@ void ReshardOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllGatherOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* context) {
-  results.addWithLabel<AllGatherNoopPattern, AllGatherOfBroadcastInDimPattern,
-                       CollectiveOfIotaPattern<AllGatherOp>>(
+  results.addWithLabel<AllGatherNoopPattern, AllGatherOfBroadcastInDimPattern>(
       StringRef(kCollectiveLabel), context);
+  results.addWithLabel<CollectiveOfIotaPattern<AllGatherOp>>(
+      StringRef(kIotaCollectiveLabel), context);
 }
 
 void AllSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.addWithLabel<AllSliceOfAllGatherPattern, AllSliceNoopPattern,
-                       CollectiveOfIotaPattern<AllSliceOp>>(
+  results.addWithLabel<AllSliceOfAllGatherPattern, AllSliceNoopPattern>(
       StringRef(kCollectiveLabel), context);
+  results.addWithLabel<CollectiveOfIotaPattern<AllSliceOp>>(
+      StringRef(kIotaCollectiveLabel), context);
 }
 
 void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
@@ -652,16 +653,18 @@ void AllReduceOp::getCanonicalizationPatterns(RewritePatternSet& results,
 
 void AllToAllOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                              MLIRContext* context) {
-  results.addWithLabel<AllToAllFusionPattern, AllToAllNoUsePattern,
-                       CollectiveOfIotaPattern<AllToAllOp>>(
+  results.addWithLabel<AllToAllFusionPattern, AllToAllNoUsePattern>(
       StringRef(kCollectiveLabel), context);
+  results.addWithLabel<CollectiveOfIotaPattern<AllToAllOp>>(
+      StringRef(kIotaCollectiveLabel), context);
 }
 
 void CollectivePermuteOp::getCanonicalizationPatterns(
     RewritePatternSet& results, MLIRContext* context) {
-  results.addWithLabel<CollectivePermuteNoopPattern,
-                       CollectiveOfIotaPattern<CollectivePermuteOp>>(
+  results.addWithLabel<CollectivePermuteNoopPattern>(
       StringRef(kCollectiveLabel), context);
+  results.addWithLabel<CollectiveOfIotaPattern<CollectivePermuteOp>>(
+      StringRef(kIotaCollectiveLabel), context);
 }
 
 void ReduceScatterOp::getCanonicalizationPatterns(RewritePatternSet& results,

@@ -67,7 +67,14 @@ void addPartitionerPipeline(OpPassManager& pm,
     // NOTE: run the canonicalizer to fuse all-slice collectives and preceding
     // all-reduces into reduce-scatters, fold back-to-back all-to-alls, and
     // remove no-op collectives, which ConvertGlobalToLocal requires.
-    addCanonicalizerPass(pm, kCollectiveLabel);
+    SmallVector<std::string> collectiveLabels = {kCollectiveLabel};
+    // Only fold collectives on iota when Shardy generates device-local code,
+    // as GSPMD requires the explicit collective for scatter/gather
+    // partitioning.
+    if (options.shardyGeneratesDeviceCode) {
+      collectiveLabels.push_back(kIotaCollectiveLabel);
+    }
+    addCanonicalizerPass(pm, collectiveLabels);
   }
 
   if (options.stage >= PartitionerStage::kPadForDivisibility) {

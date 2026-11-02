@@ -91,7 +91,13 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   // which during the canonicalizer below may be converted to reduce scatters
   // by potentially fusing with preceding all-reduces, which are inserted
   // during InsertExplicitReshards pass.
-  addCanonicalizerPass(pm, kCollectiveLabel);
+  SmallVector<std::string> collectiveLabels = {kCollectiveLabel};
+  // Only fold collectives on iota when Shardy generates device-local code,
+  // as GSPMD requires the explicit collective for scatter/gather partitioning.
+  if (shardyGeneratesDeviceCode) {
+    collectiveLabels.push_back(kIotaCollectiveLabel);
+  }
+  addCanonicalizerPass(pm, collectiveLabels);
 
   if (options.partitionerStage == PartitionerStage::kUnspecified &&
       options.enableInsertExplicitCollectives &&

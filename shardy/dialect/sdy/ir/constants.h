@@ -79,6 +79,7 @@ inline constexpr int kStartAtZ = 'z' - 'i';  // 17
 // `ArrayRef<std::string>`.
 inline const std::string kReshardLabel = "sdy-reshard";
 inline const std::string kCollectiveLabel = "sdy-collective";
+inline const std::string kIotaCollectiveLabel = "sdy-iota-collective";
 
 // Symbol name for the empty mesh.
 inline const std::string kEmptyMeshSymbol = "empty_mesh";
