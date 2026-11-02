@@ -4,6 +4,7 @@
 //--- part1.mlir
 
 sdy.mesh @mesh_x4 = <["x"=4]>
+sdy.mesh @mesh_x2_y2 = <["x"=2, "y"=2]>
 
 // The pad input is sliced from 8x2 to 7x2 (indivisible, padded to 8x2).
 // The original pad result size (10) is also indivisible by mesh axis size (4).
@@ -24,6 +25,26 @@ func.func @sequential_pad_extend(%arg0: tensor<8x2xf32>) -> tensor<10x2xf32> {
   %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
   %1 = stablehlo.pad %0, %cst, low = [1, 0], high = [2, 0], interior = [0, 0] : (tensor<7x2xf32>, tensor<f32>) -> tensor<10x2xf32>
   return %1 : tensor<10x2xf32>
+}
+
+// Communication free pad along "x"=2 where both the input (3 -> 4) and the
+// result (5 -> 6) are indivisible by 2, so the adjusted high padding remains 1
+// (6 - 4 - 1 == 1) while row 3 of the padded input replaces the original high
+// padding at row 4 of the logical 5x2 result.
+func.func @parallel_comm_free_pad_extend(
+  %arg0: tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{"x"}, {}]>})
+  -> (tensor<5x2xf32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}, {}]>}) {
+  %0 = stablehlo.slice %arg0 [0:3, 0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2_y2, [{"x"}, {}]>]>} : (tensor<4x2xf32>) -> tensor<3x2xf32>
+  %cst = stablehlo.constant dense<-1.000000e+00> : tensor<f32>
+  %1 = stablehlo.pad %0, %cst, low = [1, 0], high = [1, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2_y2, [{"x"}, {}]>]>} : (tensor<3x2xf32>, tensor<f32>) -> tensor<5x2xf32>
+  return %1 : tensor<5x2xf32>
+}
+
+func.func @sequential_comm_free_pad_extend(%arg0: tensor<4x2xf32>) -> tensor<5x2xf32> {
+  %0 = stablehlo.slice %arg0 [0:3, 0:2] : (tensor<4x2xf32>) -> tensor<3x2xf32>
+  %cst = stablehlo.constant dense<-1.000000e+00> : tensor<f32>
+  %1 = stablehlo.pad %0, %cst, low = [1, 0], high = [1, 0], interior = [0, 0] : (tensor<3x2xf32>, tensor<f32>) -> tensor<5x2xf32>
+  return %1 : tensor<5x2xf32>
 }
 
 //--- part2.mlir
@@ -56,6 +77,16 @@ func.func @main() {
   "check.expect_eq"(%res#1, %seq) : (tensor<10x2xf32>, tensor<10x2xf32>) -> ()
   "check.expect_eq"(%res#2, %seq) : (tensor<10x2xf32>, tensor<10x2xf32>) -> ()
   "check.expect_eq"(%res#3, %seq) : (tensor<10x2xf32>, tensor<10x2xf32>) -> ()
+
+  %input4 = "stablehlo.slice"(%input) {start_indices = array<i64: 0, 0>, limit_indices = array<i64: 4, 2>, strides = array<i64: 1, 1>} : (tensor<8x2xf32>) -> tensor<4x2xf32>
+  %seq_comm_free = func.call @sequential_comm_free_pad_extend(%input4) : (tensor<4x2xf32>) -> tensor<5x2xf32>
+  %res_cf:4 = "interpreter.run_parallel"(%s0, %s0, %s1, %s1) {
+    programs = [[@parallel_comm_free_pad_extend, @parallel_comm_free_pad_extend, @parallel_comm_free_pad_extend, @parallel_comm_free_pad_extend]]
+  } : (tensor<2x2xf32>, tensor<2x2xf32>, tensor<2x2xf32>, tensor<2x2xf32>) -> (tensor<5x2xf32>, tensor<5x2xf32>, tensor<5x2xf32>, tensor<5x2xf32>)
+  "check.expect_eq"(%res_cf#0, %seq_comm_free) : (tensor<5x2xf32>, tensor<5x2xf32>) -> ()
+  "check.expect_eq"(%res_cf#1, %seq_comm_free) : (tensor<5x2xf32>, tensor<5x2xf32>) -> ()
+  "check.expect_eq"(%res_cf#2, %seq_comm_free) : (tensor<5x2xf32>, tensor<5x2xf32>) -> ()
+  "check.expect_eq"(%res_cf#3, %seq_comm_free) : (tensor<5x2xf32>, tensor<5x2xf32>) -> ()
 
   return
 }

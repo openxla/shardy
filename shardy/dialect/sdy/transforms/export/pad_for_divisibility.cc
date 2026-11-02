@@ -998,8 +998,9 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     //   std::max(0, paddedInputSize - 1) * interior
     SmallVector<int64_t> newHigh;
     newHigh.reserve(rankedInputType.getRank());
-    bool highPaddingReduced = false;
+    bool needsInputMasking = false;
     bool hasNegativeHighOnPaddedDim = false;
+    ArrayRef<int64_t> origInputShape = op.getOperand().getType().getShape();
     for (int d = 0; d < rankedInputType.getRank(); ++d) {
       int64_t paddedInputSize = rankedInputType.getDimSize(d);
       int64_t paddedResultSize = paddedType.getDimSize(d);
@@ -1008,8 +1009,9 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       int64_t dHigh = paddedResultSize - paddedInputSize - dLow -
                       std::max<int64_t>(0, paddedInputSize - 1) * dInterior;
       newHigh.push_back(dHigh);
-      if (dHigh < high[d]) {
-        highPaddingReduced = true;
+      if (dHigh < high[d] ||
+          (paddedInputSize > origInputShape[d] && high[d] > 0)) {
+        needsInputMasking = true;
       }
       if (paddedResultSize > op.getResult().getType().getDimSize(d) &&
           high[d] < 0) {
@@ -1019,9 +1021,10 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
 
     std::optional<PaddingValueKind> paddingKind =
         getPaddingValueKind(adaptor.getOperands()[1]);
-    if (highPaddingReduced &&
+    if (needsInputMasking &&
         (!paddingKind || cache.getPadding(input) != paddingKind)) {
-      // When high padding is reduced, the input's padding region takes the
+      // When high padding is reduced or the padded input overlaps a positive
+      // trailing high padding region, the input's padding region takes the
       // place of the trailing padding value for the pad op. As such, we need
       // to ensure the input is padded with the correct value.
       input =
@@ -1040,7 +1043,7 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
     setSharding(newPadOp.getResult(), getSharding(result));
 
     if (paddingKind && !hasNegativeHighOnPaddedDim) {
-      if (input.getType() == op.getOperand().getType() || highPaddingReduced ||
+      if (input.getType() == op.getOperand().getType() || needsInputMasking ||
           cache.getPadding(input) == paddingKind) {
         cache.setPadding(newPadOp.getResult(), *paddingKind);
       }
