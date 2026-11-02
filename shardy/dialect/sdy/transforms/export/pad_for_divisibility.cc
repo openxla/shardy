@@ -207,7 +207,7 @@ class PaddedTypeConverter : public TypeConverter {
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
   return isa<sdy::ConstantOp, stablehlo::ConstantOp, stablehlo::SliceOp,
-             stablehlo::DotGeneralOp, stablehlo::PadOp,
+             stablehlo::DotGeneralOp, stablehlo::PadOp, stablehlo::ScatterOp,
              stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
              stablehlo::GatherOp, stablehlo::ReduceOp, PartitioningOpInterface>(
       op);
@@ -1433,6 +1433,27 @@ class StablehloReduceOpPattern
   PaddingCache& cache;
 };
 
+class StablehloScatterOpPattern
+    : public OpConversionPattern<stablehlo::ScatterOp> {
+ public:
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult matchAndRewrite(stablehlo::ScatterOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter& b) const override {
+    SmallVector<Value> values(adaptor.getOperands());
+    Value& scatterIndices = values[op.getInputs().size()];
+    RankedTensorType origType = op.getScatterIndices().getType();
+    if (origType != scatterIndices.getType() && origType.getNumElements() > 0) {
+      // Masks trailing padded scatter_indices slots with sentinel values out of
+      // bounds so zero padding does not scatter phantom updates into index 0.
+      IntegerAttr oobAttr = b.getIntegerAttr(origType.getElementType(), -1);
+      auto oobConstant = stablehlo::ConstantOp::create(b, op.getLoc(), oobAttr);
+      scatterIndices = ensurePaddingWithValue(op.getLoc(), scatterIndices,
+                                              origType, oobConstant, b);
+    }
+    return padGenericOp(op, values, getTypeConverter<PaddedTypeConverter>(), b);
+  }
+};
+
 struct PadForDivisibilityPass
     : public impl::PadForDivisibilityPassBase<PadForDivisibilityPass> {
   using PadForDivisibilityPassBase::PadForDivisibilityPassBase;
@@ -1462,6 +1483,7 @@ struct PadForDivisibilityPass
     patterns.add<GenericOpPattern, PartitioningOpInterfacePattern,
                  StablehloGatherOpPattern, StablehloReshapeOpPattern>(
         typeConverter, &getContext());
+    patterns.add<StablehloScatterOpPattern>(typeConverter, &getContext());
     patterns.add<StablehloSliceOpPattern, StablehloPadOpPattern>(
         typeConverter, &getContext(), paddingCache);
     // Sharing the padding cache reference across pattern instances is safe from
