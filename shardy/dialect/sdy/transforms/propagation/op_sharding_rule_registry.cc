@@ -1061,7 +1061,9 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                              reduceWindow.getWindowDimensions(),
                              reduceWindow.getWindowStrides().value_or(
                                  ArrayRef<int64_t>()),
-                             dim)
+                             dim,
+                             reduceWindow.getBaseDilations().value_or(
+                                 ArrayRef<int64_t>()))
                              ? FactorType::kPassThrough
                              : FactorType::kPermutation;
                 },
