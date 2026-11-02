@@ -104,6 +104,7 @@ operation has compatible shardings.
 ```
 -enable-full-version                     : Enable full version.
 -mark-partial-result-with-unreduced-axes : Whether to mark partial reduction results with unreduced axes.
+-shardy-generates-device-code            : Whether Shardy generates device code (i.e. sdy-convert-global-to-local).
 ```
 
 ### `-sdy-insert-func-call-reshards`
@@ -239,10 +240,11 @@ default of `enableHaloExchange` is true.
 #### Options
 
 ```
--enable-halo-exchange     : Implement halo exchange logic for windowed operations.
--replica-count            : Number of replicas (data parallelism).
--partition-count          : Number of partitions (model parallelism).
--rng-bit-generator-unsafe : Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.
+-enable-halo-exchange         : Implement halo exchange logic for windowed operations.
+-replica-count                : Number of replicas (data parallelism).
+-partition-count              : Number of partitions (model parallelism).
+-rng-bit-generator-unsafe     : Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.
+-shardy-generates-device-code : Whether Shardy generates device code (i.e. sdy-convert-global-to-local).
 ```
 
 ### `-sdy-resolve-single-device-sharding`

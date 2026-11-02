@@ -95,7 +95,8 @@ this just-in-time, but this pass does it all at once.
 #### Options
 
 ```
--conservative-propagation : whether to disllow rules that can propagate non-divisible sharding axes
+-conservative-propagation     : whether to disllow rules that can propagate non-divisible sharding axes
+-shardy-generates-device-code : whether Shardy generates device code (i.e. sdy-convert-global-to-local)
 ```
 
 ### `-sdy-user-priority-propagate`
