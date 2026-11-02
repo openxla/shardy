@@ -22,6 +22,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
@@ -43,6 +44,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/export/utils.h"
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "stablehlo/dialect/StablehloOps.h"
 #include "stablehlo/dialect/TypeInference.h"
 
@@ -1117,12 +1119,30 @@ class StablehloConvolutionOpPattern
       return failure();
     }
 
+    SmallVector<int64_t> kernelSpatialDims = llvm::map_to_vector(
+        dimNums.getKernelSpatialDimensions(),
+        [&](int64_t rhsDim) { return rhsOrigType.getDimSize(rhsDim); });
+    ArrayRef<int64_t> windowStrides =
+        op.getWindowStrides().value_or(ArrayRef<int64_t>());
+    ArrayRef<int64_t> lhsDilation =
+        op.getLhsDilation().value_or(ArrayRef<int64_t>());
+    ArrayRef<int64_t> rhsDilation =
+        op.getRhsDilation().value_or(ArrayRef<int64_t>());
     SmallVector<int64_t> lhsEnforceDims;
     lhsEnforceDims.push_back(dimNums.getInputFeatureDimension());
-    llvm::append_range(lhsEnforceDims, dimNums.getInputSpatialDimensions());
     SmallVector<int64_t> rhsEnforceDims;
     rhsEnforceDims.push_back(dimNums.getKernelInputFeatureDimension());
-    llvm::append_range(rhsEnforceDims, dimNums.getKernelSpatialDimensions());
+    for (auto [i, dims] : llvm::enumerate(
+             llvm::zip_equal(dimNums.getInputSpatialDimensions(),
+                             dimNums.getKernelSpatialDimensions()))) {
+      auto [lhsDim, rhsDim] = dims;
+      if (isWindowPassthroughDim(op.getPadding(), kernelSpatialDims,
+                                 windowStrides, i, lhsDilation, rhsDilation)) {
+        continue;
+      }
+      lhsEnforceDims.push_back(lhsDim);
+      rhsEnforceDims.push_back(rhsDim);
+    }
 
     // Enforce zero-padding on dimensions that need to be padded, except for
     // pass-through dimensions (like batch or kernel output feature) which are

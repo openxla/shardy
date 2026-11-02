@@ -361,6 +361,40 @@ func.func private @padded_conv_feature_group_count(%arg0: tensor<1x1x1x3xf32>, %
   return %conv_out : tensor<1x1x1x3xf32>
 }
 
+// CHECK-LABEL: func @padded_conv_passthrough_spatial_dims_any
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1x7x16xf32>, %[[ARG1:.*]]: tensor<1x16x32xf32>) -> tensor<1x7x32xf32>
+func.func @padded_conv_passthrough_spatial_dims_any(%arg0: tensor<1x7x16xf32>, %arg1: tensor<1x16x32xf32>) -> tensor<1x7x32xf32> {
+  // Prepare padded LHS with unknown padding.
+  // CHECK: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD:.*]] = stablehlo.pad %[[ARG0]], %[[CST]], low = [0, 0, 0], high = [0, 1, 0], interior = [0, 0, 0] : (tensor<1x7x16xf32>, tensor<f32>) -> tensor<1x8x16xf32>
+  // CHECK: %[[LHS_SLICE:.*]] = sdy.all_slice [{}, {"y"}, {}] %[[PAD]] out_sharding=<@mesh_4_2, [{}, {"y"}, {}]> : tensor<1x8x16xf32>
+  // CHECK: %[[LHS_ABS:.*]] = stablehlo.abs %[[LHS_SLICE]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}, {}]>]>} : tensor<1x8x16xf32>
+
+  // Verify no select/compare is generated for window-passthrough spatial dim.
+  // CHECK-NOT: stablehlo.select
+  // CHECK-NOT: stablehlo.compare
+
+  // Perform convolution and trim result.
+  // CHECK: %[[CONV:.*]] = stablehlo.convolution(%[[LHS_ABS]], %[[ARG1]])
+  // CHECK-SAME: dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f]
+  // CHECK-SAME: window = {stride = [1], pad = {{\[\[}}0, 0]]}
+  // CHECK-SAME: {batch_group_count = 1 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}]>]>}
+  // CHECK-SAME: : (tensor<1x8x16xf32>, tensor<1x16x32xf32>) -> tensor<1x8x32xf32>
+  // CHECK: %[[TRIM:.*]] = stablehlo.slice %[[CONV]] [0:1, 0:7, 0:32] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}]>]>} : (tensor<1x8x32xf32>) -> tensor<1x7x32xf32>
+  // CHECK: return %[[TRIM]] : tensor<1x7x32xf32>
+
+  %0 = sdy.all_slice [{}, {"y"}, {}] %arg0 out_sharding=<@mesh_4_2, [{}, {"y"}, {}]> : tensor<1x7x16xf32>
+  %1 = stablehlo.abs %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}, {}]>]>} : tensor<1x7x16xf32>
+  %conv_out = stablehlo.convolution(%1, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {
+      stride = [1],
+      pad = [[0, 0]]
+    } {batch_group_count = 1 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}]>]>}
+    : (tensor<1x7x16xf32>, tensor<1x16x32xf32>) -> tensor<1x7x32xf32>
+  return %conv_out : tensor<1x7x32xf32>
+}
+
 // -----
 
 sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>

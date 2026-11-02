@@ -361,6 +361,18 @@ func.func @conv_lhs_spatial_dim_size_one(%arg0: tensor<2x1x192xf32>, %arg1: tens
   return %0 : tensor<2x4x64xf32>
 }
 
+// CHECK-LABEL: func @conv_passthrough_spatial_dim
+func.func @conv_passthrough_spatial_dim(%arg0: tensor<2x16x192xf32>, %arg1: tensor<1x192x64xf32>) -> tensor<2x16x64xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [m, k, l])->([i, j, l]) {i=2, j=16, k=192, l=64, m=1} reduction={k}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f]x[0, i, o]->[b, 0, f],
+    window = {stride = [1], pad = [[0, 0]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64
+    } : (tensor<2x16x192xf32>, tensor<1x192x64xf32>) -> tensor<2x16x64xf32>
+  return %0 : tensor<2x16x64xf32>
+}
+
 // CHECK-LABEL: func @custom_call_compact_wy_helper
 func.func @custom_call_compact_wy_helper(%arg0: tensor<128x128xf32>) -> tensor<128x128xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=128, j=128}>
