@@ -638,23 +638,25 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     }
 
     SDY_CHECK(gatheringDims.size() > 1);
-    int64_t firstGatheringDim = gatheringDims.front();
 
-    // Add a dimension of size 1 at `firstGatheringDim` to gather all
-    // partitions at once, keeping dimensions 0..firstGatheringDim-1 untouched.
-    SmallVector<int64_t> tmpShape =
-        llvm::to_vector(localShape.take_front(firstGatheringDim));
+    // Always add a leading dimension of size 1 at dimension 0 to perform the
+    // All-Gather along dimension 0. Even when firstGatheringDim > 0, gathering
+    // along dimension 0 is preferred over gathering along firstGatheringDim
+    // because dimension 0 is contiguous in major-to-minor memory layout,
+    // allowing the hardware collective engine to transfer full contiguous
+    // buffers without strided slice interleaving or memory re-packing.
+    SmallVector<int64_t> tmpShape;
+    tmpShape.reserve(localShape.size() + 1);
     tmpShape.push_back(1);
-    llvm::append_range(tmpShape, localShape.drop_front(firstGatheringDim));
+    llvm::append_range(tmpShape, localShape);
     Value curInput = stablehlo::ReshapeOp::create(
         rewriter, op.getLoc(),
         RankedTensorType::get(tmpShape, localType.getElementType()), input);
 
-    // Perform All-Gather on `firstGatheringDim`.
+    // Perform All-Gather on dimension 0.
     Attribute replicaGroups;
-    std::tie(replicaGroups, tmpShape[firstGatheringDim]) =
-        getReplicaGroupsAndSize(allGatheringAxes, mesh, meshOrRef, enableRGV3,
-                                rewriter);
+    std::tie(replicaGroups, tmpShape[0]) = getReplicaGroupsAndSize(
+        allGatheringAxes, mesh, meshOrRef, enableRGV3, rewriter);
     auto channelHandle = stablehlo::ChannelHandleAttr::get(
         ctx, /*handle=*/conversionState.getNextChannelId(),
         kCrossPartitionChannelHandleType);
@@ -663,10 +665,10 @@ class AllGatherOpPattern : public OpConversionPattern<AllGatherOp> {
     auto allGather = stablehlo::AllGatherOp::create(
         rewriter, op.getLoc(),
         TypeRange{RankedTensorType::get(tmpShape, localType.getElementType())},
-        curInput, /*all_gather_dim=*/firstGatheringDim, replicaGroups,
-        channelHandle, /*use_global_device_ids=*/true);
+        curInput, /*all_gather_dim=*/0, replicaGroups, channelHandle,
+        /*use_global_device_ids=*/true);
     curInput = distributeCombinedDimToTargetDims(
-        op.getLoc(), allGather.getResult(0), firstGatheringDim,
+        op.getLoc(), allGather.getResult(0), /*combinedDim=*/0,
         gatheringFactors, gatheringDims, rewriter);
 
     conversionState.removeToConvertOp(op);
