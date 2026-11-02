@@ -31,7 +31,8 @@ namespace sdy {
 //
 // NOTE: an empty rule {([])->([])} will be created for scalar ops.
 OpShardingRuleAttr createOpShardingRule(Operation* op,
-                                        bool conservativePropagation = false);
+                                        bool conservativePropagation = false,
+                                        bool shardyGeneratesDeviceCode = false);
 
 // Gets the sharding rule if it exists already on the op. Else creates one.
 //
@@ -39,9 +40,9 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
 // sharding rule.
 //
 // See `createOpShardingRule` for more info.
-OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
-                                           bool conservativePropagation = false,
-                                           bool setShardingRuleOnOp = true);
+OpShardingRuleAttr getOrCreateShardingRule(
+    Operation* op, bool conservativePropagation = false,
+    bool setShardingRuleOnOp = true, bool shardyGeneratesDeviceCode = false);
 
 // Helper to check if a window dimension has no sliding window offset/padding
 // (i.e., start/end padding is 0, window dimension is 1, stride is 1, and

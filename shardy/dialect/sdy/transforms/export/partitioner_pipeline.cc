@@ -49,6 +49,8 @@ void addPartitionerPipeline(OpPassManager& pm,
     resolveFactorsOptions.replicaCount = options.replicaCount;
     resolveFactorsOptions.partitionCount = options.partitionCount;
     resolveFactorsOptions.rngBitGeneratorUnsafe = options.rngBitGeneratorUnsafe;
+    resolveFactorsOptions.shardyGeneratesDeviceCode =
+        options.shardyGeneratesDeviceCode;
     pm.addPass(
         createShardyResolvePermutationFactorsPass(resolveFactorsOptions));
   }

@@ -234,13 +234,14 @@ bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
 
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
                                            bool conservativePropagation,
-                                           bool setShardingRuleOnOp) {
+                                           bool setShardingRuleOnOp,
+                                           bool shardyGeneratesDeviceCode) {
   if (auto shardingRule =
           op->getAttrOfType<OpShardingRuleAttr>(kShardingRuleAttr)) {
     return shardingRule;
   }
-  OpShardingRuleAttr shardingRule =
-      createOpShardingRule(op, conservativePropagation);
+  OpShardingRuleAttr shardingRule = createOpShardingRule(
+      op, conservativePropagation, shardyGeneratesDeviceCode);
   if (setShardingRuleOnOp && shardingRule) {
     op->setAttr(kShardingRuleAttr, shardingRule);
   }
@@ -248,7 +249,9 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
 }
 
 OpShardingRuleAttr createOpShardingRule(Operation* op,
-                                        const bool conservativePropagation) {
+                                        const bool conservativePropagation,
+                                        const bool shardyGeneratesDeviceCode) {
+  (void)shardyGeneratesDeviceCode;
   return TypeSwitch<Operation*, OpShardingRuleAttr>(op)
       .Case<ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
             stablehlo::AllReduceOp, stablehlo::AndOp, stablehlo::Atan2Op,

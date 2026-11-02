@@ -141,6 +141,11 @@ def InsertExplicitReshardsPass : Pass<"sdy-insert-explicit-reshards", "func::Fun
              "mark-partial-result-with-unreduced-axes",
              "bool", /*default=*/"false",
              "Whether to mark partial reduction results with unreduced axes.">,
+      Option<"shardyGeneratesDeviceCode",
+             "shardy-generates-device-code",
+             "bool", /*default=*/"true",
+             "Whether Shardy generates device code (i.e. "
+             "sdy-convert-global-to-local).">,
     ];
 }
 
@@ -367,7 +372,12 @@ def ShardyResolvePermutationFactorsPass : Pass<"sdy-resolve-permutation-factors"
              "Number of partitions (model parallelism).">,
       Option<"rngBitGeneratorUnsafe", "rng-bit-generator-unsafe",
              "bool", /*default=*/"true",
-             "Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.">
+             "Whether to allow unsafe partitioning of stablehlo.rng_bit_generator.">,
+      Option<"shardyGeneratesDeviceCode",
+             "shardy-generates-device-code",
+             "bool", /*default=*/"true",
+             "Whether Shardy generates device code (i.e. "
+             "sdy-convert-global-to-local).">,
     ];
 }
 

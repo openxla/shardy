@@ -916,10 +916,17 @@ Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
   SDY_CHECK(false) << "Unsupported element type for reduction identity";
 }
 
+bool shardyGeneratesDeviceCode(bool avoidExportForPartitioning,
+                               bool enablePerInstructionPartitioning,
+                               PartitionerStage partitionerStage) {
+  return !avoidExportForPartitioning && !enablePerInstructionPartitioning &&
+         partitionerStage == PartitionerStage::kConvertGlobalToLocal;
+}
+
 bool shardyGeneratesDeviceCode(const PropagationOptions& options) {
-  return !options.avoidExportForPartitioning &&
-         !options.enablePerInstructionPartitioning &&
-         options.partitionerStage == PartitionerStage::kConvertGlobalToLocal;
+  return shardyGeneratesDeviceCode(options.avoidExportForPartitioning,
+                                   options.enablePerInstructionPartitioning,
+                                   options.partitionerStage);
 }
 
 }  // namespace sdy

@@ -33,6 +33,7 @@ struct PartitionerPipelineOptions {
   int64_t replicaCount = 1;
   int64_t partitionCount = 1;
   bool rngBitGeneratorUnsafe = true;
+  bool shardyGeneratesDeviceCode = false;
 };
 
 // Populates `pm` with the stage-gated partitioner passes up to

@@ -152,6 +152,10 @@ def PopulateOpShardingRulesPass : Pass<"sdy-populate-op-sharding-rules", "func::
     Option<"conservativePropagation", "conservative-propagation", "bool",
            /*default=*/"false",
            "whether to disllow rules that can propagate non-divisible sharding "
-           "axes">
+           "axes">,
+    Option<"shardyGeneratesDeviceCode", "shardy-generates-device-code",
+           "bool", /*default=*/"false",
+           "whether Shardy generates device code (i.e. "
+           "sdy-convert-global-to-local)">
   ];
 }

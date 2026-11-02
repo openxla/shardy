@@ -49,6 +49,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/propagation_options.h"
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/debugging/source_sharding.h"
 #include "shardy/dialect/sdy/transforms/propagation/factor_propagation.h"
 #include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_builder.h"
@@ -510,19 +511,21 @@ class PropagateRegisteredOp : public RewritePattern {
       const SymbolUserMap& userMap,
       GetDirectionToPropagateFn getDirectionToPropagate,
       const FactorPropagation& factorPropagation, bool conservativePropagation,
-      const ShardingGroupMap& shardingGroupMap)
+      bool shardyGeneratesDeviceCode, const ShardingGroupMap& shardingGroupMap)
       : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context),
         symbolTable(symbolTable),
         userMap(userMap),
         getDirectionToPropagate(getDirectionToPropagate),
         factorPropagation(factorPropagation),
         conservativePropagation(conservativePropagation),
+        shardyGeneratesDeviceCode(shardyGeneratesDeviceCode),
         shardingGroupMap(shardingGroupMap) {}
 
   LogicalResult matchAndRewrite(Operation* op,
                                 PatternRewriter& rewriter) const override {
-    OpShardingRuleAttr shardingRule =
-        getOrCreateShardingRule(op, conservativePropagation);
+    OpShardingRuleAttr shardingRule = getOrCreateShardingRule(
+        op, conservativePropagation, /*setShardingRuleOnOp=*/true,
+        shardyGeneratesDeviceCode);
     if (!shardingRule) {
       // Rule doesn't exist for ops that aren't known/registered.
       return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
@@ -544,6 +547,7 @@ class PropagateRegisteredOp : public RewritePattern {
   GetDirectionToPropagateFn getDirectionToPropagate;
   const FactorPropagation& factorPropagation;
   bool conservativePropagation;
+  bool shardyGeneratesDeviceCode;
   const ShardingGroupMap& shardingGroupMap;
 };
 
@@ -816,7 +820,7 @@ LogicalResult BasicPropagationPassImpl::propagate(
       shardingGroupMap);
   patterns.add<PropagateRegisteredOp>(
       context, symbolTable, userMap, getDirectionToPropagate, factorPropagation,
-      conservativePropagation, shardingGroupMap);
+      conservativePropagation, shardyGeneratesDeviceCode, shardingGroupMap);
   // We only need a single iteration (and another to confirm convergence), since
   // we make sure ops whose sharding changes are added back to the worklist.
   // Only issue a warning if failed to converge in debug builds, otherwise we
@@ -897,6 +901,7 @@ void BasicPropagationPassImpl::setPropagationOptions(
   conservativePropagation = options.conservativePropagation;
   debugShardingOrigins = options.debugShardingOrigins;
   debugPropagationEdgeSharding = options.debugPropagationEdgeSharding;
+  shardyGeneratesDeviceCode = sdy::shardyGeneratesDeviceCode(options);
 }
 
 std::unique_ptr<Pass> createBasicPropagationPass(

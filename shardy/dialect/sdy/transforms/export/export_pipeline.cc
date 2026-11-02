@@ -26,6 +26,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/common/passes.h"
 #include "shardy/dialect/sdy/transforms/export/partitioner_pipeline.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"
+#include "shardy/dialect/sdy/transforms/export/utils.h"
 
 namespace mlir {
 namespace sdy {
@@ -43,6 +44,10 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
   passOptions.markPartialResultWithUnreducedAxes =
       options.markPartialResultWithUnreducedAxes ||
       options.partitionerStage != PartitionerStage::kUnspecified;
+  bool shardyGeneratesDeviceCode = sdy::shardyGeneratesDeviceCode(
+      options.avoidExportForPartitioning,
+      options.enablePerInstructionPartitioning, options.partitionerStage);
+  passOptions.shardyGeneratesDeviceCode = shardyGeneratesDeviceCode;
   pm.addNestedPass<func::FuncOp>(createInsertExplicitReshardsPass(passOptions));
 
   if (options.enablePerInstructionPartitioning) {
@@ -72,6 +77,7 @@ void runShardyPartitioner(OpPassManager& pm, int& dumpIndex,
     pipelineOptions.replicaCount = options.replicaCount;
     pipelineOptions.partitionCount = options.partitionCount;
     pipelineOptions.rngBitGeneratorUnsafe = options.rngBitGeneratorUnsafe;
+    pipelineOptions.shardyGeneratesDeviceCode = shardyGeneratesDeviceCode;
     addPartitionerPipeline(pm, pipelineOptions);
   } else if (options.enableInsertExplicitCollectives) {
     pm.addPass(mlir::sdy::createSaveModuleOpPass(
