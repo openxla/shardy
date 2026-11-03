@@ -374,12 +374,23 @@ Value ensurePaddingWithKind(
   if (currentKind && *currentKind == requiredKind) {
     return inputVal;
   }
+  // No need to ensure requiredKind if none of the enforced dimensions
+  // are padded.
+  if (dimsToEnforce && !llvm::any_of(*dimsToEnforce, [&](int64_t dim) {
+        return origType.getDimSize(dim) != paddedType.getDimSize(dim);
+      })) {
+    return inputVal;
+  }
   Value newPaddingScalar =
       createConstant(loc, paddedType.getElementType(), requiredKind, b);
   Value select = ensurePaddingWithValue(loc, inputVal, origType,
                                         newPaddingScalar, b, dimsToEnforce);
   if (select != inputVal && !dimsToEnforce) {
     cache.setPadding(select, requiredKind);
+  }
+  if (select == inputVal) {
+    // Erase the unused constant value.
+    newPaddingScalar.getDefiningOp()->erase();
   }
 
   return select;
@@ -1122,6 +1133,8 @@ class StablehloConvolutionOpPattern
       return failure();
     }
 
+    auto paddedLhsType = cast<RankedTensorType>(lhs.getType());
+    auto paddedRhsType = cast<RankedTensorType>(rhs.getType());
     SmallVector<int64_t> kernelSpatialDims = llvm::map_to_vector(
         dimNums.getKernelSpatialDimensions(),
         [&](int64_t rhsDim) { return rhsOrigType.getDimSize(rhsDim); });
@@ -1131,6 +1144,9 @@ class StablehloConvolutionOpPattern
         op.getLhsDilation().value_or(ArrayRef<int64_t>());
     ArrayRef<int64_t> rhsDilation =
         op.getRhsDilation().value_or(ArrayRef<int64_t>());
+    SmallVector<int64_t> newWindowStrides(windowStrides);
+    SmallVector<int64_t> newLhsDilation(lhsDilation);
+    bool updatedWindowAttrs = false;
     SmallVector<int64_t> lhsEnforceDims;
     lhsEnforceDims.push_back(dimNums.getInputFeatureDimension());
     SmallVector<int64_t> rhsEnforceDims;
@@ -1139,6 +1155,26 @@ class StablehloConvolutionOpPattern
              llvm::zip_equal(dimNums.getInputSpatialDimensions(),
                              dimNums.getKernelSpatialDimensions()))) {
       auto [lhsDim, rhsDim] = dims;
+      if (isBatchAsSpatialDim(op, i)) {
+        int64_t paddedLhsB = paddedLhsType.getDimSize(lhsDim);
+        int64_t paddedRhsB = paddedRhsType.getDimSize(rhsDim);
+        if (paddedLhsB == paddedRhsB) {
+          if (paddedLhsB != lhsOrigType.getDimSize(lhsDim)) {
+            if (newWindowStrides.empty()) {
+              newWindowStrides.assign(
+                  dimNums.getInputSpatialDimensions().size(), 1);
+            }
+            if (newLhsDilation.empty()) {
+              newLhsDilation.assign(dimNums.getInputSpatialDimensions().size(),
+                                    1);
+            }
+            newWindowStrides[i] = std::max<int64_t>(1, paddedLhsB - 1);
+            newLhsDilation[i] = paddedLhsB;
+            updatedWindowAttrs = true;
+          }
+          continue;
+        }
+      }
       if (isWindowPassthroughDim(op.getPadding(), kernelSpatialDims,
                                  windowStrides, i, lhsDilation, rhsDilation)) {
         continue;
@@ -1161,13 +1197,11 @@ class StablehloConvolutionOpPattern
     int64_t origInputFeatureSize =
         lhsOrigType.getDimSize(dimNums.getInputFeatureDimension());
     int64_t paddedInputFeatureSize =
-        cast<RankedTensorType>(paddedLhs.getType())
-            .getDimSize(dimNums.getInputFeatureDimension());
+        paddedLhsType.getDimSize(dimNums.getInputFeatureDimension());
     int64_t origKernelOutputFeatureSize =
         rhsOrigType.getDimSize(dimNums.getKernelOutputFeatureDimension());
     int64_t paddedKernelOutputFeatureSize =
-        cast<RankedTensorType>(paddedRhs.getType())
-            .getDimSize(dimNums.getKernelOutputFeatureDimension());
+        paddedRhsType.getDimSize(dimNums.getKernelOutputFeatureDimension());
     bool isFeatureGroupPadded =
         paddedInputFeatureSize > origInputFeatureSize ||
         paddedKernelOutputFeatureSize > origKernelOutputFeatureSize;
@@ -1187,8 +1221,7 @@ class StablehloConvolutionOpPattern
     int64_t origInputBatchSize =
         lhsOrigType.getDimSize(dimNums.getInputBatchDimension());
     int64_t paddedInputBatchSize =
-        cast<RankedTensorType>(paddedLhs.getType())
-            .getDimSize(dimNums.getInputBatchDimension());
+        paddedLhsType.getDimSize(dimNums.getInputBatchDimension());
     bool isBatchGroupPadded =
         paddedInputBatchSize > origInputBatchSize ||
         paddedKernelOutputFeatureSize > origKernelOutputFeatureSize;
@@ -1207,7 +1240,13 @@ class StablehloConvolutionOpPattern
     SmallVector<ShapedTypeComponents> inferredReturnShapes;
     if (failed(mlir::hlo::inferConvolutionOp(
             op->getLoc(), paddedLhs.getType(), paddedRhs.getType(),
-            op.getWindowStrides(), op.getPaddingAttr(), op.getLhsDilation(),
+            updatedWindowAttrs
+                ? std::optional<ArrayRef<int64_t>>(newWindowStrides)
+                : op.getWindowStrides(),
+            op.getPadding(),
+            updatedWindowAttrs
+                ? std::optional<ArrayRef<int64_t>>(newLhsDilation)
+                : op.getLhsDilation(),
             op.getRhsDilation(), op.getWindowReversal(),
             dimNums.getInputBatchDimension(),
             dimNums.getInputFeatureDimension(),
@@ -1255,6 +1294,12 @@ class StablehloConvolutionOpPattern
                          rewriter.getI64IntegerAttr(newFeatureGroupCount));
     state.attributes.set(op.getBatchGroupCountAttrName(),
                          rewriter.getI64IntegerAttr(newBatchGroupCount));
+    if (updatedWindowAttrs) {
+      state.attributes.set(op.getWindowStridesAttrName(),
+                           rewriter.getDenseI64ArrayAttr(newWindowStrides));
+      state.attributes.set(op.getLhsDilationAttrName(),
+                           rewriter.getDenseI64ArrayAttr(newLhsDilation));
+    }
     Operation* newOp = rewriter.create(state);
 
     TensorShardingAttr outSharding = getSharding(result);

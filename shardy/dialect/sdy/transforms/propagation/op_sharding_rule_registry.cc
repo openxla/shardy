@@ -38,6 +38,7 @@ limitations under the License.
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
@@ -232,6 +233,52 @@ bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
          (rhsDilations.empty() || rhsDilations[dim] == 1);
 }
 
+bool isBatchAsSpatialDim(stablehlo::ConvolutionOp conv, int64_t spatialDimIdx) {
+  stablehlo::ConvDimensionNumbersAttr dimNums = conv.getDimensionNumbers();
+  SDY_CHECK(spatialDimIdx >= 0 &&
+            spatialDimIdx < dimNums.getInputSpatialDimensions().size() &&
+            spatialDimIdx < dimNums.getKernelSpatialDimensions().size() &&
+            spatialDimIdx < dimNums.getOutputSpatialDimensions().size());
+  int64_t lhsDim = dimNums.getInputSpatialDimensions()[spatialDimIdx];
+  int64_t rhsDim = dimNums.getKernelSpatialDimensions()[spatialDimIdx];
+  int64_t outDim = dimNums.getOutputSpatialDimensions()[spatialDimIdx];
+  int64_t lhsDimSize = conv.getLhs().getType().getDimSize(lhsDim);
+  int64_t rhsDimSize = conv.getRhs().getType().getDimSize(rhsDim);
+  int64_t outDimSize = conv.getType().getDimSize(outDim);
+  if (lhsDimSize <= 1 || lhsDimSize != rhsDimSize || lhsDimSize != outDimSize) {
+    return false;
+  }
+  if (std::optional<DenseIntElementsAttr> padding = conv.getPadding();
+      padding.has_value()) {
+    auto paddingStart =
+        padding->getValues<int64_t>().begin() + 2 * spatialDimIdx;
+    if (*paddingStart != 0 || *std::next(paddingStart) != 0) {
+      return false;
+    }
+  }
+  ArrayRef<int64_t> windowStrides =
+      conv.getWindowStrides().value_or(ArrayRef<int64_t>());
+  int64_t stride = windowStrides.empty() ? 1 : windowStrides[spatialDimIdx];
+  if (stride != lhsDimSize - 1) {
+    return false;
+  }
+  ArrayRef<int64_t> lhsDilation =
+      conv.getLhsDilation().value_or(ArrayRef<int64_t>());
+  int64_t lhsDil = lhsDilation.empty() ? 1 : lhsDilation[spatialDimIdx];
+  if (lhsDil != lhsDimSize) {
+    return false;
+  }
+  ArrayRef<int64_t> rhsDilation =
+      conv.getRhsDilation().value_or(ArrayRef<int64_t>());
+  int64_t rhsDil = rhsDilation.empty() ? 1 : rhsDilation[spatialDimIdx];
+  if (rhsDil != 1) {
+    return false;
+  }
+  ArrayRef<bool> windowReversal =
+      conv.getWindowReversal().value_or(ArrayRef<bool>());
+  return windowReversal.empty() || !windowReversal[spatialDimIdx];
+}
+
 OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
                                            bool conservativePropagation,
                                            bool setShardingRuleOnOp,
@@ -251,7 +298,6 @@ OpShardingRuleAttr getOrCreateShardingRule(Operation* op,
 OpShardingRuleAttr createOpShardingRule(Operation* op,
                                         const bool conservativePropagation,
                                         const bool shardyGeneratesDeviceCode) {
-  (void)shardyGeneratesDeviceCode;
   return TypeSwitch<Operation*, OpShardingRuleAttr>(op)
       .Case<ShardingConstraintOp, stablehlo::AbsOp, stablehlo::AddOp,
             stablehlo::AllReduceOp, stablehlo::AndOp, stablehlo::Atan2Op,
@@ -451,7 +497,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                             getFactorType)
             .build();
       })
-      .Case([conservativePropagation](stablehlo::ConvolutionOp conv) {
+      .Case([conservativePropagation,
+             shardyGeneratesDeviceCode](stablehlo::ConvolutionOp conv) {
         stablehlo::ConvDimensionNumbersAttr dimNums =
             conv.getDimensionNumbers();
 
@@ -496,6 +543,13 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                                    dimNums.getKernelSpatialDimensions(),
                                    dimNums.getOutputSpatialDimensions()))) {
             auto [lhsDim, rhsDim, outDim] = dims;
+            if (shardyGeneratesDeviceCode &&
+                isBatchAsSpatialDim(conv, spatialDimIdx)) {
+              builder.addFactor({lhsDim, rhsDim}, outDim,
+                                outType.getDimSize(outDim),
+                                FactorType::kPassThrough);
+              continue;
+            }
             // The input spatial dimension can be sharded along either the
             // number of windows (corresponds to the output spatial dimension)
             // or the window size (corresponds to the kernel spatial dimension),

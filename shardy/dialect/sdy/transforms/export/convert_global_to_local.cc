@@ -55,6 +55,7 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/common/util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "shardy/dialect/sdy/transforms/export/utils.h"
+#include "shardy/dialect/sdy/transforms/propagation/op_sharding_rule_registry.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -1804,12 +1805,51 @@ class StablehloConvolutionOpPattern
       }
     };
 
+    auto getAxes = [&](TensorShardingAttr sharding, int64_t dim) {
+      return (sharding && dim < sharding.getRank())
+                 ? sharding.getDimShardings()[dim].getAxes()
+                 : ArrayRef<AxisRefAttr>();
+    };
+
     stablehlo::ConvDimensionNumbersAttr dimNums = op.getDimensionNumbers();
     // Check Kernel Input Feature dimension (Contracting).
     addRhsReductionAxes(dimNums.getKernelInputFeatureDimension());
-    // Check Kernel Spatial dimensions (Contracting).
-    for (int64_t spatialDim : dimNums.getKernelSpatialDimensions()) {
-      addRhsReductionAxes(spatialDim);
+    // Check Kernel Spatial dimensions (Contracting, unless it is an
+    // embarrassingly parallel batch-as-spatial dimension sharded identically on
+    // LHS, RHS, and output).
+    auto localLhsType = cast<RankedTensorType>(adaptor.getLhs().getType());
+    auto localRhsType = cast<RankedTensorType>(adaptor.getRhs().getType());
+    SmallVector<int64_t> newWindowStrides(
+        op.getWindowStrides().value_or(ArrayRef<int64_t>()));
+    SmallVector<int64_t> newLhsDilation(
+        op.getLhsDilation().value_or(ArrayRef<int64_t>()));
+    bool updatedWindowAttrs = false;
+    for (auto [i, dims] : llvm::enumerate(
+             llvm::zip_equal(dimNums.getInputSpatialDimensions(),
+                             dimNums.getKernelSpatialDimensions(),
+                             dimNums.getOutputSpatialDimensions()))) {
+      auto [lhsDim, rhsDim, outDim] = dims;
+      if (isBatchAsSpatialDim(op, i) &&
+          getAxes(lhsSharding, lhsDim) == getAxes(rhsSharding, rhsDim) &&
+          getAxes(resultSharding, outDim) == getAxes(rhsSharding, rhsDim)) {
+        int64_t localB = localLhsType.getDimSize(lhsDim);
+        if (localB > 0 && localB != op.getLhs().getType().getDimSize(lhsDim) &&
+            localB == localRhsType.getDimSize(rhsDim)) {
+          if (newWindowStrides.empty()) {
+            newWindowStrides.assign(dimNums.getInputSpatialDimensions().size(),
+                                    1);
+          }
+          if (newLhsDilation.empty()) {
+            newLhsDilation.assign(dimNums.getInputSpatialDimensions().size(),
+                                  1);
+          }
+          newWindowStrides[i] = std::max<int64_t>(1, localB - 1);
+          newLhsDilation[i] = localB;
+          updatedWindowAttrs = true;
+        }
+        continue;
+      }
+      addRhsReductionAxes(rhsDim);
     }
 
     bool introducesPartialResult = true;
@@ -1818,12 +1858,6 @@ class StablehloConvolutionOpPattern
       introducesPartialResult = doesOpIntroducePartialResult(
           op, reductionAxes, "convolution", converter);
     }
-
-    auto getAxes = [&](TensorShardingAttr sharding, int64_t dim) {
-      return (sharding && dim < sharding.getRank())
-                 ? sharding.getDimShardings()[dim].getAxes()
-                 : ArrayRef<AxisRefAttr>();
-    };
 
     // feature_group_count constrains the input feature dimension (LHS) and the
     // kernel output feature dimension (RHS). We only look at the kernel
@@ -1839,10 +1873,16 @@ class StablehloConvolutionOpPattern
         op.getBatchGroupCount(),
         getAxes(lhsSharding, dimNums.getInputBatchDimension()), mesh);
 
+    DenseI64ArrayAttr windowStridesAttr =
+        updatedWindowAttrs ? rewriter.getDenseI64ArrayAttr(newWindowStrides)
+                           : op.getWindowStridesAttr();
+    DenseI64ArrayAttr lhsDilationAttr =
+        updatedWindowAttrs ? rewriter.getDenseI64ArrayAttr(newLhsDilation)
+                           : op.getLhsDilationAttr();
     auto localConv = stablehlo::ConvolutionOp::create(
         rewriter, op.getLoc(), converter->convertType(op.getResult()),
-        adaptor.getLhs(), adaptor.getRhs(), op.getWindowStridesAttr(),
-        op.getPaddingAttr(), op.getLhsDilationAttr(), op.getRhsDilationAttr(),
+        adaptor.getLhs(), adaptor.getRhs(), windowStridesAttr,
+        op.getPaddingAttr(), lhsDilationAttr, op.getRhsDilationAttr(),
         op.getWindowReversalAttr(), dimNums, localFeatureGroupCount,
         localBatchGroupCount, op.getPrecisionConfigAttr());
 

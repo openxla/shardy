@@ -115,6 +115,7 @@ cc_library(
     hdrs = ["op_sharding_rule_registry.h"],
     deps = [
         ":op_sharding_rule_builder",
+        "//shardy/common:logging",
         "//shardy/dialect/sdy/ir:dialect",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",

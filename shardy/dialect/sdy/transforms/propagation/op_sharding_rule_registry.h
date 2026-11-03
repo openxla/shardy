@@ -18,6 +18,7 @@ limitations under the License.
 
 #include "mlir/IR/Operation.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
+#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -52,6 +53,12 @@ bool isWindowPassthroughDim(std::optional<DenseIntElementsAttr> operandPadding,
                             ArrayRef<int64_t> windowStrides, int64_t dim,
                             ArrayRef<int64_t> lhsDilations = {},
                             ArrayRef<int64_t> rhsDilations = {});
+
+// Helper to check if a convolution spatial dimension encodes a batch dimension
+// represented as a spatial dimension: lhs_dim == rhs_dim == out_dim == B > 1,
+// pad == 0, window_stride == B - 1, lhs_dilation == B, rhs_dilation == 1, and
+// no window reversal.
+bool isBatchAsSpatialDim(stablehlo::ConvolutionOp conv, int64_t spatialDimIdx);
 
 }  // namespace sdy
 }  // namespace mlir

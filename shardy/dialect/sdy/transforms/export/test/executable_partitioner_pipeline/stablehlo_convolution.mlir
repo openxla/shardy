@@ -56,6 +56,23 @@ func.func @parallel_convolution_stride_padding(
   return %0 : tensor<1x1x8x14xf32>
 }
 
+// Convolution with a parallel batch-as-spatial dimension (spatial dim 0,
+// sharded on "x").
+func.func @parallel_convolution_batch_as_spatial(
+  %arg0: tensor<1x4x8x1xf32> {sdy.sharding = #sdy.sharding<@mesh_x2, [{}, {"x"}, {}, {}]>},
+  %arg1: tensor<4x3x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh_x2, [{"x"}, {}, {}, {}]>})
+  -> (tensor<1x4x8x1xf32> {sdy.sharding = #sdy.sharding<@mesh_x2, [{}, {"x"}, {}, {}]>}) {
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f] x [0, 1, i, o] -> [b, 0, 1, f],
+    window = {stride = [3, 1], pad = [[0, 0], [1, 1]], lhs_dilate = [4, 1]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2, [{}, {"x"}, {}, {}]>]>
+    }
+    : (tensor<1x4x8x1xf32>, tensor<4x3x1x1xf32>) -> tensor<1x4x8x1xf32>
+  return %0 : tensor<1x4x8x1xf32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -127,6 +144,27 @@ func.func @main() {
     -> (tensor<1x1x8x14xf32>, tensor<1x1x8x14xf32>)
   "check.expect_eq"(%res_sp#0, %seq_sp) : (tensor<1x1x8x14xf32>, tensor<1x1x8x14xf32>) -> ()
   "check.expect_eq"(%res_sp#1, %seq_sp) : (tensor<1x1x8x14xf32>, tensor<1x1x8x14xf32>) -> ()
+
+  // 4. Parallel batch-as-spatial dim ("x") on 2-device mesh.
+  %iota_32 = stablehlo.iota dim = 0 : tensor<32xf32>
+  %one_32 = stablehlo.constant dense<1.000000e+00> : tensor<32xf32>
+  %seq_32 = stablehlo.add %iota_32, %one_32 : tensor<32xf32>
+  %input_1x4x8x1 = stablehlo.reshape %seq_32 : (tensor<32xf32>) -> tensor<1x4x8x1xf32>
+  %filter_4x3x1x1 = stablehlo.reshape %seq_12 : (tensor<12xf32>) -> tensor<4x3x1x1xf32>
+
+  %seq_pb = func.call @sequential_convolution_batch_as_spatial(%input_1x4x8x1, %filter_4x3x1x1)
+    : (tensor<1x4x8x1xf32>, tensor<4x3x1x1xf32>) -> tensor<1x4x8x1xf32>
+  %pb_in_0 = "stablehlo.slice"(%input_1x4x8x1) {start_indices = array<i64: 0, 0, 0, 0>, limit_indices = array<i64: 1, 2, 8, 1>, strides = array<i64: 1, 1, 1, 1>} : (tensor<1x4x8x1xf32>) -> tensor<1x2x8x1xf32>
+  %pb_in_1 = "stablehlo.slice"(%input_1x4x8x1) {start_indices = array<i64: 0, 2, 0, 0>, limit_indices = array<i64: 1, 4, 8, 1>, strides = array<i64: 1, 1, 1, 1>} : (tensor<1x4x8x1xf32>) -> tensor<1x2x8x1xf32>
+  %pb_rhs_0 = "stablehlo.slice"(%filter_4x3x1x1) {start_indices = array<i64: 0, 0, 0, 0>, limit_indices = array<i64: 2, 3, 1, 1>, strides = array<i64: 1, 1, 1, 1>} : (tensor<4x3x1x1xf32>) -> tensor<2x3x1x1xf32>
+  %pb_rhs_1 = "stablehlo.slice"(%filter_4x3x1x1) {start_indices = array<i64: 2, 0, 0, 0>, limit_indices = array<i64: 4, 3, 1, 1>, strides = array<i64: 1, 1, 1, 1>} : (tensor<4x3x1x1xf32>) -> tensor<2x3x1x1xf32>
+  %res_pb:2 = "interpreter.run_parallel"(%pb_in_0, %pb_rhs_0, %pb_in_1, %pb_rhs_1) {
+    programs = [[@parallel_convolution_batch_as_spatial, @parallel_convolution_batch_as_spatial]]
+  } : (tensor<1x2x8x1xf32>, tensor<2x3x1x1xf32>, tensor<1x2x8x1xf32>, tensor<2x3x1x1xf32>)
+    -> (tensor<1x2x8x1xf32>, tensor<1x2x8x1xf32>)
+  %par_pb = stablehlo.concatenate %res_pb#0, %res_pb#1, dim = 1
+    : (tensor<1x2x8x1xf32>, tensor<1x2x8x1xf32>) -> tensor<1x4x8x1xf32>
+  "check.expect_eq"(%par_pb, %seq_pb) : (tensor<1x4x8x1xf32>, tensor<1x4x8x1xf32>) -> ()
 
   return
 }

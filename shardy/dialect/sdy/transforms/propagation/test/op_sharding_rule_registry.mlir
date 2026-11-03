@@ -1,4 +1,5 @@
-// RUN: sdy_opt %s -sdy-populate-op-sharding-rules -verify-diagnostics 2>&1 | FileCheck %s
+// RUN: sdy_opt %s -sdy-populate-op-sharding-rules -verify-diagnostics 2>&1 | FileCheck %s --check-prefixes=CHECK,NO-CG2L
+// RUN: sdy_opt %s -sdy-populate-op-sharding-rules="shardy-generates-device-code=true" -verify-diagnostics 2>&1 | FileCheck %s --check-prefixes=CHECK,CG2L
 
 // CHECK-LABEL: func @pointwise_op
 func.func @pointwise_op(%arg0: tensor<2x1x4xf32>) -> tensor<2x1x4xf32> {
@@ -371,6 +372,19 @@ func.func @conv_passthrough_spatial_dim(%arg0: tensor<2x16x192xf32>, %arg1: tens
       feature_group_count = 1 : i64
     } : (tensor<2x16x192xf32>, tensor<1x192x64xf32>) -> tensor<2x16x64xf32>
   return %0 : tensor<2x16x64xf32>
+}
+
+// CHECK-LABEL: func @conv_batch_as_spatial_dim
+func.func @conv_batch_as_spatial_dim(%arg0: tensor<8x24x64x4xf32>, %arg1: tensor<8x38x64x1xf32>) -> tensor<8x24x38x4xf32> {
+  // NO-CG2L: sdy.sharding_rule = #sdy.op_sharding_rule<([j, i, m, l], [k, n, m, o])->([j, i, n, l]) {i=24, j=8, k=8, l=4, m=64, n=38, o=1} reduction={m} permutation={j, k}>
+  // CG2L: sdy.sharding_rule = #sdy.op_sharding_rule<([j, i, l, k], [j, m, l, n])->([j, i, m, k]) {i=24, j=8, k=4, l=64, m=38, n=1} reduction={l}>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [0, b, f, 1]x[0, o, i, 1]->[0, b, f, 1],
+    window = {stride = [7, 1], pad = [[0, 0], [0, 0]], lhs_dilate = [8, 1]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64
+    } : (tensor<8x24x64x4xf32>, tensor<8x38x64x1xf32>) -> tensor<8x24x38x4xf32>
+  return %0 : tensor<8x24x38x4xf32>
 }
 
 // CHECK-LABEL: func @custom_call_compact_wy_helper
