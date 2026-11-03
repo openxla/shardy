@@ -61,6 +61,21 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "sharding_walker_test",
+    srcs = ["sharding_walker_test.cc"],
+    deps = [
+        ":sharding_walker",
+        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/ir:testing_utils",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
 cc_library(
     name = "util",
     srcs = ["util.cc"],

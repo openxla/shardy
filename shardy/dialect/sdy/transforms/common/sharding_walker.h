@@ -51,7 +51,7 @@ using TransformShardingForTensorFn = std::function<TensorShardingAttr(
 
 // Updates the sharding of `valueOrFuncResult` by applying `transformFn` on it.
 void transformSharding(const ValueOrFuncResult& valueOrFuncResult,
-                       TransformShardingFn transformFn);
+                       const TransformShardingFn& transformFn);
 
 // Walks the given `rootOp` in forward pre-order and applies `consumeFn` on
 // any `TensorShardingAttr` encountered.
@@ -59,8 +59,8 @@ void transformSharding(const ValueOrFuncResult& valueOrFuncResult,
 // In addition, applies `consumeOpFn` on every encountered op, before consuming
 // its shardings.
 void walkShardings(
-    Operation* rootOp, ConsumeShardingFn consumeFn,
-    ConsumeOpFn consumeOpFn = [](Operation*) {});
+    Operation* rootOp, const ConsumeShardingFn& consumeFn,
+    const ConsumeOpFn& consumeOpFn = [](Operation*) {});
 
 // Walks the given `rootOp` in forward pre-order and updates any
 // `TensorShardingAttr` encountered by applying `transformFn` on it and the
@@ -69,8 +69,8 @@ void walkShardings(
 // In addition, applies `consumeOpFn` on every encountered op, before
 // transforming its shardings.
 void transformShardings(
-    Operation* rootOp, TransformShardingForTensorFn transformFn,
-    ConsumeOpFn consumeOpFn = [](Operation*) {});
+    Operation* rootOp, const TransformShardingForTensorFn& transformFn,
+    const ConsumeOpFn& consumeOpFn = [](Operation*) {});
 
 // Walks the given `rootOp` in forward pre-order and updates any
 // `TensorShardingAttr` encountered by applying `transformFn` on it.
@@ -78,8 +78,8 @@ void transformShardings(
 // In addition, applies `consumeOpFn` on every encountered op, before
 // transforming its shardings.
 void transformShardings(
-    Operation* rootOp, TransformShardingFn transformFn,
-    ConsumeOpFn consumeOpFn = [](Operation*) {});
+    Operation* rootOp, const TransformShardingFn& transformFn,
+    const ConsumeOpFn& consumeOpFn = [](Operation*) {});
 
 }  // namespace sdy
 }  // namespace mlir

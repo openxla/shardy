@@ -17,11 +17,11 @@ limitations under the License.
 
 #include <cassert>
 #include <cstdint>
-#include <functional>
 #include <variant>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Operation.h"
@@ -42,11 +42,11 @@ namespace {
 using func::FuncOp;
 
 // Applies `callback` on `sharding` if present, and calls `setShardingFn` on the
-// result.
-void processSharding(TensorShardingAttr sharding,
-                     const ValueOrFuncResult& valueOrFuncResult,
-                     TransformShardingForTensorFn callback,
-                     std::function<void(TensorShardingAttr)> setShardingFn) {
+// result if it changed.
+void processSharding(
+    TensorShardingAttr sharding, const ValueOrFuncResult& valueOrFuncResult,
+    const TransformShardingForTensorFn& callback,
+    llvm::function_ref<void(TensorShardingAttr)> setShardingFn) {
   if (!sharding) {
     return;
   }
@@ -59,7 +59,7 @@ void processSharding(TensorShardingAttr sharding,
 // Applies `callback` on the sharding of `valueOrFuncResult` if present, and
 // replaces the sharding with the result.
 void processSharding(const ValueOrFuncResult& valueOrFuncResult,
-                     TransformShardingForTensorFn callback) {
+                     const TransformShardingForTensorFn& callback) {
   if (auto* value = std::get_if<Value>(&valueOrFuncResult)) {
     processSharding(getSharding(*value), valueOrFuncResult, callback,
                     [&](TensorShardingAttr newSharding) {
@@ -76,11 +76,12 @@ void processSharding(const ValueOrFuncResult& valueOrFuncResult,
 }
 
 // Applies `callback` on each sharding in `shardings` if present, and
-// corresponding value in `values`, and calls `setShardingsFn` on the results.
+// corresponding value in `values`, and calls `setShardingsFn` on the results if
+// any sharding changed.
 void processShardings(
     ArrayRef<TensorShardingAttr> shardings, ValueRange values,
-    TransformShardingForTensorFn callback,
-    std::function<void(ArrayRef<TensorShardingAttr>)> setShardingsFn) {
+    const TransformShardingForTensorFn& callback,
+    llvm::function_ref<void(ArrayRef<TensorShardingAttr>)> setShardingsFn) {
   if (shardings.empty()) {
     return;
   }
@@ -98,17 +99,20 @@ void processShardings(
   }
 
   SmallVector<TensorShardingAttr> newShardings;
+  newShardings.reserve(shardings.size());
   for (auto [sharding, value] : llvm::zip_equal(shardings, values)) {
     newShardings.push_back(callback(sharding, value));
   }
-  setShardingsFn(newShardings);
+  if (newShardings != shardings) {
+    setShardingsFn(newShardings);
+  }
 }
 
 // Same as above but for `TensorShardingPerValueAttr`.
 void processShardings(
     TensorShardingPerValueAttr shardings, ValueRange values,
-    TransformShardingForTensorFn callback,
-    std::function<void(TensorShardingPerValueAttr)> setShardingsFn) {
+    const TransformShardingForTensorFn& callback,
+    llvm::function_ref<void(TensorShardingPerValueAttr)> setShardingsFn) {
   return processShardings(shardings.getShardings(), values, callback,
                           [&](ArrayRef<TensorShardingAttr> newShardings) {
                             setShardingsFn(TensorShardingPerValueAttr::get(
@@ -128,17 +132,17 @@ TensorShardingAttr getValueOrFuncResultSharding(
 }  // namespace
 
 void transformSharding(const ValueOrFuncResult& valueOrFuncResult,
-                       TransformShardingFn transformFn) {
+                       const TransformShardingFn& transformFn) {
   processSharding(
       valueOrFuncResult,
-      [transformFn](TensorShardingAttr newSharding, const ValueOrFuncResult&) {
+      [&transformFn](TensorShardingAttr newSharding, const ValueOrFuncResult&) {
         return transformFn(newSharding);
       });
 }
 
 void transformShardings(Operation* rootOp,
-                        TransformShardingForTensorFn transformFn,
-                        ConsumeOpFn consumeOpFn) {
+                        const TransformShardingForTensorFn& transformFn,
+                        const ConsumeOpFn& consumeOpFn) {
   rootOp->walk<WalkOrder::PreOrder>([&](Operation* op) {
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
@@ -213,22 +217,23 @@ void transformShardings(Operation* rootOp,
   });
 }
 
-void walkShardings(Operation* rootOp, ConsumeShardingFn consumeFn,
-                   ConsumeOpFn consumeOpFn) {
+void walkShardings(Operation* rootOp, const ConsumeShardingFn& consumeFn,
+                   const ConsumeOpFn& consumeOpFn) {
   transformShardings(
       rootOp,
-      [consumeFn](TensorShardingAttr sharding, const ValueOrFuncResult&) {
+      [&consumeFn](TensorShardingAttr sharding, const ValueOrFuncResult&) {
         consumeFn(sharding);
         return sharding;
       },
       consumeOpFn);
 }
 
-void transformShardings(Operation* rootOp, TransformShardingFn transformFn,
-                        ConsumeOpFn consumeOpFn) {
+void transformShardings(Operation* rootOp,
+                        const TransformShardingFn& transformFn,
+                        const ConsumeOpFn& consumeOpFn) {
   transformShardings(
       rootOp,
-      [transformFn](TensorShardingAttr newSharding, const ValueOrFuncResult&) {
+      [&transformFn](TensorShardingAttr newSharding, const ValueOrFuncResult&) {
         return transformFn(newSharding);
       },
       consumeOpFn);
