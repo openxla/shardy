@@ -85,13 +85,17 @@ cc_test(
     srcs = ["basic_propagation_test.cc"],
     deps = [
         ":passes",
+        "//shardy/dialect/sdy/ir:dialect",
         "//shardy/dialect/sdy/ir:testing_utils",
         "//shardy/dialect/sdy/transforms/common:propagation_options",
         "//shardy/dialect/sdy/transforms/import:passes",
         "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Rewrite",
         "@llvm-project//mlir:Support",
     ],
 )

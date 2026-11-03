@@ -86,20 +86,15 @@ void notifyUsersModifiedOnTerminator(
     Operation* user, const OpOperand& use, const SymbolTable& symbolTable,
     const SymbolUserMap& userMap, NotifyOpModifiedCallback notifyOpModified) {
   SDY_CHECK(user->hasTrait<OpTrait::IsTerminator>());
+  // Do not notify parent `FuncOp` or region ops: no propagation pattern matches
+  // them, and `modifyOpInPlace` triggers O(N) `DeadnessCache` region walks.
   if (!isa<func::ReturnOp>(user)) {
-    notifyOpModified(user->getParentOp());
     return;
   }
   FuncOp funcOp = user->getParentOfType<func::FuncOp>();
-  if (userMap.getUsers(funcOp).empty()) {
-    // Note the main func does not have any callers. As well as for the funcs
-    // that are not part of the call graph, such as called computations from
-    // custom calls.
-    notifyOpModified(user->getParentOp());
-    return;
-  }
-  // Iterates over all callers of given `funcOp`. Thus supports non-flat graphs.
-  for (mlir::Operation* funcUser : userMap.getUsers(funcOp)) {
+  // Iterates over all callers of `funcOp` (empty for `@main` or uncalled
+  // functions). Thus supports non-flat graphs.
+  for (Operation* funcUser : userMap.getUsers(funcOp)) {
     if (CallOp callOp = dyn_cast<CallOp>(funcUser)) {
       Value callOpResult = callOp.getResult(use.getOperandNumber());
       notifyUsersModified(callOpResult, symbolTable, userMap, notifyOpModified);
@@ -121,8 +116,8 @@ void notifyFuncOpArgumentUsersModified(
 // Special cases:
 // - If a use is a source of an `sdy.data_flow_edge` (e.g. while operand), add
 //   the latter back to the worklist.
-// - If a user is a terminator, the parent op will be added back to the worklist
-//   instead of the terminator.
+// - If a user is a `func.return` of a called function, notify the users of the
+//   corresponding `func.call` result.
 void notifyUsersModified(Value value, const SymbolTable& symbolTable,
                          const SymbolUserMap& userMap,
                          NotifyOpModifiedCallback notifyOpModified) {
@@ -161,12 +156,9 @@ void notifyShardingModified(Value value, const SymbolTable& symbolTable,
   if (auto opResult = dyn_cast<OpResult>(value)) {
     // If the value has a defining op, add it back to the worklist.
     notifyOpModified(opResult.getOwner());
-  } else {
-    // Otherwise, the value is a block argument with an attached sharding, so
-    // we need to add its parent op (e.g. manual computation) back to the
-    // worklist.
-    notifyOpModified(value.getParentBlock()->getParentOp());
   }
+  // Block arguments skip notifying parent `FuncOp`/region ops: no pattern
+  // matches them, and `modifyOpInPlace` triggers O(N) `DeadnessCache` walks.
 
   // Notify that all users of `value` are being modified, so they will be
   // added back to the worklist as well.
