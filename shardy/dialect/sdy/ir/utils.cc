@@ -253,7 +253,7 @@ template <typename SymbolTableOrOp>
 std::pair<Attribute, MeshAttr> getCommonMeshAndRef(
     ArrayRef<TensorShardingAttr> operandShardings,
     ArrayRef<TensorShardingAttr> resultsShardings,
-    SymbolTableOrOp symbolTableOrOp, const bool ignoreDeviceIds) {
+    const SymbolTableOrOp& symbolTableOrOp, const bool ignoreDeviceIds) {
   Attribute meshOrRef;
   MeshAttr mesh;
   for (TensorShardingAttr sharding : llvm::concat<const TensorShardingAttr>(
