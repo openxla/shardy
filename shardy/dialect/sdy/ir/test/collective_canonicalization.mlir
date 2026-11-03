@@ -521,4 +521,31 @@ func.func @all_gather_of_iota_multiple_uses_not_folded() -> (tensor<8x8xi32>, te
   return %0, %1 : tensor<8x8xi32>, tensor<8x8xi32>
 }
 
+// CHECK-LABEL: func @all_slice_of_all_gather_different_mesh_device_ids
+func.func @all_slice_of_all_gather_different_mesh_device_ids(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x", "y"}, {}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{"x", "y"}, {}] %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"x", "y"}, {}] %[[AG]] out_sharding=<@mesh_non_iota, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<16x2xf32>
+  %0 = sdy.all_gather [{"x", "y"}, {}] %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x2xf32>
+  %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<@mesh_non_iota, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}
 
+// CHECK-LABEL: func @all_slice_of_all_gather_inlined_meshes_different_device_ids
+func.func @all_slice_of_all_gather_inlined_meshes_different_device_ids(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<mesh<["x"=2, "y"=2]>, [{"x", "y"}, {}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{"x", "y"}, {}] %arg0 out_sharding=<mesh<["x"=2, "y"=2]>, [{}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"x", "y"}, {}] %[[AG]] out_sharding=<mesh<["x"=2, "y"=2], device_ids=[1, 0, 3, 2]>, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<16x2xf32>
+  %0 = sdy.all_gather [{"x", "y"}, {}] %arg0 out_sharding=<mesh<["x"=2, "y"=2]>, [{}, {}]> : tensor<16x2xf32>
+  %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<mesh<["x"=2, "y"=2], device_ids=[1, 0, 3, 2]>, [{"x", "y"}, {}]> : tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}
+
+// CHECK-LABEL: func @all_slice_of_all_gather_open_dim_sharding
+func.func @all_slice_of_all_gather_open_dim_sharding(%arg0 : tensor<16x2xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"y", ?}, {"x"}]>}) -> tensor<16x2xf32> {
+  // CHECK-NEXT: %0 = sdy.all_gather [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> : tensor<16x2xf32>
+  // CHECK-NEXT: return %arg0 : tensor<16x2xf32>
+  %0 = sdy.all_gather [{}, {"x"}] %arg0 out_sharding=<@mesh, [{"y"}, {}]> : tensor<16x2xf32>
+  %1 = sdy.all_slice [{}, {"x"}] %0 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<16x2xf32>
+  return %1 : tensor<16x2xf32>
+}

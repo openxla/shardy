@@ -61,9 +61,10 @@ def ReduceScatterNoopPattern : Pat<
   (replaceWithValue $tensor)>;
 
 def AllSliceOfAllGatherPattern : Pat<
-  (Sdy_AllSliceOp (Sdy_AllGatherOp $tensor, $gatheringAxes, $_), $slicingAxes, $_),
+  (Sdy_AllSliceOp (Sdy_AllGatherOp $tensor, $gatheringAxes, $_), $slicingAxes, $out_sharding),
   (replaceWithValue $tensor),
-  [(Constraint<AllMatchPred<["gatheringAxes", "slicingAxes"]>, "axes match">)]>;
+  [(Constraint<AllMatchPred<["gatheringAxes", "slicingAxes"]>, "axes match">),
+   (TensorShardingEquivalent $tensor, $out_sharding)]>;
 
 def AllReduceOfReplicatedToUnreducedPattern : Pat<
   (Sdy_AllReduceOp (Sdy_ReplicatedToUnreducedOp $tensor, $r2u_axes, $_), $u2r_axes, $reductionOp, $_),
