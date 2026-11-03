@@ -16,8 +16,10 @@ limitations under the License.
 #include <cassert>
 #include <utility>
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -51,12 +53,24 @@ namespace {
 using func::CallOp;
 using func::FuncOp;
 
+using ShardingGroupUsersMap =
+    llvm::DenseMap<OpResult, SmallVector<ShardingGroupOp, 1>>;
+
+// Caches `ShardingGroupOp` users per `OpResult` so cloning a shared constant
+// across U consumers scans its use-list once instead of O(U^2) times.
 void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
-                             OpBuilder& builder) {
-  for (Operation* user : opResult.getUsers()) {
-    if (isa<ShardingGroupOp>(user)) {
-      builder.clone(*user, mapping);
+                             OpBuilder& builder,
+                             ShardingGroupUsersMap& shardingGroupUsersMap) {
+  auto [it, inserted] = shardingGroupUsersMap.try_emplace(opResult);
+  if (inserted) {
+    for (Operation* user : opResult.getUsers()) {
+      if (auto shardingGroupOp = dyn_cast<ShardingGroupOp>(user)) {
+        it->second.push_back(shardingGroupOp);
+      }
     }
+  }
+  for (ShardingGroupOp shardingGroupOp : it->second) {
+    builder.clone(*shardingGroupOp, mapping);
   }
 }
 
@@ -119,14 +133,16 @@ bool isScalarExpansion(Operation* op) {
 // in `mapping`, and finally clones the op itself. We do not clone scalars as
 // they do not get sharded.
 void cloneSubComputation(OpResult opResult, IRMapping& mapping,
-                         SymbolTable& symbolTable) {
+                         SymbolTable& symbolTable,
+                         ShardingGroupUsersMap& shardingGroupUsersMap) {
   if (isScalar(opResult) || mapping.lookupOrNull(opResult)) {
     return;
   }
   Operation* op = opResult.getOwner();
   for (Value operand : op->getOperands()) {
     if (auto defOpResult = dyn_cast<OpResult>(operand)) {
-      cloneSubComputation(defOpResult, mapping, symbolTable);
+      cloneSubComputation(defOpResult, mapping, symbolTable,
+                          shardingGroupUsersMap);
     }
   }
 
@@ -138,7 +154,7 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping,
     callOp.setCallee(
         symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
   }
-  cloneShardingGroupUsers(opResult, mapping, builder);
+  cloneShardingGroupUsers(opResult, mapping, builder, shardingGroupUsersMap);
 }
 
 // Recursively clones all operands of the given op, that are not already cloned,
@@ -146,19 +162,20 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping,
 // sharded.
 //
 // Returns the cloned op result.
-Value cloneSubComputation(OpResult opResult, SymbolTable& symbolTable) {
+Value cloneSubComputation(OpResult opResult, SymbolTable& symbolTable,
+                          ShardingGroupUsersMap& shardingGroupUsersMap) {
   if (isScalar(opResult)) {
     return opResult;
   }
   IRMapping mapping;
-  cloneSubComputation(opResult, mapping, symbolTable);
+  cloneSubComputation(opResult, mapping, symbolTable, shardingGroupUsersMap);
   return mapping.lookup(opResult);
 }
 
 void cloneSubComputationOnOperands(
     Operation* op, const llvm::SetVector<Operation*>& constantOps,
     const llvm::SetVector<Operation*>& scalarExpansionOps,
-    SymbolTable& symbolTable) {
+    SymbolTable& symbolTable, ShardingGroupUsersMap& shardingGroupUsersMap) {
   for (OpOperand& operand : op->getOpOperands()) {
     if (auto defOpResult = dyn_cast<OpResult>(operand.get());
         defOpResult && (constantOps.contains(defOpResult.getOwner()) ||
@@ -168,7 +185,8 @@ void cloneSubComputationOnOperands(
       // `defOpResult`, and replace the `operand` with the cloned defining
       // op. The cloned constant sub-computation has only one user `op`,
       // so that it is isolated from the rest of the computation.
-      operand.set(cloneSubComputation(defOpResult, symbolTable));
+      operand.set(
+          cloneSubComputation(defOpResult, symbolTable, shardingGroupUsersMap));
     }
   }
 }
@@ -177,7 +195,8 @@ void processOp(Operation* op, FuncOp funcOp,
                llvm::SetVector<Operation*>& constantOps,
                llvm::SetVector<Operation*>& scalarExpansionOps,
                llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
-               SymbolTable& symbolTable) {
+               SymbolTable& symbolTable,
+               ShardingGroupUsersMap& shardingGroupUsersMap) {
   if (isa<FuncOp, ShardingGroupOp>(op)) {
     return;
   }
@@ -199,7 +218,7 @@ void processOp(Operation* op, FuncOp funcOp,
     return;
   }
   cloneSubComputationOnOperands(op, constantOps, scalarExpansionOps,
-                                symbolTable);
+                                symbolTable, shardingGroupUsersMap);
 }
 
 // Converts stablehlo::ConstantOp to sdy::ConstantOp.
@@ -253,9 +272,10 @@ struct ConstantOrScalarSplitterPass
                     SymbolTable& symbolTable) {
     llvm::SetVector<Operation*> constantOps;
     llvm::SetVector<Operation*> scalarExpansionOps;
+    ShardingGroupUsersMap shardingGroupUsersMap;
     region.walk<WalkOrder::PreOrder>([&](Operation* op) {
       processOp(op, funcOp, constantOps, scalarExpansionOps, nonConstFuncOps,
-                symbolTable);
+                symbolTable, shardingGroupUsersMap);
     });
     // Since for every op in `constantOps` that has a use that isn't in
     // `constantOps`, we replaced the use with a clone of the entire

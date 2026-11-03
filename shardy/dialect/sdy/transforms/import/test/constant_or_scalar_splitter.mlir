@@ -495,6 +495,27 @@ func.func @splits_const_subexpr_with_sharding_group(%arg0: tensor<4x8xi32>) -> (
 
 // -----
 
+// CHECK-LABEL: func @splits_delayed_and_multiple_sharding_groups
+func.func @splits_delayed_and_multiple_sharding_groups(%arg0: tensor<5x7xf32>, %arg1: tensor<3x5xf32>) -> (tensor<3x7xf32>, tensor<3x5xf32>) {
+  // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00> : tensor<3x5xf32>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_0]] group_id=0 : tensor<3x5xf32>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_0]] group_id=1 : tensor<3x5xf32>
+  // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00> : tensor<3x5xf32>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_1]] group_id=0 : tensor<3x5xf32>
+  // CHECK-NEXT: sdy.sharding_group %[[CONST_1]] group_id=1 : tensor<3x5xf32>
+  // CHECK-NEXT: %[[DOT_GENERAL:.*]] = stablehlo.dot_general %[[CONST_0]], %arg0, contracting_dims = [1] x [0] : (tensor<3x5xf32>, tensor<5x7xf32>) -> tensor<3x7xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[CONST_1]], %arg1 : tensor<3x5xf32>
+  // CHECK-NEXT: return %[[DOT_GENERAL]], %[[ADD]] : tensor<3x7xf32>, tensor<3x5xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<3x5xf32>
+  %1 = stablehlo.dot_general %0, %arg0, contracting_dims = [1] x [0] : (tensor<3x5xf32>, tensor<5x7xf32>) -> tensor<3x7xf32>
+  %2 = stablehlo.add %0, %arg1 : tensor<3x5xf32>
+  sdy.sharding_group %0 group_id=0 : tensor<3x5xf32>
+  sdy.sharding_group %0 group_id=1 : tensor<3x5xf32>
+  return %1, %2 : tensor<3x7xf32>, tensor<3x5xf32>
+}
+
+// -----
+
 // CHECK-LABEL: func @does_not_split_broadcast_on_non_scalar_input
 func.func @does_not_split_broadcast_on_non_scalar_input(%arg0: tensor<2xf32>) -> tensor<2x64xf32> {
   // CHECK-NEXT: %0 = stablehlo.broadcast_in_dim %arg0, dims = [0] : (tensor<2xf32>) -> tensor<2x64xf32>
