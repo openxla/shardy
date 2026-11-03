@@ -42,36 +42,33 @@ namespace {
 using func::FuncOp;
 
 // Applies `callback` on `sharding` if present, and calls `setShardingFn` on the
-// result if `transformShardings` is true.
+// result.
 void processSharding(TensorShardingAttr sharding,
                      const ValueOrFuncResult& valueOrFuncResult,
-                     bool transformShardings,
                      TransformShardingForTensorFn callback,
                      std::function<void(TensorShardingAttr)> setShardingFn) {
   if (!sharding) {
     return;
   }
   TensorShardingAttr newSharding = callback(sharding, valueOrFuncResult);
-  if (transformShardings && newSharding != sharding) {
+  if (newSharding != sharding) {
     setShardingFn(newSharding);
   }
 }
 
 // Applies `callback` on the sharding of `valueOrFuncResult` if present, and
-// replaces the sharding with the result if `transformShardings` is true.
+// replaces the sharding with the result.
 void processSharding(const ValueOrFuncResult& valueOrFuncResult,
-                     bool transformShardings,
                      TransformShardingForTensorFn callback) {
   if (auto* value = std::get_if<Value>(&valueOrFuncResult)) {
-    processSharding(getSharding(*value), valueOrFuncResult, transformShardings,
-                    callback, [&](TensorShardingAttr newSharding) {
+    processSharding(getSharding(*value), valueOrFuncResult, callback,
+                    [&](TensorShardingAttr newSharding) {
                       setSharding(*value, newSharding);
                     });
   } else {
     auto [funcOp, resNum] = std::get<FuncResult>(valueOrFuncResult);
     processSharding(
-        getFuncResultSharding(funcOp, resNum), valueOrFuncResult,
-        transformShardings, callback,
+        getFuncResultSharding(funcOp, resNum), valueOrFuncResult, callback,
         [funcOp = funcOp, resNum = resNum](TensorShardingAttr newSharding) {
           setFuncResultSharding(funcOp, resNum, newSharding);
         });
@@ -79,11 +76,10 @@ void processSharding(const ValueOrFuncResult& valueOrFuncResult,
 }
 
 // Applies `callback` on each sharding in `shardings` if present, and
-// corresponding value in `values`, and calls `setShardingsFn` on the results if
-// `transformShardings` is true.
+// corresponding value in `values`, and calls `setShardingsFn` on the results.
 void processShardings(
     ArrayRef<TensorShardingAttr> shardings, ValueRange values,
-    bool transformShardings, TransformShardingForTensorFn callback,
+    TransformShardingForTensorFn callback,
     std::function<void(ArrayRef<TensorShardingAttr>)> setShardingsFn) {
   if (shardings.empty()) {
     return;
@@ -101,13 +97,6 @@ void processShardings(
     values = emptySingleDeviceValue;
   }
 
-  if (!transformShardings) {
-    for (auto [sharding, value] : llvm::zip_equal(shardings, values)) {
-      callback(sharding, value);
-    }
-    return;
-  }
-
   SmallVector<TensorShardingAttr> newShardings;
   for (auto [sharding, value] : llvm::zip_equal(shardings, values)) {
     newShardings.push_back(callback(sharding, value));
@@ -118,10 +107,9 @@ void processShardings(
 // Same as above but for `TensorShardingPerValueAttr`.
 void processShardings(
     TensorShardingPerValueAttr shardings, ValueRange values,
-    bool transformShardings, TransformShardingForTensorFn callback,
+    TransformShardingForTensorFn callback,
     std::function<void(TensorShardingPerValueAttr)> setShardingsFn) {
-  return processShardings(shardings.getShardings(), values, transformShardings,
-                          callback,
+  return processShardings(shardings.getShardings(), values, callback,
                           [&](ArrayRef<TensorShardingAttr> newShardings) {
                             setShardingsFn(TensorShardingPerValueAttr::get(
                                 shardings.getContext(), newShardings));
@@ -137,8 +125,20 @@ TensorShardingAttr getValueOrFuncResultSharding(
   return getFuncResultSharding(funcResult.funcOp, funcResult.resNum);
 }
 
-void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
-                   ConsumeOpFn consumeOpFn, bool transformShardings) {
+}  // namespace
+
+void transformSharding(const ValueOrFuncResult& valueOrFuncResult,
+                       TransformShardingFn transformFn) {
+  processSharding(
+      valueOrFuncResult,
+      [transformFn](TensorShardingAttr newSharding, const ValueOrFuncResult&) {
+        return transformFn(newSharding);
+      });
+}
+
+void transformShardings(Operation* rootOp,
+                        TransformShardingForTensorFn transformFn,
+                        ConsumeOpFn consumeOpFn) {
   rootOp->walk<WalkOrder::PreOrder>([&](Operation* op) {
     consumeOpFn(op);
     TypeSwitch<Operation*, void>(op)
@@ -149,8 +149,8 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
             if (auto sharding =
                     getValueOrFuncResultSharding(valueOrFuncResult)) {
               TensorShardingAttr newSharding =
-                  callback(sharding, valueOrFuncResult);
-              if (transformShardings && newSharding != sharding) {
+                  transformFn(sharding, valueOrFuncResult);
+              if (newSharding != sharding) {
                 attrs.set(kShardingAttr, newSharding);
                 return true;
               }
@@ -166,41 +166,35 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
                 return transform(attrs, FuncResult(funcOp, resNum));
               });
         })
-        .Case(
-            [&](ManualComputationOp manualComputationOp) {
-              processShardings(
-                  manualComputationOp.getInShardings(),
-                  manualComputationOp.getBody().getArguments(),
-                  transformShardings, callback,
-                  [&](TensorShardingPerValueAttr newShardings) {
-                    manualComputationOp.setInShardingsAttr(newShardings);
-                  });
-              processShardings(
-                  manualComputationOp.getOutShardings(),
-                  manualComputationOp.getResults(), transformShardings,
-                  callback, [&](TensorShardingPerValueAttr newShardings) {
-                    manualComputationOp.setOutShardingsAttr(newShardings);
-                  });
-            })
-        .Case(
-            [&](ShardableDataFlowOpInterface shardableDataFlowOp) {
-              processShardings(
-                  shardableDataFlowOp.getBlockArgumentEdgeOwnerShardings(),
-                  shardableDataFlowOp.getBlockArgumentEdgeOwners(),
-                  transformShardings, callback,
-                  [&](ArrayRef<TensorShardingAttr> newShardings) {
-                    shardableDataFlowOp.setBlockArgumentEdgeOwnerShardings(
-                        newShardings);
-                  });
-              processShardings(
-                  shardableDataFlowOp.getOpResultEdgeOwnerShardings(),
-                  shardableDataFlowOp.getOpResultEdgeOwners(),
-                  transformShardings, callback,
-                  [&](ArrayRef<TensorShardingAttr> newShardings) {
-                    shardableDataFlowOp.setOpResultEdgeOwnerShardings(
-                        newShardings);
-                  });
-            })
+        .Case([&](ManualComputationOp manualComputationOp) {
+          processShardings(
+              manualComputationOp.getInShardings(),
+              manualComputationOp.getBody().getArguments(), transformFn,
+              [&](TensorShardingPerValueAttr newShardings) {
+                manualComputationOp.setInShardingsAttr(newShardings);
+              });
+          processShardings(
+              manualComputationOp.getOutShardings(),
+              manualComputationOp.getResults(), transformFn,
+              [&](TensorShardingPerValueAttr newShardings) {
+                manualComputationOp.setOutShardingsAttr(newShardings);
+              });
+        })
+        .Case([&](ShardableDataFlowOpInterface shardableDataFlowOp) {
+          processShardings(
+              shardableDataFlowOp.getBlockArgumentEdgeOwnerShardings(),
+              shardableDataFlowOp.getBlockArgumentEdgeOwners(), transformFn,
+              [&](ArrayRef<TensorShardingAttr> newShardings) {
+                shardableDataFlowOp.setBlockArgumentEdgeOwnerShardings(
+                    newShardings);
+              });
+          processShardings(
+              shardableDataFlowOp.getOpResultEdgeOwnerShardings(),
+              shardableDataFlowOp.getOpResultEdgeOwners(), transformFn,
+              [&](ArrayRef<TensorShardingAttr> newShardings) {
+                shardableDataFlowOp.setOpResultEdgeOwnerShardings(newShardings);
+              });
+        })
         .Default([&](Operation* op) {
           if (op->getNumResults() == 1) {
             // For ops with a single result, we use `get/setSharding` instead of
@@ -208,10 +202,9 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
             // unregistered sharding attribute, to also handle SDY ops like
             // `ShardingConstraintOp`.
             Value result = op->getResult(0);
-            processSharding(result, transformShardings, callback);
+            processSharding(result, transformFn);
           } else {
-            processShardings(getShardings(op), op->getResults(),
-                             transformShardings, callback,
+            processShardings(getShardings(op), op->getResults(), transformFn,
                              [&](ArrayRef<TensorShardingAttr> newShardings) {
                                setShardings(op, newShardings);
                              });
@@ -220,44 +213,15 @@ void walkShardings(Operation* rootOp, TransformShardingForTensorFn callback,
   });
 }
 
-}  // namespace
-
-void transformSharding(const ValueOrFuncResult& valueOrFuncResult,
-                       TransformShardingFn transformFn) {
-  processSharding(
-      valueOrFuncResult, /*transformShardings=*/true,
-      [transformFn](TensorShardingAttr newSharding, const ValueOrFuncResult&) {
-        return transformFn(newSharding);
-      });
-}
-
-void walkShardings(Operation* rootOp, ConsumeShardingAndTensorFn consumeFn,
-                   ConsumeOpFn consumeOpFn) {
-  walkShardings(
-      rootOp,
-      [consumeFn](TensorShardingAttr sharding,
-                  const ValueOrFuncResult& valueOrFuncResult) {
-        consumeFn(sharding, valueOrFuncResult);
-        return sharding;
-      },
-      consumeOpFn,
-      /*transformShardings=*/false);
-}
-
 void walkShardings(Operation* rootOp, ConsumeShardingFn consumeFn,
                    ConsumeOpFn consumeOpFn) {
-  walkShardings(
+  transformShardings(
       rootOp,
       [consumeFn](TensorShardingAttr sharding, const ValueOrFuncResult&) {
         consumeFn(sharding);
+        return sharding;
       },
       consumeOpFn);
-}
-
-void transformShardings(Operation* rootOp,
-                        TransformShardingForTensorFn transformFn,
-                        ConsumeOpFn consumeOpFn) {
-  walkShardings(rootOp, transformFn, consumeOpFn, /*transformShardings=*/true);
 }
 
 void transformShardings(Operation* rootOp, TransformShardingFn transformFn,

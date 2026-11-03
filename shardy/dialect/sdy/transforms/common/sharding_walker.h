@@ -43,8 +43,6 @@ using ValueOrFuncResult = std::variant<Value, FuncResult>;
 using ConsumeOpFn = std::function<void(Operation*)>;
 
 using ConsumeShardingFn = std::function<void(TensorShardingAttr)>;
-using ConsumeShardingAndTensorFn =
-    std::function<void(TensorShardingAttr, const ValueOrFuncResult&)>;
 
 using TransformShardingFn =
     std::function<TensorShardingAttr(TensorShardingAttr)>;
@@ -54,15 +52,6 @@ using TransformShardingForTensorFn = std::function<TensorShardingAttr(
 // Updates the sharding of `valueOrFuncResult` by applying `transformFn` on it.
 void transformSharding(const ValueOrFuncResult& valueOrFuncResult,
                        TransformShardingFn transformFn);
-
-// Walks the given `rootOp` in forward pre-order and applies `consumeFn` on
-// any `TensorShardingAttr` encountered and corresponding `ValueOrFuncResult`.
-//
-// In addition, applies `consumeOpFn` on every encountered op, before consuming
-// its shardings.
-void walkShardings(
-    Operation* rootOp, ConsumeShardingAndTensorFn consumeFn,
-    ConsumeOpFn consumeOpFn = [](Operation*) {});
 
 // Walks the given `rootOp` in forward pre-order and applies `consumeFn` on
 // any `TensorShardingAttr` encountered.
