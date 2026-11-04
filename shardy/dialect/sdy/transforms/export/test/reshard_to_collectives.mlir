@@ -29,9 +29,17 @@ func.func @redundant_reshard_fully_replicated(%arg0 : tensor<16x8xf32> {sdy.shar
   return %0 : tensor<16x8xf32>
 }
 
+// CHECK-LABEL: func @redundant_reshard_unannotated_input
+func.func @redundant_reshard_unannotated_input(%arg0 : tensor<16x8xf32>) -> tensor<16x8xf32> {
+  // CHECK-NEXT: return %arg0
+  %0 = sdy.reshard %arg0 <@mesh2d, [{}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_different_meshes
 func.func @redundant_reshard_fully_replicated_different_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh1d_6, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@mesh1d_6, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
@@ -59,7 +67,8 @@ func.func @redundant_reshard_fully_replicated_different_empty_meshes(%arg0 : ten
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_input_mesh_nonempty_output_mesh_empty
 func.func @redundant_reshard_fully_replicated_input_mesh_nonempty_output_mesh_empty(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@empty_mesh, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@empty_mesh, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }

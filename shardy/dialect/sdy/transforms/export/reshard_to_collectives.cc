@@ -1412,14 +1412,21 @@ class CollectiveInserter {
   AxisToDimAndIndex outAxisToDimAndIndex;
 };
 
-// Assumes both `inSharding` and `outSharding` are non-null.
+// Returns true if `inSharding` and `outSharding` are defined on equivalent
+// meshes (same axes and device count, ignoring device order).
 bool isEquivalentOnMesh(TensorShardingAttr inSharding,
                         TensorShardingAttr outSharding, ReshardOp reshardOp) {
+  if (!inSharding || !outSharding) {
+    return false;
+  }
   if (inSharding.getMeshOrRef() == outSharding.getMeshOrRef()) {
     return true;
   }
   MeshAttr inMesh = inSharding.getMesh(reshardOp);
   MeshAttr outMesh = outSharding.getMesh(reshardOp);
+  if (!inMesh || !outMesh) {
+    return false;
+  }
   return inMesh.equals(outMesh, /*ignoreDeviceOrder=*/true);
 }
 
@@ -1455,6 +1462,11 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
     }
     if (outSharding.isFullyReplicated()) {
       if (inSharding.isFullyReplicated()) {
+        if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
+          return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
+            diag << "Cross-mesh replicated reshard is dynamically legal";
+          });
+        }
         rewriter.replaceOp(op, adaptor.getInput());
         return success();
       }
@@ -1515,6 +1527,14 @@ struct ReshardToCollectivesPass
         if (outMesh && outMesh.isSingleDevice()) {
           return true;
         }
+      }
+      // A cross-mesh reshard between fully replicated shardings is dynamically
+      // legal (will be resolved as a no-op in ConvertGlobalToLocalPass).
+      if (inSharding && outSharding &&
+          isFullyReplicatedWithoutUnreducedAxes(inSharding) &&
+          isFullyReplicatedWithoutUnreducedAxes(outSharding) &&
+          !isEquivalentOnMesh(inSharding, outSharding, op)) {
+        return true;
       }
       // In case in or out sharding is fully replicated, the reshard is either
       // erased (if both are fully replicated), or it adds an all-gather (if out

@@ -47,19 +47,51 @@ namespace sdy {
 namespace {
 
 // Returns true if folding tensor -> innerReshard -> outerSharding into
-// tensor -> outerSharding would directly reshard between a tiled (or
-// unreduced) sharding and a single-device sharding.
-bool isSingleDeviceAndTiledReshard(Operation* op, Value tensor,
-                                   TensorShardingAttr outerSharding) {
-  TensorShardingAttr inSharding = getSharding(tensor);
-  bool inIsSingleDevice = isSingleDeviceSharding(inSharding, op);
-  bool outIsSingleDevice = isSingleDeviceSharding(outerSharding, op);
-  if (inIsSingleDevice == outIsSingleDevice) {
+// tensor -> outerSharding is forbidden. Specifically:
+// 1. Single-device sharding transitions must strictly pivot through
+//    an intermediate fully-replicated sharding on the global mesh.
+// 2. Cross-mesh transitions between different meshes must strictly pivot
+//    through intermediate replicated shardings. Folding across different meshes
+//    would produce forbidden direct cross-mesh transitions.
+bool isForbiddenIntermediateReshard(Operation* op, Value tensor,
+                                    TensorShardingAttr outerSharding) {
+  auto innerReshard = dyn_cast_or_null<ReshardOp>(op);
+  if (!innerReshard) {
     return false;
   }
-  TensorShardingAttr otherSharding =
-      inIsSingleDevice ? outerSharding : inSharding;
-  return !isFullyReplicatedWithoutUnreducedAxes(otherSharding);
+  TensorShardingAttr inSharding = getSharding(tensor);
+  TensorShardingAttr innerSharding = innerReshard.getSharding();
+  if (!inSharding || !innerSharding || !outerSharding) {
+    return false;
+  }
+
+  bool inIsSingleDevice = isSingleDeviceSharding(inSharding, op);
+  bool innerIsSingleDevice = isSingleDeviceSharding(innerSharding, op);
+  bool outIsSingleDevice = isSingleDeviceSharding(outerSharding, op);
+
+  // Single-device transitions: folding is forbidden if it would directly
+  // reshard between a single-device sharding and a tiled sharding.
+  if (inIsSingleDevice != outIsSingleDevice) {
+    TensorShardingAttr otherSharding =
+        inIsSingleDevice ? outerSharding : inSharding;
+    return !isFullyReplicatedWithoutUnreducedAxes(otherSharding);
+  }
+  if (inIsSingleDevice || innerIsSingleDevice || outIsSingleDevice) {
+    return false;
+  }
+
+  // Cross-mesh: prevent folding across different meshes unless all three
+  // shardings are fully replicated without unreduced axes.
+  bool differentMeshes =
+      inSharding.getMeshOrRef() != outerSharding.getMeshOrRef() ||
+      inSharding.getMeshOrRef() != innerSharding.getMeshOrRef() ||
+      innerSharding.getMeshOrRef() != outerSharding.getMeshOrRef();
+  if (differentMeshes) {
+    return !isFullyReplicatedWithoutUnreducedAxes(inSharding) ||
+           !isFullyReplicatedWithoutUnreducedAxes(innerSharding) ||
+           !isFullyReplicatedWithoutUnreducedAxes(outerSharding);
+  }
+  return false;
 }
 
 #include "shardy/dialect/sdy/ir/canonicalization.cc.inc"

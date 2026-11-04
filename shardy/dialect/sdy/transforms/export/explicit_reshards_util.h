@@ -31,6 +31,25 @@ limitations under the License.
 namespace mlir {
 namespace sdy {
 
+// Returns the MeshOp associated with `sharding`, or `defaultMesh` if sharding
+// is null or has no valid mesh symbol.
+MeshOp getMeshOpOrDefault(TensorShardingAttr sharding,
+                          const SymbolTable& symbolTable, MeshOp defaultMesh);
+
+// Returns true if `inSharding` and `outSharding` are on different meshes
+// (excluding single-device meshes and meshes that differ only in device order).
+bool isCrossMeshTransition(TensorShardingAttr inSharding,
+                           TensorShardingAttr outSharding,
+                           const SymbolTable& symbolTable);
+
+// Inserts reshards to transition `input` from `inSharding` on MeshA to
+// `targetSharding` on MeshB via the 3-step replicated pivot:
+//   Tiled(MeshA) -> Replicated(MeshA) -> Replicated(MeshB) -> Tiled(MeshB).
+Value insertCrossMeshReshardPivot(Value input, TensorShardingAttr inSharding,
+                                  TensorShardingAttr targetSharding,
+                                  const SymbolTable& symbolTable,
+                                  IRRewriter& rewriter);
+
 // Inserts an `sdy.all-reduce` on `use` if `sourceSharding` has unreduced axes
 // or sub-axes that aren't in the user's unreduced axes
 // (`userSharding.getUnreducedAxes()` if present , or an empty array otherwise.)

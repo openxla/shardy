@@ -9,8 +9,10 @@ sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
 
 // CHECK-LABEL: func @optimization_barrier_different_meshes
 func.func @optimization_barrier_different_meshes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{"x"}]>}) {
-  // CHECK: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh_xt, [{"x"}]> : tensor<210xf32>
-  // CHECK-NEXT: stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"x"}]>]>} %[[RESHARD]]
+  // CHECK: %[[RESHARD_1:.*]] = sdy.reshard %arg0 <@mesh, [{}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_2:.*]] = sdy.reshard %[[RESHARD_1]] <@mesh_xt, [{}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_3:.*]] = sdy.reshard %[[RESHARD_2]] <@mesh_xt, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"x"}]>]>} %[[RESHARD_3]]
   %1 = stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"x"}]>]>} %arg0 : tensor<210xf32>
   %2 = stablehlo.negate %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"x"}]>]>} : tensor<210xf32>
   return %2 : tensor<210xf32>
@@ -204,4 +206,25 @@ func.func @dot_unreduced_result_different_device_orders_rhs_and_result_majority(
   // CHECK-NEXT: return %[[DOT]] : tensor<6x12xf32>
   %0 = stablehlo.dot %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}], unreduced={"x"}>]>} : (tensor<6x24xf32>, tensor<24x12xf32>) -> tensor<6x12xf32>
   return %0 : tensor<6x12xf32>
+}
+
+// CHECK-LABEL: func @reshard_different_meshes_in_unreduced_axes
+func.func @reshard_different_meshes_in_unreduced_axes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}], unreduced={"y"}>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{"x"}]>}) {
+  // CHECK:      %[[ALL_REDUCE:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_1:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh, [{}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_2:.*]] = sdy.reshard %[[RESHARD_1]] <@mesh_xt, [{}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_3:.*]] = sdy.reshard %[[RESHARD_2]] <@mesh_xt, [{"x"}]> : tensor<210xf32>
+  // CHECK-NEXT: return %[[RESHARD_3]] : tensor<210xf32>
+  %0 = sdy.reshard %arg0 <@mesh_xt, [{"x"}]> : tensor<210xf32>
+  return %0 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @reshard_different_meshes_out_unreduced_axes
+func.func @reshard_different_meshes_out_unreduced_axes(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{}], unreduced={"t"}>}) {
+  // CHECK:      %[[RESHARD_1:.*]] = sdy.reshard %arg0 <@mesh, [{}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[RESHARD_2:.*]] = sdy.reshard %[[RESHARD_1]] <@mesh_xt, [{}]> : tensor<210xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"t"} %[[RESHARD_2]] out_sharding=<@mesh_xt, [{}], unreduced={"t"}> : tensor<210xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<210xf32>
+  %0 = sdy.reshard %arg0 <@mesh_xt, [{}], unreduced={"t"}> : tensor<210xf32>
+  return %0 : tensor<210xf32>
 }

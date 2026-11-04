@@ -347,3 +347,52 @@ func.func @reshard_cse_with_transpose_different_reduction_op_not_reused(%arg0: t
   %2 = sdy.reshard %1 <@mesh, [{}, {"a"}], unreduced=max{"b"}> : tensor<4x8xf32>
   return %0, %2 : tensor<8x4xf32>, tensor<4x8xf32>
 }
+
+// CHECK-LABEL: func @reshard_of_reshard_cross_mesh_pivot_not_folded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>})
+// CHECK-NEXT: %[[V0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]>
+// CHECK-NEXT: %[[V1:.*]] = sdy.reshard %[[V0]] <@mesh_4, [{}]>
+// CHECK-NEXT: %[[V2:.*]] = sdy.reshard %[[V1]] <@mesh_4, [{"a"}]>
+// CHECK-NEXT: return %[[V2]]
+func.func @reshard_of_reshard_cross_mesh_pivot_not_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}]>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh_4, [{}]> : tensor<8xf32>
+  %2 = sdy.reshard %1 <@mesh_4, [{"a"}]> : tensor<8xf32>
+  return %2 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_cross_mesh_in_unreduced_axes_not_folded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"a"}>})
+// CHECK-NEXT: %[[V0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]>
+// CHECK-NEXT: %[[V1:.*]] = sdy.reshard %[[V0]] <@mesh_4, [{}]>
+// CHECK-NEXT: return %[[V1]]
+func.func @reshard_of_reshard_cross_mesh_in_unreduced_axes_not_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}], unreduced={"a"}>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh_4, [{}]> : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_cross_mesh_out_unreduced_axes_not_folded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+// CHECK-NEXT: %[[V0:.*]] = sdy.reshard %[[ARG0]] <@mesh_4, [{}]>
+// CHECK-NEXT: %[[V1:.*]] = sdy.reshard %[[V0]] <@mesh_4, [{}], unreduced={"a"}>
+// CHECK-NEXT: return %[[V1]]
+func.func @reshard_of_reshard_cross_mesh_out_unreduced_axes_not_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh_4, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh_4, [{}], unreduced={"a"}> : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_cross_mesh_replicated_chain_folded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+// CHECK-NEXT: %[[V0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]>
+// CHECK-NEXT: return %[[V0]]
+func.func @reshard_of_reshard_cross_mesh_replicated_chain_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh_4, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh, [{}]> : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}

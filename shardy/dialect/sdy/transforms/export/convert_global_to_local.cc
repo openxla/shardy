@@ -933,6 +933,33 @@ Value maskNonLeaderShardsToZero(Location loc, Value input, MeshAttr mesh,
       .front();
 }
 
+class ReshardOpPattern : public OpConversionPattern<ReshardOp> {
+ public:
+  ReshardOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                   ConversionState& state)
+      : OpConversionPattern<ReshardOp>(converter, ctx),
+        conversionState(state) {}
+
+  LogicalResult matchAndRewrite(
+      ReshardOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    auto* converter =
+        static_cast<const GlobalToLocalTypeConverter*>(getTypeConverter());
+    TensorShardingAttr inSharding = converter->getSharding(op.getInput());
+    TensorShardingAttr outSharding = op.getSharding();
+    if (isFullyReplicatedWithoutUnreducedAxes(inSharding) &&
+        isFullyReplicatedWithoutUnreducedAxes(outSharding)) {
+      rewriter.replaceOp(op, adaptor.getInput());
+      conversionState.removeToConvertOp(op);
+      return success();
+    }
+    return failure();
+  }
+
+ private:
+  ConversionState& conversionState;
+};
+
 class AllSliceOpPattern : public OpConversionPattern<AllSliceOp> {
  public:
   AllSliceOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -3890,8 +3917,9 @@ struct ConvertGlobalToLocalPass
                  CollectivePermuteOpPattern, ConstantOpPattern,
                  FuncOpSignaturePattern, GenericOpPattern,
                  ManualComputationOpPattern, PartitioningOpInterfacePattern,
-                 ReplicatedToUnreducedOpPattern, ShardedToUnreducedOpPattern,
-                 StablehloConcatenateOpPattern, StablehloDynamicSliceOpPattern,
+                 ReplicatedToUnreducedOpPattern, ReshardOpPattern,
+                 ShardedToUnreducedOpPattern, StablehloConcatenateOpPattern,
+                 StablehloDynamicSliceOpPattern,
                  StablehloDynamicUpdateSliceOpPattern, StablehloIotaOpPattern,
                  StablehloPadOpPattern,
                  StablehloWindowedOpPattern<stablehlo::ReduceWindowOp>,

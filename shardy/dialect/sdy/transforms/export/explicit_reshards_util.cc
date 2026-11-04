@@ -796,6 +796,72 @@ SmallVector<AxisRefAttr> getReductionAxes(
 }
 }  // namespace
 
+MeshOp getMeshOpOrDefault(TensorShardingAttr sharding,
+                          const SymbolTable& symbolTable, MeshOp defaultMesh) {
+  if (!sharding) {
+    return defaultMesh;
+  }
+  if (auto meshRef = dyn_cast<FlatSymbolRefAttr>(sharding.getMeshOrRef())) {
+    if (MeshOp meshOp = getMeshOp(symbolTable, meshRef.getValue())) {
+      return meshOp;
+    }
+  }
+  return defaultMesh;
+}
+
+bool isCrossMeshTransition(TensorShardingAttr inSharding,
+                           TensorShardingAttr outSharding,
+                           const SymbolTable& symbolTable) {
+  if (!inSharding || !outSharding ||
+      inSharding.getMeshOrRef() == outSharding.getMeshOrRef()) {
+    return false;
+  }
+  MeshOp inMeshOp = getMeshOpOrDefault(inSharding, symbolTable, nullptr);
+  MeshOp outMeshOp = getMeshOpOrDefault(outSharding, symbolTable, nullptr);
+  if (!inMeshOp || !outMeshOp || inMeshOp == outMeshOp) {
+    return false;
+  }
+  if (inMeshOp.getMesh().isSingleDevice() ||
+      outMeshOp.getMesh().isSingleDevice()) {
+    return false;
+  }
+  return !inMeshOp.getMesh().equals(outMeshOp.getMesh(),
+                                    /*ignoreDeviceOrder=*/true);
+}
+
+Value insertCrossMeshReshardPivot(Value input, TensorShardingAttr inSharding,
+                                  TensorShardingAttr targetSharding,
+                                  const SymbolTable& symbolTable,
+                                  IRRewriter& rewriter) {
+  auto rankedType = dyn_cast<RankedTensorType>(input.getType());
+  if (!rankedType ||
+      !isCrossMeshTransition(inSharding, targetSharding, symbolTable)) {
+    return ReshardOp::create(rewriter, input.getLoc(), input, targetSharding);
+  }
+  MeshOp inMeshOp = getMeshOpOrDefault(inSharding, symbolTable, nullptr);
+  MeshOp targetMeshOp =
+      getMeshOpOrDefault(targetSharding, symbolTable, nullptr);
+
+  // Step 1: Tiled(MeshA) -> Replicated(MeshA)
+  Value val = input;
+  if (!isFullyReplicatedWithoutUnreducedAxes(inSharding)) {
+    TensorShardingAttr replASharding = TensorShardingAttr::getFullyClosed(
+        rewriter.getContext(), rankedType.getRank(), inMeshOp.getName());
+    val = ReshardOp::create(rewriter, input.getLoc(), val, replASharding);
+  }
+
+  // Step 2: Replicated(MeshA) -> Replicated(MeshB)
+  TensorShardingAttr replBSharding = TensorShardingAttr::getFullyClosed(
+      rewriter.getContext(), rankedType.getRank(), targetMeshOp.getName());
+  val = ReshardOp::create(rewriter, input.getLoc(), val, replBSharding);
+
+  // Step 3: Replicated(MeshB) -> Tiled(MeshB)
+  if (!isFullyReplicatedWithoutUnreducedAxes(targetSharding)) {
+    val = ReshardOp::create(rewriter, input.getLoc(), val, targetSharding);
+  }
+  return val;
+}
+
 TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
     OpOperand& use, TensorShardingAttr sourceSharding,
     TensorShardingAttr userSharding, const SymbolTable& symbolTable,
@@ -806,14 +872,8 @@ TensorShardingAttr insertAllReduceIfUnreducedToReplicated(
   MeshAttr mesh = sourceSharding.getMesh(symbolTable);
   ArrayRef<AxisRefAttr> sourceUnreducedAxes = sourceSharding.getUnreducedAxes();
   ArrayRef<AxisRefAttr> targetUnreducedAxes;
-  if (userSharding) {
+  if (userSharding && mesh.equals(userSharding.getMesh(symbolTable))) {
     targetUnreducedAxes = userSharding.getUnreducedAxes();
-    // TODO(enver): Support the case the meshes differ only on device orders.
-    // NOTE: At this point, it is guaranteed that source unreduced axes is
-    // non-empty.
-    SDY_CHECK(mesh.equals(userSharding.getMesh(symbolTable)))
-        << "source and user shardings have different meshes for unreduced "
-           "axes.";
   }
   SmallVector<AxisRefAttr> allReduceAxes =
       getAxisSetDiff(sourceUnreducedAxes, targetUnreducedAxes, mesh);

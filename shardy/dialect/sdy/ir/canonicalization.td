@@ -29,15 +29,17 @@ def TensorShardingEquivalent : Constraint<CPred<
 //   (1) Tiled -> .. -> SingleDevice
 //   (2) SingleDevice -> .. -> Tiled
 // to produce Tiled <-> SingleDevice
-def NotSingleDeviceIntermediateReshard : Constraint<CPred<
-    "!isSingleDeviceAndTiledReshard($0.getDefiningOp(), $1, $2)">,
-    "not single-device intermediate reshard">;
+//   (3) Reshards between different meshes
+// to preserve 3-step cross-mesh pivot
+def NotForbiddenIntermediateReshard : Constraint<CPred<
+    "!isForbiddenIntermediateReshard($0.getDefiningOp(), $1, $2)">,
+    "not forbidden intermediate reshard">;
 
 def ReshardOfReshardPattern :
     Pat<(Sdy_ReshardOp (Sdy_ReshardOp:$inner_reshard $tensor, $inner_sharding), $outer_sharding),
         (Sdy_ReshardOp $tensor, $outer_sharding),
         [(HasOneUse:$inner_reshard),
-         (NotSingleDeviceIntermediateReshard $inner_reshard, $tensor, $outer_sharding)]>;
+         (NotForbiddenIntermediateReshard $inner_reshard, $tensor, $outer_sharding)]>;
 
 // TODO(b/390759740): Add more patterns for collectives, e.g., all-gather of
 // all-slice with matching axes.

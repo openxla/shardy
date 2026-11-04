@@ -88,15 +88,15 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
 
   if (onFullVersion && !isEquivalent(operandSharding, targetSharding)) {
     operand = opOperand.get();
-    auto reshardOp = ReshardOp::create(
-        rewriter, operand.getLoc(), operand,
+    TensorShardingAttr target =
         targetSharding
             ? targetSharding
             // Since operand and target shardings are not equivalent and
             // `targetSharding` is empty, `operandSharding` is guaranteed to be
             // nonempty.
-            : TensorShardingAttr::getFullyClosedLike(operandSharding));
-    opOperand.set(reshardOp);
+            : TensorShardingAttr::getFullyClosedLike(operandSharding);
+    opOperand.set(insertCrossMeshReshardPivot(operand, operandSharding, target,
+                                              symbolTable, rewriter));
   }
 }
 
@@ -301,16 +301,6 @@ void processDot(OpTy op, ShardingProjection& shardingProjection,
   auto reshardOp = ReshardOp::create(rewriter, op.getLoc(), op.getResult(),
                                      outShardings.front());
   rewriter.replaceAllUsesExcept(op.getResult(), reshardOp, reshardOp);
-}
-
-MeshOp getMeshOpOrDefault(TensorShardingAttr sharding,
-                          const SymbolTable& symbolTable, MeshOp defaultMesh) {
-  if (!sharding) {
-    return defaultMesh;
-  }
-  // NOTE: sharding always has a meshOrRef because it is a required parameter.
-  return getMeshOp(symbolTable,
-                   cast<FlatSymbolRefAttr>(sharding.getMeshOrRef()).getValue());
 }
 
 MeshOp getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
@@ -892,6 +882,30 @@ struct InsertExplicitReshardsPass
         insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
                                        onFullVersion);
         return;
+      }
+
+      if (auto reshardOp = dyn_cast<ReshardOp>(op)) {
+        TensorShardingAttr inSharding = getSharding(reshardOp.getInput());
+        TensorShardingAttr outSharding = reshardOp.getSharding();
+        if (isCrossMeshTransition(inSharding, outSharding, symbolTable)) {
+          if (!isFullyReplicatedWithoutUnreducedAxes(inSharding) ||
+              !isFullyReplicatedWithoutUnreducedAxes(outSharding)) {
+            insertAllReduceOnOpIfUnreducedToReplicated(reshardOp, rewriter,
+                                                       symbolTable);
+            inSharding = getSharding(reshardOp.getInput());
+            rewriter.setInsertionPoint(reshardOp);
+            Value pivot =
+                insertCrossMeshReshardPivot(reshardOp.getInput(), inSharding,
+                                            outSharding, symbolTable, rewriter);
+            rewriter.replaceAllUsesWith(reshardOp.getResult(), pivot);
+            rewriter.eraseOp(reshardOp);
+            if (Operation* pivotOp = pivot.getDefiningOp()) {
+              convertReshardToUnreducedCollectives(pivotOp, rewriter,
+                                                   symbolTable);
+            }
+            return;
+          }
+        }
       }
 
       if (convertReshardToUnreducedCollectives(op, rewriter, symbolTable)) {
