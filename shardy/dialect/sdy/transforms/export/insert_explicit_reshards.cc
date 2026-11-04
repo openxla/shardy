@@ -955,7 +955,8 @@ struct InsertExplicitReshardsPass
       // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
       insertAllReducesForReductionFactors(
           op, shardingProjection, commonAxesPerFactor, shardingRule, *meshOp,
-          rewriter, onFullVersion, markPartialResultWithUnreducedAxes);
+          rewriter, onFullVersion, markPartialResultWithUnreducedAxes,
+          shardyGeneratesDeviceCode);
 
       // TODO(enver): Remove sharding rules from ops.
     });

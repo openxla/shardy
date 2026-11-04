@@ -154,7 +154,8 @@ void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
     MeshOp meshOp, IRRewriter& rewriter, bool onFullVersion,
-    bool markPartialResultWithUnreducedAxes = false);
+    bool markPartialResultWithUnreducedAxes = false,
+    bool shardyGeneratesDeviceCode = false);
 
 // Finds common factor axes on the operands and results of `op` so that the
 // sharding of `op` is compatible with its sharding rule.

@@ -42,7 +42,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "shardy/dialect/sdy/transforms/propagation/utils.h"
 #include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
@@ -794,6 +793,13 @@ SmallVector<AxisRefAttr> getReductionAxes(
   }
   return axesAlongAllReductionFactors;
 }
+
+bool isLocalEffectiveScalar(Value value, TensorShardingAttr sharding,
+                            MeshAttr mesh) {
+  ShapedType localType = dynCastStaticShapedType(
+      sharding.getLocalType(value.getType(), mesh, /*allowNonDivisible=*/true));
+  return localType && localType.getNumElements() == 1;
+}
 }  // namespace
 
 MeshOp getMeshOpOrDefault(TensorShardingAttr sharding,
@@ -912,7 +918,8 @@ void insertAllReducesForReductionFactors(
     Operation* op, const ShardingProjection& shardingProjection,
     const AxesPerFactor& commonAxesPerFactor, OpShardingRuleAttr shardingRule,
     MeshOp meshOp, IRRewriter& rewriter, const bool onFullVersion,
-    const bool markPartialResultWithUnreducedAxes) {
+    const bool markPartialResultWithUnreducedAxes,
+    const bool shardyGeneratesDeviceCode) {
   if (op->getResults().empty()) {
     return;
   }
@@ -922,19 +929,20 @@ void insertAllReducesForReductionFactors(
     return;
   }
 
+  MeshAttr mesh = meshOp.getMesh();
   // The first result unreduced axes is also the common one.
   ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
       getUnreducedAxes(op->getResult(0));
   SmallVector<AxisRefAttr> allReduceAxes =
-      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, meshOp.getMesh());
+      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, mesh);
   if (allReduceAxes.empty()) {
     return;
   }
 
   SmallVector<AxisRefAttr> unreducedAxes = allReduceAxes;
   llvm::append_range(unreducedAxes, firstResultUnreducedAxes);
-  sortAndMergeAxes(unreducedAxes, meshOp.getMesh());
-  sortAndMergeAxes(allReduceAxes, meshOp.getMesh());
+  sortAndMergeAxes(unreducedAxes, mesh);
+  sortAndMergeAxes(allReduceAxes, mesh);
 
   std::optional<ReductionOp> reductionOp = getReductionType(op);
   if (!reductionOp &&
@@ -942,6 +950,24 @@ void insertAllReducesForReductionFactors(
     return;
   }
 
+  // When Shardy generates device code, split sub-mesh local-scalar reductions
+  // per factor (minor-to-major) to run over smaller orthogonal subgroups.
+  AxesPerFactor allReduceAxesPerFactor;
+  if (onFullVersion && markPartialResultWithUnreducedAxes &&
+      shardyGeneratesDeviceCode && reductionOp.has_value() &&
+      AxisListRef(allReduceAxes).getShardingSize(mesh) < mesh.getTotalSize()) {
+    for (int64_t reductionFactor :
+         llvm::reverse(shardingRule.getReductionFactors())) {
+      SmallVector<AxisRefAttr> stepAxes = getAxisSetDiff(
+          commonAxesPerFactor[reductionFactor], firstResultUnreducedAxes, mesh);
+      if (!stepAxes.empty()) {
+        sortAndMergeAxes(stepAxes, mesh);
+        allReduceAxesPerFactor.push_back(std::move(stepAxes));
+      }
+    }
+  }
+
+  ReductionOp redOp = reductionOp.value_or(ReductionOp::SUM);
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
@@ -949,16 +975,33 @@ void insertAllReducesForReductionFactors(
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
     if (markPartialResultWithUnreducedAxes) {
-      TensorShardingAttr unreducedSharding = TensorShardingAttr::get(
-          resultSharding.getContext(), resultSharding.getMeshOrRef(),
-          resultSharding.getDimShardings(), resultSharding.getReplicatedAxes(),
-          unreducedAxes, reductionOp.value_or(ReductionOp::SUM));
-      setSharding(result, unreducedSharding);
+      setSharding(result,
+                  resultSharding.replaceUnreducedAxes(unreducedAxes, redOp));
     }
-    auto allReduceOp = AllReduceOp::create(
-        rewriter, result.getLoc(), result, allReduceAxes,
-        reductionOp.value_or(ReductionOp::SUM), resultSharding);
-    rewriter.replaceAllUsesExcept(result, allReduceOp, allReduceOp);
+    ArrayRef<SmallVector<AxisRefAttr>> reductionSteps =
+        allReduceAxesPerFactor.size() > 1 &&
+                isLocalEffectiveScalar(result, resultSharding, mesh)
+            ? ArrayRef<SmallVector<AxisRefAttr>>(allReduceAxesPerFactor)
+            : ArrayRef<SmallVector<AxisRefAttr>>(allReduceAxes);
+    Value curValue = result;
+    Operation* firstAllReduceOp = nullptr;
+    SmallVector<AxisRefAttr> curUnreducedAxes = unreducedAxes;
+    for (const auto& [idx, stepAxes] : llvm::enumerate(reductionSteps)) {
+      TensorShardingAttr stepOutSharding = resultSharding;
+      if (idx + 1 < reductionSteps.size()) {
+        curUnreducedAxes = getAxisSetDiff(curUnreducedAxes, stepAxes, mesh);
+        stepOutSharding =
+            resultSharding.replaceUnreducedAxes(curUnreducedAxes, redOp);
+      }
+      auto allReduceOp =
+          AllReduceOp::create(rewriter, result.getLoc(), curValue, stepAxes,
+                              redOp, stepOutSharding);
+      if (!firstAllReduceOp) {
+        firstAllReduceOp = allReduceOp;
+      }
+      curValue = allReduceOp;
+    }
+    rewriter.replaceAllUsesExcept(result, curValue, firstAllReduceOp);
   }
 }
 
