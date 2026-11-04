@@ -27,6 +27,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
@@ -648,16 +649,10 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         }
         if (callTargetName == "annotate_device_placement" ||
             callTargetName == "Cholesky" ||
-            callTargetName == "CompactWyHelper" ||
-            callTargetName == "compute-on-done" ||
             callTargetName == "InspectSharding" ||
-            callTargetName == "InvertDiagBlocksLowerTriangular" ||
-            callTargetName == "InvertDiagBlocksUpperTriangular" ||
             callTargetName == "LayoutConstraint" ||
             callTargetName == "mhlo.erf" || callTargetName == "MoveToDevice" ||
             callTargetName == "MoveToHost" ||
-            callTargetName == "X64SplitHigh" ||
-            callTargetName == "X64SplitLow" ||
             callTargetName == "xla.megascale.provide_metadata") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }
@@ -683,18 +678,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          inShape[nonBatchDim2])
               .build();
         }
-        // SPMD operations which perform purely collective permutes between
-        // partitions. These operations may return multiple tensors, but all
-        // result tensors are expected to have the same sharding as the input.
-        if (callTargetName == "_SPMDInternalOp_MultiPad" ||
-            callTargetName == "_SPMDInternalOp_RotateRight" ||
-            callTargetName == "_SPMDInternalOp_MultiRotate" ||
-            callTargetName == "_SPMDInternalOp_MultiSlice" ||
-            callTargetName == "_SPMDInternalOp_Wrap") {
-          return OpShardingRuleBuilder::buildPointwise(customCall);
-        }
-        if (callTargetName == "Qr" ||
-            callTargetName == "QrDecompositionBlock") {
+        if (callTargetName == "Qr") {
           assert(customCall.getNumOperands() == 1 &&
                  customCall.getNumResults() == 2);
           // See `jax.lax.linalg.qr` for more information.
@@ -723,9 +707,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          FactorType::kNeedReplication)
               .build();
         }
-        if (callTargetName == "LuDecomposition" ||
-            callTargetName == "LuRealDecompositionBlock" ||
-            callTargetName == "LuComplexDecompositionBlock") {
+        if (callTargetName == "LuDecomposition") {
           int64_t numOperands = customCall.getNumOperands();
           assert(numOperands >= 1 &&
                  customCall.getNumResults() == numOperands + 2);
@@ -788,7 +770,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                          inShapeRhs[nonBatchDim1], FactorType::kNeedReplication)
               .build();
         }
-        if (callTargetName == "mhlo.topk" || callTargetName == "TopK") {
+        if (callTargetName == "mhlo.topk") {
           assert(customCall.getNumOperands() == 1 &&
                  customCall.getNumResults() == 2);
           // See `jax.lax.top_k` for more information.
@@ -803,8 +785,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
                   /*mismatchFactorIsBlocked=*/true)
               .build();
         }
-        if (callTargetName == "ApproxTopK" ||
-            callTargetName == "PartialReduce") {
+        if (callTargetName == "ApproxTopK") {
           assert(customCall.getNumOperands() == 4 &&
                  customCall.getNumResults() == 2);
           // See `jax.lax.approx_max_k` for more information.
@@ -830,24 +811,16 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           }
           return builder.build();
         }
-        if (callTargetName == "X64Combine") {
-          // If an `X64Combine` is used by a `RngBitGeneratorOp`, we replicate
-          // the operand and result of the `X64Combine` and do not propagate
-          // shardings along the `X64Combine` for two reasons.
-          // 1. The operand of the `RngBitGeneratorOp` (initial state,
-          //    1-dimensional tensor of type ui64) must be replicated.
-          // 2. We cannot have reshard on the tensor of type ui64.
-          if (llvm::any_of(customCall->getUsers(), [](Operation* user) {
-                return isa<stablehlo::RngBitGeneratorOp>(user);
-              })) {
-            OpShardingRuleBuilder builder(customCall);
-            ArrayRef<int64_t> shape = getTensorShape(customCall.getResult(0));
-            assert(shape.size() == 1);
-            builder.addFactor(0, shape.front(), FactorType::kNeedReplication,
-                              /*isBlocked=*/true);
-            return builder.build();
-          }
-          return OpShardingRuleBuilder::buildPointwise(customCall);
+        // Delegate external custom calls (e.g. XLA-internal targets) to an
+        // attached `ShardingRuleOpInterface` when registered.
+        // TODO(b/513227167): Change `ShardingRuleOpInterface::getShardingRule`
+        // to return `std::optional<OpShardingRuleAttr>` (matching
+        // `PartitioningOpInterface`) so custom hooks can take precedence, fall
+        // back to built-in rules when `std::nullopt`, and share the unknown-op
+        // warning below.
+        if (auto shardingRuleOp =
+                dyn_cast<ShardingRuleOpInterface>(customCall.getOperation())) {
+          return shardingRuleOp.getShardingRule();
         }
         // TODO(b/327191011): output unregistered op stats instead.
         static llvm::once_flag onceFlag;
