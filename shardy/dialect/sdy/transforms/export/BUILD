@@ -146,6 +146,25 @@ cc_library(
 )
 
 cc_test(
+    name = "reshard_to_collectives_oracle_test",
+    size = "medium",
+    srcs = ["reshard_to_collectives_oracle_test.cc"],
+    shard_count = 6,
+    deps = [
+        ":passes",
+        "//shardy/dialect/sdy/ir:dialect",
+        "//shardy/dialect/sdy/ir:register",
+        "@com_google_googletest//:gtest_main",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Pass",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_test(
     name = "utils_test",
     srcs = ["utils_test.cc"],
     deps = [
