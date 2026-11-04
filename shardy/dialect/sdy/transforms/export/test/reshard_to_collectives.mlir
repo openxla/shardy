@@ -9,10 +9,12 @@ sdy.mesh @mesh2d_4x6 = <["x"=4, "y"=6]>
 sdy.mesh @mesh2d_non_iota = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
 sdy.mesh @mesh2d_non_iota_2 = <["x"=2, "y"=2], device_ids=[3, 1, 2, 0]>
 sdy.mesh @mesh3d = <["x"=2, "y"=2, "z"=2]>
+sdy.mesh @mesh3d_2x3x4 = <["x"=2, "y"=3, "z"=4]>
 sdy.mesh @mesh3d_4x2x4 = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh3d_4x6x2 = <["x"=4, "y"=6, "z"=2]>
 sdy.mesh @mesh3d_4x6x5 = <["x"=4, "y"=6, "z"=5]>
 sdy.mesh @mesh4d = <["x"=2, "y"=2, "z"=2, "w"=2]>
+sdy.mesh @mesh4d_2x3x4x5 = <["x"=2, "y"=3, "z"=4, "w"=5]>
 sdy.mesh @mesh4d_z4 = <["x"=2, "y"=2, "z"=4, "w"=2]>
 sdy.mesh @mesh4d_w4 = <["x"=2, "y"=2, "z"=2, "w"=4]>
 sdy.mesh @mesh4d_w16 = <["x"=2, "y"=2, "z"=2, "w"=16]>
@@ -1000,6 +1002,53 @@ func.func @replace_axes_and_all_gather_gcd_greater_than_one_3(%arg0: tensor<12x1
   // CHECK-NEXT: return %[[ALL_GATHER]]
  %0 = sdy.reshard %arg0 <@mesh3d_4x6x5, [{"y"}, {}]> : tensor<12x10xf32>
  return %0 : tensor<12x10xf32>
+}
+
+// The collective permute must keep the sharded size of dim 0 (6), which
+// requires splitting "z" (size 4) into "z":(1)2 for dim 0 and "z":(2)2 for
+// dim 1.
+// CHECK-LABEL: func @collective_permute_splits_axis_by_gcd_with_capacity
+func.func @collective_permute_splits_axis_by_gcd_with_capacity(%arg0 : tensor<24x48xf32> {sdy.sharding=#sdy.sharding<@mesh3d_2x3x4, [{"y"}, {"z"}]>}) -> tensor<24x48xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh3d_2x3x4, [{"y", "x"}, {"z"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE_1:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d_2x3x4, [{"y", "z":(1)2}, {"x", "z":(2)2}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"z":(2)2}: 1->0] %[[COLLECTIVE_PERMUTE_1]] out_sharding=<@mesh3d_2x3x4, [{"y", "z"}, {"x"}]>
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE_2:.*]] = sdy.collective_permute %[[ALL_TO_ALL]] out_sharding=<@mesh3d_2x3x4, [{"z", "y"}, {"x"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"y"}, {}] %[[COLLECTIVE_PERMUTE_2]] out_sharding=<@mesh3d_2x3x4, [{"z"}, {"x"}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh3d_2x3x4, [{"z"}, {"x"}]> : tensor<24x48xf32>
+  return %0 : tensor<24x48xf32>
+}
+
+// Takes more than 3 iterations of the collective insertion loop to reach the
+// output sharding.
+// CHECK-LABEL: func @reshard_needs_more_than_three_iterations
+func.func @reshard_needs_more_than_three_iterations(%arg0 : tensor<24x48x72xf32> {sdy.sharding=#sdy.sharding<@mesh3d_2x3x4, [{"x", "z":(1)2}, {}, {"y"}]>}) -> tensor<24x48x72xf32> {
+  // CHECK-NEXT: %[[ALL_SLICE:.*]] = sdy.all_slice [{}, {"z":(2)2}, {}] %arg0 out_sharding=<@mesh3d_2x3x4, [{"x", "z":(1)2}, {"z":(2)2}, {"y"}]>
+  // CHECK-NEXT: %[[CP_1:.*]] = sdy.collective_permute %[[ALL_SLICE]] out_sharding=<@mesh3d_2x3x4, [{"z":(2)2, "x"}, {"z":(1)2}, {"y"}]>
+  // CHECK-NEXT: %[[A2A_1:.*]] = sdy.all_to_all [{"x"}: 0->2] %[[CP_1]] out_sharding=<@mesh3d_2x3x4, [{"z":(2)2}, {"z":(1)2}, {"y", "x"}]>
+  // CHECK-NEXT: %[[A2A_2:.*]] = sdy.all_to_all [{"z":(2)2}: 0->1] %[[A2A_1]] out_sharding=<@mesh3d_2x3x4, [{}, {"z"}, {"y", "x"}]>
+  // CHECK-NEXT: %[[CP_2:.*]] = sdy.collective_permute %[[A2A_2]] out_sharding=<@mesh3d_2x3x4, [{}, {"z":(2)2, "z":(1)2}, {"x", "y"}]>
+  // CHECK-NEXT: %[[A2A_3:.*]] = sdy.all_to_all [{"z":(1)2}: 1->2] %[[CP_2]] out_sharding=<@mesh3d_2x3x4, [{}, {"z":(2)2}, {"x", "y", "z":(1)2}]>
+  // CHECK-NEXT: %[[CP_3:.*]] = sdy.collective_permute %[[A2A_3]] out_sharding=<@mesh3d_2x3x4, [{}, {"z":(2)2}, {"x", "z":(1)2, "y"}]>
+  // CHECK-NEXT: %[[A2A_4:.*]] = sdy.all_to_all [{"y"}: 2->1] %[[CP_3]] out_sharding=<@mesh3d_2x3x4, [{}, {"z":(2)2, "y"}, {"x", "z":(1)2}]>
+  // CHECK-NEXT: %[[CP_4:.*]] = sdy.collective_permute %[[A2A_4]] out_sharding=<@mesh3d_2x3x4, [{}, {"y", "z":(2)2}, {"x", "z":(1)2}]>
+  // CHECK-NEXT: return %[[CP_4]]
+  %0 = sdy.reshard %arg0 <@mesh3d_2x3x4, [{}, {"y", "z":(2)2}, {"x", "z":(1)2}]> : tensor<24x48x72xf32>
+  return %0 : tensor<24x48x72xf32>
+}
+
+// The collective permute must fill dim 0 (capacity 6) and dim 1 (capacity 20)
+// exactly, which again requires splitting "z" (size 4).
+// CHECK-LABEL: func @collective_permute_splits_axis_by_gcd_with_capacity_4d_mesh
+func.func @collective_permute_splits_axis_by_gcd_with_capacity_4d_mesh(%arg0 : tensor<120x240xf32> {sdy.sharding=#sdy.sharding<@mesh4d_2x3x4x5, [{"x", "y"}, {"z", "w"}]>}) -> tensor<120x240xf32> {
+  // CHECK-NEXT: %[[CP_1:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh4d_2x3x4x5, [{"y", "z":(1)2}, {"x", "w", "z":(2)2}]>
+  // CHECK-NEXT: %[[A2A:.*]] = sdy.all_to_all [{"z":(1)2}: 0->1] %[[CP_1]] out_sharding=<@mesh4d_2x3x4x5, [{"y"}, {"x", "w", "z":(2)2, "z":(1)2}]>
+  // CHECK-NEXT: %[[AG_1:.*]] = sdy.all_gather [{"y"}, {}] %[[A2A]] out_sharding=<@mesh4d_2x3x4x5, [{}, {"x", "w", "z":(2)2, "z":(1)2}]>
+  // CHECK-NEXT: %[[CP_2:.*]] = sdy.collective_permute %[[AG_1]] out_sharding=<@mesh4d_2x3x4x5, [{}, {"x", "z", "w"}]>
+  // CHECK-NEXT: %[[AG_2:.*]] = sdy.all_gather [{}, {"w"}] %[[CP_2]] out_sharding=<@mesh4d_2x3x4x5, [{}, {"x", "z"}]>
+  // CHECK-NEXT: return %[[AG_2]]
+  %0 = sdy.reshard %arg0 <@mesh4d_2x3x4x5, [{}, {"x", "z"}]> : tensor<120x240xf32>
+  return %0 : tensor<120x240xf32>
 }
 
 // CHECK-LABEL: func @out_unreduced_axes_preserved
