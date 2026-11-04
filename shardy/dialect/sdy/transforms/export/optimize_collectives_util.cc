@@ -16,13 +16,11 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/optimize_collectives_util.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <iterator>
 #include <optional>
 #include <utility>
 
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -80,8 +78,7 @@ bool communicatesAnyPermutedAxis(ArrayRef<AxisRefAttr> inAxes,
 //   outSharding=<@mesh, [{}, {"x"}, {"y"}]>.
 AllToAllStage computeAllToAllStage(TensorShardingAttr inSharding,
                                    RankedTensorType inType,
-                                   AllToAllParamListAttr params,
-                                   MeshAttr mesh) {
+                                   AllToAllParamListAttr params) {
   MLIRContext* ctx = inSharding.getContext();
   SmallVector<DimensionShardingAttr> outDimShardings(
       inSharding.getDimShardings().begin(), inSharding.getDimShardings().end());
@@ -93,7 +90,7 @@ AllToAllStage computeAllToAllStage(TensorShardingAttr inSharding,
     SmallVector<AxisRefAttr> tgtAxes(outDimShardings[tgt].axis_begin(),
                                      outDimShardings[tgt].axis_end());
     for (AxisRefAttr ax : param.getAxes()) {
-      addAxisOrMerge(tgtAxes, ax, mesh);
+      tgtAxes.push_back(ax);
     }
     outDimShardings[tgt] = DimensionShardingAttr::get(
         ctx, tgtAxes, outDimShardings[tgt].getIsClosed());
@@ -332,58 +329,45 @@ std::optional<DecomposedTypeAndSharding> computeDecomposedTypeAndSharding(
   return DecomposedTypeAndSharding{splitType, splitSharding, numSplitDims};
 }
 
-struct AllToAllStagesResult {
-  SmallVector<AllToAllStage> stages;
-  SmallVector<AxisRefAttr> remainingTargetAxes;
-};
-
 // Translates each AllToAllOp in the chain to decomposed sub-dimension indices
-// and builds sequential single-axis AllToAllStages in post-permute order.
-std::optional<AllToAllStagesResult> computeAllToAllStages(
+// and builds sequential AllToAllStages.
+SmallVector<AllToAllStage> computeAllToAllStages(
     const AllToAllChain& chain, int64_t splitDim, int64_t numSplitDims,
-    ArrayRef<AxisRefAttr> inAxes, ArrayRef<AxisRefAttr> cpAxes, MeshAttr mesh,
-    RankedTensorType splitInputType, TensorShardingAttr splitInputSharding) {
+    ArrayRef<AxisRefAttr> inAxes, RankedTensorType splitInputType,
+    TensorShardingAttr splitInputSharding) {
   MLIRContext* ctx = splitInputSharding.getContext();
+  int64_t kNumAxes = static_cast<int64_t>(inAxes.size());
   SmallVector<AllToAllStage> a2aStages;
   TensorShardingAttr currentSharding = splitInputSharding;
-  llvm::SmallDenseSet<AxisRefAttr> scatteredAxes;
 
   for (AllToAllOp a2aOp : chain.a2aOps) {
+    SmallVector<AllToAllParamAttr> stageParamsList;
     for (AllToAllParamAttr param : a2aOp.getParams()) {
-      int64_t tgtDim = param.getTgtDim();
-      // Shifts dimensions after splitDim by the net change in rank.
-      int64_t tgtSubDim =
-          tgtDim < splitDim ? tgtDim : tgtDim + numSplitDims - 1;
       for (AxisRefAttr axis : param.getAxes()) {
-        for (AxisRefAttr cpAxis : cpAxes) {
-          if (!cpAxis.overlaps(axis)) {
-            continue;
+        for (int64_t k = 0; k < kNumAxes; ++k) {
+          if (axis.contains(inAxes[k])) {
+            int64_t tgtDim = param.getTgtDim();
+            // Shifts dimensions after splitDim by the net change in rank.
+            int64_t tgtSubDim =
+                tgtDim < splitDim ? tgtDim : tgtDim + numSplitDims - 1;
+            int64_t srcSubDim = splitDim + k;
+            stageParamsList.push_back(
+                AllToAllParamAttr::get(ctx, {inAxes[k]}, srcSubDim, tgtSubDim));
           }
-          if (!axis.contains(cpAxis) || !scatteredAxes.insert(cpAxis).second) {
-            return std::nullopt;
-          }
-          const auto* it = llvm::find(inAxes, cpAxis);
-          assert(it != inAxes.end());
-          int64_t k = std::distance(inAxes.begin(), it);
-          int64_t srcSubDim = splitDim + k;
-          auto stageParams = AllToAllParamListAttr::get(
-              ctx,
-              {AllToAllParamAttr::get(ctx, {cpAxis}, srcSubDim, tgtSubDim)});
-          a2aStages.push_back(computeAllToAllStage(
-              currentSharding, splitInputType, stageParams, mesh));
-          currentSharding = a2aStages.back().outSharding;
         }
       }
     }
-  }
-  SmallVector<AxisRefAttr> remainingTargetAxes;
-  for (AxisRefAttr cpAxis : cpAxes) {
-    if (!scatteredAxes.contains(cpAxis)) {
-      remainingTargetAxes.push_back(cpAxis);
+    if (!stageParamsList.empty()) {
+      llvm::sort(stageParamsList, [](AllToAllParamAttr a, AllToAllParamAttr b) {
+        return a.getSrcDim() < b.getSrcDim();
+      });
+      auto stageParams = AllToAllParamListAttr::get(ctx, stageParamsList);
+      a2aStages.push_back(
+          computeAllToAllStage(currentSharding, splitInputType, stageParams));
+      currentSharding = a2aStages.back().outSharding;
     }
   }
-  return AllToAllStagesResult{std::move(a2aStages),
-                              std::move(remainingTargetAxes)};
+  return a2aStages;
 }
 
 // Returns true if the leading sub-dimensions of `subDimAxes` match
@@ -429,8 +413,7 @@ std::optional<std::pair<int64_t, int64_t>> findAvailableAxisMove(
 //   Resulting in leading sub-dimensions matching targetAxes.
 std::optional<SmallVector<AllToAllStage>> computeStagesForRemainingAxes(
     TensorShardingAttr currentSharding, RankedTensorType splitType,
-    int64_t splitDim, int64_t numSplitDims, ArrayRef<AxisRefAttr> targetAxes,
-    MeshAttr mesh) {
+    int64_t splitDim, int64_t numSplitDims, ArrayRef<AxisRefAttr> targetAxes) {
   int64_t m = static_cast<int64_t>(targetAxes.size());
   if (m > numSplitDims) {
     return std::nullopt;
@@ -465,20 +448,10 @@ std::optional<SmallVector<AllToAllStage>> computeStagesForRemainingAxes(
     }
 
     auto [srcIdx, tgtIdx] = *move;
-    int64_t tgtDimSize = splitType.getDimSize(splitDim + tgtIdx);
-    int64_t axisSize = subDimAxes[srcIdx].getSize(mesh);
-    // Non-last remaining axes must exactly fill their sub-dimension so no
-    // unsharded factor separates them; the last must statically divide it.
-    bool isCompatible = (tgtIdx < m - 1) ? (tgtDimSize == axisSize)
-                                         : (tgtDimSize % axisSize == 0);
-    if (!isCompatible) {
-      return std::nullopt;
-    }
     auto param = AllToAllParamAttr::get(ctx, {subDimAxes[srcIdx]},
                                         splitDim + srcIdx, splitDim + tgtIdx);
     stages.push_back(computeAllToAllStage(
-        currentSharding, splitType, AllToAllParamListAttr::get(ctx, {param}),
-        mesh));
+        currentSharding, splitType, AllToAllParamListAttr::get(ctx, {param})));
     currentSharding = stages.back().outSharding;
 
     subDimAxes[tgtIdx] = subDimAxes[srcIdx];
@@ -575,8 +548,6 @@ std::optional<AllToAllRewritePlan> computeRewritePlan(
       getDecomposedAxesPerDim(inSharding, cpOp.getOutSharding(), mesh);
   SmallVector<AxisRefAttr> inAxes(inAxesPerDim[splitDim].begin(),
                                   inAxesPerDim[splitDim].end());
-  SmallVector<AxisRefAttr> cpAxes(cpAxesPerDim[splitDim].begin(),
-                                  cpAxesPerDim[splitDim].end());
 
   // Decomposes split dimension shape and sharding.
   std::optional<DecomposedTypeAndSharding> decomposed =
@@ -587,20 +558,21 @@ std::optional<AllToAllRewritePlan> computeRewritePlan(
   }
 
   // Generates all-to-all stages over the decomposed tensor.
-  std::optional<AllToAllStagesResult> stagesResult = computeAllToAllStages(
-      chain, splitDim, decomposed->numSplitDims, inAxes, cpAxes, mesh,
-      decomposed->type, decomposed->sharding);
-  if (!stagesResult || stagesResult->stages.empty()) {
+  SmallVector<AllToAllStage> a2aStages =
+      computeAllToAllStages(chain, splitDim, decomposed->numSplitDims, inAxes,
+                            decomposed->type, decomposed->sharding);
+  if (a2aStages.empty()) {
     return std::nullopt;
   }
-  SmallVector<AllToAllStage>& a2aStages = stagesResult->stages;
 
   auto outputType = cast<RankedTensorType>(terminalOp.getType());
   TensorShardingAttr outputSharding = terminalOp.getOutSharding();
+  ArrayRef<AxisRefAttr> targetAxes =
+      outputSharding.getDimSharding(splitDim).getAxes();
   std::optional<SmallVector<AllToAllStage>> remainingStages =
-      computeStagesForRemainingAxes(
-          a2aStages.back().outSharding, decomposed->type, splitDim,
-          decomposed->numSplitDims, stagesResult->remainingTargetAxes, mesh);
+      computeStagesForRemainingAxes(a2aStages.back().outSharding,
+                                    decomposed->type, splitDim,
+                                    decomposed->numSplitDims, targetAxes);
   if (!remainingStages) {
     return std::nullopt;
   }

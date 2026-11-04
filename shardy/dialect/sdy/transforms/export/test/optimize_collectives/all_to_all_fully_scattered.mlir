@@ -146,18 +146,3 @@ func.func @two_axis_full_scatter_with_unreduced_max(%arg0: tensor<16x8x8xf32> {s
   return %2 : tensor<16x8x8xf32>
 }
 
-// Permuted sub-axes {"x":(2)2, "x":(1)2} merged into {"x"} by collective_permute
-// and scattered to dim 1 in one all_to_all must scatter in post-permute order
-// ({"x":(1)2} then {"x":(2)2}) and merge back into {"x"} on the target dim.
-// CHECK-LABEL: func @permuted_sub_axes_merged_scatter_to_same_dim
-// CHECK-SAME:    (%arg0: tensor<12x10xf32> {sdy.sharding = #sdy.sharding<@mesh_sub, [{"x":(2)2, "x":(1)2}, {}]>}) -> (tensor<12x10xf32> {sdy.sharding = #sdy.sharding<@mesh_sub, [{}, {"x"}]>})
-// CHECK-NEXT:  %[[RESHAPE_IN:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_sub, [{"x":(2)2}, {"x":(1)2}, {}, {}]>]>} : (tensor<12x10xf32>) -> tensor<2x2x3x10xf32>
-// CHECK-NEXT:  %[[A2A1:.*]] = sdy.all_to_all [{"x":(1)2}: 1->3] %[[RESHAPE_IN]] out_sharding=<@mesh_sub, [{"x":(2)2}, {}, {}, {"x":(1)2}]> : tensor<2x2x3x10xf32>
-// CHECK-NEXT:  %[[A2A2:.*]] = sdy.all_to_all [{"x":(2)2}: 0->3] %[[A2A1]] out_sharding=<@mesh_sub, [{}, {}, {}, {"x"}]> : tensor<2x2x3x10xf32>
-// CHECK-NEXT:  %[[RESHAPE_OUT:.*]] = stablehlo.reshape %[[A2A2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_sub, [{}, {"x"}]>]>} : (tensor<2x2x3x10xf32>) -> tensor<12x10xf32>
-// CHECK-NEXT:  return %[[RESHAPE_OUT]] : tensor<12x10xf32>
-func.func @permuted_sub_axes_merged_scatter_to_same_dim(%arg0: tensor<12x10xf32> {sdy.sharding = #sdy.sharding<@mesh_sub, [{"x":(2)2, "x":(1)2}, {}]>}) -> (tensor<12x10xf32> {sdy.sharding = #sdy.sharding<@mesh_sub, [{}, {"x"}]>}) {
-  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_sub, [{"x"}, {}]> : tensor<12x10xf32>
-  %1 = sdy.all_to_all [{"x"}: 0->1] %0 out_sharding=<@mesh_sub, [{}, {"x"}]> : tensor<12x10xf32>
-  return %1 : tensor<12x10xf32>
-}
