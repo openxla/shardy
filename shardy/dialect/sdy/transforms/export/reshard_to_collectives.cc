@@ -139,30 +139,30 @@ struct AxisWithinCapacity {
   OptionalAxisRef remainderAxis;
 };
 
-// Returns an `AxisWithinCapacity` for the given `axis` w.r.t. to the given
-// `capacity`.
-//
-// In addition, updates `capacity` by dividing it by the size of the axis that
-// fits.
+// Returns an `AxisWithinCapacity` for the given `axis` w.r.t. `capacity`,
+// dividing `capacity` by the fitted size. Requires `axis` and `capacity` to be
+// divisible unless `splitByGcd` is true (which takes `gcd(size(axis),
+// capacity)`).
 AxisWithinCapacity getAxisWithinCapacity(AxisRefAttr axis, int64_t& capacity,
-                                         MeshAttr mesh) {
+                                         MeshAttr mesh,
+                                         bool splitByGcd = false) {
   int64_t axisSize = axis.getSize(mesh);
-  // We could use `std::gcd(axisSize, capacity)` instead, but in practice this
-  // isn't needed because how all-slice insertion works for non-divisible case.
-  if (capacity <= 1 || !areDivisible(axisSize, capacity)) {
+  // When `splitByGcd` is true, take the largest prefix of `axis` that divides
+  // `capacity` even when neither size divides the other (e.g. 2 of 4 for 6).
+  int64_t withinSize = std::gcd(axisSize, capacity);
+  if (capacity <= 1 || withinSize == 1 ||
+      (!splitByGcd && !areDivisible(axisSize, capacity))) {
     return {};
   }
-  if (capacity >= axisSize) {
-    capacity /= axisSize;
+  capacity /= withinSize;
+  if (withinSize == axisSize) {
     return {axis, /*remainderAxis=*/std::nullopt};
   }
-
   auto withinAxis = AxisRefAttr::get(mesh.getContext(), axis.getName(),
-                                     axis.getSubAxisPreSize(), capacity);
+                                     axis.getSubAxisPreSize(), withinSize);
   auto remainderAxis = AxisRefAttr::get(
       mesh.getContext(), axis.getName(),
-      withinAxis.getNextPreSizeOrFullSize(mesh), axisSize / capacity);
-  capacity = 1;
+      withinAxis.getNextPreSizeOrFullSize(mesh), axisSize / withinSize);
   return {withinAxis, remainderAxis};
 }
 
@@ -308,12 +308,12 @@ class CollectiveInserter {
     // can be handled by the previous collectives, so we are left with
     // all-gathering all axes in `inAxesPerDim` and we're done.
     //
-    // Otherwise, we need at most 2 iterations (or 3 if a dimension must first
-    // be unsharded due to a padded dimension size mismatch).
+    // Mixed-radix meshes (e.g. 2x3x4, 2x3x4x5) can split non-divisible axes
+    // across multiple rounds and require up to 6 iterations.
 
     // TODO(tomnatan): consider looping only over all-to-all and collective
     // permute as long as one of them was inserted.
-    for (int i = 0; i < 3 && !isDone(); ++i) {
+    for (int i = 0; i < 6 && !isDone(); ++i) {
       // 1. Try to insert an all-slice, that decreases the size of the tensor.
       tryAllSlice();
 
@@ -491,14 +491,13 @@ class CollectiveInserter {
   // `inAxesPerDim[d]` based on the capacity for that dimension
   // (`capacityPerDim[d]`).
   //
-  // For each dimension d, as long as `capacityPerDim[d] > 1` , pops the first
-  // axis A in `getAvailableAxes(d), and either:
-  // - Adds A as a whole to `inAxesPerDim[d]` if `size(A) >= capacityPerDim[d]`.
-  // - Splits A into two sub-axes A1 and A2, such that
-  //   `size(A1) == capacityPerDim[d]`, adds A1 to `inAxesPerDim[d]`, and adds
-  //   A2 back to the front of `getAvailableAxes(d)`.
-  // - Skips A if it isn't divisible by `capacityPerDim[d]` or vice versa, and
-  //   adds it back to the front of `getAvailableAxes(d)`.
+  // For each dimension d, while `capacityPerDim[d] > 1`, scans
+  // `getAvailableAxes(d)` and for each axis A with
+  // `g = gcd(size(A), capacityPerDim[d]) > 1`:
+  // - Adds A as a whole to `inAxesPerDim[d]` if `g == size(A)`.
+  // - Otherwise splits A into sub-axes A1 (size `g`) and A2, adds A1 to
+  //   `inAxesPerDim[d]`, and pushes A2 to the front of `getAvailableAxes(d)`.
+  // - Skips A in place if `g == 1`.
   //
   // For each axis A that is added to `inAxesPerDim[d]`, calls
   // `consumeAxisToAdd(A, d)`.
@@ -514,8 +513,8 @@ class CollectiveInserter {
       AxisList& availableAxes = getAvailableAxes(dim);
       auto availableIt = availableAxes.begin();
       while (availableIt != availableAxes.end() && dimCapacity > 1) {
-        auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(*availableIt, dimCapacity, mesh);
+        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+            *availableIt, dimCapacity, mesh, /*splitByGcd=*/true);
         if (!withinAxis) {
           ++availableIt;
           continue;
@@ -724,7 +723,8 @@ class CollectiveInserter {
   //    first dimension d such that `capacityPerDim[d] > 1`.
   //
   // In case `size(A) > capacityPerDim[d]`, we split A into two sub-axes A1 and
-  // A2, such that `size(A1) == capacityPerDim[d]`, and slice along A1 (filling
+  // A2, such that `size(A1) == capacityPerDim[d]` (or
+  // `gcd(size(A), capacityPerDim[d])` in stage 3), and slice along A1 (filling
   // in the gap).
   //
   // The internal state is updated as follows for each dimension `d` and the
@@ -894,8 +894,8 @@ class CollectiveInserter {
             int64_t simCapacity = dimCapacity;
             int64_t addedSize = 1;
             for (AxisRefAttr availAxis : availableOutAxes) {
-              auto [withinAxis, remainderAxis] =
-                  getAxisWithinCapacity(availAxis, simCapacity, mesh);
+              auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+                  availAxis, simCapacity, mesh, /*splitByGcd=*/true);
               if (withinAxis) {
                 addedSize *= withinAxis->getSize(mesh);
               }
@@ -1061,8 +1061,8 @@ class CollectiveInserter {
   //    `curCapacity[d] > 1`.
   //
   // In case `size(A) > curCapacity[d]`, we split A into two sub-axes A1 and A2,
-  // such that `size(A1) == curCapacity[d]`, and pick A1 for that dimension
-  // (filling in the gap).
+  // such that `size(A1) == curCapacity[d]` (or `gcd(size(A), curCapacity[d])`
+  // in stages 2-4), and pick A1 for that dimension (filling in the gap).
   //
   // The internal state is updated as follows for each dimension `d`:
   //
