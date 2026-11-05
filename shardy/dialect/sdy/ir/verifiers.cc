@@ -803,36 +803,35 @@ LogicalResult MeshOp::verify() {
   return success();
 }
 
-LogicalResult ShardingConstraintOp::verifySymbolUses(
-    SymbolTableCollection& symbolTableCollection) {
-  if (failed(verifyTensorShardingAttr(getSharding(), getType(), *this,
+namespace {
+
+template <typename OpTy>
+LogicalResult verifyUnaryShardingOpSymbolUses(
+    OpTy op, SymbolTableCollection& symbolTableCollection) {
+  if (failed(verifyTensorShardingAttr(op.getSharding(), op.getType(), op,
                                       symbolTableCollection,
-                                      getEmitErrorFn(*this)))) {
+                                      getEmitErrorFn(op)))) {
     return failure();
   }
-  TensorShardingAttr sourceSharding = mlir::sdy::getSharding(getOperand());
+  TensorShardingAttr sourceSharding = mlir::sdy::getSharding(op.getOperand());
   if (!sourceSharding) {
     return success();
   }
-  return verifyUnreducedAxesTransition(*this, {sourceSharding}, {getSharding()},
-                                       getSharding().getReductionOp(),
+  return verifyUnreducedAxesTransition(op, {sourceSharding}, {op.getSharding()},
+                                       op.getSharding().getReductionOp(),
                                        sourceSharding.getReductionOp());
+}
+
+}  // namespace
+
+LogicalResult ShardingConstraintOp::verifySymbolUses(
+    SymbolTableCollection& symbolTableCollection) {
+  return verifyUnaryShardingOpSymbolUses(*this, symbolTableCollection);
 }
 
 LogicalResult ReshardOp::verifySymbolUses(
     SymbolTableCollection& symbolTableCollection) {
-  if (failed(verifyTensorShardingAttr(getSharding(), getType(), *this,
-                                      symbolTableCollection,
-                                      getEmitErrorFn(*this)))) {
-    return failure();
-  }
-  TensorShardingAttr sourceSharding = mlir::sdy::getSharding(getOperand());
-  if (!sourceSharding) {
-    return success();
-  }
-  return verifyUnreducedAxesTransition(*this, {sourceSharding}, {getSharding()},
-                                       getSharding().getReductionOp(),
-                                       sourceSharding.getReductionOp());
+  return verifyUnaryShardingOpSymbolUses(*this, symbolTableCollection);
 }
 
 LogicalResult FuncDataFlowEdgeOp::verifySymbolUses(
@@ -2017,20 +2016,10 @@ LogicalResult SdyDialect::verifyOperationAttribute(Operation* op,
 
   if (attr.getName() == kResultPropagationEdgesAttr ||
       attr.getName() == kBlockArgPropagationEdgesAttr) {
-    bool incorrectAttrType = false;
     auto edgeSharding = dyn_cast<ArrayAttr>(attr.getValue());
-    if (!edgeSharding) {
-      incorrectAttrType = true;
-    } else {
-      for (auto edge : edgeSharding) {
-        auto edgeAttr = dyn_cast<PropagationEdgesAttr>(edge);
-        if (!edgeAttr) {
-          incorrectAttrType = true;
-          break;
-        }
-      }
-    }
-    if (incorrectAttrType) {
+    if (!edgeSharding || !llvm::all_of(edgeSharding, [](Attribute edge) {
+          return isa<PropagationEdgesAttr>(edge);
+        })) {
       return op->emitOpError(
                  "should have a propagation edges attribute of type ")
              << "ArrayAttr<PropagationEdgesAttr> for attr named '"
