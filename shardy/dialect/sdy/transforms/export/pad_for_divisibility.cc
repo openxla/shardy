@@ -17,6 +17,7 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 #include "llvm/ADT/STLExtras.h"
@@ -207,6 +208,7 @@ class PaddedTypeConverter : public TypeConverter {
 // this file and should be excluded from GenericOpPattern.
 bool hasCustomPadHandling(Operation* op) {
   return isa<sdy::ConstantOp, stablehlo::ConstantOp, stablehlo::SliceOp,
+             stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
              stablehlo::DotGeneralOp, stablehlo::PadOp, stablehlo::ScatterOp,
              stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
              stablehlo::GatherOp, stablehlo::ReduceOp, PartitioningOpInterface>(
@@ -1441,6 +1443,123 @@ class StablehloGatherOpPattern
   }
 };
 
+// Clamps a 0D scalar start index to `maxIdx` using the unpadded dimension
+// bound. Folds constant start indices in place so downstream patterns that
+// inspect constant indices (such as isCommunicationFreeDynamicUpdateSliceDim)
+// continue to see a constant operand.
+Value clampScalarStartIndex(Location loc, Value startIndex, int64_t maxIdx,
+                            ConversionPatternRewriter& rewriter) {
+  auto indexType = cast<RankedTensorType>(startIndex.getType());
+  Type elemType = indexType.getElementType();
+  TensorShardingAttr idxSharding = getSharding(startIndex);
+  ElementsAttr constAttr;
+  if (auto sdyConst = startIndex.getDefiningOp<sdy::ConstantOp>()) {
+    constAttr = sdyConst.getValue();
+  } else if (auto shloConst =
+                 startIndex.getDefiningOp<stablehlo::ConstantOp>()) {
+    constAttr = shloConst.getValue();
+  }
+  if (constAttr && constAttr.isSplat()) {
+    APInt val = constAttr.getSplatValue<APInt>();
+    bool isInBounds =
+        elemType.isUnsignedInteger() ? val.ule(maxIdx) : val.sle(maxIdx);
+    if (isInBounds) {
+      return startIndex;
+    }
+  }
+  auto maxConst = stablehlo::ConstantOp::create(
+      rewriter, loc,
+      DenseElementsAttr::get(indexType,
+                             rewriter.getIntegerAttr(elemType, maxIdx)));
+  if (idxSharding) {
+    setSharding(maxConst, idxSharding);
+  }
+  if (constAttr && constAttr.isSplat()) {
+    return maxConst;
+  }
+  auto clamped = stablehlo::MinOp::create(rewriter, loc, startIndex, maxConst);
+  if (idxSharding) {
+    setSharding(clamped, idxSharding);
+  }
+  return clamped;
+}
+
+template <typename OpTy>
+class DynamicSlicePattern : public OpConversionPattern<OpTy> {
+ public:
+  using OpConversionPattern<OpTy>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      OpTy op, typename OpTy::Adaptor adaptor,
+      ConversionPatternRewriter& rewriter) const override {
+    static_assert(std::is_same_v<OpTy, stablehlo::DynamicSliceOp> ||
+                  std::is_same_v<OpTy, stablehlo::DynamicUpdateSliceOp>);
+    constexpr bool isDynamicSlice =
+        std::is_same_v<OpTy, stablehlo::DynamicSliceOp>;
+    auto* converter =
+        static_cast<const PaddedTypeConverter*>(this->getTypeConverter());
+    Value operand = adaptor.getOperand();
+    auto origOperandType = op.getOperand().getType();
+    auto paddedOperandType = dyn_cast<RankedTensorType>(operand.getType());
+    RankedTensorType origResultType = op.getType();
+    if (!origOperandType || !paddedOperandType || !origResultType) {
+      return failure();
+    }
+
+    TensorShardingAttr outSharding = getSharding(op.getResult());
+    auto paddedResultType = cast<RankedTensorType>(getDivisiblePaddedType(
+        origResultType, outSharding, converter->getSymbolTable()));
+
+    ArrayRef<int64_t> origSliceSizes;
+    SmallVector<int64_t> paddedSliceSizes;
+    if constexpr (isDynamicSlice) {
+      origSliceSizes = op.getSliceSizes();
+      paddedSliceSizes.assign(origSliceSizes.begin(), origSliceSizes.end());
+      for (int64_t d = 0; d < origOperandType.getRank(); ++d) {
+        if (paddedResultType.getDimSize(d) != origResultType.getDimSize(d)) {
+          paddedSliceSizes[d] = paddedResultType.getDimSize(d);
+        }
+      }
+    } else {
+      auto origUpdateType = op.getUpdate().getType();
+      auto paddedUpdateType =
+          dyn_cast<RankedTensorType>(adaptor.getUpdate().getType());
+      if (!origUpdateType || !paddedUpdateType) {
+        return failure();
+      }
+      origSliceSizes = origUpdateType.getShape();
+      paddedSliceSizes.assign(paddedUpdateType.getShape().begin(),
+                              paddedUpdateType.getShape().end());
+    }
+
+    SmallVector<Value> startIndices(adaptor.getStartIndices());
+    for (int64_t d = 0; d < origOperandType.getRank(); ++d) {
+      if (paddedOperandType.getDimSize(d) > origOperandType.getDimSize(d) &&
+          paddedSliceSizes[d] < paddedOperandType.getDimSize(d)) {
+        int64_t maxIdx = origOperandType.getDimSize(d) - origSliceSizes[d];
+        startIndices[d] = clampScalarStartIndex(op.getLoc(), startIndices[d],
+                                                maxIdx, rewriter);
+      }
+    }
+
+    OpTy newOp;
+    if constexpr (isDynamicSlice) {
+      newOp = stablehlo::DynamicSliceOp::create(
+          rewriter, op.getLoc(), paddedResultType, operand, startIndices,
+          rewriter.getDenseI64ArrayAttr(paddedSliceSizes));
+    } else {
+      newOp = stablehlo::DynamicUpdateSliceOp::create(
+          rewriter, op.getLoc(), paddedResultType, operand, adaptor.getUpdate(),
+          startIndices);
+    }
+    if (outSharding) {
+      setSharding(newOp.getResult(), outSharding);
+    }
+    rewriter.replaceOp(op, newOp.getResult());
+    return success();
+  }
+};
+
 class StablehloReduceOpPattern
     : public OpConversionPattern<stablehlo::ReduceOp> {
  public:
@@ -1543,6 +1662,9 @@ struct PadForDivisibilityPass
                  ConstantOpPattern<sdy::ConstantOp>,
                  ConstantOpPattern<stablehlo::ConstantOp>>(
         typeConverter, &getContext(), paddingCache);
+    patterns.add<DynamicSlicePattern<stablehlo::DynamicSliceOp>,
+                 DynamicSlicePattern<stablehlo::DynamicUpdateSliceOp>>(
+        typeConverter, &getContext());
     ConversionTarget target(getContext());
 
     auto isLegalType = [&](Type type, TensorShardingAttr sharding) {
