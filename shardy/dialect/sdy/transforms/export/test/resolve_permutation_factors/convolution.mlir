@@ -403,3 +403,49 @@ func.func @convolution_spatial_sharded_stride_indivisible_output_replicated(
     : (tensor<4x16x8xf32>, tensor<3x8x12xf32>) -> tensor<4x6x12xf32>
   return %0 : tensor<4x6x12xf32>
 }
+
+// CHECK-LABEL: func @convolution_spatial_sharded_large_dim_all_gather
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8589934592x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {"a"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<2x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {}, {}]>})
+// CHECK-SAME: -> (tensor<1x8589934592x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {"a"}, {}]>})
+func.func @convolution_spatial_sharded_large_dim_all_gather(
+    %arg0: tensor<1x8589934592x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {"a"}, {}]>},
+    %arg1: tensor<2x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {}, {}]>})
+    -> (tensor<1x8589934592x1xf32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}, {"a"}, {}]>}) {
+  // REPL-NEXT: %[[RESHARD_IN:.*]] = sdy.reshard %[[ARG0]] <@mesh_a4, [{}, {}, {}]> : tensor<1x8589934592x1xf32>
+  // REPL-NEXT: %[[CONV:.*]] = stablehlo.convolution(%[[RESHARD_IN]], %[[ARG1]])
+  // REPL-SAME:   stride = [1], pad = {{\[\[}}1, 0{{\]\]}}
+  // REPL-SAME:   sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}, {}]>]>
+  // REPL-NEXT: %[[RES:.*]] = sdy.reshard %[[CONV]] <@mesh_a4, [{}, {"a"}, {}]> : tensor<1x8589934592x1xf32>
+  // REPL-NEXT: return %[[RES]] : tensor<1x8589934592x1xf32>
+
+  // HALO-NEXT: %[[GATHERED:.*]] = sdy.all_gather [{}, {"a"}, {}] %[[ARG0]] out_sharding=<@mesh_a4, [{}, {}, {}]> : tensor<1x8589934592x1xf32>
+  // HALO-NEXT: %[[MC:.*]] = sdy.manual_computation(%[[GATHERED]], %[[ARG1]])
+  // HALO-SAME:   in_shardings=[<@mesh_a4, [{}, {}, {}]>, <@mesh_a4, [{}, {}, {}]>]
+  // HALO-SAME:   out_shardings=[<@mesh_a4, [{}, {"a"}, {}]>]
+  // HALO-SAME:   manual_axes={"a"} (%[[MC_LHS:.*]]: tensor<1x8589934592x1xf32>, %[[MC_RHS:.*]]: tensor<2x1x1xf32>) {
+  // HALO-NEXT:   %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // HALO-NEXT:   %[[PADDED:.*]] = stablehlo.pad %[[MC_LHS]], %[[ZERO]], low = [0, 1, 0], high = [0, 0, 0], interior = [0, 0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}, {}]>]>} : (tensor<1x8589934592x1xf32>, tensor<f32>) -> tensor<1x8589934593x1xf32>
+  // HALO-NEXT:   %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // HALO-NEXT:   %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i64>
+  // HALO-NEXT:   %[[OFFSETS:.*]] = stablehlo.constant dense<[0, 0, 2147483648, 2147483648, 4294967296, 4294967296, 6442450944, 6442450944]> : tensor<8xi64>
+  // HALO-NEXT:   %[[OFFSET_SLICE:.*]] = stablehlo.dynamic_slice %[[OFFSETS]], %[[PID]], sizes = [1] : (tensor<8xi64>, tensor<ui32>) -> tensor<1xi64>
+  // HALO-NEXT:   %[[OFFSET:.*]] = stablehlo.reshape %[[OFFSET_SLICE]] : (tensor<1xi64>) -> tensor<i64>
+  // HALO-NEXT:   %[[SLICED:.*]] = stablehlo.dynamic_slice %[[PADDED]], %[[C0]], %[[OFFSET]], %[[C0]], sizes = [1, 2147483649, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}, {}]>]>} : (tensor<1x8589934593x1xf32>, tensor<i64>, tensor<i64>, tensor<i64>) -> tensor<1x2147483649x1xf32>
+  // HALO-NEXT:   %[[LOCAL_CONV:.*]] = stablehlo.convolution(%[[SLICED]], %[[MC_RHS]])
+  // HALO-SAME:     stride = [1], pad = {{\[\[}}0, 0{{\]\]}}
+  // HALO-SAME:     sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {}, {}]>]>
+  // HALO-SAME:     : (tensor<1x2147483649x1xf32>, tensor<2x1x1xf32>) -> tensor<1x2147483648x1xf32>
+  // HALO-NEXT:   sdy.return %[[LOCAL_CONV]] : tensor<1x2147483648x1xf32>
+  // HALO-NEXT: } : (tensor<1x8589934592x1xf32>, tensor<2x1x1xf32>) -> tensor<1x8589934592x1xf32>
+  // HALO-NEXT: return %[[MC]] : tensor<1x8589934592x1xf32>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f] x [0, i, o] -> [b, 0, f],
+    window = {stride = [1], pad = [[1, 0]]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}, {"a"}, {}]>]>
+    }
+    : (tensor<1x8589934592x1xf32>, tensor<2x1x1xf32>) -> tensor<1x8589934592x1xf32>
+  return %0 : tensor<1x8589934592x1xf32>
+}

@@ -702,6 +702,60 @@ TEST_F(ExportUtilsTest, CreateScalarIntConstant) {
                 .getSExtValue(),
             largeVal);
 }
+
+TEST_F(ExportUtilsTest, Requires64BitOffsetAndIndex) {
+  OpBuilder builder(moduleOp.get().getBodyRegion());
+
+  EXPECT_FALSE(requires64BitOffset(0));
+  EXPECT_FALSE(requires64BitOffset(std::numeric_limits<int32_t>::max()));
+  EXPECT_FALSE(requires64BitOffset(std::numeric_limits<int32_t>::min()));
+
+  EXPECT_TRUE(requires64BitOffset(
+      static_cast<int64_t>(std::numeric_limits<int32_t>::max()) + 1));
+  EXPECT_TRUE(requires64BitOffset(
+      static_cast<int64_t>(std::numeric_limits<int32_t>::min()) - 1));
+
+  SmallVector<int64_t> smallValues = {0, 100, 200};
+  EXPECT_FALSE(requires64BitOffset(smallValues));
+  SmallVector<int64_t> largeValues = {0, 100, 4294967296};
+  EXPECT_TRUE(requires64BitOffset(largeValues));
+
+  auto smallType = RankedTensorType::get({4, 8}, builder.getI32Type());
+  EXPECT_FALSE(requires64BitIndex(smallType));
+  auto largeType = RankedTensorType::get({4294967296, 8}, builder.getI32Type());
+  EXPECT_TRUE(requires64BitIndex(largeType));
+  auto dynamicType =
+      RankedTensorType::get({ShapedType::kDynamic, 8}, builder.getI32Type());
+  EXPECT_FALSE(requires64BitIndex(dynamicType));
+  auto dynamicLargeType = RankedTensorType::get(
+      {ShapedType::kDynamic, 4294967296}, builder.getI32Type());
+  EXPECT_TRUE(requires64BitIndex(dynamicLargeType));
+
+  EXPECT_EQ(getIndexOrOffsetType(builder, /*useI64=*/false),
+            builder.getI32Type());
+  EXPECT_EQ(getIndexOrOffsetType(builder, /*useI64=*/true),
+            builder.getI64Type());
+
+  DenseIntElementsAttr smallAttr = create1DOffsetsAttr(builder, smallValues);
+  EXPECT_EQ(smallAttr.getElementType(), builder.getI32Type());
+  EXPECT_EQ(smallAttr.getNumElements(), 3);
+
+  DenseIntElementsAttr largeAttr = create1DOffsetsAttr(builder, largeValues);
+  EXPECT_EQ(largeAttr.getElementType(), builder.getI64Type());
+  EXPECT_EQ(largeAttr.getNumElements(), 3);
+
+  DenseIntElementsAttr forcedI64Attr =
+      create1DOffsetsAttr(builder, smallValues, /*useI64=*/true);
+  EXPECT_EQ(forcedI64Attr.getElementType(), builder.getI64Type());
+
+  Location loc = UnknownLoc::get(builder.getContext());
+  Value constOp = create1DOffsetsConstant(loc, builder, smallValues);
+  EXPECT_EQ(constOp.getType(),
+            RankedTensorType::get({3}, builder.getI32Type()));
+  Value largeConstOp = create1DOffsetsConstant(loc, builder, largeValues);
+  EXPECT_EQ(largeConstOp.getType(),
+            RankedTensorType::get({3}, builder.getI64Type()));
+}
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir

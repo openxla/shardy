@@ -1003,8 +1003,7 @@ Value assembleHaloExchangeBuffer(
 
       SmallVector<int64_t> pairs =
           getDataShiftSourceTargetPairs(mesh, manualAxesInDim, shardOffset);
-      Value neighborData =
-          mayCollectivePermute(loc, sliceToSend, pairs, state);
+      Value neighborData = mayCollectivePermute(loc, sliceToSend, pairs, state);
       if (!isFullyReplicated(localSharding)) {
         setSharding(neighborData, localSharding);
       }
@@ -1074,12 +1073,11 @@ Value assembleHaloExchangeBuffer(
     setSharding(concat, localSharding);
   }
 
-  int64_t lowPad =
-      edgePadSize == 0
-          ? 0
-          : (dimExchange.useSlicedHalo
-                 ? dimExchange.edgePadLow * (interiorPad + 1)
-                 : edgePadSize);
+  int64_t lowPad = edgePadSize == 0
+                       ? 0
+                       : (dimExchange.useSlicedHalo
+                              ? dimExchange.edgePadLow * (interiorPad + 1)
+                              : edgePadSize);
   int64_t highPad =
       edgePadSize == 0
           ? 0
@@ -1203,14 +1201,12 @@ Value exchangeDimWithDynamicOffset(
   // and unused suffix of the last segment before collective-permute.
   int64_t totalSegments = dimExchange.leftHops + 1 + dimExchange.rightHops;
   int64_t maxEnd = maxUnpaddedOff + dimExchange.sFootprint;
-  int64_t firstSegSize =
-      (dimExchange.useSlicedHalo && dimExchange.leftHops > 0)
-          ? leftHaloOrHopsSize
-          : sIn;
-  int64_t lastSegSize =
-      (dimExchange.useSlicedHalo && dimExchange.rightHops > 0)
-          ? rightHaloOrHopsSize
-          : sIn;
+  int64_t firstSegSize = (dimExchange.useSlicedHalo && dimExchange.leftHops > 0)
+                             ? leftHaloOrHopsSize
+                             : sIn;
+  int64_t lastSegSize = (dimExchange.useSlicedHalo && dimExchange.rightHops > 0)
+                            ? rightHaloOrHopsSize
+                            : sIn;
   bool canTrimSegments =
       !dimExchange.reshapeInfo && edgePadSize == 0 && interiorPad == 0 &&
       baseDilation == 1 && totalSegments > 1 && minUnpaddedOff >= 0 &&
@@ -1227,9 +1223,8 @@ Value exchangeDimWithDynamicOffset(
     int64_t segStart;
     int64_t segEnd;
     if (dimExchange.useSlicedHalo) {
-      segStart = edgePadSize +
-                 (offset > 0 ? 0 : (leftHaloOrHopsSize + sIn)) *
-                     (interiorPad + 1);
+      segStart = edgePadSize + (offset > 0 ? 0 : (leftHaloOrHopsSize + sIn)) *
+                                   (interiorPad + 1);
       segEnd = edgePadSize +
                (offset > 0 ? leftHaloOrHopsSize : concatDimSize) *
                    (interiorPad + 1) -
@@ -1266,8 +1261,7 @@ Value exchangeDimWithDynamicOffset(
     int64_t segOffset =
         dimExchange.useSlicedHalo ? leftHaloOrHopsSize : k * sIn;
     int64_t sliceStart = (k == 0) ? minUnpaddedOff : 0;
-    int64_t sliceLimit =
-        (k == totalSegments - 1) ? (maxEnd - segOffset) : sIn;
+    int64_t sliceLimit = (k == totalSegments - 1) ? (maxEnd - segOffset) : sIn;
     return sliceAlongDim(loc, val, dim, sliceStart, sliceLimit, localSharding,
                          state.rewriter);
   };
@@ -1292,30 +1286,27 @@ Value exchangeDimWithDynamicOffset(
   Value offset;
   Value zeroConst;
   if (dimExchange.reshapeInfo) {
-    auto i32Ty = state.rewriter.getI32Type();
     SDY_CHECK(dilatedHaloBuffer);
     SDY_CHECK_EQ(baseDilation, 1);
-    SmallVector<int32_t> offsets(dimExchange.shardExchanges.size(), 0);
-    for (int64_t t = 0; t < dimExchange.shardExchanges.size(); ++t) {
+    int64_t n = dimExchange.shardExchanges.size();
+    SmallVector<int64_t> offsets(n, 0);
+    for (int64_t t = 0; t < n; ++t) {
       const auto& ex = dimExchange.shardExchanges[t];
       int64_t edgePad = dimExchange.sFootprint;
       int64_t sourceId = ex.sourceId != -1 ? ex.sourceId : t;
       int64_t relativeHop = dimExchange.leftHops + sourceId - t;
-      int64_t off = -padLow + edgePad + relativeHop * sIn + ex.localOffset;
-      SDY_CHECK_GE(off, std::numeric_limits<int32_t>::min());
-      SDY_CHECK_LE(off, std::numeric_limits<int32_t>::max());
-      offsets[t] = static_cast<int32_t>(off);
+      offsets[t] = -padLow + edgePad + relativeHop * sIn + ex.localOffset;
     }
-    int64_t n = offsets.size();
-    auto offsetsConst = stablehlo::ConstantOp::create(
-        state.rewriter, loc,
-        DenseIntElementsAttr::get(RankedTensorType::get({n}, i32Ty), offsets));
+    Value offsetsConst = create1DOffsetsConstant(loc, state.rewriter, offsets);
+    Type offsetElemTy =
+        cast<RankedTensorType>(offsetsConst.getType()).getElementType();
     auto sliceOp = stablehlo::DynamicSliceOp::create(
-        state.rewriter, loc, RankedTensorType::get({1}, i32Ty), offsetsConst,
-        idInPartitionGroup, state.rewriter.getDenseI64ArrayAttr({1}));
+        state.rewriter, loc, RankedTensorType::get({1}, offsetElemTy),
+        offsetsConst, idInPartitionGroup,
+        state.rewriter.getDenseI64ArrayAttr({1}));
     offset = stablehlo::ReshapeOp::create(
-        state.rewriter, loc, RankedTensorType::get({}, i32Ty), sliceOp);
-    zeroConst = createZeroConstant(loc, RankedTensorType::get({}, i32Ty),
+        state.rewriter, loc, RankedTensorType::get({}, offsetElemTy), sliceOp);
+    zeroConst = createZeroConstant(loc, RankedTensorType::get({}, offsetElemTy),
                                    state.rewriter);
   } else {
     int64_t minOffsetInBuffer = std::min(
@@ -2135,31 +2126,27 @@ LogicalResult handleConvolutionOp(stablehlo::ConvolutionOp convOp,
 
   Value partitionId = createDeviceId(loc, state);
   int64_t totalDevices = mesh.getTotalSize();
-  Type i32Ty = rewriter.getI32Type();
+  bool useI64 = requires64BitIndex(paddedLhs.getType());
+  Type indexElemTy = getIndexOrOffsetType(rewriter, useI64);
   Value zeroIdx =
-      createZeroConstant(loc, RankedTensorType::get({}, i32Ty), rewriter);
+      createZeroConstant(loc, RankedTensorType::get({}, indexElemTy), rewriter);
   SmallVector<Value> startIndices(rank, zeroIdx);
   SmallVector<int64_t> sliceSizes(paddedLhsShape);
   for (const ShardedConvSpatialDimInfo& d : shardedSpatialDims) {
     int64_t step = d.sOut * d.stride;
-    SmallVector<int32_t> offsetsTable;
-    offsetsTable.reserve(totalDevices);
-    for (int64_t devId = 0; devId < totalDevices; ++devId) {
-      int64_t offset =
-          getShardIndex(devId, mesh, lhsSharding.getDimShardings()[d.lhsDim]) *
-          step;
-      SDY_CHECK_LE(offset, std::numeric_limits<int32_t>::max());
-      offsetsTable.push_back(static_cast<int32_t>(offset));
-    }
-    auto offsetsConst = stablehlo::ConstantOp::create(
-        rewriter, loc,
-        DenseIntElementsAttr::get(RankedTensorType::get({totalDevices}, i32Ty),
-                                  offsetsTable));
+    SmallVector<int64_t> offsetsTable = llvm::map_to_vector(
+        llvm::seq<int64_t>(0, totalDevices), [&](int64_t devId) {
+          return getShardIndex(devId, mesh,
+                               lhsSharding.getDimShardings()[d.lhsDim]) *
+                 step;
+        });
+    Value offsetsConst =
+        create1DOffsetsConstant(loc, rewriter, offsetsTable, useI64);
     auto sliceOp = stablehlo::DynamicSliceOp::create(
-        rewriter, loc, RankedTensorType::get({1}, i32Ty), offsetsConst,
+        rewriter, loc, RankedTensorType::get({1}, indexElemTy), offsetsConst,
         partitionId, rewriter.getDenseI64ArrayAttr({1}));
     startIndices[d.lhsDim] = stablehlo::ReshapeOp::create(
-        rewriter, loc, RankedTensorType::get({}, i32Ty), sliceOp);
+        rewriter, loc, RankedTensorType::get({}, indexElemTy), sliceOp);
     sliceSizes[d.lhsDim] = d.sFootprint;
   }
 

@@ -26,6 +26,7 @@ limitations under the License.
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/Builders.h"
@@ -700,6 +701,31 @@ Value createScalarIntConstant(Location loc, Type type, int64_t val,
   return stablehlo::ConstantOp::create(
       builder, loc,
       DenseIntElementsAttr::get(tensorType, APInt(bitWidth, val, isSigned)));
+}
+
+DenseIntElementsAttr create1DOffsetsAttr(OpBuilder& builder,
+                                         ArrayRef<int64_t> offsets,
+                                         std::optional<bool> useI64) {
+  bool shouldBeI64 = useI64.value_or(requires64BitOffset(offsets));
+  Type elemTy = getIndexOrOffsetType(builder, shouldBeI64);
+  auto tensorType =
+      RankedTensorType::get({static_cast<int64_t>(offsets.size())}, elemTy);
+  if (shouldBeI64) {
+    return DenseIntElementsAttr::get(tensorType, offsets);
+  }
+  SmallVector<int32_t> i32Offsets = llvm::map_to_vector(offsets, [](int64_t o) {
+    SDY_CHECK_GE(o, std::numeric_limits<int32_t>::min());
+    SDY_CHECK_LE(o, std::numeric_limits<int32_t>::max());
+    return static_cast<int32_t>(o);
+  });
+  return DenseIntElementsAttr::get(tensorType, i32Offsets);
+}
+
+Value create1DOffsetsConstant(Location loc, OpBuilder& builder,
+                              ArrayRef<int64_t> offsets,
+                              std::optional<bool> useI64) {
+  DenseIntElementsAttr attr = create1DOffsetsAttr(builder, offsets, useI64);
+  return stablehlo::ConstantOp::create(builder, loc, attr.getType(), attr);
 }
 
 Value padHighSideToType(Location loc, Value operand, Type targetType,

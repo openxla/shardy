@@ -17,6 +17,7 @@ limitations under the License.
 #define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_UTILS_H_
 
 #include <cstdint>
+#include <limits>
 #include <list>
 #include <optional>
 
@@ -269,6 +270,47 @@ Value createZeroConstant(Location loc, Type type, OpBuilder& builder);
 // tensor type.
 Value createScalarIntConstant(Location loc, Type type, int64_t val,
                               OpBuilder& builder);
+
+// Returns true if val cannot fit in a 32-bit signed integer.
+inline bool requires64BitOffset(int64_t val) {
+  return val > std::numeric_limits<int32_t>::max() ||
+         val < std::numeric_limits<int32_t>::min();
+}
+
+// Returns true if any value in values cannot fit in a 32-bit signed integer.
+inline bool requires64BitOffset(ArrayRef<int64_t> values) {
+  return llvm::any_of(values, [](int64_t v) { return requires64BitOffset(v); });
+}
+
+// Returns true if type has any dimension that exceeds a 32-bit signed integer.
+inline bool requires64BitIndex(Type type) {
+  if (auto rankedType = dyn_cast_or_null<RankedTensorType>(type)) {
+    return llvm::any_of(rankedType.getShape(), [](int64_t dim) {
+      return !ShapedType::isDynamic(dim) &&
+             dim > std::numeric_limits<int32_t>::max();
+    });
+  }
+  return false;
+}
+
+// Returns i64Type if useI64 is true, else i32Type.
+inline Type getIndexOrOffsetType(OpBuilder& builder, bool useI64) {
+  return useI64 ? builder.getI64Type() : builder.getI32Type();
+}
+
+// Returns a 1D DenseIntElementsAttr of the given offsets.
+// If useI64 is true (or if omitted and any offset cannot fit in a 32-bit signed
+// integer), the attribute has i64 element type, otherwise i32 element type.
+DenseIntElementsAttr create1DOffsetsAttr(
+    OpBuilder& builder, ArrayRef<int64_t> offsets,
+    std::optional<bool> useI64 = std::nullopt);
+
+// Creates a 1D stablehlo.constant tensor of the given offsets.
+// If useI64 is true (or if omitted and any offset cannot fit in a 32-bit signed
+// integer), the constant has i64 element type, otherwise i32 element type.
+Value create1DOffsetsConstant(Location loc, OpBuilder& builder,
+                              ArrayRef<int64_t> offsets,
+                              std::optional<bool> useI64 = std::nullopt);
 
 // Zero-pads the high side of `operand` to match `targetType`. If `operand`
 // already matches `targetType`, returns `operand`. Attaches `sharding` to the
