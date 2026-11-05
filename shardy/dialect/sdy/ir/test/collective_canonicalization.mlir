@@ -107,12 +107,42 @@ func.func @reduce_scatter_fusion3(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sh
 
 // CHECK-LABEL: func @reduce_scatter_fusion4
 func.func @reduce_scatter_fusion4(%arg0 : tensor<64x8xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"r"}, {}]>}) -> tensor<64x8xf32> {
-  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"y", "z"}, {"x"}] %arg0 out_sharding=<@mesh2, [{"r", "y", "z"}, {"x"}]> : tensor<64x8xf32>
-  // CHECK-NEXT: %1 = sdy.all_slice [{"p"}, {"q"}] %0 out_sharding=<@mesh2, [{"r", "y", "z", "p"}, {"x", "q"}]> :  tensor<64x8xf32>
+  // CHECK-NEXT: %0 = sdy.all_reduce {"x", "y", "z"} %arg0 out_sharding=<@mesh2, [{"r"}, {}]> : tensor<64x8xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{"y", "z", "p"}, {"x", "q"}] %0 out_sharding=<@mesh2, [{"r", "y", "z", "p"}, {"x", "q"}]> : tensor<64x8xf32>
   // CHECK-NEXT: return %1 : tensor<64x8xf32>
   %0 = sdy.all_reduce {"x", "y", "z"} %arg0 out_sharding=<@mesh2, [{"r"}, {}]> : tensor<64x8xf32>
   %1 = sdy.all_slice [{"y", "z", "p"}, {"x", "q"}] %0 out_sharding=<@mesh2, [{"r", "y", "z", "p"}, {"x", "q"}]> : tensor<64x8xf32>
   return %1 : tensor<64x8xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion4_divisible
+func.func @reduce_scatter_fusion4_divisible(%arg0 : tensor<64x16xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"r"}, {}]>}) -> tensor<64x16xf32> {
+  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"y", "z"}, {"x"}] %arg0 out_sharding=<@mesh2, [{"r", "y", "z"}, {"x"}]> : tensor<64x16xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{"p"}, {"q"}] %0 out_sharding=<@mesh2, [{"r", "y", "z", "p"}, {"x", "q"}]> :  tensor<64x16xf32>
+  // CHECK-NEXT: return %1 : tensor<64x16xf32>
+  %0 = sdy.all_reduce {"x", "y", "z"} %arg0 out_sharding=<@mesh2, [{"r"}, {}]> : tensor<64x16xf32>
+  %1 = sdy.all_slice [{"y", "z", "p"}, {"x", "q"}] %0 out_sharding=<@mesh2, [{"r", "y", "z", "p"}, {"x", "q"}]> : tensor<64x16xf32>
+  return %1 : tensor<64x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_uneven_residual_all_slice_not_fused
+func.func @reduce_scatter_fusion_uneven_residual_all_slice_not_fused(%arg0 : tensor<5x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) -> tensor<5x4xf32> {
+  // CHECK-NEXT: %0 = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<5x4xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<5x4xf32>
+  // CHECK-NEXT: return %1 : tensor<5x4xf32>
+  %0 = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<5x4xf32>
+  %1 = sdy.all_slice [{"x", "y"}, {}] %0 out_sharding=<@mesh, [{"x", "y"}, {}]> : tensor<5x4xf32>
+  return %1 : tensor<5x4xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_uneven_residual_all_slice_same_padded_size
+func.func @reduce_scatter_fusion_uneven_residual_all_slice_same_padded_size(%arg0 : tensor<5x4xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}], unreduced={"x", "y"}>}) -> tensor<5x4xf32> {
+  // CHECK-NEXT: %0 = sdy.reduce_scatter [{"x", "y"}, {}] %arg0 out_sharding=<@mesh2, [{"x", "y"}, {}]> : tensor<5x4xf32>
+  // CHECK-NEXT: %1 = sdy.all_slice [{"z"}, {}] %0 out_sharding=<@mesh2, [{"x", "y", "z"}, {}]> :  tensor<5x4xf32>
+  // CHECK-NEXT: return %1 : tensor<5x4xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh2, [{}, {}]> : tensor<5x4xf32>
+  %1 = sdy.all_slice [{"x", "y", "z"}, {}] %0 out_sharding=<@mesh2, [{"x", "y", "z"}, {}]> : tensor<5x4xf32>
+  return %1 : tensor<5x4xf32>
 }
 
 // CHECK-LABEL: func @reduce_scatter_fusion_non_divisible

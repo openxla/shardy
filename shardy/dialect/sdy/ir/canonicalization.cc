@@ -20,6 +20,7 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
@@ -298,6 +299,22 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
 
     reduceScatterOutDimShardings.push_back(DimensionShardingAttr::get(
         context, expectedDimShardingAxes, /*is_closed=*/true));
+  }
+
+  ArrayRef<int64_t> tensorShape = getTensorShape(allReduceOp.getResult());
+  for (int64_t d = 0; d < rank; ++d) {
+    if (residualSlicingAxes[d].empty() || tensorShape[d] <= 0) {
+      continue;
+    }
+    int64_t rsOutShardedSize =
+        reduceScatterOutDimShardings[d].getShardedSize(mesh);
+    int64_t finalOutShardedSize =
+        allSliceOp.getOutSharding().getDimSharding(d).getShardedSize(mesh);
+    if (rsOutShardedSize > 1 &&
+        llvm::alignTo(tensorShape[d], rsOutShardedSize) !=
+            llvm::alignTo(tensorShape[d], finalOutShardedSize)) {
+      return std::nullopt;
+    }
   }
 
   ReduceScatterFusionInfo result;
