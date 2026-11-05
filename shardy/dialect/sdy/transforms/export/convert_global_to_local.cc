@@ -3450,18 +3450,36 @@ class StablehloScatterOpPattern
     }
 
     auto globalInputType = cast<RankedTensorType>(input.getType());
+    auto globalUpdateType = cast<RankedTensorType>(update.getType());
     auto dnums = op.getScatterDimensionNumbers();
-    // Identify sharded indexed dimensions in the input.
+    // Identify sharded trivial slice indexed dimensions in the input. Pass
+    // through update window dimensions already shard updates alongside the
+    // input, so their local window starts at local offset 0 without shifting
+    // scatter_indices by the shard offset.
     SmallVector<int64_t> indexedInputDims;
     if (!isFullyReplicated(inputSharding)) {
+      int64_t updateWinIdx = 0;
       for (int64_t i = 0; i < globalInputType.getRank(); ++i) {
+        bool isInserted = llvm::is_contained(dnums.getInsertedWindowDims(), i);
+        bool isBatching = llvm::is_contained(dnums.getInputBatchingDims(), i);
+        bool isPassthroughWindowDim = false;
+        if (!isInserted && !isBatching) {
+          int64_t updateWinDim = dnums.getUpdateWindowDims()[updateWinIdx++];
+          isPassthroughWindowDim =
+              globalUpdateType.getDimSize(updateWinDim) ==
+                  globalInputType.getDimSize(i) &&
+              !isFullyReplicated(updateSharding) &&
+              updateSharding.getDimShardings()[updateWinDim].getAxes() ==
+                  inputSharding.getDimShardings()[i].getAxes();
+        }
         if (!inputSharding.getDimShardings()[i].getAxes().empty()) {
           SDY_CHECK(getTotalAxesSize(
                         inputSharding.getDimShardings()[i].getAxes(), mesh) > 1)
               << "We should have removed trivial sharding in a previous pass.";
-          if (llvm::is_contained(dnums.getScatterDimsToOperandDims(), i)) {
+          if (!isPassthroughWindowDim &&
+              llvm::is_contained(dnums.getScatterDimsToOperandDims(), i)) {
             indexedInputDims.push_back(i);
-          } else if (llvm::is_contained(dnums.getInsertedWindowDims(), i)) {
+          } else if (isInserted) {
             // TODO(b/496605332): Support this case.
             return op.emitOpError() << "sharding operand dimension " << i
                                     << " that is not indexed but in inserted "

@@ -377,6 +377,88 @@ func.func @scatter_replicated_bounds(
   return %1 : tensor<8x2xf32>
 }
 
+// When an indexed operand dimension is a pass through update window dimension
+// (full window size matching the operand dimension, with updates sharded on the
+// same axes), each shard already holds its local window at local offset 0 and
+// scatter_indices must not be shifted by the shard offset.
+// CHECK-LABEL: func @input_and_update_sharded_on_indexed_passthrough_window_dim(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<2x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<2x2xi32>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<2x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>})
+// CHECK-SAME: -> (tensor<2x4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>}) {
+func.func @input_and_update_sharded_on_indexed_passthrough_window_dim(
+    %arg0: tensor<2x4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>},
+    %arg1: tensor<2x2xi32>,
+    %arg2: tensor<2x2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>})
+ -> (tensor<2x4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>}) {
+  // CHECK-NOT: stablehlo.subtract
+  // CHECK: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[ARG1]], %[[ARG2]])
+  // CHECK-SAME: scatter_dimension_numbers = #stablehlo.scatter<update_window_dims = [1, 2], input_batching_dims = [0], scatter_indices_batching_dims = [0], scatter_dims_to_operand_dims = [1, 2], index_vector_dim = 1>
+  // CHECK: (tensor<2x4x4xf32>, tensor<2x2xi32>, tensor<2x2x4xf32>) -> tensor<2x4x4xf32>
+  // CHECK: return %[[SCATTER]] : tensor<2x4x4xf32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+    stablehlo.return %arg4 : tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1, 2],
+      input_batching_dims = [0],
+      scatter_indices_batching_dims = [0],
+      scatter_dims_to_operand_dims = [1, 2],
+      index_vector_dim = 1
+    >,
+    indices_are_sorted = true,
+    unique_indices = true,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}, {"x"}]>]>
+  } : (tensor<2x4x8xf32>, tensor<2x2xi32>, tensor<2x2x8xf32>) -> tensor<2x4x8xf32>
+  return %0 : tensor<2x4x8xf32>
+}
+
+// When operand dimension 0 is a sharded inserted window dimension (trivial
+// slice) and operand dimension 2 is a sharded pass through update window
+// dimension, only coordinate 0 of scatter_indices is shifted by the shard
+// offset while coordinates 1 and 2 subtract 0.
+// CHECK-LABEL: func @input_sharded_on_both_trivial_inserted_and_passthrough_window_dims(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<2x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y":(2)2}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<3x3xi32>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<3x1x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"y":(2)2}]>})
+// CHECK-SAME: -> (tensor<2x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y":(2)2}]>}) {
+func.func @input_sharded_on_both_trivial_inserted_and_passthrough_window_dims(
+    %arg0: tensor<4x2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y":(2)2}]>},
+    %arg1: tensor<3x3xi32>,
+    %arg2: tensor<3x1x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {}, {"y":(2)2}]>})
+ -> (tensor<4x2x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y":(2)2}]>}) {
+  // CHECK: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 2, 2, 2, 2]> : tensor<8xi32>
+  // CHECK: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
+  // CHECK: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK: %[[CONVERT:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i32>
+  // CHECK: %[[C0_A:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK: %[[C0_B:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK: %[[OFF0:.*]] = stablehlo.reshape %[[CONVERT]] : (tensor<i32>) -> tensor<1xi32>
+  // CHECK: %[[OFF1:.*]] = stablehlo.reshape %[[C0_A]] : (tensor<i32>) -> tensor<1xi32>
+  // CHECK: %[[OFF2:.*]] = stablehlo.reshape %[[C0_B]] : (tensor<i32>) -> tensor<1xi32>
+  // CHECK: %[[CONCAT:.*]] = stablehlo.concatenate %[[OFF0]], %[[OFF1]], %[[OFF2]], dim = 0 : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<3xi32>
+  // CHECK: %[[BCAST:.*]] = stablehlo.broadcast_in_dim %[[CONCAT]], dims = [1] {{.*}} : (tensor<3xi32>) -> tensor<3x3xi32>
+  // CHECK: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[ARG1]], %[[BCAST]] : tensor<3x3xi32>
+  // CHECK: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[LOCAL_IDX]], %[[ARG2]])
+  // CHECK: return %[[SCATTER]] : tensor<2x2x4xf32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+    %1 = stablehlo.add %arg3, %arg4 : tensor<f32>
+    stablehlo.return %1 : tensor<f32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1, 2],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0, 1, 2],
+      index_vector_dim = 1
+    >,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {}, {"y":(2)2}]>]>
+  } : (tensor<4x2x8xf32>, tensor<3x3xi32>, tensor<3x1x8xf32>) -> tensor<4x2x8xf32>
+  return %0 : tensor<4x2x8xf32>
+}
+
 // CHECK-LABEL: func @scatter_unreduced_axes_fallback_all_reduce(
 // CHECK-SAME: %[[ARG0:.*]]: tensor<2x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y"}, {}]>},
 // CHECK-SAME: %[[ARG1:.*]]: tensor<1x1xi64> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
