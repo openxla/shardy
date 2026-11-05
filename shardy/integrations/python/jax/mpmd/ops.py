@@ -240,10 +240,9 @@ def named_computation_partir_lowering(
   )
   args = (*const_arg_values, *constvar_values, *args)  # pyrefly: ignore[bad-assignment]
 
-  if jax.__version_info__ >= (0, 10, 1):
-    _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
-  else:
-    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pyrefly: ignore[missing-argument]
+  _aval_to_ir_types = functools.partial(
+      jax_mlir.aval_to_ir_types, ctx.module_context
+  )
 
   input_types = list(map(_aval_to_ir_types, in_avals))
   output_types = list(map(_aval_to_ir_types, ctx.avals_out))
@@ -502,10 +501,9 @@ def call_mpmd_jit_lowering(
       a.sharding for a in call_jaxpr.in_avals[len(constvar_avals):]
   )
 
-  if jax.__version_info__ >= (0, 10, 1):
-    _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
-  else:
-    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pyrefly: ignore[missing-argument]
+  _aval_to_ir_types = functools.partial(
+      jax_mlir.aval_to_ir_types, ctx.module_context
+  )
 
   input_types = list(map(_aval_to_ir_types, in_avals))
   output_types = list(map(_aval_to_ir_types, ctx.avals_out))
@@ -900,10 +898,9 @@ def fori_loop_mpmd_jit_lowering(
       arg_shardings=arg_shardings,
   )
 
-  if jax.__version_info__ >= (0, 10, 1):
-    _aval_to_ir_types = functools.partial(jax_mlir.aval_to_ir_types, ctx.module_context)
-  else:
-    _aval_to_ir_types = lambda x: jax_mlir.aval_to_ir_types(x)  # pyrefly: ignore[missing-argument]
+  _aval_to_ir_types = functools.partial(
+      jax_mlir.aval_to_ir_types, ctx.module_context
+  )
 
   input_types = list(map(_aval_to_ir_types, ctx.avals_in))
   flat_input_types, _ = tree_util.tree_flatten(input_types)

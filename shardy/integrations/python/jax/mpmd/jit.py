@@ -24,7 +24,6 @@ import jax
 from jax.experimental import layout as jax_layout
 from jax.interpreters import mlir
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
-from jaxlib import xla_client
 import jaxtyping
 from mlir import ir
 import numpy as np
@@ -38,8 +37,6 @@ from shardy.integrations.python.jax.mpmd import types
 from shardy.integrations.python.jax.mpmd import utils
 
 PyTree = jaxtyping.PyTree
-
-_MIN_JAXLIB_VERSION_FOR_SCHEDULE_RULES = 406
 
 
 @dataclasses.dataclass(frozen=True)
@@ -135,35 +132,19 @@ def _apply_partitioning(
     phases: jaxlib_mpmd.PartitioningPhase,
 ) -> jaxlib_mpmd.PartitioningResult:
   """Applies MPMD partitioning to the MLIR module."""
-  # TODO: b/483036036 - This check should be able to be removed once jaxlib and
-  # openxla versions are properly synced
-  if xla_client._version < _MIN_JAXLIB_VERSION_FOR_SCHEDULE_RULES:  # pylint: disable=protected-access
-    return jaxlib_mpmd.apply_mpmd_partitioning(  # type: ignore
-        mlir_module,
-        func_name=partitioning_args.func_name,
-        named_meshes=partitioning_args.named_meshes,
-        assignment=partitioning_args.assignment,
-        input_meshes=partitioning_args.input_meshes,
-        output_meshes=partitioning_args.output_meshes,
-        donate_argnums=partitioning_args.donate_argnums,
-        partitioning_options=partitioning_args.partitioning_options,
-        fragment_merge_rules=partitioning_args.fragment_merge_rules,
-        phases=phases,
-    )
-  else:
-    return jaxlib_mpmd.apply_mpmd_partitioning(
-        mlir_module,
-        func_name=partitioning_args.func_name,
-        named_meshes=partitioning_args.named_meshes,
-        assignment=partitioning_args.assignment,
-        input_meshes=partitioning_args.input_meshes,
-        output_meshes=partitioning_args.output_meshes,
-        donate_argnums=partitioning_args.donate_argnums,
-        partitioning_options=partitioning_args.partitioning_options,
-        fragment_merge_rules=partitioning_args.fragment_merge_rules,
-        fragment_schedule_rules=partitioning_args.fragment_schedule_rules,
-        phases=phases,
-    )
+  return jaxlib_mpmd.apply_mpmd_partitioning(
+      mlir_module,
+      func_name=partitioning_args.func_name,
+      named_meshes=partitioning_args.named_meshes,
+      assignment=partitioning_args.assignment,
+      input_meshes=partitioning_args.input_meshes,
+      output_meshes=partitioning_args.output_meshes,
+      donate_argnums=partitioning_args.donate_argnums,
+      partitioning_options=partitioning_args.partitioning_options,
+      fragment_merge_rules=partitioning_args.fragment_merge_rules,
+      fragment_schedule_rules=partitioning_args.fragment_schedule_rules,
+      phases=phases,
+  )
 
 
 class MpmdGspmdTraced(jax.stages.Traced):
