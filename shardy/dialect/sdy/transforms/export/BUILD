@@ -114,7 +114,6 @@ cc_library(
         "//shardy/dialect/sdy/transforms/common:sharding_walker",
         "//shardy/dialect/sdy/transforms/propagation:op_sharding_rule_registry",
         "//shardy/dialect/sdy/transforms/propagation:sharding_projection",
-        "//shardy/dialect/sdy/transforms/propagation:utils",
         "//shardy/dialect/sdy/transforms/propagation/debugging:source_sharding",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
@@ -125,7 +124,6 @@ cc_library(
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
         "@llvm-project//mlir:Transforms",
-        "@stablehlo//:stablehlo_ops",
     ],
 )
 

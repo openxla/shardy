@@ -779,11 +779,12 @@ std::optional<ReductionOp> getReductionType(Region& region) {
   }
   Block& body = region.front();
   auto returnOp = dyn_cast<stablehlo::ReturnOp>(body.getTerminator());
-  if (!returnOp || returnOp.getOperands().empty()) {
+  size_t numResults = returnOp ? returnOp.getNumOperands() : 0;
+  if (numResults == 0 || body.getNumArguments() != 2 * numResults) {
     return std::nullopt;
   }
   std::optional<ReductionOp> result;
-  for (Value operand : returnOp.getOperands()) {
+  for (auto [index, operand] : llvm::enumerate(returnOp.getOperands())) {
     Operation* defOp = operand.getDefiningOp();
     if (!defOp) {
       return std::nullopt;
@@ -796,6 +797,12 @@ std::optional<ReductionOp> getReductionType(Region& region) {
     } else if (isa<stablehlo::MinOp>(defOp)) {
       curOpType = ReductionOp::MIN;
     } else {
+      return std::nullopt;
+    }
+    Value lhs = body.getArgument(index);
+    Value rhs = body.getArgument(index + numResults);
+    if ((defOp->getOperand(0) != lhs || defOp->getOperand(1) != rhs) &&
+        (defOp->getOperand(0) != rhs || defOp->getOperand(1) != lhs)) {
       return std::nullopt;
     }
     if (!result) {

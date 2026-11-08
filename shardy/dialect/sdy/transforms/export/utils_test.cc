@@ -393,6 +393,29 @@ TEST_F(ExportUtilsTest, GetReductionType) {
               scatter_dims_to_operand_dims = [0],
               index_vector_dim = 1>
           } : (tensor<4xf32>, tensor<4xi64>, tensor<4xf32>) -> tensor<4xf32>
+          %5 = "stablehlo.reduce"(%arg0, %arg1) <{dimensions = array<i64: 0>}> ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %s = stablehlo.add %b, %a : tensor<f32>
+            stablehlo.return %s : tensor<f32>
+          }) : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %6 = "stablehlo.reduce"(%arg0, %arg1) <{dimensions = array<i64: 0>}> ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %m = stablehlo.maximum %a, %b : tensor<f32>
+            %d = stablehlo.subtract %a, %m : tensor<f32>
+            %res = stablehlo.add %m, %d : tensor<f32>
+            stablehlo.return %res : tensor<f32>
+          }) : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %7 = "stablehlo.reduce"(%arg0, %arg1) <{dimensions = array<i64: 0>}> ({
+          ^bb0(%a: tensor<f32>, %b: tensor<f32>):
+            %dup = stablehlo.add %a, %a : tensor<f32>
+            stablehlo.return %dup : tensor<f32>
+          }) : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+          %8:2 = "stablehlo.reduce"(%arg0, %arg3, %arg1, %arg1) <{dimensions = array<i64: 0>}> ({
+          ^bb0(%a0: tensor<f32>, %a1: tensor<f32>, %b0: tensor<f32>, %b1: tensor<f32>):
+            %r0 = stablehlo.add %a0, %b0 : tensor<f32>
+            %r1 = stablehlo.add %a0, %b0 : tensor<f32>
+            stablehlo.return %r0, %r1 : tensor<f32>, tensor<f32>
+          }) : (tensor<4xf32>, tensor<4xf32>, tensor<f32>, tensor<f32>) -> (tensor<f32>, tensor<f32>)
           return
         }
       )mlir",
@@ -406,12 +429,20 @@ TEST_F(ExportUtilsTest, GetReductionType) {
   Operation* reduceMin = &*it++;
   Operation* reduceMul = &*it++;
   Operation* scatterMax = &*it++;
+  Operation* reduceCommutedAdd = &*it++;
+  Operation* reduceMultiOpAdd = &*it++;
+  Operation* reduceSelfAdd = &*it++;
+  Operation* reduceWrongArgIdx = &*it++;
 
   EXPECT_EQ(getReductionType(reduceAdd), ReductionOp::SUM);
   EXPECT_EQ(getReductionType(reduceMax), ReductionOp::MAX);
   EXPECT_EQ(getReductionType(reduceMin), ReductionOp::MIN);
   EXPECT_EQ(getReductionType(reduceMul), std::nullopt);
   EXPECT_EQ(getReductionType(scatterMax), ReductionOp::MAX);
+  EXPECT_EQ(getReductionType(reduceCommutedAdd), ReductionOp::SUM);
+  EXPECT_EQ(getReductionType(reduceMultiOpAdd), std::nullopt);
+  EXPECT_EQ(getReductionType(reduceSelfAdd), std::nullopt);
+  EXPECT_EQ(getReductionType(reduceWrongArgIdx), std::nullopt);
 }
 
 TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {

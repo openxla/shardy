@@ -77,9 +77,10 @@ func.func @reduce_max_sharded(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sh
 
 // CHECK-LABEL: func @reduce_custom_combiner_without_unreduced
 func.func @reduce_custom_combiner_without_unreduced(%arg0: tensor<2x64x13xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<2x13xf32> {
-  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.multiply across dimensions = [1]
-  // CHECK-NEXT: %[[ALL_REDUCE:.*]] = sdy.all_reduce {"x"} %[[REDUCE]] out_sharding=<@mesh, [{}, {}]>
-  // CHECK-NEXT: return %[[ALL_REDUCE]]
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.multiply across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // CHECK-NOT:  unreduced
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK-NEXT: return %[[REDUCE]]
   %0 = stablehlo.constant dense<1.000000e+00> : tensor<f32>
   %1 = "stablehlo.reduce"(%arg0, %0) <{dimensions = array<i64: 1>}> ({
   ^bb0(%arg1: tensor<f32>, %arg2: tensor<f32>):
@@ -88,6 +89,40 @@ func.func @reduce_custom_combiner_without_unreduced(%arg0: tensor<2x64x13xf32> {
   }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
   : (tensor<2x64x13xf32>, tensor<f32>) -> tensor<2x13xf32>
   return %1 : tensor<2x13xf32>
+}
+
+// CHECK-LABEL: func @reduce_boolean_and_without_unreduced
+func.func @reduce_boolean_and_without_unreduced(%arg0: tensor<2x64xi1> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) -> (tensor<2xi1> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %c) applies stablehlo.and across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>}
+  // CHECK-NOT:  unreduced
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[REDUCE]] <@mesh, [{"x"}]>
+  // CHECK-NEXT: return %[[RESHARD]]
+  %0 = stablehlo.constant dense<true> : tensor<i1>
+  %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.and across dimensions = [1]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<2x64xi1>, tensor<i1>) -> tensor<2xi1>
+  return %1 : tensor<2xi1>
+}
+
+// CHECK-LABEL: func @reduce_log_sum_exp_ending_in_add_without_unreduced
+func.func @reduce_log_sum_exp_ending_in_add_without_unreduced(%arg0: tensor<2x64xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}]>}) -> tensor<2xf32> {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>}
+  // CHECK-NOT:  unreduced
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK:      return %[[REDUCE]]
+  %neg_inf = stablehlo.constant dense<0xFF800000> : tensor<f32>
+  %0 = stablehlo.reduce(%arg0 init: %neg_inf) across dimensions = [1]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : (tensor<2x64xf32>, tensor<f32>) -> tensor<2xf32>
+      reducer(%lhs: tensor<f32>, %rhs: tensor<f32>) {
+        %mx = stablehlo.maximum %lhs, %rhs : tensor<f32>
+        %mn = stablehlo.minimum %lhs, %rhs : tensor<f32>
+        %diff = stablehlo.subtract %mn, %mx : tensor<f32>
+        %exp = stablehlo.exponential %diff : tensor<f32>
+        %log1p = stablehlo.log_plus_one %exp : tensor<f32>
+        %res = stablehlo.add %mx, %log1p : tensor<f32>
+        stablehlo.return %res : tensor<f32>
+      }
+  return %0 : tensor<2xf32>
 }
 
 // CHECK-LABEL: func @reduce_multiple_results

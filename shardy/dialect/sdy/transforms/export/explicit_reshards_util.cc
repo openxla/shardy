@@ -42,7 +42,6 @@ limitations under the License.
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 #include "shardy/dialect/sdy/transforms/propagation/sharding_projection.h"
-#include "stablehlo/dialect/StablehloOps.h"
 
 namespace mlir {
 namespace sdy {
@@ -945,8 +944,7 @@ void insertAllReducesForReductionFactors(
   sortAndMergeAxes(allReduceAxes, mesh);
 
   std::optional<ReductionOp> reductionOp = getReductionType(op);
-  if (!reductionOp &&
-      (isa<stablehlo::ScatterOp>(op) || op->getNumResults() > 1)) {
+  if (!reductionOp) {
     return;
   }
 
@@ -954,7 +952,7 @@ void insertAllReducesForReductionFactors(
   // per factor (minor-to-major) to run over smaller orthogonal subgroups.
   AxesPerFactor allReduceAxesPerFactor;
   if (onFullVersion && markPartialResultWithUnreducedAxes &&
-      shardyGeneratesDeviceCode && reductionOp.has_value() &&
+      shardyGeneratesDeviceCode &&
       AxisListRef(allReduceAxes).getShardingSize(mesh) < mesh.getTotalSize()) {
     for (int64_t reductionFactor :
          llvm::reverse(shardingRule.getReductionFactors())) {
@@ -967,7 +965,7 @@ void insertAllReducesForReductionFactors(
     }
   }
 
-  ReductionOp redOp = reductionOp.value_or(ReductionOp::SUM);
+  ReductionOp redOp = *reductionOp;
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
