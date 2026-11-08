@@ -102,14 +102,26 @@ func.func @untouched_axis_communicated_permuted_remain(%arg0: tensor<8x16xf32> {
 // while leaving permuted "z" on dim 1; must emit sequential single-param stages
 // rather than overlapping target dim 0 in one all_to_all.
 // CHECK-LABEL: func @multi_axis_single_all_to_all_on_non_major_split_dim
-// CHECK-SAME:    (%arg0: tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{}, {"x", "y", "z"}]>}) -> (tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{"x", "y"}, {"z"}]>})
-// CHECK-NEXT:  %[[RESHAPE_IN:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3d, [{}, {"x"}, {"y"}, {"z"}, {}]>]>} : (tensor<6x24xf32>) -> tensor<6x2x2x2x3xf32>
-// CHECK-NEXT:  %[[A2A1:.*]] = sdy.all_to_all [{"x"}: 1->0] %[[RESHAPE_IN]] out_sharding=<@mesh_3d, [{"x"}, {}, {"y"}, {"z"}, {}]> : tensor<6x2x2x2x3xf32>
-// CHECK-NEXT:  %[[A2A2:.*]] = sdy.all_to_all [{"y"}: 2->0] %[[A2A1]] out_sharding=<@mesh_3d, [{"x", "y"}, {}, {}, {"z"}, {}]> : tensor<6x2x2x2x3xf32>
-// CHECK-NEXT:  %[[A2A3:.*]] = sdy.all_to_all [{"z"}: 3->1] %[[A2A2]] out_sharding=<@mesh_3d, [{"x", "y"}, {"z"}, {}, {}, {}]> : tensor<6x2x2x2x3xf32>
-// CHECK-NEXT:  %[[RESHAPE_OUT:.*]] = stablehlo.reshape %[[A2A3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3d, [{"x", "y"}, {"z"}]>]>} : (tensor<6x2x2x2x3xf32>) -> tensor<6x24xf32>
-// CHECK-NEXT:  return %[[RESHAPE_OUT]] : tensor<6x24xf32>
-func.func @multi_axis_single_all_to_all_on_non_major_split_dim(%arg0: tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{}, {"x", "y", "z"}]>}) -> (tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{"x", "y"}, {"z"}]>}) {
+// CHECK-SAME:    (%arg0: tensor<7x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{}, {"x", "y", "z"}]>}) -> (tensor<7x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{"x", "y"}, {"z"}]>})
+// CHECK-NEXT:  %[[RESHAPE_IN:.*]] = stablehlo.reshape %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3d, [{}, {"x"}, {"y"}, {"z"}, {}]>]>} : (tensor<7x24xf32>) -> tensor<7x2x2x2x3xf32>
+// CHECK-NEXT:  %[[A2A1:.*]] = sdy.all_to_all [{"x"}: 1->0] %[[RESHAPE_IN]] out_sharding=<@mesh_3d, [{"x"}, {}, {"y"}, {"z"}, {}]> : tensor<7x2x2x2x3xf32>
+// CHECK-NEXT:  %[[A2A2:.*]] = sdy.all_to_all [{"y"}: 2->0] %[[A2A1]] out_sharding=<@mesh_3d, [{"x", "y"}, {}, {}, {"z"}, {}]> : tensor<7x2x2x2x3xf32>
+// CHECK-NEXT:  %[[A2A3:.*]] = sdy.all_to_all [{"z"}: 3->1] %[[A2A2]] out_sharding=<@mesh_3d, [{"x", "y"}, {"z"}, {}, {}, {}]> : tensor<7x2x2x2x3xf32>
+// CHECK-NEXT:  %[[RESHAPE_OUT:.*]] = stablehlo.reshape %[[A2A3]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3d, [{"x", "y"}, {"z"}]>]>} : (tensor<7x2x2x2x3xf32>) -> tensor<7x24xf32>
+// CHECK-NEXT:  return %[[RESHAPE_OUT]] : tensor<7x24xf32>
+func.func @multi_axis_single_all_to_all_on_non_major_split_dim(%arg0: tensor<7x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{}, {"x", "y", "z"}]>}) -> (tensor<7x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{"x", "y"}, {"z"}]>}) {
+  %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_3d, [{}, {"z", "x", "y"}]> : tensor<7x24xf32>
+  %1 = sdy.all_to_all [{"x", "y"}: 1->0] %0 out_sharding=<@mesh_3d, [{"x", "y"}, {"z"}]> : tensor<7x24xf32>
+  return %1 : tensor<7x24xf32>
+}
+
+// Preserves collective_permute when sequential scatter of {"x", "y"} onto dim 0
+// changes its divisible padded size (alignTo(6, 2) = 6 != alignTo(6, 4) = 8).
+// CHECK-LABEL: func @multi_axis_single_all_to_all_uneven_padded_size_preserved
+// CHECK-NEXT:  %[[CP:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh_3d, [{}, {"z", "x", "y"}]> : tensor<6x24xf32>
+// CHECK-NEXT:  %[[A2A:.*]] = sdy.all_to_all [{"x", "y"}: 1->0] %[[CP]] out_sharding=<@mesh_3d, [{"x", "y"}, {"z"}]> : tensor<6x24xf32>
+// CHECK-NEXT:  return %[[A2A]] : tensor<6x24xf32>
+func.func @multi_axis_single_all_to_all_uneven_padded_size_preserved(%arg0: tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{}, {"x", "y", "z"}]>}) -> (tensor<6x24xf32> {sdy.sharding = #sdy.sharding<@mesh_3d, [{"x", "y"}, {"z"}]>}) {
   %0 = sdy.collective_permute %arg0 out_sharding=<@mesh_3d, [{}, {"z", "x", "y"}]> : tensor<6x24xf32>
   %1 = sdy.all_to_all [{"x", "y"}: 1->0] %0 out_sharding=<@mesh_3d, [{"x", "y"}, {"z"}]> : tensor<6x24xf32>
   return %1 : tensor<6x24xf32>

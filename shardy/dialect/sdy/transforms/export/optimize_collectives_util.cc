@@ -25,6 +25,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
@@ -354,6 +355,7 @@ std::optional<AllToAllStagesResult> computeAllToAllStages(
       // Shifts dimensions after splitDim by the net change in rank.
       int64_t tgtSubDim =
           tgtDim < splitDim ? tgtDim : tgtDim + numSplitDims - 1;
+      int64_t tgtDimSize = splitInputType.getDimSize(tgtSubDim);
       for (AxisRefAttr axis : param.getAxes()) {
         for (AxisRefAttr cpAxis : cpAxes) {
           if (!cpAxis.overlaps(axis)) {
@@ -369,9 +371,21 @@ std::optional<AllToAllStagesResult> computeAllToAllStages(
           auto stageParams = AllToAllParamListAttr::get(
               ctx,
               {AllToAllParamAttr::get(ctx, {cpAxis}, srcSubDim, tgtSubDim)});
-          a2aStages.push_back(computeAllToAllStage(
-              currentSharding, splitInputType, stageParams, mesh));
-          currentSharding = a2aStages.back().outSharding;
+          int64_t curTgtShardedSize =
+              currentSharding.getDimSharding(tgtSubDim).getShardedSize(mesh);
+          AllToAllStage stage = computeAllToAllStage(
+              currentSharding, splitInputType, stageParams, mesh);
+          int64_t newTgtShardedSize =
+              stage.outSharding.getDimSharding(tgtSubDim).getShardedSize(mesh);
+          // Aborts if scattering onto an already sharded dimension changes its
+          // divisible padded size, which would require padding while sharded.
+          if (tgtDimSize > 0 && curTgtShardedSize > 1 &&
+              llvm::alignTo(tgtDimSize, curTgtShardedSize) !=
+                  llvm::alignTo(tgtDimSize, newTgtShardedSize)) {
+            return std::nullopt;
+          }
+          currentSharding = stage.outSharding;
+          a2aStages.push_back(std::move(stage));
         }
       }
     }
