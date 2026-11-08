@@ -25,6 +25,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -1376,6 +1377,24 @@ class StablehloGatherOpPattern
     if (needsIndexClamp) {
       Location loc = op.getLoc();
       Type elemType = startIndicesType.getElementType();
+      TensorShardingAttr idxSharding =
+          converter->getSharding(op.getStartIndices());
+      int64_t maxBound = 0;
+      for (int64_t d : startIndexMap) {
+        maxBound =
+            std::max({maxBound, paddedOperandType.getDimSize(d) - 1,
+                      origOperandType.getDimSize(d) - op.getSliceSizes()[d]});
+      }
+      unsigned bitWidth = elemType.getIntOrFloatBitWidth();
+      if (!(elemType.isUnsignedInteger() ? llvm::isUIntN(bitWidth, maxBound)
+                                         : llvm::isIntN(bitWidth, maxBound))) {
+        elemType = llvm::isIntN(32, maxBound) ? rewriter.getI32Type()
+                                              : rewriter.getI64Type();
+        startIndicesType = startIndicesType.clone(elemType);
+        startIndices = stablehlo::ConvertOp::create(
+            rewriter, loc, startIndicesType, startIndices);
+        if (idxSharding) setSharding(startIndices, idxSharding);
+      }
       Value maxConst;
       if (indexVectorDim == startIndicesType.getRank()) {
         // Implicit 1-element index vector, splat the single scalar maxIdx to
@@ -1403,15 +1422,10 @@ class StablehloGatherOpPattern
             rewriter, loc, startIndicesType, vecConst,
             rewriter.getDenseI64ArrayAttr({indexVectorDim}));
       }
-      if (TensorShardingAttr idxSharding = getSharding(startIndices)) {
-        setSharding(maxConst, idxSharding);
-      }
+      if (idxSharding) setSharding(maxConst, idxSharding);
       startIndices =
           stablehlo::MinOp::create(rewriter, loc, startIndices, maxConst);
-      if (TensorShardingAttr idxSharding =
-              getSharding(adaptor.getStartIndices())) {
-        setSharding(startIndices, idxSharding);
-      }
+      if (idxSharding) setSharding(startIndices, idxSharding);
     }
 
     SmallVector<ShapedTypeComponents> inferredReturnShapes;
