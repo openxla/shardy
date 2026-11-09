@@ -139,30 +139,30 @@ struct AxisWithinCapacity {
   OptionalAxisRef remainderAxis;
 };
 
-// Returns an `AxisWithinCapacity` for the given `axis` w.r.t. to the given
-// `capacity`.
-//
-// In addition, updates `capacity` by dividing it by the size of the axis that
-// fits.
+// Returns an `AxisWithinCapacity` for the given `axis` w.r.t. `capacity`,
+// dividing `capacity` by the fitted size. Requires `axis` and `capacity` to be
+// divisible unless `splitByGcd` is true (which takes `gcd(size(axis),
+// capacity)`).
 AxisWithinCapacity getAxisWithinCapacity(AxisRefAttr axis, int64_t& capacity,
-                                         MeshAttr mesh) {
+                                         MeshAttr mesh,
+                                         bool splitByGcd = false) {
   int64_t axisSize = axis.getSize(mesh);
-  // We could use `std::gcd(axisSize, capacity)` instead, but in practice this
-  // isn't needed because how all-slice insertion works for non-divisible case.
-  if (capacity <= 1 || !areDivisible(axisSize, capacity)) {
+  // When `splitByGcd` is true, take the largest prefix of `axis` that divides
+  // `capacity` even when neither size divides the other (e.g. 2 of 4 for 6).
+  int64_t withinSize = std::gcd(axisSize, capacity);
+  if (capacity <= 1 || withinSize == 1 ||
+      (!splitByGcd && !areDivisible(axisSize, capacity))) {
     return {};
   }
-  if (capacity >= axisSize) {
-    capacity /= axisSize;
+  capacity /= withinSize;
+  if (withinSize == axisSize) {
     return {axis, /*remainderAxis=*/std::nullopt};
   }
-
   auto withinAxis = AxisRefAttr::get(mesh.getContext(), axis.getName(),
-                                     axis.getSubAxisPreSize(), capacity);
+                                     axis.getSubAxisPreSize(), withinSize);
   auto remainderAxis = AxisRefAttr::get(
       mesh.getContext(), axis.getName(),
-      withinAxis.getNextPreSizeOrFullSize(mesh), axisSize / capacity);
-  capacity = 1;
+      withinAxis.getNextPreSizeOrFullSize(mesh), axisSize / withinSize);
   return {withinAxis, remainderAxis};
 }
 
@@ -308,12 +308,12 @@ class CollectiveInserter {
     // can be handled by the previous collectives, so we are left with
     // all-gathering all axes in `inAxesPerDim` and we're done.
     //
-    // Otherwise, we need at most 2 iterations (or 3 if a dimension must first
-    // be unsharded due to a padded dimension size mismatch).
+    // Mixed-radix meshes (e.g. 2x3x4, 2x3x4x5) can split non-divisible axes
+    // across multiple rounds and require up to 6 iterations.
 
     // TODO(tomnatan): consider looping only over all-to-all and collective
     // permute as long as one of them was inserted.
-    for (int i = 0; i < 3 && !isDone(); ++i) {
+    for (int i = 0; i < 6 && !isDone(); ++i) {
       // 1. Try to insert an all-slice, that decreases the size of the tensor.
       tryAllSlice();
 
@@ -491,14 +491,13 @@ class CollectiveInserter {
   // `inAxesPerDim[d]` based on the capacity for that dimension
   // (`capacityPerDim[d]`).
   //
-  // For each dimension d, as long as `capacityPerDim[d] > 1` , pops the first
-  // axis A in `getAvailableAxes(d), and either:
-  // - Adds A as a whole to `inAxesPerDim[d]` if `size(A) >= capacityPerDim[d]`.
-  // - Splits A into two sub-axes A1 and A2, such that
-  //   `size(A1) == capacityPerDim[d]`, adds A1 to `inAxesPerDim[d]`, and adds
-  //   A2 back to the front of `getAvailableAxes(d)`.
-  // - Skips A if it isn't divisible by `capacityPerDim[d]` or vice versa, and
-  //   adds it back to the front of `getAvailableAxes(d)`.
+  // For each dimension d, while `capacityPerDim[d] > 1`, scans
+  // `getAvailableAxes(d)` and for each axis A with
+  // `g = gcd(size(A), capacityPerDim[d]) > 1`:
+  // - Adds A as a whole to `inAxesPerDim[d]` if `g == size(A)`.
+  // - Otherwise splits A into sub-axes A1 (size `g`) and A2, adds A1 to
+  //   `inAxesPerDim[d]`, and pushes A2 to the front of `getAvailableAxes(d)`.
+  // - Skips A in place if `g == 1`.
   //
   // For each axis A that is added to `inAxesPerDim[d]`, calls
   // `consumeAxisToAdd(A, d)`.
@@ -514,8 +513,8 @@ class CollectiveInserter {
       AxisList& availableAxes = getAvailableAxes(dim);
       auto availableIt = availableAxes.begin();
       while (availableIt != availableAxes.end() && dimCapacity > 1) {
-        auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(*availableIt, dimCapacity, mesh);
+        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+            *availableIt, dimCapacity, mesh, /*splitByGcd=*/true);
         if (!withinAxis) {
           ++availableIt;
           continue;
@@ -724,7 +723,8 @@ class CollectiveInserter {
   //    first dimension d such that `capacityPerDim[d] > 1`.
   //
   // In case `size(A) > capacityPerDim[d]`, we split A into two sub-axes A1 and
-  // A2, such that `size(A1) == capacityPerDim[d]`, and slice along A1 (filling
+  // A2, such that `size(A1) == capacityPerDim[d]` (or
+  // `gcd(size(A), capacityPerDim[d])` in stage 3), and slice along A1 (filling
   // in the gap).
   //
   // The internal state is updated as follows for each dimension `d` and the
@@ -894,8 +894,8 @@ class CollectiveInserter {
             int64_t simCapacity = dimCapacity;
             int64_t addedSize = 1;
             for (AxisRefAttr availAxis : availableOutAxes) {
-              auto [withinAxis, remainderAxis] =
-                  getAxisWithinCapacity(availAxis, simCapacity, mesh);
+              auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+                  availAxis, simCapacity, mesh, /*splitByGcd=*/true);
               if (withinAxis) {
                 addedSize *= withinAxis->getSize(mesh);
               }
@@ -962,11 +962,13 @@ class CollectiveInserter {
   //    `outAxesPerDim[d2] = [..., C, D, ...]` (note that both C and D can be
   //    either A, B, or a different axis).
   //
-  // 5. `inAxesPerDim[d1] = [..., A, B, ...]` such that `outAxesPerDim[d]` is
+  // 5. `inAxesPerDim[d1] = [..., A, B, ...]` such that `outAxesPerDim[d1]` is
   //    empty, A is in `outAxesPerDim[d2]` (d2 != d1) but B isn't in
-  //    `outAxesPerDim`. This means that we can reorder `inAxesPerDim[d]` such
+  //    `outAxesPerDim`. This means that we can reorder `inAxesPerDim[d1]` such
   //    that B is before A, and A can be moved to d2 via an all-to-all before B
-  //    is all-gathered.
+  //    is all-gathered. On the same mesh, the exception is when B and the axes
+  //    after it all need to be gathered and can be moved to d2 together with A
+  //    (see `findAllToAllRange`) and gathered there.
   bool shouldCollectivePermute() {
     if (llvm::any_of(dimsToUnshard, [](bool b) { return b; })) {
       return false;
@@ -1003,9 +1005,11 @@ class CollectiveInserter {
           }
           seenDims.set(*curOutDim);
           lastOutIndex = curOutIndex;
-        } else if (lastOutDim && outAxes.empty()) {
+        } else if (lastOutDim && outAxes.empty() &&
+                   !canAllToAllWithAxesToGather(dim, inAxis)) {
           // Axis to all-gather not at the front and this dimension has no out
-          // axes (condition #5).
+          // axes (condition #5), unless it can be moved with the all-to-all
+          // and gathered in the target dimension.
           return true;
         } else {
           availableInAxis = inAxis;
@@ -1061,8 +1065,8 @@ class CollectiveInserter {
   //    `curCapacity[d] > 1`.
   //
   // In case `size(A) > curCapacity[d]`, we split A into two sub-axes A1 and A2,
-  // such that `size(A1) == curCapacity[d]`, and pick A1 for that dimension
-  // (filling in the gap).
+  // such that `size(A1) == curCapacity[d]` (or `gcd(size(A), curCapacity[d])`
+  // in stages 2-4), and pick A1 for that dimension (filling in the gap).
   //
   // The internal state is updated as follows for each dimension `d`:
   //
@@ -1249,9 +1253,12 @@ class CollectiveInserter {
   // - The common prefix between `inAxesPerDim[tgtDim]` and
   //   `outAxesPerDim[tgtDim]` is removed from both.
   //
-  // If `allowOutOfOrderTarget` is false, we enforce an addition constraint -
+  // If `allowOutOfOrderTarget` is false, we enforce an additional constraint -
   // we only all-to-all if the axes are moved to the target dimension at the
-  // right place, i.e., `allToAllAxes` is a prefix of `outAxesPerDim[tgtDim]`.
+  // right place, i.e., `inAxesPerDim[tgtDim]` is empty and `allToAllAxes` is a
+  // prefix of `outAxesPerDim[tgtDim]`. Axes at the back of
+  // `inAxesPerDim[srcDim]` that need to be all-gathered may also be moved along
+  // (see `findAllToAllRange`).
   //
   // Note that this brings us closer to being done, i.e., having both
   // `inAxesPerDim` and `outAxesPerDim` empty, because we move axes from
@@ -1299,11 +1306,83 @@ class CollectiveInserter {
   // since both axes are moved to the right position.
   std::optional<AllToAllInfo> getAllToAllInfo(int64_t srcDim,
                                               bool allowOutOfOrderTarget) {
+    std::optional<AllToAllRange> range =
+        findAllToAllRange(srcDim, allowOutOfOrderTarget);
+    if (!range) {
+      return std::nullopt;
+    }
     AxisList& srcInAxes = inAxesPerDim[srcDim];
+    auto startInAxisIt = range->startInAxisIt;
 
+    AllToAllInfo result(range->tgtDim);
+    result.axes.reserve(std::distance(startInAxisIt, srcInAxes.end()));
+
+    SmallVector<AxisRefAttr>& srcCurrentAxes = currentAxesPerDim[srcDim];
+    SmallVector<AxisRefAttr>& tgtCurrentAxes = currentAxesPerDim[range->tgtDim];
+
+    popBackFromCurrentAxes(srcCurrentAxes, srcInAxes, startInAxisIt);
+    if (srcCurrentAxes.empty()) {
+      dimsToUnshard[srcDim] = false;
+    }
+
+    AxisList& tgtInAxes = inAxesPerDim[range->tgtDim];
+    AxisList& tgtOutAxes = outAxesPerDim[range->tgtDim];
+    auto srcInAxisIt = startInAxisIt;
+    while (srcInAxisIt != srcInAxes.end()) {
+      AxisRefAttr axis = *srcInAxisIt;
+      addAxisOrMerge(result.axes, axis, mesh);
+      addAxisOrMerge(tgtCurrentAxes, axis, mesh);
+      srcInAxisIt = srcInAxes.erase(srcInAxisIt);
+      inAxisSet.erase(axis);
+      if (tgtInAxes.empty() && !tgtOutAxes.empty() &&
+          tgtOutAxes.front() == axis) {
+        tgtOutAxes.pop_front();
+      } else {
+        tgtInAxes.push_back(axis);
+        inAxisSet.insert(axis);
+      }
+    }
+
+    return result;
+  }
+
+  struct AllToAllRange {
+    AxisList::iterator startInAxisIt;
+    AxisList::iterator axesToGatherIt;
+    int64_t tgtDim;
+  };
+
+  bool canAllToAllWithAxesToGather(int64_t srcDim,
+                                   AxisRefAttr firstAxisToGather) {
+    if (curMeshOrRef != outMeshOrRef) {
+      return false;
+    }
+    std::optional<AllToAllRange> range =
+        findAllToAllRange(srcDim, /*allowOutOfOrderTarget=*/false);
+    return range && range->axesToGatherIt != inAxesPerDim[srcDim].end() &&
+           *range->axesToGatherIt == firstAxisToGather;
+  }
+
+  // Returns the suffix of `inAxesPerDim[srcDim]` that `getAllToAllInfo` can
+  // move, without mutating state. In the strict pass on the same mesh, trailing
+  // axes to gather may move along to `tgtDim` and be gathered there when
+  // padding-free.
+  std::optional<AllToAllRange> findAllToAllRange(int64_t srcDim,
+                                                 bool allowOutOfOrderTarget) {
+    AxisList& srcInAxes = inAxesPerDim[srcDim];
     auto axisRevIt = srcInAxes.rbegin();
-    int64_t numAxes = 0;
+    int64_t axesToGatherSize = 1;
+    if (!allowOutOfOrderTarget && curMeshOrRef == outMeshOrRef &&
+        !dimsToUnshard[srcDim] && outAxesPerDim[srcDim].empty()) {
+      while (axisRevIt != srcInAxes.rend() &&
+             !outAxisToDimAndIndex.contains(*axisRevIt)) {
+        axesToGatherSize *= axisRevIt->getSize(mesh);
+        ++axisRevIt;
+      }
+    }
+    auto endInAxisIt = axisRevIt.base();
     std::optional<int64_t> tgtDim;
+    int64_t movedAxesSize = 1;
     for (; axisRevIt != srcInAxes.rend(); ++axisRevIt) {
       auto outAxisEntryIt = outAxisToDimAndIndex.find(*axisRevIt);
       if (outAxisEntryIt == outAxisToDimAndIndex.end()) {
@@ -1315,11 +1394,10 @@ class CollectiveInserter {
         break;
       }
       tgtDim = outAxisDim;
-      ++numAxes;
+      movedAxesSize *= axisRevIt->getSize(mesh);
     }
 
     if (!tgtDim) {
-      // Can't do an all-to-all from `srcDim` to any dimension.
       return std::nullopt;
     }
 
@@ -1330,16 +1408,12 @@ class CollectiveInserter {
 
     AxisList& tgtOutAxes = outAxesPerDim[*tgtDim];
     if (!allowOutOfOrderTarget &&
-        !std::equal(startInAxisIt, srcInAxes.end(), tgtOutAxes.begin())) {
-      // We don't all-to-all if axes aren't moved to the target dimension at the
-      // right position.
+        (!inAxesPerDim[*tgtDim].empty() ||
+         !std::equal(startInAxisIt, endInAxisIt, tgtOutAxes.begin()))) {
       return std::nullopt;
     }
 
-    int64_t movingAxesSize = 1;
-    for (auto it = startInAxisIt; it != srcInAxes.end(); ++it) {
-      movingAxesSize *= it->getSize(mesh);
-    }
+    int64_t movingAxesSize = movedAxesSize * axesToGatherSize;
     int64_t newSrcShardedSize =
         getShardedSize(currentAxesPerDim[srcDim], mesh) / movingAxesSize;
     int64_t newTgtShardedSize =
@@ -1348,51 +1422,40 @@ class CollectiveInserter {
         !isValidShardedSizeTransition(*tgtDim, newTgtShardedSize)) {
       return std::nullopt;
     }
-
-    AllToAllInfo result(*tgtDim);
-    result.axes.reserve(numAxes);
-
-    SmallVector<AxisRefAttr>& srcCurrentAxes = currentAxesPerDim[srcDim];
-    SmallVector<AxisRefAttr>& tgtCurrentAxes = currentAxesPerDim[*tgtDim];
-
-    popBackFromCurrentAxes(srcCurrentAxes, srcInAxes, startInAxisIt);
-    if (srcCurrentAxes.empty()) {
-      dimsToUnshard[srcDim] = false;
+    // Only move trailing gather axes to `tgtDim` if they land at its very end
+    // and `tgtDim` divides evenly without padding.
+    if (axesToGatherSize > 1 &&
+        (std::distance(startInAxisIt, endInAxisIt) !=
+             static_cast<int64_t>(tgtOutAxes.size()) ||
+         getTensorShape(result)[*tgtDim] <= 0 ||
+         getTensorShape(result)[*tgtDim] % newTgtShardedSize != 0)) {
+      return std::nullopt;
     }
 
-    AxisList& tgtInAxes = inAxesPerDim[*tgtDim];
-    auto srcInAxisIt = startInAxisIt;
-    while (srcInAxisIt != srcInAxes.end()) {
-      AxisRefAttr axis = *srcInAxisIt;
-      addAxisOrMerge(result.axes, axis, mesh);
-      addAxisOrMerge(tgtCurrentAxes, axis, mesh);
-      srcInAxisIt = srcInAxes.erase(srcInAxisIt);
-      inAxisSet.erase(axis);
-      if (tgtInAxes.empty() && tgtOutAxes.front() == axis) {
-        tgtOutAxes.pop_front();
-      } else {
-        tgtInAxes.push_back(axis);
-        inAxisSet.insert(axis);
-      }
-    }
-
-    return result;
+    return AllToAllRange{startInAxisIt, endInAxisIt, *tgtDim};
   }
 
   // Tries to insert a sequence of `sdy.all_to_all`s.
   //
   // If `allowOutOfOrderTarget` is false, we only all-to-all if the axes are
-  // moved to the target dimension at the right position.
+  // moved to the target dimension at the right position. Moving axes from one
+  // dimension can expose the next prefix for an earlier dimension, so repeat
+  // until fixpoint.
   void tryAllToAlls(bool allowOutOfOrderTarget) {
-    for (int64_t srcDim = 0; srcDim < getRank(); ++srcDim) {
-      while (auto info = getAllToAllInfo(srcDim, allowOutOfOrderTarget)) {
-        result = AllToAllOp::create(
-            rewriter, loc, result,
-            AllToAllParamAttr::get(rewriter.getContext(), info->axes, srcDim,
-                                   info->tgtDim),
-            getCurrentSharding());
+    bool inserted = false;
+    do {
+      inserted = false;
+      for (int64_t srcDim = 0; srcDim < getRank(); ++srcDim) {
+        while (auto info = getAllToAllInfo(srcDim, allowOutOfOrderTarget)) {
+          result = AllToAllOp::create(
+              rewriter, loc, result,
+              AllToAllParamAttr::get(rewriter.getContext(), info->axes, srcDim,
+                                     info->tgtDim),
+              getCurrentSharding());
+          inserted = true;
+        }
       }
-    }
+    } while (!allowOutOfOrderTarget && inserted);
   }
 
   ConversionPatternRewriter& rewriter;
