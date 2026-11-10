@@ -22,6 +22,7 @@ limitations under the License.
 #include <optional>
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/SymbolTable.h"
@@ -296,6 +297,18 @@ inline bool requires64BitIndex(Type type) {
 // Returns i64Type if useI64 is true, else i32Type.
 inline Type getIndexOrOffsetType(OpBuilder& builder, bool useI64) {
   return useI64 ? builder.getI64Type() : builder.getI32Type();
+}
+
+// Returns true if val can be represented in the integer type elemType.
+inline bool canRepresentInt(Type elemType, int64_t val) {
+  auto intType = dyn_cast<IntegerType>(elemType);
+  if (!intType) {
+    return false;
+  }
+  unsigned bitWidth = intType.getWidth();
+  return intType.isUnsigned()
+             ? (val >= 0 && llvm::isUIntN(bitWidth, static_cast<uint64_t>(val)))
+             : llvm::isIntN(bitWidth, val);
 }
 
 // Returns a 1D DenseIntElementsAttr of the given offsets.

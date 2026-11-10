@@ -2275,8 +2275,20 @@ Value rewriteSingleShardUpdate(stablehlo::DynamicUpdateSliceOp op,
   SmallVector<Value> ownershipPredicates;
 
   // For each dimension, compute the local start index and ownership predicate.
+  bool useI64 = requires64BitIndex(globalOperandType);
+  bool promoteNarrowIndex =
+      cast<RankedTensorType>(adaptor.getStartIndices().front().getType())
+          .getElementType()
+          .getIntOrFloatBitWidth() < (useI64 ? 64u : 32u);
+  Type promotedScalarElemTy =
+      promoteNarrowIndex ? getIndexOrOffsetType(rewriter, useI64) : Type();
   for (int64_t d = 0; d < rank; ++d) {
     Value rawIndex = adaptor.getStartIndices()[d];
+    if (promoteNarrowIndex) {
+      rawIndex = stablehlo::ConvertOp::create(
+          rewriter, loc, RankedTensorType::get({}, promotedScalarElemTy),
+          rawIndex);
+    }
     if (!isPartitionedSliceDim.test(d)) {
       localStartIndices.push_back(rawIndex);
       continue;

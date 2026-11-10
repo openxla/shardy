@@ -181,6 +181,72 @@ func.func @sequential_scatter_min_ui8_sharded_operand_and_indices(
   return %0 : tensor<6x2xi32>
 }
 
+// Scatter with indivisible sharded ui8 scatter_indices (3x1xui8 sharded by 2,
+// padded to 4x1) into a 300-element operand (> 255), verifying that -1 sentinel
+// padding promotes ui8 indices instead of scattering into index 255.
+func.func @parallel_scatter_indivisible_ui8_indices_large_operand(
+    %arg0: tensor<300xi32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}]>},
+    %arg1: tensor<3x1xui8> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}, {}]>},
+    %arg2: tensor<3xi32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}]>})
+    -> (tensor<300xi32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}]>}) {
+  %idx = sdy.reshard %arg1 <@mesh_x2_y2, [{"x"}, {}]> : tensor<3x1xui8>
+  %upd = sdy.reshard %arg2 <@mesh_x2_y2, [{"x"}]> : tensor<3xi32>
+  %0 = "stablehlo.scatter"(%arg0, %idx, %upd) ({
+  ^bb0(%lhs: tensor<i32>, %rhs: tensor<i32>):
+    %sum = stablehlo.add %lhs, %rhs : tensor<i32>
+    stablehlo.return %sum : tensor<i32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>,
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2_y2, [{}]>]>
+  } : (tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>) -> tensor<300xi32>
+  return %0 : tensor<300xi32>
+}
+
+func.func @sequential_scatter_indivisible_ui8_indices_large_operand(
+    %arg0: tensor<300xi32>, %arg1: tensor<3x1xui8>, %arg2: tensor<3xi32>)
+    -> tensor<300xi32> {
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%lhs: tensor<i32>, %rhs: tensor<i32>):
+    %sum = stablehlo.add %lhs, %rhs : tensor<i32>
+    stablehlo.return %sum : tensor<i32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>
+  } : (tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>) -> tensor<300xi32>
+  return %0 : tensor<300xi32>
+}
+
+// Dynamic update slice with narrow i8 scalar start index on a sharded 150-elem
+// operand (padded to 152), testing clampScalarStartIndex and
+// rewriteSingleShardUpdate narrow index promotion.
+func.func @parallel_dynamic_update_slice_i8_large_operand(
+    %arg0: tensor<150xi32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}]>},
+    %arg1: tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}]>},
+    %arg2: tensor<i8> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, []>})
+    -> (tensor<150xi32> {sdy.sharding = #sdy.sharding<@mesh_x2_y2, [{}]>}) {
+  %in = sdy.reshard %arg0 <@mesh_x2_y2, [{"x"}]> : tensor<150xi32>
+  %0 = stablehlo.dynamic_update_slice %in, %arg1, %arg2 {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2_y2, [{"x"}]>]>
+  } : (tensor<150xi32>, tensor<1xi32>, tensor<i8>) -> tensor<150xi32>
+  %1 = sdy.reshard %0 <@mesh_x2_y2, [{}]> : tensor<150xi32>
+  return %1 : tensor<150xi32>
+}
+
+func.func @sequential_dynamic_update_slice_i8_large_operand(
+    %arg0: tensor<150xi32>, %arg1: tensor<1xi32>, %arg2: tensor<i8>)
+    -> tensor<150xi32> {
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2
+      : (tensor<150xi32>, tensor<1xi32>, tensor<i8>) -> tensor<150xi32>
+  return %0 : tensor<150xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -301,5 +367,56 @@ func.func @main() {
   "check.expect_eq"(%res_ui8#2, %seq_ui8) : (tensor<6x2xi32>, tensor<6x2xi32>) -> ()
   "check.expect_eq"(%res_ui8#3, %seq_ui8) : (tensor<6x2xi32>, tensor<6x2xi32>) -> ()
 
+  %in300 = stablehlo.constant dense<0> : tensor<300xi32>
+  %idx3_ui8 = stablehlo.constant dense<[[10], [20], [30]]> : tensor<3x1xui8>
+  %upd3 = stablehlo.constant dense<[100, 200, 300]> : tensor<3xi32>
+  %seq_ui8_300 = func.call @sequential_scatter_indivisible_ui8_indices_large_operand(%in300, %idx3_ui8, %upd3)
+      : (tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>) -> tensor<300xi32>
+  %res_ui8_300:4 = "interpreter.run_parallel"(
+      %in300, %idx3_ui8, %upd3,
+      %in300, %idx3_ui8, %upd3,
+      %in300, %idx3_ui8, %upd3,
+      %in300, %idx3_ui8, %upd3) {
+    programs = [[
+      @parallel_scatter_indivisible_ui8_indices_large_operand,
+      @parallel_scatter_indivisible_ui8_indices_large_operand,
+      @parallel_scatter_indivisible_ui8_indices_large_operand,
+      @parallel_scatter_indivisible_ui8_indices_large_operand
+    ]]
+  } : (tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>,
+       tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>,
+       tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>,
+       tensor<300xi32>, tensor<3x1xui8>, tensor<3xi32>)
+      -> (tensor<300xi32>, tensor<300xi32>, tensor<300xi32>, tensor<300xi32>)
+  "check.expect_eq"(%res_ui8_300#0, %seq_ui8_300) : (tensor<300xi32>, tensor<300xi32>) -> ()
+  "check.expect_eq"(%res_ui8_300#1, %seq_ui8_300) : (tensor<300xi32>, tensor<300xi32>) -> ()
+  "check.expect_eq"(%res_ui8_300#2, %seq_ui8_300) : (tensor<300xi32>, tensor<300xi32>) -> ()
+  "check.expect_eq"(%res_ui8_300#3, %seq_ui8_300) : (tensor<300xi32>, tensor<300xi32>) -> ()
+
+  %in150 = stablehlo.constant dense<0> : tensor<150xi32>
+  %upd1 = stablehlo.constant dense<[999]> : tensor<1xi32>
+  %idx_i8_dus = stablehlo.constant dense<-100> : tensor<i8>
+  %seq_dus_i8 = func.call @sequential_dynamic_update_slice_i8_large_operand(%in150, %upd1, %idx_i8_dus)
+      : (tensor<150xi32>, tensor<1xi32>, tensor<i8>) -> tensor<150xi32>
+  %res_dus_i8:4 = "interpreter.run_parallel"(
+      %in150, %upd1, %idx_i8_dus,
+      %in150, %upd1, %idx_i8_dus,
+      %in150, %upd1, %idx_i8_dus,
+      %in150, %upd1, %idx_i8_dus) {
+    programs = [[
+      @parallel_dynamic_update_slice_i8_large_operand,
+      @parallel_dynamic_update_slice_i8_large_operand,
+      @parallel_dynamic_update_slice_i8_large_operand,
+      @parallel_dynamic_update_slice_i8_large_operand
+    ]]
+  } : (tensor<150xi32>, tensor<1xi32>, tensor<i8>,
+       tensor<150xi32>, tensor<1xi32>, tensor<i8>,
+       tensor<150xi32>, tensor<1xi32>, tensor<i8>,
+       tensor<150xi32>, tensor<1xi32>, tensor<i8>)
+      -> (tensor<150xi32>, tensor<150xi32>, tensor<150xi32>, tensor<150xi32>)
+  "check.expect_eq"(%res_dus_i8#0, %seq_dus_i8) : (tensor<150xi32>, tensor<150xi32>) -> ()
+  "check.expect_eq"(%res_dus_i8#1, %seq_dus_i8) : (tensor<150xi32>, tensor<150xi32>) -> ()
+  "check.expect_eq"(%res_dus_i8#2, %seq_dus_i8) : (tensor<150xi32>, tensor<150xi32>) -> ()
+  "check.expect_eq"(%res_dus_i8#3, %seq_dus_i8) : (tensor<150xi32>, tensor<150xi32>) -> ()
   return
 }

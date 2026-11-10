@@ -767,6 +767,17 @@ TEST_F(ExportUtilsTest, Requires64BitOffsetAndIndex) {
   EXPECT_EQ(getIndexOrOffsetType(builder, /*useI64=*/true),
             builder.getI64Type());
 
+  EXPECT_TRUE(canRepresentInt(builder.getIntegerType(8), 127));
+  EXPECT_FALSE(canRepresentInt(builder.getIntegerType(8), 128));
+  EXPECT_TRUE(canRepresentInt(builder.getIntegerType(8), -128));
+  EXPECT_FALSE(canRepresentInt(builder.getIntegerType(8), -129));
+  Type ui8 = builder.getIntegerType(8, /*isSigned=*/false);
+  EXPECT_TRUE(canRepresentInt(ui8, 255));
+  EXPECT_FALSE(canRepresentInt(ui8, 256));
+  EXPECT_FALSE(canRepresentInt(ui8, -1));
+  EXPECT_FALSE(canRepresentInt(builder.getF32Type(), 0));
+  EXPECT_FALSE(canRepresentInt(builder.getIndexType(), 0));
+
   DenseIntElementsAttr smallAttr = create1DOffsetsAttr(builder, smallValues);
   EXPECT_EQ(smallAttr.getElementType(), builder.getI32Type());
   EXPECT_EQ(smallAttr.getNumElements(), 3);

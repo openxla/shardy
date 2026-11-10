@@ -16,9 +16,11 @@ limitations under the License.
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <optional>
 
@@ -692,12 +694,7 @@ Value createScalarIntConstant(Location loc, Type type, int64_t val,
   SDY_CHECK_EQ(tensorType.getRank(), 0);
   unsigned bitWidth = tensorType.getElementTypeBitWidth();
   bool isSigned = !tensorType.getElementType().isUnsignedInteger();
-  if (isSigned) {
-    SDY_CHECK(llvm::isIntN(bitWidth, val));
-  } else {
-    SDY_CHECK_GE(val, 0);
-    SDY_CHECK(llvm::isUIntN(bitWidth, static_cast<uint64_t>(val)));
-  }
+  SDY_CHECK(canRepresentInt(tensorType.getElementType(), val));
   return stablehlo::ConstantOp::create(
       builder, loc,
       DenseIntElementsAttr::get(tensorType, APInt(bitWidth, val, isSigned)));

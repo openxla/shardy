@@ -16,6 +16,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -25,7 +26,6 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -36,6 +36,7 @@ limitations under the License.
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
@@ -1322,6 +1323,23 @@ class StablehloConvolutionOpPattern
   PaddingCache& cache;
 };
 
+// Widens indices to i32 (or i64 if maxBound does not fit in i32) when maxBound
+// cannot be represented in the current element type of indices.
+Value maybeWidenIndices(Location loc, Value indices, int64_t maxBound,
+                        TensorShardingAttr idxSharding, OpBuilder& builder) {
+  auto indicesType = cast<RankedTensorType>(indices.getType());
+  if (canRepresentInt(indicesType.getElementType(), maxBound)) {
+    return indices;
+  }
+  Type elemType = getIndexOrOffsetType(builder, requires64BitOffset(maxBound));
+  Value widened = stablehlo::ConvertOp::create(
+      builder, loc, indicesType.clone(elemType), indices);
+  if (idxSharding) {
+    setSharding(widened, idxSharding);
+  }
+  return widened;
+}
+
 class StablehloGatherOpPattern
     : public OpConversionPattern<stablehlo::GatherOp> {
  public:
@@ -1376,7 +1394,6 @@ class StablehloGatherOpPattern
     // dimension size to preserve the semantics of the original gather.
     if (needsIndexClamp) {
       Location loc = op.getLoc();
-      Type elemType = startIndicesType.getElementType();
       TensorShardingAttr idxSharding =
           converter->getSharding(op.getStartIndices());
       int64_t maxBound = 0;
@@ -1385,16 +1402,10 @@ class StablehloGatherOpPattern
             std::max({maxBound, paddedOperandType.getDimSize(d) - 1,
                       origOperandType.getDimSize(d) - op.getSliceSizes()[d]});
       }
-      unsigned bitWidth = elemType.getIntOrFloatBitWidth();
-      if (!(elemType.isUnsignedInteger() ? llvm::isUIntN(bitWidth, maxBound)
-                                         : llvm::isIntN(bitWidth, maxBound))) {
-        elemType = llvm::isIntN(32, maxBound) ? rewriter.getI32Type()
-                                              : rewriter.getI64Type();
-        startIndicesType = startIndicesType.clone(elemType);
-        startIndices = stablehlo::ConvertOp::create(
-            rewriter, loc, startIndicesType, startIndices);
-        if (idxSharding) setSharding(startIndices, idxSharding);
-      }
+      startIndices =
+          maybeWidenIndices(loc, startIndices, maxBound, idxSharding, rewriter);
+      startIndicesType = cast<RankedTensorType>(startIndices.getType());
+      Type elemType = startIndicesType.getElementType();
       Value maxConst;
       if (indexVectorDim == startIndicesType.getRank()) {
         // Implicit 1-element index vector, splat the single scalar maxIdx to
@@ -1465,6 +1476,13 @@ Value clampScalarStartIndex(Location loc, Value startIndex, int64_t maxIdx,
                             ConversionPatternRewriter& rewriter) {
   auto indexType = cast<RankedTensorType>(startIndex.getType());
   Type elemType = indexType.getElementType();
+  // If maxIdx is already >= the maximum representable value of elemType (so
+  // maxIdx + 1 is not representable), no index value in elemType can exceed
+  // maxIdx.
+  if (maxIdx == std::numeric_limits<int64_t>::max() ||
+      !canRepresentInt(elemType, maxIdx + 1)) {
+    return startIndex;
+  }
   TensorShardingAttr idxSharding = getSharding(startIndex);
   ElementsAttr constAttr;
   if (auto sdyConst = startIndex.getDefiningOp<sdy::ConstantOp>()) {
@@ -1620,18 +1638,33 @@ class StablehloScatterOpPattern
   using OpConversionPattern::OpConversionPattern;
   LogicalResult matchAndRewrite(stablehlo::ScatterOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter& b) const override {
+    auto* converter = getTypeConverter<PaddedTypeConverter>();
     SmallVector<Value> values(adaptor.getOperands());
     Value& scatterIndices = values[op.getInputs().size()];
     RankedTensorType origType = op.getScatterIndices().getType();
     if (origType != scatterIndices.getType() && origType.getNumElements() > 0) {
+      Type elemType = origType.getElementType();
+      if (elemType.isUnsignedInteger()) {
+        auto inputType = cast<RankedTensorType>(values.front().getType());
+        int64_t maxBound = 0;
+        for (int64_t dim :
+             op.getScatterDimensionNumbers().getScatterDimsToOperandDims()) {
+          maxBound = std::max(maxBound, inputType.getDimSize(dim));
+        }
+        scatterIndices = maybeWidenIndices(
+            op.getLoc(), scatterIndices, maxBound,
+            converter->getSharding(op.getScatterIndices()), b);
+        elemType = getElementTypeOrSelf(scatterIndices);
+        origType = origType.clone(elemType);
+      }
       // Masks trailing padded scatter_indices slots with sentinel values out of
       // bounds so zero padding does not scatter phantom updates into index 0.
-      IntegerAttr oobAttr = b.getIntegerAttr(origType.getElementType(), -1);
+      IntegerAttr oobAttr = b.getIntegerAttr(elemType, -1);
       auto oobConstant = stablehlo::ConstantOp::create(b, op.getLoc(), oobAttr);
       scatterIndices = ensurePaddingWithValue(op.getLoc(), scatterIndices,
                                               origType, oobConstant, b);
     }
-    return padGenericOp(op, values, getTypeConverter<PaddedTypeConverter>(), b);
+    return padGenericOp(op, values, converter, b);
   }
 };
 

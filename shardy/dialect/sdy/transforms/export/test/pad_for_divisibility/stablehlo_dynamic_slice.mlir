@@ -29,3 +29,19 @@ func.func private @pad_dynamic_slice_clamps_start_index(
   %0 = stablehlo.dynamic_slice %arg0, %idx0, %idx1, sizes = [2, 4] : (tensor<7x4xf32>, tensor<i32>, tensor<i32>) -> tensor<2x4xf32>
   return %0 : tensor<2x4xf32>
 }
+
+// When a scalar start index has a narrow element type (i8, max representable
+// 127) and the unpadded max index (150 - 2 = 148) >= 127, no upper-bound
+// minimum clamp should be emitted.
+// CHECK-LABEL: func private @pad_dynamic_slice_narrow_i8_no_overflow_clamp
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<152x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {}]>}, %[[IDX0:.*]]: tensor<i8>, %[[IDX1:.*]]: tensor<i8>)
+// CHECK-SAME: -> tensor<2x4xf32>
+func.func private @pad_dynamic_slice_narrow_i8_no_overflow_clamp(
+  %arg0: tensor<150x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {}]>},
+  %idx0: tensor<i8>, %idx1: tensor<i8>)
+  -> tensor<2x4xf32> {
+  // CHECK-NEXT: %[[DS:.*]] = stablehlo.dynamic_slice %[[ARG0]], %[[IDX0]], %[[IDX1]], sizes = [2, 4] : (tensor<152x4xf32>, tensor<i8>, tensor<i8>) -> tensor<2x4xf32>
+  // CHECK-NEXT: return %[[DS]] : tensor<2x4xf32>
+  %0 = stablehlo.dynamic_slice %arg0, %idx0, %idx1, sizes = [2, 4] : (tensor<150x4xf32>, tensor<i8>, tensor<i8>) -> tensor<2x4xf32>
+  return %0 : tensor<2x4xf32>
+}

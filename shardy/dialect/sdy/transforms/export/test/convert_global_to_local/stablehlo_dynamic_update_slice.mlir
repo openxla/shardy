@@ -240,3 +240,27 @@ func.func @cross_shard_slice_dim_not_replicated(%arg0: tensor<16x8xf32> {sdy.sha
   %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : (tensor<16x8xf32>, tensor<2x8xf32>, tensor<i32>, tensor<i32>) -> tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh_2 = <["x"=2]>
+
+// Verifies that narrow i8 scalar start indices are promoted to i32 before
+// clamping and subtracting shard offsets.
+// CHECK-LABEL: func @single_element_slice_narrow_i8_index
+// CHECK-SAME:    (%[[OPERAND:.*]]: tensor<100x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>},
+// CHECK-SAME:     %[[UPDATE:.*]]: tensor<1x4xf32>, %[[IDX0:.*]]: tensor<i8>, %[[IDX1:.*]]: tensor<i8>)
+// CHECK-NEXT:  %[[IDX0_I32:.*]] = stablehlo.convert %[[IDX0]] : (tensor<i8>) -> tensor<i32>
+// CHECK-NEXT:  %[[ZERO:.*]] = stablehlo.constant dense<0> : tensor<i32>
+// CHECK-NEXT:  %[[MAX_START:.*]] = stablehlo.constant dense<199> : tensor<i32>
+// CHECK-NEXT:  %[[CLAMPED:.*]] = stablehlo.clamp %[[ZERO]], %[[IDX0_I32]], %[[MAX_START]] : tensor<i32>
+// CHECK:       %[[IDX1_I32:.*]] = stablehlo.convert %[[IDX1]] : (tensor<i8>) -> tensor<i32>
+// CHECK-NEXT:  %[[LOCAL_DUS:.*]] = stablehlo.dynamic_update_slice %[[OPERAND]], %[[UPDATE]], %{{.*}}, %[[IDX1_I32]] : (tensor<100x4xf32>, tensor<1x4xf32>, tensor<i32>, tensor<i32>) -> tensor<100x4xf32>
+func.func @single_element_slice_narrow_i8_index(%arg0: tensor<200x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>},
+                                                %arg1: tensor<1x4xf32>,
+                                                %arg2: tensor<i8>,
+                                                %arg3: tensor<i8>) -> (tensor<200x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>}) {
+  %0 = stablehlo.dynamic_update_slice %arg0, %arg1, %arg2, %arg3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : (tensor<200x4xf32>, tensor<1x4xf32>, tensor<i8>, tensor<i8>) -> tensor<200x4xf32>
+  return %0 : tensor<200x4xf32>
+}
+
