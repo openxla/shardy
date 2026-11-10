@@ -133,3 +133,32 @@ func.func @padded_gather_collapsed_dim_size_1(%arg0: tensor<1x8xf32>, %arg1: ten
   } : (tensor<1x8xf32>, tensor<2x1xi64>) -> tensor<2x2xf32>
   return %0 : tensor<2x2xf32>
 }
+
+// CHECK-LABEL: func @padded_gather_indexed_full_slice_sharded_output
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<3x4xf32>, %[[ARG1:.*]]: tensor<2x1xi64>) -> tensor<2x3x4xf32> {
+func.func @padded_gather_indexed_full_slice_sharded_output(%arg0: tensor<3x4xf32>, %arg1: tensor<2x1xi64>) -> tensor<2x3x4xf32> {
+  // When a full-slice dimension in start_index_map is sharded on both operand
+  // and the corresponding result offset dimension, slice_sizes is updated to
+  // the padded dimension size.
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[PAD:.*]] = stablehlo.pad %[[ARG0]], %[[CST]], low = [0, 0], high = [1, 0], interior = [0, 0] : (tensor<3x4xf32>, tensor<f32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: %[[SLICE:.*]] = sdy.all_slice [{"x"}, {}] %[[PAD]] out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<4x4xf32>
+  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[SLICE]], %[[ARG1]])
+  // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1, 2], start_index_map = [0], index_vector_dim = 1>
+  // CHECK-SAME: slice_sizes = array<i64: 4, 4>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}, {}]>]>}
+  // CHECK-SAME: : (tensor<4x4xf32>, tensor<2x1xi64>) -> tensor<2x4x4xf32>
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{}, {"x"}, {}] %[[GATHER]] out_sharding=<@mesh_4_2, [{}, {}, {}]> : tensor<2x4x4xf32>
+  // CHECK-NEXT: %[[UNPAD:.*]] = stablehlo.slice %[[AG]] [0:2, 0:3, 0:4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}]>]>} : (tensor<2x4x4xf32>) -> tensor<2x3x4xf32>
+  // CHECK-NEXT: return %[[UNPAD]] : tensor<2x3x4xf32>
+  %sliced_operand = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<3x4xf32>
+  %0 = "stablehlo.gather"(%sliced_operand, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1, 2],
+      start_index_map = [0], index_vector_dim = 1>,
+    slice_sizes = array<i64: 3, 4>,
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}, {}]>]>
+  } : (tensor<3x4xf32>, tensor<2x1xi64>) -> tensor<2x3x4xf32>
+  %1 = sdy.all_gather [{}, {"x"}, {}] %0 out_sharding=<@mesh_4_2, [{}, {}, {}]> : tensor<2x3x4xf32>
+  return %1 : tensor<2x3x4xf32>
+}

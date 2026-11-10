@@ -73,6 +73,23 @@ func.func @parallel_convolution_batch_as_spatial(
   return %0 : tensor<1x4x8x1xf32>
 }
 
+// Convolution with window reversal on a sharded spatial reduction dimension
+// (output spatial size 1, zero padding, unit stride/dilation, reverse = [1]).
+func.func @parallel_convolution_spatial_reduction_window_reversal(
+  %arg0: tensor<1x4x1xf32> {sdy.sharding = #sdy.sharding<@mesh_x2, [{}, {"x"}, {}]>},
+  %arg1: tensor<4x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh_x2, [{"x"}, {}, {}]>})
+  -> (tensor<1x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh_x2, [{}, {}, {}]>}) {
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, f] x [0, i, o] -> [b, 0, f],
+    window = {stride = [1], pad = [[0, 0]], reverse = [1]} {
+      batch_group_count = 1 : i64,
+      feature_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[<@mesh_x2, [{}, {}, {}]>]>
+    }
+    : (tensor<1x4x1xf32>, tensor<4x1x1xf32>) -> tensor<1x1x1xf32>
+  return %0 : tensor<1x1x1xf32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -165,6 +182,22 @@ func.func @main() {
   %par_pb = stablehlo.concatenate %res_pb#0, %res_pb#1, dim = 1
     : (tensor<1x2x8x1xf32>, tensor<1x2x8x1xf32>) -> tensor<1x4x8x1xf32>
   "check.expect_eq"(%par_pb, %seq_pb) : (tensor<1x4x8x1xf32>, tensor<1x4x8x1xf32>) -> ()
+
+  // 5. Spatial reduction dimension with window reversal on 2-device mesh.
+  %input_1x4x1 = stablehlo.constant dense<[[[1.0], [2.0], [3.0], [4.0]]]> : tensor<1x4x1xf32>
+  %filter_4x1x1 = stablehlo.constant dense<[[[10.0]], [[20.0]], [[30.0]], [[40.0]]]> : tensor<4x1x1xf32>
+  %seq_rev = func.call @sequential_convolution_spatial_reduction_window_reversal(%input_1x4x1, %filter_4x1x1)
+    : (tensor<1x4x1xf32>, tensor<4x1x1xf32>) -> tensor<1x1x1xf32>
+  %rev_in_0 = "stablehlo.slice"(%input_1x4x1) {start_indices = array<i64: 0, 0, 0>, limit_indices = array<i64: 1, 2, 1>, strides = array<i64: 1, 1, 1>} : (tensor<1x4x1xf32>) -> tensor<1x2x1xf32>
+  %rev_in_1 = "stablehlo.slice"(%input_1x4x1) {start_indices = array<i64: 0, 2, 0>, limit_indices = array<i64: 1, 4, 1>, strides = array<i64: 1, 1, 1>} : (tensor<1x4x1xf32>) -> tensor<1x2x1xf32>
+  %rev_rhs_0 = "stablehlo.slice"(%filter_4x1x1) {start_indices = array<i64: 0, 0, 0>, limit_indices = array<i64: 2, 1, 1>, strides = array<i64: 1, 1, 1>} : (tensor<4x1x1xf32>) -> tensor<2x1x1xf32>
+  %rev_rhs_1 = "stablehlo.slice"(%filter_4x1x1) {start_indices = array<i64: 2, 0, 0>, limit_indices = array<i64: 4, 1, 1>, strides = array<i64: 1, 1, 1>} : (tensor<4x1x1xf32>) -> tensor<2x1x1xf32>
+  %res_rev:2 = "interpreter.run_parallel"(%rev_in_0, %rev_rhs_0, %rev_in_1, %rev_rhs_1) {
+    programs = [[@parallel_convolution_spatial_reduction_window_reversal, @parallel_convolution_spatial_reduction_window_reversal]]
+  } : (tensor<1x2x1xf32>, tensor<2x1x1xf32>, tensor<1x2x1xf32>, tensor<2x1x1xf32>)
+    -> (tensor<1x1x1xf32>, tensor<1x1x1xf32>)
+  "check.expect_eq"(%res_rev#0, %seq_rev) : (tensor<1x1x1xf32>, tensor<1x1x1xf32>) -> ()
+  "check.expect_eq"(%res_rev#1, %seq_rev) : (tensor<1x1x1xf32>, tensor<1x1x1xf32>) -> ()
 
   return
 }

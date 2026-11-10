@@ -489,3 +489,67 @@ func.func @scatter_unreduced_axes_fallback_all_reduce(
   } : (tensor<8x2xf32>, tensor<2x1xi64>, tensor<2x2xf32>) -> tensor<8x2xf32>
   return %0 : tensor<8x2xf32>
 }
+
+// CHECK-LABEL: func @scatter_narrow_i8_indices_and_unsigned_max_identity
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<80x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<1x1xi8> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>},
+// CHECK-SAME: %[[ARG2:.*]]: tensor<1x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>})
+// CHECK-SAME: -> (tensor<80x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+func.func @scatter_narrow_i8_indices_and_unsigned_max_identity(
+    %arg0: tensor<160x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+    %arg1: tensor<2x1xi8> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>},
+    %arg2: tensor<2x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>})
+ -> (tensor<160x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[ID:.*]] = stablehlo.constant dense<0> : tensor<ui32>
+  // CHECK-NEXT: %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[ID]], dims = [] : (tensor<ui32>) -> tensor<80x2xui32>
+  // CHECK: %[[IDX_I32:.*]] = stablehlo.convert %[[ARG1]] : (tensor<1x1xi8>) -> tensor<1x1xi32>
+  // CHECK: %[[SUB:.*]] = stablehlo.subtract %[[IDX_I32]], %{{.*}} : tensor<1x1xi32>
+  // CHECK: "stablehlo.scatter"(%{{.*}}, %[[SUB]], %[[ARG2]])
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%arg3: tensor<ui32>, %arg4: tensor<ui32>):
+    %1 = stablehlo.maximum %arg3, %arg4 : tensor<ui32>
+    stablehlo.return %1 : tensor<ui32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1
+    >,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y":(2)2}>]>
+  } : (tensor<160x2xui32>, tensor<2x1xi8>, tensor<2x2xui32>) -> tensor<160x2xui32>
+  %1 = sdy.all_reduce {"y":(2)2} %0 out_sharding=<@mesh_2_4, [{"x"}, {}]> : tensor<160x2xui32>
+  return %1 : tensor<160x2xui32>
+}
+
+// CHECK-LABEL: func @scatter_ui32_indices_promoted_to_i64_and_unsigned_min_identity
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<80x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<1x1xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>},
+// CHECK-SAME: %[[ARG2:.*]]: tensor<1x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>})
+// CHECK-SAME: -> (tensor<80x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+func.func @scatter_ui32_indices_promoted_to_i64_and_unsigned_min_identity(
+    %arg0: tensor<160x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+    %arg1: tensor<2x1xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>},
+    %arg2: tensor<2x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"y":(2)2}, {}]>})
+ -> (tensor<160x2xui32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[ID:.*]] = stablehlo.constant dense<4294967295> : tensor<ui32>
+  // CHECK-NEXT: %[[ID_BCAST:.*]] = stablehlo.broadcast_in_dim %[[ID]], dims = [] : (tensor<ui32>) -> tensor<80x2xui32>
+  // CHECK: %[[IDX_I64:.*]] = stablehlo.convert %[[ARG1]] : (tensor<1x1xui32>) -> tensor<1x1xi64>
+  // CHECK: %[[SUB:.*]] = stablehlo.subtract %[[IDX_I64]], %{{.*}} : tensor<1x1xi64>
+  // CHECK: "stablehlo.scatter"(%{{.*}}, %[[SUB]], %[[ARG2]])
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%arg3: tensor<ui32>, %arg4: tensor<ui32>):
+    %1 = stablehlo.minimum %arg3, %arg4 : tensor<ui32>
+    stablehlo.return %1 : tensor<ui32>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1
+    >,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {}], unreduced={"y":(2)2}>]>
+  } : (tensor<160x2xui32>, tensor<2x1xui32>, tensor<2x2xui32>) -> tensor<160x2xui32>
+  %1 = sdy.all_reduce {"y":(2)2} %0 out_sharding=<@mesh_2_4, [{"x"}, {}]> : tensor<160x2xui32>
+  return %1 : tensor<160x2xui32>
+}

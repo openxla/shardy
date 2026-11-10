@@ -2649,6 +2649,17 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     return llvm::is_contained(startIndexMap, d);
   });
   if (needIndicesBasedPred) {
+    bool useI64 = requires64BitIndex(globalOperandType) ||
+                  indexEltTy.getIntOrFloatBitWidth() == 64 ||
+                  indexEltTy.isUnsignedInteger(32);
+    if (indexEltTy.getIntOrFloatBitWidth() < 32 ||
+        indexEltTy.isUnsignedInteger() ||
+        (useI64 && indexEltTy.getIntOrFloatBitWidth() < 64)) {
+      indexEltTy = getIndexOrOffsetType(rewriter, useI64);
+      indicesType = indicesType.clone(indexEltTy);
+      indices =
+          stablehlo::ConvertOp::create(rewriter, loc, indicesType, indices);
+    }
     Value baseIndices;
     if constexpr (std::is_same_v<DimNumbersOp,
                                  stablehlo::ScatterDimensionNumbersAttr>) {
@@ -3385,7 +3396,9 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
                                               /*Negative=*/true);
           minAttr = DenseElementsAttr::get(scalarType, minFloat);
         } else if (auto intType = dyn_cast<IntegerType>(elementType)) {
-          auto minInt = APInt::getSignedMinValue(intType.getWidth());
+          unsigned width = intType.getWidth();
+          APInt minInt = intType.isUnsigned() ? APInt::getMinValue(width)
+                                              : APInt::getSignedMinValue(width);
           minAttr = DenseElementsAttr::get(scalarType, minInt);
         }
         return minAttr ? stablehlo::ConstantOp::create(b, loc, minAttr)
@@ -3398,7 +3411,9 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
                                               /*Negative=*/false);
           maxAttr = DenseElementsAttr::get(scalarType, maxFloat);
         } else if (auto intType = dyn_cast<IntegerType>(elementType)) {
-          auto maxInt = APInt::getSignedMaxValue(intType.getWidth());
+          unsigned width = intType.getWidth();
+          APInt maxInt = intType.isUnsigned() ? APInt::getMaxValue(width)
+                                              : APInt::getSignedMaxValue(width);
           maxAttr = DenseElementsAttr::get(scalarType, maxInt);
         }
         return maxAttr ? stablehlo::ConstantOp::create(b, loc, maxAttr)
@@ -3772,6 +3787,12 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
 
       ArrayRef<int64_t> windowStrides =
           op.getWindowStrides().value_or(ArrayRef<int64_t>());
+      ArrayRef<int64_t> baseDilations;
+      ArrayRef<int64_t> windowDilations;
+      if constexpr (std::is_same_v<OpTy, stablehlo::ReduceWindowOp>) {
+        baseDilations = op.getBaseDilations().value_or(ArrayRef<int64_t>());
+        windowDilations = op.getWindowDilations().value_or(ArrayRef<int64_t>());
+      }
 
       for (int64_t dim = 0; dim < operandType.getRank(); ++dim) {
         ArrayRef<AxisRefAttr> axes =
@@ -3796,6 +3817,8 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
 
           if (isPassthrough) {
             isPassthrough =
+                (baseDilations.empty() || baseDilations[dim] == 1) &&
+                (windowDilations.empty() || windowDilations[dim] == 1) &&
                 (windowStrides.empty() || windowStrides[dim] == 1 ||
                  (!windowDimensions.empty() &&
                   windowStrides[dim] >= windowDimensions[dim])) &&

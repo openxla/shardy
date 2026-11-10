@@ -523,6 +523,9 @@ Operation* padCollectiveOp(Operation* op, Value input, Value inputOrig,
   auto rankedInput = cast<RankedTensorType>(input.getType());
   Value padOp = input;
   std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+  if (isa<sdy::ReduceScatterOp>(op) && paddingKind != PaddingValueKind::kZero) {
+    paddingKind = std::nullopt;
+  }
   bool isPaddedBefore = input.getType() != inputOrig.getType();
 
   if (paddedInputType != rankedInput) {
@@ -1337,7 +1340,7 @@ class StablehloConvolutionOpPattern
     Value finalResult =
         trimOutputForDims(newOp->getResult(0), paddedResultShaped,
                           dimNums.getOutputSpatialDimensions(), outSharding,
-                          PaddingValueKind::kZero, cache, rewriter);
+                          /*paddingKind=*/std::nullopt, cache, rewriter);
 
     rewriter.replaceOp(op, finalResult);
     return success();
@@ -1396,16 +1399,26 @@ class StablehloGatherOpPattern
     // size in the result. When such a dim is padded, we need to increase the
     // corresponding slice size to maintain the same operand-to-result mapping.
     // Also check if any indexed dimension in start_index_map is padded.
+    TensorShardingAttr outSharding = getSharding(op.getResult());
+    auto paddedResultType = cast<RankedTensorType>(getDivisiblePaddedType(
+        op.getType(), outSharding, converter->getSymbolTable()));
+    ArrayRef<int64_t> offsetDims = op.getDimensionNumbers().getOffsetDims();
+
     SmallVector<int64_t> sliceSizes(op.getSliceSizes());
     bool needsIndexClamp = false;
+    int64_t offsetDimIdx = 0;
     for (int64_t d = 0; d < origOperandType.getRank(); ++d) {
+      bool isOffsetDim = !llvm::is_contained(collapsedSliceDims, d) &&
+                         !llvm::is_contained(operandBatchingDims, d);
+      int64_t resultDim = isOffsetDim ? offsetDims[offsetDimIdx++] : -1;
       if (paddedOperandType.getDimSize(d) > origOperandType.getDimSize(d)) {
-        if (llvm::is_contained(startIndexMap, d)) {
-          needsIndexClamp = true;
-        } else if (!llvm::is_contained(collapsedSliceDims, d) &&
-                   !llvm::is_contained(operandBatchingDims, d) &&
-                   sliceSizes[d] == origOperandType.getDimSize(d)) {
+        bool inStartIndexMap = llvm::is_contained(startIndexMap, d);
+        if (isOffsetDim && sliceSizes[d] == origOperandType.getDimSize(d) &&
+            (!inStartIndexMap || paddedResultType.getDimSize(resultDim) ==
+                                     paddedOperandType.getDimSize(d))) {
           sliceSizes[d] = paddedOperandType.getDimSize(d);
+        } else if (inStartIndexMap) {
+          needsIndexClamp = true;
         }
       }
     }
@@ -1484,7 +1497,7 @@ class StablehloGatherOpPattern
         rewriter, op.getLoc(), newResultTypes[0], operand, startIndices,
         op.getDimensionNumbersAttr(), newSliceSizesAttr,
         op.getIndicesAreSortedAttr());
-    if (TensorShardingAttr outSharding = getSharding(op.getResult())) {
+    if (outSharding) {
       setSharding(newGather.getResult(), outSharding);
     }
     rewriter.replaceOp(op, newGather.getResult());

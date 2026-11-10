@@ -70,3 +70,31 @@ func.func @unknown_padding_requires_select(%arg0: tensor<7x7xf32>, %arg1: tensor
   %4 = stablehlo.dot_general %3, %arg2_sharded, contracting_dims = [0] x [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{}, {}]>]>} : (tensor<7x7xf32>, tensor<7x5xf32>) -> tensor<7x5xf32>
   return %4 : tensor<7x5xf32>
 }
+
+// Tests that non-zero padding (e.g. kOne from a sharded pad) is invalidated
+// across sdy.reduce_scatter because summing across shards changes the padded
+// value from 1 to num_shards.
+// CHECK-LABEL: func @non_zero_padding_invalidated_by_reduce_scatter
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x4xi32>) -> tensor<4xi32> {
+func.func @non_zero_padding_invalidated_by_reduce_scatter(%arg0: tensor<4x4xi32>) -> tensor<4xi32> {
+  // CHECK-NEXT: %[[C1:.*]] = stablehlo.constant dense<1> : tensor<i32>
+  // CHECK-NEXT: %[[SLICE:.*]] = sdy.all_slice [{}, {"y"}] %[[ARG0]] out_sharding=<@mesh_4_2, [{}, {"y"}]> : tensor<4x4xi32>
+  // CHECK-NEXT: %[[PAD:.*]] = stablehlo.pad %[[SLICE]], %[[C1]], low = [0, 0], high = [0, 2], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}]>]>} : (tensor<4x4xi32>, tensor<i32>) -> tensor<4x6xi32>
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{"x"}, {}] %[[PAD]] out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<4x6xi32>
+  // CHECK-NEXT: %[[IOTA:.*]] = stablehlo.iota dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : tensor<4x6xi32>
+  // CHECK-NEXT: %[[C5:.*]] = stablehlo.constant dense<5> : tensor<i32>
+  // CHECK-NEXT: %[[BOUND:.*]] = stablehlo.broadcast_in_dim %[[C5]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<i32>) -> tensor<4x6xi32>
+  // CHECK-NEXT: %[[CMP:.*]] = stablehlo.compare LT, %[[IOTA]], %[[BOUND]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<4x6xi32>, tensor<4x6xi32>) -> tensor<4x6xi1>
+  // CHECK-NEXT: %[[PAD_VAL:.*]] = stablehlo.broadcast_in_dim %[[C1]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<i32>) -> tensor<4x6xi32>
+  // CHECK-NEXT: %[[SELECT:.*]] = stablehlo.select %[[CMP]], %[[RS]], %[[PAD_VAL]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : tensor<4x6xi1>, tensor<4x6xi32>
+  // CHECK-NEXT: %[[RED:.*]] = stablehlo.reduce(%[[SELECT]] init: %[[C1]]) applies stablehlo.multiply across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}]>]>} : (tensor<4x6xi32>, tensor<i32>) -> tensor<4xi32>
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{"x"}] %[[RED]] out_sharding=<@mesh_4_2, [{}]> : tensor<4xi32>
+  // CHECK-NEXT: return %[[AG]] : tensor<4xi32>
+  %c1 = stablehlo.constant dense<1> : tensor<i32>
+  %slice = sdy.all_slice [{}, {"y"}] %arg0 out_sharding=<@mesh_4_2, [{}, {"y"}]> : tensor<4x4xi32>
+  %pad = stablehlo.pad %slice, %c1, low = [0, 0], high = [0, 1], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}]>]>} : (tensor<4x4xi32>, tensor<i32>) -> tensor<4x5xi32>
+  %rs = sdy.reduce_scatter [{"x"}, {}] %pad out_sharding=<@mesh_4_2, [{"x"}, {"y"}]> : tensor<4x5xi32>
+  %red = stablehlo.reduce(%rs init: %c1) applies stablehlo.multiply across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}]>]>} : (tensor<4x5xi32>, tensor<i32>) -> tensor<4xi32>
+  %ag = sdy.all_gather [{"x"}] %red out_sharding=<@mesh_4_2, [{}]> : tensor<4xi32>
+  return %ag : tensor<4xi32>
+}

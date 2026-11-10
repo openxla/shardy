@@ -841,6 +841,9 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
   };
 
   Value head = permutePiece(input, hops);
+  if (fraction == 0) {
+    return head;
+  }
   Value tail = permutePiece(input, hops + 1);
 
   int64_t headSliceSize = shardSize - fraction;
@@ -2996,24 +2999,38 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
                                           TensorShardingAttr sharding,
                                           MeshAttr mesh,
                                           RankedTensorType inputType) {
-  return buildDataExchangeInfo(
+  DataExchangeInfo info = buildDataExchangeInfo(
       sharding, mesh, inputType,
       [&](int64_t dim, int64_t sIn, int64_t shardCount) {
-        if (isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh)) {
-          return DimExchangeInfo{};
-        }
         int64_t sliceSize = sliceOp.getType().getDimSize(dim);
         int64_t sOut = llvm::divideCeil(sliceSize, shardCount);
         int64_t start = sliceOp.getStartIndices()[dim];
         DimExchangeInfo dimInfo = getDimExchangeInfo(
             shardCount, sIn, sOut,
             /*sFootprint=*/sOut, /*padLow=*/-start,
-            /*stride=*/1, /*baseDilation=*/1, inputType.getDimSize(dim));
+            /*stride=*/1, /*baseDilation=*/1, sliceOp.getLimitIndices()[dim]);
         // This is a zero-hop-non-communication-free case, which doesn't
         // require collective-permute but dynamic-slice.
-        dimInfo.needsComm = true;
+        dimInfo.needsComm =
+            !isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh);
         return dimInfo;
       });
+  if (info.needsComm()) {
+    int64_t dimExchangeIdx = 0;
+    for (auto [dim, dimSharding] :
+         llvm::enumerate(sharding.getDimShardings())) {
+      int64_t shardCount = dimSharding.getShardedSize(mesh);
+      if (shardCount <= 1) {
+        continue;
+      }
+      DimExchangeInfo& dimInfo = info.dimExchanges[dimExchangeIdx++];
+      int64_t sIn = info.divisibleInputShape[dim] / shardCount;
+      if (sIn != dimInfo.sOut) {
+        dimInfo.needsComm = true;
+      }
+    }
+  }
+  return info;
 }
 
 // Implements the slicing operation on replicated dimensions.
@@ -3160,14 +3177,20 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
 // Replication fallback helpers.
 // =============================================================================
 
-// Returns true if the convolution spatial dimension `spatialDimIdx` is a pure
-// reduction dimension without sliding-window shifts (i.e., output spatial size
-// `numWindows[spatialDimIdx]` is 1, padding is 0, window stride is 1, and
-// lhs/rhs dilations are 1). When false, sharding this spatial reduction
-// dimension also requires permutation (halo exchange) across shards.
+// Returns true if the convolution spatial dimension spatialDimIdx is a pure
+// reduction dimension without sliding-window shifts or window reversal (i.e.,
+// output spatial size numWindows[spatialDimIdx] is 1, padding is 0, window
+// stride is 1, lhs/rhs dilations are 1, and window_reversal is false). When
+// false, sharding this spatial reduction dimension also requires permutation
+// (halo exchange) across shards.
 bool isPureSpatialReductionDim(stablehlo::ConvolutionOp convOp,
                                int64_t spatialDimIdx,
                                ArrayRef<int64_t> numWindows) {
+  ArrayRef<bool> windowReversal =
+      convOp.getWindowReversal().value_or(ArrayRef<bool>());
+  if (!windowReversal.empty() && windowReversal[spatialDimIdx]) {
+    return false;
+  }
   return isWindowPassthroughDim(
       convOp.getPadding(), /*windowDimensions=*/numWindows,
       convOp.getWindowStrides().value_or(ArrayRef<int64_t>()), spatialDimIdx,

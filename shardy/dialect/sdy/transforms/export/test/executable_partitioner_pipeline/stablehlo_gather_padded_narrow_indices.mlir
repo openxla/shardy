@@ -133,6 +133,34 @@ func.func @parallel_gather_while_sharded_i8_202(
   return %w#1 : tensor<4x2xf32>
 }
 
+func.func @sequential_gather_indexed_full_slice(%arg0: tensor<6x4xf32>, %arg1: tensor<2x1xi32>) -> tensor<2x5x4xf32> {
+  %tbl = stablehlo.slice %arg0 [0:5, 0:4] : (tensor<6x4xf32>) -> tensor<5x4xf32>
+  %0 = "stablehlo.gather"(%tbl, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1, 2],
+      start_index_map = [0], index_vector_dim = 1>,
+    slice_sizes = array<i64: 5, 4>
+  } : (tensor<5x4xf32>, tensor<2x1xi32>) -> tensor<2x5x4xf32>
+  return %0 : tensor<2x5x4xf32>
+}
+
+func.func @parallel_gather_indexed_full_slice_sharded_output(
+    %arg0: tensor<6x4xf32> {sdy.sharding = #sdy.sharding<@mesh_6, [{"x"}, {}]>},
+    %arg1: tensor<2x1xi32>)
+    -> (tensor<2x5x4xf32> {sdy.sharding = #sdy.sharding<@mesh_6, [{}, {}, {}]>}) {
+  %tbl = stablehlo.slice %arg0 [0:5, 0:4]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_6, [{"x"}, {}]>]>}
+    : (tensor<6x4xf32>) -> tensor<5x4xf32>
+  %0 = "stablehlo.gather"(%tbl, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1, 2],
+      start_index_map = [0], index_vector_dim = 1>,
+    slice_sizes = array<i64: 5, 4>,
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_6, [{}, {"x"}, {}]>]>
+  } : (tensor<5x4xf32>, tensor<2x1xi32>) -> tensor<2x5x4xf32>
+  return %0 : tensor<2x5x4xf32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -254,5 +282,38 @@ func.func @main() {
   %out4_x2 = stablehlo.concatenate %res4#4, %res4#5, dim = 0 : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<4x2xf32>
   "check.expect_eq"(%out4_x0, %exp4) : (tensor<4x2xf32>, tensor<4x2xf32>) -> ()
   "check.expect_eq"(%out4_x2, %exp4) : (tensor<4x2xf32>, tensor<4x2xf32>) -> ()
+
+  // Case 5: full-slice indexed dimension (size 5 padded to 6 across 6 shards)
+  // sharded on both operand dim 0 and result offset dim 1.
+  %iota6x4 = "stablehlo.iota"() {iota_dimension = 0 : i64} : () -> tensor<6x4xf32>
+  %one6x4 = stablehlo.constant dense<1.0> : tensor<6x4xf32>
+  %tab6x4 = stablehlo.add %iota6x4, %one6x4 : tensor<6x4xf32>
+  %t6_0 = stablehlo.slice %tab6x4 [0:1, 0:4] : (tensor<6x4xf32>) -> tensor<1x4xf32>
+  %t6_1 = stablehlo.slice %tab6x4 [1:2, 0:4] : (tensor<6x4xf32>) -> tensor<1x4xf32>
+  %t6_2 = stablehlo.slice %tab6x4 [2:3, 0:4] : (tensor<6x4xf32>) -> tensor<1x4xf32>
+  %t6_3 = stablehlo.slice %tab6x4 [3:4, 0:4] : (tensor<6x4xf32>) -> tensor<1x4xf32>
+  %t6_4 = stablehlo.slice %tab6x4 [4:5, 0:4] : (tensor<6x4xf32>) -> tensor<1x4xf32>
+  %t6_5 = stablehlo.slice %tab6x4 [5:6, 0:4] : (tensor<6x4xf32>) -> tensor<1x4xf32>
+  %idx5 = stablehlo.constant dense<[[0], [2]]> : tensor<2x1xi32>
+  %exp5 = func.call @sequential_gather_indexed_full_slice(%tab6x4, %idx5)
+    : (tensor<6x4xf32>, tensor<2x1xi32>) -> tensor<2x5x4xf32>
+  %res5:6 = "interpreter.run_parallel"(
+      %t6_0, %idx5, %t6_1, %idx5, %t6_2, %idx5,
+      %t6_3, %idx5, %t6_4, %idx5, %t6_5, %idx5) {
+    programs = [[
+      @parallel_gather_indexed_full_slice_sharded_output,
+      @parallel_gather_indexed_full_slice_sharded_output,
+      @parallel_gather_indexed_full_slice_sharded_output,
+      @parallel_gather_indexed_full_slice_sharded_output,
+      @parallel_gather_indexed_full_slice_sharded_output,
+      @parallel_gather_indexed_full_slice_sharded_output
+    ]]
+  } : (tensor<1x4xf32>, tensor<2x1xi32>, tensor<1x4xf32>, tensor<2x1xi32>,
+       tensor<1x4xf32>, tensor<2x1xi32>, tensor<1x4xf32>, tensor<2x1xi32>,
+       tensor<1x4xf32>, tensor<2x1xi32>, tensor<1x4xf32>, tensor<2x1xi32>)
+      -> (tensor<2x5x4xf32>, tensor<2x5x4xf32>, tensor<2x5x4xf32>,
+          tensor<2x5x4xf32>, tensor<2x5x4xf32>, tensor<2x5x4xf32>)
+  "check.expect_eq"(%res5#0, %exp5) : (tensor<2x5x4xf32>, tensor<2x5x4xf32>) -> ()
+  "check.expect_eq"(%res5#5, %exp5) : (tensor<2x5x4xf32>, tensor<2x5x4xf32>) -> ()
   return
 }

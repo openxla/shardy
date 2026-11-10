@@ -455,3 +455,28 @@ func.func @gather_unreduced(
   return %0 : tensor<2x10xf32>
 }
 
+// CHECK-LABEL: func @gather_narrow_i8_indices_promoted_to_i32
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<100xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<2x1xi8>) -> tensor<2x1xi32> {
+func.func @gather_narrow_i8_indices_promoted_to_i32(
+  %arg0: tensor<200xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>},
+  %arg1: tensor<2x1xi8>) -> tensor<2x1xi32> {
+  // CHECK-NEXT: %[[IDX_I32:.*]] = stablehlo.convert %[[ARG1]] : (tensor<2x1xi8>) -> tensor<2x1xi32>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<2x1xi32>
+  // CHECK-NEXT: %[[C199:.*]] = stablehlo.constant dense<199> : tensor<2x1xi32>
+  // CHECK-NEXT: %[[CLAMP:.*]] = stablehlo.clamp %[[C0]], %[[IDX_I32]], %[[C199]] : tensor<2x1xi32>
+  // CHECK: %[[SUB:.*]] = stablehlo.subtract %[[CLAMP]], %{{.*}} : tensor<2x1xi32>
+  // CHECK: "stablehlo.gather"(%[[ARG0]], %[[SUB]])
+  %0 = "stablehlo.gather"(%arg0, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [],
+      start_index_map = [0],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}], unreduced={"x"}>]>
+  } : (tensor<200xi32>, tensor<2x1xi8>) -> tensor<2x1xi32>
+  %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<2x1xi32>
+  return %1 : tensor<2x1xi32>
+}
+

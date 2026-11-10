@@ -239,6 +239,31 @@ func.func @conv_pure_reduction_1x1_unpadded_unchanged(
   return %1 : tensor<1x1x8x4xf32>
 }
 
+// CHECK-LABEL: func @conv_spatial_reduction_window_reversal_replicated
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8x8x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}, {}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x1x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}, {}, {}]>})
+func.func @conv_spatial_reduction_window_reversal_replicated(
+  %arg0: tensor<1x8x8x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}, {}, {}]>},
+  %arg1: tensor<8x1x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}, {}, {}]>})
+    -> (tensor<1x1x8x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}, {}]>}) {
+  // CHECK-NEXT: %[[LHS_REPL:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}, {}, {}]> : tensor<1x8x8x2xf32>
+  // CHECK-NEXT: %[[RHS_REPL:.*]] = sdy.reshard %[[ARG1]] <@mesh, [{}, {}, {}, {}]> : tensor<8x1x2x4xf32>
+  // CHECK-NEXT: %[[CONV:.*]] = stablehlo.convolution(%[[LHS_REPL]], %[[RHS_REPL]])
+  // CHECK-SAME:   {batch_group_count = 1 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}, {}, {}]>]>}
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK-NEXT: return %[[CONV]] : tensor<1x1x8x4xf32>
+  %0 = stablehlo.convolution(%arg0, %arg1)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {stride = [1, 1], pad = [[0, 0], [0, 0]], reverse = [1, 0]}
+    {
+      feature_group_count = 1 : i64,
+      batch_group_count = 1 : i64,
+      sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{}, {}, {}, {}], unreduced={"a"}>]>
+    } : (tensor<1x8x8x2xf32>, tensor<8x1x2x4xf32>) -> tensor<1x1x8x4xf32>
+  %1 = sdy.all_reduce {"a"} %0 out_sharding=<@mesh, [{}, {}, {}, {}]> : tensor<1x1x8x4xf32>
+  return %1 : tensor<1x1x8x4xf32>
+}
+
 // CHECK-LABEL: func @conv_dual_semantics_with_partitioned_output_spatial_dim
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<1x8x8x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"a"}, {"b"}, {}]>},
 // CHECK-SAME:  %[[ARG1:.*]]: tensor<8x3x2x4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}, {}, {}]>})
