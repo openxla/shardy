@@ -841,6 +841,9 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
   };
 
   Value head = permutePiece(input, hops);
+  if (fraction == 0) {
+    return head;
+  }
   Value tail = permutePiece(input, hops + 1);
 
   int64_t headSliceSize = shardSize - fraction;

@@ -240,12 +240,7 @@ func.func @reverse_3_indivisible_with_padding_equal_shard_size(
   // HALO-NEXT:   %[[CONCAT2:.*]] = stablehlo.concatenate %[[S2_0]], %[[S2_1]], dim = 1
   // HALO-NEXT:   %[[RECV3_0:.*]] = "stablehlo.collective_permute"(%[[CONCAT2]])
   // HALO-SAME{LITERAL}:   source_target_pairs = dense<[[0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [8, 9], [9, 10], [10, 11], [12, 13], [13, 14], [14, 15]]>
-  // HALO-NEXT:   %[[RECV3_1:.*]] = "stablehlo.collective_permute"(%[[CONCAT2]])
-  // HALO-SAME{LITERAL}:   source_target_pairs = dense<[[0, 2], [1, 3], [4, 6], [5, 7], [8, 10], [9, 11], [12, 14], [13, 15]]>
-  // HALO-NEXT:   %[[S3_0:.*]] = stablehlo.slice %[[RECV3_1]] [0:2, 0:3, 2:2]
-  // HALO-NEXT:   %[[S3_1:.*]] = stablehlo.slice %[[RECV3_0]] [0:2, 0:3, 0:2]
-  // HALO-NEXT:   %[[CONCAT3:.*]] = stablehlo.concatenate %[[S3_0]], %[[S3_1]], dim = 2
-  // HALO-NEXT:   sdy.return %[[CONCAT3]] : tensor<2x3x2xi32>
+  // HALO-NEXT:   sdy.return %[[RECV3_0]] : tensor<2x3x2xi32>
   // HALO:      } : (tensor<4x6x8xi32>) -> tensor<4x6x8xi32>
 
   // HALO: %[[HALO_REV:.*]] = stablehlo.reverse %[[HALO_SHIFTED]], dims = [0, 1, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc_reversed_0, [{"b"}, {"a"}, {"c"}]>]>} : tensor<4x6x8xi32>

@@ -47,6 +47,27 @@ func.func @sequential_reverse_irrelevant_dim_indivisible(%arg0: tensor<4x6x8xi32
   return %1 : tensor<4x5x7xi32>
 }
 
+func.func @parallel_reverse_padding_equal_shard_size(
+  %arg0: tensor<4x6x8xi32> {sdy.sharding = #sdy.sharding<@mesh_abc, [{"b"}, {"a"}, {"c"}]>})
+  -> tensor<3x5x6xi32> {
+  %0 = stablehlo.slice %arg0 [0:3, 0:5, 0:6]
+    {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_abc, [{"b"}, {"a"}, {"c"}]>]>}
+    : (tensor<4x6x8xi32>) -> tensor<3x5x6xi32>
+  %1 = stablehlo.reverse %0, dims = [0, 1, 2]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_abc, [{"b"}, {"a"}, {"c"}]>]>}
+    : tensor<3x5x6xi32>
+  %2 = sdy.reshard %1 <@mesh_abc, [{}, {}, {}]> : tensor<3x5x6xi32>
+  return %2 : tensor<3x5x6xi32>
+}
+
+func.func @sequential_reverse_padding_equal_shard_size(%arg0: tensor<4x6x8xi32>) -> tensor<3x5x6xi32> {
+  %0 = stablehlo.slice %arg0 [0:3, 0:5, 0:6]
+    : (tensor<4x6x8xi32>) -> tensor<3x5x6xi32>
+  %1 = stablehlo.reverse %0, dims = [0, 1, 2]
+    : tensor<3x5x6xi32>
+  return %1 : tensor<3x5x6xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -116,6 +137,28 @@ func.func @main() {
        tensor<4x5x7xi32>, tensor<4x5x7xi32>, tensor<4x5x7xi32>, tensor<4x5x7xi32>,
        tensor<4x5x7xi32>, tensor<4x5x7xi32>, tensor<4x5x7xi32>, tensor<4x5x7xi32>)
   check.expect_eq %seq_irrelevant, %pars_irrelevant#0 : tensor<4x5x7xi32>
+
+  %seq_full_shard = func.call @sequential_reverse_padding_equal_shard_size(%input) : (tensor<4x6x8xi32>) -> tensor<3x5x6xi32>
+  %pars_full_shard:16 = "interpreter.run_parallel"(%s0, %s1, %s2, %s3, %s4, %s5, %s6, %s7, %s8, %s9, %sa, %sb, %sc, %sd, %se, %sf) {
+    programs = [[
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size,
+      @parallel_reverse_padding_equal_shard_size, @parallel_reverse_padding_equal_shard_size
+    ]]
+  } : (tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>,
+       tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>,
+       tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>,
+       tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>, tensor<2x3x2xi32>) ->
+      (tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>,
+       tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>,
+       tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>,
+       tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>, tensor<3x5x6xi32>)
+  check.expect_eq %seq_full_shard, %pars_full_shard#0 : tensor<3x5x6xi32>
 
   return
 }
