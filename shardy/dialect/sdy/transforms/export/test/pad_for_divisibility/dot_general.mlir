@@ -128,3 +128,26 @@ func.func @padded_contracting_dims_reuse_with_all_gather(%arg0: tensor<4x7xf32>,
   return %4 : tensor<4x5xf32>
 }
 
+// CHECK-LABEL: func @padded_dot_contracting_dims_not_reuse
+func.func @padded_dot_contracting_dims_not_reuse(%arg0: tensor<4x7xf32>, %arg1: tensor<7x5xf32>) -> tensor<4x5xf32> {
+  // CHECK: %[[LHS_ABS:.*]] = stablehlo.abs
+  // CHECK: %[[RHS_ABS:.*]] = stablehlo.abs
+  // Enforce zero-padding on LHS contracting dim (dim 1) and RHS contracting dim (dim 0).
+  // CHECK: %[[LHS_IOTA:.*]] = stablehlo.iota{{.*}}dim = 1
+  // CHECK: %[[LHS_SELECT:.*]] = stablehlo.select {{.*}}, %[[LHS_ABS]], {{.*}}
+  // CHECK: %[[RHS_IOTA:.*]] = stablehlo.iota{{.*}}dim = 0
+  // CHECK: %[[RHS_SELECT:.*]] = stablehlo.select {{.*}}, %[[RHS_ABS]], {{.*}}
+  // CHECK-NOT: stablehlo.iota {{.*}} dim = 1
+  // CHECK: %[[DOT:.*]] = stablehlo.dot %[[LHS_SELECT]], %[[RHS_SELECT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}]>]>} : (tensor<4x8xf32>, tensor<8x8xf32>) -> tensor<4x8xf32>
+  // CHECK: %[[TRIM:.*]] = stablehlo.slice %[[DOT]] [0:4, 0:5]
+  // CHECK: return %[[TRIM]]
+  %0 = sdy.all_slice [{}, {"y"}] %arg0 out_sharding=<@mesh_4_2, [{}, {"y"}]> : tensor<4x7xf32>
+  %1 = stablehlo.abs %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"y"}]>]>} : tensor<4x7xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %arg1 out_sharding=<@mesh_4_2, [{"y"}, {"x"}]> : tensor<7x5xf32>
+  %3 = stablehlo.abs %2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"y"}, {"x"}]>]>} : tensor<7x5xf32>
+  %4 = stablehlo.dot %1, %3 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}]>]>} : (tensor<4x7xf32>, tensor<7x5xf32>) -> tensor<4x5xf32>
+  %5 = stablehlo.slice %4 [0:4, 0:5] : (tensor<4x5xf32>) -> tensor<4x5xf32>
+  return %5 : tensor<4x5xf32>
+}
+
+

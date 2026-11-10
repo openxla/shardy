@@ -229,10 +229,10 @@ class PaddedTypeConverter : public TypeConverter {
 bool hasCustomPadHandling(Operation* op) {
   return isa<sdy::ConstantOp, stablehlo::ConstantOp, stablehlo::SliceOp,
              stablehlo::DynamicSliceOp, stablehlo::DynamicUpdateSliceOp,
-             stablehlo::DotGeneralOp, stablehlo::PadOp, stablehlo::ScatterOp,
-             stablehlo::ConvolutionOp, stablehlo::ReshapeOp,
-             stablehlo::GatherOp, stablehlo::ReduceOp, PartitioningOpInterface>(
-      op);
+             stablehlo::DotOp, stablehlo::DotGeneralOp, stablehlo::PadOp,
+             stablehlo::ScatterOp, stablehlo::ConvolutionOp,
+             stablehlo::ReshapeOp, stablehlo::GatherOp, stablehlo::ReduceOp,
+             PartitioningOpInterface>(op);
 }
 
 class PaddingCache {
@@ -1090,37 +1090,43 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
   PaddingCache& cache;
 };
 
-class StablehloDotGeneralOpPattern
-    : public OpConversionPattern<stablehlo::DotGeneralOp> {
+template <typename OpTy>
+class StablehloDotOpPattern : public OpConversionPattern<OpTy> {
  public:
-  StablehloDotGeneralOpPattern(TypeConverter& converter, MLIRContext* ctx,
-                               PaddingCache& cache)
-      : OpConversionPattern(converter, ctx), cache(cache) {}
+  StablehloDotOpPattern(TypeConverter& converter, MLIRContext* ctx,
+                        PaddingCache& cache)
+      : OpConversionPattern<OpTy>(converter, ctx), cache(cache) {}
 
   LogicalResult matchAndRewrite(
-      stablehlo::DotGeneralOp op, OpAdaptor adaptor,
+      OpTy op, typename OpTy::Adaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
+    static_assert(std::is_same_v<OpTy, stablehlo::DotOp> ||
+                  std::is_same_v<OpTy, stablehlo::DotGeneralOp>);
     auto* converter =
-        static_cast<const PaddedTypeConverter*>(getTypeConverter());
+        static_cast<const PaddedTypeConverter*>(this->getTypeConverter());
+
+    RankedTensorType lhsOrigType = op.getLhs().getType();
+    RankedTensorType rhsOrigType = op.getRhs().getType();
+    ArrayRef<int64_t> lhsContractingDims;
+    ArrayRef<int64_t> rhsContractingDims;
+    int64_t lhsLastDim = lhsOrigType.getRank() - 1;
+    int64_t rhsFirstDim = 0;
+    if constexpr (std::is_same_v<OpTy, stablehlo::DotGeneralOp>) {
+      stablehlo::DotDimensionNumbersAttr dimNums = op.getDotDimensionNumbers();
+      lhsContractingDims = dimNums.getLhsContractingDimensions();
+      rhsContractingDims = dimNums.getRhsContractingDimensions();
+    } else {
+      lhsContractingDims = lhsLastDim;
+      rhsContractingDims = rhsFirstDim;
+    }
 
     Location loc = op.getLoc();
-    stablehlo::DotDimensionNumbersAttr dimNums = op.getDotDimensionNumbers();
-
-    Value lhs = adaptor.getOperands()[0];
-    Value rhs = adaptor.getOperands()[1];
-    Value lhsOrig = op->getOperand(0);
-    Value rhsOrig = op->getOperand(1);
-    auto lhsOrigType = dyn_cast<RankedTensorType>(lhsOrig.getType());
-    auto rhsOrigType = dyn_cast<RankedTensorType>(rhsOrig.getType());
-    if (!lhsOrigType || !rhsOrigType) {
-      return failure();
-    }
     Value paddedLhs = ensurePaddingWithKind(
-        loc, lhs, lhsOrigType, PaddingValueKind::kZero, cache, rewriter,
-        dimNums.getLhsContractingDimensions());
+        loc, adaptor.getLhs(), lhsOrigType, PaddingValueKind::kZero, cache,
+        rewriter, lhsContractingDims);
     Value paddedRhs = ensurePaddingWithKind(
-        loc, rhs, rhsOrigType, PaddingValueKind::kZero, cache, rewriter,
-        dimNums.getRhsContractingDimensions());
+        loc, adaptor.getRhs(), rhsOrigType, PaddingValueKind::kZero, cache,
+        rewriter, rhsContractingDims);
 
     return padGenericOp(op, {paddedLhs, paddedRhs}, converter, rewriter);
   }
@@ -1721,7 +1727,8 @@ struct PadForDivisibilityPass
     // Sharing the padding cache reference across pattern instances is safe from
     // data races because pattern application within a function is sequential.
     // TODO(b/553579414): remove the pattern for stablehlo.ConstantOp.
-    patterns.add<AllSliceOpPattern, StablehloDotGeneralOpPattern,
+    patterns.add<AllSliceOpPattern, StablehloDotOpPattern<stablehlo::DotOp>,
+                 StablehloDotOpPattern<stablehlo::DotGeneralOp>,
                  StablehloConvolutionOpPattern, StablehloReduceOpPattern,
                  AllToAllOpPattern, AllGatherOpPattern, ReduceScatterOpPattern,
                  ConstantOpPattern<sdy::ConstantOp>,
