@@ -180,7 +180,25 @@ class PaddedTypeConverter : public TypeConverter {
       }
       return nullptr;
     }
-    return mlir::sdy::getSharding(value);
+    if (TensorShardingAttr sharding = mlir::sdy::getSharding(value)) {
+      return sharding;
+    }
+    for (OpOperand& use : value.getUses()) {
+      if (isa<ReturnOp>(use.getOwner())) {
+        if (auto dataFlowOp =
+                use.getOwner()
+                    ->getParentOfType<ShardableDataFlowOpInterface>()) {
+          Value result = dataFlowOp->getResult(use.getOperandNumber());
+          if (TensorShardingAttr sharding =
+                  dataFlowOp.getEdgeOwnerSharding(result)) {
+            return dataFlowOp.transformTargetSharding(
+                result, sharding,
+                DataFlowShardingTransformType::kBeforeEdgePropagation);
+          }
+        }
+      }
+    }
+    return nullptr;
   }
 
   Type convertArgType(BlockArgument arg) const {
@@ -545,9 +563,9 @@ class GenericOpPattern : public ConversionPattern {
       ConversionPatternRewriter& rewriter) const override {
     Dialect* dialect = op->getDialect();
     if ((dialect && dialect->getNamespace() != "stablehlo" &&
-         !isa<func::CallOp, func::ReturnOp, sdy::ReturnOp, sdy::AllReduceOp,
-              sdy::CollectivePermuteOp, sdy::ShardedToUnreducedOp,
-              sdy::ReplicatedToUnreducedOp>(op)) ||
+         !isa<func::CallOp, func::ReturnOp, ShardableDataFlowOpInterface,
+              sdy::ReturnOp, sdy::AllReduceOp, sdy::CollectivePermuteOp,
+              sdy::ShardedToUnreducedOp, sdy::ReplicatedToUnreducedOp>(op)) ||
         hasCustomPadHandling(op)) {
       return failure();
     }
@@ -729,7 +747,7 @@ class ConstantOpPattern : public OpConversionPattern<OpTy> {
         static_cast<const PaddedTypeConverter*>(this->getTypeConverter());
     Value result = op.getResult();
     auto origRanked = cast<RankedTensorType>(result.getType());
-    TensorShardingAttr outSharding = getSharding(result);
+    TensorShardingAttr outSharding = converter->getSharding(result);
     auto paddedRanked = cast<RankedTensorType>(getDivisiblePaddedType(
         origRanked, outSharding, converter->getSymbolTable()));
     SDY_CHECK(origRanked != paddedRanked);
@@ -1793,6 +1811,31 @@ struct PadForDivisibilityPass
       if (auto allToAllOp = dyn_cast<AllToAllOp>(op)) {
         return llvm::all_of(op->getOperands(), isLegalValue) &&
                llvm::all_of(op->getResults(), isLegalValue);
+      }
+      if (auto dataFlowOp = dyn_cast<ShardableDataFlowOpInterface>(op)) {
+        return llvm::all_of(op->getOperands(), isLegalValue) &&
+               llvm::all_of(op->getResults(), isLegalValue) &&
+               llvm::all_of(dataFlowOp.getBlockArgumentEdgeOwners(),
+                            isLegalValue);
+      }
+      if (auto returnOp = dyn_cast<ReturnOp>(op)) {
+        if (auto dataFlowOp =
+                returnOp->getParentOfType<ShardableDataFlowOpInterface>()) {
+          for (auto [operand, result, sharding] :
+               llvm::zip_equal(returnOp.getOperands(), dataFlowOp->getResults(),
+                               dataFlowOp.getOpResultEdgeOwnerShardings())) {
+            TensorShardingAttr returnSharding =
+                sharding ? dataFlowOp.transformTargetSharding(
+                               result, sharding,
+                               DataFlowShardingTransformType::
+                                   kBeforeEdgePropagation)
+                         : nullptr;
+            if (!isLegalType(operand.getType(), returnSharding)) {
+              return false;
+            }
+          }
+        }
+        return llvm::all_of(returnOp.getOperands(), isLegalValue);
       }
       if (isa<AllReduceOp, CollectivePermuteOp, ConstantOp,
               ShardedToUnreducedOp, ReplicatedToUnreducedOp>(op)) {
