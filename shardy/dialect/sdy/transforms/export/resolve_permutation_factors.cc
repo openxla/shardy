@@ -2195,7 +2195,7 @@ DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
                                         TensorShardingAttr sharding,
                                         MeshAttr mesh,
                                         RankedTensorType inputType) {
-  return buildDataExchangeInfo(
+  DataExchangeInfo info = buildDataExchangeInfo(
       sharding, mesh, inputType,
       [&](int64_t dim, int64_t sIn, int64_t shardCount) {
         int64_t sOut =
@@ -2206,13 +2206,28 @@ DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
                                                      /*sFootprint=*/sOut, pLow,
                                                      /*stride=*/1, baseDilation,
                                                      inputType.getDimSize(dim));
-        if (!isCommunicationFreePadDim(dim, padOp, sharding, mesh)) {
-          // This is a zero-hop-non-communication-free case, which doesn't
-          // require collective-permute but dynamic-slice.
-          dimInfo.needsComm = true;
-        }
+        dimInfo.needsComm =
+            !isCommunicationFreePadDim(dim, padOp, sharding, mesh);
         return dimInfo;
       });
+  if (info.needsComm()) {
+    int64_t dimExchangeIdx = 0;
+    for (auto [dim, dimSharding] :
+         llvm::enumerate(sharding.getDimShardings())) {
+      int64_t shardCount = dimSharding.getShardedSize(mesh);
+      if (shardCount <= 1) {
+        continue;
+      }
+      DimExchangeInfo& dimInfo = info.dimExchanges[dimExchangeIdx++];
+      int64_t sIn = info.divisibleInputShape[dim] / shardCount;
+      int64_t pLow = padOp.getEdgePaddingLow()[dim];
+      int64_t interior = padOp.getInteriorPadding()[dim];
+      if (sIn != dimInfo.sOut || pLow != 0 || interior != 0) {
+        dimInfo.needsComm = true;
+      }
+    }
+  }
+  return info;
 }
 
 // Implements the non-trivial padding operation on replicated dimensions.
