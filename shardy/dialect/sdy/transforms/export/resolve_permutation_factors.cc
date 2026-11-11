@@ -2999,14 +2999,18 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
                                           TensorShardingAttr sharding,
                                           MeshAttr mesh,
                                           RankedTensorType inputType) {
-  return buildDataExchangeInfo(
+  DataExchangeInfo info = buildDataExchangeInfo(
       sharding, mesh, inputType,
       [&](int64_t dim, int64_t sIn, int64_t shardCount) {
-        if (isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh)) {
-          return DimExchangeInfo{};
-        }
         int64_t sliceSize = sliceOp.getType().getDimSize(dim);
         int64_t sOut = llvm::divideCeil(sliceSize, shardCount);
+        if (isCommunicationFreeSliceDim(dim, sliceOp, sharding, mesh)) {
+          DimExchangeInfo dimInfo;
+          dimInfo.sOut = sOut;
+          dimInfo.sFootprint = sOut;
+          dimInfo.useSlicedHalo = true;
+          return dimInfo;
+        }
         int64_t start = sliceOp.getStartIndices()[dim];
         DimExchangeInfo dimInfo = getDimExchangeInfo(
             shardCount, sIn, sOut,
@@ -3017,6 +3021,22 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
         dimInfo.needsComm = true;
         return dimInfo;
       });
+  if (info.needsComm()) {
+    int64_t dimExchangeIdx = 0;
+    for (auto [dim, dimSharding] :
+         llvm::enumerate(sharding.getDimShardings())) {
+      int64_t shardCount = dimSharding.getShardedSize(mesh);
+      if (shardCount <= 1) {
+        continue;
+      }
+      DimExchangeInfo& dimInfo = info.dimExchanges[dimExchangeIdx++];
+      int64_t sIn = info.divisibleInputShape[dim] / shardCount;
+      if (sIn != dimInfo.sOut) {
+        dimInfo.needsComm = true;
+      }
+    }
+  }
+  return info;
 }
 
 // Implements the slicing operation on replicated dimensions.
