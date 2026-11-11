@@ -65,27 +65,6 @@ MATCHER_P4(FactorShardingIs, index, isClosed, isMinorMost, axisRefsMatcher,
       arg, result_listener);
 }
 
-MATCHER_P2(FactorShardingIsClosedIs, index, isClosed,
-           "factor " + PrintToString(index) + " sharding that is " +
-               (isClosed || negation ? "closed" : "open")) {
-  *result_listener << "where factor " << arg.first << " sharding is "
-                   << (arg.second.isClosed ? "closed" : "open");
-  if (arg.first != index || arg.second.isClosed != isClosed) {
-    return false;
-  }
-  return true;
-}
-
-MATCHER_P2(FactorShardingIsMinorMostIs, index, isMinorMost,
-           "factor " + PrintToString(index) + " sharding that is " +
-               (isMinorMost || negation ? "closed" : "open")) {
-  *result_listener << "where factor " << arg.first << " sharding is "
-                   << (arg.second.isMinorMost ? "closed" : "open");
-  if (arg.first != index || arg.second.isMinorMost != isMinorMost) {
-    return false;
-  }
-  return true;
-}
 
 MATCHER_P3(TensorFactorShardingsIs, factorIndexToShardingMatcher,
            replicatedAxesMatcher, unreducedAxesMatcher,
