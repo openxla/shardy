@@ -38,6 +38,24 @@ func.func @parallel_reduce_window_add(
   return %0 : tensor<4x3xf32>
 }
 
+func.func @parallel_reduce_window_base_dilation(
+    %arg0: tensor<2x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>})
+    -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>}) {
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %0 = "stablehlo.reduce_window"(%arg0, %cst) <{
+    base_dilations = array<i64: 3, 1>,
+    padding = dense<[[0, 0], [0, 0]]> : tensor<2x2xi64>,
+    window_dimensions = array<i64: 1, 1>,
+    window_strides = array<i64: 1, 1>
+  }> ({
+  ^bb0(%arg1: tensor<f32>, %arg2: tensor<f32>):
+    %1 = stablehlo.add %arg1, %arg2 : tensor<f32>
+    stablehlo.return %1 : tensor<f32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>}
+  : (tensor<2x4xf32>, tensor<f32>) -> tensor<4x4xf32>
+  return %0 : tensor<4x4xf32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -95,6 +113,18 @@ func.func @main() {
   } : (tensor<2x3xf32>, tensor<2x3xf32>) -> tensor<4x3xf32>
 
   check.expect_eq %seq_add, %par_add : tensor<4x3xf32>
+
+  %seq_base_dil = func.call @sequential_reduce_window_base_dilation(%input_max) : (tensor<2x4xf32>) -> tensor<4x4xf32>
+
+  %pars_base_dil:2 = "interpreter.run_parallel"(%shard0_max, %shard1_max) {
+    programs = [[@parallel_reduce_window_base_dilation, @parallel_reduce_window_base_dilation]]
+  } : (tensor<1x4xf32>, tensor<1x4xf32>) -> (tensor<2x4xf32>, tensor<2x4xf32>)
+
+  %par_base_dil = "stablehlo.concatenate"(%pars_base_dil#0, %pars_base_dil#1) {
+    dimension = 0 : i64
+  } : (tensor<2x4xf32>, tensor<2x4xf32>) -> tensor<4x4xf32>
+
+  check.expect_eq %seq_base_dil, %par_base_dil : tensor<4x4xf32>
 
   return
 }

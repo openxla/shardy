@@ -3772,6 +3772,12 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
 
       ArrayRef<int64_t> windowStrides =
           op.getWindowStrides().value_or(ArrayRef<int64_t>());
+      ArrayRef<int64_t> baseDilations;
+      ArrayRef<int64_t> windowDilations;
+      if constexpr (std::is_same_v<OpTy, stablehlo::ReduceWindowOp>) {
+        baseDilations = op.getBaseDilations().value_or(ArrayRef<int64_t>());
+        windowDilations = op.getWindowDilations().value_or(ArrayRef<int64_t>());
+      }
 
       for (int64_t dim = 0; dim < operandType.getRank(); ++dim) {
         ArrayRef<AxisRefAttr> axes =
@@ -3796,6 +3802,8 @@ class StablehloWindowedOpPattern : public OpConversionPattern<OpTy> {
 
           if (isPassthrough) {
             isPassthrough =
+                (baseDilations.empty() || baseDilations[dim] == 1) &&
+                (windowDilations.empty() || windowDilations[dim] == 1) &&
                 (windowStrides.empty() || windowStrides[dim] == 1 ||
                  (!windowDimensions.empty() &&
                   windowStrides[dim] >= windowDimensions[dim])) &&
