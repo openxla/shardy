@@ -711,6 +711,16 @@ func.func @gather_index_vector_dim_before_batching_dim(%arg0: tensor<5x3x7x4xf32
   return %0 : tensor<7x5x3x2xf32>
 }
 
+// CHECK-LABEL: func @map
+func.func @map(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xi32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j])->([i, j]) {i=4, j=8}>
+  %0 = "stablehlo.map"(%arg0, %arg1) ({
+    ^bb0(%arg2: tensor<f32>, %arg3: tensor<i32>):
+      "stablehlo.return"(%arg2) : (tensor<f32>) -> ()
+  }) {dimensions = array<i64: 0, 1>} : (tensor<4x8xf32>, tensor<4x8xi32>) -> tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
 // CHECK-LABEL: func @pad
 func.func @pad(%arg0: tensor<28x28x16xf32>, %arg1: tensor<f32>) -> tensor<30x26x16xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k], [])->([i, j, k]) {i=28, j=28, k=16} permutation={i, j}>
