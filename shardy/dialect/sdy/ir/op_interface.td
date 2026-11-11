@@ -274,14 +274,17 @@ def Sdy_PartitioningOpInterface : OpInterface<"PartitioningOpInterface"> {
   let methods = [
     InterfaceMethod<
       /*desc=*/[{
-        Resolves ops with permutation factors. Returning `std::nullopt` falls
-        back to generic op handling.
+        Resolves ops with permutation factors or custom partitioning
+        (`shardingRule` may be null or custom), updating `nextChannelId` and
+        `symbolTable` if needed. Returning `std::nullopt` falls back to generic
+        op handling.
       }],
       /*retType=*/"std::optional<mlir::LogicalResult>",
       /*methodName=*/"resolvePermutationFactors",
       /*args=*/(ins "mlir::sdy::OpShardingRuleAttr":$shardingRule,
                     "mlir::IRRewriter&":$rewriter,
-                    "const mlir::SymbolTable&":$symbolTable),
+                    "mlir::SymbolTable&":$symbolTable,
+                    "int64_t&":$nextChannelId),
       /*methodBody=*/"",
       /*defaultImplementation=*/[{
         return std::nullopt;

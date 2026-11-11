@@ -3642,6 +3642,17 @@ struct ShardyResolvePermutationFactorsPass
       OpShardingRuleAttr rule = getOrCreateShardingRule(
           op, /*conservativePropagation=*/false,
           /*setShardingRuleOnOp=*/false, shardyGeneratesDeviceCode);
+      if (externalOp) {
+        rewriter.setInsertionPoint(op);
+        if (std::optional<LogicalResult> res =
+                externalOp.resolvePermutationFactors(
+                    rule, rewriter, state.symbolTable, state.nextChannelId)) {
+          if (failed(*res)) {
+            signalPassFailure();
+          }
+          return;
+        }
+      }
       if (!rule || rule.isCustom()) {
         return;
       }
@@ -3668,18 +3679,6 @@ struct ShardyResolvePermutationFactorsPass
       if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
                         shouldResolveFactor)) {
         return;
-      }
-
-      if (externalOp) {
-        rewriter.setInsertionPoint(op);
-        if (std::optional<LogicalResult> res =
-                externalOp.resolvePermutationFactors(rule, rewriter,
-                                                     state.symbolTable)) {
-          if (failed(*res)) {
-            signalPassFailure();
-          }
-          return;
-        }
       }
 
       // Dispatch to HALO exchange if enabled and implemented for the op.
