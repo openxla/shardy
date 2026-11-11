@@ -123,6 +123,10 @@ bool usePartitionId(int64_t replicaCount, int64_t partitionCount);
 Value getDeviceId(Location loc, int64_t replicaCount, int64_t partitionCount,
                   OpBuilder& rewriter);
 
+// Returns the channel ID after the maximum channel ID in `moduleOp` (1 if no
+// positive channel handle exists).
+int64_t getNextChannelId(ModuleOp moduleOp);
+
 // Returns a channel handle with handle = nextChannelId++ and type = 1
 // (CROSS_PARTITION) if usePartitionId is true. Otherwise returns nullptr (to
 // perform cross-replica communication without channel handle).

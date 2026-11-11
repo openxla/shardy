@@ -297,6 +297,18 @@ Value getDeviceId(Location loc, int64_t replicaCount, int64_t partitionCount,
   return stablehlo::ReplicaIdOp::create(rewriter, loc);
 }
 
+// TODO(b/419222666): remove dependency on channel_handle attribute name.
+int64_t getNextChannelId(ModuleOp moduleOp) {
+  int64_t maxChannelId = 0;
+  moduleOp->walk([&](Operation* op) {
+    if (auto channelHandle =
+            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
+      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
+    }
+  });
+  return maxChannelId + 1;
+}
+
 stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
                                               int64_t replicaCount,
                                               int64_t partitionCount,

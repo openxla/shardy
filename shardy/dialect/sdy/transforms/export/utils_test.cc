@@ -893,6 +893,26 @@ TEST_F(ExportUtilsTest, Requires64BitOffsetAndIndex) {
   EXPECT_EQ(largeConstOp.getType(),
             RankedTensorType::get({3}, builder.getI64Type()));
 }
+
+TEST_F(ExportUtilsTest, GetNextChannelId) {
+  EXPECT_EQ(getNextChannelId(moduleOp.get()), 1);
+
+  OwningOpRef<ModuleOp> moduleWithChannels =
+      parseSourceString<ModuleOp>(R"mlir(
+    module {
+      func.func @main(%arg0: tensor<4xf32>) -> tensor<4xf32> {
+        %0 = "stablehlo.collective_permute"(%arg0) {
+          channel_handle = #stablehlo.channel_handle<handle = 5, type = 1>,
+          source_target_pairs = dense<[[0, 1]]> : tensor<1x2xi64>
+        } : (tensor<4xf32>) -> tensor<4xf32>
+        return %0 : tensor<4xf32>
+      }
+    }
+  )mlir",
+                                  &context);
+  ASSERT_TRUE(moduleWithChannels);
+  EXPECT_EQ(getNextChannelId(moduleWithChannels.get()), 6);
+}
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir
