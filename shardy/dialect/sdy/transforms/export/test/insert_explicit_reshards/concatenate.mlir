@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true' | FileCheck %s
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
+sdy.mesh @mesh_xyz = <["x"=3, "y"=4, "z"=2]>
 
 // CHECK-LABEL: func @concatenate_single_input
 func.func @concatenate_single_input(%arg0: tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}]>}) -> (tensor<4x32x256xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>}) {
@@ -106,4 +107,15 @@ func.func @concatenate_with_operands_replicated(%arg0: tensor<4x64xbf16>) -> (te
   // CHECK-NEXT: return %[[RESHARD3]]
   %0 = stablehlo.concatenate %arg0, %arg0, %arg0, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x64xbf16>, tensor<4x64xbf16>, tensor<4x64xbf16>) -> tensor<12x64xbf16>
   return %0 : tensor<12x64xbf16>
+}
+
+// CHECK-LABEL: func @concatenate_prefers_whole_trailing_axis_over_saturating_split
+func.func @concatenate_prefers_whole_trailing_axis_over_saturating_split(%arg0: tensor<6x16xi1> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x"}, {"y", "z"}]>}, %arg1: tensor<6x32xi1> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x"}, {"y", "z"}]>}) -> (tensor<6x48xi1> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{"x"}, {"y", "z"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyz, [{"x", "z"}, {}]> : tensor<6x16xi1>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %arg1 <@mesh_xyz, [{"x", "z"}, {}]> : tensor<6x32xi1>
+  // CHECK-NEXT: %[[CONCATENATE:.*]] = stablehlo.concatenate %[[RESHARD0]], %[[RESHARD1]], dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x", "z"}, {}]>]>} : (tensor<6x16xi1>, tensor<6x32xi1>) -> tensor<6x48xi1>
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[CONCATENATE]] <@mesh_xyz, [{"x"}, {"y", "z"}]> : tensor<6x48xi1>
+  // CHECK-NEXT: return %[[RESHARD2]] : tensor<6x48xi1>
+  %0 = stablehlo.concatenate %arg0, %arg1, dim = 1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"x"}, {"y", "z"}]>]>} : (tensor<6x16xi1>, tensor<6x32xi1>) -> tensor<6x48xi1>
+  return %0 : tensor<6x48xi1>
 }
