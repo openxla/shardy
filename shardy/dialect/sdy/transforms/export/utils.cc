@@ -916,31 +916,36 @@ ElementsAttr padElementsAttr(ElementsAttr elementsAttr,
 Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
                                    OpBuilder& builder) {
   if (auto floatType = dyn_cast<FloatType>(elementType)) {
-    const llvm::fltSemantics& semantics = floatType.getFloatSemantics();
-    switch (reductionOp) {
-      case ReductionOp::SUM:
-        return builder.getZeroAttr(floatType);
-      case ReductionOp::MIN:
-        return builder.getFloatAttr(
-            floatType, APFloat::getInf(semantics, /*Negative=*/false));
-      case ReductionOp::MAX:
-        return builder.getFloatAttr(
-            floatType, APFloat::getInf(semantics, /*Negative=*/true));
+    const llvm::fltSemantics& sem = floatType.getFloatSemantics();
+    if (reductionOp == ReductionOp::SUM) {
+      return APFloat::semanticsHasZero(sem) ? builder.getZeroAttr(floatType)
+                                            : Attribute();
     }
+    bool isMax = reductionOp == ReductionOp::MAX;
+    APFloat val = APFloat::getSmallest(sem, /*Negative=*/false);
+    if (APFloat::semanticsHasInf(sem)) {
+      val = APFloat::getInf(sem, /*Negative=*/isMax);
+    } else if (!isMax || APFloat::semanticsHasSignedRepr(sem)) {
+      val = APFloat::getLargest(sem, /*Negative=*/isMax);
+    } else if (APFloat::semanticsHasZero(sem)) {
+      val = APFloat::getZero(sem);
+    }
+    return builder.getFloatAttr(floatType, val);
   }
   if (auto intType = dyn_cast<IntegerType>(elementType)) {
     unsigned width = intType.getWidth();
+    bool isUnsigned = intType.isUnsigned() || width == 1;
     switch (reductionOp) {
       case ReductionOp::SUM:
         return builder.getZeroAttr(intType);
       case ReductionOp::MIN:
         return builder.getIntegerAttr(
-            intType, intType.isUnsigned() ? APInt::getMaxValue(width)
-                                          : APInt::getSignedMaxValue(width));
+            intType, isUnsigned ? APInt::getMaxValue(width)
+                                : APInt::getSignedMaxValue(width));
       case ReductionOp::MAX:
         return builder.getIntegerAttr(
-            intType, intType.isUnsigned() ? APInt::getMinValue(width)
-                                          : APInt::getSignedMinValue(width));
+            intType, isUnsigned ? APInt::getMinValue(width)
+                                : APInt::getSignedMinValue(width));
     }
   }
   SDY_CHECK(false) << "Unsupported element type for reduction identity";

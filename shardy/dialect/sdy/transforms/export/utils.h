@@ -344,7 +344,8 @@ std::optional<ReductionOp> getReductionType(Region& region);
 std::optional<ReductionOp> getReductionType(Operation* op);
 
 // Returns the identity attribute for the given element type and reduction op
-// (e.g., 0 for SUM, +inf / max_int for MIN, -inf / min_int for MAX).
+// (e.g., 0 for SUM, +inf / max_int for MIN, -inf / min_int for MAX), or a null
+// Attribute if no identity exists (such as SUM on zeroless f8E8M0FNU).
 //
 // Requires `elementType` to be a float or integer type.
 Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,

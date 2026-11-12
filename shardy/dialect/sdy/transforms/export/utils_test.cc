@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "shardy/dialect/sdy/transforms/export/utils.h"
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -447,13 +448,33 @@ TEST_F(ExportUtilsTest, GetReductionType) {
 
 TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {
   OpBuilder builder(&context);
+  Type i1Type = builder.getI1Type();
   Type i32Type = builder.getI32Type();
   Type u32Type = IntegerType::get(&context, 32, IntegerType::Unsigned);
+  Type f8E4M3FNType = Float8E4M3FNType::get(&context);
+  Type f8E5M2FNUZType = Float8E5M2FNUZType::get(&context);
+  Type f8E4M3FNUZType = Float8E4M3FNUZType::get(&context);
+  Type f8E4M3B11FNUZType = Float8E4M3B11FNUZType::get(&context);
+  Type f8E8M0FNUType = Float8E8M0FNUType::get(&context);
+  Type f8E5M3FNUType = Float8E5M3FNUType::get(&context);
+  Type f6E2M3FNType = Float6E2M3FNType::get(&context);
+  Type f6E3M2FNType = Float6E3M2FNType::get(&context);
+  Type f4E2M1FNType = Float4E2M1FNType::get(&context);
 
   // SUM
   Attribute sumF32 =
       getReductionIdentityAttr(f32Type, ReductionOp::SUM, builder);
   EXPECT_EQ(cast<FloatAttr>(sumF32).getValueAsDouble(), 0.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E5M3FNUType,
+                                                     ReductionOp::SUM, builder))
+                .getValueAsDouble(),
+            0.0);
+  EXPECT_EQ(getReductionIdentityAttr(f8E8M0FNUType, ReductionOp::SUM, builder),
+            Attribute());
+  EXPECT_EQ(cast<IntegerAttr>(
+                getReductionIdentityAttr(i1Type, ReductionOp::SUM, builder))
+                .getInt(),
+            0);
   Attribute sumI32 =
       getReductionIdentityAttr(i32Type, ReductionOp::SUM, builder);
   EXPECT_EQ(cast<IntegerAttr>(sumI32).getInt(), 0);
@@ -463,6 +484,43 @@ TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {
       getReductionIdentityAttr(f32Type, ReductionOp::MIN, builder);
   EXPECT_TRUE(cast<FloatAttr>(minF32).getValue().isInfinity());
   EXPECT_FALSE(cast<FloatAttr>(minF32).getValue().isNegative());
+  Attribute minF8 =
+      getReductionIdentityAttr(f8E4M3FNType, ReductionOp::MIN, builder);
+  EXPECT_EQ(cast<FloatAttr>(minF8).getValueAsDouble(), 448.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E5M2FNUZType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            57344.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E4M3FNUZType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            240.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E4M3B11FNUZType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            30.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E8M0FNUType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            std::ldexp(1.0, 127));
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E5M3FNUType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            114688.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f6E2M3FNType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            7.5);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f6E3M2FNType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            28.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f4E2M1FNType,
+                                                     ReductionOp::MIN, builder))
+                .getValueAsDouble(),
+            6.0);
+  Attribute minI1 = getReductionIdentityAttr(i1Type, ReductionOp::MIN, builder);
+  EXPECT_EQ(cast<IntegerAttr>(minI1).getValue().getZExtValue(), 1);
   Attribute minI32 =
       getReductionIdentityAttr(i32Type, ReductionOp::MIN, builder);
   EXPECT_EQ(cast<IntegerAttr>(minI32).getInt(),
@@ -477,6 +535,43 @@ TEST_F(ExportUtilsTest, GetReductionIdentityAttr) {
       getReductionIdentityAttr(f32Type, ReductionOp::MAX, builder);
   EXPECT_TRUE(cast<FloatAttr>(maxF32).getValue().isInfinity());
   EXPECT_TRUE(cast<FloatAttr>(maxF32).getValue().isNegative());
+  Attribute maxF8 =
+      getReductionIdentityAttr(f8E4M3FNType, ReductionOp::MAX, builder);
+  EXPECT_EQ(cast<FloatAttr>(maxF8).getValueAsDouble(), -448.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E5M2FNUZType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            -57344.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E4M3FNUZType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            -240.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E4M3B11FNUZType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            -30.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E8M0FNUType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            std::ldexp(1.0, -127));
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f8E5M3FNUType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            0.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f6E2M3FNType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            -7.5);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f6E3M2FNType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            -28.0);
+  EXPECT_EQ(cast<FloatAttr>(getReductionIdentityAttr(f4E2M1FNType,
+                                                     ReductionOp::MAX, builder))
+                .getValueAsDouble(),
+            -6.0);
+  Attribute maxI1 = getReductionIdentityAttr(i1Type, ReductionOp::MAX, builder);
+  EXPECT_EQ(cast<IntegerAttr>(maxI1).getValue().getZExtValue(), 0);
   Attribute maxI32 =
       getReductionIdentityAttr(i32Type, ReductionOp::MAX, builder);
   EXPECT_EQ(cast<IntegerAttr>(maxI32).getInt(),
