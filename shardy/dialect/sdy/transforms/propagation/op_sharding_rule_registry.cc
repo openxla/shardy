@@ -34,6 +34,7 @@ limitations under the License.
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
@@ -208,6 +209,16 @@ Value findOperandBeforeSlice(Value operand) {
     return definingOp->getOperand(0);
   }
   return operand;
+}
+
+// The first (n - 2) dimensions are batch dimensions. The last 2 dimensions are
+// decomposition dimensions, which need replication.
+OpShardingRuleAttr buildCholeskyShardingRule(Operation* op,
+                                             ArrayRef<int64_t> shape) {
+  auto getFactorType = [n = static_cast<int64_t>(shape.size()) - 2](int64_t d) {
+    return d < n ? FactorType::kPassThrough : FactorType::kNeedReplication;
+  };
+  return OpShardingRuleBuilder(op).addPointwise(shape, getFactorType).build();
 }
 
 }  // namespace
@@ -440,17 +451,7 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
         return builder.build();
       })
       .Case([](stablehlo::CholeskyOp cholesky) {
-        ArrayRef<int64_t> shape = getTensorShape(cholesky.getOperand());
-        // The first (n - 2) dimensions are batch dimensions. The last 2
-        // dimensions are decomposition dimensions, which need replication.
-        int64_t numBatchDims = shape.size() - 2;
-        std::function<FactorType(int64_t)> getFactorType = [&](int64_t dim) {
-          return dim < numBatchDims ? FactorType::kPassThrough
-                                    : FactorType::kNeedReplication;
-        };
-        return OpShardingRuleBuilder(cholesky)
-            .addPointwise(shape, getFactorType)
-            .build();
+        return buildCholeskyShardingRule(cholesky, getTensorShape(cholesky));
       })
       .Case([](stablehlo::ClampOp clamp) {
         // The `min` and `max` operands may be scalars.
@@ -649,13 +650,21 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           return OpShardingRuleAttr();
         }
         if (callTargetName == "annotate_device_placement" ||
-            callTargetName == "Cholesky" ||
             callTargetName == "InspectSharding" ||
             callTargetName == "LayoutConstraint" ||
             callTargetName == "mhlo.erf" || callTargetName == "MoveToDevice" ||
             callTargetName == "MoveToHost" ||
             callTargetName == "xla.megascale.provide_metadata") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
+        }
+        if (callTargetName == "Cholesky") {
+          TypeRange in = customCall->getOperandTypes();
+          ShapedType t = in.empty() ? nullptr : dynCastStaticShapedType(in[0]);
+          return (t && t.getRank() >= 2 && llvm::all_equal(in) &&
+                  t.getDimSize(t.getRank() - 2) == t.getShape().back() &&
+                  llvm::equal(in, customCall->getResultTypes()))
+                     ? buildCholeskyShardingRule(customCall, t.getShape())
+                     : OpShardingRuleAttr();
         }
         if (callTargetName == "Eigh") {
           assert(customCall.getNumOperands() == 1 &&
@@ -674,9 +683,9 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
           return OpShardingRuleBuilder(customCall)
               .addPointwise(inShape.drop_back(2))
               .addFactor(nonBatchDim1, {nonBatchDim1, kNullDim},
-                         inShape[nonBatchDim1])
+                         inShape[nonBatchDim1], FactorType::kNeedReplication)
               .addFactor(nonBatchDim2, {nonBatchDim2, nonBatchDim1},
-                         inShape[nonBatchDim2])
+                         inShape[nonBatchDim2], FactorType::kNeedReplication)
               .build();
         }
         if (callTargetName == "Qr") {

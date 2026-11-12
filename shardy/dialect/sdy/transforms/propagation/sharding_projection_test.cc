@@ -1298,6 +1298,70 @@ TEST_F(ShardingProjectionGetGreatestCommonPrefixAxesTest,
               ElementsAre(ElementsAre(AxisRefIs("b"))));
 }
 
+TEST_F(ShardingProjectionBuildTest, CholeskyAndEighCustomCallNeedReplication) {
+  constexpr StringRef kProgram = R"mlir(
+    func.func @main(%arg0: tensor<4x4xf32>, %arg1: tensor<8x4x4xf32>,
+                    %arg2: tensor<8x4x4xf32>, %arg3: tensor<8xf32>,
+                    %arg4: tensor<8x4xf32>, %arg5: tensor<*xf32>,
+                    %arg6: tensor<?x4x4xf32>)
+        -> (tensor<4x4xf32>, tensor<8x4x4xf32>, tensor<8x4x4xf32>,
+            tensor<8x4xf32>) {
+      %native0 = stablehlo.cholesky %arg0, lower = true : (tensor<4x4xf32>) -> tensor<4x4xf32>
+      %native1 = stablehlo.cholesky %arg1, lower = true : (tensor<8x4x4xf32>) -> tensor<8x4x4xf32>
+      %0 = stablehlo.custom_call @Cholesky(%arg0) : (tensor<4x4xf32>) -> tensor<4x4xf32>
+      %1 = stablehlo.custom_call @Cholesky(%arg1) : (tensor<8x4x4xf32>) -> tensor<8x4x4xf32>
+      %2:2 = stablehlo.custom_call @Cholesky(%arg1, %arg2)
+          : (tensor<8x4x4xf32>, tensor<8x4x4xf32>) -> (tensor<8x4x4xf32>, tensor<8x4x4xf32>)
+      %3 = stablehlo.custom_call @Cholesky(%arg3) : (tensor<8xf32>) -> tensor<8xf32>
+      %4 = stablehlo.custom_call @Cholesky(%arg4) : (tensor<8x4xf32>) -> tensor<8x4xf32>
+      %5 = stablehlo.custom_call @Cholesky(%arg0) : (tensor<4x4xf32>) -> tensor<4x4xf64>
+      %6 = stablehlo.custom_call @Cholesky(%arg5) : (tensor<*xf32>) -> tensor<*xf32>
+      %7 = stablehlo.custom_call @Cholesky(%arg6) : (tensor<?x4x4xf32>) -> tensor<?x4x4xf32>
+      %8 = stablehlo.custom_call @Cholesky() : () -> tensor<4x4xf32>
+      %9:2 = stablehlo.custom_call @Eigh(%arg1)
+          : (tensor<8x4x4xf32>) -> (tensor<8x4x4xf32>, tensor<8x4xf32>)
+      return %0, %1, %2#0, %9#1
+          : tensor<4x4xf32>, tensor<8x4x4xf32>, tensor<8x4x4xf32>, tensor<8x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kProgram, &context);
+  ASSERT_TRUE(module);
+  auto mainFn = cast<func::FuncOp>(module->lookupSymbol("main"));
+  SmallVector<stablehlo::CholeskyOp> nativeOps(
+      mainFn.getBody().front().getOps<stablehlo::CholeskyOp>());
+  ASSERT_EQ(nativeOps.size(), 2);
+  SmallVector<stablehlo::CustomCallOp> ops(
+      mainFn.getBody().front().getOps<stablehlo::CustomCallOp>());
+  ASSERT_EQ(ops.size(), 10);
+
+  EXPECT_EQ(getOrCreateShardingRule(ops[0]),
+            getOrCreateShardingRule(nativeOps[0]));
+  EXPECT_EQ(getOrCreateShardingRule(ops[1]),
+            getOrCreateShardingRule(nativeOps[1]));
+  EXPECT_EQ(strippedAttrString(getOrCreateShardingRule(ops[0]),
+                               /*stripMnemonic=*/true),
+            "<([i, j])->([i, j]) {i=4, j=4} need_replication={i, j}>");
+  EXPECT_EQ(
+      strippedAttrString(getOrCreateShardingRule(ops[1]),
+                         /*stripMnemonic=*/true),
+      "<([i, j, k])->([i, j, k]) {i=8, j=4, k=4} need_replication={j, k}>");
+  EXPECT_EQ(strippedAttrString(getOrCreateShardingRule(ops[2]),
+                               /*stripMnemonic=*/true),
+            "<([i, j, k], [i, j, k])->([i, j, k], [i, j, k]) {i=8, j=4, k=4} "
+            "need_replication={j, k}>");
+  EXPECT_FALSE(getOrCreateShardingRule(ops[3]));
+  EXPECT_FALSE(getOrCreateShardingRule(ops[4]));
+  EXPECT_FALSE(getOrCreateShardingRule(ops[5]));
+  EXPECT_FALSE(getOrCreateShardingRule(ops[6]));
+  EXPECT_FALSE(getOrCreateShardingRule(ops[7]));
+  EXPECT_FALSE(getOrCreateShardingRule(ops[8]));
+  EXPECT_EQ(strippedAttrString(getOrCreateShardingRule(ops[9]),
+                               /*stripMnemonic=*/true),
+            "<([i, j, k])->([i, j, k], [i, k]) {i=8, j=4, k=4} "
+            "need_replication={j, k}>");
+}
+
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir
