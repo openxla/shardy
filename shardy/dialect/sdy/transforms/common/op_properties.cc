@@ -29,7 +29,8 @@ namespace sdy {
 
 bool isElementwise(Operation* op) {
   if (op->hasTrait<OpTrait::Elementwise>() ||
-      op->hasTrait<hlo::OpTrait::BroadcastingElementwise>()) {
+      op->hasTrait<hlo::OpTrait::BroadcastingElementwise>() ||
+      isa<stablehlo::MapOp>(op)) {
     return true;
   }
   if (auto bitcastConvert = dyn_cast<stablehlo::BitcastConvertOp>(op)) {

@@ -122,6 +122,25 @@ TEST_F(IsElementwiseTest, BitcastConvertOpDifferentBitWidth) {
       isElementwise(getFirstOp<stablehlo::BitcastConvertOp>(module.get())));
 }
 
+TEST_F(IsElementwiseTest, MapOp) {
+  const std::string program = R"mlir(
+    func.func @main(%arg0: tensor<2x4xf32>, %arg1: tensor<2x4xf32>)
+        -> tensor<2x4xf32> {
+      %0 = "stablehlo.map"(%arg0, %arg1) ({
+        ^bb0(%x: tensor<f32>, %y: tensor<f32>):
+          %1 = stablehlo.add %x, %y : tensor<f32>
+          stablehlo.return %1 : tensor<f32>
+      }) {dimensions = array<i64: 0, 1>}
+        : (tensor<2x4xf32>, tensor<2x4xf32>) -> tensor<2x4xf32>
+      return %0 : tensor<2x4xf32>
+    })mlir";
+
+  OwningOpRef<ModuleOp> module = parseSourceString<ModuleOp>(program, &context);
+  ASSERT_TRUE(module);
+
+  EXPECT_TRUE(isElementwise(getFirstOp<stablehlo::MapOp>(module.get())));
+}
+
 }  // namespace
 
 }  // namespace sdy

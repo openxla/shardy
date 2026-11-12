@@ -93,3 +93,20 @@ func.func @transpose(%arg0: tensor<256x32x64x100xf32> {sdy.sharding = #sdy.shard
   %0 = stablehlo.transpose %arg0, dims = [3, 1, 0, 2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {"z"}, {}]>]>} : (tensor<256x32x64x100xf32>) -> tensor<100x32x256x64xf32>
   return %0 : tensor<100x32x256x64xf32>
 }
+
+// CHECK-LABEL: func @map
+func.func @map(%arg0: tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}, %arg1: tensor<4x32xf32>) -> (tensor<4x32xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg1 <@mesh, [{"x"}, {}]> : tensor<4x32xf32>
+  // CHECK-NEXT: %[[MAP:.*]] = "stablehlo.map"(%arg0, %[[RESHARD]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X:.*]]: tensor<f32>, %[[Y:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[X]], %[[Y]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x32xf32>, tensor<4x32xf32>) -> tensor<4x32xf32>
+  %0 = "stablehlo.map"(%arg0, %arg1) ({
+    ^bb0(%x: tensor<f32>, %y: tensor<f32>):
+      %sum = stablehlo.add %x, %y : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>, sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x32xf32>, tensor<4x32xf32>) -> tensor<4x32xf32>
+  // CHECK-NEXT: return %[[MAP]] : tensor<4x32xf32>
+  return %0 : tensor<4x32xf32>
+}

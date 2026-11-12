@@ -311,3 +311,37 @@ func.func @broadcast_forward_higher_priority_than_backwards(
   %1 = stablehlo.broadcast_in_dim %0, dims = [0, 1] : (tensor<32x16xf32>) -> tensor<32x16x8xf32>
   return %1 : tensor<32x16x8xf32>
 }
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @map_over_dot_general(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>},
+// CHECK-SAME:      %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>})
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
+func.func @map_over_dot_general(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}, %arg1: tensor<8x8xf32>) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>}
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0] : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[MAP_1:.*]] = "stablehlo.map"(%[[DOT]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X1:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[NEG1:.*]] = stablehlo.negate %[[X1]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[NEG1]] : tensor<f32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %1 = "stablehlo.map"(%0) ({
+    ^bb0(%x: tensor<f32>):
+      %neg = stablehlo.negate %x : tensor<f32>
+      stablehlo.return %neg : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[MAP_2:.*]] = "stablehlo.map"(%[[MAP_1]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X2:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ABS2:.*]] = stablehlo.abs %[[X2]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ABS2]] : tensor<f32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %2 = "stablehlo.map"(%1) ({
+    ^bb0(%x: tensor<f32>):
+      %abs = stablehlo.abs %x : tensor<f32>
+      stablehlo.return %abs : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[MAP_2]] : tensor<8x8xf32>
+  return %2 : tensor<8x8xf32>
+}

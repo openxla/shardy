@@ -1360,3 +1360,209 @@ func.func private @foo() -> tensor<8x16xf32> {
 // CHECK-LABEL: func.func private @foo_0() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
 // CHECK-LABEL: func.func private @foo_1() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
 // CHECK-LABEL: func.func private @foo_2() -> tensor<8x16xf32> attributes {sdy.original_func_name = "foo"} {
+
+// -----
+
+// CHECK-LABEL: func @constant_map_multiple_users
+func.func @constant_map_multiple_users() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST_2:.*]] = sdy.constant dense<2.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST_3:.*]] = sdy.constant dense<2.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_0:.*]] = "stablehlo.map"(%[[CONST_0]], %[[CONST_2]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X0:.*]]: tensor<f32>, %[[Y0:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD0:.*]] = stablehlo.add %[[X0]], %[[Y0]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD0]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_1:.*]] = "stablehlo.map"(%[[CONST_1]], %[[CONST_3]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X1:.*]]: tensor<f32>, %[[Y1:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[X1]], %[[Y1]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD1]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = stablehlo.constant dense<2.000000e+00> : tensor<8x16xf32>
+  %2 = "stablehlo.map"(%0, %1) ({
+    ^bb0(%x: tensor<f32>, %y: tensor<f32>):
+      %sum = stablehlo.add %x, %y : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[MAP_0]] : tensor<8x16xf32>
+  %3 = stablehlo.abs %2 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[MAP_1]] : tensor<8x16xf32>
+  %4 = stablehlo.negate %2 : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ABS]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>
+  return %3, %4 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @constant_map_capturing_constant_tensor_split
+func.func @constant_map_capturing_constant_tensor_split() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[VEC_0:.*]] = sdy.constant dense<2.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[VEC_1:.*]] = sdy.constant dense<2.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_0:.*]] = "stablehlo.map"(%[[CONST_0]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X0:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[SLICE_0:.*]] = stablehlo.slice %[[VEC_0]] [0:1] : (tensor<4xf32>) -> tensor<1xf32>
+  // CHECK-NEXT:   %[[RESHAPE_0:.*]] = stablehlo.reshape %[[SLICE_0]] : (tensor<1xf32>) -> tensor<f32>
+  // CHECK-NEXT:   %[[ADD_0:.*]] = stablehlo.add %[[X0]], %[[RESHAPE_0]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD_0]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_1:.*]] = "stablehlo.map"(%[[CONST_1]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X1:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[SLICE_1:.*]] = stablehlo.slice %[[VEC_1]] [0:1] : (tensor<4xf32>) -> tensor<1xf32>
+  // CHECK-NEXT:   %[[RESHAPE_1:.*]] = stablehlo.reshape %[[SLICE_1]] : (tensor<1xf32>) -> tensor<f32>
+  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %[[X1]], %[[RESHAPE_1]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD_1]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %vec = stablehlo.constant dense<2.000000e+00> : tensor<4xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = "stablehlo.map"(%0) ({
+    ^bb0(%x: tensor<f32>):
+      %slice = stablehlo.slice %vec [0:1] : (tensor<4xf32>) -> tensor<1xf32>
+      %scalar = stablehlo.reshape %slice : (tensor<1xf32>) -> tensor<f32>
+      %sum = stablehlo.add %x, %scalar : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[MAP_0]] : tensor<8x16xf32>
+  %2 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[MAP_1]] : tensor<8x16xf32>
+  %3 = stablehlo.negate %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ABS]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>
+  return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @map_capturing_non_constant_scalar_not_split
+func.func @map_capturing_non_constant_scalar_not_split(%arg0: tensor<f32>) -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP:.*]] = "stablehlo.map"(%[[CONST]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[X]], %arg0 : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %1 = "stablehlo.map"(%0) ({
+    ^bb0(%x: tensor<f32>):
+      %sum = stablehlo.add %x, %arg0 : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[MAP]] : tensor<8x16xf32>
+  %2 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[MAP]] : tensor<8x16xf32>
+  %3 = stablehlo.negate %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ABS]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>
+  return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @map_with_non_constant_preserving_body_not_split
+func.func @map_with_non_constant_preserving_body_not_split() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[VEC_0:.*]] = sdy.constant dense<2.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[VEC_1:.*]] = sdy.constant dense<2.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[CONST:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP:.*]] = "stablehlo.map"(%[[CONST]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[DOT:.*]] = stablehlo.dot %[[VEC_0]], %[[VEC_1]] : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[X]], %[[DOT]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %vec = stablehlo.constant dense<2.000000e+00> : tensor<4xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = "stablehlo.map"(%0) ({
+    ^bb0(%x: tensor<f32>):
+      %dot = stablehlo.dot %vec, %vec : (tensor<4xf32>, tensor<4xf32>) -> tensor<f32>
+      %sum = stablehlo.add %x, %dot : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[MAP]] : tensor<8x16xf32>
+  %2 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[MAP]] : tensor<8x16xf32>
+  %3 = stablehlo.negate %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ABS]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>
+  return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @constant_map_with_non_scalar_inner_op_and_capture
+func.func @constant_map_with_non_scalar_inner_op_and_capture() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[VEC_0:.*]] = sdy.constant dense<2.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[VEC_1:.*]] = sdy.constant dense<2.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_0:.*]] = "stablehlo.map"(%[[CONST_0]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X0:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[SLICE_0:.*]] = stablehlo.slice %[[VEC_0]] [0:1] : (tensor<4xf32>) -> tensor<1xf32>
+  // CHECK-NEXT:   %[[BCAST_0:.*]] = stablehlo.broadcast_in_dim %[[X0]], dims = [] : (tensor<f32>) -> tensor<1xf32>
+  // CHECK-NEXT:   %[[ADD_0:.*]] = stablehlo.add %[[BCAST_0]], %[[SLICE_0]] : tensor<1xf32>
+  // CHECK-NEXT:   %[[RESHAPE_0:.*]] = stablehlo.reshape %[[ADD_0]] : (tensor<1xf32>) -> tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[RESHAPE_0]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_1:.*]] = "stablehlo.map"(%[[CONST_1]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X1:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[SLICE_1:.*]] = stablehlo.slice %[[VEC_1]] [0:1] : (tensor<4xf32>) -> tensor<1xf32>
+  // CHECK-NEXT:   %[[BCAST_1:.*]] = stablehlo.broadcast_in_dim %[[X1]], dims = [] : (tensor<f32>) -> tensor<1xf32>
+  // CHECK-NEXT:   %[[ADD_1:.*]] = stablehlo.add %[[BCAST_1]], %[[SLICE_1]] : tensor<1xf32>
+  // CHECK-NEXT:   %[[RESHAPE_1:.*]] = stablehlo.reshape %[[ADD_1]] : (tensor<1xf32>) -> tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[RESHAPE_1]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %vec = stablehlo.constant dense<2.000000e+00> : tensor<4xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = "stablehlo.map"(%0) ({
+    ^bb0(%x: tensor<f32>):
+      %slice = stablehlo.slice %vec [0:1] : (tensor<4xf32>) -> tensor<1xf32>
+      %bcast = stablehlo.broadcast_in_dim %x, dims = [] : (tensor<f32>) -> tensor<1xf32>
+      %sum = stablehlo.add %bcast, %slice : tensor<1xf32>
+      %scalar = stablehlo.reshape %sum : (tensor<1xf32>) -> tensor<f32>
+      stablehlo.return %scalar : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[MAP_0]] : tensor<8x16xf32>
+  %2 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[MAP_1]] : tensor<8x16xf32>
+  %3 = stablehlo.negate %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ABS]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>
+  return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @constant_map_calling_const_func
+func.func @constant_map_calling_const_func() -> (tensor<8x16xf32>, tensor<8x16xf32>) {
+  // CHECK-NEXT: %[[CONST_0:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[CONST_1:.*]] = sdy.constant dense<1.000000e+00> : tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_0:.*]] = "stablehlo.map"(%[[CONST_0]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X0:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[CALL_0:.*]] = func.call @const_scalar_fn_0(%[[X0]]) : (tensor<f32>) -> tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[CALL_0]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[MAP_1:.*]] = "stablehlo.map"(%[[CONST_1]]) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X1:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[CALL_1:.*]] = func.call @const_scalar_fn_1(%[[X1]]) : (tensor<f32>) -> tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[CALL_1]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  %0 = stablehlo.constant dense<1.000000e+00> : tensor<8x16xf32>
+  %1 = "stablehlo.map"(%0) ({
+    ^bb0(%x: tensor<f32>):
+      %r = func.call @const_scalar_fn(%x) : (tensor<f32>) -> tensor<f32>
+      stablehlo.return %r : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x16xf32>) -> tensor<8x16xf32>
+  // CHECK-NEXT: %[[ABS:.*]] = stablehlo.abs %[[MAP_0]] : tensor<8x16xf32>
+  %2 = stablehlo.abs %1 : tensor<8x16xf32>
+  // CHECK-NEXT: %[[NEGATE:.*]] = stablehlo.negate %[[MAP_1]] : tensor<8x16xf32>
+  %3 = stablehlo.negate %1 : tensor<8x16xf32>
+  // CHECK-NEXT: return %[[ABS]], %[[NEGATE]] : tensor<8x16xf32>, tensor<8x16xf32>
+  return %2, %3 : tensor<8x16xf32>, tensor<8x16xf32>
+}
+
+// CHECK-LABEL: func.func private @const_scalar_fn(%arg0: tensor<f32>) -> tensor<f32>
+func.func private @const_scalar_fn(%arg0: tensor<f32>) -> tensor<f32> {
+  %0 = stablehlo.negate %arg0 : tensor<f32>
+  return %0 : tensor<f32>
+}
+
+// CHECK-LABEL: func.func private @const_scalar_fn_0(%arg0: tensor<f32>) -> tensor<f32> attributes {sdy.original_func_name = "const_scalar_fn"}
+// CHECK-LABEL: func.func private @const_scalar_fn_1(%arg0: tensor<f32>) -> tensor<f32> attributes {sdy.original_func_name = "const_scalar_fn"}

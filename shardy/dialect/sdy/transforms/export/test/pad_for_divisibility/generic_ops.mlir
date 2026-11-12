@@ -102,3 +102,25 @@ func.func private @pad_manual_computation_unannotated_return_operand(
   return %0#0, %0#1 : tensor<7x8xf32>, tensor<7x8xf32>
 }
 
+// CHECK-LABEL: func private @pad_map
+// CHECK-SAME: (%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>},
+// CHECK-SAME:  %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+// CHECK-SAME: -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+func.func private @pad_map(
+  %arg0: tensor<7x7xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>},
+  %arg1: tensor<7x7xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+  -> (tensor<7x7xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>}) {
+  // CHECK-NEXT: %[[MAP:.*]] = "stablehlo.map"(%arg0, %arg1) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X:.*]]: tensor<f32>, %[[Y:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[X]], %[[Y]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  %0 = "stablehlo.map"(%arg0, %arg1) ({
+    ^bb0(%x: tensor<f32>, %y: tensor<f32>):
+      %sum = stablehlo.add %x, %y : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{"x"}, {"y"}]>]>} : (tensor<7x7xf32>, tensor<7x7xf32>) -> tensor<7x7xf32>
+  // CHECK-NEXT: return %[[MAP]] : tensor<8x8xf32>
+  return %0 : tensor<7x7xf32>
+}
+

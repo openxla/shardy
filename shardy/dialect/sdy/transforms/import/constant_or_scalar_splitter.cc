@@ -36,6 +36,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/common/op_properties.h"
@@ -79,6 +80,8 @@ void cloneShardingGroupUsers(OpResult opResult, IRMapping& mapping,
 // given all its operands are constant expressions, for which it holds if the
 // given op is either:
 // - A broadcast, reshape or slice op.
+// - A `stablehlo::MapOp` whose computation only contains constant, iota, or
+//   constant preserving ops.
 // - An elementwise op.
 // - A call to a func that all operations are constant preserving.
 // Assumes the op is not constant or iota.
@@ -87,6 +90,14 @@ bool isConstantPreserving(Operation* op,
                           const SymbolTable& symbolTable) {
   if (CallOp callOp = dyn_cast<CallOp>(op)) {
     return !nonConstFuncOps.contains(getOriginalFuncName(callOp, symbolTable));
+  }
+  if (auto mapOp = dyn_cast<stablehlo::MapOp>(op)) {
+    return llvm::all_of(
+        mapOp.getComputation().getOps(), [&](Operation& innerOp) {
+          return innerOp.hasTrait<OpTrait::IsTerminator>() ||
+                 isa<ConstantOp, stablehlo::IotaOp>(&innerOp) ||
+                 isConstantPreserving(&innerOp, nonConstFuncOps, symbolTable);
+        });
   }
   if (!isPure(op)) {
     return false;
@@ -103,8 +114,9 @@ bool isConstantPreserving(Operation* op,
 
 // Returns true if the given op is either:
 // - A constant or iota op.
-// - A constant preserving op. (see isConstantPreserving) and all operands are
-// constants, that is, exist in `constantOps`.
+// - A constant preserving op (see `isConstantPreserving`) and all its operands
+//   and captured values defined above its regions are constants, that is, exist
+//   in `constantOps`.
 bool isConstantExpression(Operation* op,
                           const llvm::SetVector<Operation*>& constantOps,
                           const llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
@@ -112,11 +124,22 @@ bool isConstantExpression(Operation* op,
   if (isa<ConstantOp, stablehlo::IotaOp>(op)) {
     return true;
   }
-  return isConstantPreserving(op, nonConstFuncOps, symbolTable) &&
-         llvm::all_of(op->getOperands(), [&](Value operand) {
-           return operand.getDefiningOp() &&
-                  constantOps.contains(operand.getDefiningOp());
-         });
+  if (!isConstantPreserving(op, nonConstFuncOps, symbolTable)) {
+    return false;
+  }
+  auto isConstantValue = [&](Value value) {
+    return value.getDefiningOp() && constantOps.contains(value.getDefiningOp());
+  };
+  if (!llvm::all_of(op->getOperands(), isConstantValue)) {
+    return false;
+  }
+  bool allCapturedValuesConstant = true;
+  visitUsedValuesDefinedAbove(op->getRegions(), [&](OpOperand* operand) {
+    if (!isConstantValue(operand->get())) {
+      allCapturedValuesConstant = false;
+    }
+  });
+  return allCapturedValuesConstant;
 }
 
 // Returns true if the given op is a broadcast of scalar.
@@ -129,9 +152,9 @@ bool isScalarExpansion(Operation* op) {
   return false;
 }
 
-// Recursively clones all operands of the given op, that are not already mapped
-// in `mapping`, and finally clones the op itself. We do not clone scalars as
-// they do not get sharded.
+// Recursively clones all operands and captured values defined above the regions
+// of the given op that are not already mapped in `mapping`, and finally clones
+// the op itself. We do not clone scalars as they do not get sharded.
 void cloneSubComputation(OpResult opResult, IRMapping& mapping,
                          SymbolTable& symbolTable,
                          ShardingGroupUsersMap& shardingGroupUsersMap) {
@@ -145,15 +168,21 @@ void cloneSubComputation(OpResult opResult, IRMapping& mapping,
                           shardingGroupUsersMap);
     }
   }
+  visitUsedValuesDefinedAbove(op->getRegions(), [&](OpOperand* operand) {
+    if (auto defOpResult = dyn_cast<OpResult>(operand->get())) {
+      cloneSubComputation(defOpResult, mapping, symbolTable,
+                          shardingGroupUsersMap);
+    }
+  });
 
   // This will insert the cloned op right before the original op.
   OpBuilder builder(op);
   Operation* clonedOp = builder.clone(*op, mapping);
-  if (CallOp callOp = dyn_cast<CallOp>(clonedOp)) {
+  clonedOp->walk([&](CallOp callOp) {
     FuncOp funcOp = symbolTable.lookup<FuncOp>(callOp.getCallee());
     callOp.setCallee(
         symbolTable.insert(cloneFuncRecursively(funcOp, symbolTable)));
-  }
+  });
   cloneShardingGroupUsers(opResult, mapping, builder, shardingGroupUsersMap);
 }
 
@@ -191,18 +220,21 @@ void cloneSubComputationOnOperands(
   }
 }
 
-void processOp(Operation* op, FuncOp funcOp,
-               llvm::SetVector<Operation*>& constantOps,
-               llvm::SetVector<Operation*>& scalarExpansionOps,
-               llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
-               SymbolTable& symbolTable,
-               ShardingGroupUsersMap& shardingGroupUsersMap) {
+WalkResult processOp(Operation* op, FuncOp funcOp,
+                     llvm::SetVector<Operation*>& constantOps,
+                     llvm::SetVector<Operation*>& scalarExpansionOps,
+                     llvm::SmallDenseSet<StringRef>& nonConstFuncOps,
+                     SymbolTable& symbolTable,
+                     ShardingGroupUsersMap& shardingGroupUsersMap) {
   if (isa<FuncOp, ShardingGroupOp>(op)) {
-    return;
+    return WalkResult::advance();
   }
   if (isConstantExpression(op, constantOps, nonConstFuncOps, symbolTable)) {
     constantOps.insert(op);
-    return;
+    // Skip nested regions of constant expressions (e.g., `stablehlo.map`) so
+    // inner ops are not cloned or mutated before the whole op is cloned per
+    // consumer.
+    return WalkResult::skip();
   }
   // NOTE: There are cases that op is an constant expression but may not pass
   // the following check such as constant and iota ops. That is fine because if
@@ -215,10 +247,11 @@ void processOp(Operation* op, FuncOp funcOp,
   }
   if (isScalarExpansion(op)) {
     scalarExpansionOps.insert(op);
-    return;
+    return WalkResult::advance();
   }
   cloneSubComputationOnOperands(op, constantOps, scalarExpansionOps,
                                 symbolTable, shardingGroupUsersMap);
+  return WalkResult::advance();
 }
 
 // Converts stablehlo::ConstantOp to sdy::ConstantOp.
@@ -274,8 +307,8 @@ struct ConstantOrScalarSplitterPass
     llvm::SetVector<Operation*> scalarExpansionOps;
     ShardingGroupUsersMap shardingGroupUsersMap;
     region.walk<WalkOrder::PreOrder>([&](Operation* op) {
-      processOp(op, funcOp, constantOps, scalarExpansionOps, nonConstFuncOps,
-                symbolTable, shardingGroupUsersMap);
+      return processOp(op, funcOp, constantOps, scalarExpansionOps,
+                       nonConstFuncOps, symbolTable, shardingGroupUsersMap);
     });
     // Since for every op in `constantOps` that has a use that isn't in
     // `constantOps`, we replaced the use with a clone of the entire

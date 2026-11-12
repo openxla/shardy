@@ -93,6 +93,28 @@ func.func @stablehlo_while_sharded(%arg0: tensor<16xf32> {sdy.sharding = #sdy.sh
   return %0 : tensor<16xf32>
 }
 
+// CHECK-LABEL: func.func @stablehlo_map_sharded
+// CHECK-SAME: (%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>},
+// CHECK-SAME:  %arg1: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>})
+// CHECK-SAME: -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>})
+func.func @stablehlo_map_sharded(
+    %arg0: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>},
+    %arg1: tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>})
+    -> (tensor<8x32xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {"y"}]>}) {
+  // CHECK-NEXT: %[[MAP:.*]] = "stablehlo.map"(%arg0, %arg1) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X:.*]]: tensor<f32>, %[[Y:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[MUL:.*]] = stablehlo.multiply %[[X]], %[[Y]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[MUL]] : tensor<f32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {"y"}]>]>} : (tensor<4x8xf32>, tensor<4x8xf32>) -> tensor<4x8xf32>
+  %0 = "stablehlo.map"(%arg0, %arg1) ({
+    ^bb0(%x: tensor<f32>, %y: tensor<f32>):
+      %mul = stablehlo.multiply %x, %y : tensor<f32>
+      stablehlo.return %mul : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>, sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{"x"}, {"y"}]>]>} : (tensor<8x32xf32>, tensor<8x32xf32>) -> tensor<8x32xf32>
+  // CHECK-NEXT: return %[[MAP]] : tensor<4x8xf32>
+  return %0 : tensor<8x32xf32>
+}
+
 // -----
 
 // CHECK: module attributes {sdy.output_shardings = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=4]>, [{"x"}, {}], unreduced={"y"}>]>, sdy.parameters_shardings = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=4]>, [{"x"}, {"y"}]>, <mesh<["x"=2, "y"=4]>, [{"y"}, {}]>, <mesh<["x"=2, "y"=4]>, [{}, {}]>]>} {

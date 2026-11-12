@@ -393,3 +393,28 @@ func.func @prefer_lhs_factor_non_elementwise(
     (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
   return %0 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @mesh_a_2_b_2 = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @prefer_most_sharded_factor_map_op(
+// CHECK-SAME:       %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{}, {"a"}]>},
+// CHECK-SAME:       %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b", "a"}, {}]>})
+// CHECK-SAME:   -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b", "a", ?}, {?}]>})
+func.func @prefer_most_sharded_factor_map_op(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{}, {"a"}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_a_2_b_2, [{"b", "a"}, {}]>})
+    -> tensor<8x8xf32> {
+  // CHECK-NEXT: %[[MAP:.*]] = "stablehlo.map"(%arg0, %arg1) <{dimensions = array<i64: 0, 1>}> ({
+  // CHECK-NEXT: ^bb0(%[[X:.*]]: tensor<f32>, %[[Y:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[X]], %[[Y]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a_2_b_2, [{"b", "a", ?}, {?}]>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  %0 = "stablehlo.map"(%arg0, %arg1) ({
+    ^bb0(%x: tensor<f32>, %y: tensor<f32>):
+      %sum = stablehlo.add %x, %y : tensor<f32>
+      stablehlo.return %sum : tensor<f32>
+  }) {dimensions = array<i64: 0, 1>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[MAP]] : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
