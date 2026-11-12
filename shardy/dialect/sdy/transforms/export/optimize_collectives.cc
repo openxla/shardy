@@ -22,10 +22,12 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/dialect/sdy/ir/dialect.h"  // IWYU pragma: keep
+#include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/optimize_collectives_util.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
 #include "stablehlo/dialect/StablehloOps.h"               // IWYU pragma: keep
@@ -78,6 +80,78 @@ class CollectivePermuteOptimizationPattern
   SymbolTableCollection& symbolTableCollection;
 };
 
+// Pattern that commutes binary reduction-preserving operations with
+// sdy.all_reduce:
+//   op(all_reduce(x), all_reduce(y)) -> all_reduce(op(x, y))
+// when:
+//   - op matches the all_reduce reduction_op (AddOp/SubtractOp for SUM,
+//     MaxOp for MAX, MinOp for MIN).
+//   - Both all_reduce ops have matching reduction_op, reduction_axes, and
+//     out_sharding.
+//   - Both all_reduce ops have a single use and matching operand shardings.
+template <typename BinaryOpTy, ReductionOp kReductionOp>
+class BinaryOpOfAllReducePattern : public OpRewritePattern<BinaryOpTy> {
+ public:
+  using OpRewritePattern<BinaryOpTy>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(BinaryOpTy binaryOp,
+                                PatternRewriter& rewriter) const override {
+    auto lhsAllReduce = binaryOp.getLhs().template getDefiningOp<AllReduceOp>();
+    auto rhsAllReduce = binaryOp.getRhs().template getDefiningOp<AllReduceOp>();
+    if (!lhsAllReduce || !rhsAllReduce) {
+      return failure();
+    }
+
+    if (!lhsAllReduce->hasOneUse() || !rhsAllReduce->hasOneUse()) {
+      return failure();
+    }
+
+    if (lhsAllReduce.getReductionOp() != kReductionOp ||
+        rhsAllReduce.getReductionOp() != kReductionOp) {
+      return failure();
+    }
+
+    if (lhsAllReduce.getReductionAxes() != rhsAllReduce.getReductionAxes()) {
+      return failure();
+    }
+
+    if (lhsAllReduce.getOutSharding() != rhsAllReduce.getOutSharding()) {
+      return failure();
+    }
+
+    if (TensorShardingAttr outSharding = getSharding(binaryOp.getResult());
+        outSharding && outSharding != lhsAllReduce.getOutSharding()) {
+      return failure();
+    }
+
+    Value lhsTensor = lhsAllReduce.getTensor();
+    Value rhsTensor = rhsAllReduce.getTensor();
+    if (lhsTensor.getType() != rhsTensor.getType() ||
+        (kReductionOp == ReductionOp::SUM &&
+         getElementTypeOrSelf(lhsTensor.getType()).isInteger(1))) {
+      return failure();
+    }
+
+    if (getSharding(lhsTensor) != getSharding(rhsTensor)) {
+      return failure();
+    }
+
+    auto newBinaryOp = BinaryOpTy::create(
+        rewriter, binaryOp.getLoc(), lhsTensor, rhsTensor);
+
+    if (TensorShardingAttr inSharding = getSharding(lhsTensor)) {
+      setSharding(newBinaryOp.getResult(), inSharding);
+    }
+
+    rewriter.replaceOpWithNewOp<AllReduceOp>(
+        binaryOp, newBinaryOp.getResult(), lhsAllReduce.getReductionAxesAttr(),
+        lhsAllReduce.getReductionOp(), lhsAllReduce.getOutShardingAttr());
+    rewriter.eraseOp(lhsAllReduce);
+    rewriter.eraseOp(rhsAllReduce);
+    return success();
+  }
+};
+
 struct OptimizeCollectivesPass
     : public impl::OptimizeCollectivesPassBase<OptimizeCollectivesPass> {
   using OptimizeCollectivesPassBase::OptimizeCollectivesPassBase;
@@ -88,6 +162,12 @@ struct OptimizeCollectivesPass
     RewritePatternSet patterns(&getContext());
     patterns.add<CollectivePermuteOptimizationPattern>(patterns.getContext(),
                                                        symbolTableCollection);
+    patterns.add<
+        BinaryOpOfAllReducePattern<stablehlo::AddOp, ReductionOp::SUM>,
+        BinaryOpOfAllReducePattern<stablehlo::SubtractOp, ReductionOp::SUM>,
+        BinaryOpOfAllReducePattern<stablehlo::MaxOp, ReductionOp::MAX>,
+        BinaryOpOfAllReducePattern<stablehlo::MinOp, ReductionOp::MIN>>(
+        patterns.getContext());
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
       signalPassFailure();
     }
