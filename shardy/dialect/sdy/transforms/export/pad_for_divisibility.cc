@@ -523,6 +523,9 @@ Operation* padCollectiveOp(Operation* op, Value input, Value inputOrig,
   auto rankedInput = cast<RankedTensorType>(input.getType());
   Value padOp = input;
   std::optional<PaddingValueKind> paddingKind = cache.getPadding(input);
+  if (isa<sdy::ReduceScatterOp>(op) && paddingKind != PaddingValueKind::kZero) {
+    paddingKind = std::nullopt;
+  }
   bool isPaddedBefore = input.getType() != inputOrig.getType();
 
   if (paddedInputType != rankedInput) {
@@ -1121,12 +1124,12 @@ class StablehloDotOpPattern : public OpConversionPattern<OpTy> {
     }
 
     Location loc = op.getLoc();
-    Value paddedLhs = ensurePaddingWithKind(
-        loc, adaptor.getLhs(), lhsOrigType, PaddingValueKind::kZero, cache,
-        rewriter, lhsContractingDims);
-    Value paddedRhs = ensurePaddingWithKind(
-        loc, adaptor.getRhs(), rhsOrigType, PaddingValueKind::kZero, cache,
-        rewriter, rhsContractingDims);
+    Value paddedLhs = ensurePaddingWithKind(loc, adaptor.getLhs(), lhsOrigType,
+                                            PaddingValueKind::kZero, cache,
+                                            rewriter, lhsContractingDims);
+    Value paddedRhs = ensurePaddingWithKind(loc, adaptor.getRhs(), rhsOrigType,
+                                            PaddingValueKind::kZero, cache,
+                                            rewriter, rhsContractingDims);
 
     return padGenericOp(op, {paddedLhs, paddedRhs}, converter, rewriter);
   }
@@ -1337,7 +1340,7 @@ class StablehloConvolutionOpPattern
     Value finalResult =
         trimOutputForDims(newOp->getResult(0), paddedResultShaped,
                           dimNums.getOutputSpatialDimensions(), outSharding,
-                          PaddingValueKind::kZero, cache, rewriter);
+                          /*paddingKind=*/std::nullopt, cache, rewriter);
 
     rewriter.replaceOp(op, finalResult);
     return success();
@@ -1391,35 +1394,42 @@ class StablehloGatherOpPattern
         op.getDimensionNumbers().getOperandBatchingDims();
     int64_t indexVectorDim = op.getDimensionNumbers().getIndexVectorDim();
 
-    // An operand dim is a non-slicing dim if it is not indexed by
-    // start_index_map, not collapsed, and not a batching dim, and preserves its
-    // size in the result. When such a dim is padded, we need to increase the
-    // corresponding slice size to maintain the same operand-to-result mapping.
-    // Also check if any indexed dimension in start_index_map is padded.
+    // When a full-slice offset dim (not collapsed and not a batching dim) is
+    // padded, increase its slice size to the padded operand dim size if it is
+    // either unindexed (not in start_index_map) or its corresponding result
+    // offset dim is padded to the same size. For padded dims in
+    // start_index_map, also widen narrow index types if needed, and clamp
+    // start indices when the slice size is not increased.
+    TensorShardingAttr outSharding = getSharding(op.getResult());
+    auto paddedResultType = cast<RankedTensorType>(getDivisiblePaddedType(
+        op.getType(), outSharding, converter->getSymbolTable()));
+    ArrayRef<int64_t> offsetDims = op.getDimensionNumbers().getOffsetDims();
+
     SmallVector<int64_t> sliceSizes(op.getSliceSizes());
+    bool needsIndexWiden = false;
     bool needsIndexClamp = false;
+    int64_t offsetDimIdx = 0;
     for (int64_t d = 0; d < origOperandType.getRank(); ++d) {
+      bool isOffsetDim = !llvm::is_contained(collapsedSliceDims, d) &&
+                         !llvm::is_contained(operandBatchingDims, d);
+      int64_t resultDim = isOffsetDim ? offsetDims[offsetDimIdx++] : -1;
       if (paddedOperandType.getDimSize(d) > origOperandType.getDimSize(d)) {
-        if (llvm::is_contained(startIndexMap, d)) {
-          needsIndexClamp = true;
-        } else if (!llvm::is_contained(collapsedSliceDims, d) &&
-                   !llvm::is_contained(operandBatchingDims, d) &&
-                   sliceSizes[d] == origOperandType.getDimSize(d)) {
+        bool inStartIndexMap = llvm::is_contained(startIndexMap, d);
+        needsIndexWiden |= inStartIndexMap;
+        if (isOffsetDim && sliceSizes[d] == origOperandType.getDimSize(d) &&
+            (!inStartIndexMap || paddedResultType.getDimSize(resultDim) ==
+                                     paddedOperandType.getDimSize(d))) {
           sliceSizes[d] = paddedOperandType.getDimSize(d);
+        } else if (inStartIndexMap) {
+          needsIndexClamp = true;
         }
       }
     }
 
-    // StableHLO gather clamps out-of-bounds indices for dimension d to:
-    //   effective_index[d] = min(max(start_index[d], 0), dim_size(d) -
-    //   slice_size(d))
-    //
-    // If we pad an indexing dim, we apply this formula using the unpadded
-    // dimension size to preserve the semantics of the original gather.
-    if (needsIndexClamp) {
-      Location loc = op.getLoc();
-      TensorShardingAttr idxSharding =
-          converter->getSharding(op.getStartIndices());
+    Location loc = op.getLoc();
+    TensorShardingAttr idxSharding =
+        converter->getSharding(op.getStartIndices());
+    if (needsIndexWiden) {
       int64_t maxBound = 0;
       for (int64_t d : startIndexMap) {
         maxBound =
@@ -1429,6 +1439,16 @@ class StablehloGatherOpPattern
       startIndices =
           maybeWidenIndices(loc, startIndices, maxBound, idxSharding, rewriter);
       startIndicesType = cast<RankedTensorType>(startIndices.getType());
+    }
+
+    // StableHLO gather clamps out-of-bounds indices for dimension d to:
+    //   effective_index[d] = min(max(start_index[d], 0), dim_size(d) -
+    //   slice_size(d))
+    //
+    // If we pad an indexing dim without increasing its slice size, we apply
+    // this formula using the unpadded dimension size to preserve the semantics
+    // of the original gather.
+    if (needsIndexClamp) {
       Type elemType = startIndicesType.getElementType();
       Value maxConst;
       if (indexVectorDim == startIndicesType.getRank()) {
@@ -1484,7 +1504,7 @@ class StablehloGatherOpPattern
         rewriter, op.getLoc(), newResultTypes[0], operand, startIndices,
         op.getDimensionNumbersAttr(), newSliceSizesAttr,
         op.getIndicesAreSortedAttr());
-    if (TensorShardingAttr outSharding = getSharding(op.getResult())) {
+    if (outSharding) {
       setSharding(newGather.getResult(), outSharding);
     }
     rewriter.replaceOp(op, newGather.getResult());
@@ -1832,11 +1852,11 @@ struct PadForDivisibilityPass
                llvm::zip_equal(returnOp.getOperands(), dataFlowOp->getResults(),
                                dataFlowOp.getOpResultEdgeOwnerShardings())) {
             TensorShardingAttr returnSharding =
-                sharding ? dataFlowOp.transformTargetSharding(
-                               result, sharding,
-                               DataFlowShardingTransformType::
-                                   kBeforeEdgePropagation)
-                         : nullptr;
+                sharding
+                    ? dataFlowOp.transformTargetSharding(
+                          result, sharding,
+                          DataFlowShardingTransformType::kBeforeEdgePropagation)
+                    : nullptr;
             if (!isLegalType(operand.getType(), returnSharding)) {
               return false;
             }

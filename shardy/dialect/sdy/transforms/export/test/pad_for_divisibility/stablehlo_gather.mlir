@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -sdy-pad-for-divisibility | FileCheck %s
 
 sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>
+sdy.mesh @mesh_3_2 = <["x"=3, "y"=2]>
 
 // CHECK-LABEL: func @padded_gather
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<3x4xf32>, %[[ARG1:.*]]: tensor<2x1xi64>) -> tensor<2x4xf32>
@@ -132,4 +133,66 @@ func.func @padded_gather_collapsed_dim_size_1(%arg0: tensor<1x8xf32>, %arg1: ten
     sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}]>]>
   } : (tensor<1x8xf32>, tensor<2x1xi64>) -> tensor<2x2xf32>
   return %0 : tensor<2x2xf32>
+}
+
+// CHECK-LABEL: func @padded_gather_indexed_full_slice_sharded_output
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<3x4xf32>, %[[ARG1:.*]]: tensor<2x1xi64>) -> tensor<2x3x4xf32> {
+func.func @padded_gather_indexed_full_slice_sharded_output(%arg0: tensor<3x4xf32>, %arg1: tensor<2x1xi64>) -> tensor<2x3x4xf32> {
+  // When a full-slice dimension in start_index_map is sharded on both operand
+  // and the corresponding result offset dimension, slice_sizes is updated to
+  // the padded dimension size.
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[PAD:.*]] = stablehlo.pad %[[ARG0]], %[[CST]], low = [0, 0], high = [1, 0], interior = [0, 0] : (tensor<3x4xf32>, tensor<f32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: %[[SLICE:.*]] = sdy.all_slice [{"x"}, {}] %[[PAD]] out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<4x4xf32>
+  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[SLICE]], %[[ARG1]])
+  // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1, 2], start_index_map = [0], index_vector_dim = 1>
+  // CHECK-SAME: slice_sizes = array<i64: 4, 4>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}, {}]>]>}
+  // CHECK-SAME: : (tensor<4x4xf32>, tensor<2x1xi64>) -> tensor<2x4x4xf32>
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{}, {"x"}, {}] %[[GATHER]] out_sharding=<@mesh_4_2, [{}, {}, {}]> : tensor<2x4x4xf32>
+  // CHECK-NEXT: %[[UNPAD:.*]] = stablehlo.slice %[[AG]] [0:2, 0:3, 0:4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}]>]>} : (tensor<2x4x4xf32>) -> tensor<2x3x4xf32>
+  // CHECK-NEXT: return %[[UNPAD]] : tensor<2x3x4xf32>
+  %sliced_operand = sdy.all_slice [{"x"}, {}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<3x4xf32>
+  %0 = "stablehlo.gather"(%sliced_operand, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1, 2],
+      start_index_map = [0], index_vector_dim = 1>,
+    slice_sizes = array<i64: 3, 4>,
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {"x"}, {}]>]>
+  } : (tensor<3x4xf32>, tensor<2x1xi64>) -> tensor<2x3x4xf32>
+  %1 = sdy.all_gather [{}, {"x"}, {}] %0 out_sharding=<@mesh_4_2, [{}, {}, {}]> : tensor<2x3x4xf32>
+  return %1 : tensor<2x3x4xf32>
+}
+
+// CHECK-LABEL: func @padded_gather_indexed_full_slice_widen_narrow_indices
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<128x4xf32>, %[[ARG1:.*]]: tensor<2x2xi8>) -> tensor<2x128xf32> {
+func.func @padded_gather_indexed_full_slice_widen_narrow_indices(
+    %arg0: tensor<128x4xf32>, %arg1: tensor<2x2xi8>) -> tensor<2x128xf32> {
+  // Even when a full-slice indexed dimension (dim 0, size 128 padded to 129)
+  // updates slice_sizes from 128 to 129 without clamping, narrow i8 indices
+  // must still be widened to i32 because padded dimbound 129 - 1 = 128
+  // overflows i8 in downstream convert-global-to-local bounds checks.
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  // CHECK-NEXT: %[[PAD:.*]] = stablehlo.pad %[[ARG0]], %[[CST]], low = [0, 0], high = [1, 0], interior = [0, 0] : (tensor<128x4xf32>, tensor<f32>) -> tensor<129x4xf32>
+  // CHECK-NEXT: %[[SLICE:.*]] = sdy.all_slice [{"x"}, {"y"}] %[[PAD]] out_sharding=<@mesh_3_2, [{"x"}, {"y"}]> : tensor<129x4xf32>
+  // CHECK-NEXT: %[[WIDENED:.*]] = stablehlo.convert %[[ARG1]] : (tensor<2x2xi8>) -> tensor<2x2xi32>
+  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[SLICE]], %[[WIDENED]])
+  // CHECK-SAME: dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [1], start_index_map = [0, 1], index_vector_dim = 1>
+  // CHECK-SAME: slice_sizes = array<i64: 129, 1>
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3_2, [{}, {"x"}]>]>}
+  // CHECK-SAME: : (tensor<129x4xf32>, tensor<2x2xi32>) -> tensor<2x129xf32>
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{}, {"x"}] %[[GATHER]] out_sharding=<@mesh_3_2, [{}, {}]> : tensor<2x129xf32>
+  // CHECK-NEXT: %[[UNPAD:.*]] = stablehlo.slice %[[AG]] [0:2, 0:128] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3_2, [{}, {}]>]>} : (tensor<2x129xf32>) -> tensor<2x128xf32>
+  // CHECK-NEXT: return %[[UNPAD]] : tensor<2x128xf32>
+  %sliced_operand = sdy.all_slice [{"x"}, {"y"}] %arg0 out_sharding=<@mesh_3_2, [{"x"}, {"y"}]> : tensor<128x4xf32>
+  %0 = "stablehlo.gather"(%sliced_operand, %arg1) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [1],
+      start_index_map = [0, 1], index_vector_dim = 1>,
+    slice_sizes = array<i64: 128, 1>,
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_3_2, [{}, {"x"}]>]>
+  } : (tensor<128x4xf32>, tensor<2x2xi8>) -> tensor<2x128xf32>
+  %1 = sdy.all_gather [{}, {"x"}] %0 out_sharding=<@mesh_3_2, [{}, {}]> : tensor<2x128xf32>
+  return %1 : tensor<2x128xf32>
 }
