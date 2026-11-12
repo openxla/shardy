@@ -37,7 +37,6 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Location.h"
-#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
@@ -1928,25 +1927,6 @@ class StablehloConvolutionOpPattern
   bool enableRGV3;
 };
 
-bool nonPadOrPadWithZero(Value operand) {
-  auto padOp = operand.getDefiningOp<stablehlo::PadOp>();
-  if (!padOp) {
-    return true;
-  }
-  DenseElementsAttr attr;
-  bool isZero = false;
-  if (matchPattern(padOp.getPaddingValue(), m_Constant(&attr)) &&
-      attr.isSplat()) {
-    Attribute splatValue = attr.getSplatValue<Attribute>();
-    if (auto floatAttr = dyn_cast<FloatAttr>(splatValue)) {
-      isZero = floatAttr.getValue().isZero();
-    } else if (auto intAttr = dyn_cast<IntegerAttr>(splatValue)) {
-      isZero = intAttr.getValue().isZero();
-    }
-  }
-  return isZero;
-}
-
 class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
  public:
   StablehloDotOpPattern(TypeConverter& converter, MLIRContext* ctx,
@@ -1980,17 +1960,13 @@ class StablehloDotOpPattern : public OpConversionPattern<stablehlo::DotOp> {
       if (!contractingAxes.empty()) {
         int64_t totalAxesSize = getTotalAxesSize(contractingAxes, mesh);
 
-        // Check divisibility of sharded contracting dimensions.
+        // Check divisibility of sharded contracting dimensions. Upstream
+        // `sdy-pad-for-divisibility` guarantees zero-valued divisibility
+        // padding on contracting dims.
         SDY_CHECK(lhsType.getDimSize(lhsContractingDim) % totalAxesSize == 0)
             << "Sharded contracting dimension must be divisible by the total "
                "size "
                "of the axes sharding it.";
-        auto checkPadding = [](Value operand) {
-          SDY_CHECK(nonPadOrPadWithZero(operand))
-              << "Padding value must be zero for sharded contracting dot.";
-        };
-        checkPadding(lhs);
-        checkPadding(op.getRhs());
 
         // Verify that an AllReduce has been inserted by a previous pass unless
         // the result is explicitly unreduced.
@@ -2043,7 +2019,9 @@ class StablehloDotGeneralOpPattern
         return op.emitError("failed to resolve mesh.");
       }
 
-      // Identify sharded contracting dimension axes in the LHS.
+      // Identify sharded contracting dimension axes in the LHS. Upstream
+      // `sdy-pad-for-divisibility` guarantees zero-valued divisibility padding
+      // on contracting dims.
       stablehlo::DotDimensionNumbersAttr dimNums = op.getDotDimensionNumbers();
       auto lhsType = cast<RankedTensorType>(lhs.getType());
       SmallVector<AxisRefAttr> reductionAxes;
@@ -2061,13 +2039,6 @@ class StablehloDotGeneralOpPattern
 
       if (!reductionAxes.empty()) {
         sortAndMergeAxes(reductionAxes, mesh);
-        auto checkPadding = [](Value operand) {
-          SDY_CHECK(nonPadOrPadWithZero(operand))
-              << "Padding value must be zero for sharded contracting "
-                 "dot_general.";
-        };
-        checkPadding(lhs);
-        checkPadding(op.getRhs());
 
         // Verify that an AllReduce has been inserted by a previous pass unless
         // the result is explicitly unreduced.

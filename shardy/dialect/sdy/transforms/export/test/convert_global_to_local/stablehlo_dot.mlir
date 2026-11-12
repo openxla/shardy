@@ -90,3 +90,30 @@ func.func @sharded_contracting_dim_reduce_scatter(
   return %1 : tensor<8x32xf32>
 }
 
+// CHECK-LABEL: func @sharded_contracting_dim_with_nonzero_pad
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<3x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<4x7xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) -> tensor<5x7xf32> {
+func.func @sharded_contracting_dim_with_nonzero_pad(
+  %arg0: tensor<3x8xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{}, {"x"}]>},
+  %arg1: tensor<8x7xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) -> tensor<5x7xf32> {
+  // CHECK: %[[CST:.*]] = stablehlo.constant dense<1.000000e+00> : tensor<f32>
+  // CHECK: %[[PAD:.*]] = stablehlo.pad %[[ARG0]], %[[CST]], low = [1, 0], high = [1, 0], interior = [0, 0] : (tensor<3x4xf32>, tensor<f32>) -> tensor<5x4xf32>
+  %cst = stablehlo.constant dense<1.0> : tensor<f32>
+  %pad = stablehlo.pad %arg0, %cst, low = [1, 0], high = [1, 0], interior = [0, 0]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {"x"}]>]>}
+    : (tensor<3x8xf32>, tensor<f32>) -> tensor<5x8xf32>
+
+  // CHECK: %[[DOT:.*]] = stablehlo.dot %[[PAD]], %[[ARG1]]
+  // CHECK-SAME: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
+  // CHECK-SAME: (tensor<5x4xf32>, tensor<4x7xf32>) -> tensor<5x7xf32>
+  %0 = stablehlo.dot %pad, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}], unreduced={"x"}>]>}
+    : (tensor<5x8xf32>, tensor<8x7xf32>) -> tensor<5x7xf32>
+
+  // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[DOT]])
+  %1 = sdy.all_reduce {"x"} %0 out_sharding=<@mesh_2_4, [{}, {}]> : tensor<5x7xf32>
+
+  // CHECK: return %[[RES]] : tensor<5x7xf32>
+  return %1 : tensor<5x7xf32>
+}
+
+
