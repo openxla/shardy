@@ -23,6 +23,7 @@ limitations under the License.
 #include <tuple>
 #include <utility>
 
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
@@ -2620,6 +2621,28 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     return llvm::is_contained(startIndexMap, d);
   });
   if (needIndicesBasedPred) {
+    // Widen narrow indices so bounds and shard offset shifts cannot wrap, and
+    // cap same width unsigned indices before signed conversion so high bit
+    // values do not reinterpret as negative.
+    int64_t maxDim = 0;
+    for (int64_t dim : startIndexMap) {
+      maxDim = std::max(maxDim, globalOperandType.getDimSize(dim));
+    }
+    unsigned bitWidth = indexEltTy.getIntOrFloatBitWidth();
+    bool useI32 = maxDim <= INT32_MAX && bitWidth <= 32;
+    Type computeType = useI32 ? rewriter.getI32Type() : rewriter.getI64Type();
+    if (indexEltTy.isUnsignedInteger() && bitWidth == (useI32 ? 32 : 64)) {
+      APInt maxSigned = APInt::getSignedMaxValue(bitWidth);
+      Value cap = stablehlo::ConstantOp::create(
+          rewriter, loc, DenseIntElementsAttr::get(indicesType, maxSigned));
+      indices = stablehlo::MinOp::create(rewriter, loc, indices, cap);
+    }
+    if (computeType != indexEltTy) {
+      indexEltTy = computeType;
+      indicesType = RankedTensorType::get(indicesType.getShape(), computeType);
+      indices =
+          stablehlo::ConvertOp::create(rewriter, loc, indicesType, indices);
+    }
     Value baseIndices;
     if constexpr (std::is_same_v<DimNumbersOp,
                                  stablehlo::ScatterDimensionNumbersAttr>) {
