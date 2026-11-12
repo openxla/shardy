@@ -3190,14 +3190,20 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
 // Replication fallback helpers.
 // =============================================================================
 
-// Returns true if the convolution spatial dimension `spatialDimIdx` is a pure
-// reduction dimension without sliding-window shifts (i.e., output spatial size
-// `numWindows[spatialDimIdx]` is 1, padding is 0, window stride is 1, and
-// lhs/rhs dilations are 1). When false, sharding this spatial reduction
-// dimension also requires permutation (halo exchange) across shards.
+// Returns true if the convolution spatial dimension spatialDimIdx is a pure
+// reduction dimension without sliding-window shifts or window reversal (i.e.,
+// output spatial size numWindows[spatialDimIdx] is 1, padding is 0, window
+// stride is 1, lhs/rhs dilations are 1, and window_reversal is false). When
+// false, sharding this spatial reduction dimension also requires permutation
+// (halo exchange) across shards.
 bool isPureSpatialReductionDim(stablehlo::ConvolutionOp convOp,
                                int64_t spatialDimIdx,
                                ArrayRef<int64_t> numWindows) {
+  ArrayRef<bool> windowReversal =
+      convOp.getWindowReversal().value_or(ArrayRef<bool>());
+  if (!windowReversal.empty() && windowReversal[spatialDimIdx]) {
+    return false;
+  }
   return isWindowPassthroughDim(
       convOp.getPadding(), /*windowDimensions=*/numWindows,
       convOp.getWindowStrides().value_or(ArrayRef<int64_t>()), spatialDimIdx,
