@@ -591,6 +591,13 @@ func.func @dynamic_update_slice_constant_indices(%arg0: tensor<32x4x8xf32>, %arg
   return %2 : tensor<32x4x8xf32>
 }
 
+// CHECK-LABEL: func @exp2
+func.func @exp2(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}>
+  %0 = stablehlo.exp2 %arg0 : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
 // CHECK-LABEL: func @fft
 func.func @fft(%arg0: tensor<8x32x64xcomplex<f32>>) -> tensor<8x32x64xcomplex<f32>> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=64} need_replication={j, k}>
@@ -645,6 +652,13 @@ func.func @fft_single_fft_dimension_inverse_real_expanded_result(%arg0: tensor<8
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j, k])->([i, j, k]) {i=8, j=32, k=33} need_replication={k} blocked_propagation={k}>
   %0  = stablehlo.fft %arg0, type = IRFFT, length = [64] : (tensor<8x32x33xcomplex<f32>>) -> tensor<8x32x64xf32>
   return %0 : tensor<8x32x64xf32>
+}
+
+// CHECK-LABEL: func @fma
+func.func @fma(%arg0: tensor<4x8xf32>, %arg1: tensor<4x8xf32>, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [i, j])->([i, j]) {i=4, j=8}>
+  %0 = stablehlo.fma %arg0, %arg1, %arg2 : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
 }
 
 // CHECK-LABEL: @gather
@@ -709,6 +723,13 @@ func.func @gather_index_vector_dim_before_batching_dim(%arg0: tensor<5x3x7x4xf32
     indices_are_sorted = false
   } : (tensor<5x3x7x4xf32>, tensor<7x2x5x3xi64>) -> tensor<7x5x3x2xf32>
   return %0 : tensor<7x5x3x2xf32>
+}
+
+// CHECK-LABEL: func @log2
+func.func @log2(%arg0: tensor<4x8xf32>) -> tensor<4x8xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}>
+  %0 = stablehlo.log2 %arg0 : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
 }
 
 // CHECK-LABEL: func @map
