@@ -134,7 +134,8 @@ struct DimExchangeInfo {
   // Indicates if the exchange for this dimension is supported by HALO exchange.
   // We cannot use HALO exchange if the number of gathered shards (leftHops +
   // rightHops + 1) is equal to or larger than the total shard count in the
-  // dimension, AND we need more than 1 hop in at least one direction.
+  // dimension, AND we need more than 1 hop in at least one direction. A slice
+  // dimension with singleSourceSlice set is exempt from this limit.
   bool canUseHalo = true;
   // Reshape-specific data, present if this exchange is for a reshape op.
   std::optional<ReshapeDimExchangeInfo> reshapeInfo;
@@ -147,6 +148,19 @@ struct DimExchangeInfo {
   int64_t edgePadHigh = 0;
   // Whether to use sliced halo exchange for this dimension.
   bool useSlicedHalo = false;
+
+  // A stride-1 slice whose data all lives in one input shard.
+  struct SingleSourceSlice {
+    // Index of the input shard holding the data.
+    int64_t sourceShard;
+    // Start of the slice within that shard.
+    int64_t localStart;
+    // Number of elements sliced.
+    int64_t size;
+  };
+  // Set for a slice dimension that is lowered by slicing on the source shard
+  // and sending only the sliced pieces, instead of exchanging whole shards.
+  std::optional<SingleSourceSlice> singleSourceSlice;
 
   // Returns the base offset of the local shard within the concatenated halo
   // buffer.
@@ -729,12 +743,14 @@ Value sliceAlongDim(Location loc, Value val, int64_t dim, int64_t sliceStart,
 // partitioned by the manual axes in 'manualAxesInDim'. The number of devices
 // to shift is given by 'shardOffset'. If cyclicParticipatingShards is set,
 // shifts cyclically across the first cyclicParticipatingShards shards along
-// manualAxesInDim. Returns all the (i, j) pairs where i is the source device
+// manualAxesInDim. If sourceShard is set, only devices in that shard of the
+// dimension send. Returns all the (i, j) pairs where i is the source device
 // and j is the target device.
 SmallVector<int64_t> getDataShiftSourceTargetPairs(
     MeshAttr manualMesh, ArrayRef<AxisRefAttr> manualAxesInDim,
     int64_t shardOffset,
-    std::optional<int64_t> cyclicParticipatingShards = std::nullopt) {
+    std::optional<int64_t> cyclicParticipatingShards = std::nullopt,
+    std::optional<int64_t> sourceShard = std::nullopt) {
   ArrayRef<MeshAxisAttr> manualMeshAxes = manualMesh.getAxes();
   int64_t totalSize = manualMesh.getTotalSize();
   SmallVector<int64_t> pairs;
@@ -764,6 +780,9 @@ SmallVector<int64_t> getDataShiftSourceTargetPairs(
     for (const AxisShiftInfo& info : axisInfos) {
       int64_t subCoord = (coords[info.meshIdx] / info.postSize) % info.subSize;
       coordInDim = coordInDim * info.subSize + subCoord;
+    }
+    if (sourceShard && coordInDim != *sourceShard) {
+      continue;
     }
 
     int64_t targetCoordInDim = coordInDim + shardOffset;
@@ -1329,6 +1348,108 @@ Value exchangeDimWithDynamicOffset(
                                         localSharding, state);
 }
 
+// Lowers a slice dimension whose data all lives in one input shard: slices on
+// that shard, then sends each output shard only its own piece. Returns a value
+// of size sOut along dim, like exchangeDimWithDynamicOffset.
+Value exchangeSingleSourceSliceDim(
+    Location loc, Value operand, Value paddingValue, int64_t dim,
+    const DimExchangeInfo& dimExchange, TensorShardingAttr sharding,
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
+    TensorShardingAttr localSharding, ResolutionState& state) {
+  IRRewriter& rewriter = state.rewriter;
+  auto [sourceShard, localStart, size] = *dimExchange.singleSourceSlice;
+  int64_t sOut = dimExchange.sOut;
+  // Number of output shards that hold data; the rest hold only padding.
+  int64_t numTargets = llvm::divideCeil(size, sOut);
+  DimensionShardingAttr dimSharding = sharding.getDimShardings()[dim];
+  SmallVector<AxisRefAttr> manualAxesInDim =
+      getManualAxesInDim(dimSharding, mesh, manualAxes);
+
+  // The slice is only meaningful on the source shard.
+  Value local = sliceAlongDim(loc, operand, dim, localStart, localStart + size,
+                              localSharding, rewriter);
+  auto localType = cast<RankedTensorType>(local.getType());
+  int64_t rank = localType.getRank();
+  bool setLocalSharding = !isFullyReplicated(localSharding);
+  if (size != numTargets * sOut) {
+    // Pad so that the slice splits into equal pieces of size sOut.
+    SmallVector<int64_t> low(rank, 0), high(rank, 0), interior(rank, 0);
+    high[dim] = numTargets * sOut - size;
+    SmallVector<int64_t> paddedShape = llvm::to_vector(localType.getShape());
+    paddedShape[dim] = numTargets * sOut;
+    local = stablehlo::PadOp::create(
+        rewriter, loc,
+        RankedTensorType::get(paddedShape, localType.getElementType()), local,
+        paddingValue, rewriter.getDenseI64ArrayAttr(low),
+        rewriter.getDenseI64ArrayAttr(high),
+        rewriter.getDenseI64ArrayAttr(interior));
+    if (setLocalSharding) {
+      setSharding(local, localSharding);
+    }
+  }
+
+  auto getPieceForTarget = [&](int64_t target) {
+    Value piece = sliceAlongDim(loc, local, dim, target * sOut,
+                                (target + 1) * sOut, localSharding, rewriter);
+    if (target != sourceShard) {
+      SmallVector<int64_t> pairs = getDataShiftSourceTargetPairs(
+          mesh, manualAxesInDim, target - sourceShard,
+          /*cyclicParticipatingShards=*/std::nullopt, sourceShard);
+      SDY_CHECK(!pairs.empty());
+      piece = mayCollectivePermute(loc, piece, pairs, state);
+      if (setLocalSharding) {
+        setSharding(piece, localSharding);
+      }
+    }
+    return piece;
+  };
+
+  // When sourceShard != 0, target 0's collective_permute already zeroes all
+  // shards != 0; when numTargets == shardCount, every shard != 0 is selected
+  // below. Only sourceShard == 0 with padding shards (numTargets < shardCount)
+  // needs an explicit mask for target 0.
+  int64_t shardCount = dimSharding.getShardedSize(mesh);
+  bool maskTargetZero = sourceShard == 0 && numTargets < shardCount;
+  if (numTargets == 1 && !maskTargetZero) {
+    return getPieceForTarget(0);
+  }
+
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, createDeviceId(loc, state), mesh, dimSharding, rewriter);
+  Value result;
+  if (!maskTargetZero) {
+    result = getPieceForTarget(0);
+  } else {
+    SmallVector<int64_t> pieceShape = llvm::to_vector(localType.getShape());
+    pieceShape[dim] = sOut;
+    result = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc,
+        RankedTensorType::get(pieceShape, localType.getElementType()),
+        paddingValue, rewriter.getDenseI64ArrayAttr({}));
+    if (setLocalSharding) {
+      setSharding(result, localSharding);
+    }
+  }
+  auto pieceType = cast<RankedTensorType>(result.getType());
+  auto predType = pieceType.clone(rewriter.getI1Type());
+  for (int64_t target = maskTargetZero ? 0 : 1; target < numTargets; ++target) {
+    Value piece = getPieceForTarget(target);
+    Value isTarget = stablehlo::CompareOp::create(
+        rewriter, loc, idInPartitionGroup,
+        createScalarIntConstant(loc, rewriter.getI32Type(), target, rewriter),
+        stablehlo::ComparisonDirection::EQ);
+    Value broadcastPred = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc, predType, isTarget, rewriter.getDenseI64ArrayAttr({}));
+    result = stablehlo::SelectOp::create(rewriter, loc, pieceType,
+                                         broadcastPred, piece, result);
+    if (setLocalSharding) {
+      setSharding(broadcastPred, localSharding);
+      setSharding(result, localSharding);
+    }
+  }
+  return result;
+}
+
 // Performs HALO exchange for a sharded operand inside a manual computation
 // block.
 Value exchangeDataWithDynamicOffset(
@@ -1347,6 +1468,12 @@ Value exchangeDataWithDynamicOffset(
     }
     dimExchangeIdx++;
     if (!dimExchanges[dimExchangeIdx].needsComm) {
+      continue;
+    }
+    if (dimExchanges[dimExchangeIdx].singleSourceSlice) {
+      operand = exchangeSingleSourceSliceDim(
+          loc, operand, paddingValue, dim, dimExchanges[dimExchangeIdx],
+          sharding, mesh, manualAxes, localSharding, state);
       continue;
     }
 
@@ -3017,6 +3144,23 @@ DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
         DimExchangeInfo dimInfo = getDimExchangeInfo(
             shardCount, sIn, sOut, sFootprint, /*padLow=*/-start, stride,
             /*baseDilation=*/1, inputType.getDimSize(dim));
+        int64_t limit = sliceOp.getLimitIndices()[dim];
+        // Keep replicating an operand that is itself a reshard: the
+        // replication can fold with that reshard.
+        // TODO(b/562930354): If a single-source slice is immediately replicated
+        // by a ReshardOp, slice locally and all-gather directly from the source
+        // shard instead of sending to shard 0 first.
+        bool keepReplication = !dimInfo.canUseHalo &&
+                               sliceOp.getOperand().getDefiningOp<ReshardOp>();
+        // Any other multi-hop slice that reads a single input shard is sliced
+        // on that shard first, so only the sliced data is sent.
+        if (stride == 1 && !keepReplication &&
+            start / sIn == (limit - 1) / sIn &&
+            (dimInfo.leftHops > 1 || dimInfo.rightHops > 1)) {
+          dimInfo.singleSourceSlice = DimExchangeInfo::SingleSourceSlice{
+              start / sIn, start % sIn, limit - start};
+          dimInfo.canUseHalo = true;
+        }
         // This is a zero-hop-non-communication-free case, which doesn't
         // require collective-permute but dynamic-slice.
         dimInfo.needsComm = true;
@@ -3111,6 +3255,8 @@ Value handleLocalSliceDims(Location loc, Value exchangedLocal,
 //    - Pad the concatenated buffer by sOut.
 //    - Slice out a local segment of shape sOut using a dynamic offset computed
 //      on-device via partitionId.
+//    - A multi-hop dimension that reads a single input shard is instead sliced
+//      on that shard, which sends each output shard its piece.
 // 3. Implement replicated slice dimensions:
 // 4. Trim final tensor shape to match expected output shape.
 LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
