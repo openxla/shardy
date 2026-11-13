@@ -41,6 +41,7 @@ limitations under the License.
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/utils.h"
 #include "shardy/dialect/sdy/transforms/export/passes.h"  // IWYU pragma: keep
@@ -139,30 +140,30 @@ struct AxisWithinCapacity {
   OptionalAxisRef remainderAxis;
 };
 
-// Returns an `AxisWithinCapacity` for the given `axis` w.r.t. to the given
-// `capacity`.
-//
-// In addition, updates `capacity` by dividing it by the size of the axis that
-// fits.
+// Returns an `AxisWithinCapacity` for the given `axis` w.r.t. `capacity`,
+// dividing `capacity` by the fitted size. Requires `axis` and `capacity` to be
+// divisible unless `splitByGcd` is true (which takes `gcd(size(axis),
+// capacity)`).
 AxisWithinCapacity getAxisWithinCapacity(AxisRefAttr axis, int64_t& capacity,
-                                         MeshAttr mesh) {
+                                         MeshAttr mesh,
+                                         bool splitByGcd = false) {
   int64_t axisSize = axis.getSize(mesh);
-  // We could use `std::gcd(axisSize, capacity)` instead, but in practice this
-  // isn't needed because how all-slice insertion works for non-divisible case.
-  if (capacity <= 1 || !areDivisible(axisSize, capacity)) {
+  // When `splitByGcd` is true, take the largest prefix of `axis` that divides
+  // `capacity` even when neither size divides the other (e.g. 2 of 4 for 6).
+  int64_t withinSize = std::gcd(axisSize, capacity);
+  if (capacity <= 1 || withinSize == 1 ||
+      (!splitByGcd && withinSize != std::min(axisSize, capacity))) {
     return {};
   }
-  if (capacity >= axisSize) {
-    capacity /= axisSize;
+  capacity /= withinSize;
+  if (withinSize == axisSize) {
     return {axis, /*remainderAxis=*/std::nullopt};
   }
-
   auto withinAxis = AxisRefAttr::get(mesh.getContext(), axis.getName(),
-                                     axis.getSubAxisPreSize(), capacity);
+                                     axis.getSubAxisPreSize(), withinSize);
   auto remainderAxis = AxisRefAttr::get(
       mesh.getContext(), axis.getName(),
-      withinAxis.getNextPreSizeOrFullSize(mesh), axisSize / capacity);
-  capacity = 1;
+      withinAxis.getNextPreSizeOrFullSize(mesh), axisSize / withinSize);
   return {withinAxis, remainderAxis};
 }
 
@@ -265,29 +266,7 @@ class CollectiveInserter {
     // exactly the same during the reshard. We are left with `inAxesPerDim` and
     // `outAxesPerDim` that need to become empty, via a sequence of collectives.
     for (int64_t dim = 0; dim < getRank(); ++dim) {
-      if (dimsToUnshard[dim]) {
-        continue;
-      }
-      AxisList& inAxes = inAxesPerDim[dim];
-      AxisList& outAxes = outAxesPerDim[dim];
-      auto inIt = inAxes.begin();
-      auto outIt = outAxes.begin();
-      int64_t prefixSize = 1;
-      auto validInEnd = inIt;
-      auto validOutEnd = outIt;
-      while (inIt != inAxes.end() && outIt != outAxes.end() &&
-             *inIt == *outIt) {
-        prefixSize *= inIt->getSize(mesh);
-        ++inIt;
-        ++outIt;
-        if ((inIt == inAxes.end() && outIt == outAxes.end()) ||
-            isValidShardedSizeTransition(dim, prefixSize)) {
-          validInEnd = inIt;
-          validOutEnd = outIt;
-        }
-      }
-      inAxes.erase(inAxes.begin(), validInEnd);
-      outAxes.erase(outAxes.begin(), validOutEnd);
+      eraseCommonPrefix(dim);
     }
 
     inAxisSet = getAxisSet(inAxesPerDim);
@@ -308,12 +287,14 @@ class CollectiveInserter {
     // can be handled by the previous collectives, so we are left with
     // all-gathering all axes in `inAxesPerDim` and we're done.
     //
-    // Otherwise, we need at most 2 iterations (or 3 if a dimension must first
-    // be unsharded due to a padded dimension size mismatch).
+    // Mixed-radix meshes (e.g. 2x3x4, 2x3x4x5) can split non-divisible axes
+    // across multiple rounds. Loop while progress is made up to a safety bound.
 
     // TODO(tomnatan): consider looping only over all-to-all and collective
     // permute as long as one of them was inserted.
-    for (int i = 0; i < 3 && !isDone(); ++i) {
+    constexpr int kMaxIterations = 16;
+    for (int i = 0; i < kMaxIterations && !isDone(); ++i) {
+      Value prevResult = result;
       // 1. Try to insert an all-slice, that decreases the size of the tensor.
       tryAllSlice();
 
@@ -333,8 +314,11 @@ class CollectiveInserter {
 
       // 4. Try to insert an all-gather, that increases the size of the tensor.
       tryAllGather();
+      if (result == prevResult) {
+        break;
+      }
     }
-    assert(isDone());
+    SDY_CHECK(isDone());
 
     return result;
   }
@@ -373,6 +357,38 @@ class CollectiveInserter {
       return false;
     }
     return true;
+  }
+
+  // Erases the longest common prefix of `inAxesPerDim[dim]` and
+  // `outAxesPerDim[dim]` whose sharded size preserves `dim`'s padded size (or
+  // reaches the complete output sharding of `dim`).
+  void eraseCommonPrefix(int64_t dim) {
+    if (dimsToUnshard[dim]) {
+      return;
+    }
+    AxisList& inAxes = inAxesPerDim[dim];
+    AxisList& outAxes = outAxesPerDim[dim];
+    int64_t prefixSize = getShardedSize(currentAxesPerDim[dim], mesh) /
+                         getShardedSize(inAxes, mesh);
+    auto inIt = inAxes.begin();
+    auto outIt = outAxes.begin();
+    auto validInEnd = inIt;
+    auto validOutEnd = outIt;
+    while (inIt != inAxes.end() && outIt != outAxes.end() && *inIt == *outIt) {
+      prefixSize *= inIt->getSize(mesh);
+      ++inIt;
+      ++outIt;
+      if ((inIt == inAxes.end() && outIt == outAxes.end()) ||
+          isValidShardedSizeTransition(dim, prefixSize)) {
+        validInEnd = inIt;
+        validOutEnd = outIt;
+      }
+    }
+    for (auto it = inAxes.begin(); it != validInEnd; ++it) {
+      inAxisSet.erase(*it);
+    }
+    inAxes.erase(inAxes.begin(), validInEnd);
+    outAxes.erase(outAxes.begin(), validOutEnd);
   }
 
   TensorShardingAttr getCurrentSharding() const {
@@ -491,14 +507,13 @@ class CollectiveInserter {
   // `inAxesPerDim[d]` based on the capacity for that dimension
   // (`capacityPerDim[d]`).
   //
-  // For each dimension d, as long as `capacityPerDim[d] > 1` , pops the first
-  // axis A in `getAvailableAxes(d), and either:
-  // - Adds A as a whole to `inAxesPerDim[d]` if `size(A) >= capacityPerDim[d]`.
-  // - Splits A into two sub-axes A1 and A2, such that
-  //   `size(A1) == capacityPerDim[d]`, adds A1 to `inAxesPerDim[d]`, and adds
-  //   A2 back to the front of `getAvailableAxes(d)`.
-  // - Skips A if it isn't divisible by `capacityPerDim[d]` or vice versa, and
-  //   adds it back to the front of `getAvailableAxes(d)`.
+  // For each dimension d, while `capacityPerDim[d] > 1`, scans
+  // `getAvailableAxes(d)` and for each axis A with
+  // `g = gcd(size(A), capacityPerDim[d]) > 1`:
+  // - Adds A as a whole to `inAxesPerDim[d]` if `g == size(A)`.
+  // - Otherwise splits A into sub-axes A1 (size `g`) and A2, adds A1 to
+  //   `inAxesPerDim[d]`, and pushes A2 to the front of `getAvailableAxes(d)`.
+  // - Skips A in place if `g == 1`.
   //
   // For each axis A that is added to `inAxesPerDim[d]`, calls
   // `consumeAxisToAdd(A, d)`.
@@ -514,8 +529,8 @@ class CollectiveInserter {
       AxisList& availableAxes = getAvailableAxes(dim);
       auto availableIt = availableAxes.begin();
       while (availableIt != availableAxes.end() && dimCapacity > 1) {
-        auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(*availableIt, dimCapacity, mesh);
+        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+            *availableIt, dimCapacity, mesh, /*splitByGcd=*/true);
         if (!withinAxis) {
           ++availableIt;
           continue;
@@ -724,7 +739,8 @@ class CollectiveInserter {
   //    first dimension d such that `capacityPerDim[d] > 1`.
   //
   // In case `size(A) > capacityPerDim[d]`, we split A into two sub-axes A1 and
-  // A2, such that `size(A1) == capacityPerDim[d]`, and slice along A1 (filling
+  // A2, such that `size(A1) == capacityPerDim[d]` (or
+  // `gcd(size(A), capacityPerDim[d])` in stage 3), and slice along A1 (filling
   // in the gap).
   //
   // The internal state is updated as follows for each dimension `d` and the
@@ -868,20 +884,16 @@ class CollectiveInserter {
         hasSlicingAxes = true;
         addAxisOrMerge(slicingAxes, *withinAxis, mesh);
         addAxisOrMerge(currentAxes, *withinAxis, mesh);
-        if (inAxes.empty() && outIt == outAxes.begin()) {
-          // Slicing axis is where it needs to be.
-          outIt = outAxes.erase(outIt);
-        } else {
-          inAxisSet.insert(*withinAxis);
-          inAxes.push_back(*withinAxis);
-          *outIt = *withinAxis;
-          ++outIt;
-        }
+        inAxisSet.insert(*withinAxis);
+        inAxes.push_back(*withinAxis);
+        *outIt = *withinAxis;
+        ++outIt;
         if (remainderAxis) {
           outAxes.insert(outIt, *remainderAxis);
           availableOutAxes.push_back(*remainderAxis);
         }
       }
+      eraseCommonPrefix(dim);
     }
 
     // 3. Slice axes in the first dimension that has enough capacity.
@@ -894,8 +906,8 @@ class CollectiveInserter {
             int64_t simCapacity = dimCapacity;
             int64_t addedSize = 1;
             for (AxisRefAttr availAxis : availableOutAxes) {
-              auto [withinAxis, remainderAxis] =
-                  getAxisWithinCapacity(availAxis, simCapacity, mesh);
+              auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+                  availAxis, simCapacity, mesh, /*splitByGcd=*/true);
               if (withinAxis) {
                 addedSize *= withinAxis->getSize(mesh);
               }
@@ -1061,8 +1073,8 @@ class CollectiveInserter {
   //    `curCapacity[d] > 1`.
   //
   // In case `size(A) > curCapacity[d]`, we split A into two sub-axes A1 and A2,
-  // such that `size(A1) == curCapacity[d]`, and pick A1 for that dimension
-  // (filling in the gap).
+  // such that `size(A1) == gcd(size(A), curCapacity[d])`, and pick A1 for that
+  // dimension (filling in the gap).
   //
   // The internal state is updated as follows for each dimension `d`:
   //
@@ -1125,26 +1137,29 @@ class CollectiveInserter {
   // - `currentAxesPerDim = [["z", "y"], ["x"]]`
   void performCollectivePermute() {
     AxisList availableOutAxes;
+    SmallVector<AxisList> placedOutAxesPerDim(getRank());
     SmallVector<AxisList> availableInAxesPerDim(getRank());
 
     // 1. Place out axes in the right position.
     inAxisSet.clear();
-    for (auto [inAxes, outAxes, currentAxes, dimCapacity, availableInAxes] :
+    for (auto [inAxes, outAxes, currentAxes, dimCapacity, placedOutAxes,
+               availableInAxes] :
          llvm::zip_equal(inAxesPerDim, outAxesPerDim, currentAxesPerDim,
-                         capacityPerDim, availableInAxesPerDim)) {
+                         capacityPerDim, placedOutAxesPerDim,
+                         availableInAxesPerDim)) {
       // TODO(tomnatan): consider reusing from `getSlicingAxesPerDim`.
       dimCapacity = getShardedSize(inAxes, mesh);
       int64_t usedCapacity = dimCapacity;
       popBackFromCurrentAxes(currentAxes, inAxes, inAxes.begin());
       while (dimCapacity > 1 && !outAxes.empty()) {
-        auto [withinAxis, remainderAxis] =
-            getAxisWithinCapacity(outAxes.front(), dimCapacity, mesh);
+        auto [withinAxis, remainderAxis] = getAxisWithinCapacity(
+            outAxes.front(), dimCapacity, mesh, /*splitByGcd=*/true);
         if (!withinAxis) {
-          // Size of `outAxes.front()` not divisible by capacity or vice versa.
+          // Size of `outAxes.front()` is coprime with capacity.
           break;
         }
         outAxes.pop_front();
-        addAxisOrMerge(currentAxes, *withinAxis, mesh);
+        placedOutAxes.push_back(*withinAxis);
         if (remainderAxis) {
           outAxes.push_front(*remainderAxis);
         }
@@ -1187,16 +1202,26 @@ class CollectiveInserter {
     AxisList availableInAxes = concatAxisLists(availableInAxesPerDim);
     distributeInAxesWithinCapacity(availableInAxes, /*addToFront=*/true);
 
-    // We need to recreate the map because we might have split an out axis due
-    // to capacity constraint.
-    outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
-
-    for (auto [inAxes, currentAxes] :
-         llvm::zip_equal(inAxesPerDim, currentAxesPerDim)) {
+    for (int64_t dim = 0; dim < getRank(); ++dim) {
+      AxisList& placedOutAxes = placedOutAxesPerDim[dim];
+      AxisList& inAxes = inAxesPerDim[dim];
+      AxisList& outAxes = outAxesPerDim[dim];
+      SmallVector<AxisRefAttr>& currentAxes = currentAxesPerDim[dim];
+      for (AxisRefAttr axis : placedOutAxes) {
+        inAxisSet.insert(axis);
+      }
+      outAxes.insert(outAxes.begin(), placedOutAxes.begin(),
+                     placedOutAxes.end());
+      inAxes.splice(inAxes.begin(), placedOutAxes);
       for (AxisRefAttr axis : inAxes) {
         addAxisOrMerge(currentAxes, axis, mesh);
       }
+      eraseCommonPrefix(dim);
     }
+
+    // We need to recreate the map because we might have split an out axis due
+    // to capacity constraint.
+    outAxisToDimAndIndex = getAxisToDimAndIndex(outAxesPerDim);
   }
 
   // Tries to insert an `sdy.collective_permute`.
@@ -1205,6 +1230,7 @@ class CollectiveInserter {
     // the actual creation of the collective permute, since the latter isn't
     // guaranteed to maintain the order of axes in case a collective permute is
     // actually redundant.
+    TensorShardingAttr prevSharding = getCurrentSharding();
     if (shouldCollectivePermute()) {
       performCollectivePermute();
     } else if (curMeshOrRef == outMeshOrRef) {
@@ -1220,8 +1246,11 @@ class CollectiveInserter {
     // TODO(b/392797233): if the order of device ids changes, but the input or
     // output sharding is fully replicated, we can skip the collective permute.
 
-    result = CollectivePermuteOp::create(rewriter, loc, result,
-                                         getCurrentSharding());
+    TensorShardingAttr newSharding = getCurrentSharding();
+    if (newSharding == prevSharding) {
+      return;
+    }
+    result = CollectivePermuteOp::create(rewriter, loc, result, newSharding);
   }
 
   // TODO(b/392952931): currently we are greedily all-to-all-ing axes even if
@@ -1367,14 +1396,9 @@ class CollectiveInserter {
       addAxisOrMerge(result.axes, axis, mesh);
       addAxisOrMerge(tgtCurrentAxes, axis, mesh);
       srcInAxisIt = srcInAxes.erase(srcInAxisIt);
-      inAxisSet.erase(axis);
-      if (tgtInAxes.empty() && tgtOutAxes.front() == axis) {
-        tgtOutAxes.pop_front();
-      } else {
-        tgtInAxes.push_back(axis);
-        inAxisSet.insert(axis);
-      }
+      tgtInAxes.push_back(axis);
     }
+    eraseCommonPrefix(*tgtDim);
 
     return result;
   }
@@ -1434,7 +1458,6 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
  public:
   using OpConversionPattern::OpConversionPattern;
 
- private:
   LogicalResult matchAndRewrite(
       ReshardOp op, OpAdaptor adaptor,
       ConversionPatternRewriter& rewriter) const override {
@@ -1505,7 +1528,7 @@ struct ReshardToCollectivesPass
     : public impl::ReshardToCollectivesPassBase<ReshardToCollectivesPass> {
   using ReshardToCollectivesPassBase::ReshardToCollectivesPassBase;
 
- private:
+ protected:
   LogicalResult initialize(MLIRContext* context) final {
     target = std::make_shared<ConversionTarget>(*context);
     target->addLegalOp<AllGatherOp, AllSliceOp, AllToAllOp,

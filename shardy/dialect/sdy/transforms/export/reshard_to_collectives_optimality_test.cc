@@ -546,6 +546,7 @@ bool validateCollectiveStep(Operation& op, const ReshardGraph& graph,
     elems = ReshardGraph::allToAllElems(from.localElems, groupSize);
   } else if (isa<CollectivePermuteOp>(op)) {
     kind = MoveKind::kCollectivePermute;
+    valid &= from.state != to.state;
     for (auto [x, y] : llvm::zip_equal(from.state, to.state)) {
       valid &= graph.atomsSize(x) == graph.atomsSize(y);
     }
@@ -991,6 +992,13 @@ TEST_F(ReshardOptimalityTest, ShortestPathMatchesHandComputedCosts) {
 TEST_F(ReshardOptimalityTest, NonDivisibleShapesPreservePaddingInvariants) {
   verifyNonDivisibleAllPairs({{"a", 2}, {"b", 3}}, {5, 9});
   verifyNonDivisibleAllPairs({{"a", 2}, {"b", 4}}, {6, 10});
+  verifyNonDivisibleAllPairs({{"a", 2}, {"b", 2}, {"c", 3}}, {6, 10});
+  verifyNonDivisibleAllPairs({{"a", 2}, {"b", 4}}, {5, 6, 10});
+  verifyNonDivisibleAllPairs({{"a", 2}, {"b", 3}, {"c", 4}}, {5, 10});
+  if (const char* env = std::getenv("SDY_RUN_LARGE_OPTIMALITY_SWEEP");
+      env && std::string_view(env) == "1") {
+    verifyNonDivisibleAllPairs({{"a", 2}, {"b", 3}, {"c", 4}}, {5, 10, 14});
+  }
 }
 
 struct SweepCase {
@@ -1027,11 +1035,11 @@ TEST_P(ReshardOptimalitySweepTest, AllPairs) {
 INSTANTIATE_TEST_SUITE_P(
     SmallMeshes, ReshardOptimalitySweepTest,
     ::testing::Values(
-        SweepCase{"2x3_rank2", {{"a", 2}, {"b", 3}}, {6, 12}, 20, 0},
+        SweepCase{"2x3_rank2", {{"a", 2}, {"b", 3}}, {6, 12}, 18, 0},
         SweepCase{"2x4_rank2", {{"a", 2}, {"b", 4}}, {8, 16}, 372, 0},
         SweepCase{"2x4_rank3", {{"a", 2}, {"b", 4}}, {8, 16, 24}, 2970, 0},
         SweepCase{
-            "2x3x4_rank2", {{"a", 2}, {"b", 3}, {"c", 4}}, {24, 48}, 21406, 21},
+            "2x3x4_rank2", {{"a", 2}, {"b", 3}, {"c", 4}}, {24, 48}, 21054, 0},
         SweepCase{
             "2x2x4_rank2", {{"a", 2}, {"b", 2}, {"c", 4}}, {16, 32}, 8400, 0}),
     [](const ::testing::TestParamInfo<SweepCase>& info) {
@@ -1047,8 +1055,8 @@ std::vector<SweepCase> largeSweepCases() {
       SweepCase{"2x3x4_rank3",
                 {{"a", 2}, {"b", 3}, {"c", 4}},
                 {24, 48, 72},
-                210609,
-                138},
+                208122,
+                0},
       SweepCase{"2x2x4_rank3",
                 {{"a", 2}, {"b", 2}, {"c", 4}},
                 {16, 32, 48},
@@ -1058,8 +1066,8 @@ std::vector<SweepCase> largeSweepCases() {
       SweepCase{"2x3x4x5_rank2",
                 {{"a", 2}, {"b", 3}, {"c", 4}, {"d", 5}},
                 {120, 240},
-                1236323,
-                1408},
+                1225952,
+                0},
   };
 }
 
