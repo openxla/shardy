@@ -52,6 +52,33 @@ func.func @parallel_all_gather_slice_2d(
   return %1 : tensor<4x2xf32>
 }
 
+func.func @sequential_all_gather_slice_1d_nonzero_shard(%arg0: tensor<4xf32>) -> tensor<2xf32> {
+  %0 = stablehlo.slice %arg0 [2:4] : (tensor<4xf32>) -> tensor<2xf32>
+  return %0 : tensor<2xf32>
+}
+
+func.func @parallel_all_gather_slice_1d_nonzero_shard(
+    %arg0: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+    -> tensor<2xf32> {
+  %0 = sdy.all_gather [{"x"}] %arg0 out_sharding=<@mesh_2, [{}]> : tensor<4xf32>
+  %1 = stablehlo.slice %0 [2:4] : (tensor<4xf32>) -> tensor<2xf32>
+  return %1 : tensor<2xf32>
+}
+
+func.func @sequential_all_gather_slice_2d_nonzero_shard(%arg0: tensor<4x4xf32>) -> tensor<4x2xf32> {
+  %0 = stablehlo.slice %arg0 [0:4, 2:4] : (tensor<4x4xf32>) -> tensor<4x2xf32>
+  return %0 : tensor<4x2xf32>
+}
+
+func.func @parallel_all_gather_slice_2d_nonzero_shard(
+    %arg0: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_2, [{"x"}, {"y"}]>})
+    -> (tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_2, [{"x"}, {}]>}) {
+  %0 = sdy.all_gather [{}, {"y"}] %arg0 out_sharding=<@mesh_2_2, [{"x"}, {}]> : tensor<4x4xf32>
+  %1 = stablehlo.slice %0 [0:4, 2:4] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_2, [{"x"}, {}]>]>}
+    : (tensor<4x4xf32>) -> tensor<4x2xf32>
+  return %1 : tensor<4x2xf32>
+}
+
 //--- part2.mlir
 
 // Main Orchestrator: executes the sequential and parallel slice programs and
@@ -126,6 +153,27 @@ func.func @main() {
     dimension = 0 : i64
   } : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<4x2xf32>
   check.expect_eq %seq_2d, %par_2d : tensor<4x2xf32>
+
+  // 1D all_gather => slice [2:4] (non-zero shard index 1) test on @mesh_2.
+  %seq_1d_nz = func.call @sequential_all_gather_slice_1d_nonzero_shard(%input_1d) : (tensor<4xf32>) -> tensor<2xf32>
+  %pars_1d_nz:2 = "interpreter.run_parallel"(%s1d_0, %s1d_1) {
+    programs = [[@parallel_all_gather_slice_1d_nonzero_shard, @parallel_all_gather_slice_1d_nonzero_shard]]
+  } : (tensor<2xf32>, tensor<2xf32>) -> (tensor<2xf32>, tensor<2xf32>)
+  check.expect_eq %seq_1d_nz, %pars_1d_nz#0 : tensor<2xf32>
+  check.expect_eq %seq_1d_nz, %pars_1d_nz#1 : tensor<2xf32>
+
+  // 2D all_gather => slice [0:4, 2:4] (non-zero shard index 1 along "y") test on @mesh_2_2.
+  %seq_2d_nz = func.call @sequential_all_gather_slice_2d_nonzero_shard(%input_2d) : (tensor<4x4xf32>) -> tensor<4x2xf32>
+  %pars_2d_nz:4 = "interpreter.run_parallel"(%s2d_0, %s2d_1, %s2d_2, %s2d_3) {
+    programs = [[@parallel_all_gather_slice_2d_nonzero_shard, @parallel_all_gather_slice_2d_nonzero_shard, @parallel_all_gather_slice_2d_nonzero_shard, @parallel_all_gather_slice_2d_nonzero_shard]]
+  } : (tensor<2x2xf32>, tensor<2x2xf32>, tensor<2x2xf32>, tensor<2x2xf32>) ->
+      (tensor<2x2xf32>, tensor<2x2xf32>, tensor<2x2xf32>, tensor<2x2xf32>)
+  check.expect_eq %pars_2d_nz#0, %pars_2d_nz#1 : tensor<2x2xf32>
+  check.expect_eq %pars_2d_nz#2, %pars_2d_nz#3 : tensor<2x2xf32>
+  %par_2d_nz = "stablehlo.concatenate"(%pars_2d_nz#0, %pars_2d_nz#2) {
+    dimension = 0 : i64
+  } : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<4x2xf32>
+  check.expect_eq %seq_2d_nz, %par_2d_nz : tensor<4x2xf32>
 
   return
 }

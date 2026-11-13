@@ -858,16 +858,18 @@ Value emitDynamicSliceForAxes(Location loc, Value globalTensor, MeshAttr mesh,
       .getResult();
 }
 
-// Masks non-leader shards (where shard index across `axes` != 0) to
-// `nonLeaderVal` (or zero if `nonLeaderVal` is null).
+// Masks non-leader shards (where shard index across `axes` !=
+// `leaderShardIndex`) to `nonLeaderVal` (or zero if `nonLeaderVal` is null).
 SmallVector<Value> maskNonLeaderShards(
     Location loc, ValueRange inputs, MeshAttr mesh, ArrayRef<AxisRefAttr> axes,
     const ConversionState& conversionState, ConversionPatternRewriter& rewriter,
-    Value nonLeaderVal = nullptr, Value deviceId = nullptr) {
+    Value nonLeaderVal = nullptr, Value deviceId = nullptr,
+    int64_t leaderShardIndex = 0) {
   int64_t numDevices = mesh.getTotalSize();
   SmallVector<bool> leaderTable = llvm::map_to_vector(
-      llvm::seq<int64_t>(0, numDevices),
-      [&](int64_t devId) { return getShardIndex(devId, mesh, axes) == 0; });
+      llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
+        return getShardIndex(devId, mesh, axes) == leaderShardIndex;
+      });
   bool singleLeader = llvm::count(leaderTable, true) == 1;
   bool onlyDeviceZeroIsLeader = singleLeader && leaderTable[0];
   Value isLeader;
@@ -916,14 +918,17 @@ SmallVector<Value> maskNonLeaderShards(
   });
 }
 
-// Masks non-leader shards (where shard index across `axes` != 0) to zero.
+// Masks non-leader shards (where shard index across `axes` !=
+// `leaderShardIndex`) to zero.
 Value maskNonLeaderShardsToZero(Location loc, Value input, MeshAttr mesh,
                                 ArrayRef<AxisRefAttr> axes,
                                 const ConversionState& conversionState,
                                 ConversionPatternRewriter& rewriter,
-                                Value deviceId = nullptr) {
+                                Value deviceId = nullptr,
+                                int64_t leaderShardIndex = 0) {
   return maskNonLeaderShards(loc, input, mesh, axes, conversionState, rewriter,
-                             /*nonLeaderVal=*/nullptr, deviceId)
+                             /*nonLeaderVal=*/nullptr, deviceId,
+                             leaderShardIndex)
       .front();
 }
 
@@ -3548,14 +3553,14 @@ class StablehloScatterOpPattern
 };
 
 // Implements:
-//   all_gather (single-user) => slice [0:K]
+//   all_gather (single-user) => slice [k*K : (k+1)*K]
 // where the all_gather only gathers on the slicing dimension, turns that
 // dimension into a replicated dimension, and K equals the all_gather
 // local operand size on that dimension, with:
 //   maskNonLeaderShardsToZero (select) => stablehlo.all_reduce (SUM)
 //
-// This is because the op chains effectively broadcast the local slice[0:K] from
-// the leader to all shards.
+// This is because the op chains effectively broadcast the local shard k from
+// that shard to all shards.
 class AllGatherAndSliceViaAllReducePattern
     : public OpConversionPattern<stablehlo::SliceOp> {
  public:
@@ -3611,18 +3616,26 @@ class AllGatherAndSliceViaAllReducePattern
     ArrayRef<int64_t> limits = op.getLimitIndices();
     ArrayRef<int64_t> strides = op.getStrides();
     ArrayRef<int64_t> globalInShape = op.getOperand().getType().getShape();
+    int64_t shardSize = agInputType.getDimSize(gatherDim);
+    if (shardSize <= 0 || starts[gatherDim] < 0 ||
+        starts[gatherDim] % shardSize != 0 ||
+        limits[gatherDim] - starts[gatherDim] != shardSize) {
+      return failure();
+    }
     for (int64_t d = 0; d < agInputType.getRank(); ++d) {
-      int64_t expectedLimit = (d == gatherDim)
-                                  ? agInputType.getDimSize(gatherDim)
-                                  : globalInShape[d];
-      if (starts[d] != 0 || strides[d] != 1 || limits[d] != expectedLimit) {
+      if (strides[d] != 1) {
+        return failure();
+      }
+      if (d != gatherDim && (starts[d] != 0 || limits[d] != globalInShape[d])) {
         return failure();
       }
     }
 
     Location loc = op.getLoc();
-    Value masked = maskNonLeaderShardsToZero(loc, agInput, mesh, axes,
-                                             conversionState, rewriter);
+    Value masked = maskNonLeaderShardsToZero(
+        loc, agInput, mesh, axes, conversionState, rewriter,
+        /*deviceId=*/nullptr,
+        /*leaderShardIndex=*/starts[gatherDim] / shardSize);
     auto allReduce = stablehlo::AllReduceOp::create(
         rewriter, loc, TypeRange{localResultType}, ValueRange{masked},
         shloAllGather.getReplicaGroupsAttr(),
