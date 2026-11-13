@@ -35,9 +35,11 @@ limitations under the License.
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/transforms/common/util.h"
 #include "shardy/dialect/sdy/transforms/import/passes.h"  // IWYU pragma: keep
 #include "stablehlo/dialect/StablehloOps.h"
@@ -50,6 +52,67 @@ namespace sdy {
 
 namespace {
 
+// Unwraps any chain of `sdy::ShardingConstraintOp`.
+Value stripShardingConstraints(Value val) {
+  while (auto sc = val.getDefiningOp<ShardingConstraintOp>()) {
+    val = sc.getInput();
+  }
+  return val;
+}
+
+// Returns true if `val` traces through broadcasts, reshapes, converts, or
+// sharding constraints to a splat integer zero constant (`sdy.constant` or
+// `stablehlo.constant`).
+bool isZeroConstant(Value val) {
+  while (val) {
+    val = stripShardingConstraints(val);
+    if (auto bcast = val.getDefiningOp<stablehlo::BroadcastInDimOp>()) {
+      val = bcast.getOperand();
+      continue;
+    }
+    if (auto reshape = val.getDefiningOp<stablehlo::ReshapeOp>()) {
+      val = reshape.getOperand();
+      continue;
+    }
+    if (auto convert = val.getDefiningOp<stablehlo::ConvertOp>()) {
+      val = convert.getOperand();
+      continue;
+    }
+    break;
+  }
+  ElementsAttr attr;
+  if (auto sdyConst = val.getDefiningOp<ConstantOp>()) {
+    attr = sdyConst.getValue();
+  } else if (auto shloConst = val.getDefiningOp<stablehlo::ConstantOp>()) {
+    attr = shloConst.getValue();
+  }
+  return attr && attr.isSplat() && isa<IntegerType>(attr.getElementType()) &&
+         attr.getSplatValue<APInt>().isZero();
+}
+
+// Recursively erases dead index computation ops including
+// `ShardingConstraintOp` (which lacks the `Pure` trait so
+// `applyPatternsGreedily` does not DCE it).
+void eraseDeadIndexChain(PatternRewriter& rewriter, Value root) {
+  SmallVector<Operation*> worklist;
+  if (Operation* defOp = root.getDefiningOp()) {
+    worklist.push_back(defOp);
+  }
+  while (!worklist.empty()) {
+    Operation* op = worklist.pop_back_val();
+    if (!op || !op->use_empty()) continue;
+    if (!isOpTriviallyDead(op) && !isa<ShardingConstraintOp>(op)) continue;
+    for (Value operand : op->getOperands()) {
+      if (Operation* operandOp = operand.getDefiningOp()) {
+        if (!llvm::is_contained(worklist, operandOp)) {
+          worklist.push_back(operandOp);
+        }
+      }
+    }
+    rewriter.eraseOp(op);
+  }
+}
+
 // Helper function to slice out a specific index component from an index
 // vector and concatenate the remaining parts. This is used when an implicit
 // batch dimension is being removed from the index map.
@@ -60,23 +123,40 @@ Value sliceAndConcatenateIndices(PatternRewriter& rewriter, Location loc,
   auto currentShape = indicesType.getShape();
   int64_t total = currentShape[indexVectorDim];
 
+  auto outerScOp = indices.getDefiningOp<ShardingConstraintOp>();
+  Value unwrappedIndices = stripShardingConstraints(indices);
+
+  auto maybePreserveShardingConstraint = [&](Value newIndices) -> Value {
+    if (outerScOp &&
+        outerScOp.getSharding().getDimSharding(indexVectorDim).emptyAxes() &&
+        !newIndices.getDefiningOp<ShardingConstraintOp>()) {
+      return ShardingConstraintOp::create(rewriter, loc, newIndices,
+                                          outerScOp.getSharding());
+    }
+    return newIndices;
+  };
+
   // If start_indices is already a ConcatenateOp along the index vector dim,
   // simply remove the component at removedIdx.
-  if (auto concatOp = indices.getDefiningOp<stablehlo::ConcatenateOp>()) {
+  if (auto concatOp =
+          unwrappedIndices.getDefiningOp<stablehlo::ConcatenateOp>()) {
     if (static_cast<int64_t>(concatOp.getDimension()) == indexVectorDim &&
         static_cast<int64_t>(concatOp.getInputs().size()) == total) {
       SmallVector<Value> inputs = llvm::to_vector(concatOp.getInputs());
       inputs.erase(inputs.begin() + removedIdx);
 
       // If only one component remains, return it directly.
-      if (inputs.size() == 1) return inputs[0];
+      if (inputs.size() == 1) {
+        return maybePreserveShardingConstraint(inputs[0]);
+      }
 
       auto concatShape = llvm::to_vector(currentShape);
       concatShape[indexVectorDim] -= 1;
       auto concatType =
           RankedTensorType::get(concatShape, indicesType.getElementType());
-      return stablehlo::ConcatenateOp::create(rewriter, loc, concatType, inputs,
-                                              indexVectorDim);
+      Value newConcat = stablehlo::ConcatenateOp::create(
+          rewriter, loc, concatType, inputs, indexVectorDim);
+      return maybePreserveShardingConstraint(newConcat);
     }
   }
 
@@ -105,14 +185,17 @@ Value sliceAndConcatenateIndices(PatternRewriter& rewriter, Location loc,
   addPart(0, removedIdx);
   addPart(removedIdx + 1, total);
 
-  if (keptParts.size() == 1) return keptParts[0];
+  if (keptParts.size() == 1) {
+    return maybePreserveShardingConstraint(keptParts[0]);
+  }
 
   auto resultShape = llvm::to_vector(currentShape);
   resultShape[indexVectorDim] -= 1;
   auto resultType =
       RankedTensorType::get(resultShape, indicesType.getElementType());
-  return stablehlo::ConcatenateOp::create(rewriter, loc, resultType, keptParts,
-                                          indexVectorDim);
+  Value newConcat = stablehlo::ConcatenateOp::create(rewriter, loc, resultType,
+                                                     keptParts, indexVectorDim);
+  return maybePreserveShardingConstraint(newConcat);
 }
 
 // Returns the corresponding dimension in `inType` if `currDim` in `outType`
@@ -155,12 +238,43 @@ std::optional<int64_t> matchNonUnitReshapeDim(RankedTensorType inType,
 bool tracesToIota(Value val, int64_t dim) {
   int64_t currDim = dim;
   while (val) {
+    if (auto sc = val.getDefiningOp<ShardingConstraintOp>()) {
+      val = sc.getInput();
+      continue;
+    }
     if (auto iota = val.getDefiningOp<stablehlo::IotaOp>()) {
       return static_cast<int64_t>(iota.getIotaDimension()) == currDim;
     }
     if (auto convert = val.getDefiningOp<stablehlo::ConvertOp>()) {
       val = convert.getOperand();
       continue;
+    }
+    // Unwrap negative-index normalization `select(x < 0, x + D, x)` since
+    // iota values are non-negative.
+    if (auto select = val.getDefiningOp<stablehlo::SelectOp>()) {
+      Value pred = stripShardingConstraints(select.getPred());
+      Value onTrue = stripShardingConstraints(select.getOnTrue());
+      Value onFalse = stripShardingConstraints(select.getOnFalse());
+      if (auto cmp = pred.getDefiningOp<stablehlo::CompareOp>()) {
+        Value lhs = stripShardingConstraints(cmp.getLhs());
+        Value rhs = stripShardingConstraints(cmp.getRhs());
+        auto dir = cmp.getComparisonDirection();
+        if ((dir == stablehlo::ComparisonDirection::LT && lhs == onFalse &&
+             isZeroConstant(rhs)) ||
+            (dir == stablehlo::ComparisonDirection::GT && rhs == onFalse &&
+             isZeroConstant(lhs))) {
+          val = select.getOnFalse();
+          continue;
+        }
+        if ((dir == stablehlo::ComparisonDirection::GE && lhs == onTrue &&
+             isZeroConstant(rhs)) ||
+            (dir == stablehlo::ComparisonDirection::LE && rhs == onTrue &&
+             isZeroConstant(lhs))) {
+          val = select.getOnTrue();
+          continue;
+        }
+      }
+      return false;
     }
     if (auto concat = val.getDefiningOp<stablehlo::ConcatenateOp>()) {
       if (concat.getInputs().size() == 1) {
@@ -195,7 +309,7 @@ bool tracesToIota(Value val, int64_t dim) {
 // from an iota for identity mapping. Shared between gather and scatter.
 bool verifyIotaOrigin(Value indicesVal, int64_t indexVectorDim,
                       int64_t removedIndexVectorIdx) {
-  Value potentialIota = indicesVal;
+  Value potentialIota = stripShardingConstraints(indicesVal);
   if (auto concatOp = potentialIota.getDefiningOp<stablehlo::ConcatenateOp>()) {
     if (static_cast<int64_t>(concatOp.getDimension()) != indexVectorDim ||
         removedIndexVectorIdx >=
@@ -295,12 +409,14 @@ struct ExplicitGatherBatchingPattern
         operandBatchingDims, startIndicesBatchingDims, startIndexMap,
         indexVectorDim);
 
+    Value oldIndices = op.getStartIndices();
     auto newGatherOp = stablehlo::GatherOp::create(
         rewriter, op.getLoc(), op.getType(), op.getOperand(), newStartIndices,
         newDimNums, op.getSliceSizes(), op.getIndicesAreSorted());
     copyAttributes(op, newGatherOp,
                    {"dimension_numbers", "indices_are_sorted"});
     rewriter.replaceOp(op, newGatherOp.getResult());
+    eraseDeadIndexChain(rewriter, oldIndices);
 
     return success();
   }
@@ -399,7 +515,9 @@ struct ExplicitScatterBatchingPattern
                                 newScatterOp.getUpdateComputation(),
                                 newScatterOp.getUpdateComputation().end());
 
+    Value oldIndices = op.getScatterIndices();
     rewriter.replaceOp(op, newScatterOp.getResults());
+    eraseDeadIndexChain(rewriter, oldIndices);
 
     return success();
   }
@@ -596,12 +714,14 @@ struct DegenerateGatherToBroadcastPattern
       }
     }
 
+    Value oldIndices = op.getStartIndices();
     auto broadcastOp = stablehlo::BroadcastInDimOp::create(
         rewriter, op.getLoc(), op.getType(), op.getOperand(),
         rewriter.getDenseI64ArrayAttr(broadcastDimensions));
     copyAttributes(op, broadcastOp,
                    {"dimension_numbers", "slice_sizes", "indices_are_sorted"});
     rewriter.replaceOp(op, broadcastOp.getResult());
+    eraseDeadIndexChain(rewriter, oldIndices);
     return success();
   }
 };
@@ -799,10 +919,12 @@ struct DegenerateScatterToReducePattern
     state.addTypes(operandType);
     Operation* combinedOp = rewriter.create(state);
 
+    Value oldIndices = op.getScatterIndices();
     copyAttributes(
         op, combinedOp,
         {"scatter_dimension_numbers", "indices_are_sorted", "unique_indices"});
     rewriter.replaceOp(op, combinedOp->getResults());
+    eraseDeadIndexChain(rewriter, oldIndices);
     return success();
   }
 };
