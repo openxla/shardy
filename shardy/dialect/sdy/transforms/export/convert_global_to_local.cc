@@ -29,6 +29,7 @@ limitations under the License.
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "mlir/Dialect/Func/IR/FuncDialect.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/IR/Builders.h"
@@ -389,19 +390,6 @@ class FuncOpSignaturePattern : public OpConversionPattern<func::FuncOp> {
  private:
   ConversionState& conversionState;
 };
-
-// Returns the channel ID after the maximum channel ID in the given `moduleOp`.
-// TODO(b/419222666): remove dependency on `channel_handle` attribute name.
-int64_t getNextChannelId(ModuleOp moduleOp) {
-  int64_t maxChannelId = 0;
-  moduleOp->walk([&](mlir::Operation* op) {
-    if (auto channelHandle =
-            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
-      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
-    }
-  });
-  return maxChannelId + 1;
-}
 
 // Returns a ReplicaGroupMeshAxesAttr based on the provided axes and mesh.
 Attribute getReplicaGroupsV3(ArrayRef<AxisRefAttr> axes, MeshAttr mesh,

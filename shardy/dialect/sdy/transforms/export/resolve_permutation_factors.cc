@@ -73,21 +73,26 @@ using MeshCache = DenseMap<MeshAttr, MeshOp>;
 
 // State maintained during resolving permutation factors.
 struct ResolutionState {
+  ModuleOp moduleOp;
   IRRewriter& rewriter;
   SymbolTable& symbolTable;
   MeshCache& meshCache;
-  int64_t& nextChannelId;
   int64_t replicaCount = 1;
   int64_t partitionCount = 1;
+  std::optional<int64_t> nextChannelId;
   SmallVector<Operation*> opsToErase;
 };
 
-// Returns a channel handle with handle = nextChannelId++ and type = 1
-// (CROSS_PARTITION) if usePartitionId is true. Otherwise returns nullptr (to
-// perform cross-replica communication without channel handle).
+// Returns a channel handle with handle = nextChannelId++ (lazily initialized
+// from `state.moduleOp`) and type = 1 (CROSS_PARTITION) if usePartitionId is
+// true. Otherwise returns nullptr (to perform cross-replica communication
+// without channel handle).
 stablehlo::ChannelHandleAttr getChannelHandle(ResolutionState& state) {
+  if (!state.nextChannelId) {
+    state.nextChannelId = getNextChannelId(state.moduleOp);
+  }
   return sdy::getChannelHandle(state.rewriter.getContext(), state.replicaCount,
-                               state.partitionCount, state.nextChannelId);
+                               state.partitionCount, *state.nextChannelId);
 }
 
 // Describes the data exchange needed to perform explicit resharding for a
@@ -3455,18 +3460,6 @@ void resolvePermutationFactorsViaReplication(Operation* op,
 // The module pass.
 // -----------------------------------------------------------------------------
 
-// Returns the maximum channel ID in moduleOp plus one.
-int64_t getNextChannelId(ModuleOp moduleOp) {
-  int64_t maxChannelId = 0;
-  moduleOp->walk([&](Operation* op) {
-    if (auto channelHandle =
-            op->getAttrOfType<stablehlo::ChannelHandleAttr>("channel_handle")) {
-      maxChannelId = std::max(maxChannelId, channelHandle.getHandle());
-    }
-  });
-  return maxChannelId + 1;
-}
-
 struct ShardyResolvePermutationFactorsPass
     : public impl::ShardyResolvePermutationFactorsPassBase<
           ShardyResolvePermutationFactorsPass> {
@@ -3485,9 +3478,8 @@ struct ShardyResolvePermutationFactorsPass
       meshCache[meshOp.getMesh()] = meshOp;
     }
 
-    int64_t nextChannelId = getNextChannelId(moduleOp);
-    ResolutionState state{rewriter,      symbolTable,  meshCache,
-                          nextChannelId, replicaCount, partitionCount};
+    ResolutionState state{moduleOp,     rewriter,       symbolTable, meshCache,
+                          replicaCount, partitionCount, std::nullopt};
 
     // Walk the module to resolve permutation factors for each op.
     moduleOp.walk([&](Operation* op) {
@@ -3514,6 +3506,28 @@ struct ShardyResolvePermutationFactorsPass
       OpShardingRuleAttr rule = getOrCreateShardingRule(
           op, /*conservativePropagation=*/false,
           /*setShardingRuleOnOp=*/false, shardyGeneratesDeviceCode);
+      if (externalOp) {
+        rewriter.setInsertionPoint(op);
+        if (std::optional<LogicalResult> res =
+                externalOp.resolvePermutationFactors(rule, rewriter,
+                                                     state.symbolTable)) {
+          if (failed(*res)) {
+            signalPassFailure();
+            return;
+          }
+          // Invalidate cached channel ID and register any newly added top-level
+          // helper symbols in `state.symbolTable` (hooks should insert new
+          // top-level ops before the current top-level op so `moduleOp.walk`
+          // does not visit them).
+          state.nextChannelId.reset();
+          for (Operation& topOp : moduleOp.getBody()->getOperations()) {
+            if (SymbolTable::getSymbolName(&topOp)) {
+              state.symbolTable.insert(&topOp);
+            }
+          }
+          return;
+        }
+      }
       if (!rule || rule.isCustom()) {
         return;
       }
@@ -3540,18 +3554,6 @@ struct ShardyResolvePermutationFactorsPass
       if (llvm::none_of(llvm::seq<int64_t>(0, rule.getNumFactors()),
                         shouldResolveFactor)) {
         return;
-      }
-
-      if (externalOp) {
-        rewriter.setInsertionPoint(op);
-        if (std::optional<LogicalResult> res =
-                externalOp.resolvePermutationFactors(rule, rewriter,
-                                                     state.symbolTable)) {
-          if (failed(*res)) {
-            signalPassFailure();
-          }
-          return;
-        }
       }
 
       // Dispatch to HALO exchange if enabled and implemented for the op.
