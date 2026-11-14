@@ -138,3 +138,33 @@ func.func @sort_compatible_on_nonsort_dimension(%arg0: tensor<4x32x8xi32> {sdy.s
   }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"y"}, {}]>]>} : (tensor<4x32x8xi32>) -> (tensor<4x32x8xi32>)
   return %0 : tensor<4x32x8xi32>
 }
+
+// CHECK-LABEL: func @sort_small_batch_dim_divides_sorting_axis
+func.func @sort_small_batch_dim_divides_sorting_axis(%arg0: tensor<2x32xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {"t"}]>}) -> (tensor<2x32xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {"t"}]>}) {
+  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{"t":(1)2}, {}]> : tensor<2x32xi32>
+  // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{"t":(1)2}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_xyzt, [{}, {"t"}]> : tensor<2x32xi32>
+  // CHECK-NEXT: return %[[RESHARD1]] : tensor<2x32xi32>
+  %0 = "stablehlo.sort"(%arg0) <{dimension = 1 : i64, is_stable = true}> ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"t"}]>]>} : (tensor<2x32xi32>) -> (tensor<2x32xi32>)
+  return %0 : tensor<2x32xi32>
+}
+
+// CHECK-LABEL: func @sort_non_divisible_batch_dim_does_not_split_sorting_axis
+func.func @sort_non_divisible_batch_dim_does_not_split_sorting_axis(%arg0: tensor<6x32xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {"t"}]>}) -> (tensor<6x32xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{}, {"t"}]>}) {
+  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {}]> : tensor<6x32xi32>
+  // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_xyzt, [{}, {"t"}]> : tensor<6x32xi32>
+  // CHECK-NEXT: return %[[RESHARD1]] : tensor<6x32xi32>
+  %0 = "stablehlo.sort"(%arg0) <{dimension = 1 : i64, is_stable = true}> ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"t"}]>]>} : (tensor<6x32xi32>) -> (tensor<6x32xi32>)
+  return %0 : tensor<6x32xi32>
+}

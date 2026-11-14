@@ -18,7 +18,6 @@ limitations under the License.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <numeric>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -666,19 +665,21 @@ void distributeAxisRefsToBatchingFactors(
             break;
           }
         } else {
-          const int64_t gcd = std::gcd(factorCapacity, axisSize);
-          if (gcd == 1) {
+          // Only split an axis when it saturates factorCapacity, avoiding odd
+          // residual shard sizes.
+          if (factorCapacity == 1 || axisSize % factorCapacity != 0) {
             break;
           }
-          if (gcd != axisSize) {
+          if (factorCapacity != axisSize) {
             addAxisOrMerge(
                 factorSharding,
                 AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
-                                 axisRef.getSubAxisPreSize(), gcd),
+                                 axisRef.getSubAxisPreSize(), factorCapacity),
                 meshOp.getMesh());
             axisRefsToDistribute.front() = AxisRefAttr::get(
                 meshOp.getContext(), axisRef.getName(),
-                axisRef.getSubAxisPreSize() * gcd, axisSize / gcd);
+                axisRef.getSubAxisPreSize() * factorCapacity,
+                axisSize / factorCapacity);
             break;
           }
         }
