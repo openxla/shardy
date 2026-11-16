@@ -18,7 +18,6 @@ limitations under the License.
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <numeric>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -661,31 +660,27 @@ void distributeAxisRefsToBatchingFactors(
       while (!axisRefsToDistribute.empty()) {
         AxisRefAttr axisRef = axisRefsToDistribute.front();
         const int64_t axisSize = axisRef.getSize(meshOp.getMesh());
-        if (!allowSplitting) {
-          if (factorCapacity % axisSize != 0) {
-            break;
-          }
-        } else {
-          const int64_t gcd = std::gcd(factorCapacity, axisSize);
-          if (gcd == 1) {
-            break;
-          }
-          if (gcd != axisSize) {
-            addAxisOrMerge(
-                factorSharding,
-                AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
-                                 axisRef.getSubAxisPreSize(), gcd),
-                meshOp.getMesh());
-            axisRefsToDistribute.front() = AxisRefAttr::get(
-                meshOp.getContext(), axisRef.getName(),
-                axisRef.getSubAxisPreSize() * gcd, axisSize / gcd);
-            break;
-          }
+        if (factorCapacity % axisSize == 0) {
+          addAxisOrMerge(factorSharding, axisRef, meshOp.getMesh());
+          factorCapacity /= axisSize;
+          axisRefsToDistribute = axisRefsToDistribute.drop_front();
+          continue;
         }
-        addAxisOrMerge(factorSharding, axisRef, meshOp.getMesh());
-
-        factorCapacity /= axisSize;
-        axisRefsToDistribute = axisRefsToDistribute.drop_front();
+        // Only split an axis when `factorCapacity` divides `axisSize`, so the
+        // batching dimension has per-shard size 1.
+        if (allowSplitting && factorCapacity > 1 &&
+            axisSize % factorCapacity == 0) {
+          addAxisOrMerge(
+              factorSharding,
+              AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
+                               axisRef.getSubAxisPreSize(), factorCapacity),
+              meshOp.getMesh());
+          axisRefsToDistribute.front() =
+              AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
+                               axisRef.getSubAxisPreSize() * factorCapacity,
+                               axisSize / factorCapacity);
+        }
+        break;
       }
       if (axisRefsToDistribute.empty()) {
         return;
