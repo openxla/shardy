@@ -1035,13 +1035,13 @@ TEST_P(ReshardOptimalitySweepTest, AllPairs) {
 INSTANTIATE_TEST_SUITE_P(
     SmallMeshes, ReshardOptimalitySweepTest,
     ::testing::Values(
-        SweepCase{"2x3_rank2", {{"a", 2}, {"b", 3}}, {6, 12}, 18, 0},
-        SweepCase{"2x4_rank2", {{"a", 2}, {"b", 4}}, {8, 16}, 372, 0},
-        SweepCase{"2x4_rank3", {{"a", 2}, {"b", 4}}, {8, 16, 24}, 2970, 0},
+        SweepCase{"2x3_rank2", {{"a", 2}, {"b", 3}}, {6, 12}, 16, 0},
+        SweepCase{"2x4_rank2", {{"a", 2}, {"b", 4}}, {8, 16}, 288, 0},
+        SweepCase{"2x4_rank3", {{"a", 2}, {"b", 4}}, {8, 16, 24}, 2574, 0},
         SweepCase{
-            "2x3x4_rank2", {{"a", 2}, {"b", 3}, {"c", 4}}, {24, 48}, 21054, 0},
+            "2x3x4_rank2", {{"a", 2}, {"b", 3}, {"c", 4}}, {24, 48}, 20106, 0},
         SweepCase{
-            "2x2x4_rank2", {{"a", 2}, {"b", 2}, {"c", 4}}, {16, 32}, 8400, 0}),
+            "2x2x4_rank2", {{"a", 2}, {"b", 2}, {"c", 4}}, {16, 32}, 7080, 0}),
     [](const ::testing::TestParamInfo<SweepCase>& info) {
       return info.param.name;
     });
@@ -1055,18 +1055,18 @@ std::vector<SweepCase> largeSweepCases() {
       SweepCase{"2x3x4_rank3",
                 {{"a", 2}, {"b", 3}, {"c", 4}},
                 {24, 48, 72},
-                208122,
+                196824,
                 0},
       SweepCase{"2x2x4_rank3",
                 {{"a", 2}, {"b", 2}, {"c", 4}},
                 {16, 32, 48},
-                112896,
+                103896,
                 0},
-      SweepCase{"2x8_rank3", {{"a", 2}, {"b", 8}}, {16, 32, 48}, 112896, 0},
+      SweepCase{"2x8_rank3", {{"a", 2}, {"b", 8}}, {16, 32, 48}, 103896, 0},
       SweepCase{"2x3x4x5_rank2",
                 {{"a", 2}, {"b", 3}, {"c", 4}, {"d", 5}},
                 {120, 240},
-                1225952,
+                1218418,
                 0},
   };
 }

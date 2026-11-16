@@ -697,13 +697,49 @@ func.func @reorder_axes_for_all_to_all_then_all_gather_single_axis(%arg0 : tenso
   return %0 : tensor<16x8xf32>
 }
 
+// Instead of reordering "x" before "y" with a collective permute, "x" is moved
+// to dim 1 with "y" and gathered there, which communicates less.
 // CHECK-LABEL: func @reorder_axes_for_all_to_all_then_all_gather_remaining_axes
 func.func @reorder_axes_for_all_to_all_then_all_gather_remaining_axes(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh3d, [{"z", "y", "x"}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{"z", "x", "y"}, {}]>
-  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y"}: 0->1] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{"z", "x"}, {"y"}]>
-  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z", "x"}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh3d, [{}, {"y"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y", "x"}: 0->1] %arg0 out_sharding=<@mesh3d, [{"z"}, {"y", "x"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z"}, {"x"}] %[[ALL_TO_ALL]] out_sharding=<@mesh3d, [{}, {"y"}]>
   // CHECK-NEXT: return %[[ALL_GATHER]]
   %0 = sdy.reshard %arg0 <@mesh3d, [{}, {"y"}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// "y" is moved to dim 0 along with "x" and gathered there, rather than first
+// reordering it before "x" with a collective permute.
+// CHECK-LABEL: func @all_to_all_with_axis_to_gather_then_all_gather
+func.func @all_to_all_with_axis_to_gather_then_all_gather(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {"x", "y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"x", "y"}: 1->0] %arg0 out_sharding=<@mesh2d, [{"x", "y"}, {}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"y"}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh2d, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh2d, [{"x"}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// Dim 0 (size 4) can't hold "x" and "y" (8) without padding, so "y" is
+// reordered with a collective permute and gathered at dim 1 instead.
+// CHECK-LABEL: func @all_to_all_with_axis_to_gather_needs_padding
+func.func @all_to_all_with_axis_to_gather_needs_padding(%arg0 : tensor<4x16xf32> {sdy.sharding = #sdy.sharding<@mesh2d_4x2, [{}, {"x", "y"}]>}) -> tensor<4x16xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d_4x2, [{}, {"y", "x"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"x"}: 1->0] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_4x2, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"y"}] %[[ALL_TO_ALL]] out_sharding=<@mesh2d_4x2, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh2d_4x2, [{"x"}, {}]> : tensor<4x16xf32>
+  return %0 : tensor<4x16xf32>
+}
+
+// Switching meshes already requires a collective permute, so reorder "y" before
+// "x" in that collective permute instead of piggybacking "y" onto the all-to-all.
+// CHECK-LABEL: func @all_to_all_with_axis_to_gather_different_mesh
+func.func @all_to_all_with_axis_to_gather_different_mesh(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {"x", "y"}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh2d_non_iota, [{}, {"y", "x"}]>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"x"}: 1->0] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_non_iota, [{"x"}, {"y"}]>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"y"}] %[[ALL_TO_ALL]] out_sharding=<@mesh2d_non_iota, [{"x"}, {}]>
+  // CHECK-NEXT: return %[[ALL_GATHER]]
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{"x"}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
@@ -1066,9 +1102,8 @@ func.func @collective_permute_stage1_splits_axis_by_gcd(%arg0 : tensor<24x48x72x
 
 // CHECK-LABEL: func @out_unreduced_axes_preserved
 func.func @out_unreduced_axes_preserved(%arg0 : tensor<16x8xf32> {sdy.sharding=#sdy.sharding<@mesh3d, [{"y", "z"}, {}], unreduced={"x"}>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %arg0 out_sharding=<@mesh3d, [{"z", "y"}, {}], unreduced={"x"}>
-  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y"}: 0->1] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh3d, [{"z"}, {"y"}], unreduced={"x"}>
-  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"z"}, {}] %[[ALL_TO_ALL]] out_sharding=<@mesh3d, [{}, {"y"}], unreduced={"x"}>
+  // CHECK-NEXT: %[[ALL_TO_ALL:.*]] = sdy.all_to_all [{"y", "z"}: 0->1] %arg0 out_sharding=<@mesh3d, [{}, {"y", "z"}], unreduced={"x"}>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"z"}] %[[ALL_TO_ALL]] out_sharding=<@mesh3d, [{}, {"y"}], unreduced={"x"}>
   // CHECK-NEXT: return %[[ALL_GATHER]]
   %0 = sdy.reshard %arg0 <@mesh3d, [{}, {"y"}], unreduced={"x"}> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
