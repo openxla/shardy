@@ -97,12 +97,6 @@ int64_t getTensorRank(Type type);
 // Assumes the `ShapeTensor` has a rank.
 int64_t getTensorRank(Value value);
 
-// Returns the rank of the func result tensor of `funcOp` at index `resNum` if
-// its type is a `ShapeTensor`, otherwise returns 0.
-//
-// Assumes the `ShapeTensor` has a rank.
-int64_t getFuncResultTensorRank(func::FuncOp funcOp, int64_t resNum);
-
 // Returns true if the value is a tensor with rank 0.
 bool isScalar(Value value);
 
@@ -121,11 +115,6 @@ MeshOp getMeshOp(const SymbolTable& symbolTable, StringRef meshName);
 // nullptr otherwise.
 MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName);
 
-// Looks up the mesh symbol with the given `meshName` in the symbol table of
-// the enclosing module of `op`, and returns it if it exists in the table, or
-// nullptr otherwise.
-MeshOp getMeshOp(Operation* op, StringRef meshName);
-
 // If `meshOrRef` is a `MeshAttr`, returns it, otherwise, looks up the
 // referenced mesh symbol in `symbolTable`, and returns its `MeshAttr`
 // if it exists in the table, or nullptr otherwise.
@@ -143,11 +132,6 @@ MeshAttr getMeshAttr(const SymbolTable& symbolTable, StringRef meshName);
 // Looks up the mesh symbol with the given `meshSymName` in `symbolTable`, and
 // returns its `MeshAttr` if it exists in the table, or nullptr otherwise.
 MeshAttr getMeshAttr(const SymbolTable& symbolTable, SymbolRefAttr meshSymName);
-
-// Looks up the mesh symbol with the given `meshName` in the symbol table of
-// the enclosing module of `op`, and returns its `MeshAttr` if it exists in the
-// table, or nullptr otherwise.
-MeshAttr getMeshAttr(Operation* op, StringRef meshName);
 
 // Looks up the mesh symbol with the given `meshSymName` in the symbol table of
 // the enclosing module of `op`, and returns its `MeshAttr` if it exists in the

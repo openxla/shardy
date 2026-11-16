@@ -172,10 +172,6 @@ MeshOp getMeshOp(Operation* op, SymbolRefAttr meshSymName) {
   return SymbolTable::lookupNearestSymbolFrom<sdy::MeshOp>(op, meshSymName);
 }
 
-MeshOp getMeshOp(Operation* op, StringRef meshName) {
-  return getMeshOp(op, SymbolRefAttr::get(op->getContext(), meshName));
-}
-
 MeshOp getMeshOp(const SymbolTable& symbolTable, StringRef meshName) {
   return symbolTable.lookup<MeshOp>(meshName);
 }
@@ -205,10 +201,6 @@ MeshAttr getMeshAttr(const SymbolTable& symbolTable, StringRef meshName) {
 MeshAttr getMeshAttr(const SymbolTable& symbolTable,
                      SymbolRefAttr meshSymName) {
   return getMeshAttr(symbolTable, meshSymName.getLeafReference());
-}
-
-MeshAttr getMeshAttr(Operation* op, StringRef meshName) {
-  return getMeshAttr(op, SymbolRefAttr::get(op->getContext(), meshName));
 }
 
 MeshAttr getMeshAttr(Operation* op, SymbolRefAttr meshSymName) {
@@ -1031,54 +1023,46 @@ bool isSingleDeviceSharding(TensorShardingAttr sharding, Operation* op) {
   return mesh && mesh.isSingleDevice();
 }
 
-int64_t getFuncResultTensorRank(FuncOp funcOp, int64_t resNum) {
-  return getTensorRank(funcOp.getResultTypes()[resNum]);
-}
+namespace {
 
-TensorShardingPerValueAttr getFuncArgShardings(FuncOp funcOp,
-                                               const SymbolTable& symbolTable) {
-  Attribute meshOrRef =
-      getMeshOrRef(funcOp.getNumArguments(), symbolTable, [&](int64_t i) {
-        return funcOp.getArgAttrOfType<TensorShardingAttr>(i, kShardingAttr);
-      });
+TensorShardingPerValueAttr getFuncValueShardings(
+    FuncOp funcOp, const SymbolTable& symbolTable, int64_t numValues,
+    llvm::function_ref<TensorShardingAttr(int64_t)> getSharding,
+    llvm::function_ref<int64_t(int64_t)> getRank) {
+  Attribute meshOrRef = getMeshOrRef(numValues, symbolTable, getSharding);
   if (!meshOrRef) {
     return nullptr;
   }
-  SmallVector<TensorShardingAttr> argShardings;
-  argShardings.reserve(funcOp.getNumArguments());
-  for (int64_t argNum = 0; argNum < funcOp.getNumArguments(); ++argNum) {
-    TensorShardingAttr sdySharding =
-        funcOp.getArgAttrOfType<TensorShardingAttr>(argNum, kShardingAttr);
-    argShardings.push_back(sdySharding
-                               ? sdySharding
-                               : TensorShardingAttr::getFullyOpen(
-                                     funcOp.getContext(),
-                                     getTensorRank(funcOp.getArgument(argNum)),
-                                     meshOrRef));
+  SmallVector<TensorShardingAttr> shardings;
+  shardings.reserve(numValues);
+  for (int64_t i = 0; i < numValues; ++i) {
+    TensorShardingAttr sdySharding = getSharding(i);
+    shardings.push_back(sdySharding
+                            ? sdySharding
+                            : TensorShardingAttr::getFullyOpen(
+                                  funcOp.getContext(), getRank(i), meshOrRef));
   }
-  return TensorShardingPerValueAttr::get(funcOp.getContext(), argShardings);
+  return TensorShardingPerValueAttr::get(funcOp.getContext(), shardings);
+}
+
+}  // namespace
+
+TensorShardingPerValueAttr getFuncArgShardings(FuncOp funcOp,
+                                               const SymbolTable& symbolTable) {
+  return getFuncValueShardings(
+      funcOp, symbolTable, funcOp.getNumArguments(),
+      [&](int64_t i) {
+        return funcOp.getArgAttrOfType<TensorShardingAttr>(i, kShardingAttr);
+      },
+      [&](int64_t i) { return getTensorRank(funcOp.getArgument(i)); });
 }
 
 TensorShardingPerValueAttr getFuncResultShardings(
     FuncOp funcOp, const SymbolTable& symbolTable) {
-  Attribute meshOrRef =
-      getMeshOrRef(funcOp.getNumResults(), symbolTable,
-                   [&](int64_t i) { return getFuncResultSharding(funcOp, i); });
-  if (!meshOrRef) {
-    return nullptr;
-  }
-  SmallVector<TensorShardingAttr> resultShardings;
-  resultShardings.reserve(funcOp.getNumResults());
-  for (int64_t resultNum = 0; resultNum < funcOp.getNumResults(); ++resultNum) {
-    TensorShardingAttr sdySharding = getFuncResultSharding(funcOp, resultNum);
-    resultShardings.push_back(
-        sdySharding
-            ? sdySharding
-            : TensorShardingAttr::getFullyOpen(
-                  funcOp.getContext(),
-                  getFuncResultTensorRank(funcOp, resultNum), meshOrRef));
-  }
-  return TensorShardingPerValueAttr::get(funcOp.getContext(), resultShardings);
+  return getFuncValueShardings(
+      funcOp, symbolTable, funcOp.getNumResults(),
+      [&](int64_t i) { return getFuncResultSharding(funcOp, i); },
+      [&](int64_t i) { return getTensorRank(funcOp.getResultTypes()[i]); });
 }
 
 bool walkCalls(ModuleOp moduleOp, ProcessCallOpFn processCallOp,
@@ -1365,43 +1349,34 @@ LogicalResult verifyUnreducedAxesTransition(
   bool canRemove = expectedRemovedRedOp.has_value();
 
   // Collect unreduced axes from all operand and result shardings.
-  SmallVector<AxisRefAttr> flatOperandAxes;
-  for (TensorShardingAttr sharding : operandShardings) {
-    if (sharding) {
-      llvm::append_range(flatOperandAxes, sharding.getUnreducedAxes());
+  auto collectUnreducedAxes = [](ArrayRef<TensorShardingAttr> shardings) {
+    SmallVector<AxisRefAttr> flatAxes;
+    for (TensorShardingAttr sharding : shardings) {
+      if (sharding) {
+        llvm::append_range(flatAxes, sharding.getUnreducedAxes());
+      }
     }
-  }
-
-  SmallVector<AxisRefAttr> flatResultAxes;
-  for (TensorShardingAttr sharding : resultShardings) {
-    if (sharding) {
-      llvm::append_range(flatResultAxes, sharding.getUnreducedAxes());
-    }
-  }
+    return flatAxes;
+  };
+  SmallVector<AxisRefAttr> flatOperandAxes =
+      collectUnreducedAxes(operandShardings);
+  SmallVector<AxisRefAttr> flatResultAxes =
+      collectUnreducedAxes(resultShardings);
 
   // Retrieve the MeshAttr since getAxisSetDiff requires it to inspect splits.
   // Skip verification if there is no mesh or if the mesh is not consistent.
   MeshAttr mesh;
-  for (TensorShardingAttr sharding : operandShardings) {
-    if (sharding) {
-      MeshAttr curMesh = getMeshOrLookup(op, sharding.getMeshOrRef());
-      if (curMesh) {
-        if (!mesh) {
-          mesh = curMesh;
-        } else if (mesh != curMesh) {
-          return success();
-        }
-      }
-    }
-  }
-  for (TensorShardingAttr sharding : resultShardings) {
-    if (sharding) {
-      MeshAttr curMesh = getMeshOrLookup(op, sharding.getMeshOrRef());
-      if (curMesh) {
-        if (!mesh) {
-          mesh = curMesh;
-        } else if (mesh != curMesh) {
-          return success();
+  for (ArrayRef<TensorShardingAttr> shardings :
+       {operandShardings, resultShardings}) {
+    for (TensorShardingAttr sharding : shardings) {
+      if (sharding) {
+        MeshAttr curMesh = getMeshOrLookup(op, sharding.getMeshOrRef());
+        if (curMesh) {
+          if (!mesh) {
+            mesh = curMesh;
+          } else if (mesh != curMesh) {
+            return success();
+          }
         }
       }
     }
