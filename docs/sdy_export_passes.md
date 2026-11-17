@@ -117,8 +117,13 @@ Inserts reshards for func and call sharding conflicts on results.
 
 _Optimizes collective communication operations._
 
-Eliminates redundant collective-permute operations preceding all-to-all
-chains by decomposing split dimensions and fusing into a combined all-to-all.
+Optimizes collective communication operations, including:
+- Eliminating redundant collective-permute operations preceding all-to-all
+  chains by decomposing split dimensions and fusing into a combined
+  all-to-all.
+- Commuting reduction-preserving binary operations (`add`, `subtract`,
+  `maximum`, `minimum`) before `sdy.all_reduce` when operand/result types
+  and shardings match.
 
 ### `-sdy-pad-for-divisibility`
 
