@@ -186,16 +186,68 @@ func.func @all_gather_slice_size_mismatch(%arg0: tensor<8xf32> {sdy.sharding = #
   return %1 : tensor<2xf32>
 }
 
-// Negative test: slice size matches local all_gather operand size (4), but start index is non-zero.
-// CHECK-LABEL: func @all_gather_slice_nonzero_start
+// Positive test: slice size matches local all_gather operand size (4) with shard-aligned non-zero start index (leader shard 1).
+// CHECK-LABEL: func @all_gather_slice_nonzero_shard_aligned_start
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<4xf32>
-func.func @all_gather_slice_nonzero_start(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<4xf32> {
-  // CHECK-NEXT: %[[AG:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{all_gather_dim = 0 : i64
-  // CHECK-SAME: (tensor<4xf32>) -> tensor<8xf32>
-  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[AG]] [4:8] : (tensor<8xf32>) -> tensor<4xf32>
-  // CHECK-NEXT: return %[[SLICE]] : tensor<4xf32>
+func.func @all_gather_slice_nonzero_shard_aligned_start(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<4xf32> {
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[LEADER:.*]] = stablehlo.constant dense<1> : tensor<ui32>
+  // CHECK-NEXT: %[[IS_LEADER:.*]] = stablehlo.compare EQ, %[[PID]], %[[LEADER]] : (tensor<ui32>, tensor<ui32>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<4xf32>
+  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ZERO]] : tensor<i1>, tensor<4xf32>
+  // CHECK-NEXT: %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]]) <{
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>,
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_1_2, axes = [#stablehlo.axis_ref<name = "y">]>,
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK-SAME: }> ({
+  // CHECK-NEXT: ^bb0(%[[LHS:.*]]: tensor<f32>, %[[RHS:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[LHS]], %[[RHS]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<4xf32>) -> tensor<4xf32>
+  // CHECK-NEXT: return %[[AR]] : tensor<4xf32>
   %0 = sdy.all_gather [{"y"}] %arg0 out_sharding=<@mesh_1_2, [{}]> : tensor<8xf32>
   %1 = stablehlo.slice %0 [4:8] : (tensor<8xf32>) -> tensor<4xf32>
+  return %1 : tensor<4xf32>
+}
+
+// Positive test: 2D non-zero shard-aligned start index (leader shard 1 along "y").
+// CHECK-LABEL: func @all_gather_slice_nonzero_shard_aligned_2d
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+// CHECK-SAME: -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {}]>}) {
+func.func @all_gather_slice_nonzero_shard_aligned_2d(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {"y"}]>})
+    -> (tensor<16x4xf32> {sdy.sharding = #sdy.sharding<@mesh_4_2, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[false, true, false, true, false, true, false, true]> : tensor<8xi1>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi1>, tensor<ui32>) -> tensor<1xi1>
+  // CHECK-NEXT: %[[IS_LEADER:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi1>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<4x4xf32>
+  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[IS_LEADER]], %[[ARG0]], %[[ZERO]] : tensor<i1>, tensor<4x4xf32>
+  // CHECK-NEXT: %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]]) <{
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>,
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_4_2, axes = [#stablehlo.axis_ref<name = "y">]>,
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK-SAME: }> ({
+  // CHECK-NEXT: ^bb0(%[[LHS:.*]]: tensor<f32>, %[[RHS:.*]]: tensor<f32>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[LHS]], %[[RHS]] : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<4x4xf32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: return %[[AR]] : tensor<4x4xf32>
+  %0 = sdy.all_gather [{}, {"y"}] %arg0 out_sharding=<@mesh_4_2, [{"x"}, {}]> : tensor<16x8xf32>
+  %1 = stablehlo.slice %0 [0:16, 4:8] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4_2, [{"x"}, {}]>]>} : (tensor<16x8xf32>) -> tensor<16x4xf32>
+  return %1 : tensor<16x4xf32>
+}
+
+// Negative test: slice size matches local all_gather operand size (4), but start index (2) is not shard-aligned.
+// CHECK-LABEL: func @all_gather_slice_unaligned_start
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<4xf32>
+func.func @all_gather_slice_unaligned_start(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<4xf32> {
+  // CHECK-NEXT: %[[AG:.*]] = "stablehlo.all_gather"(%[[ARG0]]) <{all_gather_dim = 0 : i64
+  // CHECK-SAME: (tensor<4xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[AG]] [2:6] : (tensor<8xf32>) -> tensor<4xf32>
+  // CHECK-NEXT: return %[[SLICE]] : tensor<4xf32>
+  %0 = sdy.all_gather [{"y"}] %arg0 out_sharding=<@mesh_1_2, [{}]> : tensor<8xf32>
+  %1 = stablehlo.slice %0 [2:6] : (tensor<8xf32>) -> tensor<4xf32>
   return %1 : tensor<4xf32>
 }
 
