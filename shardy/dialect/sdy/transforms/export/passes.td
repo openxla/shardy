@@ -219,8 +219,13 @@ def ReshardToCollectivesPass : Pass<"sdy-reshard-to-collectives", "func::FuncOp"
 def OptimizeCollectivesPass : Pass<"sdy-optimize-collectives", "func::FuncOp"> {
   let summary = "Optimizes collective communication operations.";
   let description = [{
-    Eliminates redundant collective-permute operations preceding all-to-all
-    chains by decomposing split dimensions and fusing into a combined all-to-all.
+    Optimizes collective communication operations, including:
+    - Eliminating redundant collective-permute operations preceding all-to-all
+      chains by decomposing split dimensions and fusing into a combined
+      all-to-all.
+    - Commuting reduction-preserving binary operations (`add`, `subtract`,
+      `maximum`, `minimum`) before `sdy.all_reduce` when operand/result types
+      and shardings match.
   }];
   let dependentDialects = [
     "mlir::sdy::SdyDialect",
