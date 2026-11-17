@@ -415,6 +415,20 @@ func.func @custom_call_move_to_host(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
   return %0 : tensor<8x4xf32>
 }
 
+// CHECK-LABEL: func @custom_call_pin_to_device
+func.func @custom_call_pin_to_device(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>
+  %0 = stablehlo.custom_call @PinToDevice(%arg0) {backend_config = ""} : (tensor<8x4xf32>) -> tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
+// CHECK-LABEL: func @custom_call_pin_to_device_sram
+func.func @custom_call_pin_to_device_sram(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>
+  %0 = stablehlo.custom_call @PinToDeviceSram(%arg0) {backend_config = ""} : (tensor<8x4xf32>) -> tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
 // CHECK-LABEL: func @custom_call_layout_constraint
 func.func @custom_call_layout_constraint(%arg0: tensor<8x4xf32>) -> tensor<8x4xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=8, j=4}>

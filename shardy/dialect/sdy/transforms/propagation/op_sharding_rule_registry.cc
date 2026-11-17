@@ -654,7 +654,8 @@ OpShardingRuleAttr createOpShardingRule(Operation* op,
             callTargetName == "InspectSharding" ||
             callTargetName == "LayoutConstraint" ||
             callTargetName == "mhlo.erf" || callTargetName == "MoveToDevice" ||
-            callTargetName == "MoveToHost" ||
+            callTargetName == "MoveToHost" || callTargetName == "PinToDevice" ||
+            callTargetName == "PinToDeviceSram" ||
             callTargetName == "xla.megascale.provide_metadata") {
           return OpShardingRuleBuilder::buildPointwise(customCall);
         }

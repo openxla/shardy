@@ -22,6 +22,24 @@ func.func @element_wise_host_offload_first(%arg0: tensor<8x8xf32> {sdy.sharding 
 // -----
 sdy.mesh @mesh = <["a"=2, "b"=2]>
 
+// CHECK-LABEL: func @element_wise_pin_to_device_first(
+// CHECK-SAME:      %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}
+// CHECK-SAME:  -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
+func.func @element_wise_pin_to_device_first(%arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a", ?}, {?}]>}) -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"a", ?}]>}) {
+  // CHECK:      %1 = stablehlo.custom_call @PinToDevice(%0) {backend_config = "", sdy.sharding = #sdy.sharding_per_value<[<@mesh, [[[SOME_SHARDING:.*]]]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %2 = stablehlo.custom_call @PinToDeviceSram(%1) {backend_config = "", sdy.sharding = #sdy.sharding_per_value<[<@mesh, [[[SOME_SHARDING]]]>]>} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %3 = stablehlo.add %2, %2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"a", ?}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %3 : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg0 : tensor<8x8xf32>
+  %1 = stablehlo.custom_call @PinToDevice(%0) {backend_config = ""} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %2 = stablehlo.custom_call @PinToDeviceSram(%1) {backend_config = ""} : (tensor<8x8xf32>) -> tensor<8x8xf32>
+  %3 = stablehlo.add %2, %2 : tensor<8x8xf32>
+  return %3 : tensor<8x8xf32>
+}
+
+// -----
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
 // Without prioritizing element-wise ops first, the sharding on dim 0 would
 // have been propagated first.
 // CHECK-LABEL: func @element_wise_over_dot_general(
