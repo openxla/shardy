@@ -1357,7 +1357,11 @@ Value exchangeSingleSourceSliceDim(
     MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
     TensorShardingAttr localSharding, ResolutionState& state) {
   IRRewriter& rewriter = state.rewriter;
-  auto [sourceShard, localStart, size] = *dimExchange.singleSourceSlice;
+  const DimExchangeInfo::SingleSourceSlice& singleSource =
+      *dimExchange.singleSourceSlice;
+  int64_t sourceShard = singleSource.sourceShard;
+  int64_t localStart = singleSource.localStart;
+  int64_t size = singleSource.size;
   int64_t sOut = dimExchange.sOut;
   // Number of output shards that hold data; the rest hold only padding.
   int64_t numTargets = llvm::divideCeil(size, sOut);
@@ -1388,21 +1392,7 @@ Value exchangeSingleSourceSliceDim(
     }
   }
 
-  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
-      loc, createDeviceId(loc, state), mesh, dimSharding, rewriter);
-  SmallVector<int64_t> pieceShape = llvm::to_vector(localType.getShape());
-  pieceShape[dim] = sOut;
-  auto pieceType =
-      RankedTensorType::get(pieceShape, localType.getElementType());
-  auto predType = RankedTensorType::get(pieceShape, rewriter.getI1Type());
-
-  Value result = stablehlo::BroadcastInDimOp::create(
-      rewriter, loc, pieceType, paddingValue,
-      rewriter.getDenseI64ArrayAttr({}));
-  if (setLocalSharding) {
-    setSharding(result, localSharding);
-  }
-  for (int64_t target = 0; target < numTargets; ++target) {
+  auto getPieceForTarget = [&](int64_t target) {
     Value piece = sliceAlongDim(loc, local, dim, target * sOut,
                                 (target + 1) * sOut, localSharding, rewriter);
     if (target != sourceShard) {
@@ -1415,7 +1405,39 @@ Value exchangeSingleSourceSliceDim(
         setSharding(piece, localSharding);
       }
     }
-    // Keep the piece only on its target shard; elsewhere it is not valid data.
+    return piece;
+  };
+
+  // Target 0's piece is already zero on non-zero shards when sourceShard != 0
+  // (via collective_permute) and overwritten on every non-zero shard when
+  // numTargets == shardCount.
+  bool skipTargetZeroMask =
+      sourceShard != 0 || numTargets == dimSharding.getShardedSize(mesh);
+  if (numTargets == 1 && skipTargetZeroMask) {
+    return getPieceForTarget(0);
+  }
+
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, createDeviceId(loc, state), mesh, dimSharding, rewriter);
+  Value result;
+  if (skipTargetZeroMask) {
+    result = getPieceForTarget(0);
+  } else {
+    SmallVector<int64_t> pieceShape = llvm::to_vector(localType.getShape());
+    pieceShape[dim] = sOut;
+    result = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc,
+        RankedTensorType::get(pieceShape, localType.getElementType()),
+        paddingValue, rewriter.getDenseI64ArrayAttr({}));
+    if (setLocalSharding) {
+      setSharding(result, localSharding);
+    }
+  }
+  auto pieceType = cast<RankedTensorType>(result.getType());
+  auto predType = pieceType.clone(rewriter.getI1Type());
+  for (int64_t target = skipTargetZeroMask ? 1 : 0; target < numTargets;
+       ++target) {
+    Value piece = getPieceForTarget(target);
     Value isTarget = stablehlo::CompareOp::create(
         rewriter, loc, idInPartitionGroup,
         createScalarIntConstant(loc, rewriter.getI32Type(), target, rewriter),
@@ -2894,7 +2916,7 @@ LogicalResult handleReshapeOp(stablehlo::ReshapeOp reshapeOp,
   }
 
   // Verify the assumption that the input and output shardings have the same
-  // ordered normalized axes, guranteed by the insert-explicit-reshard pass.
+  // ordered normalized axes, guaranteed by the insert-explicit-reshard pass.
   auto getOrderedNormalizedAxes = [mesh](TensorShardingAttr sharding) {
     SmallVector<AxisRefAttr> axes;
     for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {

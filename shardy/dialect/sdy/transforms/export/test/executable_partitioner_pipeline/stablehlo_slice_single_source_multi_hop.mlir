@@ -78,6 +78,23 @@ func.func @sequential_slice_all_targets_no_pad(%arg0: tensor<32xi32>) -> tensor<
   return %0 : tensor<8xi32>
 }
 
+// Slicing [1:8] of 32 elements on 4 shards reads 7 elements from shard 0
+// (sourceShard == 0) and splits across all 4 output shards (numTargets ==
+// shardCount, with high padding on the last piece).
+func.func @parallel_slice_source_zero_all_targets(
+  %arg0: tensor<32xi32> {sdy.sharding = #sdy.sharding<@mesh_custom, [{"a", "b"}]>})
+  -> (tensor<7xi32> {sdy.sharding = #sdy.sharding<@mesh_custom, [{}]>}) {
+  %0 = stablehlo.slice %arg0 [1:8]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_custom, [{"a", "b"}]>]>} : (tensor<32xi32>) -> tensor<7xi32>
+  %1 = sdy.reshard %0 <@mesh_custom, [{}]> : tensor<7xi32>
+  return %1 : tensor<7xi32>
+}
+
+func.func @sequential_slice_source_zero_all_targets(%arg0: tensor<32xi32>) -> tensor<7xi32> {
+  %0 = stablehlo.slice %arg0 [1:8] : (tensor<32xi32>) -> tensor<7xi32>
+  return %0 : tensor<7xi32>
+}
+
 // 2D slice where both sharded dimensions take the single-source multi-hop path.
 func.func @parallel_slice_2d_both_single_source(
   %arg0: tensor<9x12xi32> {sdy.sharding = #sdy.sharding<@mesh_3x3, [{"a"}, {"b"}]>})
@@ -167,6 +184,15 @@ func.func @main() {
   "check.expect_eq"(%res4#1, %seq4) : (tensor<8xi32>, tensor<8xi32>) -> ()
   "check.expect_eq"(%res4#2, %seq4) : (tensor<8xi32>, tensor<8xi32>) -> ()
   "check.expect_eq"(%res4#3, %seq4) : (tensor<8xi32>, tensor<8xi32>) -> ()
+
+  %seq4_zero = func.call @sequential_slice_source_zero_all_targets(%input4) : (tensor<32xi32>) -> tensor<7xi32>
+  %res4_zero:4 = "interpreter.run_parallel"(%u1, %u3, %u0, %u2) {
+    programs = [[@parallel_slice_source_zero_all_targets, @parallel_slice_source_zero_all_targets, @parallel_slice_source_zero_all_targets, @parallel_slice_source_zero_all_targets]]
+  } : (tensor<8xi32>, tensor<8xi32>, tensor<8xi32>, tensor<8xi32>) -> (tensor<7xi32>, tensor<7xi32>, tensor<7xi32>, tensor<7xi32>)
+  "check.expect_eq"(%res4_zero#0, %seq4_zero) : (tensor<7xi32>, tensor<7xi32>) -> ()
+  "check.expect_eq"(%res4_zero#1, %seq4_zero) : (tensor<7xi32>, tensor<7xi32>) -> ()
+  "check.expect_eq"(%res4_zero#2, %seq4_zero) : (tensor<7xi32>, tensor<7xi32>) -> ()
+  "check.expect_eq"(%res4_zero#3, %seq4_zero) : (tensor<7xi32>, tensor<7xi32>) -> ()
 
   %input5_seq = stablehlo.iota dim = 0 : tensor<108xi32>
   %input5 = stablehlo.reshape %input5_seq : (tensor<108xi32>) -> tensor<9x12xi32>
