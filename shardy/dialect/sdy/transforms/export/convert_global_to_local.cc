@@ -2889,6 +2889,18 @@ class StablehloGatherOpPattern
     ReductionOp reductionOp =
         resSharding ? resSharding.getReductionOp() : ReductionOp::SUM;
 
+    // Zeroless float types (e.g. f8E8M0FNU) have no additive zero; bitcast to
+    // unsigned integer so 0 masks out unselected shards for SUM reduction.
+    RankedTensorType origType = resultType;
+    if (auto fTy = dyn_cast<FloatType>(origType.getElementType());
+        !introducesPartialResult && fTy &&
+        !getReductionIdentityAttr(fTy, reductionOp, rewriter)) {
+      resultType = origType.clone(
+          rewriter.getIntegerType(fTy.getWidth(), /*isSigned=*/false));
+      result = stablehlo::BitcastConvertOp::create(rewriter, loc, resultType,
+                                                   result);
+    }
+
     // Fill the out-of-bounds positions with the reduction identity.
     Value identityVal =
         reductionOp == ReductionOp::SUM
@@ -2908,6 +2920,10 @@ class StablehloGatherOpPattern
                                           operandSharding.getMeshOrRef(),
                                           enableRGV3, conversionState, rewriter)
               .front();
+      if (resultType != origType) {
+        result = stablehlo::BitcastConvertOp::create(rewriter, loc, origType,
+                                                     result);
+      }
     }
 
     rewriter.replaceOp(op, result);

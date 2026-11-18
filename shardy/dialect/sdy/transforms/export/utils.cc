@@ -818,6 +818,14 @@ std::optional<ReductionOp> getReductionType(Operation* op) {
   if (auto scatterOp = dyn_cast<stablehlo::ScatterOp>(op)) {
     return getReductionType(scatterOp.getUpdateComputation());
   }
+  if (auto gatherOp = dyn_cast<stablehlo::GatherOp>(op)) {
+    // Zeroless floats lack an additive zero; defer masking to
+    // ConvertGlobalToLocal.
+    auto fTy = dyn_cast<FloatType>(gatherOp.getType().getElementType());
+    if (fTy && !APFloat::semanticsHasZero(fTy.getFloatSemantics())) {
+      return std::nullopt;
+    }
+  }
   return ReductionOp::SUM;
 }
 
