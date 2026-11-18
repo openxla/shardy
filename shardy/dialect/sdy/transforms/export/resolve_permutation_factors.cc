@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -832,22 +833,32 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
   int64_t hops = totalShift / shardSize;
   int64_t fraction = totalShift % shardSize;
 
-  // Helper to collective permute a sliced piece by a given device offset.
-  auto permutePiece = [&](Value piece, int64_t deviceOffset) -> Value {
+  // Helper to slice [sliceStart, sliceLimit) along dim and collective-permute
+  // the piece by deviceOffset devices. Avoids creating the slice when pairs
+  // is empty (out-of-bounds shift filled with zeros).
+  auto permutePiece = [&](int64_t sliceStart, int64_t sliceLimit,
+                          int64_t deviceOffset) -> Value {
     if (deviceOffset == 0) {
-      return piece;
+      return sliceAlongDim(loc, input, dim, sliceStart, sliceLimit,
+                           localSharding, state.rewriter);
     }
     SmallVector<int64_t> pairs =
         getDataShiftSourceTargetPairs(mesh, manualAxesInDim, deviceOffset);
     if (pairs.empty()) {
+      SmallVector<int64_t> pieceShape = llvm::to_vector(inputType.getShape());
+      pieceShape[dim] = sliceLimit - sliceStart;
+      auto pieceType =
+          RankedTensorType::get(pieceShape, inputType.getElementType());
       Value zeroConst = createZeroScalarConstant(
           loc, inputType.getElementType(), state.rewriter);
       auto bcast = stablehlo::BroadcastInDimOp::create(
-          state.rewriter, loc, cast<RankedTensorType>(piece.getType()),
-          zeroConst, state.rewriter.getDenseI64ArrayAttr({}));
+          state.rewriter, loc, pieceType, zeroConst,
+          state.rewriter.getDenseI64ArrayAttr({}));
       setSharding(bcast, localSharding);
       return bcast;
     }
+    Value piece = sliceAlongDim(loc, input, dim, sliceStart, sliceLimit,
+                                localSharding, state.rewriter);
     auto pairType =
         RankedTensorType::get({static_cast<int64_t>(pairs.size()) / 2, 2},
                               state.rewriter.getI64Type());
@@ -859,27 +870,22 @@ Value rightShiftData(Location loc, Value input, int64_t dim, int64_t totalShift,
     return permOp.getResult();
   };
 
-  Value head = permutePiece(input, hops);
   if (fraction == 0) {
-    return head;
+    return permutePiece(0, shardSize, hops);
   }
-  Value tail = permutePiece(input, hops + 1);
 
   int64_t headSliceSize = shardSize - fraction;
 
-  // tailSlice slices tail[shardSize - fraction : shardSize]
-  Value tailSlice =
-      sliceAlongDim(loc, tail, dim, headSliceSize, shardSize, localSharding,
-                    state.rewriter, /*skipFullDimSlice=*/false);
+  // tail slices input[shardSize - fraction : shardSize] and permutes by
+  // hops + 1.
+  Value tail = permutePiece(headSliceSize, shardSize, hops + 1);
 
-  // headSlice slices head[0 : headSliceSize]
-  Value headSlice = sliceAlongDim(loc, head, dim, 0, headSliceSize,
-                                  localSharding, state.rewriter,
-                                  /*skipFullDimSlice=*/false);
+  // head slices input[0 : headSliceSize] and permutes by hops.
+  Value head = permutePiece(0, headSliceSize, hops);
 
-  // Concat tailSlice followed by headSlice
-  Value concat = stablehlo::ConcatenateOp::create(
-      state.rewriter, loc, ValueRange{tailSlice, headSlice}, dim);
+  // Concat tail followed by head
+  Value concat = stablehlo::ConcatenateOp::create(state.rewriter, loc,
+                                                  ValueRange{tail, head}, dim);
   setSharding(concat, localSharding);
   return concat;
 }
@@ -3126,6 +3132,141 @@ void handleRngBitGeneratorOp(stablehlo::RngBitGeneratorOp rngOp,
 // stablehlo.slice
 // -----------------------------------------------------------------------------
 
+// Folds a single-use stablehlo.pad followed by a step-1 stablehlo.slice into a
+// single stablehlo.pad (possibly with negative edge padding), a no-op
+// cancellation (the pad operand), or an all-padding broadcast_in_dim. Returns
+// true if sliceOp (and padOp) was replaced and erased.
+bool tryMergePadAndSlice(stablehlo::SliceOp sliceOp, IRRewriter& rewriter,
+                         const SymbolTable& symbolTable) {
+  auto padOp = sliceOp.getOperand().getDefiningOp<stablehlo::PadOp>();
+  if (!padOp || !padOp->hasOneUse()) {
+    return false;
+  }
+  TensorShardingAttr sharding = getSharding(sliceOp.getResult());
+  if (isFullyReplicated(sharding) || !sharding.getUnreducedAxes().empty() ||
+      getSharding(padOp.getOperand()) != sharding ||
+      getSharding(padOp.getResult()) != sharding) {
+    return false;
+  }
+  MeshAttr mesh = sharding.getMesh(symbolTable);
+  if (!mesh || mesh.isSingleDevice()) {
+    return false;
+  }
+  auto inType = dyn_cast<RankedTensorType>(padOp.getOperand().getType());
+  RankedTensorType padType = padOp.getType();
+  RankedTensorType sliceType = sliceOp.getType();
+  if (!inType || !inType.hasStaticShape() || !padType.hasStaticShape() ||
+      !sliceType.hasStaticShape()) {
+    return false;
+  }
+  int64_t rank = sliceType.getRank();
+  if (sharding.getDimShardings().size() != static_cast<size_t>(rank)) {
+    return false;
+  }
+
+  ArrayRef<int64_t> edgeLow = padOp.getEdgePaddingLow();
+  ArrayRef<int64_t> edgeHigh = padOp.getEdgePaddingHigh();
+  ArrayRef<int64_t> interior = padOp.getInteriorPadding();
+  ArrayRef<int64_t> sliceStarts = sliceOp.getStartIndices();
+  ArrayRef<int64_t> sliceLimits = sliceOp.getLimitIndices();
+  ArrayRef<int64_t> sliceStrides = sliceOp.getStrides();
+
+  SmallVector<int64_t> newLow(rank);
+  SmallVector<int64_t> newHigh(rank);
+  bool isNoOp = true;
+  bool isAllPadding = false;
+  bool mayHaveMultiHaloExchanges = false;
+
+  for (int64_t d = 0; d < rank; ++d) {
+    if (sliceStrides[d] != 1) {
+      return false;
+    }
+    int64_t inDim = inType.getDimSize(d);
+    int64_t padDim = padType.getDimSize(d);
+    int64_t outDim = sliceType.getDimSize(d);
+    bool isUnsliced = (sliceStarts[d] == 0 && sliceLimits[d] == padDim);
+
+    if (interior[d] != 0) {
+      if (!isUnsliced) {
+        return false;
+      }
+      newLow[d] = edgeLow[d];
+      newHigh[d] = edgeHigh[d];
+      if (inDim > 1 || newLow[d] != 0 || newHigh[d] != 0) {
+        isNoOp = false;
+      }
+      if (outDim == 0 || inDim == 0) {
+        isAllPadding = true;
+      }
+      continue;
+    }
+
+    if (outDim == 0 || inDim == 0 || sliceLimits[d] <= edgeLow[d] ||
+        sliceStarts[d] >= inDim + edgeLow[d]) {
+      isAllPadding = true;
+    }
+    if (sharding.getDimShardings()[d].getShardedSize(mesh) > 1 &&
+        (edgeLow[d] != 0 || edgeHigh[d] != 0) && !isUnsliced) {
+      mayHaveMultiHaloExchanges = true;
+    }
+    newLow[d] = edgeLow[d] - sliceStarts[d];
+    newHigh[d] = sliceLimits[d] - (inDim + edgeLow[d]);
+    if (newLow[d] != 0 || newHigh[d] != 0) {
+      isNoOp = false;
+    }
+  }
+
+  if (isNoOp) {
+    rewriter.replaceOp(sliceOp, padOp.getOperand());
+    rewriter.eraseOp(padOp);
+    return true;
+  }
+
+  Location fusedLoc = rewriter.getFusedLoc({padOp.getLoc(), sliceOp.getLoc()});
+  if (isAllPadding) {
+    Value paddingValue = padOp.getPaddingValue();
+    TensorShardingAttr padValSharding = getSharding(paddingValue);
+    if (isFullyReplicatedWithoutUnreducedAxes(padValSharding) &&
+        (!padValSharding ||
+         padValSharding.getMeshOrRef() == sharding.getMeshOrRef())) {
+      rewriter.setInsertionPoint(sliceOp);
+      auto bcastOp = stablehlo::BroadcastInDimOp::create(
+          rewriter, fusedLoc, sliceType, paddingValue,
+          rewriter.getDenseI64ArrayAttr({}));
+      setSharding(bcastOp.getResult(), sharding);
+      rewriter.replaceOp(sliceOp, bcastOp.getResult());
+      rewriter.eraseOp(padOp);
+      return true;
+    }
+  }
+
+  if (!mayHaveMultiHaloExchanges) {
+    return false;
+  }
+
+  rewriter.setInsertionPoint(sliceOp);
+  auto mergedPadOp = stablehlo::PadOp::create(
+      rewriter, fusedLoc, sliceType, padOp.getOperand(),
+      padOp.getPaddingValue(), rewriter.getDenseI64ArrayAttr(newLow),
+      rewriter.getDenseI64ArrayAttr(newHigh), padOp.getInteriorPaddingAttr());
+  setSharding(mergedPadOp.getResult(), sharding);
+  rewriter.replaceOp(sliceOp, mergedPadOp.getResult());
+  rewriter.eraseOp(padOp);
+  return true;
+}
+
+// Pre-walk pass over moduleOp to fold sharded pad -> slice patterns before
+// main permutation factor resolution.
+void mergePadAndSliceOps(ModuleOp moduleOp, IRRewriter& rewriter,
+                         const SymbolTable& symbolTable) {
+  SmallVector<stablehlo::SliceOp> sliceOps;
+  moduleOp.walk(
+      [&](stablehlo::SliceOp sliceOp) { sliceOps.push_back(sliceOp); });
+  for (stablehlo::SliceOp sliceOp : sliceOps) {
+    tryMergePadAndSlice(sliceOp, rewriter, symbolTable);
+  }
+}
+
 DataExchangeInfo getSliceDataExchangeInfo(stablehlo::SliceOp sliceOp,
                                           TensorShardingAttr sharding,
                                           MeshAttr mesh,
@@ -3638,6 +3779,10 @@ struct ShardyResolvePermutationFactorsPass
     int64_t nextChannelId = getNextChannelId(moduleOp);
     ResolutionState state{rewriter,      symbolTable,  meshCache,
                           nextChannelId, replicaCount, partitionCount};
+
+    if (enableHaloExchange) {
+      mergePadAndSliceOps(moduleOp, rewriter, symbolTable);
+    }
 
     // Walk the module to resolve permutation factors for each op.
     moduleOp.walk([&](Operation* op) {

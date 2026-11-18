@@ -35,6 +35,18 @@ func.func @sequential_pad_comm_free_and_comm(%arg0: tensor<4x4x2xi32>, %arg1: te
   return %0 : tensor<7x6x2xi32>
 }
 
+func.func @parallel_pad_merged_with_slice(
+  %arg0: tensor<4x4x2xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}, {}]>})
+  -> (tensor<7x6x4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}, {}]>}) {
+  %c = stablehlo.constant dense<0> : tensor<i32>
+  %0 = stablehlo.pad %arg0, %c, low = [0, 2, 1], high = [4, 0, 1], interior = [0, 0, 0]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}, {}]>]>} : (tensor<4x4x2xi32>, tensor<i32>) -> tensor<8x6x4xi32>
+  %1 = stablehlo.slice %0 [1:8, 0:6, 0:4]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"a"}, {"b"}, {}]>]>} : (tensor<8x6x4xi32>) -> tensor<7x6x4xi32>
+  %2 = sdy.reshard %1 <@mesh, [{}, {}, {}]> : tensor<7x6x4xi32>
+  return %2 : tensor<7x6x4xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -67,6 +79,14 @@ func.func @main() {
   "check.expect_eq"(%res2#1, %seq2) : (tensor<7x6x2xi32>, tensor<7x6x2xi32>) -> ()
   "check.expect_eq"(%res2#2, %seq2) : (tensor<7x6x2xi32>, tensor<7x6x2xi32>) -> ()
   "check.expect_eq"(%res2#3, %seq2) : (tensor<7x6x2xi32>, tensor<7x6x2xi32>) -> ()
+
+  %res3:4 = "interpreter.run_parallel"(%s0, %s1, %s2, %s3) {
+    programs = [[@parallel_pad_merged_with_slice, @parallel_pad_merged_with_slice, @parallel_pad_merged_with_slice, @parallel_pad_merged_with_slice]]
+  } : (tensor<2x2x2xi32>, tensor<2x2x2xi32>, tensor<2x2x2xi32>, tensor<2x2x2xi32>) -> (tensor<7x6x4xi32>, tensor<7x6x4xi32>, tensor<7x6x4xi32>, tensor<7x6x4xi32>)
+  "check.expect_eq"(%res3#0, %seq) : (tensor<7x6x4xi32>, tensor<7x6x4xi32>) -> ()
+  "check.expect_eq"(%res3#1, %seq) : (tensor<7x6x4xi32>, tensor<7x6x4xi32>) -> ()
+  "check.expect_eq"(%res3#2, %seq) : (tensor<7x6x4xi32>, tensor<7x6x4xi32>) -> ()
+  "check.expect_eq"(%res3#3, %seq) : (tensor<7x6x4xi32>, tensor<7x6x4xi32>) -> ()
 
   return
 }
