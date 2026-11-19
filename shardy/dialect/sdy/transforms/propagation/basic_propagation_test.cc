@@ -19,6 +19,7 @@ limitations under the License.
 #include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Action.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -293,6 +294,54 @@ TEST_F(BasicPropagationTest,
     EXPECT_EQ(strippedAttrString(innerSharding, /*stripMnemonic=*/true),
               "<@mesh, [{?}, {\"b\", ?}]>");
   }
+}
+
+TEST_F(BasicPropagationTest, PropagatesFuncResultsBatchPreservingResultAttrs) {
+  constexpr const char* kModuleStr = R"mlir(
+    module {
+      sdy.mesh @mesh = <["a"=2, "b"=2]>
+      func.func @main(
+          %arg0: tensor<4x6xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>},
+          %arg1: tensor<4x6xf32>,
+          %arg2: !stablehlo.token,
+          %arg3: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>})
+          -> (tensor<4x6xf32> {jax.result_info = "r0"},
+              tensor<4x6xf32>,
+              tensor<4x6xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>, jax.result_info = "r2"},
+              !stablehlo.token,
+              tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) {
+        %0 = stablehlo.negate %arg0 : tensor<4x6xf32>
+        return %0, %0, %arg1, %arg2, %arg3
+            : tensor<4x6xf32>, tensor<4x6xf32>, tensor<4x6xf32>,
+              !stablehlo.token, tensor<4x8xf32>
+      }
+    }
+  )mlir";
+
+  OwningOpRef<ModuleOp> module =
+      parseSourceString<ModuleOp>(kModuleStr, &context);
+  ASSERT_TRUE(module);
+
+  PassManager pm(&context);
+  pm.addPass(createBasicPropagationPass());
+  ASSERT_TRUE(succeeded(pm.run(*module)));
+
+  func::FuncOp funcOp = *module->getOps<func::FuncOp>().begin();
+  for (int resIdx : {0, 1}) {
+    TensorShardingAttr sharding = getFuncResultSharding(funcOp, resIdx);
+    ASSERT_NE(sharding, nullptr);
+    EXPECT_EQ(strippedAttrString(sharding, /*stripMnemonic=*/true),
+              "<@mesh, [{\"a\", ?}, {\"b\", ?}]>");
+  }
+  EXPECT_EQ(funcOp.getResultAttrOfType<StringAttr>(0, "jax.result_info"), "r0");
+  EXPECT_EQ(funcOp.getResultAttrOfType<StringAttr>(2, "jax.result_info"), "r2");
+  EXPECT_EQ(strippedAttrString(getSharding(funcOp.getArgument(1)),
+                               /*stripMnemonic=*/true),
+            "<@mesh, [{\"a\", ?}, {?}]>");
+  EXPECT_EQ(getFuncResultSharding(funcOp, 3), nullptr);
+  EXPECT_EQ(strippedAttrString(getFuncResultSharding(funcOp, 4),
+                               /*stripMnemonic=*/true),
+            "<@mesh, [{\"a\"}, {\"b\"}]>");
 }
 
 }  // namespace
