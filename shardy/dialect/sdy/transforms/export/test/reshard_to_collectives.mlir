@@ -39,37 +39,44 @@ func.func @redundant_reshard_unannotated_input(%arg0 : tensor<16x8xf32>) -> tens
 }
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_different_meshes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{}, {}]>})
 func.func @redundant_reshard_fully_replicated_different_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_2x3, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh1d_6, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh1d_6, [{}, {}]> : tensor<16x8xf32>
   // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@mesh1d_6, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_same_mesh_different_device_ids
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>})
 func.func @redundant_reshard_fully_replicated_same_mesh_different_device_ids(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@mesh2d_non_iota, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_same_empty_meshes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}, {}]>})
 func.func @redundant_reshard_fully_replicated_same_empty_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: return %[[ARG0]]
   %0 = sdy.reshard %arg0 <@empty_mesh, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_different_empty_meshes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}, {}]>})
 func.func @redundant_reshard_fully_replicated_different_empty_meshes(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@empty_mesh, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@empty_mesh_another, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@empty_mesh_another, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }
 
 // CHECK-LABEL: func @redundant_reshard_fully_replicated_input_mesh_nonempty_output_mesh_empty
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>})
 func.func @redundant_reshard_fully_replicated_input_mesh_nonempty_output_mesh_empty(%arg0 : tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}]>}) -> tensor<16x8xf32> {
-  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %arg0 <@empty_mesh, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@empty_mesh, [{}, {}]> : tensor<16x8xf32>
   // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@empty_mesh, [{}, {}]> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
@@ -93,7 +100,8 @@ func.func @reshard_from_sharded_to_fully_replicated_same_meshes(%arg0 : tensor<2
 // CHECK-LABEL: func @reshard_from_sharded_to_fully_replicated_different_meshes
 func.func @reshard_from_sharded_to_fully_replicated_different_meshes(%arg0 : tensor<24x8xf32> {sdy.sharding = #sdy.sharding<@mesh1d_6, [{"x"}, {}]>}) -> tensor<24x8xf32> {
   // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %arg0 out_sharding=<@mesh1d_6, [{}, {}]>
-  // CHECK-NEXT: return %[[ALL_GATHER]]
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_GATHER]] <@mesh2d_2x3, [{}, {}]>
+  // CHECK-NEXT: return %[[RESHARD]]
   %0 = sdy.reshard %arg0 <@mesh2d_2x3, [{}, {}]> : tensor<24x8xf32>
   return %0 : tensor<24x8xf32>
 }
@@ -1267,5 +1275,47 @@ func.func @single_device_out_sharding(%arg0 : tensor<16x8xf32> {sdy.sharding = #
   // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ARG0]] <@single_dev_0, []> : tensor<16x8xf32>
   // CHECK-NEXT: return %[[RESHARD]] : tensor<16x8xf32>
   %0 = sdy.reshard %arg0 <@single_dev_0, []> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @replicated_dims_with_unreduced_different_device_ids
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}], unreduced={"x"}>})
+func.func @replicated_dims_with_unreduced_different_device_ids(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}], unreduced={"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ARG0]] out_sharding=<@mesh2d_non_iota, [{}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]] : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @replicated_dims_with_unreduced_max_different_device_ids
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}], unreduced=max{"x"}>})
+func.func @replicated_dims_with_unreduced_max_different_device_ids(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {}], unreduced=max{"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ARG0]] out_sharding=<@mesh2d_non_iota_2, [{}, {}], unreduced=max{"x"}> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[COLLECTIVE_PERMUTE]] : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota_2, [{}, {}], unreduced=max{"x"}> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_to_replicated_different_device_ids
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_non_iota, [{"x"}, {}]>})
+func.func @sharded_to_replicated_different_device_ids(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d_non_iota, [{"x"}, {}]>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{"x"}, {}] %[[ARG0]] out_sharding=<@mesh2d_non_iota, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_GATHER]] <@mesh2d, [{}, {}]> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[RESHARD]] : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh2d, [{}, {}]> : tensor<16x8xf32>
+  return %0 : tensor<16x8xf32>
+}
+
+// CHECK-LABEL: func @sharded_with_unreduced_to_replicated_dims_unreduced_different_device_ids
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {"y"}], unreduced={"x"}>})
+func.func @sharded_with_unreduced_to_replicated_dims_unreduced_different_device_ids(
+    %arg0: tensor<16x8xf32> {sdy.sharding = #sdy.sharding<@mesh2d, [{}, {"y"}], unreduced={"x"}>}) -> tensor<16x8xf32> {
+  // CHECK-NEXT: %[[COLLECTIVE_PERMUTE:.*]] = sdy.collective_permute %[[ARG0]] out_sharding=<@mesh2d_non_iota, [{}, {"y"}], unreduced={"x"}> : tensor<16x8xf32>
+  // CHECK-NEXT: %[[ALL_GATHER:.*]] = sdy.all_gather [{}, {"y"}] %[[COLLECTIVE_PERMUTE]] out_sharding=<@mesh2d_non_iota, [{}, {}], unreduced={"x"}> : tensor<16x8xf32>
+  // CHECK-NEXT: return %[[ALL_GATHER]] : tensor<16x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh2d_non_iota, [{}, {}], unreduced={"x"}> : tensor<16x8xf32>
   return %0 : tensor<16x8xf32>
 }

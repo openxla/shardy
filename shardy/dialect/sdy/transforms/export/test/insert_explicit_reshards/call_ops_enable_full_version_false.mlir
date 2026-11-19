@@ -122,3 +122,25 @@ func.func private @foo(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mes
   %3 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
   return %3 : tensor<210xf32>
 }
+
+// -----
+
+sdy.mesh @meshA = <["x"=2, "y"=4]>
+sdy.mesh @meshB = <["a"=4, "b"=2]>
+
+// CHECK-LABEL: func @call_cross_mesh_replicated_not_changed_when_false
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>})
+func.func @call_cross_mesh_replicated_not_changed_when_false(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>}) {
+  // CHECK-NOT: sdy.reshard
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_repl_b(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: return %[[CALL]] : tensor<8xf32>
+  %0 = call @callee_repl_b(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_repl_b
+func.func private @callee_repl_b(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{}]>}) {
+  return %arg0 : tensor<8xf32>
+}
