@@ -24,13 +24,17 @@ limitations under the License.
 #include <utility>
 
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
+#include "mlir/IR/AttrTypeSubElements.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -1348,6 +1352,155 @@ class ConstantOpPattern : public OpConversionPattern<sdy::ConstantOp> {
   ConversionState& conversionState;
 };
 
+bool isFrameNameLoc(NameLoc nameLoc) {
+  return isa<FileLineColLoc>(nameLoc.getChildLoc());
+}
+
+// Flattens a CallSiteLoc tree from innermost callee to outermost caller.
+void collectCallSiteChain(Location rootLoc, SmallVectorImpl<Location>& chain) {
+  constexpr size_t kMaxChainDepth = 256;
+  SmallVector<Location, 8> stack = {rootLoc};
+  while (!stack.empty() && chain.size() < kMaxChainDepth) {
+    Location loc = stack.pop_back_val();
+    if (auto callSite = dyn_cast<CallSiteLoc>(loc)) {
+      stack.push_back(callSite.getCaller());
+      stack.push_back(callSite.getCallee());
+    } else {
+      chain.push_back(loc);
+    }
+  }
+}
+
+// Unwraps outer FusedLoc and op-type NameLoc wrappers (ending with ':') to
+// extract the op name and inner stack-frame Location. When isCaller is true,
+// bare stack-frame NameLocs carry no op name.
+std::pair<StringRef, Location> unwrapOpNameAndFrameLoc(Location loc,
+                                                       bool isCaller) {
+  if (auto fusedLoc = dyn_cast<FusedLoc>(loc);
+      fusedLoc && !fusedLoc.getLocations().empty()) {
+    loc = fusedLoc.getLocations().front();
+  }
+  while (auto nameLoc = dyn_cast<NameLoc>(loc)) {
+    if (isFrameNameLoc(nameLoc)) {
+      StringRef name =
+          isCaller ? StringRef() : nameLoc.getName().strref().split('@').first;
+      return {name, nameLoc};
+    }
+    StringRef name = nameLoc.getName().strref().split('@').first;
+    if (!name.ends_with(":")) {
+      return {name, nameLoc.getChildLoc()};
+    }
+    loc = nameLoc.getChildLoc();
+  }
+  return {StringRef(), loc};
+}
+
+bool hasOpNamePrefix(StringRef calleeName, StringRef callerName) {
+  calleeName = calleeName.trim('/');
+  callerName = callerName.trim('/');
+  if (callerName.empty()) {
+    return true;
+  }
+  return calleeName == callerName || (calleeName.starts_with(callerName) &&
+                                      calleeName[callerName.size()] == '/');
+}
+
+// Returns true when callee already includes caller's op-name prefix and outer
+// stack frames.
+bool isRedundantCallerLoc(Location callee, Location caller) {
+  if (callee == caller || isa<UnknownLoc>(caller)) {
+    return true;
+  }
+  auto [callerName, callerFrameLoc] =
+      unwrapOpNameAndFrameLoc(caller, /*isCaller=*/true);
+  if (callerName.empty() && isa<UnknownLoc>(callerFrameLoc)) {
+    return false;
+  }
+  auto [calleeName, calleeFrameLoc] =
+      unwrapOpNameAndFrameLoc(callee, /*isCaller=*/false);
+  if (!hasOpNamePrefix(calleeName, callerName)) {
+    return false;
+  }
+  if (isa<UnknownLoc>(callerFrameLoc)) {
+    return true;
+  }
+  if (isa<UnknownLoc>(calleeFrameLoc)) {
+    return false;
+  }
+  SmallVector<Location, 8> callerFrames;
+  SmallVector<Location, 8> calleeFrames;
+  collectCallSiteChain(callerFrameLoc, callerFrames);
+  collectCallSiteChain(calleeFrameLoc, calleeFrames);
+  return calleeFrames.size() >= callerFrames.size() &&
+         ArrayRef<Location>(calleeFrames).take_back(callerFrames.size()) ==
+             ArrayRef<Location>(callerFrames);
+}
+
+// Combines callee (inside sdy.manual_computation) with caller (the
+// sdy.manual_computation op itself), skipping redundant op-name prefixes and
+// overlapping CallSiteLoc entries.
+Location stackManualComputationLocations(Location callee, Location caller) {
+  if (isa<UnknownLoc>(caller) || callee == caller) {
+    return callee;
+  }
+  if (isa<UnknownLoc>(callee)) {
+    return caller;
+  }
+
+  SmallVector<Location, 8> calleeChain;
+  SmallVector<Location, 8> callerChain;
+  collectCallSiteChain(callee, calleeChain);
+  collectCallSiteChain(caller, callerChain);
+
+  size_t maxOverlap = std::min(calleeChain.size(), callerChain.size());
+  size_t overlap = 0;
+  for (size_t k = maxOverlap; k > 0; --k) {
+    if (ArrayRef<Location>(calleeChain).take_back(k) ==
+        ArrayRef<Location>(callerChain).take_front(k)) {
+      overlap = k;
+      break;
+    }
+  }
+
+  ArrayRef<Location> extraCallers =
+      ArrayRef<Location>(callerChain).drop_front(overlap);
+  while (!extraCallers.empty() &&
+         isRedundantCallerLoc(calleeChain.back(), extraCallers.front())) {
+    extraCallers = extraCallers.drop_front();
+  }
+  if (extraCallers.empty()) {
+    return callee;
+  }
+
+  calleeChain.append(extraCallers.begin(), extraCallers.end());
+  Location combined = calleeChain.back();
+  for (Location loc :
+       llvm::reverse(ArrayRef<Location>(calleeChain).drop_back(1))) {
+    combined = CallSiteLoc::get(loc, combined);
+  }
+  return combined;
+}
+
+void propagateManualComputationLocations(ModuleOp module) {
+  module.walk([](ManualComputationOp manualCompOp) {
+    Location callerLoc = manualCompOp.getLoc();
+    if (isa<UnknownLoc>(callerLoc) || manualCompOp.getBody().empty()) {
+      return;
+    }
+    AttrTypeReplacer replacer;
+    replacer.addReplacement(
+        [callerLoc](LocationAttr loc) -> std::pair<LocationAttr, WalkResult> {
+          return {stackManualComputationLocations(loc, callerLoc),
+                  WalkResult::skip()};
+        });
+    for (Operation& bodyOp :
+         manualCompOp.getBody().front().without_terminator()) {
+      replacer.recursivelyReplaceElementsIn(&bodyOp, /*replaceAttrs=*/false,
+                                            /*replaceLocs=*/true);
+    }
+  });
+}
+
 class ManualComputationOpPattern
     : public OpConversionPattern<ManualComputationOp> {
  public:
@@ -2411,12 +2564,13 @@ class StablehloReduceOpPattern
         !doesOpIntroducePartialResult(op, reductionAxes, "reduce", converter)) {
       auto localReduceOp = cast<stablehlo::ReduceOp>(
           createLocalGenericOp(op, adaptor.getOperands(), converter, rewriter));
+      Operation* finalOp = nullptr;
       if (op.getNumResults() == 1) {
         ValueRange results = createAllReduceForUnreducedAxes(
             op.getLoc(), localReduceOp.getResults(), localReduceOp.getBody(),
             reductionAxes, mesh, meshOrRef, enableRGV3, conversionState,
             rewriter);
-        rewriter.replaceOp(op, results);
+        finalOp = results.front().getDefiningOp();
       } else {
         // Stablehlo.all_reduce requires a 2-parameter reduction region and
         // does not support a variadic 2*N-parameter reduction computation.
@@ -2461,8 +2615,14 @@ class StablehloReduceOpPattern
         rewriter.cloneRegionBefore(localReduceOp.getBody(),
                                    finalReduceOp.getBody(),
                                    finalReduceOp.getBody().end());
-        rewriter.replaceOp(op, finalReduceOp.getResults());
+        finalOp = finalReduceOp;
       }
+      constexpr StringRef kFrontendAttributesAttr = "mhlo.frontend_attributes";
+      if (Attribute frontendAttrs =
+              op->getDiscardableAttr(kFrontendAttributesAttr)) {
+        finalOp->setDiscardableAttr(kFrontendAttributesAttr, frontendAttrs);
+      }
+      rewriter.replaceOp(op, finalOp->getResults());
       conversionState.removeToConvertOp(op);
       return success();
     }
@@ -3945,6 +4105,8 @@ struct ConvertGlobalToLocalPass
         typeConverter.populateArgShardings(whileOp);
       }
     });
+
+    propagateManualComputationLocations(module);
 
     ConversionState conversionState;
     conversionState.replicaCount = replicaCount;
