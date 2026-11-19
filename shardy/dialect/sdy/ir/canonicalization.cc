@@ -68,7 +68,6 @@ bool isForbiddenIntermediateReshard(Operation* op, Value tensor,
   }
 
   bool inIsSingleDevice = isSingleDeviceSharding(inSharding, op);
-  bool innerIsSingleDevice = isSingleDeviceSharding(innerSharding, op);
   bool outIsSingleDevice = isSingleDeviceSharding(outerSharding, op);
 
   // Single-device transitions: folding is forbidden if it would directly
@@ -78,8 +77,10 @@ bool isForbiddenIntermediateReshard(Operation* op, Value tensor,
         inIsSingleDevice ? outerSharding : inSharding;
     return !isFullyReplicatedWithoutUnreducedAxes(otherSharding);
   }
-  if (inIsSingleDevice || innerIsSingleDevice || outIsSingleDevice) {
-    return false;
+  if (inIsSingleDevice && outIsSingleDevice) {
+    // Prevent folding a multi-device bridge between two different
+    // single-device shardings into a direct cross-device reshard.
+    return inSharding.getMeshOrRef() != outerSharding.getMeshOrRef();
   }
 
   // Cross-mesh: prevent folding across different meshes unless all three

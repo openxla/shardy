@@ -2,6 +2,9 @@
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
 sdy.mesh @mesh_xpq = <["x"=4, "p"=3, "q"=5]>
+sdy.mesh @mesh_iota = <["x"=2, "y"=2, "z"=2]>
+sdy.mesh @mesh_non_iota = <["x"=2, "y"=2, "z"=2], device_ids=[7, 6, 5, 4, 3, 2, 1, 0]>
+sdy.mesh @mesh_diff_axes_non_iota = <["a"=4, "b"=2], device_ids=[7, 6, 5, 4, 3, 2, 1, 0]>
 
 // CHECK-LABEL: func @custom_call_inspect_sharding
 func.func @custom_call_inspect_sharding(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {"y"}]>}) -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {"x"}]>}) {
@@ -247,4 +250,148 @@ func.func @unregistered_custom_call_without_existing_rule(%arg0: tensor<4x2xf32>
   // CHECK-NOT: sdy.reshard
   %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x":(1)2}, {"y"}]>]>} : (tensor<4x2xf32>) -> tensor<2x4xf32>
   return %0 : tensor<2x4xf32>
+}
+
+// CHECK-LABEL: func @custom_call_without_rule_normalizes_replicated_operand
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @custom_call_without_rule_normalizes_replicated_operand(
+    %arg0: tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{}, {}]>},
+    %arg1: tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<4x2xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<4x2xf32>
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[R]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x2xf32>, tensor<4x2xf32>) -> tensor<4x2xf32>
+  // CHECK-NEXT: return %[[CC]] : tensor<4x2xf32>
+  %0 = stablehlo.custom_call @foo(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<4x2xf32>, tensor<4x2xf32>) -> tensor<4x2xf32>
+  return %0 : tensor<4x2xf32>
+}
+
+// CHECK-LABEL: func @custom_call_with_custom_rule_normalizes_replicated_result
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @custom_call_with_custom_rule_normalizes_replicated_result(
+    %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{}, {}]>}) {
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}, custom>} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[CC]] <@mesh_xpq, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R]] : tensor<4x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([i, j]) {i=4, j=8}, custom>, sdy.sharding = #sdy.sharding_per_value<[<@mesh_xpq, [{}, {}]>]>} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @custom_call_conflicting_non_replicated_meshes_untouched
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {}]>})
+func.func @custom_call_conflicting_non_replicated_meshes_untouched(
+    %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xpq, [{"x"}, {}]>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}]>}) {
+  // CHECK-NOT: sdy.reshard
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}]>]>} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: return %[[CC]] : tensor<4x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {}]>]>} : (tensor<4x8xf32>) -> tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+// Non-custom sharding rule where all tensor dims map to different non-overlapping
+// factors and @mesh_non_iota vs @mesh_iota have the same axes with disjoint
+// mesh axes across factors: %arg0 keeps its "x" sharding while moving onto
+// @mesh_iota.
+// CHECK-LABEL: func @custom_call_distinct_factors_non_custom_rule_disjoint_axes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+func.func @custom_call_distinct_factors_non_custom_rule_disjoint_axes(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"z"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %[[ARG0]] <@mesh_iota, [{"x"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[RESHARD0]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8}>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[CC]] : tensor<8x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8}>
+  } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// Non-custom sharding rule where all tensor dims map to different non-overlapping
+// factors, and %arg0 (@mesh_non_iota) and %arg1 (@mesh_iota) both shard along
+// "x": findCommonAxesHeuristic keeps mesh axes mutually disjoint across
+// factors, so the smaller %arg0 drops "x" to replicated on @mesh_iota.
+// CHECK-LABEL: func @custom_call_distinct_factors_non_custom_rule_conflicting_axes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"x"}, {}]>})
+func.func @custom_call_distinct_factors_non_custom_rule_conflicting_axes(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+    %arg1: tensor<8x16xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"x"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"z"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %[[ARG0]] <@mesh_iota, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[RESHARD0]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=16, m=8, n=8}>} : (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[CC]] : tensor<8x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=16, m=8, n=8}>
+  } : (tensor<8x8xf32>, tensor<8x16xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// Non-custom sharding rule where all tensor dims map to different non-overlapping
+// factors, but the non-iota mesh has a different axis structure than
+// @mesh_iota: prePivotForeignMeshes wipes %arg0 via a 2-step replicated pivot.
+// CHECK-LABEL: func @custom_call_distinct_factors_non_custom_rule_different_axes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_diff_axes_non_iota, [{"a"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+func.func @custom_call_distinct_factors_non_custom_rule_different_axes(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_diff_axes_non_iota, [{"a"}, {}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"z"}]>}) {
+  // CHECK-NEXT: %[[PIVOT0:.*]] = sdy.reshard %[[ARG0]] <@mesh_diff_axes_non_iota, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[PIVOT1:.*]] = sdy.reshard %[[PIVOT0]] <@mesh_iota, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[PIVOT1]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8}>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[CC]] : tensor<8x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8}>
+  } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// Non-custom sharding rule where all non-overlapping factors are marked
+// need_replication: distributeAxisRefsToBatchingFactors clears every factor
+// because no batching factors exist, so all operands/results reshard to
+// replicated on @mesh_iota.
+// CHECK-LABEL: func @custom_call_distinct_need_replication_factors_non_custom_rule
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+func.func @custom_call_distinct_need_replication_factors_non_custom_rule(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"z"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %[[ARG0]] <@mesh_iota, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[ARG1]] <@mesh_iota, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[RESHARD0]], %[[RESHARD1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8} need_replication={i, j, k, l, m, n}>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[RESHARD_OUT:.*]] = sdy.reshard %[[CC]] <@mesh_iota, [{}, {"z"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[RESHARD_OUT]] : tensor<8x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8} need_replication={i, j, k, l, m, n}>
+  } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// Same distinct-factor sharding rule marked `custom`: InsertExplicitReshardsPass
+// skips ShardingProjection and only normalizes replicated tensors, leaving the
+// mixed non-replicated @mesh_non_iota and @mesh_iota shardings untouched.
+// CHECK-LABEL: func @custom_call_distinct_factors_custom_rule_untouched
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+func.func @custom_call_distinct_factors_custom_rule_untouched(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"x"}, {}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"z"}]>}) {
+  // CHECK-NOT: sdy.reshard
+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%[[ARG0]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8}, custom>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: return %[[CC]] : tensor<8x8xf32>
+  %0 = stablehlo.custom_call @foo(%arg0, %arg1) {
+    sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"z"}]>]>,
+    sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [k, l])->([m, n]) {i=8, j=8, k=8, l=8, m=8, n=8}, custom>
+  } : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
 }
