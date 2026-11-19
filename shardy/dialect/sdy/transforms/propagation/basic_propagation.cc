@@ -33,6 +33,7 @@ limitations under the License.
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
@@ -45,6 +46,7 @@ limitations under the License.
 #include "mlir/Support/WalkResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "shardy/common/logging.h"
+#include "shardy/dialect/sdy/ir/constants.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
 #include "shardy/dialect/sdy/ir/utils.h"
@@ -434,6 +436,7 @@ void propagateFuncResults(FuncOp funcOp, const SymbolUserMap& userMap,
                           const SymbolTable& symbolTable,
                           const FactorPropagation& factorPropagation,
                           const ShardingGroupMap& shardingGroupMap) {
+  SmallVector<TensorShardingAttr> updatedResultShardings;
   for (OpOperand& returnOperand : getBodyTerminatorOpOperands(funcOp)) {
     Value returnValue = returnOperand.get();
     auto tensorType = dynCastStaticShapedType(returnValue.getType());
@@ -442,6 +445,12 @@ void propagateFuncResults(FuncOp funcOp, const SymbolUserMap& userMap,
       continue;
     }
     int64_t resNum = returnOperand.getOperandNumber();
+    TensorShardingAttr operandShardingRef = getSharding(returnValue);
+    TensorShardingAttr resultsShardingRef =
+        getFuncResultSharding(funcOp, resNum);
+    if (operandShardingRef == resultsShardingRef) {
+      continue;
+    }
     // NOTE: we void the returned `LogicalResult` since function updates aren't
     // done through a rewriter, can ignore whether operands/results were
     // updated.
@@ -453,9 +462,6 @@ void propagateFuncResults(FuncOp funcOp, const SymbolUserMap& userMap,
     //   argument. Here it will be okay to log the warning on the defining
     //   op of `returnValue`.
     // As such, we pass `returnValue` as both the operand and result.
-    TensorShardingAttr operandShardingRef = getSharding(returnValue);
-    TensorShardingAttr resultsShardingRef =
-        getFuncResultSharding(funcOp, resNum);
     PropagationTensorParams operandsParams = PropagationTensorParams(
         /*tensors=*/returnValue,
         /*shardings=*/operandShardingRef,
@@ -467,7 +473,10 @@ void propagateFuncResults(FuncOp funcOp, const SymbolUserMap& userMap,
         /*shardings=*/resultsShardingRef,
         /*setShardingCallback=*/
         [&](TensorShardingAttr sharding, int64_t) {
-          setFuncResultSharding(funcOp, resNum, sharding);
+          if (updatedResultShardings.empty()) {
+            updatedResultShardings.resize(funcOp.getNumResults());
+          }
+          updatedResultShardings[resNum] = sharding;
         },
         /*isFuncResult=*/true);
 
@@ -480,6 +489,17 @@ void propagateFuncResults(FuncOp funcOp, const SymbolUserMap& userMap,
         factorPropagation,
         /*conservativePropagation=*/false, funcOp, symbolTable,
         /*rewriter=*/nullptr, shardingGroupMap);
+  }
+  if (!updatedResultShardings.empty()) {
+    // Batch result attribute updates to avoid O(N^2) ArrayAttr copies.
+    modifyAllResultAttrs(
+        funcOp, [&](mlir::NamedAttrList& attrs, int64_t resNum) {
+          if (TensorShardingAttr sharding = updatedResultShardings[resNum]) {
+            attrs.set(kShardingAttr, sharding);
+            return true;
+          }
+          return false;
+        });
   }
 }
 
