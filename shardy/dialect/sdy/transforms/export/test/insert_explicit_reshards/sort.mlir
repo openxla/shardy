@@ -4,6 +4,7 @@ sdy.mesh @mesh = <["x"=4, "y"=2]>
 sdy.mesh @mesh_xyz = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh_xyzt = <["x"=4, "y"=4, "z"=4, "t"=8]>
 sdy.mesh @mesh_w = <["w"=16]>
+sdy.mesh @mesh_ax = <["a"=1, "x"=4]>
 
 // CHECK-LABEL: func @sort
 // TODO(b/479473118): Shardings with fully replication should not be open.
@@ -91,9 +92,9 @@ func.func @sort_input_and_output_shardings_are_different_on_sorting_dimension(%a
 
 // CHECK-LABEL: func @sort_sorting_dim_shardings_has_common_prefix
 func.func @sort_sorting_dim_shardings_has_common_prefix(%arg0: tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "z"}, {"x"}, {}]>}) -> (tensor<4x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>}) {
-  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"z", "y"}, {"t"}]>
+  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"z", "t"}, {"y"}]>
   // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
-  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"z", "y"}, {"t"}]>]>}
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"z", "t"}, {"y"}]>]>}
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>
   // CHECK-NEXT: return %[[RESHARD1]]
   %0 = "stablehlo.sort"(%arg0) <{dimension = 0 : i64, is_stable = true}> ({
@@ -106,7 +107,7 @@ func.func @sort_sorting_dim_shardings_has_common_prefix(%arg0: tensor<4x32x8xi32
 
 // CHECK-LABEL: func @sort_sorting_dim_shardings_has_common_prefix_and_large
 func.func @sort_sorting_dim_shardings_has_common_prefix_and_large(%arg0: tensor<64x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "t", "z"}, {"x"}, {}]>}) -> (tensor<64x32x8xi32> {sdy.sharding = #sdy.sharding<@mesh_xyzt, [{"y", "t"}, {"z"}, {}]>}) {
-  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"z", "y"}, {"t"}]> : tensor<64x32x8xi32>
+  // CHECK: %[[RESHARD1:.*]] = sdy.reshard %arg0 <@mesh_xyzt, [{}, {"z", "t"}, {"y"}]> : tensor<64x32x8xi32>
   // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD1]])
   // CHECK: %[[RESHARD2:.*]] = sdy.reshard %[[SORT]] <@mesh_xyzt, [{"y", "t"}, {"z"}, {}]> : tensor<64x32x8xi32>
   %0 = "stablehlo.sort"(%arg0) <{dimension = 0 : i64, is_stable = true}> ({
@@ -142,9 +143,9 @@ func.func @sort_compatible_on_nonsort_dimension(%arg0: tensor<4x32x8xi32> {sdy.s
 
 // CHECK-LABEL: func @sort_split_axis_remainder_fits_next_batch_dim
 func.func @sort_split_axis_remainder_fits_next_batch_dim(%arg0: tensor<4x8x32xi32> {sdy.sharding = #sdy.sharding<@mesh_w, [{}, {}, {"w"}]>}) -> (tensor<4x8x32xi32> {sdy.sharding = #sdy.sharding<@mesh_w, [{}, {}, {"w"}]>}) {
-  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_w, [{"w":(1)4}, {"w":(4)4}, {}]> : tensor<4x8x32xi32>
+  // CHECK: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_w, [{"w":(4)4}, {"w":(1)4}, {}]> : tensor<4x8x32xi32>
   // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
-  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_w, [{"w":(1)4}, {"w":(4)4}, {}]>]>}
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_w, [{"w":(4)4}, {"w":(1)4}, {}]>]>}
   // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_w, [{}, {}, {"w"}]> : tensor<4x8x32xi32>
   // CHECK-NEXT: return %[[RESHARD1]] : tensor<4x8x32xi32>
   %0 = "stablehlo.sort"(%arg0) <{dimension = 2 : i64, is_stable = true}> ({
@@ -168,4 +169,35 @@ func.func @sort_non_divisible_batch_dim_does_not_split_sorting_axis(%arg0: tenso
       stablehlo.return %1 : tensor<i1>
   }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyzt, [{}, {"t"}]>]>} : (tensor<6x32xi32>) -> (tensor<6x32xi32>)
   return %0 : tensor<6x32xi32>
+}
+
+// CHECK-LABEL: func @sort_prefers_whole_trailing_axis_over_saturating_split
+func.func @sort_prefers_whole_trailing_axis_over_saturating_split(%arg0: tensor<2x64xi32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x", "y"}]>}) -> (tensor<2x64xi32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x", "y"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyz, [{"y"}, {}]> : tensor<2x64xi32>
+  // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{"y"}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_xyz, [{}, {"x", "y"}]> : tensor<2x64xi32>
+  // CHECK-NEXT: return %[[RESHARD1]] : tensor<2x64xi32>
+  %0 = "stablehlo.sort"(%arg0) <{dimension = 1 : i64, is_stable = true}> ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {"x", "y"}]>]>} : (tensor<2x64xi32>) -> (tensor<2x64xi32>)
+  return %0 : tensor<2x64xi32>
+}
+
+// A size-one axis is still moved to a batching dim, even one without capacity.
+// CHECK-LABEL: func @sort_size_one_axis_batch_dim_size_one
+func.func @sort_size_one_axis_batch_dim_size_one(%arg0: tensor<1x16xi32> {sdy.sharding = #sdy.sharding<@mesh_ax, [{}, {"a"}]>}) -> (tensor<1x16xi32> {sdy.sharding = #sdy.sharding<@mesh_ax, [{}, {"a"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_ax, [{"a"}, {}]> : tensor<1x16xi32>
+  // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_ax, [{"a"}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_ax, [{}, {"a"}]> : tensor<1x16xi32>
+  // CHECK-NEXT: return %[[RESHARD1]] : tensor<1x16xi32>
+  %0 = "stablehlo.sort"(%arg0) <{dimension = 1 : i64, is_stable = true}> ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_ax, [{}, {"a"}]>]>} : (tensor<1x16xi32>) -> (tensor<1x16xi32>)
+  return %0 : tensor<1x16xi32>
 }

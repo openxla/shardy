@@ -630,78 +630,109 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
   return factorAxisRefs;
 }
 
-void distributeAxisRefsToBatchingFactors(
-    MutableArrayRef<AxisRefAttr> axisRefsToDistribute,
-    OpShardingRuleAttr shardingRule, MeshOp meshOp,
-    AxesPerFactor& factorCommonAxes) {
-  // TODO(enver): Instead iterate batching factors in the order of their
-  // available capacity, the one with largest available capacity being the
-  // first one to distribute `axisRefsToDistribute`. Sort first, and then
-  // iterate over sorted list.
-  for (bool allowSplitting : {false, true}) {
-    for (const int64_t factorIndex : shardingRule.getBatchingFactors()) {
-      const int64_t factorSize = shardingRule.getFactorSizes()[factorIndex];
-      // Skip if a factor has size zero which could happen if the corresponding
-      // dimension has zero size.
-      if (factorSize == 0) {
-        continue;
-      }
-      SmallVector<AxisRefAttr>& factorSharding = factorCommonAxes[factorIndex];
-      const int64_t factorShardingSize =
-          AxisListRef(factorSharding).getShardingSize(meshOp.getMesh());
-      // NOTE: Here, `factorSize` can be smaller than `factorShardingSize` as in
-      // some cases it is allowed to have shardings larger than its size.
-      if ((factorSize % factorShardingSize) != 0) {
-        // Skip the factor if factor size does not divide its sharding size,
-        // hence a new axis can not be appended properly.
-        continue;
-      }
-      int64_t factorCapacity = factorSize / factorShardingSize;
-      while (!axisRefsToDistribute.empty()) {
-        AxisRefAttr axisRef = axisRefsToDistribute.front();
-        const int64_t axisSize = axisRef.getSize(meshOp.getMesh());
-        if (factorCapacity % axisSize == 0) {
-          addAxisOrMerge(factorSharding, axisRef, meshOp.getMesh());
-          factorCapacity /= axisSize;
-          axisRefsToDistribute = axisRefsToDistribute.drop_front();
-          continue;
-        }
-        // Only split an axis when `factorCapacity` divides `axisSize`, so the
-        // batching dimension has per-shard size 1.
-        if (allowSplitting && factorCapacity > 1 &&
-            axisSize % factorCapacity == 0) {
-          addAxisOrMerge(
-              factorSharding,
-              AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
-                               axisRef.getSubAxisPreSize(), factorCapacity),
-              meshOp.getMesh());
-          axisRefsToDistribute.front() =
-              AxisRefAttr::get(meshOp.getContext(), axisRef.getName(),
-                               axisRef.getSubAxisPreSize() * factorCapacity,
-                               axisSize / factorCapacity);
-        }
-        break;
-      }
-      if (axisRefsToDistribute.empty()) {
-        return;
-      }
-    }
-  }
-}
-
-// Distribute the greatest common prefix of shardings of factors that need
-// replication to batching factors.
+// Distributes the common axes of factors that need replication onto batching
+// factors. Whole axes are placed first, minor-to-major, and then the minor part
+// of an axis if the remaining capacity divides its size. Axes of one factor
+// keep their relative order on each batching factor.
 void distributeAxisRefsToBatchingFactors(OpShardingRuleAttr shardingRule,
                                          MeshOp meshOp,
                                          AxesPerFactor& factorCommonAxes) {
+  MeshAttr mesh = meshOp.getMesh();
+  MLIRContext* ctx = meshOp.getContext();
+  // Axes to distribute per need-replication factor, with original positions.
+  using IndexedAxis = std::pair<int, AxisRefAttr>;
+  SmallVector<SmallVector<IndexedAxis>> sources;
+  bool hasSizeOneAxis = false;
   for (const int64_t factorIndex : shardingRule.getNeedReplicationFactors()) {
-    SmallVector<AxisRefAttr> axisRefsToDistribute =
-        factorCommonAxes[factorIndex];
+    SmallVector<AxisRefAttr> axes = std::move(factorCommonAxes[factorIndex]);
     factorCommonAxes[factorIndex].clear();
-    if (shardingRule.isFactorInAllNonScalarTensors(factorIndex) &&
-        !axisRefsToDistribute.empty()) {
-      distributeAxisRefsToBatchingFactors(axisRefsToDistribute, shardingRule,
-                                          meshOp, factorCommonAxes);
+    if (!shardingRule.isFactorInAllNonScalarTensors(factorIndex) ||
+        axes.empty()) {
+      continue;
+    }
+    SmallVector<IndexedAxis>& source = sources.emplace_back();
+    for (auto [index, axis] : llvm::enumerate(axes)) {
+      source.push_back({index, axis});
+      hasSizeOneAxis |= axis.getSize(mesh) == 1;
+    }
+  }
+  if (sources.empty()) {
+    return;
+  }
+
+  // TODO(enver): Instead iterate batching factors in the order of their
+  // available capacity, the one with largest available capacity being the
+  // first one.
+  SmallVector<int64_t> batchingFactors;
+  SmallVector<int64_t> capacities;
+  for (const int64_t factorIndex : shardingRule.getBatchingFactors()) {
+    const int64_t factorSize = shardingRule.getFactorSizes()[factorIndex];
+    // Skip factors of zero-sized or dynamic dimensions.
+    if (factorSize <= 0) {
+      continue;
+    }
+    const int64_t factorShardingSize =
+        AxisListRef(factorCommonAxes[factorIndex]).getShardingSize(mesh);
+    // NOTE: `factorSize` can be smaller than `factorShardingSize`. Skip the
+    // factor if a new axis can not be appended properly.
+    if (factorSize % factorShardingSize != 0) {
+      continue;
+    }
+    const int64_t capacity = factorSize / factorShardingSize;
+    // A size-one axis still needs a batching factor, even one without capacity.
+    if (capacity > 1 || (hasSizeOneAxis && batchingFactors.empty())) {
+      batchingFactors.push_back(factorIndex);
+      capacities.push_back(capacity);
+    }
+  }
+  if (batchingFactors.empty()) {
+    return;
+  }
+
+  const size_t numSources = sources.size();
+  const size_t numBatching = batchingFactors.size();
+  // placed[s][b] holds the axes of source `s` placed on batching factor `b`.
+  SmallVector<SmallVector<SmallVector<IndexedAxis>>> placed(
+      numSources, SmallVector<SmallVector<IndexedAxis>>(numBatching));
+  for (bool allowSplitting : {false, true}) {
+    const bool placeSizeOneAxes = !allowSplitting && hasSizeOneAxis;
+    for (size_t s = 0; s < numSources; ++s) {
+      SmallVector<IndexedAxis>& source = sources[s];
+      // Source `s` starts at batching factor `s`, so that different sources
+      // prefer different batching factors.
+      for (size_t step = 0; step < numBatching; ++step) {
+        const size_t b = (s + step) % numBatching;
+        int64_t& capacity = capacities[b];
+        for (int i = static_cast<int>(source.size()) - 1;
+             i >= 0 && (capacity > 1 || placeSizeOneAxes); --i) {
+          auto [index, axis] = source[i];
+          const int64_t axisSize = axis.getSize(mesh);
+          if (capacity % axisSize == 0) {
+            placed[s][b].push_back(source[i]);
+            capacity /= axisSize;
+            source.erase(source.begin() + i);
+          } else if (allowSplitting && axisSize % capacity == 0) {
+            // Only split an axis when `capacity` divides `axisSize`, so the
+            // batching dimension has per-shard size 1. Take the minor part.
+            const int64_t majorSize = axisSize / capacity;
+            placed[s][b].push_back(
+                {index, AxisRefAttr::get(ctx, axis.getName(),
+                                         axis.getSubAxisPreSize() * majorSize,
+                                         capacity)});
+            source[i].second = AxisRefAttr::get(
+                ctx, axis.getName(), axis.getSubAxisPreSize(), majorSize);
+            capacity = 1;
+          }
+        }
+      }
+    }
+  }
+  for (size_t b = 0; b < numBatching; ++b) {
+    for (size_t s = 0; s < numSources; ++s) {
+      llvm::stable_sort(placed[s][b], llvm::less_first());
+      for (const auto& [_, axis] : placed[s][b]) {
+        addAxisOrMerge(factorCommonAxes[batchingFactors[b]], axis, mesh);
+      }
     }
   }
 }

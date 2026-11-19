@@ -73,20 +73,21 @@ struct MeshAxis {
   int64_t size;
 };
 
-// An indivisible piece of a mesh axis. An axis of size p^k (p prime) is split
-// into k atoms of size p, ordered from major to minor; any other axis is a
-// single atom.
-// TODO(b/562957450): Support decomposing composite non-prime-power axes (e.g.
-// size 6 or 12), which have multiple prime-factor orderings with overlapping
-// sub-axes (such as :(1)2, :(2)3 vs :(1)3, :(3)2).
-struct Atom {
+// A mesh axis or sub-axis `axes[axis]:(preSize)size` (`size >= 2`,
+// `axes[axis].size % (preSize * size) == 0`).
+struct SubAxis {
   int axis;
   int64_t preSize;
   int64_t size;
+
+  bool operator==(const SubAxis& other) const {
+    return std::tie(axis, preSize, size) ==
+           std::tie(other.axis, other.preSize, other.size);
+  }
 };
 
-// Atoms sharding each tensor dimension, from major to minor.
-using State = std::vector<std::vector<int>>;
+// Canonical merged sub-axes sharding each tensor dimension, major to minor.
+using State = std::vector<std::vector<SubAxis>>;
 
 enum class MoveKind { kAllSlice, kAllGather, kAllToAll, kCollectivePermute };
 
@@ -132,20 +133,97 @@ struct Step {
   int state;
 };
 
-// Returns prime p if n > 1 is a power of p, otherwise std::nullopt.
-std::optional<int64_t> primeOfPrimePower(int64_t n) {
-  for (int64_t p = 2; p * p <= n; ++p) {
-    if (n % p == 0) {
-      while (n % p == 0) {
-        n /= p;
-      }
-      return n == 1 ? std::optional<int64_t>(p) : std::nullopt;
+// Returns all distinct prime-factor decompositions of `axes[axisIndex]` (of
+// size `n`), each as an ordered list of prime sub-axis atoms from major to
+// minor. Prime powers p^k have one ordering; composite axes like 6 or 36 have
+// multiple orderings (e.g. :(1)2, :(2)3 and :(1)3, :(3)2).
+std::vector<std::vector<SubAxis>> primeFactorChains(int axisIndex, int64_t n) {
+  std::vector<int64_t> primes;
+  int64_t rem = n;
+  for (int64_t p = 2; p * p <= rem; ++p) {
+    while (rem % p == 0) {
+      primes.push_back(p);
+      rem /= p;
     }
   }
-  return n > 1 ? std::optional<int64_t>(n) : std::nullopt;
+  if (rem > 1) {
+    primes.push_back(rem);
+  }
+  std::vector<std::vector<SubAxis>> chains;
+  do {
+    std::vector<SubAxis>& chain = chains.emplace_back();
+    chain.reserve(primes.size());
+    int64_t pre = 1;
+    for (int64_t p : primes) {
+      chain.push_back({axisIndex, pre, p});
+      pre *= p;
+    }
+  } while (std::next_permutation(primes.begin(), primes.end()));
+  return chains;
 }
 
-// State graph of all shardings of a tensor on a mesh.
+void appendSubAxis(std::vector<SubAxis>& dimAxes, SubAxis sub) {
+  if (!dimAxes.empty() && dimAxes.back().axis == sub.axis &&
+      dimAxes.back().preSize * dimAxes.back().size == sub.preSize) {
+    dimAxes.back().size *= sub.size;
+  } else {
+    dimAxes.push_back(sub);
+  }
+}
+
+bool popSuffixSubAxes(std::vector<SubAxis>& dimAxes,
+                      llvm::ArrayRef<SubAxis> suffix) {
+  for (auto it = suffix.rbegin(); it != suffix.rend(); ++it) {
+    if (dimAxes.empty() || dimAxes.back().axis != it->axis ||
+        dimAxes.back().preSize * dimAxes.back().size !=
+            it->preSize * it->size) {
+      return false;
+    }
+    if (dimAxes.back().size == it->size) {
+      dimAxes.pop_back();
+    } else {
+      if (dimAxes.back().size < it->size ||
+          it->preSize % dimAxes.back().preSize != 0) {
+        return false;
+      }
+      dimAxes.back().size = it->preSize / dimAxes.back().preSize;
+    }
+  }
+  return true;
+}
+
+bool subAxesCanCoexist(SubAxis a, SubAxis b) {
+  if (a.axis != b.axis) {
+    return true;
+  }
+  int64_t aNext = a.preSize * a.size;
+  int64_t bNext = b.preSize * b.size;
+  auto [minPre, maxPre] = std::minmax(a.preSize, b.preSize);
+  auto [minNext, maxNext] = std::minmax(aNext, bNext);
+  if (minNext > maxPre) {
+    return minNext % maxPre == 0 && maxPre % minPre == 0 &&
+           maxNext % minNext == 0;
+  }
+  return maxPre % minNext == 0;
+}
+
+bool statesCanCoexist(const State& a, const State& b) {
+  for (const std::vector<SubAxis>& dimA : a) {
+    for (SubAxis x : dimA) {
+      for (const std::vector<SubAxis>& dimB : b) {
+        for (SubAxis y : dimB) {
+          if (!subAxesCanCoexist(x, y)) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// State graph of all shardings of a tensor on a mesh, across all prime-factor
+// decompositions of every mesh axis.
 //
 // Precondition: each `shape[d]` must be positive. Local shard sizes use
 // divisible padding (`alignTo(shape[d], dimShards)`), and sharded-to-sharded
@@ -162,32 +240,37 @@ class ReshardGraph {
 
   ReshardGraph(std::vector<MeshAxis> axes, std::vector<int64_t> shape)
       : axes_(std::move(axes)), shape_(std::move(shape)) {
+    assert(llvm::all_of(shape_, [](int64_t d) { return d > 0; }) &&
+           "each tensor dimension must be positive");
     numDevices_ = 1;
+    std::vector<std::vector<std::vector<SubAxis>>> chainsPerAxis;
+    chainsPerAxis.reserve(axes_.size());
     for (auto [axisIndex, axis] : llvm::enumerate(axes_)) {
       assert(axis.size > 0 && "mesh axis size must be positive");
       numDevices_ *= axis.size;
-      std::optional<int64_t> prime = primeOfPrimePower(axis.size);
-      int64_t atomSize = prime.value_or(axis.size);
-      for (int64_t pre = 1; pre < axis.size; pre *= atomSize) {
-        atoms_.push_back({static_cast<int>(axisIndex), pre, atomSize});
-      }
+      chainsPerAxis.push_back(
+          primeFactorChains(static_cast<int>(axisIndex), axis.size));
     }
-    assert(atoms_.size() <= 255 &&
-           "atom index + 1 must fit in a non-zero byte for key()");
-    assert(llvm::all_of(shape_, [](int64_t d) { return d > 0; }) &&
-           "each tensor dimension must be positive");
-    forEachExtension(State(shape_.size()), [&](const State& s) {
-      index_[key(s)] = nodes_.size();
-      nodes_.push_back(makeNode(s));
-    });
-    buildEdges();
+    std::vector<SubAxis> curAtoms;
+    forEachAtomChain(chainsPerAxis, 0, curAtoms,
+                     [&](llvm::ArrayRef<SubAxis> atoms) { buildChain(atoms); });
+    for (Node& node : nodes_) {
+      llvm::sort(node.edges, [](const Edge& a, const Edge& b) {
+        return std::tie(a.to, a.kind, a.cost) < std::tie(b.to, b.kind, b.cost);
+      });
+      node.edges.erase(
+          llvm::unique(node.edges,
+                       [](const Edge& a, const Edge& b) {
+                         return a.to == b.to && a.kind == b.kind;
+                       }),
+          node.edges.end());
+    }
   }
 
   int numStates() const { return nodes_.size(); }
   int rank() const { return shape_.size(); }
   const Node& node(int i) const { return nodes_[i]; }
   const State& state(int i) const { return nodes_[i].state; }
-  const std::vector<Atom>& atoms() const { return atoms_; }
   const std::vector<MeshAxis>& axes() const { return axes_; }
   const std::vector<int64_t>& shape() const { return shape_; }
 
@@ -234,18 +317,20 @@ class ReshardGraph {
   // maximum over all devices of target shard elements not already held in
   // `src`.
   int64_t lowerBound(int src, int tgt) const {
-    std::vector<int64_t> coord(atoms_.size(), 0);
+    std::vector<int64_t> axisCoord(axes_.size(), 0);
     int64_t maxMissingElems = 0;
     for (int64_t device = 0; device < numDevices_; ++device) {
       int64_t rem = device;
-      for (auto [i, atom] : llvm::enumerate(atoms_)) {
-        coord[i] = rem % atom.size;
-        rem /= atom.size;
+      for (int a = static_cast<int>(axes_.size()) - 1; a >= 0; --a) {
+        axisCoord[a] = rem % axes_[a].size;
+        rem /= axes_[a].size;
       }
       int64_t tgtElems = 1, overlap = 1;
       for (int d = 0; d < rank(); ++d) {
-        auto [srcBegin, srcLen] = interval(nodes_[src].state[d], d, coord);
-        auto [tgtBegin, tgtLen] = interval(nodes_[tgt].state[d], d, coord);
+        auto [srcBegin, srcLen] =
+            interval(nodes_[src].state[d], d, axisCoord);
+        auto [tgtBegin, tgtLen] =
+            interval(nodes_[tgt].state[d], d, axisCoord);
         tgtElems *= tgtLen;
         overlap *= std::max<int64_t>(
             0, std::min(srcBegin + srcLen, tgtBegin + tgtLen) -
@@ -256,42 +341,32 @@ class ReshardGraph {
     return maxMissingElems;
   }
 
-  // Prints the sharding of node `s` in sdy syntax, merging consecutive atoms of
-  // the same axis.
+  // Prints the sharding of node `s` in sdy syntax.
   std::string stateString(int s) const {
     std::string result = "[";
-    for (auto [d, dimAtoms] : llvm::enumerate(nodes_[s].state)) {
+    for (auto [d, dimAxes] : llvm::enumerate(nodes_[s].state)) {
       if (d > 0) {
         result += ", ";
       }
       result += '{';
-      for (size_t i = 0; i < dimAtoms.size();) {
-        const Atom& first = atoms_[dimAtoms[i]];
-        int64_t size = first.size;
-        size_t j = i + 1;
-        while (j < dimAtoms.size() && atoms_[dimAtoms[j]].axis == first.axis &&
-               atoms_[dimAtoms[j]].preSize == first.preSize * size) {
-          size *= atoms_[dimAtoms[j]].size;
-          ++j;
-        }
+      for (auto [i, sub] : llvm::enumerate(dimAxes)) {
         if (i > 0) {
           result += ", ";
         }
-        const MeshAxis& axis = axes_[first.axis];
+        const MeshAxis& axis = axes_[sub.axis];
         result += "\"" + axis.name + "\"";
-        if (size != axis.size) {
-          result +=
-              ":(" + std::to_string(first.preSize) + ")" + std::to_string(size);
+        if (sub.size != axis.size) {
+          result += ":(" + std::to_string(sub.preSize) + ")" +
+                    std::to_string(sub.size);
         }
-        i = j;
       }
       result += '}';
     }
     return result + "]";
   }
 
-  // Maps an axis ref to its atoms, or nullopt if it splits an atom.
-  std::optional<std::vector<int>> atomsOf(AxisRefAttr axisRef) const {
+  // Converts an SDY `AxisRefAttr` into a `SubAxis`, or nullopt if invalid.
+  std::optional<SubAxis> subAxisOf(AxisRefAttr axisRef) const {
     auto axisIt = llvm::find_if(
         axes_, [&](const MeshAxis& a) { return a.name == axisRef.getName(); });
     if (axisIt == axes_.end()) {
@@ -302,45 +377,36 @@ class ReshardGraph {
     if (SubAxisInfoAttr info = axisRef.getSubAxisInfo()) {
       pre = info.getPreSize();
       size = info.getSize();
-    }
-    std::vector<int> result;
-    int64_t covered = 1;
-    for (auto [i, atom] : llvm::enumerate(atoms_)) {
-      if (atom.axis != axisIndex || atom.preSize < pre ||
-          atom.preSize >= pre * size) {
-        continue;
-      }
-      if (atom.preSize != pre * covered) {
+      if (size == axisIt->size) {
         return std::nullopt;
       }
-      result.push_back(i);
-      covered *= atom.size;
     }
-    if (covered != size) {
+    if (pre < 1 || size < 2 || axisIt->size % (pre * size) != 0) {
       return std::nullopt;
     }
-    return result;
+    return SubAxis{axisIndex, pre, size};
   }
 
   std::optional<int> indexOf(TensorShardingAttr sharding) const {
     State s;
+    s.reserve(sharding.getRank());
     for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
-      std::vector<int>& dimAtoms = s.emplace_back();
+      std::vector<SubAxis>& dimAxes = s.emplace_back();
       for (AxisRefAttr axisRef : dimSharding.getAxes()) {
-        std::optional<std::vector<int>> refAtoms = atomsOf(axisRef);
-        if (!refAtoms) {
+        std::optional<SubAxis> sub = subAxisOf(axisRef);
+        if (!sub) {
           return std::nullopt;
         }
-        dimAtoms.insert(dimAtoms.end(), refAtoms->begin(), refAtoms->end());
+        dimAxes.push_back(*sub);
       }
     }
     return indexOf(s);
   }
 
-  int64_t atomsSize(llvm::ArrayRef<int> atomIndices) const {
+  static int64_t subAxesSize(llvm::ArrayRef<SubAxis> subAxes) {
     int64_t size = 1;
-    for (int i : atomIndices) {
-      size *= atoms_[i].size;
+    for (const SubAxis& sub : subAxes) {
+      size *= sub.size;
     }
     return size;
   }
@@ -382,6 +448,44 @@ class ReshardGraph {
   }
 
  private:
+  using AtomState = std::vector<std::vector<int>>;
+
+  static void forEachAtomChain(
+      const std::vector<std::vector<std::vector<SubAxis>>>& chainsPerAxis,
+      size_t axisIndex, std::vector<SubAxis>& curAtoms,
+      llvm::function_ref<void(llvm::ArrayRef<SubAxis>)> fn) {
+    if (axisIndex == chainsPerAxis.size()) {
+      fn(curAtoms);
+      return;
+    }
+    size_t prevSize = curAtoms.size();
+    for (const std::vector<SubAxis>& chain : chainsPerAxis[axisIndex]) {
+      curAtoms.insert(curAtoms.end(), chain.begin(), chain.end());
+      forEachAtomChain(chainsPerAxis, axisIndex + 1, curAtoms, fn);
+      curAtoms.resize(prevSize);
+    }
+  }
+
+  State canonicalize(const AtomState& atomState,
+                     llvm::ArrayRef<SubAxis> atoms) const {
+    State s(rank());
+    for (int d = 0; d < rank(); ++d) {
+      for (int a : atomState[d]) {
+        appendSubAxis(s[d], atoms[a]);
+      }
+    }
+    return s;
+  }
+
+  int getOrInsertNode(State s) {
+    std::string k = key(s);
+    auto [it, inserted] = index_.try_emplace(std::move(k), nodes_.size());
+    if (inserted) {
+      nodes_.push_back(makeNode(std::move(s)));
+    }
+    return it->second;
+  }
+
   // Builds the graph node and padded shard metadata for state `s`.
   Node makeNode(State s) const {
     Node node;
@@ -389,7 +493,7 @@ class ReshardGraph {
     node.paddedShape.reserve(rank());
     node.localElems = 1;
     for (int d = 0; d < rank(); ++d) {
-      int64_t shards = atomsSize(s[d]);
+      int64_t shards = subAxesSize(s[d]);
       int64_t padded = llvm::alignTo(shape_[d], shards);
       node.dimShards.push_back(shards);
       node.paddedShape.push_back(padded);
@@ -399,28 +503,34 @@ class ReshardGraph {
     return node;
   }
 
-  // Encodes `s` into a byte string where each 0-based atom index `a` is
-  // stored as a non-zero byte `a + 1` and each dimension ends with '\0'.
+  // Encodes `s` into a byte string for hash-map lookup.
   static std::string key(const State& s) {
+    auto append = [](std::string& k, int64_t v) {
+      k.append(reinterpret_cast<const char*>(&v), sizeof(v));
+    };
     std::string k;
-    for (const std::vector<int>& dimAtoms : s) {
-      for (int a : dimAtoms) {
-        k.push_back(static_cast<char>(a + 1));
+    for (const std::vector<SubAxis>& dimAxes : s) {
+      for (const SubAxis& sub : dimAxes) {
+        append(k, sub.axis);
+        append(k, sub.preSize);
+        append(k, sub.size);
       }
-      k.push_back('\0');
+      append(k, -1);
     }
     return k;
   }
 
-  // Global [begin, length) of the unpadded shard held by the device at `coord`
-  // along dimension `d`, when that dimension is sharded by `dimAtoms`.
+  // Global [begin, length) of the unpadded shard held by the device at
+  // `axisCoord` along dimension `d`, when sharded by `dimAxes`.
   std::pair<int64_t, int64_t> interval(
-      const std::vector<int>& dimAtoms, int d,
-      const std::vector<int64_t>& coord) const {
+      llvm::ArrayRef<SubAxis> dimAxes, int d,
+      llvm::ArrayRef<int64_t> axisCoord) const {
     int64_t index = 0, numShards = 1;
-    for (int a : dimAtoms) {
-      index = index * atoms_[a].size + coord[a];
-      numShards *= atoms_[a].size;
+    for (const SubAxis& sub : dimAxes) {
+      int64_t stride = axes_[sub.axis].size / (sub.preSize * sub.size);
+      int64_t subCoord = (axisCoord[sub.axis] / stride) % sub.size;
+      index = index * sub.size + subCoord;
+      numShards *= sub.size;
     }
     int64_t shardSize = llvm::divideCeil(shape_[d], numShards);
     int64_t begin = std::min(shape_[d], index * shardSize);
@@ -428,59 +538,72 @@ class ReshardGraph {
     return {begin, end - begin};
   }
 
-  // Calls `fn` on every state obtained by appending unused atoms to `cur`.
-  void forEachExtension(State cur,
-                        llvm::function_ref<void(const State&)> fn) const {
-    llvm::BitVector used(atoms_.size());
+  // Calls `fn` on every atom state obtained by appending unused atoms to `cur`.
+  void forEachExtension(size_t numAtoms, AtomState cur,
+                        llvm::function_ref<void(const AtomState&)> fn) const {
+    llvm::BitVector used(numAtoms);
     for (const std::vector<int>& dimAtoms : cur) {
       for (int a : dimAtoms) {
         used.set(a);
       }
     }
-    forEachExtension(0, used, cur, fn);
+    forEachExtension(numAtoms, 0, used, cur, fn);
   }
 
-  void forEachExtension(int dim, llvm::BitVector& used, State& cur,
-                        llvm::function_ref<void(const State&)> fn) const {
+  void forEachExtension(size_t numAtoms, int dim, llvm::BitVector& used,
+                        AtomState& cur,
+                        llvm::function_ref<void(const AtomState&)> fn) const {
     if (dim == rank()) {
       fn(cur);
       return;
     }
-    forEachExtension(dim + 1, used, cur, fn);
-    for (int a = 0; a < static_cast<int>(atoms_.size()); ++a) {
+    forEachExtension(numAtoms, dim + 1, used, cur, fn);
+    for (int a = 0; a < static_cast<int>(numAtoms); ++a) {
       if (used.test(a)) {
         continue;
       }
       cur[dim].push_back(a);
       used.set(a);
-      forEachExtension(dim, used, cur, fn);
+      forEachExtension(numAtoms, dim, used, cur, fn);
       used.reset(a);
       cur[dim].pop_back();
     }
   }
 
-  void buildEdges() {
-    int n = numStates();
+  // Populates states and single-collective edges induced by one choice of
+  // prime-factor ordering per mesh axis.
+  void buildChain(llvm::ArrayRef<SubAxis> atoms) {
+    std::vector<std::pair<AtomState, int>> chainStates;
     std::map<std::vector<int64_t>, std::vector<int>> sameSizes;
-    for (int s = 0; s < n; ++s) {
-      sameSizes[nodes_[s].dimShards].push_back(s);
-    }
-    for (int s = 0; s < n; ++s) {
-      const Node& from = nodes_[s];
+    forEachExtension(atoms.size(), AtomState(rank()),
+                     [&](const AtomState& atomState) {
+                       int u = getOrInsertNode(canonicalize(atomState, atoms));
+                       chainStates.push_back({atomState, u});
+                       sameSizes[nodes_[u].dimShards].push_back(u);
+                     });
+    auto atomsProduct = [&](llvm::ArrayRef<int> indices) {
+      int64_t size = 1;
+      for (int i : indices) {
+        size *= atoms[i].size;
+      }
+      return size;
+    };
+    for (const auto& [atomState, s] : chainStates) {
       // All-slice to any valid extension, and the reverse all-gather.
-      forEachExtension(from.state, [&](const State& t) {
-        int ti = index_.at(key(t));
-        if (ti == s || !isValidPaddingTransition(from, nodes_[ti])) {
-          return;
-        }
-        nodes_[s].edges.push_back({ti, Cost{0, 1}, MoveKind::kAllSlice});
-        nodes_[ti].edges.push_back({s,
-                                    Cost{allGatherElems(nodes_[ti], from), 1},
-                                    MoveKind::kAllGather});
-      });
+      forEachExtension(
+          atoms.size(), atomState, [&](const AtomState& nextAtomState) {
+            int ti = index_.at(key(canonicalize(nextAtomState, atoms)));
+            if (ti == s || !isValidPaddingTransition(nodes_[s], nodes_[ti])) {
+              return;
+            }
+            nodes_[s].edges.push_back({ti, Cost{0, 1}, MoveKind::kAllSlice});
+            nodes_[ti].edges.push_back(
+                {s, Cost{allGatherElems(nodes_[ti], nodes_[s]), 1},
+                 MoveKind::kAllGather});
+          });
       // All-to-all of a suffix of one dimension to the end of another.
       for (int src = 0; src < rank(); ++src) {
-        const std::vector<int>& srcAtoms = from.state[src];
+        const std::vector<int>& srcAtoms = atomState[src];
         for (size_t start = 0; start < srcAtoms.size(); ++start) {
           llvm::ArrayRef<int> moved =
               llvm::ArrayRef(srcAtoms).drop_front(start);
@@ -488,24 +611,27 @@ class ReshardGraph {
             if (tgt == src) {
               continue;
             }
-            State t = from.state;
-            t[src].resize(start);
-            t[tgt].insert(t[tgt].end(), moved.begin(), moved.end());
-            int ti = index_.at(key(t));
-            if (!isValidPaddingTransition(from, nodes_[ti])) {
+            AtomState nextAtomState = atomState;
+            nextAtomState[src].resize(start);
+            nextAtomState[tgt].insert(nextAtomState[tgt].end(), moved.begin(),
+                                      moved.end());
+            int ti = index_.at(key(canonicalize(nextAtomState, atoms)));
+            if (!isValidPaddingTransition(nodes_[s], nodes_[ti])) {
               continue;
             }
             nodes_[s].edges.push_back(
-                {ti, Cost{allToAllElems(from, nodes_[ti], atomsSize(moved)), 1},
+                {ti,
+                 Cost{allToAllElems(nodes_[s], nodes_[ti], atomsProduct(moved)),
+                      1},
                  MoveKind::kAllToAll});
           }
         }
       }
-      // Collective-permute to any state with the same per-dimension sizes.
-      for (int t : sameSizes[from.dimShards]) {
+      // Collective-permute to any coexisting state with the same per-dim sizes.
+      for (int t : sameSizes[nodes_[s].dimShards]) {
         if (t != s) {
           nodes_[s].edges.push_back(
-              {t, Cost{from.localElems, 1}, MoveKind::kCollectivePermute});
+              {t, Cost{nodes_[s].localElems, 1}, MoveKind::kCollectivePermute});
         }
       }
     }
@@ -513,7 +639,6 @@ class ReshardGraph {
 
   std::vector<MeshAxis> axes_;
   std::vector<int64_t> shape_;
-  std::vector<Atom> atoms_;
   int64_t numDevices_ = 1;
   std::vector<Node> nodes_;
   std::unordered_map<std::string, int> index_;
@@ -538,23 +663,53 @@ bool validateCollectiveStep(Operation& op, const ReshardGraph& graph,
                             const ReshardGraph::Node& from,
                             const ReshardGraph::Node& to, MoveKind& kind,
                             int64_t& elems, std::string& error) {
-  auto isPrefix = [](const State& a, const State& b) {
-    for (auto [x, y] : llvm::zip_equal(a, b)) {
-      if (x.size() > y.size() || !std::equal(x.begin(), x.end(), y.begin())) {
+  auto toSubAxes = [&](llvm::ArrayRef<AxisRefAttr> refs,
+                       std::vector<SubAxis>& out) {
+    out.reserve(refs.size());
+    for (AxisRefAttr axisRef : refs) {
+      std::optional<SubAxis> sub = graph.subAxisOf(axisRef);
+      if (!sub) {
         return false;
       }
+      out.push_back(*sub);
     }
     return true;
   };
   elems = 0;
-  bool valid = true;
-  if (isa<AllSliceOp>(op)) {
+  bool valid = statesCanCoexist(from.state, to.state);
+  if (auto allSlice = dyn_cast<AllSliceOp>(op)) {
     kind = MoveKind::kAllSlice;
-    valid = isPrefix(from.state, to.state) &&
+    State expected = from.state;
+    ArrayRef<AxisRefListAttr> slicingAxes = allSlice.getSlicingAxes();
+    valid = valid && slicingAxes.size() == expected.size();
+    for (size_t d = 0; valid && d < expected.size(); ++d) {
+      std::vector<SubAxis> added;
+      if (!toSubAxes(slicingAxes[d].getValue(), added) ||
+          from.dimShards[d] * ReshardGraph::subAxesSize(added) !=
+              to.dimShards[d]) {
+        valid = false;
+        break;
+      }
+      for (SubAxis sub : added) {
+        appendSubAxis(expected[d], sub);
+      }
+    }
+    valid = valid && from.state != to.state && expected == to.state &&
             ReshardGraph::isValidPaddingTransition(from, to);
-  } else if (isa<AllGatherOp>(op)) {
+  } else if (auto allGather = dyn_cast<AllGatherOp>(op)) {
     kind = MoveKind::kAllGather;
-    valid = isPrefix(to.state, from.state) &&
+    State expected = from.state;
+    ArrayRef<AxisRefListAttr> gatheringAxes = allGather.getGatheringAxes();
+    valid = valid && gatheringAxes.size() == expected.size();
+    for (size_t d = 0; valid && d < expected.size(); ++d) {
+      std::vector<SubAxis> gathered;
+      if (!toSubAxes(gatheringAxes[d].getValue(), gathered) ||
+          !popSuffixSubAxes(expected[d], gathered)) {
+        valid = false;
+        break;
+      }
+    }
+    valid = valid && from.state != to.state && expected == to.state &&
             ReshardGraph::isValidPaddingTransition(from, to);
     if (valid) {
       elems = ReshardGraph::allGatherElems(from, to);
@@ -563,35 +718,33 @@ bool validateCollectiveStep(Operation& op, const ReshardGraph& graph,
     kind = MoveKind::kAllToAll;
     State expected = from.state;
     int64_t groupSize = 1;
-    for (AllToAllParamAttr param : allToAll.getParams()) {
-      std::vector<int> moved;
-      for (AxisRefAttr axisRef : param.getAxes()) {
-        std::optional<std::vector<int>> refAtoms = graph.atomsOf(axisRef);
-        if (!refAtoms) {
-          valid = false;
-          break;
-        }
-        moved.insert(moved.end(), refAtoms->begin(), refAtoms->end());
-      }
-      std::vector<int>& srcAtoms = expected[param.getSrcDim()];
-      if (!valid || moved.size() > srcAtoms.size() ||
-          !std::equal(moved.begin(), moved.end(),
-                      srcAtoms.end() - moved.size())) {
+    if (valid && allToAll.getParams().size() == 1) {
+      AllToAllParamAttr param = allToAll.getParams().front();
+      int64_t srcDim = param.getSrcDim();
+      int64_t tgtDim = param.getTgtDim();
+      int64_t rank = expected.size();
+      std::vector<SubAxis> moved;
+      if (srcDim < 0 || srcDim >= rank || tgtDim < 0 || tgtDim >= rank ||
+          srcDim == tgtDim || !toSubAxes(param.getAxes(), moved) ||
+          moved.empty() || !popSuffixSubAxes(expected[srcDim], moved)) {
         valid = false;
-        break;
+      } else {
+        for (SubAxis sub : moved) {
+          appendSubAxis(expected[tgtDim], sub);
+        }
+        groupSize = ReshardGraph::subAxesSize(moved);
       }
-      srcAtoms.resize(srcAtoms.size() - moved.size());
-      llvm::append_range(expected[param.getTgtDim()], moved);
-      groupSize *= graph.atomsSize(moved);
+    } else {
+      valid = false;
     }
-    valid = valid && expected == to.state &&
+    valid = valid && from.state != to.state && expected == to.state &&
             ReshardGraph::isValidPaddingTransition(from, to);
     if (valid) {
       elems = ReshardGraph::allToAllElems(from, to, groupSize);
     }
   } else if (isa<CollectivePermuteOp>(op)) {
     kind = MoveKind::kCollectivePermute;
-    valid = from.state != to.state && from.dimShards == to.dimShards;
+    valid = valid && from.state != to.state && from.dimShards == to.dimShards;
     elems = from.localElems;
   } else {
     error = "unsupported collective";
@@ -675,7 +828,7 @@ std::vector<PassPlan> runPass(MLIRContext& context, const ReshardGraph& graph,
       }
       std::optional<int> next = graph.indexOf(collective.getOutSharding());
       if (!next) {
-        plan.error = "unrepresentable sharding";
+        plan.error = "invalid sharding";
         break;
       }
       const ReshardGraph::Node& from = graph.node(cur);
@@ -869,12 +1022,12 @@ class ReshardOptimalityTest : public ::testing::Test {
     for (const auto& [bucket, count] : stats.ratioHistogram) {
       os << "  ratio " << bucket << ": " << count << "\n";
     }
-    // Smallest counterexamples first: fewest atoms, then largest gap.
-    auto numAtoms = [&](const Counterexample& c) {
+    // Smallest counterexamples first: fewest sub-axes, then largest gap.
+    auto numSubAxes = [&](const Counterexample& c) {
       int n = 0;
       for (int s : {c.src, c.tgt}) {
-        for (const auto& dimAtoms : graph.state(s)) {
-          n += dimAtoms.size();
+        for (const auto& dimAxes : graph.state(s)) {
+          n += dimAxes.size();
         }
       }
       return n;
@@ -883,9 +1036,9 @@ class ReshardOptimalityTest : public ::testing::Test {
         counterexamples, [&](const Counterexample& a, const Counterexample& b) {
           bool aElems = a.greedy.elems > a.optimal.elems;
           bool bElems = b.greedy.elems > b.optimal.elems;
-          return std::make_tuple(!aElems, numAtoms(a),
+          return std::make_tuple(!aElems, numSubAxes(a),
                                  -(a.greedy.elems - a.optimal.elems)) <
-                 std::make_tuple(!bElems, numAtoms(b),
+                 std::make_tuple(!bElems, numSubAxes(b),
                                  -(b.greedy.elems - b.optimal.elems));
         });
     // Most common (greedy -> optimal) collective sequences among
@@ -940,35 +1093,37 @@ std::vector<int> allStates(const ReshardGraph& graph) {
 
 TEST_F(ReshardOptimalityTest, ShortestPathMatchesHandComputedCosts) {
   ReshardGraph graph({{"x", 2}, {"y", 4}}, {8, 16});
+  const SubAxis x{0, 1, 2}, y{1, 1, 4}, y1{1, 1, 2};
   std::vector<Step> parent;
   int replicated = *graph.indexOf(State{{}, {}});
   std::vector<Cost> dist = graph.shortestFrom(replicated, &parent);
   // Slicing is free.
-  EXPECT_EQ(dist[*graph.indexOf(State{{0}, {1, 2}})], (Cost{0, 1}));
-  int xOnDim0 = *graph.indexOf(State{{0}, {}});
+  EXPECT_EQ(dist[*graph.indexOf(State{{x}, {y}})], (Cost{0, 1}));
+  int xOnDim0 = *graph.indexOf(State{{x}, {}});
   dist = graph.shortestFrom(xOnDim0, &parent);
   // Gathering "x" receives the other half of the tensor (64 elements).
   EXPECT_EQ(dist[replicated], (Cost{64, 1}));
   // Moving "x" to dim 1 is one all-to-all sending half the local shard.
-  EXPECT_EQ(dist[*graph.indexOf(State{{}, {0}})], (Cost{32, 1}));
+  EXPECT_EQ(dist[*graph.indexOf(State{{}, {x}})], (Cost{32, 1}));
   // Replacing "x" with "y":(1)2 is one collective-permute.
-  EXPECT_EQ(dist[*graph.indexOf(State{{1}, {}})], (Cost{64, 1}));
-  EXPECT_EQ(graph.lowerBound(xOnDim0, *graph.indexOf(State{{1}, {}})), 64);
-  int xy1OnDim0 = *graph.indexOf(State{{0, 1}, {}});
+  EXPECT_EQ(dist[*graph.indexOf(State{{y1}, {}})], (Cost{64, 1}));
+  EXPECT_EQ(graph.lowerBound(xOnDim0, *graph.indexOf(State{{y1}, {}})), 64);
+  int xy1OnDim0 = *graph.indexOf(State{{x, y1}, {}});
   dist = graph.shortestFrom(xy1OnDim0, &parent);
   // Two all-to-alls ("y":(1)2 then "x") cost 16 + 16 = 32 < cp(32) + a2a(24).
-  EXPECT_EQ(dist[*graph.indexOf(State{{}, {1, 0}})], (Cost{32, 2}));
+  EXPECT_EQ(dist[*graph.indexOf(State{{}, {y1, x}})], (Cost{32, 2}));
   // Moving ["x", "y":(1)2] to dim 1 then gathering "y":(1)2 costs 24 + 32 = 56.
-  EXPECT_EQ(dist[*graph.indexOf(State{{}, {0}})], (Cost{56, 2}));
+  EXPECT_EQ(dist[*graph.indexOf(State{{}, {x}})], (Cost{56, 2}));
 }
 
 TEST_F(ReshardOptimalityTest, UnevenShapeShortestPathMatchesHandComputedCosts) {
   ReshardGraph graph2x3({{"a", 2}, {"b", 3}}, {5, 9});
+  const SubAxis a{0, 1, 2}, b{1, 1, 3};
   std::vector<Step> parent;
   int replicated2x3 = *graph2x3.indexOf(State{{}, {}});
-  int aOnDim0 = *graph2x3.indexOf(State{{0}, {}});
-  int bOnDim0 = *graph2x3.indexOf(State{{1}, {}});
-  int bOnDim1 = *graph2x3.indexOf(State{{}, {1}});
+  int aOnDim0 = *graph2x3.indexOf(State{{a}, {}});
+  int bOnDim0 = *graph2x3.indexOf(State{{b}, {}});
+  int bOnDim1 = *graph2x3.indexOf(State{{}, {b}});
 
   // All-gathering "b" on dim 0 gathers 2x9 padded shards across 3 peers (36
   // elements received, vs naive 45 - 18 = 27).
@@ -990,9 +1145,10 @@ TEST_F(ReshardOptimalityTest, UnevenShapeShortestPathMatchesHandComputedCosts) {
   EXPECT_EQ(graph2x3.lowerBound(aOnDim0, bOnDim0), 18);
 
   ReshardGraph graph2x4({{"x", 2}, {"y", 4}}, {5});
-  int x = *graph2x4.indexOf(State{{0}});
-  int xy1 = *graph2x4.indexOf(State{{0, 1}});
-  int xy = *graph2x4.indexOf(State{{0, 1, 2}});
+  const SubAxis x2{0, 1, 2}, y2{1, 1, 2}, yFull{1, 1, 4};
+  int x = *graph2x4.indexOf(State{{x2}});
+  int xy1 = *graph2x4.indexOf(State{{x2, y2}});
+  int xy = *graph2x4.indexOf(State{{x2, yFull}});
 
   // Direct all-slice from 2-way (padded 6) to 4-way (padded 8) is blocked, so
   // resharding must gather to replicated then slice.
@@ -1008,13 +1164,54 @@ TEST_F(ReshardOptimalityTest, UnevenShapeShortestPathMatchesHandComputedCosts) {
   EXPECT_EQ(graph2x4.lowerBound(xy, x), 3);
 }
 
+TEST_F(ReshardOptimalityTest,
+       CompositeAxisShortestPathMatchesHandComputedCosts) {
+  // Size 6 has 2 prime-factor orderings (2*3 and 3*2), yielding 19 rank-2
+  // states (vs. 11 along a single ordering).
+  ReshardGraph graph6({{"a", 6}}, {6, 12});
+  EXPECT_EQ(graph6.numStates(), 19);
+  const SubAxis a1_2{0, 1, 2}, a1_3{0, 1, 3}, a3_2{0, 3, 2};
+  std::vector<Step> parent;
+  int s1_2 = *graph6.indexOf(State{{a1_2}, {}});
+  int s1_3 = *graph6.indexOf(State{{a1_3}, {}});
+  int s3_2 = *graph6.indexOf(State{{a3_2}, {}});
+
+  // [{"a":(1)2}, {}] -> [{"a":(1)3}, {}] slices "a":(2)3 to full "a" along
+  // ordering 2*3 (0 elems), then gathers "a":(3)2 along ordering 3*2 (12
+  // elems), matching the 12-element overlap lower bound (vs. 36 to unshard).
+  std::vector<Cost> dist = graph6.shortestFrom(s1_2, &parent);
+  EXPECT_EQ(dist[s1_3], (Cost{12, 2}));
+  EXPECT_EQ(graph6.lowerBound(s1_2, s1_3), 12);
+
+  // [{"a":(1)2}, {}] and [{"a":(3)2}, {}] cannot coexist in a single SDY
+  // collective; all-gathering "a":(1)2 (36 elems) then slicing "a":(3)2 is
+  // optimal and matches the 36-element overlap lower bound.
+  EXPECT_EQ(dist[s3_2], (Cost{36, 2}));
+  EXPECT_EQ(graph6.lowerBound(s1_2, s3_2), 36);
+
+  // Size 36 = 2^2 * 3^2 has C(4, 2) = 6 prime-factor orderings (1,283 rank-2
+  // states vs. 261 on a single ordering). On {36, 72}, [{"a":(1)4}, {}] ->
+  // [{"a":(1)6}, {}] slices "a":(4)3 to shared LCM [{"a":(1)12}, {}] along
+  // 2*2*3*3 (0 elems), then gathers "a":(6)2 along 2*3*2*3 (216 elems),
+  // beating both GCD gather via [{"a":(1)2}, {}] (648) and unsharding (1,944).
+  ReshardGraph graph36({{"a", 36}}, {36, 72});
+  EXPECT_EQ(graph36.numStates(), 1283);
+  int s36_1_4 = *graph36.indexOf(State{{{0, 1, 4}}, {}});
+  int s36_1_6 = *graph36.indexOf(State{{{0, 1, 6}}, {}});
+  dist = graph36.shortestFrom(s36_1_4, &parent);
+  EXPECT_EQ(dist[s36_1_6], (Cost{216, 2}));
+  EXPECT_EQ(graph36.lowerBound(s36_1_4, s36_1_6), 216);
+}
+
 struct SweepCase {
   std::string name;
   std::vector<MeshAxis> axes;
   std::vector<int64_t> shape;
-  // Number of pairs where the pass communicates more than optimal. Lower
-  // this when the pass improves; it must never go up. Negative means unchecked.
-  int64_t maxSubOptimalElems;
+  // Number of pairs that are not valid and byte-optimal (`subOptimalElems +
+  // numErrors`), i.e. ratchets the count of valid byte-optimal pairs so
+  // turning an error into a suboptimal lowering cannot break the ratchet.
+  // Lower this when the pass improves; negative means unchecked.
+  int64_t maxNonOptimalPairs;
   // Number of pairs where the pass fails or emits a wrong sequence.
   int64_t maxErrors;
 };
@@ -1034,8 +1231,8 @@ TEST_P(ReshardOptimalitySweepTest, AllPairs) {
   if (c.maxErrors >= 0) {
     EXPECT_LE(stats.numErrors, c.maxErrors);
   }
-  if (c.maxSubOptimalElems >= 0) {
-    EXPECT_LE(stats.subOptimalElems, c.maxSubOptimalElems);
+  if (c.maxNonOptimalPairs >= 0) {
+    EXPECT_LE(stats.subOptimalElems + stats.numErrors, c.maxNonOptimalPairs);
   }
 }
 
@@ -1061,6 +1258,11 @@ INSTANTIATE_TEST_SUITE_P(
                   {5, 10},
                   47301,
                   0},
+        SweepCase{"6_rank2", {{"a", 6}}, {6, 12}, 156, 124},
+        SweepCase{"6_uneven_rank2", {{"a", 6}}, {5, 9}, 202, 92},
+        SweepCase{"6_rank3", {{"a", 6}}, {6, 12, 18}, 558, 444},
+        SweepCase{"2x6_rank2", {{"a", 2}, {"b", 6}}, {12, 24}, 3990, 2841},
+        SweepCase{"12_rank2", {{"a", 12}}, {12, 24}, 10308, 8492},
         SweepCase{
             "2x2x4_rank2", {{"a", 2}, {"b", 2}, {"c", 4}}, {16, 32}, 7080, 0}),
     [](const ::testing::TestParamInfo<SweepCase>& info) {
@@ -1094,6 +1296,8 @@ std::vector<SweepCase> largeSweepCases() {
                 {120, 240},
                 1218418,
                 0},
+      SweepCase{"2x6_rank3", {{"a", 2}, {"b", 6}}, {12, 24, 36}, 22680, 15033},
+      SweepCase{"12_rank3", {{"a", 12}}, {12, 24, 36}, 56700, 45066},
   };
 }
 

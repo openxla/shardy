@@ -1,5 +1,7 @@
 // RUN: sdy_opt %s -sdy-explicit-gather-scatter-batching | FileCheck %s
 
+sdy.mesh @mesh = <["x"=2]>
+
 // ===== Test 1: Basic row-wise gather with iota in concatenated indices =====
 // This pattern typically arises from row-wise indexing in JAX using a batch iota,
 // such as: arr.at[jnp.arange(B), offset] or arr.at[jax.lax.iota(jnp.int32, B), offset]
@@ -568,4 +570,144 @@ func.func @scatter_iota_partial_window_not_rewritten(
     unique_indices = false
   } : (tensor<4x8xf32>, tensor<4x1xi32>, tensor<4x4xf32>) -> tensor<4x8xf32>
   return %result : tensor<4x8xf32>
+}
+
+// ===== Test 21: Gather with sharding constraints and negative-index select =====
+// JAX explicit sharding mode inserts sdy.sharding_constraint on intermediate
+// ops and normalizes negative indices via select(compare(LT, x, 0), add(x, D), x).
+
+// CHECK-LABEL: func @gather_batch_2d_with_sharding_constraint_and_negative_index_select
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>, %[[COL_IDX:.*]]: tensor<4x1xi32>) -> tensor<4xf32>
+func.func @gather_batch_2d_with_sharding_constraint_and_negative_index_select(
+    %operand: tensor<4x8xf32>, %col_idx: tensor<4x1xi32>) -> tensor<4xf32> {
+  // CHECK-NEXT: %[[COL_SC:.*]] = sdy.sharding_constraint %[[COL_IDX]] <@mesh, [{"x"}, {}]> : tensor<4x1xi32>
+  // CHECK-NEXT: %[[GATHER:.*]] = "stablehlo.gather"(%[[OPERAND]], %[[COL_SC]]) <{
+  // CHECK-SAME:   dimension_numbers = #stablehlo.gather<
+  // CHECK-SAME:     collapsed_slice_dims = [1],
+  // CHECK-SAME:     operand_batching_dims = [0],
+  // CHECK-SAME:     start_indices_batching_dims = [0],
+  // CHECK-SAME:     start_index_map = [1],
+  // CHECK-SAME:     index_vector_dim = 1>,
+  // CHECK-SAME:   indices_are_sorted = false,
+  // CHECK-SAME:   slice_sizes = array<i64: 1, 1>
+  // CHECK-SAME: }> : (tensor<4x8xf32>, tensor<4x1xi32>) -> tensor<4xf32>
+  // CHECK-NEXT: %[[RES_SC:.*]] = sdy.sharding_constraint %[[GATHER]] <@mesh, [{"x"}]> : tensor<4xf32>
+  // CHECK-NEXT: return %[[RES_SC]] : tensor<4xf32>
+  %0 = stablehlo.iota dim = 0 : tensor<4xi32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"x"}]> : tensor<4xi32>
+  %2 = sdy.constant dense<0> : tensor<4xi32>
+  %3 = stablehlo.compare LT, %1, %2, SIGNED : (tensor<4xi32>, tensor<4xi32>) -> tensor<4xi1>
+  %4 = sdy.sharding_constraint %3 <@mesh, [{"x"}]> : tensor<4xi1>
+  %5 = sdy.constant dense<4> : tensor<4xi32>
+  %6 = stablehlo.add %1, %5 : tensor<4xi32>
+  %7 = sdy.sharding_constraint %6 <@mesh, [{"x"}]> : tensor<4xi32>
+  %8 = stablehlo.select %4, %7, %1 : tensor<4xi1>, tensor<4xi32>
+  %9 = sdy.sharding_constraint %8 <@mesh, [{"x"}]> : tensor<4xi32>
+  %10 = stablehlo.broadcast_in_dim %9, dims = [0] : (tensor<4xi32>) -> tensor<4x1xi32>
+  %11 = sdy.sharding_constraint %10 <@mesh, [{"x"}, {}]> : tensor<4x1xi32>
+  %12 = sdy.sharding_constraint %col_idx <@mesh, [{"x"}, {}]> : tensor<4x1xi32>
+  %13 = stablehlo.concatenate %11, %12, dim = 1 : (tensor<4x1xi32>, tensor<4x1xi32>) -> tensor<4x2xi32>
+  %14 = sdy.sharding_constraint %13 <@mesh, [{"x"}, {}]> : tensor<4x2xi32>
+  %15 = "stablehlo.gather"(%operand, %14) <{
+    dimension_numbers = #stablehlo.gather<
+      collapsed_slice_dims = [0, 1],
+      start_index_map = [0, 1],
+      index_vector_dim = 1>,
+    indices_are_sorted = false,
+    slice_sizes = array<i64: 1, 1>
+  }> : (tensor<4x8xf32>, tensor<4x2xi32>) -> tensor<4xf32>
+  %16 = sdy.sharding_constraint %15 <@mesh, [{"x"}]> : tensor<4xf32>
+  return %16 : tensor<4xf32>
+}
+
+// ===== Test 22: Scatter with sharding constraints and a broadcast zero bound =====
+// Mirrors what JAX explicit sharding mode emits for
+// x.at[jnp.arange(B), idx].add(updates): the zero bound of the negative-index
+// select is a scalar constant that is broadcast and then constrained.
+
+// CHECK-LABEL: func @scatter_batch_2d_with_sharding_constraint_and_broadcast_zero_bound
+// CHECK-SAME: (%[[OPERAND:.*]]: tensor<4x8xf32>, %[[COL_IDX:.*]]: tensor<4x1xi32>, %[[UPDATES:.*]]: tensor<4xf32>) -> tensor<4x8xf32>
+func.func @scatter_batch_2d_with_sharding_constraint_and_broadcast_zero_bound(
+    %operand: tensor<4x8xf32>, %col_idx: tensor<4x1xi32>, %updates: tensor<4xf32>)
+    -> tensor<4x8xf32> {
+  // CHECK-NEXT: %[[COL_SC:.*]] = sdy.sharding_constraint %[[COL_IDX]] <@mesh, [{"x"}, {}]> : tensor<4x1xi32>
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[OPERAND]], %[[COL_SC]], %[[UPDATES]]) <{
+  // CHECK-SAME:   indices_are_sorted = false,
+  // CHECK-SAME:   scatter_dimension_numbers = #stablehlo.scatter<
+  // CHECK-SAME:     inserted_window_dims = [1],
+  // CHECK-SAME:     input_batching_dims = [0],
+  // CHECK-SAME:     scatter_indices_batching_dims = [0],
+  // CHECK-SAME:     scatter_dims_to_operand_dims = [1],
+  // CHECK-SAME:     index_vector_dim = 1>,
+  // CHECK-SAME:   unique_indices = false
+  // CHECK-SAME: }> ({
+  // CHECK-NEXT: ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+  // CHECK-NEXT:   %[[SUM:.*]] = stablehlo.add %arg3, %arg4 : tensor<f32>
+  // CHECK-NEXT:   stablehlo.return %[[SUM]] : tensor<f32>
+  // CHECK-NEXT: }) : (tensor<4x8xf32>, tensor<4x1xi32>, tensor<4xf32>) -> tensor<4x8xf32>
+  // CHECK-NEXT: %[[RES_SC:.*]] = sdy.sharding_constraint %[[SCATTER]] <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[RES_SC]] : tensor<4x8xf32>
+  %0 = stablehlo.iota dim = 0 : tensor<4xi32>
+  %1 = sdy.sharding_constraint %0 <@mesh, [{"x"}]> : tensor<4xi32>
+  %c0 = stablehlo.constant dense<0> : tensor<i32>
+  %2 = stablehlo.broadcast_in_dim %c0, dims = [] : (tensor<i32>) -> tensor<4xi32>
+  %3 = sdy.sharding_constraint %2 <@mesh, [{"x"}]> : tensor<4xi32>
+  %4 = stablehlo.compare LT, %1, %3, SIGNED : (tensor<4xi32>, tensor<4xi32>) -> tensor<4xi1>
+  %c4 = stablehlo.constant dense<4> : tensor<i32>
+  %5 = stablehlo.broadcast_in_dim %c4, dims = [] : (tensor<i32>) -> tensor<4xi32>
+  %6 = sdy.sharding_constraint %5 <@mesh, [{"x"}]> : tensor<4xi32>
+  %7 = stablehlo.add %1, %6 : tensor<4xi32>
+  %8 = sdy.sharding_constraint %7 <@mesh, [{"x"}]> : tensor<4xi32>
+  %9 = stablehlo.select %4, %8, %1 : tensor<4xi1>, tensor<4xi32>
+  %10 = sdy.sharding_constraint %9 <@mesh, [{"x"}]> : tensor<4xi32>
+  %11 = stablehlo.broadcast_in_dim %10, dims = [0] : (tensor<4xi32>) -> tensor<4x1xi32>
+  %12 = sdy.sharding_constraint %11 <@mesh, [{"x"}, {}]> : tensor<4x1xi32>
+  %13 = stablehlo.concatenate %12, %col_idx, dim = 1 : (tensor<4x1xi32>, tensor<4x1xi32>) -> tensor<4x2xi32>
+  %14 = sdy.sharding_constraint %13 <@mesh, [{"x"}, {}]> : tensor<4x2xi32>
+  %15 = "stablehlo.scatter"(%operand, %14, %updates) <{
+    indices_are_sorted = false,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      inserted_window_dims = [0, 1],
+      scatter_dims_to_operand_dims = [0, 1],
+      index_vector_dim = 1>,
+    unique_indices = false
+  }> ({
+  ^bb0(%arg3: tensor<f32>, %arg4: tensor<f32>):
+    %sum = stablehlo.add %arg3, %arg4 : tensor<f32>
+    stablehlo.return %sum : tensor<f32>
+  }) : (tensor<4x8xf32>, tensor<4x2xi32>, tensor<4xf32>) -> tensor<4x8xf32>
+  %16 = sdy.sharding_constraint %15 <@mesh, [{"x"}, {}]> : tensor<4x8xf32>
+  return %16 : tensor<4x8xf32>
+}
+
+// ===== Test 23: Non-zero select bound is NOT unwrapped as identity iota =====
+// A select with a non-zero comparison bound (e.g. tf.reverse_sequence pattern
+// select(iota < seq_len, seq_len - 1 - iota, iota)) reverses indices for elements
+// < seq_len and must NOT be treated as an identity iota.
+
+// CHECK-LABEL: func @gather_batch_2d_non_zero_select_bound_not_promoted
+func.func @gather_batch_2d_non_zero_select_bound_not_promoted(
+    %operand: tensor<4x8xf32>, %seq_len: tensor<4x1xi32>, %col_idx: tensor<4x1xi32>)
+    -> tensor<4x1xf32> {
+  %iota = stablehlo.iota dim = 0 : tensor<4x1xi32>
+  %c1 = stablehlo.constant dense<1> : tensor<4x1xi32>
+  %cmp = stablehlo.compare LT, %iota, %seq_len, SIGNED : (tensor<4x1xi32>, tensor<4x1xi32>) -> tensor<4x1xi1>
+  %sub1 = stablehlo.subtract %seq_len, %c1 : tensor<4x1xi32>
+  %rev = stablehlo.subtract %sub1, %iota : tensor<4x1xi32>
+  %sel = stablehlo.select %cmp, %rev, %iota : tensor<4x1xi1>, tensor<4x1xi32>
+  %indices = stablehlo.concatenate %sel, %col_idx, dim = 1 : (tensor<4x1xi32>, tensor<4x1xi32>) -> tensor<4x2xi32>
+  // CHECK: "stablehlo.gather"
+  // CHECK-SAME: collapsed_slice_dims = [0]
+  // CHECK-SAME: start_index_map = [0, 1]
+  // CHECK-NOT: operand_batching_dims
+  %result = "stablehlo.gather"(%operand, %indices) {
+    dimension_numbers = #stablehlo.gather<
+      offset_dims = [1],
+      collapsed_slice_dims = [0],
+      start_index_map = [0, 1],
+      index_vector_dim = 1>,
+    slice_sizes = array<i64: 1, 1>,
+    indices_are_sorted = false
+  } : (tensor<4x8xf32>, tensor<4x2xi32>) -> tensor<4x1xf32>
+  return %result : tensor<4x1xf32>
 }
