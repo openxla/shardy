@@ -1519,10 +1519,10 @@ class CollectiveInserter {
   AxisToDimAndIndex outAxisToDimAndIndex;
 };
 
-// Returns true if `inSharding` and `outSharding` are defined on equivalent
-// meshes (same axes and device count, ignoring device order).
-bool isEquivalentOnMesh(TensorShardingAttr inSharding,
-                        TensorShardingAttr outSharding, ReshardOp reshardOp) {
+// Returns true if `inSharding` and `outSharding` resolve to meshes with the
+// same axes (and, when `ignoreDeviceOrder` is false, the same device_ids).
+bool meshesMatch(TensorShardingAttr inSharding, TensorShardingAttr outSharding,
+                 ReshardOp reshardOp, bool ignoreDeviceOrder) {
   if (!inSharding || !outSharding) {
     return false;
   }
@@ -1534,7 +1534,20 @@ bool isEquivalentOnMesh(TensorShardingAttr inSharding,
   if (!inMesh || !outMesh) {
     return false;
   }
-  return inMesh.equals(outMesh, /*ignoreDeviceOrder=*/true);
+  return inMesh.equals(outMesh, ignoreDeviceOrder);
+}
+
+bool hasMatchingUnreducedState(TensorShardingAttr inSharding,
+                               TensorShardingAttr outSharding) {
+  return inSharding.getUnreducedAxes() == outSharding.getUnreducedAxes() &&
+         inSharding.getReductionOp() == outSharding.getReductionOp();
+}
+
+TensorShardingAttr getClosedReplicatedWithUnreduced(
+    TensorShardingAttr meshSource, TensorShardingAttr unreducedSource) {
+  return TensorShardingAttr::getFullyClosedLike(meshSource)
+      .replaceUnreducedAxes(unreducedSource.getUnreducedAxes(),
+                            unreducedSource.getReductionOp());
 }
 
 class ReshardPattern : public OpConversionPattern<ReshardOp> {
@@ -1566,33 +1579,63 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
       return rewriter.notifyMatchFailure(
           op, [](Diagnostic& diag) { diag << "Incompatible shardings"; });
     }
+    TensorShardingAttr trailingReplicatedReshard;
     if (outSharding.isFullyReplicated()) {
-      if (inSharding.isFullyReplicated()) {
-        if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
+      if (!hasMatchingUnreducedState(inSharding, outSharding)) {
+        return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
+          diag << "Reshard with different unreduced axes or reduction ops is "
+                  "not supported";
+        });
+      }
+      if (inSharding.getMeshOrRef() == outSharding.getMeshOrRef()) {
+        if (inSharding.isFullyReplicated()) {
+          rewriter.replaceOp(op, adaptor.getInput());
+          return success();
+        }
+        outSharding =
+            getClosedReplicatedWithUnreduced(inSharding, outSharding);
+      } else if (!outSharding.getUnreducedAxes().empty()) {
+        // Cross-mesh reshards carrying unreduced axes are only supported via
+        // collective_permute across same-axes meshes with different device_ids;
+        // never leave a cross-mesh replicated sdy.reshard with unreduced axes.
+        if (!meshesMatch(inSharding, outSharding, op,
+                         /*ignoreDeviceOrder=*/true) ||
+            meshesMatch(inSharding, outSharding, op,
+                        /*ignoreDeviceOrder=*/false)) {
           return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
-            diag << "Cross-mesh replicated reshard is dynamically legal";
+            diag << "Cross-mesh reshard with unreduced axes requires "
+                    "same-axes meshes with different device_ids";
           });
         }
-        rewriter.replaceOp(op, adaptor.getInput());
-        return success();
+        outSharding =
+            getClosedReplicatedWithUnreduced(outSharding, outSharding);
+      } else if (inSharding.isFullyReplicated()) {
+        return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
+          diag << "Cross-mesh replicated reshard is dynamically legal";
+        });
+      } else {
+        trailingReplicatedReshard =
+            TensorShardingAttr::getFullyClosedLike(outSharding);
+        outSharding = TensorShardingAttr::getFullyClosedLike(inSharding);
       }
-      // TODO(enver): Hard fail if output sharding has a different unreduced
-      // axes than the input sharding. Note that the out sharding may be fully
-      // replicated and still have different unreduced axes than the input
-      // sharding.
-      outSharding = TensorShardingAttr::getFullyClosedLike(inSharding)
-                        .replaceUnreducedAxes(outSharding.getUnreducedAxes(),
-                                              outSharding.getReductionOp());
     }
     if (isFullyReplicatedWithoutUnreducedAxes(inSharding)) {
       inSharding = TensorShardingAttr::getFullyClosedLike(outSharding);
     }
-    if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
+    if (!meshesMatch(inSharding, outSharding, op, /*ignoreDeviceOrder=*/true)) {
       // We currently only support a reshard between different meshes if
       // they have the same axes and different device ids, and at least one
-      // of the sharding isn't fully replicated.
+      // of the shardings is not fully replicated without unreduced axes.
       return rewriter.notifyMatchFailure(
           op, [](Diagnostic& diag) { diag << "Incompatible meshes"; });
+    }
+    if (inSharding.getMeshOrRef() != outSharding.getMeshOrRef() &&
+        meshesMatch(inSharding, outSharding, op,
+                    /*ignoreDeviceOrder=*/false)) {
+      return rewriter.notifyMatchFailure(op, [](Diagnostic& diag) {
+        diag << "Cross-mesh reshard on identical meshes requires replicated "
+                "shardings without unreduced axes";
+      });
     }
 
     // TODO(tomnatan): we should verify that the operand of ReshardOp has a
@@ -1601,7 +1644,12 @@ class ReshardPattern : public OpConversionPattern<ReshardOp> {
 
     CollectiveInserter collectiveInserter(inSharding, outSharding,
                                           adaptor.getInput(), rewriter, op);
-    rewriter.replaceOp(op, collectiveInserter.insert());
+    Value result = collectiveInserter.insert();
+    if (trailingReplicatedReshard) {
+      result = ReshardOp::create(rewriter, op.getLoc(), result,
+                                 trailingReplicatedReshard);
+    }
+    rewriter.replaceOp(op, result);
 
     return success();
   }
@@ -1634,24 +1682,24 @@ struct ReshardToCollectivesPass
           return true;
         }
       }
-      // A cross-mesh reshard between fully replicated shardings is dynamically
-      // legal (will be resolved as a no-op in ConvertGlobalToLocalPass).
+      // A cross-mesh reshard between fully replicated shardings without
+      // unreduced axes is dynamically legal (will be resolved as a no-op in
+      // ConvertGlobalToLocalPass).
       if (inSharding && outSharding &&
           isFullyReplicatedWithoutUnreducedAxes(inSharding) &&
           isFullyReplicatedWithoutUnreducedAxes(outSharding) &&
-          !isEquivalentOnMesh(inSharding, outSharding, op)) {
+          inSharding.getMeshOrRef() != outSharding.getMeshOrRef()) {
         return true;
       }
-      // In case in or out sharding is fully replicated, the reshard is either
-      // erased (if both are fully replicated), or it adds an all-gather (if out
-      // sharding is fully replicated and in sharding is sharded) or an
-      // all-slice (if in sharding is fully replicated and out sharding is
-      // sharded), either way it is handled and it should be marked as illegal.
-      if (isFullyReplicatedWithoutUnreducedAxes(inSharding) ||
+      // In case in or out sharding is fully replicated (even with unreduced
+      // axes), the reshard is either erased, lowered to collectives, or fails
+      // legalization if unsupported.
+      if (!inSharding || inSharding.isFullyReplicated() ||
           outSharding.isFullyReplicated()) {
         return false;
       }
-      if (!isEquivalentOnMesh(inSharding, outSharding, op)) {
+      if (!meshesMatch(inSharding, outSharding, op,
+                       /*ignoreDeviceOrder=*/true)) {
         return true;
       }
       return false;

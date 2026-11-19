@@ -131,8 +131,13 @@ mlir::stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
                                                     int64_t partitionCount,
                                                     int64_t& nextChannelId);
 
-// Returns the first non-single-device MeshOp found in moduleOp, or nullptr if
-// none exists.
+// Returns true if mesh is non-null, non-empty, and not single-device. In
+// SPMD, we assume there are only two kinds of non-empty mesh: single-device
+// meshes (isSingleDevice()) and all-device meshes covering all SPMD devices.
+bool isAllDeviceMesh(MeshAttr mesh);
+
+// Returns the first all-device MeshOp found in moduleOp, or nullptr if none
+// exists.
 MeshOp getGlobalMeshOp(ModuleOp moduleOp);
 
 // Returns the logical index of the shard that the given device (`deviceId`)

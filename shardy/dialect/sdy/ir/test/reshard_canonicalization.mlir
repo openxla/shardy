@@ -396,3 +396,52 @@ func.func @reshard_of_reshard_cross_mesh_replicated_chain_folded(
   %1 = sdy.reshard %0 <@mesh, [{}]> : tensor<8xf32>
   return %1 : tensor<8xf32>
 }
+
+// CHECK-LABEL: func @reshard_cse_different_meshes_replicated_not_reused
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]> : tensor<8xf32>
+// CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[ARG0]] <@mesh_4, [{}]> : tensor<8xf32>
+// CHECK-NEXT: return %[[R0]], %[[R1]] : tensor<8xf32>, tensor<8xf32>
+func.func @reshard_cse_different_meshes_replicated_not_reused(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> (tensor<8xf32>, tensor<8xf32>) {
+  %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %arg0 <@mesh_4, [{}]> : tensor<8xf32>
+  return %0, %1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_cross_mesh_replicated_multi_use_preserved
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG0]] <@mesh_4, [{}]> : tensor<8xf32>
+// CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@mesh, [{}]> : tensor<8xf32>
+// CHECK-NEXT: return %[[R0]], %[[R1]] : tensor<8xf32>, tensor<8xf32>
+func.func @reshard_cross_mesh_replicated_multi_use_preserved(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> (tensor<8xf32>, tensor<8xf32>) {
+  %0 = sdy.reshard %arg0 <@mesh_4, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh, [{}]> : tensor<8xf32>
+  return %0, %1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_single_device_to_replicated_to_other_single_device_not_folded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh_0, []>})
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]> : tensor<8xf32>
+// CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@single_device_mesh_1, []> : tensor<8xf32>
+// CHECK-NEXT: return %[[R1]] : tensor<8xf32>
+sdy.mesh @single_device_mesh_1 = <[], device_ids=[1]>
+func.func @reshard_of_reshard_single_device_to_replicated_to_other_single_device_not_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@single_device_mesh_0, []>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@mesh, [{}]> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@single_device_mesh_1, []> : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @reshard_of_reshard_replicated_to_single_device_to_cross_mesh_tiled_not_folded
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+// CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG0]] <@single_device_mesh_0, []> : tensor<8xf32>
+// CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@mesh_4, [{"a"}]> : tensor<8xf32>
+// CHECK-NEXT: return %[[R1]] : tensor<8xf32>
+func.func @reshard_of_reshard_replicated_to_single_device_to_cross_mesh_tiled_not_folded(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> tensor<8xf32> {
+  %0 = sdy.reshard %arg0 <@single_device_mesh_0, []> : tensor<8xf32>
+  %1 = sdy.reshard %0 <@mesh_4, [{"a"}]> : tensor<8xf32>
+  return %1 : tensor<8xf32>
+}
