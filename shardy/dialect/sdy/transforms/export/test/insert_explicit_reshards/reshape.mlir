@@ -465,7 +465,7 @@ func.func @reshape_no_overflow_axes(
 func.func @reshape_to_scalar_with_overflow(
     %arg0: tensor<1x1x1xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}, {}]>})
     -> (tensor<f32> {sdy.sharding = #sdy.sharding<@mesh, []>}) {
-  // CHECK:      %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}, {"x":(2)2}]> : tensor<1x1x1xf32>
+  // CHECK:      %[[RESHARD:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}, {}]> : tensor<1x1x1xf32>
   // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[RESHARD]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, []>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([ij, k, l])->([]) {i=3, j=2, k=1, l=1}>} : (tensor<1x1x1xf32>) -> tensor<f32>
   // CHECK-NEXT: return %[[RESHAPE]] : tensor<f32>
   %0 = stablehlo.reshape %arg0 {
