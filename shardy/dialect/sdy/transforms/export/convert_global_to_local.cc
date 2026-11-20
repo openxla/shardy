@@ -2762,7 +2762,8 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     TensorShardingAttr operandSharding, RankedTensorType globalOperandType,
     RankedTensorType localOperandType, DimNumbersOp dimNumbers,
     ArrayRef<int64_t> trivialSliceDims, const ConversionState& conversionState,
-    ConversionPatternRewriter& rewriter, bool computeMask = true) {
+    ConversionPatternRewriter& rewriter, bool computeMask = true,
+    bool indicesAreSorted = false) {
   int64_t ivd = dimNumbers.getIndexVectorDim();
   ArrayRef<int64_t> startIndexMap;
   if constexpr (std::is_same_v<DimNumbersOp,
@@ -2788,9 +2789,10 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
       maxDim = std::max(maxDim, globalOperandType.getDimSize(dim));
     }
     unsigned bitWidth = indexEltTy.getIntOrFloatBitWidth();
+    bool wasUnsigned = indexEltTy.isUnsignedInteger();
     bool useI32 = maxDim <= INT32_MAX && bitWidth <= 32;
     Type computeType = useI32 ? rewriter.getI32Type() : rewriter.getI64Type();
-    if (indexEltTy.isUnsignedInteger() && bitWidth == (useI32 ? 32 : 64)) {
+    if (wasUnsigned && bitWidth == (useI32 ? 32 : 64)) {
       APInt maxSigned = APInt::getSignedMaxValue(bitWidth);
       Value cap = stablehlo::ConstantOp::create(
           rewriter, loc, DenseIntElementsAttr::get(indicesType, maxSigned));
@@ -2805,8 +2807,17 @@ std::pair<Value, Value> computeLocalIndicesAndMask(
     Value baseIndices;
     if constexpr (std::is_same_v<DimNumbersOp,
                                  stablehlo::ScatterDimensionNumbersAttr>) {
-      // Use original unclamped indices so OOB indices stay OOB locally.
-      baseIndices = indices;
+      // Clamp negative OOB indices to -1 on 1D sorted scatters so subtracting
+      // indicesMin cannot underflow signed computeType and break
+      // indices_are_sorted.
+      if (indicesAreSorted && !wasUnsigned && startIndexMap.size() == 1) {
+        APInt negOneVal = APInt::getAllOnes(useI32 ? 32 : 64);
+        Value negOne = stablehlo::ConstantOp::create(
+            rewriter, loc, DenseIntElementsAttr::get(indicesType, negOneVal));
+        baseIndices = stablehlo::MaxOp::create(rewriter, loc, indices, negOne);
+      } else {
+        baseIndices = indices;
+      }
     } else {
       // Use globally clamped indices for gather semantics.
       baseIndices = clampGatherIndices(loc, indices, globalOperandType,
@@ -3696,6 +3707,12 @@ class StablehloScatterOpPattern
                                conversionState, rewriter);
     }
 
+    // Componentwise clamping breaks lexicographical order on multi-dim
+    // scatters, so clear indices_are_sorted when sharding multi-dim scatters.
+    bool indicesAreSorted =
+        op.getIndicesAreSorted() &&
+        (indexedInputDims.empty() ||
+         dnums.getScatterDimsToOperandDims().size() == 1);
     // Adjust indices for sharded dimensions (Disjoint writes are parallel).
     Value adjustedIndices = adaptor.getScatterIndices();
     if (!isFullyReplicated(inputSharding)) {
@@ -3703,7 +3720,8 @@ class StablehloScatterOpPattern
           computeLocalIndicesAndMask(loc, adjustedIndices, mesh, inputSharding,
                                      globalInputType, localInputType, dnums,
                                      indexedInputDims, conversionState,
-                                     rewriter, /*computeMask=*/false)
+                                     rewriter, /*computeMask=*/false,
+                                     indicesAreSorted)
               .first;
     }
 
@@ -3711,7 +3729,7 @@ class StablehloScatterOpPattern
     auto localScatter = stablehlo::ScatterOp::create(
         rewriter, loc, converter->convertResultTypes(op.getResults()),
         localInputs, adjustedIndices, adaptor.getUpdates(), dnums,
-        op.getIndicesAreSorted(), op.getUniqueIndices());
+        indicesAreSorted, op.getUniqueIndices());
     copyAttributes(
         op, localScatter, /*attributesToExclude=*/
         {"scatter_dimension_numbers", "indices_are_sorted", "unique_indices"});

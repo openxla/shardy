@@ -489,3 +489,163 @@ func.func @scatter_unreduced_axes_fallback_all_reduce(
   } : (tensor<8x2xf32>, tensor<2x1xi64>, tensor<2x2xf32>) -> tensor<8x2xf32>
   return %0 : tensor<8x2xf32>
 }
+
+// CHECK-LABEL: func @scatter_sorted_i32_clamps_negative_indices_to_neg_one(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<4x1xi32>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<4x4xf32>)
+// CHECK-SAME: -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+func.func @scatter_sorted_i32_clamps_negative_indices_to_neg_one(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+    %arg1: tensor<4x1xi32>,
+    %arg2: tensor<4x4xf32>)
+    -> (tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[NEG_ONE:.*]] = stablehlo.constant dense<-1> : tensor<4x1xi32>
+  // CHECK-NEXT: %[[CLAMPED:.*]] = stablehlo.maximum %[[ARG1]], %[[NEG_ONE]] : tensor<4x1xi32>
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK-NEXT: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i32>
+  // CHECK-NEXT: %[[OFF_BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>} : (tensor<i32>) -> tensor<4x1xi32>
+  // CHECK-NEXT: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[OFF_BCAST]] : tensor<4x1xi32>
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[LOCAL_IDX]], %[[ARG2]])
+  // CHECK-SAME: indices_are_sorted = true
+  // CHECK: (tensor<4x4xf32>, tensor<4x1xi32>, tensor<4x4xf32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: return %[[SCATTER]] : tensor<4x4xf32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%lhs: tensor<f32>, %rhs: tensor<f32>):
+    %sum = stablehlo.add %lhs, %rhs : tensor<f32>
+    stablehlo.return %sum : tensor<f32>
+  }) {
+    indices_are_sorted = true,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {}]>]>
+  } : (tensor<8x4xf32>, tensor<4x1xi32>, tensor<4x4xf32>) -> tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
+// CHECK-LABEL: func @scatter_sorted_scalar_i64_clamps_negative_index_to_neg_one(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<i64>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<i32>)
+// CHECK-SAME: -> (tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>}) {
+func.func @scatter_sorted_scalar_i64_clamps_negative_index_to_neg_one(
+    %arg0: tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>},
+    %arg1: tensor<i64>,
+    %arg2: tensor<i32>)
+    -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}]>}) {
+  // CHECK-NEXT: %[[NEG_ONE:.*]] = stablehlo.constant dense<-1> : tensor<i64>
+  // CHECK-NEXT: %[[CLAMPED:.*]] = stablehlo.maximum %[[ARG1]], %[[NEG_ONE]] : tensor<i64>
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK-NEXT: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : (tensor<i32>) -> tensor<i64>
+  // CHECK-NEXT: %[[OFF_BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, []>]>} : (tensor<i64>) -> tensor<i64>
+  // CHECK-NEXT: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[CLAMPED]], %[[OFF_BCAST]] : tensor<i64>
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[LOCAL_IDX]], %[[ARG2]])
+  // CHECK-SAME: indices_are_sorted = true
+  // CHECK: (tensor<4xi32>, tensor<i64>, tensor<i32>) -> tensor<4xi32>
+  // CHECK-NEXT: return %[[SCATTER]] : tensor<4xi32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%lhs: tensor<i32>, %rhs: tensor<i32>):
+    %sum = stablehlo.add %lhs, %rhs : tensor<i32>
+    stablehlo.return %sum : tensor<i32>
+  }) {
+    indices_are_sorted = true,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 0>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}]>]>
+  } : (tensor<8xi32>, tensor<i64>, tensor<i32>) -> tensor<8xi32>
+  return %0 : tensor<8xi32>
+}
+
+// CHECK-LABEL: func @scatter_sorted_ui32_does_not_clamp_to_neg_one(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<4x1xui32>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<4x4xf32>)
+// CHECK-SAME: -> (tensor<4x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+func.func @scatter_sorted_ui32_does_not_clamp_to_neg_one(
+    %arg0: tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+    %arg1: tensor<4x1xui32>,
+    %arg2: tensor<4x4xf32>)
+    -> (tensor<8x4xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[CAP:.*]] = stablehlo.constant dense<2147483647> : tensor<4x1xui32>
+  // CHECK-NEXT: %[[SAT:.*]] = stablehlo.minimum %[[ARG1]], %[[CAP]] : tensor<4x1xui32>
+  // CHECK-NEXT: %[[IDX_I32:.*]] = stablehlo.convert %[[SAT]] : (tensor<4x1xui32>) -> tensor<4x1xi32>
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 4, 4, 4, 4]> : tensor<8xi32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK-NEXT: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i32>
+  // CHECK-NEXT: %[[OFF_BCAST:.*]] = stablehlo.broadcast_in_dim %[[OFFSET]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>} : (tensor<i32>) -> tensor<4x1xi32>
+  // CHECK-NEXT: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[IDX_I32]], %[[OFF_BCAST]] : tensor<4x1xi32>
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[LOCAL_IDX]], %[[ARG2]])
+  // CHECK-SAME: indices_are_sorted = true
+  // CHECK: (tensor<4x4xf32>, tensor<4x1xi32>, tensor<4x4xf32>) -> tensor<4x4xf32>
+  // CHECK-NEXT: return %[[SCATTER]] : tensor<4x4xf32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%lhs: tensor<f32>, %rhs: tensor<f32>):
+    %sum = stablehlo.add %lhs, %rhs : tensor<f32>
+    stablehlo.return %sum : tensor<f32>
+  }) {
+    indices_are_sorted = true,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {}]>]>
+  } : (tensor<8x4xf32>, tensor<4x1xui32>, tensor<4x4xf32>) -> tensor<8x4xf32>
+  return %0 : tensor<8x4xf32>
+}
+
+// CHECK-LABEL: func @scatter_sorted_multi_dim_sharded_clears_indices_are_sorted(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<2x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>},
+// CHECK-SAME: %[[ARG1:.*]]: tensor<2x2xi32>,
+// CHECK-SAME: %[[ARG2:.*]]: tensor<2x2xf32>)
+// CHECK-SAME: -> (tensor<2x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>}) {
+func.func @scatter_sorted_multi_dim_sharded_clears_indices_are_sorted(
+    %arg0: tensor<4x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>},
+    %arg1: tensor<2x2xi32>,
+    %arg2: tensor<2x2xf32>)
+    -> (tensor<4x4x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>}) {
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[TABLE:.*]] = stablehlo.constant dense<[0, 0, 0, 0, 2, 2, 2, 2]> : tensor<8xi32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.dynamic_slice %[[TABLE]], %[[PID]], sizes = [1] : (tensor<8xi32>, tensor<ui32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[RESHAPE:.*]] = stablehlo.reshape %[[SLICE]] : (tensor<1xi32>) -> tensor<i32>
+  // CHECK-NEXT: %[[OFFSET:.*]] = stablehlo.convert %[[RESHAPE]] : tensor<i32>
+  // CHECK-NEXT: %[[C0:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // CHECK-NEXT: %[[OFF0:.*]] = stablehlo.reshape %[[OFFSET]] : (tensor<i32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[OFF1:.*]] = stablehlo.reshape %[[C0]] : (tensor<i32>) -> tensor<1xi32>
+  // CHECK-NEXT: %[[CONCAT:.*]] = stablehlo.concatenate %[[OFF0]], %[[OFF1]], dim = 0 : (tensor<1xi32>, tensor<1xi32>) -> tensor<2xi32>
+  // CHECK-NEXT: %[[OFF_VEC:.*]] = stablehlo.broadcast_in_dim %[[CONCAT]], dims = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2_4, [{}, {}]>]>} : (tensor<2xi32>) -> tensor<2x2xi32>
+  // CHECK-NEXT: %[[LOCAL_IDX:.*]] = stablehlo.subtract %[[ARG1]], %[[OFF_VEC]] : tensor<2x2xi32>
+  // CHECK-NEXT: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[ARG0]], %[[LOCAL_IDX]], %[[ARG2]])
+  // CHECK-SAME: indices_are_sorted = false
+  // CHECK: (tensor<2x4x2xf32>, tensor<2x2xi32>, tensor<2x2xf32>) -> tensor<2x4x2xf32>
+  // CHECK-NEXT: return %[[SCATTER]] : tensor<2x4x2xf32>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%lhs: tensor<f32>, %rhs: tensor<f32>):
+    %sum = stablehlo.add %lhs, %rhs : tensor<f32>
+    stablehlo.return %sum : tensor<f32>
+  }) {
+    indices_are_sorted = true,
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0, 1],
+      scatter_dims_to_operand_dims = [0, 1],
+      index_vector_dim = 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{"x"}, {}, {}]>]>
+  } : (tensor<4x4x2xf32>, tensor<2x2xi32>, tensor<2x2xf32>) -> tensor<4x4x2xf32>
+  return %0 : tensor<4x4x2xf32>
+}
+
