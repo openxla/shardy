@@ -78,6 +78,14 @@ AxisSet getAxisSet(ArrayRef<AxisList> axesPerDim) {
   return result;
 }
 
+// Returns true if `axis` cannot coexist with or still overlaps a different axis
+// in `axes`.
+bool hasAxisConflict(const AxisSet& axes, AxisRefAttr axis) {
+  return llvm::any_of(axes, [axis](AxisRefAttr other) {
+    return !axis.canCoexist(other) || (axis != other && axis.overlaps(other));
+  });
+}
+
 // Returns a map from `AxisRefAttr` to the dimension in `axesPerDim` in which
 // this axis appears and the index within the respective `AxisList`.
 AxisToDimAndIndex getAxisToDimAndIndex(ArrayRef<AxisList> axesPerDim) {
@@ -260,12 +268,19 @@ class CollectiveInserter {
     // sub-axes like full axes and assume any two sub-axes that overlap are also
     // equal, which allows using them as keys in a hash map.
     alignSubAxesByDecomposition(inAxesPerDim, outAxesPerDim, mesh);
+    // Dimensions with an input axis that conflicts with an output axis after
+    // decomposition must be unsharded first.
+    const AxisSet outAxisSet = getAxisSet(outAxesPerDim);
     // We remove the common prefix of `inAxesPerDim` and `outAxesPerDim` (except
     // on dimensions in `dimsToUnshard`, and only up to a prefix whose sharded
     // size preserves the dimension's padded size), since those axes stay
     // exactly the same during the reshard. We are left with `inAxesPerDim` and
     // `outAxesPerDim` that need to become empty, via a sequence of collectives.
     for (int64_t dim = 0; dim < getRank(); ++dim) {
+      dimsToUnshard[dim] = dimsToUnshard[dim] ||
+                           llvm::any_of(inAxesPerDim[dim], [&](AxisRefAttr a) {
+                             return hasAxisConflict(outAxisSet, a);
+                           });
       eraseCommonPrefix(dim);
     }
 
@@ -562,6 +577,12 @@ class CollectiveInserter {
         [&](int64_t) -> AxisList& { return availableAxes; }, consumeAxisToAdd);
   }
 
+  // Returns true if `axis` is in `inAxisSet` or conflicts with a current input
+  // axis.
+  bool isOutAxisUnavailable(AxisRefAttr axis) const {
+    return inAxisSet.contains(axis) || hasAxisConflict(inAxisSet, axis);
+  }
+
   // For an future all-to-all from source dimension `d1` to target dimension
   // `d2`, Holds the range of out axes in that dimension to slice at `d1`.
   struct AxesToSliceForAllToAll {
@@ -623,7 +644,8 @@ class CollectiveInserter {
   std::optional<AxesToSliceForAllToAll> getAxesToSliceForAllToAll(
       int64_t srcDim) {
     AxisList& srcInAxes = inAxesPerDim[srcDim];
-    if (srcInAxes.empty() || !outAxesPerDim[srcDim].empty()) {
+    if (dimsToUnshard[srcDim] || srcInAxes.empty() ||
+        !outAxesPerDim[srcDim].empty()) {
       // No axes at source dimension to move, or source dimension has other axes
       // in output sharding.
       return std::nullopt;
@@ -644,7 +666,7 @@ class CollectiveInserter {
     // Find the first out axis beyond `srcInAxes.back()`.
     auto startOutAxisIt = ++llvm::find(tgtOutAxes, srcInAxes.back());
     if (startOutAxisIt == tgtOutAxes.end() ||
-        inAxisSet.contains(*startOutAxisIt)) {
+        isOutAxisUnavailable(*startOutAxisIt)) {
       // `tgtOutAxes` doesn't have any axes beyond `srcInAxes.back()` or the
       // first of those axes isn't available to slice.
       return std::nullopt;
@@ -675,7 +697,7 @@ class CollectiveInserter {
     auto curOutAxisIt = startOutAxisIt;
     int64_t addedSlicingAxesSize = 1;
     while (curOutAxisIt != tgtOutAxes.end() &&
-           !inAxisSet.contains(*curOutAxisIt)) {
+           !isOutAxisUnavailable(*curOutAxisIt)) {
       // Current out axis is available to slice.
       addedSlicingAxesSize *= (curOutAxisIt++)->getSize(mesh);
     }
@@ -849,7 +871,7 @@ class CollectiveInserter {
       int64_t newShardedSize = getShardedSize(currentAxes, mesh);
       int64_t simCapacity = dimCapacity;
       for (AxisRefAttr outAxis : outAxes) {
-        if (inAxisSet.contains(outAxis)) {
+        if (isOutAxisUnavailable(outAxis)) {
           continue;
         }
         auto [withinAxis, remainderAxis] =
@@ -864,7 +886,7 @@ class CollectiveInserter {
       auto outIt = outAxes.begin();
       while (outIt != outAxes.end()) {
         AxisRefAttr outAxis = *outIt;
-        if (inAxisSet.contains(outAxis)) {
+        if (isOutAxisUnavailable(outAxis)) {
           // Out axis isn't available to slice.
           ++outIt;
           continue;
