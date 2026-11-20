@@ -23,6 +23,7 @@ limitations under the License.
 #include <tuple>
 #include <utility>
 
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -3115,6 +3116,22 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
     auto localType = cast<RankedTensorType>(converter->convertType(op));
     Location loc = op.getLoc();
     int64_t iotaDim = op.getIotaDimension();
+    // Compute the local iota and shard offset sum in an exact integer type
+    // before converting when indices exceed float significand precision or zero
+    // is unrepresentable.
+    int64_t dim = op.getType().getDimSize(iotaDim);
+    std::optional<bool> useI64;
+    Type elemTy = localType.getElementType();
+    auto cTy = dyn_cast<ComplexType>(elemTy);
+    if (auto fTy = dyn_cast<FloatType>(cTy ? cTy.getElementType() : elemTy);
+        fTy && !sharding.getDimShardings()[iotaDim].getAxes().empty()) {
+      const llvm::fltSemantics& sem = fTy.getFloatSemantics();
+      if (!APFloat::semanticsHasZero(sem) ||
+          dim > (1LL << std::min(62U, APFloat::semanticsPrecision(sem)))) {
+        useI64 = requires64BitOffset(dim);
+        localType = localType.clone(getIndexOrOffsetType(rewriter, *useI64));
+      }
+    }
     // Create the local iota.
     Value localIota =
         stablehlo::IotaOp::create(rewriter, loc, localType, iotaDim);
@@ -3130,14 +3147,17 @@ class StablehloIotaOpPattern : public OpConversionPattern<stablehlo::IotaOp> {
         RankedTensorType::get({}, localType.getElementType());
     Value offset = getDimensionOffset(
         loc, mesh, sharding.getDimShardings()[iotaDim].getAxes(), shardSize,
-        conversionState, rewriter);
+        conversionState, rewriter, useI64);
     Value offsetConverted = stablehlo::ConvertOp::create(
         rewriter, loc, convertedOffsetType, offset);
     Value broadcastOffset = stablehlo::BroadcastInDimOp::create(
         rewriter, loc, localType, offsetConverted,
         rewriter.getDenseI64ArrayAttr({}));
-    rewriter.replaceOpWithNewOp<stablehlo::AddOp>(op, localIota,
-                                                  broadcastOffset);
+    Value sum =
+        stablehlo::AddOp::create(rewriter, loc, localIota, broadcastOffset);
+    rewriter.replaceOp(op, useI64.has_value() ? stablehlo::ConvertOp::create(
+                                                    rewriter, loc, sum, elemTy)
+                                              : sum);
 
     conversionState.removeToConvertOp(op);
     return success();
