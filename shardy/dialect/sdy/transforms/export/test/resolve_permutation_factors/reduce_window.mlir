@@ -1352,3 +1352,86 @@ func.func @reduce_window_4d_sharded(%arg0: tensor<2x8x8x4xi32> {sdy.sharding = #
 }
 
 
+// Same as @reduce_window_base_dilation_permutation, but with dim 1 unsharded
+// so post-op dynamic slicing preserves the full size of unsharded dimensions.
+// CHECK-LABEL: func @reduce_window_unit_window_base_dilation_unsharded_dim
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xi32>
+func.func @reduce_window_unit_window_base_dilation_unsharded_dim(%arg0: tensor<4x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) -> (tensor<10x8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {}]>}) {
+  // CHECK: %[[CST:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  %c = stablehlo.constant dense<0> : tensor<i32>
+
+  // REPL:      %[[RESHARD_IN:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<4x8xi32>
+  // REPL-NEXT: %[[RW:.*]] = "stablehlo.reduce_window"(%[[RESHARD_IN]], %[[CST]])
+  // REPL-SAME{LITERAL}: <{base_dilations = array<i64: 3, 1>, padding = dense<0> : tensor<2x2xi64>, window_dimensions = array<i64: 1, 1>, window_strides = array<i64: 1, 1>}> ({
+  // REPL-NEXT: ^bb0(%arg1: tensor<i32>, %arg2: tensor<i32>):
+  // REPL-NEXT:   %[[ADD:.*]] = stablehlo.add %arg1, %arg2 : tensor<i32>
+  // REPL-NEXT:   stablehlo.return %[[ADD]] : tensor<i32>
+  // REPL-NEXT: })
+  // REPL-NEXT: %[[RES:.*]] = sdy.reshard %[[RW]] <@mesh, [{"a"}, {}]> : tensor<10x8xi32>
+
+  // HALO:      %[[RES:.*]] = sdy.manual_computation(%[[ARG0]], %[[CST]]) in_shardings=[<@mesh, [{"a"}, {}]>, <@mesh, []>] out_shardings=[<@mesh, [{"a"}, {}]>] manual_axes={"a"} (%arg1: tensor<2x8xi32>, %arg2: tensor<i32>) {
+  // HALO-NEXT:   %[[PID1:.*]] = stablehlo.partition_id : tensor<ui32>
+  // HALO-NEXT:   %[[C_DIV1:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // HALO-NEXT:   %[[DIV1:.*]] = stablehlo.divide %[[PID1]], %[[C_DIV1]] : tensor<ui32>
+  // HALO-NEXT:   %[[ID1:.*]] = stablehlo.convert %[[DIV1]] : (tensor<ui32>) -> tensor<i32>
+  // HALO-NEXT:   %[[SLICE_L:.*]] = stablehlo.slice %arg1 [1:2, 0:8]
+  // HALO-NEXT:   %[[CP1:.*]] = "stablehlo.collective_permute"(%[[SLICE_L]])
+  // HALO-SAME{LITERAL}: source_target_pairs = dense<[[0, 2], [1, 3]]> : tensor<2x2xi64>}>
+  // HALO-NEXT:   %[[C_ONE1:.*]] = stablehlo.constant dense<1> : tensor<i32>
+  // HALO-NEXT:   %[[CMP1:.*]] = stablehlo.compare GE, %[[ID1]], %[[C_ONE1]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
+  // HALO-NEXT:   %[[BCAST_PAD1:.*]] = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<i32>) -> tensor<1x8xi32>
+  // HALO-NEXT:   %[[BCAST_CMP1:.*]] = stablehlo.broadcast_in_dim %[[CMP1]], dims = [] : (tensor<i1>) -> tensor<1x8xi1>
+  // HALO-NEXT:   %[[SEL1:.*]] = stablehlo.select %[[BCAST_CMP1]], %[[CP1]], %[[BCAST_PAD1]] : tensor<1x8xi1>, tensor<1x8xi32>
+  // HALO-NEXT:   %[[SLICE_R:.*]] = stablehlo.slice %arg1 [0:1, 0:8]
+  // HALO-NEXT:   %[[CP2:.*]] = "stablehlo.collective_permute"(%[[SLICE_R]])
+  // HALO-SAME{LITERAL}: source_target_pairs = dense<[[2, 0], [3, 1]]> : tensor<2x2xi64>}>
+  // HALO-NEXT:   %[[C_ONE2:.*]] = stablehlo.constant dense<1> : tensor<i32>
+  // HALO-NEXT:   %[[CMP2:.*]] = stablehlo.compare LT, %[[ID1]], %[[C_ONE2]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
+  // HALO-NEXT:   %[[BCAST_PAD2:.*]] = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<i32>) -> tensor<1x8xi32>
+  // HALO-NEXT:   %[[BCAST_CMP2:.*]] = stablehlo.broadcast_in_dim %[[CMP2]], dims = [] : (tensor<i1>) -> tensor<1x8xi1>
+  // HALO-NEXT:   %[[SEL2:.*]] = stablehlo.select %[[BCAST_CMP2]], %[[CP2]], %[[BCAST_PAD2]] : tensor<1x8xi1>, tensor<1x8xi32>
+  // HALO-NEXT:   %[[CONCAT1:.*]] = stablehlo.concatenate %[[SEL1]], %arg1, %[[SEL2]], dim = 0
+  // HALO-NEXT:   %[[C_STRIDE1:.*]] = stablehlo.constant dense<-1> : tensor<i32>
+  // HALO-NEXT:   %[[C_OFFSET1:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[MUL1:.*]] = stablehlo.multiply %[[ID1]], %[[C_STRIDE1]] : tensor<i32>
+  // HALO-NEXT:   %[[ADD1:.*]] = stablehlo.add %[[MUL1]], %[[C_OFFSET1]] : tensor<i32>
+  // HALO-NEXT:   %[[C_ZERO1:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT:   %[[C_BD1:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[UNDIL1:.*]] = stablehlo.divide %[[ADD1]], %[[C_BD1]] : tensor<i32>
+  // HALO-NEXT:   %[[SLICE1:.*]] = stablehlo.dynamic_slice %[[CONCAT1]], %[[UNDIL1]], %[[C_ZERO1]], sizes = [3, 8]
+  // HALO-NEXT:   %[[RW:.*]] = "stablehlo.reduce_window"(%[[SLICE1]], %arg2) <{base_dilations = array<i64: 3, 1>, padding = dense<0> : tensor<2x2xi64>, window_dimensions = array<i64: 1, 1>, window_strides = array<i64: 1, 1>}> ({
+  // HALO-NEXT:   ^bb0(%arg3: tensor<i32>, %arg4: tensor<i32>):
+  // HALO-NEXT:     %[[ADD:.*]] = stablehlo.add %arg3, %arg4 : tensor<i32>
+  // HALO-NEXT:     stablehlo.return %[[ADD]] : tensor<i32>
+  // HALO-NEXT:   })
+  // HALO-NEXT:   %[[C_ZERO2:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT:   %[[PID2:.*]] = stablehlo.partition_id : tensor<ui32>
+  // HALO-NEXT:   %[[C_DIV2:.*]] = stablehlo.constant dense<2> : tensor<ui32>
+  // HALO-NEXT:   %[[DIV2:.*]] = stablehlo.divide %[[PID2]], %[[C_DIV2]] : tensor<ui32>
+  // HALO-NEXT:   %[[ID2:.*]] = stablehlo.convert %[[DIV2]] : (tensor<ui32>) -> tensor<i32>
+  // HALO-NEXT:   %[[C_STRIDE2:.*]] = stablehlo.constant dense<-1> : tensor<i32>
+  // HALO-NEXT:   %[[C_OFFSET2:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[MUL2:.*]] = stablehlo.multiply %[[ID2]], %[[C_STRIDE2]] : tensor<i32>
+  // HALO-NEXT:   %[[ADD2:.*]] = stablehlo.add %[[MUL2]], %[[C_OFFSET2]] : tensor<i32>
+  // HALO-NEXT:   %[[C_ZERO3:.*]] = stablehlo.constant dense<0> : tensor<i32>
+  // HALO-NEXT:   %[[MAX2:.*]] = stablehlo.maximum %[[ADD2]], %[[C_ZERO3]] : tensor<i32>
+  // HALO-NEXT:   %[[C_BD2:.*]] = stablehlo.constant dense<3> : tensor<i32>
+  // HALO-NEXT:   %[[OFF_OUT:.*]] = stablehlo.remainder %[[MAX2]], %[[C_BD2]] : tensor<i32>
+  // HALO-NEXT:   %[[SLICE2:.*]] = stablehlo.dynamic_slice %[[RW]], %[[OFF_OUT]], %[[C_ZERO2]], sizes = [5, 8]
+  // HALO-NEXT:   sdy.return %[[SLICE2]] : tensor<5x8xi32>
+  // HALO-NEXT: } : (tensor<4x8xi32>, tensor<i32>) -> tensor<10x8xi32>
+  %0 = "stablehlo.reduce_window"(%arg0, %c) ({
+    ^bb0(%arg1: tensor<i32>, %arg2: tensor<i32>):
+      %1 = stablehlo.add %arg1, %arg2 : tensor<i32>
+      stablehlo.return %1 : tensor<i32>
+  }) {
+    window_dimensions = array<i64: 1, 1>,
+    window_strides = array<i64: 1, 1>,
+    base_dilations = array<i64: 3, 1>,
+    padding = dense<0> : tensor<2x2xi64>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{"a"}, {}]>]>
+  } : (tensor<4x8xi32>, tensor<i32>) -> tensor<10x8xi32>
+
+  // CHECK: return %[[RES]] : tensor<10x8xi32>
+  return %0 : tensor<10x8xi32>
+}
