@@ -53,8 +53,9 @@ namespace sdy {
 
 namespace {
 
-// Returns the constant integer value of `val` if it is defined by a constant
-// op. Only expects sdy::ConstantOp and stablehlo::ConstantOp.
+// Returns the constant integer value of `val` if it is defined by a splat
+// integer constant op, saturating unsigned values above INT64_MAX to INT64_MAX.
+// Only expects sdy::ConstantOp and stablehlo::ConstantOp.
 std::optional<int64_t> getConstantInt(Value val) {
   ElementsAttr attr;
   if (auto sdyConst = val.getDefiningOp<ConstantOp>()) {
@@ -64,10 +65,15 @@ std::optional<int64_t> getConstantInt(Value val) {
     // consistently represented as sdy::ConstantOp.
     attr = shloConst.getValue();
   }
-  if (attr) {
-    return attr.getSplatValue<APInt>().getSExtValue();
+  if (!attr || !attr.isSplat() || !isa<IntegerType>(attr.getElementType())) {
+    return std::nullopt;
   }
-  return std::nullopt;
+  APInt intVal = attr.getSplatValue<APInt>();
+  if (attr.getElementType().isUnsignedInteger()) {
+    return static_cast<int64_t>(
+        intVal.getLimitedValue(std::numeric_limits<int64_t>::max()));
+  }
+  return intVal.getSExtValue();
 }
 
 // Returns a sorted vector containing all axes in `axesPerDim`.

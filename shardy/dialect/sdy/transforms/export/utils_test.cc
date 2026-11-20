@@ -893,6 +893,54 @@ TEST_F(ExportUtilsTest, Requires64BitOffsetAndIndex) {
   EXPECT_EQ(largeConstOp.getType(),
             RankedTensorType::get({3}, builder.getI64Type()));
 }
+
+TEST_F(ExportUtilsTest,
+       IsCommunicationFreeDynamicUpdateSliceDimUnsignedConstants) {
+  OwningOpRef<ModuleOp> module = mlir::parseSourceString<ModuleOp>(
+      R"mlir(
+        func.func @test(%a256: tensor<256xf32>, %a65540: tensor<65540xf32>,
+                        %a4g: tensor<4294967304xf32>, %a10: tensor<10xf32>,
+                        %a16: tensor<16xf32>, %u4: tensor<4xf32>, %u2: tensor<2xf32>) {
+          %c0 = sdy.constant dense<190> : tensor<ui8>
+          %0 = stablehlo.dynamic_update_slice %a256, %u4, %c0 : (tensor<256xf32>, tensor<4xf32>, tensor<ui8>) -> tensor<256xf32>
+          %c1 = stablehlo.constant dense<32768> : tensor<ui16>
+          %1 = stablehlo.dynamic_update_slice %a65540, %u4, %c1 : (tensor<65540xf32>, tensor<4xf32>, tensor<ui16>) -> tensor<65540xf32>
+          %c2 = sdy.constant dense<2147483650> : tensor<ui32>
+          %2 = stablehlo.dynamic_update_slice %a4g, %u4, %c2 : (tensor<4294967304xf32>, tensor<4xf32>, tensor<ui32>) -> tensor<4294967304xf32>
+          %c3 = sdy.constant dense<18446744073709551615> : tensor<ui64>
+          %3 = stablehlo.dynamic_update_slice %a10, %u2, %c3 : (tensor<10xf32>, tensor<2xf32>, tensor<ui64>) -> tensor<10xf32>
+          %c4 = sdy.constant dense<200> : tensor<ui8>
+          %4 = stablehlo.dynamic_update_slice %a256, %u4, %c4 : (tensor<256xf32>, tensor<4xf32>, tensor<ui8>) -> tensor<256xf32>
+          %5 = stablehlo.dynamic_update_slice %a16, %u2, %c3 : (tensor<16xf32>, tensor<2xf32>, tensor<ui64>) -> tensor<16xf32>
+          %c6 = sdy.constant dense<-66> : tensor<i8>
+          %6 = stablehlo.dynamic_update_slice %a256, %u4, %c6 : (tensor<256xf32>, tensor<4xf32>, tensor<i8>) -> tensor<256xf32>
+          return
+        }
+      )mlir",
+      &context);
+  ASSERT_TRUE(module);
+  SmallVector<stablehlo::DynamicUpdateSliceOp> ops(
+      cast<func::FuncOp>(module->lookupSymbol("test"))
+          .getOps<stablehlo::DynamicUpdateSliceOp>());
+  ASSERT_EQ(ops.size(), 7);
+  auto isCommFree = [&](int64_t opIdx, StringRef axis) {
+    TensorShardingAttr sharding = TensorShardingAttr::get(
+        &context, "mesh",
+        {DimensionShardingAttr::get(&context,
+                                    {AxisRefAttr::get(&context, axis)},
+                                    /*isClosed=*/true)},
+        /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+    return isCommunicationFreeDynamicUpdateSliceDim(
+        0, ops[opIdx], sharding, sharding.getMesh(getSymbolTable()));
+  };
+  EXPECT_FALSE(isCommFree(0, "y"));
+  EXPECT_FALSE(isCommFree(1, "x"));
+  EXPECT_FALSE(isCommFree(2, "x"));
+  EXPECT_FALSE(isCommFree(3, "y"));
+  EXPECT_TRUE(isCommFree(4, "y"));
+  EXPECT_TRUE(isCommFree(5, "y"));
+  EXPECT_TRUE(isCommFree(6, "y"));
+}
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir
