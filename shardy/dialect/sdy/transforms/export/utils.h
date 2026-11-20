@@ -95,8 +95,8 @@ bool isCommunicationFreeSliceDim(int64_t dimIdx, stablehlo::SliceOp sliceOp,
 
 // Returns true if the pad operation on the given dimension is
 // "communication-free". A pad is communication-free if it is not sharded, or if
-// it is sharded but has no interior padding, and edge padding low and high are
-// multiples of the shard size.
+// every shard's output slice only reads input elements already local to that
+// shard.
 bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
                                TensorShardingAttr sharding, MeshAttr mesh);
 

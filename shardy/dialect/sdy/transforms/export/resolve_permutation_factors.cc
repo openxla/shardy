@@ -1125,8 +1125,9 @@ Value assembleHaloExchangeBuffer(
 
   SmallVector<int64_t> paddedConcatShape =
       llvm::to_vector(concatType.getShape());
+  int64_t concatDimSize = concatType.getShape()[dim];
   int64_t dilatedSize =
-      (concatType.getShape()[dim] - 1) * (interiorPad + 1) + 1;
+      concatDimSize + std::max<int64_t>(0, concatDimSize - 1) * interiorPad;
   paddedConcatShape[dim] = dilatedSize + lowPad + highPad;
   auto paddedConcatType =
       RankedTensorType::get(paddedConcatShape, concatType.getElementType());
@@ -1207,7 +1208,8 @@ Value exchangeDimWithDynamicOffset(
   int64_t minUnpaddedOff = std::min(unpaddedBaseOffset, endOffset);
   int64_t maxUnpaddedOff = std::max(unpaddedBaseOffset, endOffset);
   int64_t concatDimSize = leftHaloOrHopsSize + sIn + rightHaloOrHopsSize;
-  int64_t dilatedConcatSize = (concatDimSize - 1) * (interiorPad + 1) + 1;
+  int64_t dilatedConcatSize =
+      concatDimSize + std::max<int64_t>(0, concatDimSize - 1) * interiorPad;
   // Skip edge padding when every shard's slice window [offset, offset +
   // dilatedFootprint] lies entirely within the concatenated segments [0,
   // dilatedConcatSize].
@@ -1653,11 +1655,12 @@ Value computeWindowPostOpSliceOffset(Location loc, Value scalarPartitionId,
 
 // Computes left/right hops, exact halo boundary slice sizes, edge padding, and
 // communication requirements for a sharded dimension based on the per-shard
-// coverage interval [getShardStart(t), getShardStart(t) + footprint - 1].
+// coverage interval [getShardStart(t), getShardLimit(t)].
 void computeDimHaloBoundaryInfo(
     int64_t shardCount, int64_t sIn, int64_t validTotalSize,
-    int64_t physicalTotalSize, int64_t footprint,
+    int64_t physicalTotalSize,
     llvm::function_ref<int64_t(int64_t)> getShardStart,
+    llvm::function_ref<int64_t(int64_t)> getShardLimit,
     DimExchangeInfo& dimInfo) {
   int64_t maxLeftHalo = 0;
   int64_t maxRightHalo = 0;
@@ -1667,7 +1670,7 @@ void computeDimHaloBoundaryInfo(
 
   for (int64_t t = 0; t < shardCount; ++t) {
     int64_t start = getShardStart(t);
-    int64_t limit = start + footprint - 1;
+    int64_t limit = getShardLimit(t);
     int64_t validStart = std::max<int64_t>(0, start);
     int64_t validLimit = std::min<int64_t>(validTotalSize - 1, limit);
 
@@ -1696,14 +1699,14 @@ void computeDimHaloBoundaryInfo(
     if (start < 0) {
       maxEdgePadLow = std::max(maxEdgePadLow, -start);
     }
-    if (start < t * sIn && t > 0) {
+    if (limit >= start && start < t * sIn && t > 0) {
       maxLeftHalo = std::max(maxLeftHalo, std::min(sIn, t * sIn - start));
     }
-    if (limit >= (t + 1) * sIn && t < shardCount - 1) {
+    if (limit >= start && limit >= (t + 1) * sIn && t < shardCount - 1) {
       maxRightHalo =
           std::max(maxRightHalo, std::min(sIn, limit - (t + 1) * sIn + 1));
     }
-    if (limit >= physicalTotalSize) {
+    if (limit >= start && limit >= physicalTotalSize) {
       maxEdgePadHigh = std::max(maxEdgePadHigh, limit - physicalTotalSize + 1);
     }
   }
@@ -1723,22 +1726,34 @@ void computeDimHaloBoundaryInfo(
   }
 }
 
-// Returns the data exchange info for a single sharded dimension.
+// Returns the data exchange info for a single sharded dimension. When
+// `dilatedFootprint` is true (as in `stablehlo.pad`), `sFootprint` is measured
+// in the dilated coordinate space rather than the undilated input space.
 DimExchangeInfo getDimExchangeInfo(int64_t shardCount, int64_t sIn,
                                    int64_t sOut, int64_t sFootprint,
                                    int64_t padLow, int64_t stride,
-                                   int64_t baseDilation, int64_t inputDimSize) {
+                                   int64_t baseDilation, int64_t inputDimSize,
+                                   bool dilatedFootprint = false) {
   DimExchangeInfo dimInfo;
   dimInfo.sFootprint = sFootprint;
   dimInfo.sOut = sOut;
 
-  computeDimHaloBoundaryInfo(
-      shardCount, sIn, inputDimSize, shardCount * sIn, sFootprint,
-      [&](int64_t t) {
-        return llvm::divideFloorSigned(t * sOut * stride - padLow,
-                                       baseDilation);
-      },
-      dimInfo);
+  auto getShardStart = [&](int64_t t) {
+    return llvm::divideFloorSigned(t * sOut * stride - padLow, baseDilation);
+  };
+  auto getShardLimit = [&](int64_t t) {
+    int64_t start = getShardStart(t);
+    if (sFootprint <= 0) {
+      return start - 1;
+    }
+    if (dilatedFootprint) {
+      return llvm::divideFloorSigned(
+          t * sOut * stride + sFootprint - 1 - padLow, baseDilation);
+    }
+    return start + sFootprint - 1;
+  };
+  computeDimHaloBoundaryInfo(shardCount, sIn, inputDimSize, shardCount * sIn,
+                             getShardStart, getShardLimit, dimInfo);
   return dimInfo;
 }
 
@@ -2442,10 +2457,11 @@ DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
             llvm::divideCeil(padOp.getType().getDimSize(dim), shardCount);
         int64_t pLow = padOp.getEdgePaddingLow()[dim];
         int64_t baseDilation = padOp.getInteriorPadding()[dim] + 1;
-        DimExchangeInfo dimInfo = getDimExchangeInfo(shardCount, sIn, sOut,
-                                                     /*sFootprint=*/sOut, pLow,
-                                                     /*stride=*/1, baseDilation,
-                                                     inputType.getDimSize(dim));
+        DimExchangeInfo dimInfo =
+            getDimExchangeInfo(shardCount, sIn, sOut, /*sFootprint=*/sOut, pLow,
+                               /*stride=*/1, baseDilation,
+                               inputType.getDimSize(dim),
+                               /*dilatedFootprint=*/true);
         dimInfo.needsComm =
             !isCommunicationFreePadDim(dim, padOp, sharding, mesh);
         return dimInfo;
@@ -2503,7 +2519,7 @@ Value handleReplicatedPadDims(
     localHigh[i] = high;
     int64_t sInLocal = exchangedLocalType.getShape()[i];
     int64_t expandedInputSize =
-        (sInLocal - 1) * (interior + 1) + 1 + low + high;
+        sInLocal + std::max<int64_t>(0, sInLocal - 1) * interior + low + high;
     SDY_CHECK(expandedInputSize == sOutLocal);
     if (low != 0 || high != 0 || interior != 0) {
       needsLocalPad = true;
