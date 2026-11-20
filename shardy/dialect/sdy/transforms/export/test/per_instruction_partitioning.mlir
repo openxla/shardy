@@ -276,15 +276,45 @@ func.func @concatenate_sharded_concat_dim(%arg0: tensor<4xf32> {sdy.sharding = #
   // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}]>, <@mesh, [{"x"}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}]>]
   // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<2xf32>, %arg3: tensor<1xf32>) {
-  // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%arg2)
-  // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%arg3)
-  // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[AG0]], %[[AG1]], dim = 0 : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
-  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
-  // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
+  // CHECK-NOT:    all_gather
+  // CHECK:        "stablehlo.collective_permute"
+  // CHECK-SAME{LITERAL}: source_target_pairs = dense<[[1, 0]]> : tensor<1x2xi64>
+  // CHECK:        %[[DS0:.*]] = stablehlo.dynamic_slice {{.*}}, sizes = [3] : (tensor<5xf32>, tensor<i32>) -> tensor<3xf32>
+  // CHECK:        "stablehlo.collective_permute"
+  // CHECK-SAME{LITERAL}: source_target_pairs = dense<[[0, 1]]> : tensor<1x2xi64>
+  // CHECK:        %[[DS1:.*]] = stablehlo.dynamic_slice {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
+  // CHECK:        %[[SEL:.*]] = stablehlo.select {{.*}}, %[[DS1]], %[[DS0]] : tensor<3xi1>, tensor<3xf32>
+  // CHECK-NEXT:   sdy.return %[[SEL]] : tensor<3xf32>
   // CHECK-NEXT: } : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
   // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<4xf32>, tensor<2xf32>) -> tensor<6xf32>
   return %0 : tensor<6xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["x"=4]>
+
+// CHECK-LABEL: func @concatenate_sharded_concat_dim_exceeds_halo_hops
+func.func @concatenate_sharded_concat_dim_exceeds_halo_hops(
+    %arg0: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>},
+    %arg1: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>},
+    %arg2: tensor<4xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>})
+    -> (tensor<12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>}) {
+  // CHECK:      %[[MANUAL:.*]] = sdy.manual_computation(%arg0, %arg1, %arg2)
+  // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}]>, <@mesh, [{"x"}]>, <@mesh, [{"x"}]>]
+  // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}]>]
+  // CHECK-SAME:   manual_axes={"x"} (%arg3: tensor<1xf32>, %arg4: tensor<1xf32>, %arg5: tensor<1xf32>) {
+  // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%arg3)
+  // CHECK:        %[[AG1:.*]] = "stablehlo.all_gather"(%arg4)
+  // CHECK:        %[[AG2:.*]] = "stablehlo.all_gather"(%arg5)
+  // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[AG0]], %[[AG1]], %[[AG2]], dim = 0 : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>) -> tensor<12xf32>
+  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<12xf32>, tensor<i32>) -> tensor<3xf32>
+  // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
+  // CHECK-NEXT: } : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>) -> tensor<12xf32>
+  // CHECK-NEXT: return %[[MANUAL]] : tensor<12xf32>
+  %0 = stablehlo.concatenate %arg0, %arg1, %arg2, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<4xf32>, tensor<4xf32>, tensor<4xf32>) -> tensor<12xf32>
+  return %0 : tensor<12xf32>
 }
 
 // -----
@@ -325,18 +355,14 @@ func.func @concatenate_indivisible_sharded_concat_dim(%arg0: tensor<5xf32> {sdy.
   // CHECK-SAME:   in_shardings=[<@mesh, [{"x"}]>, <@mesh, [{"x"}]>]
   // CHECK-SAME:   out_shardings=[<@mesh, [{"x"}]>]
   // CHECK-SAME:   manual_axes={"x"} (%arg2: tensor<3xf32>, %arg3: tensor<1xf32>) {
-  // CHECK:        %[[IN_SLICE0:.*]] = stablehlo.slice %arg2 [0:3] : (tensor<3xf32>) -> tensor<3xf32>
-  // CHECK:        %[[AG0:.*]] = "stablehlo.all_gather"(%[[IN_SLICE0]]) {{.*}} : (tensor<3xf32>) -> tensor<6xf32>
-  // CHECK:        %[[SLICE0:.*]] = stablehlo.slice %[[AG0]] [0:5] : (tensor<6xf32>) -> tensor<5xf32>
-  // CHECK:        %[[IN_SLICE1:.*]] = stablehlo.slice %arg3 [0:1] : (tensor<1xf32>) -> tensor<1xf32>
-  // CHECK-NEXT:   %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
-  // CHECK-NEXT:   %[[IS_NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
-  // CHECK-NEXT:   %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<1xf32>
-  // CHECK-NEXT:   %[[MASKED:.*]] = stablehlo.select %[[IS_NON_LEADER]], %[[ZERO]], %[[IN_SLICE1]] : tensor<i1>, tensor<1xf32>
-  // CHECK-NEXT:   %[[AR1:.*]] = "stablehlo.all_reduce"(%[[MASKED]])
-  // CHECK:        %[[CONCAT:.*]] = stablehlo.concatenate %[[SLICE0]], %[[AR1]], dim = 0 : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
-  // CHECK:        %[[SLICE:.*]] = stablehlo.dynamic_slice %[[CONCAT]], {{.*}}, sizes = [3] : (tensor<6xf32>, tensor<i32>) -> tensor<3xf32>
-  // CHECK:        sdy.return %[[SLICE]] : tensor<3xf32>
+  // CHECK-NOT:    all_gather
+  // CHECK-NOT:    all_reduce
+  // CHECK:        %[[PAD_ARG0:.*]] = stablehlo.pad {{.*}}, low = [0], high = [0], interior = [0] : (tensor<3xf32>, tensor<f32>) -> tensor<3xf32>
+  // CHECK:        "stablehlo.collective_permute"
+  // CHECK-SAME{LITERAL}: source_target_pairs = dense<[[0, 1]]> : tensor<1x2xi64>
+  // CHECK:        %[[DS_ARG1:.*]] = stablehlo.dynamic_slice {{.*}}, sizes = [3] : (tensor<7xf32>, tensor<i32>) -> tensor<3xf32>
+  // CHECK:        %[[SEL:.*]] = stablehlo.select {{.*}}, %[[DS_ARG1]], %[[PAD_ARG0]] : tensor<3xi1>, tensor<3xf32>
+  // CHECK-NEXT:   sdy.return %[[SEL]] : tensor<3xf32>
   // CHECK-NEXT: } : (tensor<6xf32>, tensor<2xf32>) -> tensor<6xf32>
   // CHECK-NEXT: return %[[MANUAL]] : tensor<6xf32>
   %0 = stablehlo.concatenate %arg0, %arg1, dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : (tensor<5xf32>, tensor<1xf32>) -> tensor<6xf32>
