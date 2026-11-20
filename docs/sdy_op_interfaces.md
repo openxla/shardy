@@ -90,11 +90,13 @@ dimensions, and converting global tensor shapes to shard-local shapes.
 #### `resolvePermutationFactors`
 
 ```c++
-std::optional<mlir::LogicalResult> resolvePermutationFactors(mlir::sdy::OpShardingRuleAttr shardingRule, mlir::IRRewriter&rewriter, const mlir::SymbolTable&symbolTable);
+std::optional<mlir::LogicalResult> resolvePermutationFactors(mlir::sdy::OpShardingRuleAttr shardingRule, mlir::IRRewriter&rewriter, mlir::SymbolTable&symbolTable, int64_t&nextChannelId);
 ```
 
-Resolves ops with permutation factors. Returning `std::nullopt` falls
-back to generic op handling.
+Resolves ops with permutation factors or custom partitioning
+(`shardingRule` may be null or custom), updating `nextChannelId` and
+`symbolTable` if needed. Returning `std::nullopt` falls back to generic
+op handling.
 
 NOTE: This method *must* be implemented by the user.
 

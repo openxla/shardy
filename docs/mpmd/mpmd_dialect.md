@@ -306,13 +306,13 @@ Interfaces: `ConditionallySpeculatable`
 
 | Operand | Description |
 | :-----: | ----------- |
-| `tensors` | variadic of ranked tensor of 4/6/8/16/32/64-bit float or bool or 2/4/8/16/32/64-bit integer or complex type with 32/64-bit float elements or per-tensor integer quantized values or token |
+| `tensors` | variadic of ranked tensor of 4/6/8/16/32/64-bit float or bool or 2/4/8/16/32/64-bit integer or complex type with f16/bf16/f32/f64 floating-point type elements or per-tensor integer quantized values or token |
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `results` | variadic of ranked tensor of 4/6/8/16/32/64-bit float or bool or 2/4/8/16/32/64-bit integer or complex type with 32/64-bit float elements or per-tensor integer quantized values or token |
+| `results` | variadic of ranked tensor of 4/6/8/16/32/64-bit float or bool or 2/4/8/16/32/64-bit integer or complex type with f16/bf16/f32/f64 floating-point type elements or per-tensor integer quantized values or token |
 
 
 
