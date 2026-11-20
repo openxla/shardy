@@ -3233,23 +3233,10 @@ class StablehloRngBitGeneratorOpPattern
     Type stateElemTy = stateType.getElementType();
     SDY_CHECK(stateElemTy.isInteger(32) || stateElemTy.isInteger(64));
 
-    auto x64CombineOp = initialState.getDefiningOp<stablehlo::CustomCallOp>();
-    if (x64CombineOp && (x64CombineOp.getCallTargetName() != "X64Combine" ||
-                         x64CombineOp.getNumOperands() != 2)) {
-      x64CombineOp = nullptr;
-    }
-
-    RankedTensorType hashStateType =
-        x64CombineOp
-            ? cast<RankedTensorType>(x64CombineOp.getOperand(0).getType())
-            : stateType;
-    Type hashElemTy = hashStateType.getElementType();
-    SDY_CHECK(hashElemTy.isInteger(32) || hashElemTy.isInteger(64));
-
     int64_t numDevices = mesh.getTotalSize();
 
     // Compute per-device tile ordinal hash table.
-    unsigned bitWidth = hashElemTy.getIntOrFloatBitWidth();
+    unsigned bitWidth = stateElemTy.getIntOrFloatBitWidth();
     SmallVector<APInt> hashTable = llvm::map_to_vector(
         llvm::seq<int64_t>(0, numDevices), [&](int64_t devId) {
           return hashShardOrdinal(getShardIndex(devId, mesh, dataAxes),
@@ -3261,24 +3248,13 @@ class StablehloRngBitGeneratorOpPattern
     Value scalarHash = lookupPerDeviceValue(
         loc,
         DenseIntElementsAttr::get(
-            RankedTensorType::get({numDevices}, hashElemTy), hashTable),
+            RankedTensorType::get({numDevices}, stateElemTy), hashTable),
         conversionState, rewriter, deviceId);
     Value broadcastHash = stablehlo::BroadcastInDimOp::create(
-        rewriter, loc, hashStateType, scalarHash,
+        rewriter, loc, stateType, scalarHash,
         rewriter.getDenseI64ArrayAttr({}));
-    Value adjustedState;
-    if (x64CombineOp) {
-      Value lo = stablehlo::AddOp::create(
-          rewriter, loc, x64CombineOp.getOperand(0), broadcastHash);
-      Value hi = stablehlo::AddOp::create(
-          rewriter, loc, x64CombineOp.getOperand(1), broadcastHash);
-      adjustedState = createLocalGenericOp(x64CombineOp, ValueRange{lo, hi},
-                                           converter, rewriter)
-                          ->getResult(0);
-    } else {
-      adjustedState =
-          stablehlo::AddOp::create(rewriter, loc, initialState, broadcastHash);
-    }
+    Value adjustedState =
+        stablehlo::AddOp::create(rewriter, loc, initialState, broadcastHash);
 
     auto localStateType =
         cast<RankedTensorType>(converter->convertType(op.getOutputState()));
@@ -3307,14 +3283,7 @@ class StablehloRngBitGeneratorOpPattern
                        .front();
     }
 
-    // Erase the localized X64Combine created by GenericOpPattern if this
-    // rng_bit_generator was the only user of the original X64Combine because
-    // the localized rng_bit_generator doesn't use it.
-    bool eraseX64Combine = x64CombineOp && op.getInitialState().hasOneUse();
     rewriter.replaceOp(op, {finalState, localRng.getOutput()});
-    if (eraseX64Combine) {
-      rewriter.eraseOp(x64CombineOp);
-    }
     conversionState.removeToConvertOp(op);
     return success();
   }
