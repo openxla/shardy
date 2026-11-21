@@ -24,6 +24,7 @@ limitations under the License.
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/MathExtras.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -195,14 +196,84 @@ struct ReduceScatterFusionInfo {
   ReductionOp reductionOp;
 };
 
+// Permutes sharding's dimension shardings forward according to a
+// stablehlo.transpose permutation (outDim reads from
+// inDim = permutation[outDim]), preserving mesh and tensor-level axes.
+TensorShardingAttr permuteShardingForward(TensorShardingAttr sharding,
+                                          ArrayRef<int64_t> permutation) {
+  SDY_CHECK_EQ(sharding.getDimShardings().size(), permutation.size());
+  SmallVector<DimensionShardingAttr> newDimShardings;
+  newDimShardings.reserve(permutation.size());
+  for (int64_t inDim : permutation) {
+    newDimShardings.push_back(sharding.getDimSharding(inDim));
+  }
+  return sharding.replaceDimShardings(newDimShardings);
+}
+
+// Permutes per-dimension attributes backward from a stablehlo.transpose
+// result space to its operand space (inDim = permutation[outDim]).
+template <typename T>
+SmallVector<T> permuteBackward(ArrayRef<T> values,
+                               ArrayRef<int64_t> permutation) {
+  SDY_CHECK_EQ(values.size(), permutation.size());
+  SmallVector<T> result(permutation.size());
+  for (auto [outDim, inDim] : llvm::enumerate(permutation)) {
+    result[inDim] = values[outDim];
+  }
+  return result;
+}
+
+// Permutes sharding's dimension shardings backward across a
+// stablehlo.transpose (inDim = permutation[outDim]), preserving mesh and
+// tensor-level axes.
+TensorShardingAttr permuteShardingBackward(TensorShardingAttr sharding,
+                                           ArrayRef<int64_t> permutation) {
+  return sharding.replaceDimShardings(
+      permuteBackward(sharding.getDimShardings(), permutation));
+}
+
+// Returns true if every stablehlo.transpose in transposes (ordered from
+// slice-adjacent to allReduceOp-adjacent) preserves allReduceOutSharding
+// (up to closedness and replicated axes) and allReduceMesh under its
+// permutation.
+bool isTransposeChainPreservingSharding(
+    TensorShardingAttr allReduceOutSharding, MeshAttr allReduceMesh,
+    ArrayRef<stablehlo::TransposeOp> transposes) {
+  TensorShardingAttr expectedSharding = allReduceOutSharding;
+  for (stablehlo::TransposeOp transposeOp : llvm::reverse(transposes)) {
+    expectedSharding =
+        permuteShardingForward(expectedSharding, transposeOp.getPermutation());
+    TensorShardingAttr actualSharding = getSharding(transposeOp.getResult());
+    if (!actualSharding) {
+      if (!isFullyReplicatedWithoutUnreducedAxes(expectedSharding)) {
+        return false;
+      }
+      continue;
+    }
+    if (actualSharding.getMesh(transposeOp) != allReduceMesh ||
+        actualSharding.getUnreducedAxes() !=
+            expectedSharding.getUnreducedAxes() ||
+        actualSharding.getReductionOp() != expectedSharding.getReductionOp() ||
+        actualSharding.getRank() != expectedSharding.getRank() ||
+        !llvm::equal(actualSharding.getDimShardings(),
+                     expectedSharding.getDimShardings(),
+                     [](DimensionShardingAttr a, DimensionShardingAttr b) {
+                       return a.getAxes() == b.getAxes();
+                     })) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Helper function to check if the reduce scatter fusion is possible and compute
 // the axes. Returns std::nullopt on failure.
 std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
-    AllReduceOp allReduceOp, AllSliceOp allSliceOp, PatternRewriter& rewriter) {
+    AllReduceOp allReduceOp, ArrayRef<AxisRefListAttr> slicingAxes,
+    TensorShardingAttr sliceOutSharding, PatternRewriter& rewriter) {
   MLIRContext* context = rewriter.getContext();
   MeshAttr mesh = allReduceOp.getOutSharding().getMesh(allReduceOp);
   ArrayRef<AxisRefAttr> reductionAxes = allReduceOp.getReductionAxes();
-  ArrayRef<AxisRefListAttr> slicingAxes = allSliceOp.getSlicingAxes();
   llvm::SmallSetVector<AxisRefAttr, 4> remainingReductionAxes(
       reductionAxes.begin(), reductionAxes.end());
 
@@ -309,7 +380,7 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
     int64_t rsOutShardedSize =
         reduceScatterOutDimShardings[d].getShardedSize(mesh);
     int64_t finalOutShardedSize =
-        allSliceOp.getOutSharding().getDimSharding(d).getShardedSize(mesh);
+        sliceOutSharding.getDimSharding(d).getShardedSize(mesh);
     if (rsOutShardedSize > 1 &&
         llvm::alignTo(tensorShape[d], rsOutShardedSize) !=
             llvm::alignTo(tensorShape[d], finalOutShardedSize)) {
@@ -325,16 +396,15 @@ std::optional<ReduceScatterFusionInfo> matchAndComputeReduceScatterFusionAxes(
   result.reductionOp = allReduceOp.getReductionOp();
   result.reduceScatterOutSharding = TensorShardingAttr::get(
       context, allReduceOp.getOutShardingAttr().getMeshOrRef(),
-      reduceScatterOutDimShardings,
-      allSliceOp.getOutSharding().getReplicatedAxes(),
-      allSliceOp.getOutSharding().getUnreducedAxes(),
-      allSliceOp.getOutSharding().getReductionOp());
+      reduceScatterOutDimShardings, sliceOutSharding.getReplicatedAxes(),
+      sliceOutSharding.getUnreducedAxes(), sliceOutSharding.getReductionOp());
 
   return result;
 }
 
-// Pattern to fuse sdy.all_reduce + sdy.all_slice -> sdy.reduce_scatter +
-// optional sdy.all_slice.
+// Pattern to fuse sdy.all_reduce + (optional stablehlo.transpose chain) +
+// sdy.all_slice -> sdy.reduce_scatter + optional sdy.all_slice +
+// (optional stablehlo.transpose chain).
 // For example,
 //
 // ```mlir
@@ -355,51 +425,106 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
  public:
   using OpRewritePattern<AllSliceOp>::OpRewritePattern;
 
- private:
   LogicalResult matchAndRewrite(AllSliceOp allSliceOp,
                                 PatternRewriter& rewriter) const override {
-    auto allReduceOp = allSliceOp.getTensor().getDefiningOp<AllReduceOp>();
+    // Walk backward through any chain of stablehlo.transpose ops from the
+    // slice operand back to a defining sdy.all_reduce. transposes is ordered
+    // from slice-adjacent (front()) to allReduce-adjacent (back()).
+    SmallVector<stablehlo::TransposeOp> transposes;
+    llvm::SmallPtrSet<Operation*, 4> visited;
+    Value curOperand = allSliceOp.getTensor();
+    while (auto transposeOp =
+               curOperand.getDefiningOp<stablehlo::TransposeOp>()) {
+      if (!visited.insert(transposeOp).second) {
+        return rewriter.notifyMatchFailure(allSliceOp,
+                                           "cyclic stablehlo.transpose chain");
+      }
+      transposes.push_back(transposeOp);
+      curOperand = transposeOp.getOperand();
+    }
+
+    auto allReduceOp = curOperand.getDefiningOp<AllReduceOp>();
     if (!allReduceOp) {
       return rewriter.notifyMatchFailure(
           allSliceOp, "operand is not defined by sdy.all_reduce");
     }
 
-    // Check if all uses of the allReduceOp are AllSliceOps identical to this
-    // one.
+    if (!transposes.empty()) {
+      if (!allReduceOp->hasOneUse()) {
+        return rewriter.notifyMatchFailure(
+            allSliceOp,
+            "sdy.all_reduce with intervening transpose must have a single use");
+      }
+      for (stablehlo::TransposeOp intermediateTranspose :
+           llvm::drop_begin(transposes)) {
+        if (!intermediateTranspose->hasOneUse()) {
+          return rewriter.notifyMatchFailure(
+              allSliceOp,
+              "intermediate stablehlo.transpose must have a single use");
+        }
+      }
+    }
+
+    // Check if all uses of the root op directly feeding allSliceOp are
+    // identical AllSliceOps.
+    Operation* rootBeforeSlice = transposes.empty()
+                                     ? allReduceOp.getOperation()
+                                     : transposes.front().getOperation();
     MeshAttr allReduceMesh = allReduceOp.getOutSharding().getMesh(allReduceOp);
-    for (Operation* user : allReduceOp->getUsers()) {
+    for (Operation* user : rootBeforeSlice->getUsers()) {
       auto userSliceOp = dyn_cast<AllSliceOp>(user);
       if (!userSliceOp) {
         return rewriter.notifyMatchFailure(
-            allSliceOp, "sdy.all_reduce has a user that is not sdy.all_slice");
+            allSliceOp, "root op has a user that is not sdy.all_slice");
       }
       // An sdy.all_slice of a fully replicated tensor may switch meshes, which
       // an sdy.reduce_scatter on the sdy.all_reduce mesh cannot express.
       if (userSliceOp.getOutSharding().getMesh(userSliceOp) != allReduceMesh) {
         return rewriter.notifyMatchFailure(
             allSliceOp,
-            "sdy.all_reduce has an sdy.all_slice user on a different mesh");
+            "root op has an sdy.all_slice user on a different mesh");
       }
       // Check for identical slicing axes.
       if (userSliceOp.getSlicingAxes() != allSliceOp.getSlicingAxes()) {
         return rewriter.notifyMatchFailure(
             allSliceOp,
-            "sdy.all_reduce has an sdy.all_slice user with different slicing "
-            "axes");
+            "root op has an sdy.all_slice user with different slicing axes");
       }
-      if (userSliceOp->isBeforeInBlock(allSliceOp)) {
+      if (userSliceOp->getBlock() != allSliceOp->getBlock() ||
+          userSliceOp->isBeforeInBlock(allSliceOp)) {
         return rewriter.notifyMatchFailure(
             allSliceOp,
-            "This sdy.all_slice is not the first user of the sdy.all_reduce");
+            "this sdy.all_slice is not the first user in its block");
       }
+    }
+
+    if (!isTransposeChainPreservingSharding(allReduceOp.getOutSharding(),
+                                            allReduceMesh, transposes)) {
+      return rewriter.notifyMatchFailure(
+          allSliceOp,
+          "intervening stablehlo.transpose alters sharding or mesh");
     }
 
     MLIRContext* context = rewriter.getContext();
 
-    // Call the helper function to perform checks and compute axes.
+    // Pull allSliceOp's slicing axes and output sharding backward across the
+    // transpose chain to the pre-transpose tensor space of allReduceOp.
+    SmallVector<AxisRefListAttr> preTransposeSlicingAxes =
+        llvm::to_vector(allSliceOp.getSlicingAxes());
+    TensorShardingAttr preTransposeSliceOutSharding =
+        allSliceOp.getOutSharding();
+    for (stablehlo::TransposeOp transposeOp : transposes) {
+      ArrayRef<int64_t> permutation = transposeOp.getPermutation();
+      preTransposeSlicingAxes = permuteBackward<AxisRefListAttr>(
+          preTransposeSlicingAxes, permutation);
+      preTransposeSliceOutSharding =
+          permuteShardingBackward(preTransposeSliceOutSharding, permutation);
+    }
+
     std::optional<ReduceScatterFusionInfo> fusionInfo =
-        matchAndComputeReduceScatterFusionAxes(allReduceOp, allSliceOp,
-                                               rewriter);
+        matchAndComputeReduceScatterFusionAxes(
+            allReduceOp, preTransposeSlicingAxes, preTransposeSliceOutSharding,
+            rewriter);
 
     if (!fusionInfo) {
       return rewriter.notifyMatchFailure(
@@ -408,33 +533,53 @@ class ReduceScatterFusion : public OpRewritePattern<AllSliceOp> {
           "slicing axes.");
     }
 
-    // Create the new ReduceScatterOp
+    // Create the new ReduceScatterOp (and optional residual AllSliceOp) before
+    // the original AllReduceOp so they dominate any intervening transposes.
+    rewriter.setInsertionPoint(allReduceOp);
     auto reduceScatterOp = ReduceScatterOp::create(
         rewriter, allReduceOp.getLoc(), allReduceOp.getTensor(),
         ListOfAxisRefListsAttr::get(context, fusionInfo->reduceScatterAxes),
         fusionInfo->reductionOp, fusionInfo->reduceScatterOutSharding);
 
-    Value finalResult = reduceScatterOp.getResult();
+    Value preTransposeResult = reduceScatterOp.getResult();
+    TensorShardingAttr preTransposeSharding =
+        fusionInfo->reduceScatterOutSharding;
 
-    // If there are residual axes, create a new AllSliceOp
     if (fusionInfo->residualSlicingAxes.has_value()) {
-      finalResult =
+      preTransposeSharding = preTransposeSliceOutSharding;
+      preTransposeResult =
           AllSliceOp::create(
               rewriter, allSliceOp.getLoc(), reduceScatterOp.getResult(),
               ListOfAxisRefListsAttr::get(
                   context, fusionInfo->residualSlicingAxes.value()),
-              allSliceOp.getOutSharding())
+              preTransposeSharding)
               .getResult();
+    }
+
+    // Rewire and update sharding forward along the transpose chain so the
+    // transposes now execute after reduce-scatter (and any residual all-slice).
+    Value curValue = preTransposeResult;
+    TensorShardingAttr curSharding = preTransposeSharding;
+    for (stablehlo::TransposeOp transposeOp : llvm::reverse(transposes)) {
+      curSharding =
+          permuteShardingForward(curSharding, transposeOp.getPermutation());
+      rewriter.modifyOpInPlace(transposeOp, [&] {
+        if (transposeOp.getOperand() != curValue) {
+          transposeOp->setOperand(0, curValue);
+        }
+        setSharding(transposeOp.getResult(), curSharding);
+      });
+      curValue = transposeOp.getResult();
     }
 
     // Replace all identical AllSliceOp users with the final result.
     for (Operation* userSliceOp :
-         llvm::make_early_inc_range(allReduceOp->getUsers())) {
-      rewriter.replaceOp(userSliceOp, finalResult);
+         llvm::make_early_inc_range(rootBeforeSlice->getUsers())) {
+      rewriter.replaceOp(userSliceOp, curValue);
     }
 
-    // Erase the original AllReduceOp. It's safe because all its users have
-    // just been replaced.
+    // Erase the original AllReduceOp. All its users have been replaced or
+    // rewired to preTransposeResult.
     rewriter.eraseOp(allReduceOp);
 
     return success();
@@ -498,17 +643,7 @@ Value unwrapMetadataOp(Value v) {
 TensorShardingAttr getTargetSharding(TensorShardingAttr sharding, Value v) {
   while (Operation* op = v.getDefiningOp()) {
     if (auto transpose = dyn_cast<stablehlo::TransposeOp>(op)) {
-      ArrayRef<int64_t> perm = transpose.getPermutation();
-      SDY_CHECK(sharding.getDimShardings().size() == perm.size());
-
-      SmallVector<DimensionShardingAttr> newDims(perm.size());
-      for (auto [resDim, opDim] : llvm::enumerate(perm)) {
-        newDims[opDim] = sharding.getDimShardings()[resDim];
-      }
-      sharding = TensorShardingAttr::get(
-          sharding.getContext(), sharding.getMeshOrRef(), newDims,
-          sharding.getReplicatedAxes(), sharding.getUnreducedAxes(),
-          sharding.getReductionOp());
+      sharding = permuteShardingBackward(sharding, transpose.getPermutation());
       v = transpose.getOperand();
       continue;
     }
