@@ -3808,17 +3808,35 @@ class AllGatherAndSliceViaAllReducePattern
     }
 
     Location loc = op.getLoc();
+    Type reduceElemTy = elemTy;
+    RankedTensorType reduceType = localResultType;
+    Value reduceInput = agInput;
+    // Zeroless float types (e.g. f8E8M0FNU) have no additive zero; bitcast to
+    // unsigned integer so 0 masks out non-leader shards for SUM reduction.
+    if (auto fTy = dyn_cast<FloatType>(elemTy);
+        fTy && !getReductionIdentityAttr(fTy, ReductionOp::SUM, rewriter)) {
+      reduceElemTy =
+          rewriter.getIntegerType(fTy.getWidth(), /*isSigned=*/false);
+      reduceType = localResultType.clone(reduceElemTy);
+      reduceInput = stablehlo::BitcastConvertOp::create(rewriter, loc,
+                                                        reduceType, agInput);
+    }
     Value masked = maskNonLeaderShardsToZero(
-        loc, agInput, mesh, axes, conversionState, rewriter,
+        loc, reduceInput, mesh, axes, conversionState, rewriter,
         /*deviceId=*/nullptr,
         /*leaderShardIndex=*/starts[gatherDim] / shardSize);
     auto allReduce = stablehlo::AllReduceOp::create(
-        rewriter, loc, TypeRange{localResultType}, ValueRange{masked},
+        rewriter, loc, TypeRange{reduceType}, ValueRange{masked},
         shloAllGather.getReplicaGroupsAttr(),
         shloAllGather.getChannelHandleAttr(),
         shloAllGather.getUseGlobalDeviceIds());
-    buildReduceComputation(allReduce, elemTy, ReductionOp::SUM, rewriter);
-    rewriter.replaceOp(op, allReduce.getResults());
+    buildReduceComputation(allReduce, reduceElemTy, ReductionOp::SUM, rewriter);
+    Value result = allReduce.getResult(0);
+    if (reduceType != localResultType) {
+      result = stablehlo::BitcastConvertOp::create(rewriter, loc,
+                                                   localResultType, result);
+    }
+    rewriter.replaceOp(op, result);
     rewriter.eraseOp(shloAllGather);
     conversionState.removeToConvertOp(op);
     return success();

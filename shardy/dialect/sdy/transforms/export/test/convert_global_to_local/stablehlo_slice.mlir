@@ -299,3 +299,29 @@ func.func @all_gather_slice_multi_dim_gather_not_converted(%arg0: tensor<16x16xf
   %1 = stablehlo.slice %0 [0:4, 0:8] : (tensor<16x16xf32>) -> tensor<4x8xf32>
   return %1 : tensor<4x8xf32>
 }
+
+// Positive test: zeroless float f8E8M0FNU bitcasts to ui8 for masking and all_reduce(SUM).
+// CHECK-LABEL: func @all_gather_slice_f8e8m0fnu_bitcasts_to_ui8
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<2xf8E8M0FNU> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<2xf8E8M0FNU>
+func.func @all_gather_slice_f8e8m0fnu_bitcasts_to_ui8(
+    %arg0: tensor<4xf8E8M0FNU> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<2xf8E8M0FNU> {
+  // CHECK-NEXT: %[[IN_UI8:.*]] = stablehlo.bitcast_convert %[[ARG0]] : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<0> : tensor<2xui8>
+  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[NON_LEADER]], %[[ZERO]], %[[IN_UI8]] : tensor<i1>, tensor<2xui8>
+  // CHECK-NEXT: %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]]) <{
+  // CHECK-SAME:   channel_handle = #stablehlo.channel_handle<handle = {{.*}}, type = 1>,
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_1_2, axes = [#stablehlo.axis_ref<name = "y">]>,
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK-SAME: }> ({
+  // CHECK-NEXT: ^bb0(%[[LHS:.*]]: tensor<ui8>, %[[RHS:.*]]: tensor<ui8>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[LHS]], %[[RHS]] : tensor<ui8>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<ui8>
+  // CHECK-NEXT: }) : (tensor<2xui8>) -> tensor<2xui8>
+  // CHECK-NEXT: %[[OUT:.*]] = stablehlo.bitcast_convert %[[AR]] : (tensor<2xui8>) -> tensor<2xf8E8M0FNU>
+  // CHECK-NEXT: return %[[OUT]] : tensor<2xf8E8M0FNU>
+  %0 = sdy.all_gather [{"y"}] %arg0 out_sharding=<@mesh_1_2, [{}]> : tensor<4xf8E8M0FNU>
+  %1 = stablehlo.slice %0 [0:2] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  return %1 : tensor<2xf8E8M0FNU>
+}

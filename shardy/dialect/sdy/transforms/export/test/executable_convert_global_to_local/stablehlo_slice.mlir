@@ -79,6 +79,34 @@ func.func @parallel_all_gather_slice_2d_nonzero_shard(
   return %1 : tensor<4x2xf32>
 }
 
+func.func @sequential_all_gather_slice_1d_f8e8m0fnu(
+    %arg0: tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU> {
+  %0 = stablehlo.slice %arg0 [0:2] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  return %0 : tensor<2xf8E8M0FNU>
+}
+
+func.func @parallel_all_gather_slice_1d_f8e8m0fnu(
+    %arg0: tensor<4xf8E8M0FNU> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+    -> tensor<2xf8E8M0FNU> {
+  %0 = sdy.all_gather [{"x"}] %arg0 out_sharding=<@mesh_2, [{}]> : tensor<4xf8E8M0FNU>
+  %1 = stablehlo.slice %0 [0:2] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  return %1 : tensor<2xf8E8M0FNU>
+}
+
+func.func @sequential_all_gather_slice_1d_f8e8m0fnu_nonzero_shard(
+    %arg0: tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU> {
+  %0 = stablehlo.slice %arg0 [2:4] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  return %0 : tensor<2xf8E8M0FNU>
+}
+
+func.func @parallel_all_gather_slice_1d_f8e8m0fnu_nonzero_shard(
+    %arg0: tensor<4xf8E8M0FNU> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}]>})
+    -> tensor<2xf8E8M0FNU> {
+  %0 = sdy.all_gather [{"x"}] %arg0 out_sharding=<@mesh_2, [{}]> : tensor<4xf8E8M0FNU>
+  %1 = stablehlo.slice %0 [2:4] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  return %1 : tensor<2xf8E8M0FNU>
+}
+
 //--- part2.mlir
 
 // Main Orchestrator: executes the sequential and parallel slice programs and
@@ -174,6 +202,34 @@ func.func @main() {
     dimension = 0 : i64
   } : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<4x2xf32>
   check.expect_eq %seq_2d_nz, %par_2d_nz : tensor<4x2xf32>
+
+  // 1D all_gather => slice [0:2] with zeroless float f8E8M0FNU (including 0x00 and 0xff).
+  %raw_f8 = stablehlo.constant dense<[0, 127, 254, 255]> : tensor<4xui8>
+  %input_f8 = stablehlo.bitcast_convert %raw_f8 : (tensor<4xui8>) -> tensor<4xf8E8M0FNU>
+  %seq_f8 = func.call @sequential_all_gather_slice_1d_f8e8m0fnu(%input_f8)
+    : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  %sf8_0 = stablehlo.slice %input_f8 [0:2] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  %sf8_1 = stablehlo.slice %input_f8 [2:4] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  %pars_f8:2 = "interpreter.run_parallel"(%sf8_0, %sf8_1) {
+    programs = [[@parallel_all_gather_slice_1d_f8e8m0fnu, @parallel_all_gather_slice_1d_f8e8m0fnu]]
+  } : (tensor<2xf8E8M0FNU>, tensor<2xf8E8M0FNU>) -> (tensor<2xf8E8M0FNU>, tensor<2xf8E8M0FNU>)
+  %seq_f8_u8 = stablehlo.bitcast_convert %seq_f8 : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  %par_f8_0_u8 = stablehlo.bitcast_convert %pars_f8#0 : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  %par_f8_1_u8 = stablehlo.bitcast_convert %pars_f8#1 : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  check.expect_eq %par_f8_0_u8, %seq_f8_u8 : tensor<2xui8>
+  check.expect_eq %par_f8_1_u8, %seq_f8_u8 : tensor<2xui8>
+
+  // 1D all_gather => slice [2:4] (non-zero leader shard 1) with f8E8M0FNU.
+  %seq_f8_nz = func.call @sequential_all_gather_slice_1d_f8e8m0fnu_nonzero_shard(%input_f8)
+    : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
+  %pars_f8_nz:2 = "interpreter.run_parallel"(%sf8_0, %sf8_1) {
+    programs = [[@parallel_all_gather_slice_1d_f8e8m0fnu_nonzero_shard, @parallel_all_gather_slice_1d_f8e8m0fnu_nonzero_shard]]
+  } : (tensor<2xf8E8M0FNU>, tensor<2xf8E8M0FNU>) -> (tensor<2xf8E8M0FNU>, tensor<2xf8E8M0FNU>)
+  %seq_f8_nz_u8 = stablehlo.bitcast_convert %seq_f8_nz : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  %par_f8_nz_0_u8 = stablehlo.bitcast_convert %pars_f8_nz#0 : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  %par_f8_nz_1_u8 = stablehlo.bitcast_convert %pars_f8_nz#1 : (tensor<2xf8E8M0FNU>) -> tensor<2xui8>
+  check.expect_eq %par_f8_nz_0_u8, %seq_f8_nz_u8 : tensor<2xui8>
+  check.expect_eq %par_f8_nz_1_u8, %seq_f8_nz_u8 : tensor<2xui8>
 
   return
 }
