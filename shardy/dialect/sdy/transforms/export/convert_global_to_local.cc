@@ -3380,7 +3380,8 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
         localLow.push_back(lLow);
         int64_t sInLocal = localInputType.getDimSize(i);
         int64_t expandedInputSize =
-            (sInLocal - 1) * (interiorPaddingAttr[i] + 1) + 1;
+            sInLocal +
+            std::max<int64_t>(0, sInLocal - 1) * interiorPaddingAttr[i];
         localHigh.push_back(localResultType.getDimSize(i) -
                             (expandedInputSize + lLow));
       }
@@ -3404,7 +3405,9 @@ class StablehloPadOpPattern : public OpConversionPattern<stablehlo::PadOp> {
       int64_t maxO = *llvm::max_element(allOffsets[i]);
       int64_t minO = *llvm::min_element(allOffsets[i]);
       int64_t sInLocal = localInputType.getDimSize(i);
-      int64_t sInExpanded = (sInLocal - 1) * (interiorPaddingAttr[i] + 1) + 1;
+      int64_t sInExpanded =
+          sInLocal +
+          std::max<int64_t>(0, sInLocal - 1) * interiorPaddingAttr[i];
 
       // We pad the input on the left by maxO so that the slice start (maxO -
       // offset) is always >= 0.

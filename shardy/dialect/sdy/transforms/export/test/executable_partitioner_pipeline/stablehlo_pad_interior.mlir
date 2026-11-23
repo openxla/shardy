@@ -36,6 +36,38 @@ func.func @sequential_pad_negative_low_interior(%arg0: tensor<2xi32>, %arg1: ten
   return %0 : tensor<2xi32>
 }
 
+func.func @parallel_pad_indivisible_interior(
+  %arg0: tensor<3xi32> {sdy.sharding = #sdy.sharding<@mesh_a2, [{}]>})
+  -> (tensor<7xi32> {sdy.sharding = #sdy.sharding<@mesh_a2, [{}]>}) {
+  %in = sdy.reshard %arg0 <@mesh_a2, [{"a"}]> : tensor<3xi32>
+  %c = stablehlo.constant dense<-1> : tensor<i32>
+  %0 = stablehlo.pad %in, %c, low = [0], high = [0], interior = [2]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a2, [{"a"}]>]>} : (tensor<3xi32>, tensor<i32>) -> tensor<7xi32>
+  %1 = sdy.reshard %0 <@mesh_a2, [{}]> : tensor<7xi32>
+  return %1 : tensor<7xi32>
+}
+
+func.func @sequential_pad_indivisible_interior(%arg0: tensor<3xi32>, %arg1: tensor<i32>) -> tensor<7xi32> {
+  %0 = stablehlo.pad %arg0, %arg1, low = [0], high = [0], interior = [2] : (tensor<3xi32>, tensor<i32>) -> tensor<7xi32>
+  return %0 : tensor<7xi32>
+}
+
+func.func @parallel_pad_interior_single_left_hop(
+  %arg0: tensor<6xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}]>})
+  -> (tensor<11xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{}]>}) {
+  %in = sdy.reshard %arg0 <@mesh_a4, [{"a"}]> : tensor<6xi32>
+  %c = stablehlo.constant dense<-1> : tensor<i32>
+  %0 = stablehlo.pad %in, %c, low = [0], high = [0], interior = [1]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{"a"}]>]>} : (tensor<6xi32>, tensor<i32>) -> tensor<11xi32>
+  %1 = sdy.reshard %0 <@mesh_a4, [{}]> : tensor<11xi32>
+  return %1 : tensor<11xi32>
+}
+
+func.func @sequential_pad_interior_single_left_hop(%arg0: tensor<6xi32>, %arg1: tensor<i32>) -> tensor<11xi32> {
+  %0 = stablehlo.pad %arg0, %arg1, low = [0], high = [0], interior = [1] : (tensor<6xi32>, tensor<i32>) -> tensor<11xi32>
+  return %0 : tensor<11xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -72,6 +104,24 @@ func.func @main() {
 
   "check.expect_eq"(%res2#0, %seq2) : (tensor<2xi32>, tensor<2xi32>) -> ()
   "check.expect_eq"(%res2#1, %seq2) : (tensor<2xi32>, tensor<2xi32>) -> ()
+
+  %input3 = stablehlo.constant dense<[10, 20, 30]> : tensor<3xi32>
+  %seq3 = func.call @sequential_pad_indivisible_interior(%input3, %c_neg1) : (tensor<3xi32>, tensor<i32>) -> tensor<7xi32>
+  %res3:2 = "interpreter.run_parallel"(%input3, %input3) {
+    programs = [[@parallel_pad_indivisible_interior, @parallel_pad_indivisible_interior]]
+  } : (tensor<3xi32>, tensor<3xi32>) -> (tensor<7xi32>, tensor<7xi32>)
+  "check.expect_eq"(%res3#0, %seq3) : (tensor<7xi32>, tensor<7xi32>) -> ()
+  "check.expect_eq"(%res3#1, %seq3) : (tensor<7xi32>, tensor<7xi32>) -> ()
+
+  %input4 = stablehlo.constant dense<[1, 2, 3, 4, 5, 6]> : tensor<6xi32>
+  %seq4 = func.call @sequential_pad_interior_single_left_hop(%input4, %c_neg1) : (tensor<6xi32>, tensor<i32>) -> tensor<11xi32>
+  %res4:4 = "interpreter.run_parallel"(%input4, %input4, %input4, %input4) {
+    programs = [[@parallel_pad_interior_single_left_hop, @parallel_pad_interior_single_left_hop, @parallel_pad_interior_single_left_hop, @parallel_pad_interior_single_left_hop]]
+  } : (tensor<6xi32>, tensor<6xi32>, tensor<6xi32>, tensor<6xi32>) -> (tensor<11xi32>, tensor<11xi32>, tensor<11xi32>, tensor<11xi32>)
+  "check.expect_eq"(%res4#0, %seq4) : (tensor<11xi32>, tensor<11xi32>) -> ()
+  "check.expect_eq"(%res4#1, %seq4) : (tensor<11xi32>, tensor<11xi32>) -> ()
+  "check.expect_eq"(%res4#2, %seq4) : (tensor<11xi32>, tensor<11xi32>) -> ()
+  "check.expect_eq"(%res4#3, %seq4) : (tensor<11xi32>, tensor<11xi32>) -> ()
 
   return
 }

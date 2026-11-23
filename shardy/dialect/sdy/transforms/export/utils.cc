@@ -206,24 +206,22 @@ bool isCommunicationFreePadDim(int64_t dimIdx, stablehlo::PadOp padOp,
     return true;
   }
 
-  if (padOp.getInteriorPadding()[dimIdx] != 0) {
-    return false;
-  }
-
   ArrayRef<int64_t> inShape = getTensorShape(padOp.getOperand());
   int64_t inDimSize = inShape[dimIdx];
-  if (inDimSize == ShapedType::kDynamic) {
+  int64_t outDimSize = padOp.getType().getDimSize(dimIdx);
+  if (inDimSize == ShapedType::kDynamic || outDimSize == ShapedType::kDynamic) {
     return false;
   }
 
   int64_t sIn = llvm::divideCeil(inDimSize, shardCount);
-  int64_t sOut =
-      llvm::divideCeil(padOp.getType().getDimSize(dimIdx), shardCount);
+  int64_t sOut = llvm::divideCeil(outDimSize, shardCount);
   int64_t low = padOp.getEdgePaddingLow()[dimIdx];
+  int64_t dilation = padOp.getInteriorPadding()[dimIdx] + 1;
 
   for (int64_t t = 0; t < shardCount; ++t) {
-    int64_t start = t * sOut - low;
-    int64_t limit = start + sOut - 1;
+    int64_t dilatedStart = t * sOut - low;
+    int64_t start = llvm::divideCeilSigned(dilatedStart, dilation);
+    int64_t limit = llvm::divideFloorSigned(dilatedStart + sOut - 1, dilation);
     int64_t validStart = std::max<int64_t>(0, start);
     int64_t validLimit = std::min<int64_t>(inDimSize - 1, limit);
     if (validStart <= validLimit) {
