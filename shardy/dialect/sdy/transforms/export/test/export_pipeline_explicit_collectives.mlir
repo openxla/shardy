@@ -197,3 +197,85 @@ func.func @propagation_barrier_removed_before_explicit_reshards(
   %1 = stablehlo.add %0, %0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_barrier, [{}, {"y"}]>]>} : tensor<8x8xf32>
   return %1 : tensor<8x8xf32>
 }
+
+// -----
+sdy.mesh @meshA = <["a"=2, "b"=2]>
+sdy.mesh @meshB = <["x"=2, "y"=2]>
+
+// CHECK-LABEL: func @cross_mesh_replicated_isolated_in_export_pipeline
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<["a"=2, "b"=2]>, [{"a"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=2, "y"=2]>, [{"x"}, {}]>})
+func.func @cross_mesh_replicated_isolated_in_export_pipeline(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"a"}, {}]>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"x"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"x"}, {}]>}) {
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{"a"}, {}] %[[ARG0]] out_sharding=<mesh<["a"=2, "b"=2]>, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[AG]] <mesh<["x"=2, "y"=2]>, [{}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"x"}, {}] %[[RESHARD]] out_sharding=<mesh<["x"=2, "y"=2]>, [{"x"}, {}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[AS]], %[[ARG1]] {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=2, "y"=2]>, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8x8xf32>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{"x"}, {}]>]>} : tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
+}
+
+// -----
+sdy.mesh @mesh_iota = <["x"=3, "y"=2]>
+sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
+
+// End-to-end Group 1d: sharded(@mesh_non_iota) -> replicated(@mesh_iota)
+// lowers to sdy.all_gather on @mesh_non_iota followed by a preserved
+// cross-mesh replicated sdy.reshard onto @mesh_iota.
+// CHECK-LABEL: func @dot_general_cross_device_ids_conflict_to_replicated
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<6x12x18xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=3, "y"=2]>, [{}, {"x"}, {}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<6x18x12xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>, [{}, {"x"}, {}]>})
+func.func @dot_general_cross_device_ids_conflict_to_replicated(
+    %arg0: tensor<6x12x18xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"x"}, {}]>},
+    %arg1: tensor<6x18x12xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {"x"}, {}]>})
+    -> (tensor<6x12x12xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"x"}, {}]>}) {
+  // CHECK-NEXT: %[[AG:.*]] = sdy.all_gather [{}, {"x"}, {}] %[[ARG1]] out_sharding=<mesh<["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>, [{}, {}, {}]> : tensor<6x18x12xf32>
+  // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[AG]] <mesh<["x"=3, "y"=2]>, [{}, {}, {}]> : tensor<6x18x12xf32>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[ARG0]], %[[RESHARD]], batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=3, "y"=2]>, [{}, {"x"}, {}]>]>} : (tensor<6x12x18xf32>, tensor<6x18x12xf32>) -> tensor<6x12x12xf32>
+  // CHECK-NEXT: return %[[DOT]] : tensor<6x12x12xf32>
+  %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_iota, [{}, {"x"}, {}]>]>} :
+    (tensor<6x12x18xf32>, tensor<6x18x12xf32>) -> tensor<6x12x12xf32>
+  return %0 : tensor<6x12x12xf32>
+}
+
+// -----
+sdy.mesh @mesh_iota = <["x"=3, "y"=2]>
+sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
+
+// End-to-end Group 3a: dim-replicated unreduced output transitioning from
+// @mesh_iota to @mesh_non_iota lowers to sdy.collective_permute instead of
+// being deleted.
+// CHECK-LABEL: func @dot_general_unreduced_cross_device_ids_replicated_dims
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<6x12x18xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=3, "y"=2]>, [{}, {}, {"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<6x18x12xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=3, "y"=2]>, [{}, {"x"}, {}]>})
+func.func @dot_general_unreduced_cross_device_ids_replicated_dims(
+    %arg0: tensor<6x12x18xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {}, {"x"}]>},
+    %arg1: tensor<6x18x12xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{}, {"x"}, {}]>})
+    -> (tensor<6x12x12xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{}, {}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[ARG0]], %[[ARG1]], batching_dims = [0] x [0], contracting_dims = [2] x [1] {sdy.sharding = #sdy.sharding_per_value<[<mesh<["x"=3, "y"=2]>, [{}, {}, {}], unreduced={"x"}>]>} : (tensor<6x12x18xf32>, tensor<6x18x12xf32>) -> tensor<6x12x12xf32>
+  // CHECK-NEXT: %[[CP:.*]] = sdy.collective_permute %[[DOT]] out_sharding=<mesh<["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>, [{}, {}, {}], unreduced={"x"}> : tensor<6x12x12xf32>
+  // CHECK-NEXT: return %[[CP]] : tensor<6x12x12xf32>
+  %0 = stablehlo.dot_general %arg0, %arg1, batching_dims = [0] x [0], contracting_dims = [2] x [1]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}, {}], unreduced={"x"}>]>} :
+    (tensor<6x12x18xf32>, tensor<6x18x12xf32>) -> tensor<6x12x12xf32>
+  return %0 : tensor<6x12x12xf32>
+}
+
+// -----
+sdy.mesh @mesh_iota = <["x"=3, "y"=2]>
+sdy.mesh @mesh_non_iota = <["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>
+
+// CHECK-LABEL: func @func_return_same_axes_diff_device_ids_unreduced_max
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<6x12xf32> {sdy.sharding = #sdy.sharding<mesh<["x"=3, "y"=2]>, [{"y"}, {}], unreduced=max{"x"}>})
+func.func @func_return_same_axes_diff_device_ids_unreduced_max(
+    %arg0: tensor<6x12xf32> {sdy.sharding = #sdy.sharding<@mesh_iota, [{"y"}, {}], unreduced=max{"x"}>})
+    -> (tensor<6x12xf32> {sdy.sharding = #sdy.sharding<@mesh_non_iota, [{"y"}, {}], unreduced=max{"x"}>}) {
+  // CHECK-NOT: sdy.all_reduce
+  // CHECK-NEXT: %[[CP:.*]] = sdy.collective_permute %[[ARG0]] out_sharding=<mesh<["x"=3, "y"=2], device_ids=[5, 4, 3, 2, 1, 0]>, [{"y"}, {}], unreduced=max{"x"}> : tensor<6x12xf32>
+  // CHECK-NEXT: return %[[CP]] : tensor<6x12xf32>
+  return %arg0 : tensor<6x12xf32>
+}

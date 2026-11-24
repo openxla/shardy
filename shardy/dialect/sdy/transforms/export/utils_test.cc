@@ -941,6 +941,17 @@ TEST_F(ExportUtilsTest,
   EXPECT_TRUE(isCommFree(5, "y"));
   EXPECT_TRUE(isCommFree(6, "y"));
 }
+
+TEST_F(ExportUtilsTest, IsAllDeviceMesh) {
+  EXPECT_FALSE(isAllDeviceMesh(nullptr));
+  EXPECT_FALSE(isAllDeviceMesh(MeshAttr::get(&context, /*axes=*/{})));
+  EXPECT_FALSE(
+      isAllDeviceMesh(MeshAttr::get(&context, /*axes=*/{}, /*deviceIds=*/{0})));
+  EXPECT_TRUE(isAllDeviceMesh(
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 1)})));
+  EXPECT_TRUE(isAllDeviceMesh(
+      MeshAttr::get(&context, {MeshAxisAttr::get(&context, "x", 2)})));
+}
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir

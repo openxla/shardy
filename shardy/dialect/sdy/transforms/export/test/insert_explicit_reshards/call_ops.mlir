@@ -128,3 +128,172 @@ func.func private @foo(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mes
   %3 = stablehlo.abs %arg0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
   return %3 : tensor<210xf32>
 }
+
+// -----
+
+sdy.mesh @meshA = <["x"=2, "y"=4]>
+sdy.mesh @meshB = <["a"=4, "b"=2]>
+sdy.mesh @meshC = <["p"=2, "q"=4]>
+
+// CHECK-LABEL: func @call_cross_mesh_replicated_result_and_arg
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>})
+func.func @call_cross_mesh_replicated_result_and_arg(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshC, [{}]>}) {
+  // CHECK-NEXT: %[[IN_R:.*]] = sdy.reshard %[[ARG0]] <@meshB, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_repl_b(%[[IN_R]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[OUT_R:.*]] = sdy.reshard %[[CALL]] <@meshC, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: return %[[OUT_R]] : tensor<8xf32>
+  %0 = call @callee_repl_b(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@meshC, [{}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_repl_b
+func.func private @callee_repl_b(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{}]>}) {
+  return %arg0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_cross_mesh_tiled_result
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>})
+func.func @call_cross_mesh_tiled_result(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_tiled_a(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"x"}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[CALL]] <@meshA, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@meshB, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: %[[R2:.*]] = sdy.reshard %[[R1]] <@meshB, [{"a"}]> : tensor<8xf32>
+  // CHECK-NEXT: return %[[R2]] : tensor<8xf32>
+  %0 = call @callee_tiled_a(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{"a"}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_tiled_a
+func.func private @callee_tiled_a(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>}) {
+  return %arg0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_same_mesh_mismatched_result
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>})
+func.func @call_same_mesh_mismatched_result(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"y"}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_tiled_a(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"x"}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[CALL]] <@meshA, [{"y"}]> : tensor<8xf32>
+  // CHECK-NEXT: return %[[R]] : tensor<8xf32>
+  %0 = call @callee_tiled_a(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"y"}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_unannotated_callee_result_caller_tiled
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32>)
+func.func @call_unannotated_callee_result_caller_tiled(%arg0: tensor<8xf32>) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_unannotated(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[CALL]] <@meshA, [{"x"}]> : tensor<8xf32>
+  // CHECK-NEXT: return %[[R]] : tensor<8xf32>
+  %0 = call @callee_unannotated(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"x"}]>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_unannotated
+func.func private @callee_unannotated(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  return %arg0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_multi_result_callee_unannotated_slot_cross_mesh
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8xf32>)
+func.func @call_multi_result_callee_unannotated_slot_cross_mesh(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+    %arg1: tensor<8xf32>)
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>}, tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]]:2 = call @callee_multi_res(%[[ARG0]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"x"}]>, <@meshA, [{}]>]>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[CALL]]#1 <@meshB, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: return %[[CALL]]#0, %[[R]] : tensor<8xf32>, tensor<8xf32>
+  %0:2 = call @callee_multi_res(%arg0, %arg1) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"x"}]>, <@meshB, [{}]>]>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_multi_res
+func.func private @callee_multi_res(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+    %arg1: tensor<8xf32>)
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>}, tensor<8xf32>) {
+  return %arg0, %arg1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_unannotated_multi_result_mixed_callee_meshes
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+func.func @call_unannotated_multi_result_mixed_callee_meshes(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+        tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]]:2 = call @callee_mixed_results(%[[ARG0]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{"x"}]>, <@meshB, [{"a"}]>]>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  // CHECK-NEXT: return %[[CALL]]#0, %[[CALL]]#1 : tensor<8xf32>, tensor<8xf32>
+  %0:2 = call @callee_mixed_results(%arg0, %arg1) : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_mixed_results
+func.func private @callee_mixed_results(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{"x"}]>},
+        tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>}) {
+  return %arg0, %arg1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_unannotated_multi_result_first_callee_unannotated
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32>,
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+func.func @call_unannotated_multi_result_first_callee_unannotated(
+    %arg0: tensor<8xf32>,
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+    -> (tensor<8xf32>, tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>}) {
+  // CHECK-NEXT: %[[CALL:.*]]:2 = call @callee_first_unannotated_second_b(%[[ARG0]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{}]>, <@meshB, [{"a"}]>]>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  // CHECK-NEXT: return %[[CALL]]#0, %[[CALL]]#1 : tensor<8xf32>, tensor<8xf32>
+  %0:2 = call @callee_first_unannotated_second_b(%arg0, %arg1) : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_first_unannotated_second_b
+func.func private @callee_first_unannotated_second_b(
+    %arg0: tensor<8xf32>,
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+    -> (tensor<8xf32>, tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>}) {
+  return %arg0, %arg1 : tensor<8xf32>, tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_unreduced_result_cross_mesh
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}], unreduced={"x"}>})
+func.func @call_unreduced_result_cross_mesh(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}], unreduced={"x"}>})
+    -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{}], unreduced={"a"}>}) {
+  // CHECK-NEXT: %[[CALL:.*]] = call @callee_unreduced_a(%[[ARG0]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshA, [{}], unreduced={"x"}>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x"} %[[CALL]] out_sharding=<@meshA, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[AR]] <@meshB, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"a"} %[[R]] out_sharding=<@meshB, [{}], unreduced={"a"}> : tensor<8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<8xf32>
+  %0 = call @callee_unreduced_a(%arg0) {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{}], unreduced={"a"}>]>} : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func private @callee_unreduced_a
+func.func private @callee_unreduced_a(%arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}], unreduced={"x"}>}) -> (tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}], unreduced={"x"}>}) {
+  return %arg0 : tensor<8xf32>
+}
+
+// CHECK-LABEL: func @call_cross_mesh_arg_to_unannotated_callee_slot
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+func.func @call_cross_mesh_arg_to_unannotated_callee_slot(
+    %arg0: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshA, [{}]>},
+    %arg1: tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>})
+    -> (tensor<8xf32>, tensor<8xf32> {sdy.sharding = #sdy.sharding<@meshB, [{"a"}]>}) {
+  // CHECK-NEXT: %[[IN_R:.*]] = sdy.reshard %[[ARG0]] <@meshB, [{}]> : tensor<8xf32>
+  // CHECK-NEXT: %[[CALL:.*]]:2 = call @callee_first_unannotated_second_b(%[[IN_R]], %[[ARG1]]) {sdy.sharding = #sdy.sharding_per_value<[<@meshB, [{}]>, <@meshB, [{"a"}]>]>} : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  // CHECK-NEXT: return %[[CALL]]#0, %[[CALL]]#1 : tensor<8xf32>, tensor<8xf32>
+  %0:2 = call @callee_first_unannotated_second_b(%arg0, %arg1) : (tensor<8xf32>, tensor<8xf32>) -> (tensor<8xf32>, tensor<8xf32>)
+  return %0#0, %0#1 : tensor<8xf32>, tensor<8xf32>
+}

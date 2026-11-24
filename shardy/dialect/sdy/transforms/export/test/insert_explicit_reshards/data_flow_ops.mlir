@@ -1,6 +1,7 @@
 // RUN: sdy_opt %s -sdy-insert-explicit-reshards='enable-full-version=true' | FileCheck %s
 
 sdy.mesh @mesh = <["x"=4, "y"=2]>
+sdy.mesh @mesh_xt = <["x"=2, "t"=4]>
 
 // CHECK-LABEL: func @case
 func.func @case(%arg0: tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x":(1)2}]>}, %arg1: tensor<i32>) -> (tensor<210xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}]>}) {
@@ -187,4 +188,110 @@ func.func @optimization_barrier(%arg0: tensor<210xf32> {sdy.sharding = #sdy.shar
   %1 = stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} %arg0 : tensor<210xf32>
   %2 = stablehlo.negate %1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}]>]>} : tensor<210xf32>
   return %2 : tensor<210xf32>
+}
+
+// CHECK-LABEL: func @while_cross_mesh_replicated
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<i32>)
+func.func @while_cross_mesh_replicated(
+    %arg0: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>},
+    %arg1: tensor<i32>)
+    -> (tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{}]>}) {
+  // CHECK-NEXT: %[[INIT_R:.*]] = sdy.reshard %[[ARG0]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[WHILE:.*]]:2 = stablehlo.while(%[[ITER:.*]] = %[[INIT_R]], %[[ITER_0:.*]] = %[[ARG1]]) : tensor<24xf32>, tensor<i32>
+  // CHECK-NEXT: cond {
+  // CHECK-NEXT:   %[[C:.*]] = stablehlo.constant dense<10> : tensor<i32>
+  // CHECK-NEXT:   %[[CMP:.*]] = stablehlo.compare LT, %[[ITER_0]], %[[C]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
+  // CHECK-NEXT:   stablehlo.return %[[CMP]] : tensor<i1>
+  // CHECK-NEXT: } do {
+  // CHECK-NEXT:   %[[NEG:.*]] = stablehlo.negate %[[ITER]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{}]>]>} : tensor<24xf32>
+  // CHECK-NEXT:   %[[BODY_R0:.*]] = sdy.reshard %[[NEG]] <@mesh, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[BODY_R1:.*]] = sdy.reshard %[[BODY_R0]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   stablehlo.return %[[BODY_R1]], %[[ITER_0]] : tensor<24xf32>, tensor<i32>
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[WHILE]]#0 : tensor<24xf32>
+  %0:2 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %arg1) : tensor<24xf32>, tensor<i32>
+    attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{}]>, <@mesh_xt, []>]>}
+  cond {
+    %c = stablehlo.constant dense<10> : tensor<i32>
+    %cmp = stablehlo.compare LT, %iterArg_0, %c : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    stablehlo.return %cmp : tensor<i1>
+  } do {
+    %2 = stablehlo.negate %iterArg {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : tensor<24xf32>
+    stablehlo.return %2, %iterArg_0 : tensor<24xf32>, tensor<i32>
+  }
+  return %0#0 : tensor<24xf32>
+}
+
+// CHECK-LABEL: func @while_cross_mesh_tiled
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<i32>)
+func.func @while_cross_mesh_tiled(
+    %arg0: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}]>},
+    %arg1: tensor<i32>)
+    -> (tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{"t"}]>}) {
+  // CHECK-NEXT: %[[IR0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[IR1:.*]] = sdy.reshard %[[IR0]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[IR2:.*]] = sdy.reshard %[[IR1]] <@mesh_xt, [{"t"}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[WHILE:.*]]:2 = stablehlo.while(%[[ITER:.*]] = %[[IR2]], %[[ITER_0:.*]] = %[[ARG1]]) : tensor<24xf32>, tensor<i32>
+  // CHECK-NEXT: cond {
+  // CHECK-NEXT:   %[[C:.*]] = stablehlo.constant dense<10> : tensor<i32>
+  // CHECK-NEXT:   %[[CMP:.*]] = stablehlo.compare LT, %[[ITER_0]], %[[C]] : (tensor<i32>, tensor<i32>) -> tensor<i1>
+  // CHECK-NEXT:   stablehlo.return %[[CMP]] : tensor<i1>
+  // CHECK-NEXT: } do {
+  // CHECK-NEXT:   %[[NEG:.*]] = stablehlo.negate %[[ITER]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"t"}]>]>} : tensor<24xf32>
+  // CHECK-NEXT:   %[[BR0:.*]] = sdy.reshard %[[NEG]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[BR1:.*]] = sdy.reshard %[[BR0]] <@mesh, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[BR2:.*]] = sdy.reshard %[[BR1]] <@mesh, [{"x"}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[BR3:.*]] = sdy.reshard %[[BR2]] <@mesh, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[BR4:.*]] = sdy.reshard %[[BR3]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[BR5:.*]] = sdy.reshard %[[BR4]] <@mesh_xt, [{"t"}]> : tensor<24xf32>
+  // CHECK-NEXT:   stablehlo.return %[[BR5]], %[[ITER_0]] : tensor<24xf32>, tensor<i32>
+  // CHECK-NEXT: }
+  // CHECK-NEXT: return %[[WHILE]]#0 : tensor<24xf32>
+  %0:2 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %arg1) : tensor<24xf32>, tensor<i32>
+    attributes {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"t"}]>, <@mesh_xt, []>]>}
+  cond {
+    %c = stablehlo.constant dense<10> : tensor<i32>
+    %cmp = stablehlo.compare LT, %iterArg_0, %c : (tensor<i32>, tensor<i32>) -> tensor<i1>
+    stablehlo.return %cmp : tensor<i1>
+  } do {
+    %2 = stablehlo.negate %iterArg {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}]>]>} : tensor<24xf32>
+    stablehlo.return %2, %iterArg_0 : tensor<24xf32>, tensor<i32>
+  }
+  return %0#0 : tensor<24xf32>
+}
+
+// CHECK-LABEL: func @if_cross_mesh
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<i1>,
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+func.func @if_cross_mesh(%arg0: tensor<i1>, %arg1: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> (tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{"t"}]>}) {
+  // CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG1]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@mesh_xt, [{"t"}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[IF:.*]] = "stablehlo.if"(%[[ARG0]]) ({
+  // CHECK-NEXT:   stablehlo.return %[[R1]] : tensor<24xf32>
+  // CHECK-NEXT: }, {
+  // CHECK-NEXT:   %[[NEG:.*]] = stablehlo.negate %[[ARG1]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : tensor<24xf32>
+  // CHECK-NEXT:   %[[R2:.*]] = sdy.reshard %[[NEG]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT:   %[[R3:.*]] = sdy.reshard %[[R2]] <@mesh_xt, [{"t"}]> : tensor<24xf32>
+  // CHECK-NEXT:   stablehlo.return %[[R3]] : tensor<24xf32>
+  // CHECK-NEXT: }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"t"}]>]>} : (tensor<i1>) -> tensor<24xf32>
+  // CHECK-NEXT: return %[[IF]] : tensor<24xf32>
+  %0 = "stablehlo.if"(%arg0) ({
+    stablehlo.return %arg1 : tensor<24xf32>
+  }, {
+    %1 = stablehlo.negate %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}]>]>} : tensor<24xf32>
+    stablehlo.return %1 : tensor<24xf32>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{"t"}]>]>} : (tensor<i1>) -> tensor<24xf32>
+  return %0 : tensor<24xf32>
+}
+
+// CHECK-LABEL: func @optimization_barrier_cross_mesh_replicated
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>})
+func.func @optimization_barrier_cross_mesh_replicated(%arg0: tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) -> (tensor<24xf32> {sdy.sharding = #sdy.sharding<@mesh_xt, [{}]>}) {
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[ARG0]] <@mesh_xt, [{}]> : tensor<24xf32>
+  // CHECK-NEXT: %[[OB:.*]] = stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{}]>]>} %[[R]] : tensor<24xf32>
+  // CHECK-NEXT: return %[[OB]] : tensor<24xf32>
+  %1 = stablehlo.optimization_barrier {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xt, [{}]>]>} %arg0 : tensor<24xf32>
+  return %1 : tensor<24xf32>
 }
