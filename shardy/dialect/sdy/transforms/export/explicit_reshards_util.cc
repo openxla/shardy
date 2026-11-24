@@ -632,8 +632,10 @@ AxesPerFactor findCommonAxesOnUnaryOperation(
 
 // Distributes the common axes of factors that need replication onto batching
 // factors. Whole axes are placed first, minor-to-major, and then the minor part
-// of an axis if the remaining capacity divides its size. Axes of one factor
-// keep their relative order on each batching factor.
+// of an axis if the remaining capacity divides its size. Only a minor suffix of
+// each factor's axes is moved, since moving a middle axis needs a
+// collective_permute. Axes of one factor keep their relative order on each
+// batching factor.
 void distributeAxisRefsToBatchingFactors(OpShardingRuleAttr shardingRule,
                                          MeshOp meshOp,
                                          AxesPerFactor& factorCommonAxes) {
@@ -722,6 +724,8 @@ void distributeAxisRefsToBatchingFactors(OpShardingRuleAttr shardingRule,
             source[i].second = AxisRefAttr::get(
                 ctx, axis.getName(), axis.getSubAxisPreSize(), majorSize);
             capacity = 1;
+          } else {
+            break;
           }
         }
       }

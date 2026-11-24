@@ -171,6 +171,23 @@ func.func @sort_non_divisible_batch_dim_does_not_split_sorting_axis(%arg0: tenso
   return %0 : tensor<6x32xi32>
 }
 
+// "y" fits the batch dim but is not a suffix of the sorting dim axes, so moving
+// it would need a collective_permute. Nothing is moved.
+// CHECK-LABEL: func @sort_does_not_move_non_suffix_axis_to_batch_dim
+func.func @sort_does_not_move_non_suffix_axis_to_batch_dim(%arg0: tensor<6x64xi32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x", "y", "z"}]>}) -> (tensor<6x64xi32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x", "y", "z"}]>}) {
+  // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyz, [{}, {}]> : tensor<6x64xi32>
+  // CHECK-NEXT: %[[SORT:.*]] = "stablehlo.sort"(%[[RESHARD0]])
+  // CHECK: {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {}]>]>}
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[SORT]] <@mesh_xyz, [{}, {"x", "y", "z"}]> : tensor<6x64xi32>
+  // CHECK-NEXT: return %[[RESHARD1]] : tensor<6x64xi32>
+  %0 = "stablehlo.sort"(%arg0) <{dimension = 1 : i64, is_stable = true}> ({
+    ^bb0(%arg2: tensor<i32>, %arg3: tensor<i32>):
+      %1 = stablehlo.compare GT, %arg2, %arg3 : (tensor<i32>, tensor<i32>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+  }) {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xyz, [{}, {"x", "y", "z"}]>]>} : (tensor<6x64xi32>) -> (tensor<6x64xi32>)
+  return %0 : tensor<6x64xi32>
+}
+
 // CHECK-LABEL: func @sort_prefers_whole_trailing_axis_over_saturating_split
 func.func @sort_prefers_whole_trailing_axis_over_saturating_split(%arg0: tensor<2x64xi32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x", "y"}]>}) -> (tensor<2x64xi32> {sdy.sharding = #sdy.sharding<@mesh_xyz, [{}, {"x", "y"}]>}) {
   // CHECK-NEXT: %[[RESHARD0:.*]] = sdy.reshard %arg0 <@mesh_xyz, [{"y"}, {}]> : tensor<2x64xi32>
