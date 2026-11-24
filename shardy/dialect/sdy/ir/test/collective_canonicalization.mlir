@@ -579,3 +579,162 @@ func.func @all_slice_of_all_gather_open_dim_sharding(%arg0 : tensor<16x2xf32> {s
   %1 = sdy.all_slice [{}, {"x"}] %0 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<16x2xf32>
   return %1 : tensor<16x2xf32>
 }
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose
+func.func @reduce_scatter_fusion_across_transpose(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<4x16xf32> {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{"x"}, {"y"}] %arg0 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[RS]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([j, i]) {i=16, j=4}>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: return %[[T]] : tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>, sdy.sharding_rule = #sdy.op_sharding_rule<([i, j])->([j, i]) {i=16, j=4}>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  return %2 : tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_omitted_sharding
+func.func @reduce_scatter_fusion_across_transpose_omitted_sharding(%arg0 : tensor<16x4x8xf32>) -> tensor<16x8x4xf32> {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{}, {"y"}, {"x"}] %arg0 out_sharding=<@mesh, [{}, {"y"}, {"x"}]> : tensor<16x4x8xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[RS]], dims = [0, 2, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"x"}, {"y"}]>]>} : (tensor<16x4x8xf32>) -> tensor<16x8x4xf32>
+  // CHECK-NEXT: return %[[T]] : tensor<16x8x4xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}, {}]> : tensor<16x4x8xf32>
+  %1 = stablehlo.transpose %0, dims = [0, 2, 1] : (tensor<16x4x8xf32>) -> tensor<16x8x4xf32>
+  %2 = sdy.all_slice [{}, {"x"}, {"y"}] %1 out_sharding=<@mesh, [{}, {"x"}, {"y"}]> : tensor<16x8x4xf32>
+  return %2 : tensor<16x8x4xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_chain_with_residual
+func.func @reduce_scatter_fusion_across_transpose_chain_with_residual(%arg0 : tensor<16x32x64xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{"q":(1)2}, {}, {"x"}]>}) -> tensor<32x16x64xf32> {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{"q":(2)2}, {"y"}, {}] %arg0 out_sharding=<@mesh2, [{"q":(1)4}, {"y"}, {"x"}]> : tensor<16x32x64xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"q":(4)2, "z"}, {"p"}, {}] %[[RS]] out_sharding=<@mesh2, [{"q", "z"}, {"y", "p"}, {"x"}]> : tensor<16x32x64xf32>
+  // CHECK-NEXT: %[[T0:.*]] = stablehlo.transpose %[[AS]], dims = [1, 2, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{"y", "p"}, {"x"}, {"q", "z"}]>]>} : (tensor<16x32x64xf32>) -> tensor<32x64x16xf32>
+  // CHECK-NEXT: %[[T1:.*]] = stablehlo.transpose %[[T0]], dims = [0, 2, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{"y", "p"}, {"q", "z"}, {"x"}]>]>} : (tensor<32x64x16xf32>) -> tensor<32x16x64xf32>
+  // CHECK-NEXT: return %[[T1]] : tensor<32x16x64xf32>
+  %0 = sdy.all_reduce {"y", "q":(2)2} %arg0 out_sharding=<@mesh2, [{"q":(1)2}, {}, {"x"}]> : tensor<16x32x64xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 2, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{}, {"x"}, {"q":(1)2}]>]>} : (tensor<16x32x64xf32>) -> tensor<32x64x16xf32>
+  %2 = stablehlo.transpose %1, dims = [0, 2, 1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{}, {"q":(1)2}, {"x"}]>]>} : (tensor<32x64x16xf32>) -> tensor<32x16x64xf32>
+  %3 = sdy.all_slice [{"y", "p"}, {"q":(2)4, "z"}, {}] %2 out_sharding=<@mesh2, [{"y", "p"}, {"q", "z"}, {"x"}]> : tensor<32x16x64xf32>
+  return %3 : tensor<32x16x64xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_multiple_all_slice_users
+func.func @reduce_scatter_fusion_across_transpose_multiple_all_slice_users(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<4x16xf32>, tensor<4x16xf32>) {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{"x"}, {"y"}] %arg0 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[RS]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"y"}, {"x"}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: return %[[T]], %[[T]] : tensor<4x16xf32>, tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  %3 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  return %2, %3 : tensor<4x16xf32>, tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_open_dim_and_replicated_axes
+func.func @reduce_scatter_fusion_across_transpose_open_dim_and_replicated_axes(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh2, [{}, {}], replicated={"p"}>}) -> tensor<4x16xf32> {
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reduce_scatter [{"x"}, {"y"}] %arg0 out_sharding=<@mesh2, [{"x"}, {"y"}], replicated={"p"}> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[RS]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{"y"}, {"x"}], replicated={"p"}>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: return %[[T]] : tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh2, [{}, {}], replicated={"p"}> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh2, [{?}, {?}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh2, [{"y"}, {"x"}], replicated={"p"}> : tensor<4x16xf32>
+  return %2 : tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_all_reduce_multiple_uses
+func.func @reduce_scatter_fusion_across_transpose_all_reduce_multiple_uses(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<4x16xf32>, tensor<16x4xf32>) {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"y"}, {"x"}] %[[T]] out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[AS]], %[[AR]] : tensor<4x16xf32>, tensor<16x4xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  return %2, %0 : tensor<4x16xf32>, tensor<16x4xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_intermediate_multiple_uses
+func.func @reduce_scatter_fusion_across_transpose_intermediate_multiple_uses(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<16x4xf32>, tensor<4x16xf32>) {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T0:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[T1:.*]] = stablehlo.transpose %[[T0]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<4x16xf32>) -> tensor<16x4xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"x"}, {"y"}] %[[T1]] out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<16x4xf32>
+  // CHECK-NEXT: return %[[AS]], %[[T0]] : tensor<16x4xf32>, tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = stablehlo.transpose %1, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<4x16xf32>) -> tensor<16x4xf32>
+  %3 = sdy.all_slice [{"x"}, {"y"}] %2 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<16x4xf32>
+  return %3, %1 : tensor<16x4xf32>, tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_non_slice_user
+func.func @reduce_scatter_fusion_across_transpose_non_slice_user(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<4x16xf32>, tensor<4x16xf32>) {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"y"}, {"x"}] %[[T]] out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[AS]], %[[T]] : tensor<4x16xf32>, tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  return %2, %1 : tensor<4x16xf32>, tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_different_slice_axes
+func.func @reduce_scatter_fusion_across_transpose_different_slice_axes(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> (tensor<4x16xf32>, tensor<4x16xf32>) {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS0:.*]] = sdy.all_slice [{"y"}, {"x"}] %[[T]] out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS1:.*]] = sdy.all_slice [{"x"}, {"y"}] %[[T]] out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[AS0]], %[[AS1]] : tensor<4x16xf32>, tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  %3 = sdy.all_slice [{"x"}, {"y"}] %1 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<4x16xf32>
+  return %2, %3 : tensor<4x16xf32>, tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_alters_sharding
+func.func @reduce_scatter_fusion_across_transpose_alters_sharding(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<4x16xf32> {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{}, {"y"}] %[[T]] out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<4x16xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{"x"}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{}, {"y"}] %1 out_sharding=<@mesh, [{"x"}, {"y"}]> : tensor<4x16xf32>
+  return %2 : tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_drops_non_replicated_sharding
+func.func @reduce_scatter_fusion_across_transpose_drops_non_replicated_sharding(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{"x"}, {}]>}) -> tensor<4x16xf32> {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"y"}, {}] %[[T]] out_sharding=<@mesh, [{"y"}, {}]> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<4x16xf32>
+  %0 = sdy.all_reduce {"y"} %arg0 out_sharding=<@mesh, [{"x"}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {}] %1 out_sharding=<@mesh, [{"y"}, {}]> : tensor<4x16xf32>
+  return %2 : tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_different_mesh
+func.func @reduce_scatter_fusion_across_transpose_different_mesh(%arg0 : tensor<16x4xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<4x16xf32> {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{"y"}, {"x"}] %[[T]] out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<4x16xf32>
+  %0 = sdy.all_reduce {"x", "y"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<16x4xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_non_iota, [{}, {}]>]>} : (tensor<16x4xf32>) -> tensor<4x16xf32>
+  %2 = sdy.all_slice [{"y"}, {"x"}] %1 out_sharding=<@mesh, [{"y"}, {"x"}]> : tensor<4x16xf32>
+  return %2 : tensor<4x16xf32>
+}
+
+// CHECK-LABEL: func @reduce_scatter_fusion_across_transpose_residual_padding_mismatch
+func.func @reduce_scatter_fusion_across_transpose_residual_padding_mismatch(%arg0 : tensor<6x8xf32> {sdy.sharding=#sdy.sharding<@mesh, [{}, {}]>}) -> tensor<8x6xf32> {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<6x8xf32>
+  // CHECK-NEXT: %[[T:.*]] = stablehlo.transpose %[[AR]], dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<6x8xf32>) -> tensor<8x6xf32>
+  // CHECK-NEXT: %[[AS:.*]] = sdy.all_slice [{}, {"x", "y"}] %[[T]] out_sharding=<@mesh, [{}, {"x", "y"}]> : tensor<8x6xf32>
+  // CHECK-NEXT: return %[[AS]] : tensor<8x6xf32>
+  %0 = sdy.all_reduce {"x"} %arg0 out_sharding=<@mesh, [{}, {}]> : tensor<6x8xf32>
+  %1 = stablehlo.transpose %0, dims = [1, 0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<6x8xf32>) -> tensor<8x6xf32>
+  %2 = sdy.all_slice [{}, {"x", "y"}] %1 out_sharding=<@mesh, [{}, {"x", "y"}]> : tensor<8x6xf32>
+  return %2 : tensor<8x6xf32>
+}
