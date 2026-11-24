@@ -22,10 +22,12 @@ limitations under the License.
 #include <string_view>
 #include <utility>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // IWYU pragma: keep
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -38,6 +40,7 @@ limitations under the License.
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"  // IWYU pragma: keep
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "shardy/common/logging.h"
 #include "shardy/dialect/sdy/ir/dialect.h"
 #include "shardy/dialect/sdy/ir/enums.h"
@@ -61,12 +64,59 @@ namespace {
 using func::CallOp;
 using func::FuncOp;
 
+bool hasDifferentMesh(TensorShardingAttr lhs, TensorShardingAttr rhs) {
+  return lhs && rhs && lhs.getMeshOrRef() != rhs.getMeshOrRef();
+}
+
+bool hasDifferentMesh(TensorShardingAttr sharding, MeshOp meshOp) {
+  return sharding &&
+         sharding.getMeshOrRef() !=
+             FlatSymbolRefAttr::get(sharding.getContext(), meshOp.getName());
+}
+
+bool hasSameMeshAndEquivalentSharding(TensorShardingAttr lhs,
+                                      TensorShardingAttr rhs) {
+  return !hasDifferentMesh(lhs, rhs) && isEquivalent(lhs, rhs);
+}
+
+bool isAllDeviceMesh(TensorShardingAttr sharding,
+                     const SymbolTable& symbolTable) {
+  return sharding && isAllDeviceMesh(sharding.getMesh(symbolTable));
+}
+
+bool isSameAxesDifferentDeviceIdsMatchingUnreduced(
+    TensorShardingAttr lhs, TensorShardingAttr rhs,
+    const SymbolTable& symbolTable) {
+  return hasDifferentMesh(lhs, rhs) &&
+         !isCrossMeshTransition(lhs, rhs, symbolTable) &&
+         isAllDeviceMesh(lhs, symbolTable) &&
+         isAllDeviceMesh(rhs, symbolTable) &&
+         lhs.getMesh(symbolTable).getDeviceIds() !=
+             rhs.getMesh(symbolTable).getDeviceIds() &&
+         !lhs.getUnreducedAxes().empty() &&
+         lhs.getUnreducedAxes() == rhs.getUnreducedAxes() &&
+         lhs.getReductionOp() == rhs.getReductionOp();
+}
+
+std::optional<MeshOp> lookupAllDeviceMeshOp(TensorShardingAttr sharding,
+                                            const SymbolTable& symbolTable) {
+  if (!sharding) {
+    return std::nullopt;
+  }
+  MeshOp meshOp = getMeshOpOrDefault(sharding, symbolTable, nullptr);
+  if (meshOp && isAllDeviceMesh(meshOp.getMesh())) {
+    return meshOp;
+  }
+  return std::nullopt;
+}
+
 void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
                                             TensorShardingAttr targetSharding,
                                             IRRewriter& rewriter,
                                             const SymbolTable& symbolTable,
                                             const bool insertAfterOperand,
-                                            const bool onFullVersion) {
+                                            const bool onFullVersion,
+                                            const bool enableFullVersion) {
   Value operand = opOperand.get();
   TensorShardingAttr operandSharding = getSharding(operand);
 
@@ -74,19 +124,77 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
     rewriter.setInsertionPointAfterValue(operand);
   }
 
-  if (operandSharding) {
+  const bool enforceCrossMesh =
+      enableFullVersion && isa<RankedTensorType>(operand.getType());
+  const bool crossMesh =
+      enforceCrossMesh && hasDifferentMesh(operandSharding, targetSharding);
+  const bool sameAxesMatchingUnreduced =
+      enforceCrossMesh && isSameAxesDifferentDeviceIdsMatchingUnreduced(
+                              operandSharding, targetSharding, symbolTable);
+
+  if (operandSharding && !sameAxesMatchingUnreduced) {
     // If `operandSharding` has unreduced axes, insert an all-reduce if any of
-    // the axes isn't unreduced in the target sharding.
+    // the axes isn't unreduced in the target sharding. On cross-mesh boundaries
+    // under `enableFullVersion`, always all-reduce all unreduced axes on the
+    // source mesh first (except same-axes device-order permutes with matching
+    // unreduced axes and reduction ops).
     operandSharding = insertAllReduceIfUnreducedToReplicated(
-        opOperand, operandSharding, targetSharding, symbolTable, rewriter);
+        opOperand, operandSharding,
+        crossMesh ? TensorShardingAttr() : targetSharding, symbolTable,
+        rewriter);
+    if (insertAfterOperand) {
+      rewriter.setInsertionPointAfterValue(opOperand.get());
+    }
   }
 
-  if (TensorShardingAttr newSharding = insertUnreducedCollectives(
-          opOperand, targetSharding, symbolTable, rewriter)) {
-    operandSharding = newSharding;
+  if (enforceCrossMesh && !sameAxesMatchingUnreduced &&
+      (crossMesh || !operandSharding) &&
+      !getUnreducedAxes(targetSharding).empty()) {
+    // Move operand (or materialize an explicit replicated sharding when
+    // unannotated) onto `targetSharding`'s mesh before calling
+    // `insertUnreducedCollectives` so `inSharding` is present and
+    // `inMesh.equals(outMesh)` holds.
+    Value current = opOperand.get();
+    if (!isCrossMeshTransition(operandSharding, targetSharding, symbolTable) &&
+        isAllDeviceMesh(operandSharding, symbolTable) &&
+        isAllDeviceMesh(targetSharding, symbolTable)) {
+      TensorShardingAttr movedSharding = TensorShardingAttr::get(
+          rewriter.getContext(), targetSharding.getMeshOrRef(),
+          operandSharding.getDimShardings(), /*replicated_axes=*/{},
+          /*unreduced_axes=*/{});
+      auto movedReshard =
+          ReshardOp::create(rewriter, current.getLoc(), current, movedSharding);
+      opOperand.set(movedReshard);
+    } else if (auto rankedType =
+                   dyn_cast<RankedTensorType>(current.getType())) {
+      TensorShardingAttr replTarget = TensorShardingAttr::getFullyClosed(
+          rewriter.getContext(), rankedType.getRank(),
+          targetSharding.getMeshOrRef());
+      Value pivoted = insertCrossMeshReshardPivot(
+          current, operandSharding, replTarget, symbolTable, rewriter);
+      opOperand.set(pivoted);
+    }
+    operandSharding = getSharding(opOperand.get());
+    if (insertAfterOperand) {
+      rewriter.setInsertionPointAfterValue(opOperand.get());
+    }
   }
 
-  if (onFullVersion && !isEquivalent(operandSharding, targetSharding)) {
+  if (!sameAxesMatchingUnreduced) {
+    if (TensorShardingAttr newSharding = insertUnreducedCollectives(
+            opOperand, targetSharding, symbolTable, rewriter)) {
+      operandSharding = newSharding;
+      if (insertAfterOperand) {
+        rewriter.setInsertionPointAfterValue(opOperand.get());
+      }
+    }
+  }
+
+  const bool matchesTarget =
+      enforceCrossMesh
+          ? hasSameMeshAndEquivalentSharding(operandSharding, targetSharding)
+          : isEquivalent(operandSharding, targetSharding);
+  if (onFullVersion && !matchesTarget) {
     operand = opOperand.get();
     TensorShardingAttr target =
         targetSharding
@@ -102,21 +210,23 @@ void insertExplicitReshardsToTargetSharding(OpOperand& opOperand,
 
 void insertExplicitReshardsOnFuncReturn(FuncOp funcOp, IRRewriter& rewriter,
                                         const SymbolTable& symbolTable,
-                                        const bool onFullVersion) {
+                                        const bool enableFullVersion) {
   Operation* returnOp = getBodyTerminator(funcOp);
   rewriter.setInsertionPoint(returnOp);
   for (const auto& [index, opOperand] :
        llvm::enumerate(returnOp->getOpOperands())) {
     insertExplicitReshardsToTargetSharding(
         opOperand, /*targetSharding=*/getFuncResultSharding(funcOp, index),
-        rewriter, symbolTable, /*insertAfterOperand=*/false, onFullVersion);
+        rewriter, symbolTable, /*insertAfterOperand=*/false, enableFullVersion,
+        enableFullVersion);
   }
 }
 
 void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface op,
                                         IRRewriter& rewriter,
                                         const SymbolTable& symbolTable,
-                                        const bool onFullVersion) {
+                                        const bool onFullVersion,
+                                        const bool enableFullVersion) {
   for (Value owner : llvm::concat<Value>(op.getOpResultEdgeOwners(),
                                          op.getBlockArgumentEdgeOwners())) {
     TensorShardingAttr ownerSharding = op.transformTargetSharding(
@@ -126,14 +236,15 @@ void insertExplicitReshardsOnDataFlowOp(ShardableDataFlowOpInterface op,
       insertExplicitReshardsToTargetSharding(
           *sourceOpOperand,
           /*targetSharding=*/ownerSharding, rewriter, symbolTable,
-          /*insertAfterOperand=*/true, onFullVersion);
+          /*insertAfterOperand=*/true, onFullVersion, enableFullVersion);
     }
   }
 }
 
 void insertExplicitReshardsOnCallOp(CallOp callOp, IRRewriter& rewriter,
                                     const SymbolTable& symbolTable,
-                                    const bool onFullVersion) {
+                                    const bool onFullVersion,
+                                    const bool enableFullVersion) {
   FuncOp funcOp = symbolTable.lookup<FuncOp>(callOp.getCallee());
   TensorShardingPerValueAttr funcArgShardings =
       mlir::sdy::getFuncArgShardings(funcOp, symbolTable);
@@ -154,7 +265,7 @@ void insertExplicitReshardsOnCallOp(CallOp callOp, IRRewriter& rewriter,
     insertExplicitReshardsToTargetSharding(
         sourceOpOperand,
         /*targetSharding=*/funcArgSharding, rewriter, symbolTable,
-        /*insertAfterOperand=*/true, onFullVersion);
+        /*insertAfterOperand=*/true, onFullVersion, enableFullVersion);
   }
 }
 
@@ -324,34 +435,170 @@ MeshOp getMostCommonMesh(ArrayRef<TensorShardingAttr> inShardings,
   return mostCommonMesh;
 }
 
-// Returns the most common mesh. Returns nullopt if any of the following holds:
+// Returns the most common mesh. When `enableFullVersion` is false, returns
+// nullopt if any of the following holds:
 //  1. There is no tensor with a sharding attribute.
-//  2. Tensors have different meshes (ignoring device ids)
+//  2. Tensors have different meshes (ignoring device ids).
 //  3. Some tensors have single-device meshes.
+// When `enableFullVersion` is true, falls back to voting over non-empty
+// multi-device meshes (preferring non-replicated shardings first, then
+// replicated shardings, then non-single-device empty meshes).
 std::optional<MeshOp> getMesh(ArrayRef<TensorShardingAttr> inShardings,
                               ArrayRef<TensorShardingAttr> outShardings,
-                              const SymbolTable& symbolTable) {
-  std::optional<StringRef> meshName = getCommonMeshName(
+                              const SymbolTable& symbolTable,
+                              const bool enableFullVersion) {
+  Attribute commonMeshOrRef = getCommonMeshOrRef(
       inShardings, outShardings, symbolTable, /*ignoreDeviceIds=*/true);
-  if (!meshName.has_value()) {
-    // This means none of the operands or results have a sharding attribute or
-    // the sharding attributes use different meshes.
-    // TODO(enver): Actually, we are moving towards supporting multiple explicit
-    // reshards so operands and results are all bound by the same mesh.
+  if (auto meshNameAttr =
+          dyn_cast_or_null<FlatSymbolRefAttr>(commonMeshOrRef)) {
+    MeshOp meshOp = getMeshOp(symbolTable, meshNameAttr.getValue());
+    SDY_CHECK(meshOp) << "unknown mesh: "
+                      << std::string_view(meshNameAttr.getValue());
+    if (!meshOp.getMesh().isSingleDevice()) {
+      // Return the mesh with the most common device id.
+      return getMostCommonMesh(inShardings, outShardings, symbolTable,
+                               /*defaultMesh=*/meshOp);
+    }
+  }
+  if (!enableFullVersion) {
     return std::nullopt;
   }
-  MeshOp meshOp = getMeshOp(symbolTable, *meshName);
-  SDY_CHECK(meshOp) << "unknown mesh: " << std::string_view(*meshName);
-  if (meshOp.getMesh().isSingleDevice()) {
-    return std::nullopt;
+
+  auto voteBestMesh = [&](const bool includeReplicated) -> MeshOp {
+    int64_t maxMeshCount = 0;
+    MeshOp bestMesh = nullptr;
+    llvm::SmallDenseMap<StringRef, int64_t> meshCounts;
+    for (const TensorShardingAttr sharding :
+         llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
+      if (!sharding) {
+        continue;
+      }
+      if (!includeReplicated &&
+          isFullyReplicatedWithoutUnreducedAxes(sharding)) {
+        continue;
+      }
+      std::optional<MeshOp> candidate =
+          lookupAllDeviceMeshOp(sharding, symbolTable);
+      if (!candidate) {
+        continue;
+      }
+      const int64_t count = ++meshCounts[candidate->getName()];
+      if (count > maxMeshCount) {
+        maxMeshCount = count;
+        bestMesh = *candidate;
+      }
+    }
+    return bestMesh;
+  };
+
+  if (MeshOp best = voteBestMesh(/*includeReplicated=*/false)) {
+    return best;
   }
-  // Return the mesh with the most common device id.
-  return getMostCommonMesh(inShardings, outShardings, symbolTable,
-                           /*defaultMesh=*/meshOp);
+  if (MeshOp best = voteBestMesh(/*includeReplicated=*/true)) {
+    return best;
+  }
+  for (const TensorShardingAttr sharding :
+       llvm::concat<const TensorShardingAttr>(inShardings, outShardings)) {
+    if (!sharding) {
+      continue;
+    }
+    MeshOp candidate = getMeshOpOrDefault(sharding, symbolTable, nullptr);
+    if (candidate && !candidate.getMesh().isSingleDevice()) {
+      return candidate;
+    }
+  }
+  return std::nullopt;
+}
+
+bool needsPrePivot(TensorShardingAttr sharding, MeshOp targetMeshOp,
+                   const SymbolTable& symbolTable) {
+  if (!sharding || !hasDifferentMesh(sharding, targetMeshOp)) {
+    return false;
+  }
+  MeshAttr shardingMesh = sharding.getMesh(symbolTable);
+  // Keep same-axes different-device-id (or inline equivalent) shardings for
+  // 1-step resharding in `insertExplicitReshards`. Pre-pivot incompatible axes,
+  // identical-device-id distinct symbols, empty meshes, or single-device meshes
+  // onto `targetMeshOp`.
+  if (isAllDeviceMesh(shardingMesh) &&
+      shardingMesh.equals(targetMeshOp.getMesh(), /*ignoreDeviceOrder=*/true) &&
+      shardingMesh.getDeviceIds() != targetMeshOp.getMesh().getDeviceIds()) {
+    return false;
+  }
+  return true;
+}
+
+// Pre-pivots incompatible foreign-mesh (or inline/single-device/empty-mesh)
+// operands and results onto `Replicated(targetMeshOp)` so `ShardingProjection`
+// and `processOp` only see compatible meshes.
+void prePivotForeignMeshes(Operation* op, MeshOp targetMeshOp,
+                           const SymbolTable& symbolTable,
+                           IRRewriter& rewriter) {
+  rewriter.setInsertionPoint(op);
+  for (OpOperand& opOperand : op->getOpOperands()) {
+    Value operand = opOperand.get();
+    TensorShardingAttr operandSharding = getSharding(operand);
+    if (!needsPrePivot(operandSharding, targetMeshOp, symbolTable)) {
+      continue;
+    }
+    auto rankedType = dyn_cast<RankedTensorType>(operand.getType());
+    if (!rankedType) {
+      continue;
+    }
+    TensorShardingAttr replTargetSharding =
+        TensorShardingAttr::getFullyReplicated(
+            rewriter.getContext(), rankedType.getRank(), targetMeshOp.getName(),
+            /*isClosed=*/true);
+    operandSharding = insertAllReduceIfUnreducedToReplicated(
+        opOperand, operandSharding, replTargetSharding, symbolTable, rewriter);
+    Value pivoted =
+        insertCrossMeshReshardPivot(opOperand.get(), operandSharding,
+                                    replTargetSharding, symbolTable, rewriter);
+    opOperand.set(pivoted);
+  }
+
+  for (OpResult res : llvm::reverse(op->getResults())) {
+    TensorShardingAttr origOutSharding = getSharding(res);
+    if (!needsPrePivot(origOutSharding, targetMeshOp, symbolTable)) {
+      continue;
+    }
+    auto rankedType = dyn_cast<RankedTensorType>(res.getType());
+    if (!rankedType) {
+      continue;
+    }
+    TensorShardingAttr replTargetSharding =
+        TensorShardingAttr::getFullyReplicated(
+            rewriter.getContext(), rankedType.getRank(), targetMeshOp.getName(),
+            /*isClosed=*/true);
+    rewriter.setInsertionPointAfter(op);
+    TensorShardingAttr replOrigOutSharding =
+        TensorShardingAttr::getFullyReplicated(
+            rewriter.getContext(), rankedType.getRank(),
+            origOutSharding.getMeshOrRef(), /*isClosed=*/true);
+    auto replOutReshard =
+        ReshardOp::create(rewriter, res.getLoc(), res, replOrigOutSharding);
+    rewriter.replaceAllUsesExcept(res, replOutReshard.getResult(),
+                                  replOutReshard);
+
+    if (!isEquivalent(replOrigOutSharding, origOutSharding) ||
+        !origOutSharding.getUnreducedAxes().empty()) {
+      rewriter.setInsertionPointAfter(replOutReshard);
+      auto finalReshard = ReshardOp::create(
+          rewriter, res.getLoc(), replOutReshard.getResult(), origOutSharding);
+      rewriter.replaceAllUsesExcept(replOutReshard.getResult(),
+                                    finalReshard.getResult(), finalReshard);
+      if (!origOutSharding.getUnreducedAxes().empty()) {
+        convertReshardToUnreducedCollectives(finalReshard, rewriter,
+                                             symbolTable);
+      }
+    }
+    setSharding(res, replTargetSharding);
+  }
 }
 
 void insertAllReduceOnOpIfUnreducedToReplicated(
-    Operation* op, IRRewriter& rewriter, const SymbolTable& symbolTable) {
+    Operation* op, IRRewriter& rewriter, const SymbolTable& symbolTable,
+    const bool enableFullVersion = false) {
   if (op->getResults().empty()) {
     auto operandHasUnreducedAxes = [&](OpOperand& operand) {
       TensorShardingAttr sharding = getSharding(operand.get());
@@ -364,9 +611,14 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
   }
 
   TensorShardingAttr firstResultSharding = getSharding(op->getResult(0));
-  if (op->getNumResults() > 1) {
-    ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
-        getUnreducedAxes(firstResultSharding);
+  ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
+      getUnreducedAxes(firstResultSharding);
+  bool allResultsMatchFirst = llvm::all_of(op->getResults(), [&](OpResult res) {
+    TensorShardingAttr resSharding = getSharding(res);
+    return !hasDifferentMesh(firstResultSharding, resSharding) &&
+           firstResultUnreducedAxes == getUnreducedAxes(resSharding);
+  });
+  if (!enableFullVersion) {
     for (OpResult result : op->getResults().drop_front()) {
       SDY_CHECK(firstResultUnreducedAxes == getUnreducedAxes(result))
           << "Unreduced axes mismatch between results for multi-result op.";
@@ -376,13 +628,19 @@ void insertAllReduceOnOpIfUnreducedToReplicated(
   // For each operand that has unreduced axes, insert an all-reduce if
   // any of the unreduced axes isn't unreduced in the target sharding.
   //
-  // We assume all results of an op should have the same unreduced axes,
-  // so we look at the first result.
+  // We assume all results of an op should have the same unreduced axes when on
+  // a single mesh, so we look at the first result.
   rewriter.setInsertionPoint(op);
   for (OpOperand& operand : op->getOpOperands()) {
     if (TensorShardingAttr inSharding = getSharding(operand.get())) {
+      TensorShardingAttr targetSharding =
+          enableFullVersion &&
+                  (!allResultsMatchFirst ||
+                   hasDifferentMesh(inSharding, firstResultSharding))
+              ? TensorShardingAttr()
+              : firstResultSharding;
       insertAllReduceIfUnreducedToReplicated(
-          operand, inSharding, firstResultSharding, symbolTable, rewriter);
+          operand, inSharding, targetSharding, symbolTable, rewriter);
     }
   }
 }
@@ -473,7 +731,8 @@ void redistributeAxes(TensorFactorShardings& tfs, TensorMappingAttr mapping,
 AxesPerFactor processReshapeWithOverflowAxes(
     stablehlo::ReshapeOp op, ShardingProjection& shardingProjection,
     ArrayRef<TensorShardingAttr> outShardings, IRRewriter& rewriter,
-    OpShardingRuleAttr shardingRule, MeshOp meshOp) {
+    const SymbolTable& symbolTable, OpShardingRuleAttr shardingRule,
+    MeshOp meshOp, const bool enableFullVersion) {
   MeshAttr mesh = meshOp.getMesh();
   MLIRContext* ctx = op.getContext();
 
@@ -554,8 +813,7 @@ AxesPerFactor processReshapeWithOverflowAxes(
   }
   insertExplicitReshards(op, getShardings(op->getOperands()), outShardings,
                          shardingProjection, finalUpdate, rewriter,
-                         shardingRule,
-                         SymbolTable(op->getParentOfType<ModuleOp>()), meshOp);
+                         shardingRule, symbolTable, meshOp, enableFullVersion);
   // The contract of processOp requires returning AxesPerFactor representing the
   // operation's sharding.
   return commonAxes;
@@ -582,7 +840,8 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
                         ArrayRef<TensorShardingAttr> outShardings,
                         IRRewriter& rewriter, const SymbolTable& symbolTable,
                         OpShardingRuleAttr shardingRule, MeshOp meshOp,
-                        const bool onFullVersion) {
+                        const bool onFullVersion,
+                        const bool enableFullVersion) {
   // Checks if factors are sharded the same way across operands and results.
   if (onFullVersion) {
     UpdateTensorShardings updateTensorShardings =
@@ -601,9 +860,9 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
           return shardingProjection.getGreatestCommonPrefixAxes(
               shardingRule.getNumFactors());
         }
-        return processReshapeWithOverflowAxes(reshapeOp, shardingProjection,
-                                              outShardings, rewriter,
-                                              shardingRule, meshOp);
+        return processReshapeWithOverflowAxes(
+            reshapeOp, shardingProjection, outShardings, rewriter, symbolTable,
+            shardingRule, meshOp, enableFullVersion);
       }
     }
 
@@ -615,7 +874,7 @@ AxesPerFactor processOp(Operation* op, ShardingProjection& shardingProjection,
     }
     insertExplicitReshards(op, inShardings, outShardings, shardingProjection,
                            updateTensorShardings, rewriter, shardingRule,
-                           symbolTable, meshOp);
+                           symbolTable, meshOp, enableFullVersion);
     return commonAxesPerFactor;
   }
 
@@ -674,6 +933,56 @@ TensorShardingAttr getSourceShardingForSingleDeviceOperand(
         ctx, rankedType.getRank(), globalMeshOp.getName(), /*isClosed=*/true);
   }
   return operandSharding;
+}
+
+// Normalizes fully-replicated foreign-mesh operands and results of custom or
+// un-ruled operations onto a single target multi-device mesh. Conflicting
+// non-replicated shardings on custom ops are intentionally left untouched.
+void normalizeCustomOpReplicatedMeshes(
+    Operation* op, ArrayRef<TensorShardingAttr> inShardings,
+    ArrayRef<TensorShardingAttr> outShardings, const SymbolTable& symbolTable,
+    IRRewriter& rewriter) {
+  if (isa<ReshardOp>(op)) {
+    return;
+  }
+  std::optional<MeshOp> targetMeshOp = getMesh(
+      inShardings, outShardings, symbolTable, /*enableFullVersion=*/true);
+  if (!targetMeshOp.has_value()) {
+    return;
+  }
+  rewriter.setInsertionPoint(op);
+  for (OpOperand& opOperand : op->getOpOperands()) {
+    Value operand = opOperand.get();
+    auto rankedType = dyn_cast<RankedTensorType>(operand.getType());
+    TensorShardingAttr operandSharding = getSharding(operand);
+    if (!rankedType || !operandSharding ||
+        !hasDifferentMesh(operandSharding, *targetMeshOp) ||
+        !isFullyReplicatedWithoutUnreducedAxes(operandSharding)) {
+      continue;
+    }
+    TensorShardingAttr replTarget = TensorShardingAttr::getFullyReplicated(
+        rewriter.getContext(), rankedType.getRank(), targetMeshOp->getName(),
+        /*isClosed=*/true);
+    opOperand.set(
+        ReshardOp::create(rewriter, operand.getLoc(), operand, replTarget));
+  }
+  rewriter.setInsertionPointAfter(op);
+  for (OpResult res : llvm::reverse(op->getResults())) {
+    auto rankedType = dyn_cast<RankedTensorType>(res.getType());
+    TensorShardingAttr origOutSharding = getSharding(res);
+    if (!rankedType || !origOutSharding ||
+        !hasDifferentMesh(origOutSharding, *targetMeshOp) ||
+        !isFullyReplicatedWithoutUnreducedAxes(origOutSharding)) {
+      continue;
+    }
+    TensorShardingAttr replTarget = TensorShardingAttr::getFullyReplicated(
+        rewriter.getContext(), rankedType.getRank(), targetMeshOp->getName(),
+        /*isClosed=*/true);
+    auto reshardOp =
+        ReshardOp::create(rewriter, res.getLoc(), res, origOutSharding);
+    rewriter.replaceAllUsesExcept(res, reshardOp, reshardOp);
+    setSharding(res, replTarget);
+  }
 }
 
 // Inserts explicit reshards to convert all operands of the given single-device
@@ -896,24 +1205,30 @@ struct InsertExplicitReshardsPass
         // TODO(enver): Prefer resharding the owner when multiple sources are
         // sharded in the same way.
         insertExplicitReshardsOnDataFlowOp(shardableDataFlowOp, rewriter,
-                                           symbolTable, onFullVersion);
+                                           symbolTable, onFullVersion,
+                                           enableFullVersion);
         return;
       }
 
       if (CallOp callOp = dyn_cast<CallOp>(op)) {
         insertExplicitReshardsOnCallOp(callOp, rewriter, symbolTable,
-                                       onFullVersion);
+                                       onFullVersion, enableFullVersion);
         return;
       }
 
       if (auto reshardOp = dyn_cast<ReshardOp>(op)) {
         TensorShardingAttr inSharding = getSharding(reshardOp.getInput());
         TensorShardingAttr outSharding = reshardOp.getSharding();
-        if (isCrossMeshTransition(inSharding, outSharding, symbolTable)) {
+        if (enableFullVersion &&
+            isCrossMeshTransition(inSharding, outSharding, symbolTable)) {
           if (!isFullyReplicatedWithoutUnreducedAxes(inSharding) ||
               !isFullyReplicatedWithoutUnreducedAxes(outSharding)) {
-            insertAllReduceOnOpIfUnreducedToReplicated(reshardOp, rewriter,
-                                                       symbolTable);
+            if (inSharding && !inSharding.getUnreducedAxes().empty()) {
+              rewriter.setInsertionPoint(reshardOp);
+              insertAllReduceIfUnreducedToReplicated(
+                  reshardOp->getOpOperand(0), inSharding, TensorShardingAttr(),
+                  symbolTable, rewriter);
+            }
             inSharding = getSharding(reshardOp.getInput());
             rewriter.setInsertionPoint(reshardOp);
             Value pivot =
@@ -927,6 +1242,42 @@ struct InsertExplicitReshardsPass
             }
             return;
           }
+        } else if (enableFullVersion &&
+                   isSameAxesDifferentDeviceIdsMatchingUnreduced(
+                       inSharding, outSharding, symbolTable)) {
+          // Keep 1-step same-axes different-device-ids permutes with matching
+          // unreduced axes and reduction ops for ReshardToCollectivesPass.
+          return;
+        } else if (enableFullVersion &&
+                   (hasDifferentMesh(inSharding, outSharding) || !inSharding) &&
+                   (!getUnreducedAxes(inSharding).empty() ||
+                    !getUnreducedAxes(outSharding).empty())) {
+          rewriter.setInsertionPoint(reshardOp);
+          if (inSharding && !inSharding.getUnreducedAxes().empty()) {
+            inSharding = insertAllReduceIfUnreducedToReplicated(
+                reshardOp->getOpOperand(0), inSharding, TensorShardingAttr(),
+                symbolTable, rewriter);
+          }
+          if (!outSharding.getUnreducedAxes().empty()) {
+            if (auto rankedType =
+                    dyn_cast<RankedTensorType>(reshardOp.getType())) {
+              TensorShardingAttr movedSharding =
+                  isAllDeviceMesh(inSharding, symbolTable) &&
+                          isAllDeviceMesh(outSharding, symbolTable)
+                      ? TensorShardingAttr::get(rewriter.getContext(),
+                                                outSharding.getMeshOrRef(),
+                                                inSharding.getDimShardings(),
+                                                /*replicated_axes=*/{},
+                                                /*unreduced_axes=*/{})
+                      : TensorShardingAttr::getFullyClosed(
+                            rewriter.getContext(), rankedType.getRank(),
+                            outSharding.getMeshOrRef());
+              auto movedReshard =
+                  ReshardOp::create(rewriter, reshardOp.getLoc(),
+                                    reshardOp.getInput(), movedSharding);
+              reshardOp->setOperand(0, movedReshard);
+            }
+          }
         }
       }
 
@@ -934,7 +1285,8 @@ struct InsertExplicitReshardsPass
         return;
       }
 
-      insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable);
+      insertAllReduceOnOpIfUnreducedToReplicated(op, rewriter, symbolTable,
+                                                 enableFullVersion);
 
       SmallVector<TensorShardingAttr> inShardings =
           getShardings(op->getOperands());
@@ -957,23 +1309,33 @@ struct InsertExplicitReshardsPass
 
       // TODO(b/434668939): Enable explicit reshards on custom sharding rules.
       if (!shardingRule || shardingRule.isCustom()) {
+        if (enableFullVersion) {
+          normalizeCustomOpReplicatedMeshes(op, inShardings, outShardings,
+                                            symbolTable, rewriter);
+        }
         // Insert explicit reshards only on operations with sharding rules,
         // since all the operations of interest got their sharding rules.
         return;
       }
 
       std::optional<MeshOp> meshOp =
-          getMesh(inShardings, outShardings, symbolTable);
+          getMesh(inShardings, outShardings, symbolTable, enableFullVersion);
       if (!meshOp.has_value()) {
         return;
+      }
+
+      if (enableFullVersion) {
+        prePivotForeignMeshes(op, *meshOp, symbolTable, rewriter);
+        inShardings = getShardings(op->getOperands());
+        outShardings = getShardings(op->getResults());
       }
 
       ShardingProjection shardingProjection = ShardingProjection::build(
           inShardings, outShardings, shardingRule, meshOp->getMesh(),
           /*closedIfMissing=*/true);
-      AxesPerFactor commonAxesPerFactor =
-          processOp(op, shardingProjection, inShardings, outShardings, rewriter,
-                    symbolTable, shardingRule, *meshOp, onFullVersion);
+      AxesPerFactor commonAxesPerFactor = processOp(
+          op, shardingProjection, inShardings, outShardings, rewriter,
+          symbolTable, shardingRule, *meshOp, onFullVersion, enableFullVersion);
       // TODO(b/440055868): Insert a reshard from unreduced to replicated axes.
       insertAllReducesForReductionFactors(
           op, shardingProjection, commonAxesPerFactor, shardingRule, *meshOp,
