@@ -649,3 +649,40 @@ func.func @scatter_sorted_multi_dim_sharded_clears_indices_are_sorted(
   return %0 : tensor<4x4x2xf32>
 }
 
+// CHECK-LABEL: func @scatter_complex_mul_sharded_batch_dim(
+// CHECK-SAME: %[[ARG0:.*]]: tensor<4x2xcomplex<f32>>,
+// CHECK-SAME: %[[ARG1:.*]]: tensor<2x1xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+// CHECK-SAME: %[[ARG2:.*]]: tensor<2x2xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+func.func @scatter_complex_mul_sharded_batch_dim(
+    %arg0: tensor<4x2xcomplex<f32>>,
+    %arg1: tensor<4x1xi32> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>},
+    %arg2: tensor<4x2xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_2_4, [{"x"}, {}]>})
+    -> tensor<4x2xcomplex<f32>> {
+  // CHECK: %[[IDENTITY:.*]] = stablehlo.constant dense<(1.000000e+00,0.000000e+00)> : tensor<complex<f32>>
+  // CHECK: %[[INIT_BCAST:.*]] = stablehlo.broadcast_in_dim %[[IDENTITY]], dims = [] : (tensor<complex<f32>>) -> tensor<4x2xcomplex<f32>>
+  // CHECK: %[[SELECT:.*]] = stablehlo.select %{{.*}}, %[[ARG0]], %[[INIT_BCAST]] : tensor<i1>, tensor<4x2xcomplex<f32>>
+  // CHECK: %[[SCATTER:.*]] = "stablehlo.scatter"(%[[SELECT]], %[[ARG1]], %[[ARG2]])
+  // CHECK: %[[RES:.*]] = "stablehlo.all_reduce"(%[[SCATTER]]) <{
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_2_4, axes = [#stablehlo.axis_ref<name = "x">]>,
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK-SAME: }> ({
+  // CHECK-NEXT: ^bb0(%[[LHS:.*]]: tensor<complex<f32>>, %[[RHS:.*]]: tensor<complex<f32>>):
+  // CHECK-NEXT:   %[[MUL:.*]] = stablehlo.multiply %[[LHS]], %[[RHS]] : tensor<complex<f32>>
+  // CHECK-NEXT:   stablehlo.return %[[MUL]] : tensor<complex<f32>>
+  // CHECK-NEXT: }) : (tensor<4x2xcomplex<f32>>) -> tensor<4x2xcomplex<f32>>
+  // CHECK-NEXT: return %[[RES]] : tensor<4x2xcomplex<f32>>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+  ^bb0(%lhs: tensor<complex<f32>>, %rhs: tensor<complex<f32>>):
+    %prod = stablehlo.multiply %lhs, %rhs : tensor<complex<f32>>
+    stablehlo.return %prod : tensor<complex<f32>>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [1],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [0],
+      index_vector_dim = 1>,
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2_4, [{}, {}]>]>
+  } : (tensor<4x2xcomplex<f32>>, tensor<4x1xi32>, tensor<4x2xcomplex<f32>>) -> tensor<4x2xcomplex<f32>>
+  return %0 : tensor<4x2xcomplex<f32>>
+}
+

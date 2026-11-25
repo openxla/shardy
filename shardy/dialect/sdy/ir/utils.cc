@@ -45,6 +45,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
@@ -1176,8 +1177,11 @@ Operation* getCommonSupportedReductionOp(stablehlo::ScatterOp scatter) {
     Type elementType = tensorType.getElementType();
     bool isLogical = elementType.isInteger(1) &&
                      isa<stablehlo::AndOp, stablehlo::OrOp>(curOp);
-    if (!isLogical && !isa<stablehlo::AddOp, stablehlo::MulOp, stablehlo::MaxOp,
-                           stablehlo::MinOp>(curOp)) {
+    // Complex types have no total order for min/max reductions.
+    bool isMinMax = isa<stablehlo::MaxOp, stablehlo::MinOp>(curOp) &&
+                    !isa<ComplexType>(elementType);
+    if (!isLogical && !isMinMax &&
+        !isa<stablehlo::AddOp, stablehlo::MulOp>(curOp)) {
       return nullptr;
     }
 

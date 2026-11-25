@@ -941,6 +941,41 @@ TEST_F(ExportUtilsTest,
   EXPECT_TRUE(isCommFree(5, "y"));
   EXPECT_TRUE(isCommFree(6, "y"));
 }
+
+TEST_F(ExportUtilsTest, ComplexReductionTypeAndIdentity) {
+  OwningOpRef<ModuleOp> module = mlir::parseSourceString<ModuleOp>(
+      R"mlir(
+        func.func @complex_reduces(%arg0: tensor<4xcomplex<f32>>, %init: tensor<complex<f32>>) -> (tensor<complex<f32>>, tensor<complex<f32>>, tensor<complex<f32>>) {
+          %sum = stablehlo.reduce(%arg0 init: %init) applies stablehlo.add across dimensions = [0] : (tensor<4xcomplex<f32>>, tensor<complex<f32>>) -> tensor<complex<f32>>
+          %max = stablehlo.reduce(%arg0 init: %init) applies stablehlo.maximum across dimensions = [0] : (tensor<4xcomplex<f32>>, tensor<complex<f32>>) -> tensor<complex<f32>>
+          %min = stablehlo.reduce(%arg0 init: %init) applies stablehlo.minimum across dimensions = [0] : (tensor<4xcomplex<f32>>, tensor<complex<f32>>) -> tensor<complex<f32>>
+          return %sum, %max, %min : tensor<complex<f32>>, tensor<complex<f32>>, tensor<complex<f32>>
+        }
+      )mlir",
+      &context);
+  ASSERT_TRUE(module);
+  SmallVector<stablehlo::ReduceOp> reduces(
+      cast<func::FuncOp>(module->lookupSymbol("complex_reduces"))
+          .getOps<stablehlo::ReduceOp>());
+  ASSERT_EQ(reduces.size(), 3);
+  EXPECT_EQ(getReductionType(reduces[0]), ReductionOp::SUM);
+  EXPECT_EQ(getReductionType(reduces[1]), std::nullopt);
+  EXPECT_EQ(getReductionType(reduces[2]), std::nullopt);
+
+  OpBuilder builder(&context);
+  Type c64Type = ComplexType::get(builder.getF32Type());
+  Attribute sumIdentity =
+      getReductionIdentityAttr(c64Type, ReductionOp::SUM, builder);
+  EXPECT_EQ(sumIdentity, builder.getArrayAttr({builder.getF32FloatAttr(0.0f),
+                                               builder.getF32FloatAttr(0.0f)}));
+  EXPECT_TRUE(
+      DenseElementsAttr::get(RankedTensorType::get({}, c64Type), sumIdentity));
+  EXPECT_FALSE(getReductionIdentityAttr(c64Type, ReductionOp::MAX, builder));
+  EXPECT_FALSE(getReductionIdentityAttr(c64Type, ReductionOp::MIN, builder));
+  EXPECT_FALSE(getReductionIdentityAttr(
+      ComplexType::get(Float8E8M0FNUType::get(&context)), ReductionOp::SUM,
+      builder));
+}
 }  // namespace
 }  // namespace sdy
 }  // namespace mlir

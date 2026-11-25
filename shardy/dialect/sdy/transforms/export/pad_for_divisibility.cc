@@ -1294,7 +1294,7 @@ class StablehloConvolutionOpPattern
     }
 
     auto inferredResultType = RankedTensorType::get(
-        inferredReturnShapes[0].getDims(), lhsOrigType.getElementType());
+        inferredReturnShapes[0].getDims(), op.getType().getElementType());
     Value result = op.getResult();
     Type paddedResultType = getDivisiblePaddedType(
         result.getType(), getSharding(result), converter->getSymbolTable());

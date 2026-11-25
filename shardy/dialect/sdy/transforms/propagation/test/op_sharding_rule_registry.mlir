@@ -1152,6 +1152,25 @@ func.func @scatter_unsupported_multi_reduction_op(%arg0: tensor<3x4x2xi32>,
   return %0#0, %0#1 : tensor<3x4x2xi32>, tensor<3x4x2xf32>
 }
 
+// CHECK-LABEL: @scatter_complex_max_need_replication
+func.func @scatter_complex_max_need_replication(%arg0: tensor<3x4x2xcomplex<f32>>, %arg1: tensor<2x3x2xi64>, %arg2: tensor<2x3x2x2xcomplex<f32>>) -> tensor<3x4x2xcomplex<f32>> {
+  // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([n, k, m], [i, j, o], [i, j, l, m])->([n, k, m]) {i=2, j=3, k=4, l=2, m=2, n=3, o=2} need_replication={i, j, k, l, o}>
+  %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) ({
+    ^bb0(%arg3: tensor<complex<f32>>, %arg4: tensor<complex<f32>>):
+      %1 = stablehlo.maximum %arg3, %arg4 : tensor<complex<f32>>
+      stablehlo.return %1 : tensor<complex<f32>>
+  }) {
+    scatter_dimension_numbers = #stablehlo.scatter<
+      update_window_dims = [2, 3],
+      inserted_window_dims = [0],
+      scatter_dims_to_operand_dims = [1, 0],
+      index_vector_dim = 2>,
+    indices_are_sorted = false,
+    unique_indices = false
+  } : (tensor<3x4x2xcomplex<f32>>, tensor<2x3x2xi64>, tensor<2x3x2x2xcomplex<f32>>) -> tensor<3x4x2xcomplex<f32>>
+  return %0 : tensor<3x4x2xcomplex<f32>>
+}
+
 // CHECK-LABEL: func @select
 func.func @select(%arg0: tensor<4x8xi1>, %arg1: tensor<4x8xf32>, %arg2: tensor<4x8xf32>) -> tensor<4x8xf32> {
   // CHECK: sdy.sharding_rule = #sdy.op_sharding_rule<([i, j], [i, j], [i, j])->([i, j]) {i=4, j=8}>

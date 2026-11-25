@@ -38,6 +38,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
@@ -790,12 +791,14 @@ std::optional<ReductionOp> getReductionType(Region& region) {
     if (!defOp) {
       return std::nullopt;
     }
+    // Complex types have no total order for min/max reductions.
+    bool isComplex = isa<ComplexType>(getElementTypeOrSelf(operand.getType()));
     std::optional<ReductionOp> curOpType;
     if (isa<stablehlo::AddOp>(defOp)) {
       curOpType = ReductionOp::SUM;
-    } else if (isa<stablehlo::MaxOp>(defOp)) {
+    } else if (isa<stablehlo::MaxOp>(defOp) && !isComplex) {
       curOpType = ReductionOp::MAX;
-    } else if (isa<stablehlo::MinOp>(defOp)) {
+    } else if (isa<stablehlo::MinOp>(defOp) && !isComplex) {
       curOpType = ReductionOp::MIN;
     } else {
       return std::nullopt;
@@ -959,6 +962,15 @@ Attribute getReductionIdentityAttr(Type elementType, ReductionOp reductionOp,
             intType, isUnsigned ? APInt::getMinValue(width)
                                 : APInt::getSignedMinValue(width));
     }
+  }
+  if (auto complexType = dyn_cast<ComplexType>(elementType)) {
+    // Complex types only have an additive identity (0, 0).
+    if (reductionOp != ReductionOp::SUM) {
+      return Attribute();
+    }
+    Attribute zeroAttr = getReductionIdentityAttr(
+        complexType.getElementType(), ReductionOp::SUM, builder);
+    return zeroAttr ? builder.getArrayAttr({zeroAttr, zeroAttr}) : Attribute();
   }
   SDY_CHECK(false) << "Unsupported element type for reduction identity";
 }

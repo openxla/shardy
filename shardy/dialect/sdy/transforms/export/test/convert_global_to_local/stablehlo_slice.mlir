@@ -325,3 +325,24 @@ func.func @all_gather_slice_f8e8m0fnu_bitcasts_to_ui8(
   %1 = stablehlo.slice %0 [0:2] : (tensor<4xf8E8M0FNU>) -> tensor<2xf8E8M0FNU>
   return %1 : tensor<2xf8E8M0FNU>
 }
+
+// CHECK-LABEL: func @all_gather_slice_to_1_complex
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<1xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<1xcomplex<f32>>
+func.func @all_gather_slice_to_1_complex(%arg0: tensor<2xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh_1_2, [{"y"}]>}) -> tensor<1xcomplex<f32>> {
+  // CHECK-NEXT: %[[PID:.*]] = stablehlo.partition_id : tensor<ui32>
+  // CHECK-NEXT: %[[NON_LEADER:.*]] = stablehlo.convert %[[PID]] : (tensor<ui32>) -> tensor<i1>
+  // CHECK-NEXT: %[[ZERO:.*]] = stablehlo.constant dense<(0.000000e+00,0.000000e+00)> : tensor<1xcomplex<f32>>
+  // CHECK-NEXT: %[[MASKED:.*]] = stablehlo.select %[[NON_LEADER]], %[[ZERO]], %[[ARG0]] : tensor<i1>, tensor<1xcomplex<f32>>
+  // CHECK-NEXT: %[[AR:.*]] = "stablehlo.all_reduce"(%[[MASKED]]) <{
+  // CHECK-SAME:   replica_groups = #stablehlo.replica_group_mesh_axes<mesh = @mesh_1_2, axes = [#stablehlo.axis_ref<name = "y">]>,
+  // CHECK-SAME:   use_global_device_ids
+  // CHECK-SAME: }> ({
+  // CHECK-NEXT: ^bb0(%[[LHS:.*]]: tensor<complex<f32>>, %[[RHS:.*]]: tensor<complex<f32>>):
+  // CHECK-NEXT:   %[[ADD:.*]] = stablehlo.add %[[LHS]], %[[RHS]] : tensor<complex<f32>>
+  // CHECK-NEXT:   stablehlo.return %[[ADD]] : tensor<complex<f32>>
+  // CHECK-NEXT: }) : (tensor<1xcomplex<f32>>) -> tensor<1xcomplex<f32>>
+  // CHECK-NEXT: return %[[AR]] : tensor<1xcomplex<f32>>
+  %0 = sdy.all_gather [{"y"}] %arg0 out_sharding=<@mesh_1_2, [{}]> : tensor<2xcomplex<f32>>
+  %1 = stablehlo.slice %0 [0:1] : (tensor<2xcomplex<f32>>) -> tensor<1xcomplex<f32>>
+  return %1 : tensor<1xcomplex<f32>>
+}

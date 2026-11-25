@@ -485,6 +485,27 @@ func.func @padded_conv_non_zero_batch_padding_not_marked_zero(%arg0: tensor<3x3x
   return %red : tensor<2x1xf32>
 }
 
+// CHECK-LABEL: func @padded_conv_mixed_precision_complex
+func.func @padded_conv_mixed_precision_complex(%arg0: tensor<1x4x7x3xcomplex<f32>>, %arg1: tensor<3x3x3x2xcomplex<f32>>) -> tensor<1x2x5x2xcomplex<f64>> {
+  // CHECK: %[[CONV:.*]] = stablehlo.convolution
+  // CHECK-SAME: : (tensor<1x4x8x4xcomplex<f32>>, tensor<3x3x4x2xcomplex<f32>>) -> tensor<1x2x6x2xcomplex<f64>>
+  // CHECK: %[[TRIM:.*]] = stablehlo.slice %[[CONV]] [0:1, 0:2, 0:5, 0:2] {{.*}} : (tensor<1x2x6x2xcomplex<f64>>) -> tensor<1x2x5x2xcomplex<f64>>
+  // CHECK: return %[[TRIM]] : tensor<1x2x5x2xcomplex<f64>>
+  %sliced_lhs = sdy.all_slice [{}, {}, {"x"}, {"y"}] %arg0 out_sharding=<@mesh_4_2, [{}, {}, {"x"}, {"y"}]> : tensor<1x4x7x3xcomplex<f32>>
+  %sliced_rhs = sdy.all_slice [{}, {}, {"y"}, {}] %arg1 out_sharding=<@mesh_4_2, [{}, {}, {"y"}, {}]> : tensor<3x3x3x2xcomplex<f32>>
+  %conv_out = stablehlo.convolution(%sliced_lhs, %sliced_rhs)
+    dim_numbers = [b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f],
+    window = {
+      stride = [1, 1],
+      pad = [[0, 0], [0, 0]],
+      lhs_dilate = [1, 1],
+      rhs_dilate = [1, 1],
+      reverse = [0, 0]
+    } {batch_group_count = 1 : i64, feature_group_count = 1 : i64, sdy.sharding = #sdy.sharding_per_value<[<@mesh_4_2, [{}, {}, {}, {}]>]>}
+    : (tensor<1x4x7x3xcomplex<f32>>, tensor<3x3x3x2xcomplex<f32>>) -> tensor<1x2x5x2xcomplex<f64>>
+  return %conv_out : tensor<1x2x5x2xcomplex<f64>>
+}
+
 // -----
 
 sdy.mesh @mesh_4_2 = <["x"=4, "y"=2]>

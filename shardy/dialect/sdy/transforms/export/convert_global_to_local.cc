@@ -3544,6 +3544,15 @@ Value getScatterReductionIdentity(stablehlo::ScatterOp scatter, OpBuilder& b) {
               DenseElementsAttr::get(scalarType,
                                      b.getFloatAttr(elementType, 1.0)));
         }
+        if (auto complexType = dyn_cast<ComplexType>(elementType)) {
+          // Complex multiplicative identity is (1, 0).
+          Type compType = complexType.getElementType();
+          return stablehlo::ConstantOp::create(
+              b, loc,
+              DenseElementsAttr::get(
+                  scalarType, b.getArrayAttr({b.getFloatAttr(compType, 1.0),
+                                              b.getFloatAttr(compType, 0.0)})));
+        }
         return stablehlo::ConstantOp::create(
             b, loc,
             DenseElementsAttr::get(scalarType,
@@ -3788,7 +3797,8 @@ class AllGatherAndSliceViaAllReducePattern
     if (!mesh || axes.empty() ||
         !agOutSharding.getDimSharding(gatherDim).emptyAxes() ||
         agInputType != localResultType ||
-        (!isa<FloatType, IntegerType>(elemTy) || elemTy.isInteger(1))) {
+        (!isa<FloatType, IntegerType, ComplexType>(elemTy) ||
+         elemTy.isInteger(1))) {
       return failure();
     }
     ArrayRef<int64_t> starts = op.getStartIndices();

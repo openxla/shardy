@@ -209,3 +209,14 @@ func.func @reduce_scalar_result_full_mesh_not_split(%arg0: tensor<6x12xf32> {sdy
   %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.add across dimensions = [0, 1] : (tensor<6x12xf32>, tensor<f32>) -> tensor<f32>
   return %1 : tensor<f32>
 }
+
+// CHECK-LABEL: func @reduce_complex_max_without_unreduced
+func.func @reduce_complex_max_without_unreduced(%arg0: tensor<2x64x13xcomplex<f32>> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"x"}, {}]>}) -> tensor<2x13xcomplex<f32>> {
+  // CHECK:      %[[REDUCE:.*]] = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>}
+  // CHECK-NOT:  unreduced
+  // CHECK-NOT:  sdy.all_reduce
+  // CHECK-NEXT: return %[[REDUCE]]
+  %0 = stablehlo.constant dense<(0.000000e+00,0.000000e+00)> : tensor<complex<f32>>
+  %1 = stablehlo.reduce(%arg0 init: %0) applies stablehlo.maximum across dimensions = [1] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {}]>]>} : (tensor<2x64x13xcomplex<f32>>, tensor<complex<f32>>) -> tensor<2x13xcomplex<f32>>
+  return %1 : tensor<2x13xcomplex<f32>>
+}
