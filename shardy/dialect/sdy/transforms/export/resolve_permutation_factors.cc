@@ -2044,8 +2044,288 @@ Value selectRotatedWithRightPadding(Location loc, Value rotated0,
   return selected;
 }
 
+// Forward declaration for constant-offset concatenate HALO lowering.
+FailureOr<Value> resolvePadOp(stablehlo::PadOp padOp, ResolutionState& state);
+
+// Returns true if every axis referenced by `sharding` can coexist with all
+// `manualAxesAttrs` in an `sdy.manual_computation`.
+bool canShardingCoexistWithManualAxes(TensorShardingAttr sharding,
+                                      ArrayRef<AxisRefAttr> manualAxesAttrs) {
+  if (!sharding) {
+    return true;
+  }
+  for (AxisRefAttr manualAxis : manualAxesAttrs) {
+    if (sharding.anyOfAxisRef([&](AxisRefAttr axisRef) {
+          return !axisRef.canCoexist(manualAxis);
+        })) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Lowers a sharded `stablehlo.concatenate` with constant operand offsets via
+// per-operand HALO `stablehlo.pad` and elementwise `stablehlo.select` when the
+// largest operand starts within the first output shard (`offset <= sOut`), all
+// other non-empty operands have size `<= sOut`, and every operand requires at
+// most 1 HALO neighbor hop along `dim` (with at most 4 total hops across all
+// operands).
+LogicalResult handleConcatenateWithConstantOffsets(
+    stablehlo::ConcatenateOp concatOp, ResolutionState& state) {
+  if (concatOp->getParentOfType<ManualComputationOp>()) {
+    return failure();
+  }
+  ValueRange inputs = concatOp.getInputs();
+  if (inputs.size() < 2) {
+    return failure();
+  }
+  RankedTensorType outType = concatOp.getType();
+  if (!outType.hasStaticShape()) {
+    return failure();
+  }
+  int64_t dim = concatOp.getDimension();
+  TensorShardingAttr concatSharding = getSharding(concatOp.getResult());
+  if (concatSharding && !concatSharding.getUnreducedAxes().empty()) {
+    return failure();
+  }
+
+  auto hasShardedConcatDim = [&](TensorShardingAttr s) {
+    if (isFullyReplicated(s) || !s.getUnreducedAxes().empty()) {
+      return false;
+    }
+    MeshAttr m = s.getMesh(state.symbolTable);
+    return m && !m.isSingleDevice() &&
+           s.getDimShardings()[dim].getShardedSize(m) > 1;
+  };
+
+  TensorShardingAttr sharding = concatSharding;
+  ReshardOp outReshard = nullptr;
+  if (!hasShardedConcatDim(sharding)) {
+    // When `sdy-insert-explicit-reshards` runs before this pass, non-slice
+    // concatenations have `kNeedReplication` on `dim`, so `dim` is unsharded
+    // on `concatOp` and re-sharded by a single-use `sdy.reshard` user.
+    if (!concatOp->hasOneUse()) {
+      return failure();
+    }
+    outReshard = dyn_cast<ReshardOp>(*concatOp->user_begin());
+    if (!outReshard || !hasShardedConcatDim(outReshard.getSharding())) {
+      return failure();
+    }
+    sharding = outReshard.getSharding();
+    // The reshard may only shard `dim`; every other dim must already match.
+    if (concatSharding &&
+        (concatSharding.getMeshOrRef() != sharding.getMeshOrRef() ||
+         !concatSharding.getDimShardings()[dim].getAxes().empty())) {
+      return failure();
+    }
+    for (int64_t d = 0; d < outType.getRank(); ++d) {
+      ArrayRef<AxisRefAttr> concatAxes;
+      if (concatSharding) {
+        concatAxes = concatSharding.getDimShardings()[d].getAxes();
+      }
+      if (d != dim && concatAxes != sharding.getDimShardings()[d].getAxes()) {
+        return failure();
+      }
+    }
+  }
+
+  MeshAttr mesh = sharding.getMesh(state.symbolTable);
+  int64_t shardCount = sharding.getDimShardings()[dim].getShardedSize(mesh);
+
+  IRRewriter& rewriter = state.rewriter;
+  if (!getZeroAttr(RankedTensorType::get({}, outType.getElementType()),
+                   rewriter)) {
+    return failure();
+  }
+
+  struct PieceInfo {
+    Value input;
+    int64_t offset;
+    int64_t dimSize;
+  };
+  SmallVector<PieceInfo> nonEmpty;
+  SmallVector<Operation*> candidateInReshards;
+  nonEmpty.reserve(inputs.size());
+  int64_t runningOffset = 0;
+  int64_t largestIdx = -1;
+  int64_t largestSize = -1;
+  for (Value input : inputs) {
+    auto inType = dyn_cast<RankedTensorType>(input.getType());
+    if (!inType || !inType.hasStaticShape()) {
+      return failure();
+    }
+    int64_t dimSize = inType.getDimSize(dim);
+    if (dimSize == 0) {
+      TensorShardingAttr inSharding = getSharding(input);
+      if (inSharding && !inSharding.getUnreducedAxes().empty()) {
+        return failure();
+      }
+      if (auto inReshard = input.getDefiningOp<ReshardOp>()) {
+        candidateInReshards.push_back(inReshard);
+      }
+      continue;
+    }
+    Value rawInput = input;
+    if (!sharding.isEquivalent(getSharding(rawInput))) {
+      auto inReshard = rawInput.getDefiningOp<ReshardOp>();
+      if (!outReshard || !inReshard ||
+          !sharding.isEquivalent(getSharding(inReshard.getInput()))) {
+        return failure();
+      }
+      rawInput = inReshard.getInput();
+      candidateInReshards.push_back(inReshard);
+    }
+    if (dimSize > largestSize) {
+      largestSize = dimSize;
+      largestIdx = static_cast<int64_t>(nonEmpty.size());
+    }
+    nonEmpty.push_back({rawInput, runningOffset, dimSize});
+    runningOffset += dimSize;
+  }
+
+  auto replaceTargetWith = [&](Value replacement) {
+    if (outReshard) {
+      // Defer erasing `outReshard` (which follows `concatOp` in the block) so
+      // the active `moduleOp.walk` iterator remains valid.
+      outReshard.replaceAllUsesWith(replacement);
+      state.opsToErase.push_back(outReshard);
+      state.opsToErase.push_back(concatOp);
+    } else {
+      rewriter.replaceOp(concatOp, replacement);
+    }
+    llvm::append_range(state.opsToErase, candidateInReshards);
+  };
+
+  int64_t fullSize = outType.getDimSize(dim);
+  if (fullSize <= 0 || nonEmpty.empty()) {
+    return failure();
+  }
+  if (nonEmpty.size() == 1) {
+    replaceTargetWith(nonEmpty[0].input);
+    return success();
+  }
+
+  int64_t sOut = llvm::divideCeil(fullSize, shardCount);
+  constexpr int64_t kMaxHaloOffset = std::numeric_limits<int32_t>::max();
+  if (nonEmpty[largestIdx].offset > sOut || fullSize > kMaxHaloOffset ||
+      sOut > kMaxHaloOffset / shardCount ||
+      getPaddedDimSize(fullSize, shardCount) + 2 * sOut > kMaxHaloOffset) {
+    return failure();
+  }
+
+  llvm::SmallDenseSet<AxisRefAttr> manualAxes;
+  for (DimensionShardingAttr dimSharding : sharding.getDimShardings()) {
+    if (dimSharding.getShardedSize(mesh) > 1) {
+      manualAxes.insert(dimSharding.getAxes().begin(),
+                        dimSharding.getAxes().end());
+    }
+  }
+  SmallVector<AxisRefAttr> manualAxesAttrs =
+      getManualAxesAttrs(mesh, manualAxes);
+  if (!canShardingCoexistWithManualAxes(sharding, manualAxesAttrs)) {
+    return failure();
+  }
+
+  int64_t totalHops = 0;
+  for (auto [idx, piece] : llvm::enumerate(nonEmpty)) {
+    if ((static_cast<int64_t>(idx) != largestIdx && piece.dimSize > sOut) ||
+        !canShardingCoexistWithManualAxes(getSharding(piece.input),
+                                          manualAxesAttrs)) {
+      return failure();
+    }
+    int64_t sIn = llvm::divideCeil(piece.dimSize, shardCount);
+    DimExchangeInfo dimInfo =
+        getDimExchangeInfo(shardCount, sIn, sOut, /*sFootprint=*/sOut,
+                           /*padLow=*/piece.offset, /*stride=*/1,
+                           /*baseDilation=*/1, piece.dimSize);
+    if (!dimInfo.canUseHalo || dimInfo.leftHops > 1 || dimInfo.rightHops > 1) {
+      return failure();
+    }
+    totalHops += dimInfo.leftHops + dimInfo.rightHops;
+    if (totalHops > 4) {
+      return failure();
+    }
+  }
+
+  Location loc = concatOp.getLoc();
+  rewriter.setInsertionPoint(concatOp);
+  int64_t rank = outType.getRank();
+  Value zero =
+      createZeroScalarConstant(loc, outType.getElementType(), rewriter);
+
+  auto padAndResolvePiece = [&](const PieceInfo& piece) -> Value {
+    SmallVector<int64_t> low(rank, 0), high(rank, 0), interior(rank, 0);
+    low[dim] = piece.offset;
+    high[dim] = fullSize - piece.offset - piece.dimSize;
+    rewriter.setInsertionPoint(concatOp);
+    auto padOp = stablehlo::PadOp::create(
+        rewriter, loc, outType, piece.input, zero,
+        rewriter.getDenseI64ArrayAttr(low), rewriter.getDenseI64ArrayAttr(high),
+        rewriter.getDenseI64ArrayAttr(interior));
+    setSharding(padOp.getResult(), sharding);
+    FailureOr<Value> resolved = resolvePadOp(padOp, state);
+    SDY_CHECK(succeeded(resolved));
+    return *resolved;
+  };
+
+  Value current = padAndResolvePiece(nonEmpty[largestIdx]);
+
+  rewriter.setInsertionPoint(concatOp);
+  bool useI64 = requires64BitIndex(outType);
+  Type idxElemTy = getIndexOrOffsetType(rewriter, useI64);
+  auto iotaType = RankedTensorType::get(outType.getShape(), idxElemTy);
+  Value iota = stablehlo::IotaOp::create(rewriter, loc, iotaType,
+                                         rewriter.getI64IntegerAttr(dim));
+  setSharding(iota, sharding);
+
+  auto createBroadcastBound = [&](int64_t bound) -> Value {
+    Value scalar = createScalarIntConstant(loc, idxElemTy, bound, rewriter);
+    Value bcast = stablehlo::BroadcastInDimOp::create(
+        rewriter, loc, iotaType, scalar, rewriter.getDenseI64ArrayAttr({}));
+    setSharding(bcast, sharding);
+    return bcast;
+  };
+
+  for (auto [idx, piece] : llvm::enumerate(nonEmpty)) {
+    if (static_cast<int64_t>(idx) == largestIdx) {
+      continue;
+    }
+    Value paddedPiece = padAndResolvePiece(piece);
+    rewriter.setInsertionPoint(concatOp);
+    // Select `paddedPiece` where `offset <= iota < offset + dimSize`, skipping
+    // a bound that is trivially true at either end of `dim`.
+    auto compareIota = [&](int64_t bound, stablehlo::ComparisonDirection dir) {
+      Value cmp = stablehlo::CompareOp::create(
+          rewriter, loc, iota, createBroadcastBound(bound), dir);
+      setSharding(cmp, sharding);
+      return cmp;
+    };
+    Value pred;
+    if (piece.offset > 0) {
+      pred = compareIota(piece.offset, stablehlo::ComparisonDirection::GE);
+    }
+    if (piece.offset + piece.dimSize < fullSize) {
+      Value lt = compareIota(piece.offset + piece.dimSize,
+                             stablehlo::ComparisonDirection::LT);
+      if (pred) {
+        pred = stablehlo::AndOp::create(rewriter, loc, pred, lt);
+        setSharding(pred, sharding);
+      } else {
+        pred = lt;
+      }
+    }
+    current = stablehlo::SelectOp::create(rewriter, loc, outType, pred,
+                                          paddedPiece, current);
+    setSharding(current, sharding);
+  }
+
+  replaceTargetWith(current);
+  return success();
+}
+
 // Implements rotate-right concatenate(slice(x, [k:N]), slice(x, [0:k])) along a
-// sharded dimension using cyclic collective-permutes:
+// sharded dimension using cyclic collective-permutes, or falls back to
+// constant-offset HALO padding when eligible:
 //
 // 1. Align logical input shard sizes via high-side padding.
 // 2. Inside `sdy.manual_computation`, cyclically shift the
@@ -2060,7 +2340,7 @@ LogicalResult handleConcatenateOp(stablehlo::ConcatenateOp concatOp,
   std::optional<int64_t> amountOpt =
       findRotateRightPattern(concatOp, state.symbolTable);
   if (!amountOpt) {
-    return failure();
+    return handleConcatenateWithConstantOffsets(concatOp, state);
   }
   int64_t amount = *amountOpt;
   int64_t dim = concatOp.getDimension();
@@ -2994,26 +3274,28 @@ Value handleReplicatedPadDims(
 //              baseOffset = -padLow + sIn + sOut.
 // 3. Implement replicated padding dimensions.
 // 4. Trim final tensor shape to match expected output shape.
-LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
+FailureOr<Value> resolvePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
   Value origInput = padOp.getOperand();
   TensorShardingAttr inSharding = getSharding(origInput);
   auto origInputType = mlir::dyn_cast<RankedTensorType>(origInput.getType());
   if (isFullyReplicated(inSharding) || !origInputType) {
-    return success();
+    return padOp.getResult();
   }
 
   SymbolTable& symbolTable = state.symbolTable;
   MeshAttr mesh = inSharding.getMesh(symbolTable);
   if (!mesh || mesh.isSingleDevice()) {
-    return success();
+    return padOp.getResult();
   }
 
   DataExchangeInfo info =
       getPadDataExchangeInfo(padOp, inSharding, mesh, origInputType);
   if (info.manualAxes.empty() || !info.needsComm()) {
-    return success();
+    return padOp.getResult();
   }
-  if (!canUseHalo(info)) {
+  if (!canUseHalo(info) ||
+      !canShardingCoexistWithManualAxes(
+          inSharding, getManualAxesAttrs(mesh, info.manualAxes))) {
     return failure();
   }
 
@@ -3049,7 +3331,11 @@ LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
       sliceHighSideToType(loc, result, padOp.getType(), inSharding, rewriter);
 
   rewriter.replaceOp(padOp, result);
-  return success();
+  return result;
+}
+
+LogicalResult handlePadOp(stablehlo::PadOp padOp, ResolutionState& state) {
+  return success(succeeded(resolvePadOp(padOp, state)));
 }
 
 // -----------------------------------------------------------------------------
@@ -4749,8 +5035,17 @@ struct ShardyResolvePermutationFactorsPass
       // Otherwise, use a generic resolution based on explicit reshards.
       resolvePermutationFactorsViaReplication(op, rule, state);
     });
-    for (Operation* opToErase : state.opsToErase) {
-      rewriter.eraseOp(opToErase);
+    llvm::SmallPtrSet<Operation*, 16> erased;
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (Operation* opToErase : state.opsToErase) {
+        if (!erased.contains(opToErase) && opToErase->use_empty()) {
+          rewriter.eraseOp(opToErase);
+          erased.insert(opToErase);
+          changed = true;
+        }
+      }
     }
   }
 };

@@ -112,6 +112,63 @@ func.func @parallel_concat_whole_trailing_axis(
   return %0 : tensor<2x24xi32>
 }
 
+func.func @parallel_concat_prefix_1_7_2d(
+  %arg0: tensor<3x1xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}, {}]>},
+  %arg1: tensor<3x8xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}, {"x"}]>})
+  -> (tensor<3x8xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}, {}]>}) {
+  %0 = stablehlo.add %arg0, %arg0
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {"x"}]>]>}
+    : tensor<3x1xi32>
+  %1 = stablehlo.slice %arg1 [0:3, 0:7]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {"x"}]>]>}
+    : (tensor<3x8xi32>) -> tensor<3x7xi32>
+  %2 = stablehlo.add %1, %1
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {"x"}]>]>}
+    : tensor<3x7xi32>
+  %3 = stablehlo.concatenate %0, %2, dim = 1
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{}, {"x"}]>]>}
+    : (tensor<3x1xi32>, tensor<3x7xi32>) -> tensor<3x8xi32>
+  return %3 : tensor<3x8xi32>
+}
+
+func.func @parallel_concat_indivisible_1_4(
+  %arg0: tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+  %arg1: tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}]>})
+  -> (tensor<5xi32> {sdy.sharding = #sdy.sharding<@mesh_4, [{}]>},
+      tensor<i32> {sdy.sharding = #sdy.sharding<@mesh_4, []>}) {
+  %0 = stablehlo.add %arg0, %arg0
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}]>]>}
+    : tensor<1xi32>
+  %1 = stablehlo.concatenate %0, %arg1, dim = 0
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}]>]>}
+    : (tensor<1xi32>, tensor<4xi32>) -> tensor<5xi32>
+  %zero = stablehlo.constant dense<0> : tensor<i32>
+  %sum = stablehlo.reduce(%1 init: %zero) applies stablehlo.add across dimensions = [0]
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, []>]>}
+    : (tensor<5xi32>, tensor<i32>) -> tensor<i32>
+  return %1, %sum : tensor<5xi32>, tensor<i32>
+}
+
+func.func @parallel_concat_three_operands(
+  %arg0: tensor<1xi32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}]>},
+  %arg1: tensor<5xi32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}]>},
+  %arg2: tensor<2xi32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}]>})
+  -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_2, [{}]>}) {
+  %0 = stablehlo.add %arg0, %arg0
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>}
+    : tensor<1xi32>
+  %1 = stablehlo.add %arg1, %arg1
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>}
+    : tensor<5xi32>
+  %2 = stablehlo.add %arg2, %arg2
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>}
+    : tensor<2xi32>
+  %3 = stablehlo.concatenate %0, %1, %2, dim = 0
+    {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}]>]>}
+    : (tensor<1xi32>, tensor<5xi32>, tensor<2xi32>) -> tensor<8xi32>
+  return %3 : tensor<8xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -261,6 +318,68 @@ func.func @main() {
       : (tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>,
          tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>, tensor<2x3xi32>) -> tensor<2x24xi32>
   check.expect_eq %seq_w, %w_full : tensor<2x24xi32>
+
+  // Test 7: 2D prefix [3x1] ++ [3x7] -> [3x8] on @mesh_4 with non-slice operands.
+  %p2d_0 = stablehlo.constant dense<[[9], [19], [29]]> : tensor<3x1xi32>
+  %p2d_1_iota = stablehlo.iota dim = 0 : tensor<24xi32>
+  %p2d_1 = stablehlo.reshape %p2d_1_iota : (tensor<24xi32>) -> tensor<3x8xi32>
+  %seq_p2d = func.call @sequential_concat_prefix_1_7_2d(%p2d_0, %p2d_1)
+      : (tensor<3x1xi32>, tensor<3x8xi32>) -> tensor<3x8xi32>
+  %p2d_s0 = "stablehlo.slice"(%p2d_1) {start_indices = array<i64: 0, 0>, limit_indices = array<i64: 3, 2>, strides = array<i64: 1, 1>} : (tensor<3x8xi32>) -> tensor<3x2xi32>
+  %p2d_s1 = "stablehlo.slice"(%p2d_1) {start_indices = array<i64: 0, 2>, limit_indices = array<i64: 3, 4>, strides = array<i64: 1, 1>} : (tensor<3x8xi32>) -> tensor<3x2xi32>
+  %p2d_s2 = "stablehlo.slice"(%p2d_1) {start_indices = array<i64: 0, 4>, limit_indices = array<i64: 3, 6>, strides = array<i64: 1, 1>} : (tensor<3x8xi32>) -> tensor<3x2xi32>
+  %p2d_s3 = "stablehlo.slice"(%p2d_1) {start_indices = array<i64: 0, 6>, limit_indices = array<i64: 3, 8>, strides = array<i64: 1, 1>} : (tensor<3x8xi32>) -> tensor<3x2xi32>
+  %p2d_res:4 = "interpreter.run_parallel"(
+      %p2d_0, %p2d_s0, %p2d_0, %p2d_s1, %p2d_0, %p2d_s2, %p2d_0, %p2d_s3) {
+    programs = [[@parallel_concat_prefix_1_7_2d, @parallel_concat_prefix_1_7_2d,
+                 @parallel_concat_prefix_1_7_2d, @parallel_concat_prefix_1_7_2d]]
+  } : (tensor<3x1xi32>, tensor<3x2xi32>, tensor<3x1xi32>, tensor<3x2xi32>,
+       tensor<3x1xi32>, tensor<3x2xi32>, tensor<3x1xi32>, tensor<3x2xi32>)
+      -> (tensor<3x8xi32>, tensor<3x8xi32>, tensor<3x8xi32>, tensor<3x8xi32>)
+  check.expect_eq %seq_p2d, %p2d_res#0 : tensor<3x8xi32>
+  check.expect_eq %seq_p2d, %p2d_res#1 : tensor<3x8xi32>
+  check.expect_eq %seq_p2d, %p2d_res#2 : tensor<3x8xi32>
+  check.expect_eq %seq_p2d, %p2d_res#3 : tensor<3x8xi32>
+
+  // Test 8: Indivisible [1] ++ [4] -> [5] on @mesh_4 + reduce sum check.
+  %ind_0 = stablehlo.constant dense<[7]> : tensor<1xi32>
+  %ind_1 = stablehlo.constant dense<[11, 13, 17, 19]> : tensor<4xi32>
+  %seq_ind:2 = func.call @sequential_concat_indivisible_1_4(%ind_0, %ind_1)
+      : (tensor<1xi32>, tensor<4xi32>) -> (tensor<5xi32>, tensor<i32>)
+  %ind_s0 = "stablehlo.slice"(%ind_1) {start_indices = array<i64: 0>, limit_indices = array<i64: 1>, strides = array<i64: 1>} : (tensor<4xi32>) -> tensor<1xi32>
+  %ind_s1 = "stablehlo.slice"(%ind_1) {start_indices = array<i64: 1>, limit_indices = array<i64: 2>, strides = array<i64: 1>} : (tensor<4xi32>) -> tensor<1xi32>
+  %ind_s2 = "stablehlo.slice"(%ind_1) {start_indices = array<i64: 2>, limit_indices = array<i64: 3>, strides = array<i64: 1>} : (tensor<4xi32>) -> tensor<1xi32>
+  %ind_s3 = "stablehlo.slice"(%ind_1) {start_indices = array<i64: 3>, limit_indices = array<i64: 4>, strides = array<i64: 1>} : (tensor<4xi32>) -> tensor<1xi32>
+  %ind_res:8 = "interpreter.run_parallel"(
+      %ind_0, %ind_s0, %ind_0, %ind_s1, %ind_0, %ind_s2, %ind_0, %ind_s3) {
+    programs = [[@parallel_concat_indivisible_1_4, @parallel_concat_indivisible_1_4,
+                 @parallel_concat_indivisible_1_4, @parallel_concat_indivisible_1_4]]
+  } : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>,
+       tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+      -> (tensor<5xi32>, tensor<i32>, tensor<5xi32>, tensor<i32>,
+          tensor<5xi32>, tensor<i32>, tensor<5xi32>, tensor<i32>)
+  check.expect_eq %seq_ind#0, %ind_res#0 : tensor<5xi32>
+  check.expect_eq %seq_ind#1, %ind_res#1 : tensor<i32>
+  check.expect_eq %seq_ind#0, %ind_res#2 : tensor<5xi32>
+  check.expect_eq %seq_ind#1, %ind_res#3 : tensor<i32>
+  check.expect_eq %seq_ind#0, %ind_res#4 : tensor<5xi32>
+  check.expect_eq %seq_ind#1, %ind_res#5 : tensor<i32>
+  check.expect_eq %seq_ind#0, %ind_res#6 : tensor<5xi32>
+  check.expect_eq %seq_ind#1, %ind_res#7 : tensor<i32>
+
+  // Test 9: 3-operand [1] ++ [5] ++ [2] -> [8] on @mesh_2.
+  %t3_0 = stablehlo.constant dense<[3]> : tensor<1xi32>
+  %t3_1 = stablehlo.constant dense<[10, 20, 30, 40, 50]> : tensor<5xi32>
+  %t3_2 = stablehlo.constant dense<[70, 80]> : tensor<2xi32>
+  %seq_t3 = func.call @sequential_concat_three_operands(%t3_0, %t3_1, %t3_2)
+      : (tensor<1xi32>, tensor<5xi32>, tensor<2xi32>) -> tensor<8xi32>
+  %t3_res:2 = "interpreter.run_parallel"(%t3_0, %t3_1, %t3_2, %t3_0, %t3_1, %t3_2) {
+    programs = [[@parallel_concat_three_operands, @parallel_concat_three_operands]]
+  } : (tensor<1xi32>, tensor<5xi32>, tensor<2xi32>,
+       tensor<1xi32>, tensor<5xi32>, tensor<2xi32>)
+      -> (tensor<8xi32>, tensor<8xi32>)
+  check.expect_eq %seq_t3, %t3_res#0 : tensor<8xi32>
+  check.expect_eq %seq_t3, %t3_res#1 : tensor<8xi32>
 
   return
 }
