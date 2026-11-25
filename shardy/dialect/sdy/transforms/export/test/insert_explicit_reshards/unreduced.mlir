@@ -2,6 +2,9 @@
 
 sdy.mesh @mesh = <["x"=4, "y"=2, "z"=4]>
 sdy.mesh @mesh_x16 = <["x"=16]>
+sdy.mesh @mesh_xy = <["x"=2, "y"=2]>
+sdy.mesh @mesh_xy_dup = <["x"=2, "y"=2]>
+sdy.mesh @mesh_xy_rev = <["x"=2, "y"=2], device_ids=[3, 2, 1, 0]>
 
 // CHECK-LABEL: func @all_reduce_on_func_input
 func.func @all_reduce_on_func_input(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}, %arg1: tensor<4x8xf32>) -> tensor<4x8xf32> {
@@ -224,7 +227,9 @@ func.func @all_reduce_source_has_unreduced_and_target_no_sharding(
 func.func @all_reduce_source_no_sharding_and_target_has_unreduced(
   %arg0: tensor<4x8xf32>)
      -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"y"}>}) {
-  // CHECK-NEXT: return %arg0
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %arg0 <@mesh, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"y"} %[[R]] out_sharding=<@mesh, [{}, {}], unreduced={"y"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R2U]]
   return %arg0 : tensor<4x8xf32>
 }
 
@@ -430,4 +435,99 @@ func.func @insert_reshard_unreduced_to_sharded_min(%arg0: tensor<8x8xf32> {sdy.s
   // CHECK-NEXT: %[[RESHARD:.*]] = sdy.reshard %[[ALL_REDUCE]] <@mesh, [{"y"}, {"x"}]> : tensor<8x8xf32>
   // CHECK-NEXT: return %[[RESHARD]]
   return %arg0 : tensor<8x8xf32>
+}
+
+// CHECK-LABEL: func @func_return_cross_mesh_to_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+func.func @func_return_cross_mesh_to_unreduced(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"x"}, {}]>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_x16, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@mesh_x16, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x"} %[[R1]] out_sharding=<@mesh_x16, [{}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<4x8xf32>
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @func_return_same_axes_diff_device_ids_to_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}]>})
+func.func @func_return_same_axes_diff_device_ids_to_unreduced(%arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}]>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_rev, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[MOVED:.*]] = sdy.reshard %[[ARG0]] <@mesh_xy_rev, [{"x"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[S2U:.*]] = sdy.sharded_to_unreduced [{"x"}, {}] %[[MOVED]] out_sharding=<@mesh_xy_rev, [{}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[S2U]] : tensor<4x8xf32>
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_unannotated_input_to_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32>)
+func.func @reshard_unannotated_input_to_unreduced(%arg0: tensor<4x8xf32>)
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x"} %[[R]] out_sharding=<@mesh, [{}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<4x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh, [{}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @func_return_unannotated_input_to_sharded_and_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32>)
+func.func @func_return_unannotated_input_to_sharded_and_unreduced(%arg0: tensor<4x8xf32>)
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"y"}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@mesh, [{"y"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x"} %[[R1]] out_sharding=<@mesh, [{"y"}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<4x8xf32>
+  return %arg0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @reshard_same_axes_identical_device_ids_matching_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}], unreduced={"x"}>})
+func.func @reshard_same_axes_identical_device_ids_matching_unreduced(
+    %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"y"}, {}], unreduced={"x"}>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_dup, [{"y"}, {}], unreduced={"x"}>}) {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"x"} %[[ARG0]] out_sharding=<@mesh_xy, [{"y"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R0:.*]] = sdy.reshard %[[AR]] <@mesh_xy, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R1:.*]] = sdy.reshard %[[R0]] <@mesh_xy_dup, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2:.*]] = sdy.reshard %[[R1]] <@mesh_xy_dup, [{"y"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"x"} %[[R2]] out_sharding=<@mesh_xy_dup, [{"y"}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<4x8xf32>
+  %0 = sdy.reshard %arg0 <@mesh_xy_dup, [{"y"}, {}], unreduced={"x"}> : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @add_foreign_unreduced_operand_keeps_result_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}], unreduced={"y"}>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_dup, [{"x"}, {}], unreduced={"y"}>})
+func.func @add_foreign_unreduced_operand_keeps_result_unreduced(
+    %arg0: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}], unreduced={"y"}>},
+    %arg1: tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_dup, [{"x"}, {}], unreduced={"y"}>})
+    -> (tensor<4x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}], unreduced={"y"}>}) {
+  // CHECK-NEXT: %[[AR0:.*]] = sdy.all_reduce {"y"} %[[ARG0]] out_sharding=<@mesh_xy, [{"x"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[AR1:.*]] = sdy.all_reduce {"y"} %[[ARG1]] out_sharding=<@mesh_xy_dup, [{"x"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[P0:.*]] = sdy.reshard %[[AR1]] <@mesh_xy_dup, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[P1:.*]] = sdy.reshard %[[P0]] <@mesh_xy, [{}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[P2:.*]] = sdy.reshard %[[P1]] <@mesh_xy, [{"x"}, {}]> : tensor<4x8xf32>
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %[[AR0]], %[[P2]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xy, [{"x"}, {}]>]>} : tensor<4x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"y"} %[[ADD]] out_sharding=<@mesh_xy, [{"x"}, {}], unreduced={"y"}> : tensor<4x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<4x8xf32>
+  %0 = stablehlo.add %arg0, %arg1 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xy, [{"x"}, {}], unreduced={"y"}>]>} : tensor<4x8xf32>
+  return %0 : tensor<4x8xf32>
+}
+
+// CHECK-LABEL: func @dot_general_foreign_unreduced_operand_preserves_contracting_unreduced
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_rev, [{}, {"x"}], unreduced={"y"}>},
+// CHECK-SAME:  %[[ARG1:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}]>})
+func.func @dot_general_foreign_unreduced_operand_preserves_contracting_unreduced(
+    %arg0: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy_rev, [{}, {"x"}], unreduced={"y"}>},
+    %arg1: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{"x"}, {}]>})
+    -> (tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_xy, [{}, {}], unreduced={"x", "y"}>}) {
+  // CHECK-NEXT: %[[AR:.*]] = sdy.all_reduce {"y"} %[[ARG0]] out_sharding=<@mesh_xy_rev, [{}, {"x"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[R:.*]] = sdy.reshard %[[AR]] <@mesh_xy, [{}, {"x"}]> : tensor<8x8xf32>
+  // CHECK-NEXT: %[[DOT:.*]] = stablehlo.dot_general %[[R]], %[[ARG1]], contracting_dims = [1] x [0] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xy, [{}, {}], unreduced={"x"}>]>} : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  // CHECK-NEXT: %[[R2U:.*]] = sdy.replicated_to_unreduced {"y"} %[[DOT]] out_sharding=<@mesh_xy, [{}, {}], unreduced={"x", "y"}> : tensor<8x8xf32>
+  // CHECK-NEXT: return %[[R2U]] : tensor<8x8xf32>
+  %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0]
+      {sdy.sharding = #sdy.sharding_per_value<[<@mesh_xy, [{}, {}], unreduced={"x", "y"}>]>}
+      : (tensor<8x8xf32>, tensor<8x8xf32>) -> tensor<8x8xf32>
+  return %0 : tensor<8x8xf32>
 }

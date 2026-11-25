@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARD_UTIL_H_
-#define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARD_UTIL_H_
+#ifndef SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARDS_UTIL_H_
+#define SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARDS_UTIL_H_
 
 #include <cassert>
 #include <cstdint>
@@ -128,7 +128,8 @@ SmallVector<int64_t> getTensorSizes(Operation* op);
 // Assumes factor shardings do not have overflow axes.
 //
 // Assumes all tensor shardings have the same mesh as `mesh` on axes but may be
-// different on device order.
+// different on device order. When 'enableFullVersion' is true, also reshards
+// fully replicated shardings onto 'meshOp' if they reference a different mesh.
 void insertExplicitReshards(Operation* op,
                             ArrayRef<TensorShardingAttr> inShardings,
                             ArrayRef<TensorShardingAttr> outShardings,
@@ -136,12 +137,12 @@ void insertExplicitReshards(Operation* op,
                             UpdateTensorShardings updateTensorShardings,
                             IRRewriter& rewriter,
                             OpShardingRuleAttr shardingRule,
-                            const SymbolTable& symbolTable, MeshOp meshOp);
+                            const SymbolTable& symbolTable, MeshOp meshOp,
+                            bool enableFullVersion = false);
 
 // Inserts an `sdy.all-reduce` for each result of `op`.
 //
 // Assumes the followings:
-// - All op results have the same unreduced axes.
 // - All op results have the same mesh as `mesh` ignoring device id orders.
 // - `commonAxesPerFactor` is non-empty if `onFullVersion` is true.
 //
@@ -205,4 +206,4 @@ bool convertReshardToUnreducedCollectives(Operation* op, IRRewriter& rewriter,
 }  // namespace sdy
 }  // namespace mlir
 
-#endif  // SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARD_UTIL_H_
+#endif  // SHARDY_DIALECT_SDY_TRANSFORMS_EXPORT_EXPLICIT_RESHARDS_UTIL_H_

@@ -22,11 +22,13 @@ limitations under the License.
 #include <tuple>
 #include <utility>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -133,13 +135,37 @@ void insertExplicitReshardsOnResult(
   setSharding(result, newTensorSharding);
 }
 
-// TODO(enver): Detect cases where two meshes are indeed equivalent when device
-// orders are different only on replicated axes, for example:
-// mesh1 = [x:2, y:2]
-// mesh2 = [x:2, y:2], device_ids=[1,0,3,2].
-// If we replicate along y and only use the x in sharding.
-bool shouldReshardToCommonMesh(TensorShardingAttr sharding, MeshOp meshOp,
-                               const SymbolTable& symbolTable) {
+// Returns true if 'sharding' should be explicitly resharded to align with
+// 'meshOp' even when factor shardings already agree (for an operand:
+// resharding from 'sharding' onto 'meshOp' before the op; for a result:
+// setting the op's result to 'meshOp' and resharding users back to
+// 'sharding').
+//
+// Returns false for unannotated (null) shardings. When 'enableFullVersion' is
+// true, returns false for non-RankedTensorType values (such as tokens) and
+// true for any tensor mesh reference other than the symbol of 'meshOp'
+// (including fully replicated and inlined meshes) so the op stays on a single
+// mesh; any communication-free cross-mesh optimization belongs downstream in
+// collective lowering. Otherwise skips replicated shardings without unreduced
+// axes and only checks device_ids inequality.
+bool shouldReshardToCommonMesh(Type type, TensorShardingAttr sharding,
+                               MeshOp meshOp, const SymbolTable& symbolTable,
+                               const bool enableFullVersion) {
+  if (!sharding) {
+    return false;
+  }
+  if (enableFullVersion) {
+    if (!isa<RankedTensorType>(type)) {
+      return false;
+    }
+    auto meshRef = dyn_cast<FlatSymbolRefAttr>(sharding.getMeshOrRef());
+    return !meshRef || meshRef.getValue() != meshOp.getName();
+  }
+  // TODO(enver): Detect cases where two meshes are indeed equivalent when
+  // device orders are different only on replicated axes, for example:
+  // mesh1 = [x:2, y:2]
+  // mesh2 = [x:2, y:2], device_ids=[1,0,3,2].
+  // If we replicate along y and only use the x in sharding.
   return !isFullyReplicatedWithoutUnreducedAxes(sharding) &&
          sharding.getMesh(symbolTable).getDeviceIds() !=
              meshOp.getMesh().getDeviceIds();
@@ -175,12 +201,15 @@ void insertExplicitReshards(Operation* op,
                             UpdateTensorShardings updateTensorShardings,
                             IRRewriter& rewriter,
                             OpShardingRuleAttr shardingRule,
-                            const SymbolTable& symbolTable, MeshOp meshOp) {
+                            const SymbolTable& symbolTable, MeshOp meshOp,
+                            const bool enableFullVersion) {
   rewriter.setInsertionPoint(op);
   for (const auto& [operandIndex, operandSharding] :
        llvm::enumerate(inShardings)) {
     if (updateTensorShardings.updateOperands.test(operandIndex) ||
-        shouldReshardToCommonMesh(operandSharding, meshOp, symbolTable)) {
+        shouldReshardToCommonMesh(op->getOperand(operandIndex).getType(),
+                                  operandSharding, meshOp, symbolTable,
+                                  enableFullVersion)) {
       insertExplicitReshardsOnOperand(op, operandIndex, shardingProjection,
                                       shardingRule, meshOp, rewriter);
     }
@@ -189,7 +218,9 @@ void insertExplicitReshards(Operation* op,
   for (const auto& [resultIndex, resultSharding] :
        llvm::enumerate(outShardings)) {
     if (updateTensorShardings.updateResults.test(resultIndex) ||
-        shouldReshardToCommonMesh(resultSharding, meshOp, symbolTable)) {
+        shouldReshardToCommonMesh(op->getResult(resultIndex).getType(),
+                                  resultSharding, meshOp, symbolTable,
+                                  enableFullVersion)) {
       insertExplicitReshardsOnResult(op, resultIndex, shardingProjection,
                                      shardingRule, meshOp, rewriter);
     }
@@ -805,7 +836,9 @@ SmallVector<AxisRefAttr> getReductionAxes(
     return reductionAxes;
   }
 
-  if (getUnreducedAxes(op->getResult(0)).empty()) {
+  if (llvm::all_of(op->getResults(), [](Value result) {
+        return getUnreducedAxes(result).empty();
+      })) {
     return {};
   }
 
@@ -851,17 +884,20 @@ bool isCrossMeshTransition(TensorShardingAttr inSharding,
       inSharding.getMeshOrRef() == outSharding.getMeshOrRef()) {
     return false;
   }
-  MeshOp inMeshOp = getMeshOpOrDefault(inSharding, symbolTable, nullptr);
-  MeshOp outMeshOp = getMeshOpOrDefault(outSharding, symbolTable, nullptr);
-  if (!inMeshOp || !outMeshOp || inMeshOp == outMeshOp) {
+  MeshAttr inMesh = inSharding.getMesh(symbolTable);
+  MeshAttr outMesh = outSharding.getMesh(symbolTable);
+  if (!inMesh || !outMesh || inMesh.isSingleDevice() ||
+      outMesh.isSingleDevice()) {
     return false;
   }
-  if (inMeshOp.getMesh().isSingleDevice() ||
-      outMeshOp.getMesh().isSingleDevice()) {
+  if (inMesh.empty() && outMesh.empty()) {
     return false;
   }
-  return !inMeshOp.getMesh().equals(outMeshOp.getMesh(),
-                                    /*ignoreDeviceOrder=*/true);
+  // Distinct mesh symbols with identical axes and identical device_ids still
+  // require pivoting through replicated, since collective_permute cannot
+  // operate on identical device_ids.
+  return !inMesh.equals(outMesh, /*ignoreDeviceOrder=*/true) ||
+         inMesh.getDeviceIds() == outMesh.getDeviceIds();
 }
 
 Value insertCrossMeshReshardPivot(Value input, TensorShardingAttr inSharding,
@@ -873,21 +909,19 @@ Value insertCrossMeshReshardPivot(Value input, TensorShardingAttr inSharding,
       !isCrossMeshTransition(inSharding, targetSharding, symbolTable)) {
     return ReshardOp::create(rewriter, input.getLoc(), input, targetSharding);
   }
-  MeshOp inMeshOp = getMeshOpOrDefault(inSharding, symbolTable, nullptr);
-  MeshOp targetMeshOp =
-      getMeshOpOrDefault(targetSharding, symbolTable, nullptr);
 
   // Step 1: Tiled(MeshA) -> Replicated(MeshA)
   Value val = input;
   if (!isFullyReplicatedWithoutUnreducedAxes(inSharding)) {
     TensorShardingAttr replASharding = TensorShardingAttr::getFullyClosed(
-        rewriter.getContext(), rankedType.getRank(), inMeshOp.getName());
+        rewriter.getContext(), rankedType.getRank(), inSharding.getMeshOrRef());
     val = ReshardOp::create(rewriter, input.getLoc(), val, replASharding);
   }
 
   // Step 2: Replicated(MeshA) -> Replicated(MeshB)
   TensorShardingAttr replBSharding = TensorShardingAttr::getFullyClosed(
-      rewriter.getContext(), rankedType.getRank(), targetMeshOp.getName());
+      rewriter.getContext(), rankedType.getRank(),
+      targetSharding.getMeshOrRef());
   val = ReshardOp::create(rewriter, input.getLoc(), val, replBSharding);
 
   // Step 3: Replicated(MeshB) -> Tiled(MeshB)
@@ -959,49 +993,49 @@ void insertAllReducesForReductionFactors(
   }
 
   MeshAttr mesh = meshOp.getMesh();
-  // The first result unreduced axes is also the common one.
-  ArrayRef<AxisRefAttr> firstResultUnreducedAxes =
-      getUnreducedAxes(op->getResult(0));
-  SmallVector<AxisRefAttr> allReduceAxes =
-      getAxisSetDiff(reductionAxes, firstResultUnreducedAxes, mesh);
-  if (allReduceAxes.empty()) {
-    return;
-  }
-
-  SmallVector<AxisRefAttr> unreducedAxes = allReduceAxes;
-  llvm::append_range(unreducedAxes, firstResultUnreducedAxes);
-  sortAndMergeAxes(unreducedAxes, mesh);
-  sortAndMergeAxes(allReduceAxes, mesh);
-
   std::optional<ReductionOp> reductionOp = getReductionType(op);
   if (!reductionOp) {
     return;
   }
-
-  // When Shardy generates device code, split sub-mesh local-scalar reductions
-  // per factor (minor-to-major) to run over smaller orthogonal subgroups.
-  AxesPerFactor allReduceAxesPerFactor;
-  if (onFullVersion && markPartialResultWithUnreducedAxes &&
-      shardyGeneratesDeviceCode &&
-      AxisListRef(allReduceAxes).getShardingSize(mesh) < mesh.getTotalSize()) {
-    for (int64_t reductionFactor :
-         llvm::reverse(shardingRule.getReductionFactors())) {
-      SmallVector<AxisRefAttr> stepAxes = getAxisSetDiff(
-          commonAxesPerFactor[reductionFactor], firstResultUnreducedAxes, mesh);
-      if (!stepAxes.empty()) {
-        sortAndMergeAxes(stepAxes, mesh);
-        allReduceAxesPerFactor.push_back(std::move(stepAxes));
-      }
-    }
-  }
-
   ReductionOp redOp = *reductionOp;
+
   // TODO(tomnatan): consider supporting multi-input all-reduce op.
   rewriter.setInsertionPointAfter(op);
   for (Value result : op->getResults()) {
     TensorShardingAttr resultSharding =
         getOrCreateSharding(result, meshOp.getName(),
                             /*closedIfMissing=*/true);
+    SmallVector<AxisRefAttr> resultUnreducedAxes =
+        llvm::to_vector(getUnreducedAxes(resultSharding));
+    SmallVector<AxisRefAttr> allReduceAxes =
+        getAxisSetDiff(reductionAxes, resultUnreducedAxes, mesh);
+    if (allReduceAxes.empty()) {
+      continue;
+    }
+
+    SmallVector<AxisRefAttr> unreducedAxes = allReduceAxes;
+    llvm::append_range(unreducedAxes, resultUnreducedAxes);
+    sortAndMergeAxes(unreducedAxes, mesh);
+    sortAndMergeAxes(allReduceAxes, mesh);
+
+    // When Shardy generates device code, split sub-mesh local-scalar reductions
+    // per factor (minor-to-major) to run over smaller orthogonal subgroups.
+    AxesPerFactor allReduceAxesPerFactor;
+    if (onFullVersion && markPartialResultWithUnreducedAxes &&
+        shardyGeneratesDeviceCode &&
+        AxisListRef(allReduceAxes).getShardingSize(mesh) <
+            mesh.getTotalSize()) {
+      for (int64_t reductionFactor :
+           llvm::reverse(shardingRule.getReductionFactors())) {
+        SmallVector<AxisRefAttr> stepAxes = getAxisSetDiff(
+            commonAxesPerFactor[reductionFactor], resultUnreducedAxes, mesh);
+        if (!stepAxes.empty()) {
+          sortAndMergeAxes(stepAxes, mesh);
+          allReduceAxesPerFactor.push_back(std::move(stepAxes));
+        }
+      }
+    }
+
     if (markPartialResultWithUnreducedAxes) {
       setSharding(result,
                   resultSharding.replaceUnreducedAxes(unreducedAxes, redOp));
@@ -1014,13 +1048,16 @@ void insertAllReducesForReductionFactors(
     Value curValue = result;
     Operation* firstAllReduceOp = nullptr;
     SmallVector<AxisRefAttr> curUnreducedAxes = unreducedAxes;
-    for (const auto& [idx, stepAxes] : llvm::enumerate(reductionSteps)) {
-      TensorShardingAttr stepOutSharding = resultSharding;
-      if (idx + 1 < reductionSteps.size()) {
-        curUnreducedAxes = getAxisSetDiff(curUnreducedAxes, stepAxes, mesh);
-        stepOutSharding =
-            resultSharding.replaceUnreducedAxes(curUnreducedAxes, redOp);
-      }
+    for (const auto& stepAxes : reductionSteps) {
+      curUnreducedAxes = getAxisSetDiff(curUnreducedAxes, stepAxes, mesh);
+      TensorShardingAttr stepOutSharding =
+          curUnreducedAxes.empty()
+              ? TensorShardingAttr::get(rewriter.getContext(),
+                                        resultSharding.getMeshOrRef(),
+                                        resultSharding.getDimShardings(),
+                                        resultSharding.getReplicatedAxes(),
+                                        /*unreducedAxes=*/{})
+              : resultSharding.replaceUnreducedAxes(curUnreducedAxes, redOp);
       auto allReduceOp =
           AllReduceOp::create(rewriter, result.getLoc(), curValue, stepAxes,
                               redOp, stepOutSharding);

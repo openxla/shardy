@@ -312,10 +312,13 @@ stablehlo::ChannelHandleAttr getChannelHandle(MLIRContext* ctx,
   return nullptr;
 }
 
+bool isAllDeviceMesh(MeshAttr mesh) {
+  return mesh && !mesh.empty() && !mesh.isSingleDevice();
+}
+
 MeshOp getGlobalMeshOp(ModuleOp moduleOp) {
   for (MeshOp meshOp : moduleOp.getOps<MeshOp>()) {
-    MeshAttr mesh = meshOp.getMesh();
-    if (!mesh.isSingleDevice() && !mesh.getAxes().empty()) {
+    if (isAllDeviceMesh(meshOp.getMesh())) {
       return meshOp;
     }
   }
