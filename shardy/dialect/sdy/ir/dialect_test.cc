@@ -19,8 +19,10 @@ limitations under the License.
 #include <optional>
 
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OwningOpRef.h"
 #include "mlir/Support/LLVM.h"
 #include "shardy/dialect/sdy/ir/testing_utils.h"
 #include <gmock/gmock.h>
@@ -910,6 +912,67 @@ TEST_F(DialectTest, TensorShardingAttrIsEquivalentReductionOp) {
   EXPECT_FALSE(maxSharding.isEquivalent(minSharding));
   EXPECT_TRUE(
       maxSharding.isEquivalent(minSharding, /*ignoreUnreducedAxes=*/true));
+}
+
+TEST_F(DialectTest, ManualComputationEdgeOwnerSharding) {
+  OpBuilder builder(&context);
+  Location loc = builder.getUnknownLoc();
+  OwningOpRef<ModuleOp> module = ModuleOp::create(loc);
+  builder.setInsertionPointToEnd(module->getBody());
+  MeshOp::create(builder, loc, "empty_mesh", createMesh({}));
+  MeshOp::create(builder, loc, "mesh", createMesh({{"x", 4}, {"y", 2}}));
+
+  auto emptyOp = ManualComputationOp::create(
+      builder, loc, TypeRange{}, ValueRange{}, ArrayRef<TensorShardingAttr>{},
+      ArrayRef<TensorShardingAttr>{}, ArrayRef<AxisRefAttr>{});
+  auto emptyInterface = cast<ShardableDataFlowOpInterface>(*emptyOp);
+  EXPECT_EQ(emptyInterface.getBlockArgumentEdgeOwnerSharding(0), nullptr);
+  EXPECT_EQ(emptyInterface.getOpResultEdgeOwnerSharding(0), nullptr);
+
+  auto globalType = RankedTensorType::get({8, 4}, builder.getF32Type());
+  auto localType = RankedTensorType::get({4, 4}, builder.getF32Type());
+  auto c0 = ConstantOp::create(builder, loc,
+                               DenseElementsAttr::get(globalType, 0.0f));
+  auto c1 = ConstantOp::create(builder, loc,
+                               DenseElementsAttr::get(globalType, 1.0f));
+
+  TensorShardingAttr emptyMeshSharding = TensorShardingAttr::get(
+      &context, "empty_mesh", {createDimSharding({}), createDimSharding({})},
+      /*replicatedAxes=*/{}, /*unreducedAxes=*/{});
+  TensorShardingAttr subAxisInSharding =
+      createTensorSharding({createDimSharding({createAxis("x")}),
+                            createDimSharding({createAxis("y")})});
+  TensorShardingAttr outSharding =
+      createTensorSharding({createDimSharding({createSubAxis("x", 1, 2)}),
+                            createDimSharding({createAxis("y")})});
+
+  auto manualOp = ManualComputationOp::create(
+      builder, loc, TypeRange{globalType, globalType},
+      ValueRange{c0.getResult(), c1.getResult()},
+      ArrayRef<TensorShardingAttr>{emptyMeshSharding, subAxisInSharding},
+      ArrayRef<TensorShardingAttr>{emptyMeshSharding, outSharding},
+      ArrayRef<AxisRefAttr>{createSubAxis("x", 1, 2)});
+  Block* body = builder.createBlock(&manualOp.getBody(), {},
+                                    {globalType, localType}, {loc, loc});
+  builder.setInsertionPointToEnd(body);
+  ReturnOp::create(builder, loc, body->getArguments());
+
+  auto interface = cast<ShardableDataFlowOpInterface>(*manualOp);
+  SmallVector<TensorShardingAttr> allArgShardings =
+      interface.getBlockArgumentEdgeOwnerShardings();
+  SmallVector<TensorShardingAttr> allResShardings =
+      interface.getOpResultEdgeOwnerShardings();
+  ASSERT_EQ(allArgShardings.size(), 2);
+  ASSERT_EQ(allResShardings.size(), 2);
+
+  EXPECT_EQ(interface.getBlockArgumentEdgeOwnerSharding(0), emptyMeshSharding);
+  EXPECT_EQ(interface.getBlockArgumentEdgeOwnerSharding(1),
+            createTensorSharding({createDimSharding({createSubAxis("x", 2, 2)}),
+                                  createDimSharding({createAxis("y")})}));
+  EXPECT_EQ(interface.getBlockArgumentEdgeOwnerSharding(0), allArgShardings[0]);
+  EXPECT_EQ(interface.getBlockArgumentEdgeOwnerSharding(1), allArgShardings[1]);
+  EXPECT_EQ(interface.getOpResultEdgeOwnerSharding(0), allResShardings[0]);
+  EXPECT_EQ(interface.getOpResultEdgeOwnerSharding(1), allResShardings[1]);
 }
 
 }  // namespace
