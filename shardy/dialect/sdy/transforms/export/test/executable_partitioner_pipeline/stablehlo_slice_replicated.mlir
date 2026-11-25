@@ -19,6 +19,20 @@ func.func @sequential_slice_replicated(%arg0: tensor<8xi32>) -> tensor<3xi32> {
   return %0 : tensor<3xi32>
 }
 
+func.func @parallel_slice_replicated_single_shard(
+  %arg0: tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"b"}]>})
+  -> (tensor<4xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}]>}) {
+  %0 = stablehlo.slice %arg0 [4:8]
+    {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{"b"}]>]>} : (tensor<8xi32>) -> tensor<4xi32>
+  %1 = sdy.reshard %0 <@mesh, [{}]> : tensor<4xi32>
+  return %1 : tensor<4xi32>
+}
+
+func.func @sequential_slice_replicated_single_shard(%arg0: tensor<8xi32>) -> tensor<4xi32> {
+  %0 = stablehlo.slice %arg0 [4:8] : (tensor<8xi32>) -> tensor<4xi32>
+  return %0 : tensor<4xi32>
+}
+
 //--- part2.mlir
 
 func.func @main() {
@@ -38,6 +52,16 @@ func.func @main() {
   "check.expect_eq"(%res#1, %seq) : (tensor<3xi32>, tensor<3xi32>) -> ()
   "check.expect_eq"(%res#2, %seq) : (tensor<3xi32>, tensor<3xi32>) -> ()
   "check.expect_eq"(%res#3, %seq) : (tensor<3xi32>, tensor<3xi32>) -> ()
+
+  %seq_full = func.call @sequential_slice_replicated_single_shard(%input) : (tensor<8xi32>) -> tensor<4xi32>
+  %res_full:4 = "interpreter.run_parallel"(%s0, %s1, %s0, %s1) {
+    programs = [[@parallel_slice_replicated_single_shard, @parallel_slice_replicated_single_shard, @parallel_slice_replicated_single_shard, @parallel_slice_replicated_single_shard]]
+  } : (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) -> (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>, tensor<4xi32>)
+
+  "check.expect_eq"(%res_full#0, %seq_full) : (tensor<4xi32>, tensor<4xi32>) -> ()
+  "check.expect_eq"(%res_full#1, %seq_full) : (tensor<4xi32>, tensor<4xi32>) -> ()
+  "check.expect_eq"(%res_full#2, %seq_full) : (tensor<4xi32>, tensor<4xi32>) -> ()
+  "check.expect_eq"(%res_full#3, %seq_full) : (tensor<4xi32>, tensor<4xi32>) -> ()
 
   return
 }

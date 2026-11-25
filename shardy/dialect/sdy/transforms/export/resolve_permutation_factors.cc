@@ -4205,6 +4205,63 @@ Value handleLocalSliceDims(Location loc, Value exchangedLocal,
 //      on that shard, which sends each output shard its piece.
 // 3. Implement replicated slice dimensions:
 // 4. Trim final tensor shape to match expected output shape.
+// Returns true if `sliceOp` selects one full shard along a single sharded
+// dimension and is immediately replicated on that dimension by a ReshardOp, so
+// `AllGatherAndSliceViaAllReducePattern` can lower it directly via all-reduce
+// without a HALO collective-permute to shard 0 first.
+bool isReplicatedSingleShardSlice(stablehlo::SliceOp sliceOp,
+                                  TensorShardingAttr inSharding, MeshAttr mesh,
+                                  RankedTensorType origInputType) {
+  Type elemTy = origInputType.getElementType();
+  if (!mlir::isa<mlir::FloatType, mlir::IntegerType>(elemTy) ||
+      elemTy.isInteger(1) || !inSharding.getUnreducedAxes().empty()) {
+    return false;
+  }
+  if (!sliceOp->hasOneUse()) {
+    return false;
+  }
+  auto reshardOp = mlir::dyn_cast<ReshardOp>(*sliceOp->user_begin());
+  if (!reshardOp) {
+    return false;
+  }
+  TensorShardingAttr reshardSharding = reshardOp.getSharding();
+  if (!reshardSharding || !reshardSharding.getUnreducedAxes().empty() ||
+      reshardSharding.getMeshOrRef() != inSharding.getMeshOrRef()) {
+    return false;
+  }
+
+  int64_t slicedShardedDim = -1;
+  ArrayRef<int64_t> starts = sliceOp.getStartIndices();
+  ArrayRef<int64_t> limits = sliceOp.getLimitIndices();
+  ArrayRef<int64_t> strides = sliceOp.getStrides();
+  for (int64_t d = 0; d < origInputType.getRank(); ++d) {
+    if (strides[d] != 1) {
+      return false;
+    }
+    int64_t dimSize = origInputType.getDimSize(d);
+    if (starts[d] == 0 && limits[d] == dimSize) {
+      if (reshardSharding.getDimSharding(d) != inSharding.getDimSharding(d)) {
+        return false;
+      }
+      continue;
+    }
+    if (slicedShardedDim != -1) {
+      return false;
+    }
+    int64_t shardCount = inSharding.getDimSharding(d).getShardedSize(mesh);
+    if (shardCount <= 1 || dimSize % shardCount != 0) {
+      return false;
+    }
+    int64_t sIn = dimSize / shardCount;
+    if (starts[d] < 0 || starts[d] % sIn != 0 || limits[d] - starts[d] != sIn ||
+        !reshardSharding.getDimSharding(d).emptyAxes()) {
+      return false;
+    }
+    slicedShardedDim = d;
+  }
+  return slicedShardedDim != -1;
+}
+
 LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
                             ResolutionState& state) {
   IRRewriter& rewriter = state.rewriter;
@@ -4227,7 +4284,8 @@ LogicalResult handleSliceOp(stablehlo::SliceOp sliceOp,
   if (info.manualAxes.empty() || !info.needsComm()) {
     return success();
   }
-  if (!canUseHalo(info)) {
+  if (!canUseHalo(info) ||
+      isReplicatedSingleShardSlice(sliceOp, inSharding, mesh, origInputType)) {
     return failure();
   }
 

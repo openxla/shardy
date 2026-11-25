@@ -401,7 +401,7 @@ func.func @slice_single_source_indivisible_input(
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<32xi32>
 func.func @slice_single_source_all_targets_no_pad(
   %arg0: tensor<32xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}]>})
-  -> tensor<8xi32> {
+  -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}]>}) {
   // REPL-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[ARG0]] <@mesh_a4, [{}]> : tensor<32xi32>
   // REPL-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[RESHARD1]] [24:32] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}]>]>}
   // REPL-NEXT: %[[RES:.*]] = sdy.reshard %[[SLICE]] <@mesh_a4, [{"a"}]> : tensor<8xi32>
@@ -440,11 +440,8 @@ func.func @slice_single_source_all_targets_no_pad(
     sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a"}]>]>
   } : (tensor<32xi32>) -> tensor<8xi32>
 
-  // CHECK-NEXT: %[[RS:.*]] = sdy.reshard %[[RES]] <@mesh_a4, [{}]> : tensor<8xi32>
-  %1 = sdy.reshard %0 <@mesh_a4, [{}]> : tensor<8xi32>
-
-  // CHECK-NEXT: return %[[RS]] : tensor<8xi32>
-  return %1 : tensor<8xi32>
+  // CHECK-NEXT: return %[[RES]] : tensor<8xi32>
+  return %0 : tensor<8xi32>
 }
 
 // All 8 elements on shard 0 split evenly across all 4 output shards (pieces of
@@ -454,7 +451,7 @@ func.func @slice_single_source_all_targets_no_pad(
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<32xi32>
 func.func @slice_single_source_zero_all_targets(
   %arg0: tensor<32xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}]>})
-  -> tensor<8xi32> {
+  -> (tensor<8xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}]>}) {
   // REPL-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[ARG0]] <@mesh_a4, [{}]> : tensor<32xi32>
   // REPL-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[RESHARD1]] [0:8] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}]>]>}
   // REPL-NEXT: %[[RES:.*]] = sdy.reshard %[[SLICE]] <@mesh_a4, [{"a"}]> : tensor<8xi32>
@@ -493,11 +490,8 @@ func.func @slice_single_source_zero_all_targets(
     sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a"}]>]>
   } : (tensor<32xi32>) -> tensor<8xi32>
 
-  // CHECK-NEXT: %[[RS:.*]] = sdy.reshard %[[RES]] <@mesh_a4, [{}]> : tensor<8xi32>
-  %1 = sdy.reshard %0 <@mesh_a4, [{}]> : tensor<8xi32>
-
-  // CHECK-NEXT: return %[[RS]] : tensor<8xi32>
-  return %1 : tensor<8xi32>
+  // CHECK-NEXT: return %[[RES]] : tensor<8xi32>
+  return %0 : tensor<8xi32>
 }
 
 // The 3 sliced elements are on shard 7 while output lands on shards 0, 1, and 2
@@ -706,4 +700,57 @@ func.func @slice_comm_free_to_one_and_comm(
 
   // CHECK-NEXT: return %[[RES]] : tensor<1x3xi32>
   return %0 : tensor<1x3xi32>
+}
+
+// Single-shard slice immediately replicated by sdy.reshard defers to
+// replication so AllGatherAndSliceViaAllReducePattern lowers it directly via
+// all-reduce without a HALO collective-permute to shard 0 first.
+// CHECK-LABEL: func @slice_replicated_single_shard
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<12xi32>
+func.func @slice_replicated_single_shard(
+  %arg0: tensor<12xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}]>})
+  -> tensor<3xi32> {
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[ARG0]] <@mesh_a4, [{}]> : tensor<12xi32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[RESHARD1]] [3:6] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_a4, [{}]>]>}
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[SLICE]] <@mesh_a4, [{"a"}]> : tensor<3xi32>
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reshard %[[RESHARD2]] <@mesh_a4, [{}]> : tensor<3xi32>
+  // CHECK-NEXT: return %[[RS]] : tensor<3xi32>
+  %0 = stablehlo.slice %arg0 [3:6] {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a"}]>]>
+  } : (tensor<12xi32>) -> tensor<3xi32>
+  %1 = sdy.reshard %0 <@mesh_a4, [{}]> : tensor<3xi32>
+  return %1 : tensor<3xi32>
+}
+
+// Replicated single-shard slice preserves sharding on other unsliced dims.
+// CHECK-LABEL: func @slice_replicated_single_shard_2d
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<6x10xi32>
+func.func @slice_replicated_single_shard_2d(
+  %arg0: tensor<6x10xi32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>})
+  -> (tensor<3x10xi32> {sdy.sharding = #sdy.sharding<@mesh, [{}, {"b"}]>}) {
+  // CHECK-NEXT: %[[RESHARD1:.*]] = sdy.reshard %[[ARG0]] <@mesh, [{}, {"b"}]> : tensor<6x10xi32>
+  // CHECK-NEXT: %[[SLICE:.*]] = stablehlo.slice %[[RESHARD1]] [3:6, 0:10] {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{}, {"b"}]>]>}
+  // CHECK-NEXT: %[[RESHARD2:.*]] = sdy.reshard %[[SLICE]] <@mesh, [{"a"}, {"b"}]> : tensor<3x10xi32>
+  // CHECK-NEXT: %[[RS:.*]] = sdy.reshard %[[RESHARD2]] <@mesh, [{}, {"b"}]> : tensor<3x10xi32>
+  // CHECK-NEXT: return %[[RS]] : tensor<3x10xi32>
+  %0 = stablehlo.slice %arg0 [3:6, 0:10] {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh, [{"a"}, {"b"}]>]>
+  } : (tensor<6x10xi32>) -> tensor<3x10xi32>
+  %1 = sdy.reshard %0 <@mesh, [{}, {"b"}]> : tensor<3x10xi32>
+  return %1 : tensor<3x10xi32>
+}
+
+// Partial-shard slice (< sIn) followed by replication still uses HALO so we
+// do not fall back to a full all-gather of the input tensor.
+// CHECK-LABEL: func @slice_replicated_partial_shard_uses_halo
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<12xi32>
+func.func @slice_replicated_partial_shard_uses_halo(
+  %arg0: tensor<12xi32> {sdy.sharding = #sdy.sharding<@mesh_a4, [{"a"}]>})
+  -> tensor<2xi32> {
+  // HALO: sdy.manual_computation
+  %0 = stablehlo.slice %arg0 [3:5] {
+    sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_a4, [{"a"}]>]>
+  } : (tensor<12xi32>) -> tensor<2xi32>
+  %1 = sdy.reshard %0 <@mesh_a4, [{}]> : tensor<2xi32>
+  return %1 : tensor<2xi32>
 }
