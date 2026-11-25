@@ -328,20 +328,19 @@ Value ensurePaddingWithValue(
   // dimension is less than the original unpadded size (index < original_size).
   Value validDataMask;
   for (auto [dim, origSize] : llvm::enumerate(origType.getShape())) {
-    if (origSize == paddedType.getDimSize(dim) ||
+    int64_t paddedSize = paddedType.getDimSize(dim);
+    if (origSize == paddedSize ||
         (dimsToEnforce && !llvm::is_contained(*dimsToEnforce, dim))) {
       continue;
     }
-    auto iotaType =
-        RankedTensorType::get(paddedType.getShape(), b.getI32Type());
+    Type indexElemType =
+        getIndexOrOffsetType(b, requires64BitOffset(paddedSize));
+    auto iotaType = RankedTensorType::get(paddedType.getShape(), indexElemType);
     Value iota = stablehlo::IotaOp::create(b, loc, iotaType, dim);
     if (sharding) {
       setSharding(iota, sharding);
     }
-    Value limit = stablehlo::ConstantOp::create(
-        b, loc,
-        DenseElementsAttr::get(RankedTensorType::get({}, b.getI32Type()),
-                               b.getI32IntegerAttr(origSize)));
+    Value limit = createScalarIntConstant(loc, indexElemType, origSize, b);
     Value broadcastLimit = stablehlo::BroadcastInDimOp::create(
         b, loc, iotaType, limit, b.getDenseI64ArrayAttr({}));
     if (sharding) {

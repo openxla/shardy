@@ -1,6 +1,8 @@
 // RUN: sdy_opt %s -sdy-pad-for-divisibility | FileCheck %s
 
 sdy.mesh @mesh_4 = <["x"=4]>
+sdy.mesh @mesh_2 = <["x"=2]>
+sdy.mesh @mesh_3 = <["x"=3]>
 
 // CHECK-LABEL: func @extend_padding(
 // CHECK-SAME:    %[[ARG0:.*]]: tensor<8x8xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<10x8xf32> {
@@ -284,4 +286,73 @@ func.func @negative_high_padding_does_not_preserve_padding_cache(%arg0: tensor<8
   %1 = stablehlo.pad %0, %cst, low = [0, 0], high = [-1, 0], interior = [0, 0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{"x"}, {}]>]>} : (tensor<7x8xf32>, tensor<f32>) -> tensor<6x8xf32>
   %2 = stablehlo.reduce(%1 init: %cst) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{}]>]>} : (tensor<6x8xf32>, tensor<f32>) -> tensor<8xf32>
   return %2 : tensor<8xf32>
+}
+
+// Uses i64 iota and limit when a padded dimension exceeds INT32_MAX
+// (origSize = 2147483649 padded to 2147483650 on 2 shards).
+// CHECK-LABEL: func @large_padded_dim_exceeds_int32_max(
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<2147483650x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>}) -> tensor<2xf32> {
+// CHECK-NEXT:    %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:2147483650, 0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : (tensor<2147483650x2xf32>) -> tensor<2147483650x2xf32>
+// CHECK-NEXT:    %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+// CHECK-NEXT:    %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : tensor<2147483650x2xi64>
+// CHECK-NEXT:    %[[LIMIT:.*]] = stablehlo.constant dense<2147483649> : tensor<i64>
+// CHECK-NEXT:    %[[BCAST_LIMIT:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : (tensor<i64>) -> tensor<2147483650x2xi64>
+// CHECK-NEXT:    %[[MASK:.*]] = stablehlo.compare LT, %[[IOTA]], %[[BCAST_LIMIT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : (tensor<2147483650x2xi64>, tensor<2147483650x2xi64>) -> tensor<2147483650x2xi1>
+// CHECK-NEXT:    %[[BCAST_ZERO:.*]] = stablehlo.broadcast_in_dim %[[ZERO]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : (tensor<f32>) -> tensor<2147483650x2xf32>
+// CHECK-NEXT:    %[[SELECT:.*]] = stablehlo.select %[[MASK]], %[[SLICE]], %[[BCAST_ZERO]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_2, [{"x"}, {}]>]>} : tensor<2147483650x2xi1>, tensor<2147483650x2xf32>
+// CHECK-NEXT:    %[[REDUCE:.*]] = stablehlo.reduce(%[[SELECT]] init: %[[ZERO]]) applies stablehlo.add across dimensions = [0]
+// CHECK-SAME:      : (tensor<2147483650x2xf32>, tensor<f32>) -> tensor<2xf32>
+// CHECK-NEXT:    return %[[REDUCE]] : tensor<2xf32>
+// CHECK-NEXT:  }
+func.func @large_padded_dim_exceeds_int32_max(%arg0: tensor<2147483650x2xf32> {sdy.sharding = #sdy.sharding<@mesh_2, [{"x"}, {}]>}) -> tensor<2xf32> {
+  %0 = stablehlo.slice %arg0 [0:2147483649, 0:2] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2, [{"x"}, {}]>]>} : (tensor<2147483650x2xf32>) -> tensor<2147483649x2xf32>
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.reduce(%0 init: %cst) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_2, [{}]>]>} : (tensor<2147483649x2xf32>, tensor<f32>) -> tensor<2xf32>
+  return %1 : tensor<2xf32>
+}
+
+// Uses i64 iota and limit when origSize == INT32_MAX (2147483647) is padded
+// past INT32_MAX (2147483649 on 3 shards).
+// CHECK-LABEL: func @padded_dim_exceeds_int32_max_from_int32_max_orig_size(
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<2147483649x2xf32> {sdy.sharding = #sdy.sharding<@mesh_3, [{"x"}, {}]>}) -> tensor<2xf32> {
+// CHECK-NEXT:    %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:2147483649, 0:2] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3, [{"x"}, {}]>]>} : (tensor<2147483649x2xf32>) -> tensor<2147483649x2xf32>
+// CHECK-NEXT:    %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+// CHECK-NEXT:    %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3, [{"x"}, {}]>]>} : tensor<2147483649x2xi64>
+// CHECK-NEXT:    %[[LIMIT:.*]] = stablehlo.constant dense<2147483647> : tensor<i64>
+// CHECK-NEXT:    %[[BCAST_LIMIT:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3, [{"x"}, {}]>]>} : (tensor<i64>) -> tensor<2147483649x2xi64>
+// CHECK-NEXT:    %[[MASK:.*]] = stablehlo.compare LT, %[[IOTA]], %[[BCAST_LIMIT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3, [{"x"}, {}]>]>} : (tensor<2147483649x2xi64>, tensor<2147483649x2xi64>) -> tensor<2147483649x2xi1>
+// CHECK-NEXT:    %[[BCAST_ZERO:.*]] = stablehlo.broadcast_in_dim %[[ZERO]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3, [{"x"}, {}]>]>} : (tensor<f32>) -> tensor<2147483649x2xf32>
+// CHECK-NEXT:    %[[SELECT:.*]] = stablehlo.select %[[MASK]], %[[SLICE]], %[[BCAST_ZERO]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_3, [{"x"}, {}]>]>} : tensor<2147483649x2xi1>, tensor<2147483649x2xf32>
+// CHECK-NEXT:    %[[REDUCE:.*]] = stablehlo.reduce(%[[SELECT]] init: %[[ZERO]]) applies stablehlo.add across dimensions = [0]
+// CHECK-SAME:      : (tensor<2147483649x2xf32>, tensor<f32>) -> tensor<2xf32>
+// CHECK-NEXT:    return %[[REDUCE]] : tensor<2xf32>
+// CHECK-NEXT:  }
+func.func @padded_dim_exceeds_int32_max_from_int32_max_orig_size(%arg0: tensor<2147483649x2xf32> {sdy.sharding = #sdy.sharding<@mesh_3, [{"x"}, {}]>}) -> tensor<2xf32> {
+  %0 = stablehlo.slice %arg0 [0:2147483647, 0:2] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_3, [{"x"}, {}]>]>} : (tensor<2147483649x2xf32>) -> tensor<2147483647x2xf32>
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.reduce(%0 init: %cst) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_3, [{}]>]>} : (tensor<2147483647x2xf32>, tensor<f32>) -> tensor<2xf32>
+  return %1 : tensor<2xf32>
+}
+
+// Keeps i32 iota and limit when the padded dimension fits in i32 even if an
+// unpadded sibling dimension exceeds INT32_MAX.
+// CHECK-LABEL: func @small_padded_dim_with_large_unpadded_dim_stays_i32(
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<8x2147483650xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<2147483650xf32> {
+// CHECK-NEXT:    %[[SLICE:.*]] = stablehlo.slice %[[ARG0]] [0:8, 0:2147483650] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x2147483650xf32>) -> tensor<8x2147483650xf32>
+// CHECK-NEXT:    %[[ZERO:.*]] = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+// CHECK-NEXT:    %[[IOTA:.*]] = stablehlo.iota dim = 0 {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : tensor<8x2147483650xi32>
+// CHECK-NEXT:    %[[LIMIT:.*]] = stablehlo.constant dense<7> : tensor<i32>
+// CHECK-NEXT:    %[[BCAST_LIMIT:.*]] = stablehlo.broadcast_in_dim %[[LIMIT]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<i32>) -> tensor<8x2147483650xi32>
+// CHECK-NEXT:    %[[MASK:.*]] = stablehlo.compare LT, %[[IOTA]], %[[BCAST_LIMIT]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x2147483650xi32>, tensor<8x2147483650xi32>) -> tensor<8x2147483650xi1>
+// CHECK-NEXT:    %[[BCAST_ZERO:.*]] = stablehlo.broadcast_in_dim %[[ZERO]], dims = [] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : (tensor<f32>) -> tensor<8x2147483650xf32>
+// CHECK-NEXT:    %[[SELECT:.*]] = stablehlo.select %[[MASK]], %[[SLICE]], %[[BCAST_ZERO]] {sdy.sharding = #sdy.sharding_per_value<[<@mesh_4, [{"x"}, {}]>]>} : tensor<8x2147483650xi1>, tensor<8x2147483650xf32>
+// CHECK-NEXT:    %[[REDUCE:.*]] = stablehlo.reduce(%[[SELECT]] init: %[[ZERO]]) applies stablehlo.add across dimensions = [0]
+// CHECK-SAME:      : (tensor<8x2147483650xf32>, tensor<f32>) -> tensor<2147483650xf32>
+// CHECK-NEXT:    return %[[REDUCE]] : tensor<2147483650xf32>
+// CHECK-NEXT:  }
+func.func @small_padded_dim_with_large_unpadded_dim_stays_i32(%arg0: tensor<8x2147483650xf32> {sdy.sharding = #sdy.sharding<@mesh_4, [{"x"}, {}]>}) -> tensor<2147483650xf32> {
+  %0 = stablehlo.slice %arg0 [0:7, 0:2147483650] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{"x"}, {}]>]>} : (tensor<8x2147483650xf32>) -> tensor<7x2147483650xf32>
+  %cst = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+  %1 = stablehlo.reduce(%0 init: %cst) applies stablehlo.add across dimensions = [0] {sdy.sharding = #sdy.sharding_per_value<[#sdy.sharding<@mesh_4, [{}]>]>} : (tensor<7x2147483650xf32>, tensor<f32>) -> tensor<2147483650xf32>
+  return %1 : tensor<2147483650xf32>
 }
