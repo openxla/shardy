@@ -277,3 +277,76 @@ func.func @add_extra_sharding_constraint_for_fully_open_replicated_sharding(%arg
   sdy.sharding_group %1 group_id=0 : tensor<8x8xf32>
   func.return %0, %1 : tensor<8x8xf32>, tensor<8x8xf32>
 }
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @unreduced_open_sharding_preserved_in_group
+// CHECK-SAME:    (%arg0: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}], unreduced={"a"}>},
+// CHECK-SAME:     %arg1: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:     %arg2: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>})
+func.func @unreduced_open_sharding_preserved_in_group(
+    %arg0: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}], unreduced={"a"}>},
+    %arg1: tensor<8x12xf32>,
+    %arg2: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) -> (tensor<8x12xf32>, tensor<8x12xf32>) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg1, %arg2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}], unreduced={"a"}>]>} : tensor<8x12xf32>
+  %0 = stablehlo.add %arg1, %arg2 : tensor<8x12xf32>
+  sdy.sharding_group %arg0 group_id=0 : tensor<8x12xf32>
+  sdy.sharding_group %0 group_id=0 : tensor<8x12xf32>
+  return %arg0, %0 : tensor<8x12xf32>, tensor<8x12xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @replicated_open_sharding_preserved_in_group
+// CHECK-SAME:    (%arg0: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}], replicated={"a"}>},
+// CHECK-SAME:     %arg1: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {"b", ?}]>},
+// CHECK-SAME:     %arg2: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>})
+func.func @replicated_open_sharding_preserved_in_group(
+    %arg0: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}], replicated={"a"}>},
+    %arg1: tensor<8x12xf32>,
+    %arg2: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {"b"}]>}) -> (tensor<8x12xf32>, tensor<8x12xf32>) {
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg1, %arg2 {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [{?}, {"b", ?}], replicated={"a"}>]>} : tensor<8x12xf32>
+  %0 = stablehlo.add %arg1, %arg2 : tensor<8x12xf32>
+  sdy.sharding_group %arg0 group_id=0 : tensor<8x12xf32>
+  sdy.sharding_group %0 group_id=0 : tensor<8x12xf32>
+  return %arg0, %0 : tensor<8x12xf32>, tensor<8x12xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @conflict_with_open_unreduced_sharding_in_group
+// CHECK-SAME:    (%arg0: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}], unreduced={"a"}>},
+// CHECK-SAME:     %arg1: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>})
+// expected-warning@below {{The initial operand shardings on the sharding groups of groupID: 0}}
+func.func @conflict_with_open_unreduced_sharding_in_group(
+    %arg0: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{?}, {?}], unreduced={"a"}>},
+    %arg1: tensor<8x12xf32> {sdy.sharding = #sdy.sharding<@mesh, [{"a"}, {?}]>}) -> (tensor<8x12xf32>, tensor<8x12xf32>) {
+  // CHECK-NEXT: %[[WSC_0:.*]] = sdy.sharding_constraint %arg1 <@mesh, [{"a", ?}, {?}]> : tensor<8x12xf32>
+  // CHECK-NEXT: %[[WSC_1:.*]] = sdy.sharding_constraint %arg0 <@mesh, [{"a", ?}, {?}]> : tensor<8x12xf32>
+  // CHECK-NEXT: sdy.sharding_group %[[WSC_1]] group_id=0 : tensor<8x12xf32>
+  // CHECK-NEXT: sdy.sharding_group %[[WSC_0]] group_id=0 : tensor<8x12xf32>
+  sdy.sharding_group %arg0 group_id=0 : tensor<8x12xf32>
+  sdy.sharding_group %arg1 group_id=0 : tensor<8x12xf32>
+  return %arg0, %arg1 : tensor<8x12xf32>, tensor<8x12xf32>
+}
+
+// -----
+
+sdy.mesh @mesh = <["a"=2, "b"=2]>
+
+// CHECK-LABEL: func @scalar_unreduced_sharding_preserved_in_group
+// CHECK-SAME:    (%arg0: tensor<f32> {sdy.sharding = #sdy.sharding<@mesh, [], unreduced={"a"}>})
+func.func @scalar_unreduced_sharding_preserved_in_group(
+    %arg0: tensor<f32> {sdy.sharding = #sdy.sharding<@mesh, [], unreduced={"a"}>}) -> (tensor<f32>, tensor<f32>) {
+  // CHECK-NEXT: %[[CST:.*]] = stablehlo.constant {sdy.sharding = #sdy.sharding_per_value<[<@mesh, [], unreduced={"a"}>]>} dense<0.000000e+00> : tensor<f32>
+  %0 = stablehlo.constant dense<0.0> : tensor<f32>
+  sdy.sharding_group %arg0 group_id=0 : tensor<f32>
+  sdy.sharding_group %0 group_id=0 : tensor<f32>
+  return %arg0, %0 : tensor<f32>, tensor<f32>
+}
