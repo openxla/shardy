@@ -22,10 +22,10 @@ from typing import Any
 from absl import logging
 import jax
 from jax.experimental import layout as jax_layout
+from jax.extend.mlir import ir
 from jax.interpreters import mlir
 from jaxlib import _sdy_mpmd as jaxlib_mpmd
 import jaxtyping
-from mlir import ir
 import numpy as np
 import typing_extensions
 
