@@ -69,7 +69,9 @@ CommonSharding findCommonSharding(int64_t groupId, ValueRange groupMembers) {
   TensorShardingAttr sharding;
   for (Value member : groupMembers) {
     TensorShardingAttr candidateSharding = getSharding(member);
-    if (!candidateSharding || candidateSharding.isFullyReplicatedAndOpen()) {
+    if (!candidateSharding || (candidateSharding.isFullyReplicatedAndOpen() &&
+                               candidateSharding.getReplicatedAxes().empty() &&
+                               candidateSharding.getUnreducedAxes().empty())) {
       continue;
     }
     if (!sharding) {
