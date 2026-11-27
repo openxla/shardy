@@ -204,6 +204,7 @@ cc_library(
     hdrs = ["register.h"],
     deps = [
         ":dialect",
+        "//third_party/openxla/shardy/src:defs",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:FuncExtensions",
         "@llvm-project//mlir:IR",
