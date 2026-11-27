@@ -228,6 +228,87 @@ bool IsSplitKeepTransferred(FragmentOp fragment) {
   return fragment->hasAttr(kSplitKeepTransferredAttrName);
 }
 
+FragmentOp FindLastFragmentOnMesh(FragmentOp fragment) {
+  Block* block = fragment->getBlock();
+  StringRef mesh_name = fragment.getMeshName();
+  // Walk backward from just before `fragment` to find the nearest same-mesh
+  // fragment.
+  auto it = fragment->getIterator();
+  while (it != block->begin()) {
+    --it;
+    if (auto frag = dyn_cast<FragmentOp>(&*it)) {
+      if (frag.getMeshName() == mesh_name) {
+        return frag;
+      }
+    }
+  }
+  return nullptr;
+}
+
+Operation* FindLatestOperandProducer(Operation* op) {
+  Operation* latest = nullptr;
+  for (Value v : op->getOperands()) {
+    Operation* def = v.getDefiningOp();
+    if (!def) continue;
+    if (!latest || latest->isBeforeInBlock(def)) {
+      latest = def;
+    }
+  }
+  return latest;
+}
+
+FragmentOp FindLatestProducerFragmentOnMesh(FragmentOp fragment) {
+  FragmentOp latest = nullptr;
+  StringRef mesh_name = fragment.getMeshName();
+  for (Value v : fragment.getOperands()) {
+    if (auto frag = dyn_cast_or_null<FragmentOp>(v.getDefiningOp())) {
+      if (frag.getMeshName() == mesh_name &&
+          (!latest || latest->isBeforeInBlock(frag))) {
+        latest = frag;
+      }
+    }
+  }
+  return latest;
+}
+
+namespace {
+
+// Returns whether `op_to_move` can be positioned after `target_op` without
+// breaking use-def chains. Returns true if already after `target_op`, or
+// false if they are in different blocks.
+//
+// Only checks same-block users; users in nested regions (e.g., inside a
+// fragment body) are ignored because fragment results are only used at the
+// function-body level in the MPMD dialect.
+bool CanMoveAfterInBlock(Operation* op_to_move, Operation* target_op) {
+  if (op_to_move->getBlock() != target_op->getBlock()) return false;
+  if (!op_to_move->isBeforeInBlock(target_op)) return true;
+
+  for (Value result : op_to_move->getResults()) {
+    for (Operation* user : result.getUsers()) {
+      if (user->getBlock() == op_to_move->getBlock()) {
+        if (user == target_op || user->isBeforeInBlock(target_op)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
+bool EnsureAfter(Operation* op, Operation* target) {
+  if (!target) return true;
+  if (op == target) return true;
+  SDY_CHECK(op->getBlock() == target->getBlock())
+      << "EnsureAfter requires both ops to be in the same block.";
+  if (!op->isBeforeInBlock(target)) return true;
+  if (!CanMoveAfterInBlock(op, target)) return false;
+  op->moveAfter(target);
+  return true;
+}
+
 namespace {
 
 // Verifies that the kControlOperandStartIdxAttrName attribute, if present,
@@ -616,6 +697,8 @@ bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op) {
 
 FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
                           RewriterBase& rewriter) {
+  SDY_CHECK(producer->getNextNode() == consumer)
+      << "Expected producer to be immediately before consumer.";
   SDY_CHECK_EQ(producer.getMeshName(), consumer.getMeshName())
       << "Expected both fragments to be on the same mesh.";
   SDY_CHECK(AreStageIdsConsistent(producer, consumer))

@@ -190,6 +190,9 @@ FailureOr<FragmentOp> MergeFragmentBasePass::MergeFragmentsRewrite(
           "The consumer and producer can't be merged at any position.");
     }
     mergeable_user->moveAfter(producer_op);
+  } else {
+    // Make fragments adjacent for MergeFragments precondition.
+    producer_op->moveBefore(mergeable_user);
   }
 
   // Proceeding with actual merging.
