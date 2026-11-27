@@ -104,8 +104,13 @@ PartitioningOptions ParsePartitioningOptions(
   PARSE_BOOL_OPTION(mpmd_infer_transfers);
   PARSE_BOOL_OPTION(mpmd_infer_cross_mesh_reductions);
   PARSE_BOOL_OPTION(mpmd_fragment_remat);
+  PARSE_BOOL_OPTION(mpmd_merge_remat_fragments);
   PARSE_BOOL_OPTION(mpmd_split_bwd_fragments);
   PARSE_BOOL_OPTION(mpmd_assume_homogeneous_devices);
+  PARSE_BOOL_OPTION(mpmd_absorb_inferred_fragments_on_entry_point_function);
+  PARSE_BOOL_OPTION(mpmd_copy_constant_creation_from_producer_to_consumer);
+  PARSE_BOOL_OPTION(mpmd_apply_merge_transfers_pass);
+  PARSE_BOOL_OPTION(mpmd_merge_inferred_after_scheduling);
 #undef PARSE_BOOL_OPTION
 
   if (auto it = options.find("mpmd_pipeline_schedule"); it != options.end()) {
