@@ -170,6 +170,18 @@ Value getEdgeOwnerFromSource(OpOperand& source, RegionOpTy op) {
 TensorShardingAttr
 ShardableDataFlowOpInterface::getBlockArgumentEdgeOwnerSharding(
     unsigned index) {
+  if (auto manualComputation = dyn_cast<ManualComputationOp>(getOperation())) {
+    if (manualComputation.getInShardings().empty()) {
+      return nullptr;
+    }
+    TensorShardingAttr sharding = manualComputation.getInSharding(index);
+    ArrayRef<AxisRefAttr> manualAxes = manualComputation.getManualAxes();
+    if (manualAxes.empty()) {
+      return sharding;
+    }
+    return eraseManualAxes(sharding, manualAxes,
+                           sharding.getMesh(manualComputation));
+  }
   if (SmallVector<TensorShardingAttr> argShardings =
           getBlockArgumentEdgeOwnerShardings();
       !argShardings.empty()) {
@@ -180,6 +192,12 @@ ShardableDataFlowOpInterface::getBlockArgumentEdgeOwnerSharding(
 
 TensorShardingAttr ShardableDataFlowOpInterface::getOpResultEdgeOwnerSharding(
     unsigned index) {
+  if (auto manualComputation = dyn_cast<ManualComputationOp>(getOperation())) {
+    if (manualComputation.getOutShardings().empty()) {
+      return nullptr;
+    }
+    return manualComputation.getOutSharding(index);
+  }
   if (SmallVector<TensorShardingAttr> resultShardings =
           getOpResultEdgeOwnerShardings();
       !resultShardings.empty()) {
@@ -1326,7 +1344,7 @@ ManualComputationOp::getBlockArgumentEdgeOwnerShardings() {
   shardings.reserve(getInShardings().size());
   MeshAttr mesh;
   for (TensorShardingAttr sharding : getInShardings().getShardings()) {
-    if (!mesh) {
+    if (!mesh || mesh.empty()) {
       mesh = sharding.getMesh(*this);
     }
     shardings.push_back(eraseManualAxes(sharding, getManualAxes(), mesh));
