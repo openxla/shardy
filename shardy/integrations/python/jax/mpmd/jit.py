@@ -147,7 +147,7 @@ def _apply_partitioning(
   )
 
 
-class MpmdGspmdTraced(jax.stages.Traced):
+class MpmdTraced(jax.stages.Traced):
   """A `Traced` object for MPMD parallelism."""
 
   def __init__(
@@ -159,7 +159,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
       traced_args: Any,
       lowering_platforms: tuple[str, ...] | None = None,
   ):
-    """Initializes an MpmdGspmdTraced object."""
+    """Initializes an MpmdTraced object."""
     self._traced = traced
 
     self.func = func
@@ -433,7 +433,7 @@ class MpmdGspmdTraced(jax.stages.Traced):
     Returns:
       A `stages.MpmdLowered` object.
 
-    This includes MPMD partition and GSPMD propagation across different MPMD
+    This includes MPMD partition and SDY propagation across different MPMD
     programs.
     """
     mlir_module, partitioning_args, lowered_args = (
@@ -688,8 +688,8 @@ class MpmdWrapped(jax.stages.Wrapped):
       self._donate_argnums = donate_argnums
     self._mpmd_config = mpmd_config
 
-  def trace(self, *args) -> MpmdGspmdTraced:
-    """Traces the computation via `jax.jit` and returns a `MpmdGspmdTraced`."""
+  def trace(self, *args) -> MpmdTraced:
+    """Traces the computation via `jax.jit` and returns a `MpmdTraced`."""
     # TODO: b/377706756 - Maybe read the mesh assignment from the args shardings
     # too. This is more complicated, since args may be a mix of jax.Arrays and
     # jax.ShapeDtypeStructs, and also we will need to enforce that the
@@ -706,7 +706,7 @@ class MpmdWrapped(jax.stages.Wrapped):
     traced = self._jax_jit_wrapped.trace(*args)
     logging.info('Tracing function %s via jax.jit completed.', func_name)
 
-    return MpmdGspmdTraced(
+    return MpmdTraced(
         func=self.func,
         mpmd_config=self._mpmd_config,
         donate_argnums=self._donate_argnums,
@@ -715,7 +715,7 @@ class MpmdWrapped(jax.stages.Wrapped):
     )
 
   def lower(self, *args) -> stages.MpmdLowered:
-    """See `MpmdGspmdTraced.lower`."""
+    """See `MpmdTraced.lower`."""
     return self.trace(*args).lower()
 
   def __call__(self, *args):
@@ -738,7 +738,7 @@ def jit(
 ) -> MpmdWrapped:
   """Partitions a function for MPMD and SPMD parallelism.
 
-  This uses PartIR as the MPMD partitioner and GSPMD as the SPMD partitioner.
+  This uses PartIR as the MPMD partitioner and SDY as the SPMD partitioner.
   This aims to have the same args as jax.jit, but at the moment only
   `donate_argnums` is supported.
 
