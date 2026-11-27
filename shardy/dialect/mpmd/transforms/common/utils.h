@@ -125,6 +125,24 @@ SmallVector<T> FilterRange(RangeT range, const BitVector& erase) {
   return result;
 }
 
+// Searches backward from `fragment` for the nearest FragmentOp on the same
+// mesh. Does not consider `fragment` itself. Returns nullptr if none found.
+FragmentOp FindLastFragmentOnMesh(FragmentOp fragment);
+
+// Returns the latest (block-order) op that defines any operand of `op`.
+// Returns nullptr if all operands are block arguments.
+Operation* FindLatestOperandProducer(Operation* op);
+
+// Returns the latest (block-order) FragmentOp among the operand producers of
+// `fragment` that is on the same mesh. Returns nullptr if no operand is
+// produced by a same-mesh FragmentOp.
+FragmentOp FindLatestProducerFragmentOnMesh(FragmentOp fragment);
+
+// Moves `op` after `target` if needed and safe. Returns false if the move
+// would break use-def chains. No-op (returns true) if `target` is nullptr,
+// `op == target`, or `op` is already after `target`.
+bool EnsureAfter(Operation* op, Operation* target);
+
 // Returns true if the stage_ids of the producer and consumer fragments are
 // consistent (i.e., they are either identical, or one of them is undefined).
 bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op);
@@ -159,7 +177,15 @@ bool AreStageIdsConsistent(FragmentOp producer_op, FragmentOp consumer_op);
 FragmentOp MergeFragments(FragmentOp producer, FragmentOp consumer,
                           RewriterBase& rewriter);
 
-// Returns discardable attributes that must be preserved in the merged fragment.
+// Computes discardable attributes for the merged fragment that MergeFragments
+// does not handle. Must be called before MergeFragments (which erases both
+// ops) and applied to the merged result afterward.
+//
+// Currently handles:
+//   - call_counter: merged if both have the same count or exactly one is
+//     user-defined; dropped if conflicting.
+//   - inferred_by: union of both when both fragments are inferred;
+//     dropped if either is user-defined.
 SmallVector<std::pair<StringRef, Attribute>> MergeAttributes(
     FragmentOp producer_op, FragmentOp consumer_op);
 
