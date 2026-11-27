@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -113,6 +114,20 @@ struct ReshapeDimExchangeInfo {
   }
 };
 
+// Multi-hop exchange by source rounds: in round j, shard t reads its j-th
+// needed source shard, using one collective-permute per round rather than hop.
+struct SourceRoundsPlan {
+  // sources[j][t] is the shard that shard t reads in round j, or a sentinel.
+  SmallVector<SmallVector<int64_t>> sources;
+  // offsets[t] is where shard t's footprint starts in its concatenated rounds.
+  SmallVector<int64_t> offsets;
+
+  // Source is outside the tensor: segment is padding.
+  static constexpr int64_t kPadding = -1;
+  // Shard's footprint ends before this segment.
+  static constexpr int64_t kUnused = -2;
+};
+
 // Describes the data exchange needed to perform explicit resharding for a
 // single dimension of a tensor operand with permutation factors.
 struct DimExchangeInfo {
@@ -140,6 +155,9 @@ struct DimExchangeInfo {
   bool canUseHalo = true;
   // Reshape-specific data, present if this exchange is for a reshape op.
   std::optional<ReshapeDimExchangeInfo> reshapeInfo;
+  // Present if exchanging by source rounds needs fewer collective-permutes
+  // than exchanging by hop distance.
+  std::optional<SourceRoundsPlan> sourceRounds;
 
   // Halo sizes for sliced halo communication.
   int64_t leftHaloSize = 0;
@@ -739,19 +757,13 @@ Value sliceAlongDim(Location loc, Value val, int64_t dim, int64_t sliceStart,
 // Core HALO exchange helpers.
 // -----------------------------------------------------------------------------
 
-// For each logical device i in the 'manualMesh', computes the logical device
-// j that should receive the shifted data of i if the dimension is
-// partitioned by the manual axes in 'manualAxesInDim'. The number of devices
-// to shift is given by 'shardOffset'. If cyclicParticipatingShards is set,
-// shifts cyclically across the first cyclicParticipatingShards shards along
-// manualAxesInDim. If sourceShard is set, only devices in that shard of the
-// dimension send. Returns all the (i, j) pairs where i is the source device
-// and j is the target device.
-SmallVector<int64_t> getDataShiftSourceTargetPairs(
+// Maps each source device i in `manualMesh` to its target device j along
+// `manualAxesInDim` via `getTargetShard(shardOfI, shardCount)`, omitting i when
+// `getTargetShard` returns std::nullopt.
+SmallVector<int64_t> getSourceTargetPairs(
     MeshAttr manualMesh, ArrayRef<AxisRefAttr> manualAxesInDim,
-    int64_t shardOffset,
-    std::optional<int64_t> cyclicParticipatingShards = std::nullopt,
-    std::optional<int64_t> sourceShard = std::nullopt) {
+    llvm::function_ref<std::optional<int64_t>(int64_t, int64_t)>
+        getTargetShard) {
   ArrayRef<MeshAxisAttr> manualMeshAxes = manualMesh.getAxes();
   int64_t totalSize = manualMesh.getTotalSize();
   SmallVector<int64_t> pairs;
@@ -782,20 +794,13 @@ SmallVector<int64_t> getDataShiftSourceTargetPairs(
       int64_t subCoord = (coords[info.meshIdx] / info.postSize) % info.subSize;
       coordInDim = coordInDim * info.subSize + subCoord;
     }
-    if (sourceShard && coordInDim != *sourceShard) {
-      continue;
-    }
 
-    int64_t targetCoordInDim = coordInDim + shardOffset;
-    if (cyclicParticipatingShards) {
-      if (coordInDim >= *cyclicParticipatingShards) {
-        continue;
-      }
-      targetCoordInDim =
-          llvm::mod(targetCoordInDim, *cyclicParticipatingShards);
-    } else if (targetCoordInDim < 0 || targetCoordInDim >= totalShardsInDim) {
+    std::optional<int64_t> targetShard =
+        getTargetShard(coordInDim, totalShardsInDim);
+    if (!targetShard) {
       continue;
     }
+    int64_t targetCoordInDim = *targetShard;
 
     SmallVector<int64_t> nextCoords = coords;
     for (const AxisShiftInfo& info : llvm::reverse(axisInfos)) {
@@ -813,6 +818,33 @@ SmallVector<int64_t> getDataShiftSourceTargetPairs(
     pairs.push_back(tgt);
   }
   return pairs;
+}
+
+// Returns (source, target) device pairs shifting data by `shardOffset` shards
+// along `manualAxesInDim` (optionally cyclic or restricted to `sourceShard`).
+SmallVector<int64_t> getDataShiftSourceTargetPairs(
+    MeshAttr manualMesh, ArrayRef<AxisRefAttr> manualAxesInDim,
+    int64_t shardOffset,
+    std::optional<int64_t> cyclicParticipatingShards = std::nullopt,
+    std::optional<int64_t> sourceShard = std::nullopt) {
+  return getSourceTargetPairs(
+      manualMesh, manualAxesInDim,
+      [&](int64_t shard, int64_t shardCount) -> std::optional<int64_t> {
+        if (sourceShard && shard != *sourceShard) {
+          return std::nullopt;
+        }
+        int64_t target = shard + shardOffset;
+        if (cyclicParticipatingShards) {
+          if (shard >= *cyclicParticipatingShards) {
+            return std::nullopt;
+          }
+          return llvm::mod(target, *cyclicParticipatingShards);
+        }
+        if (target < 0 || target >= shardCount) {
+          return std::nullopt;
+        }
+        return target;
+      });
 }
 
 // Generates code to right shift elements logically in each local device across
@@ -1164,6 +1196,145 @@ Value dynamicSliceHaloExchangeBuffer(Location loc, Value haloBuffer,
   return dynamicSliceOp.getResult();
 }
 
+// Returns the entry of a per-shard table for the current device's shard.
+Value lookupByShard(Location loc, ArrayRef<int64_t> table,
+                    Value idInPartitionGroup, IRRewriter& rewriter) {
+  Value tableConst = create1DOffsetsConstant(loc, rewriter, table);
+  Type elemTy = cast<RankedTensorType>(tableConst.getType()).getElementType();
+  auto sliceOp = stablehlo::DynamicSliceOp::create(
+      rewriter, loc, RankedTensorType::get({1}, elemTy), tableConst,
+      idInPartitionGroup, rewriter.getDenseI64ArrayAttr({1}));
+  return stablehlo::ReshapeOp::create(
+      rewriter, loc, RankedTensorType::get({}, elemTy), sliceOp);
+}
+
+// Lowers `dimExchange.sourceRounds` with at most one collective-permute per
+// round, selecting among present `{received, local, padding}` candidates.
+Value exchangeDimBySourceRounds(
+    Location loc, Value operand, Value paddingValue, int64_t dim,
+    const DimExchangeInfo& dimExchange, TensorShardingAttr sharding,
+    MeshAttr mesh, const llvm::SmallDenseSet<AxisRefAttr>& manualAxes,
+    TensorShardingAttr localSharding, ResolutionState& state) {
+  const SourceRoundsPlan& plan = *dimExchange.sourceRounds;
+  IRRewriter& rewriter = state.rewriter;
+  DimensionShardingAttr dimSharding = sharding.getDimShardings()[dim];
+  SmallVector<AxisRefAttr> manualAxesInDim =
+      getManualAxesInDim(dimSharding, mesh, manualAxes);
+  Value idInPartitionGroup = convertPartitionIdToIdInGroup(
+      loc, createDeviceId(loc, state), mesh, dimSharding, rewriter);
+  auto withLocalSharding = [&](Value value) {
+    if (!isFullyReplicated(localSharding)) {
+      setSharding(value, localSharding);
+    }
+    return value;
+  };
+
+  int64_t sIn = cast<RankedTensorType>(operand.getType()).getDimSize(dim);
+  int64_t numRounds = plan.sources.size();
+  int64_t shardCount = plan.offsets.size();
+  // Trim unused prefix of round 0 and suffix of round numRounds - 1.
+  int64_t minOffset = *llvm::min_element(plan.offsets);
+  int64_t maxEnd = *llvm::max_element(plan.offsets) + dimExchange.sFootprint;
+
+  SmallVector<Value> segments;
+  segments.reserve(numRounds);
+  for (int64_t round = 0; round < numRounds; ++round) {
+    ArrayRef<int64_t> sources = plan.sources[round];
+    Value local = sliceAlongDim(
+        loc, operand, dim, /*sliceStart=*/round == 0 ? minOffset : 0,
+        /*sliceLimit=*/round == numRounds - 1 ? maxEnd - round * sIn : sIn,
+        localSharding, rewriter);
+    auto segmentType = cast<RankedTensorType>(local.getType());
+
+    enum Kind { kUseReceived = 0, kUseLocal = 1, kUsePadding = 2 };
+    SmallVector<int64_t> targetOf(shardCount, -1);
+    SmallVector<int64_t> kinds(shardCount, -1);
+    std::array<bool, 3> present = {false, false, false};
+    for (auto [t, source] : llvm::enumerate(sources)) {
+      if (source == SourceRoundsPlan::kUnused) {
+        continue;
+      }
+      if (source == SourceRoundsPlan::kPadding) {
+        kinds[t] = kUsePadding;
+      } else if (source == static_cast<int64_t>(t)) {
+        kinds[t] = kUseLocal;
+      } else {
+        kinds[t] = kUseReceived;
+        targetOf[source] = t;
+      }
+      present[kinds[t]] = true;
+    }
+
+    std::array<Value, 3> candidates = {nullptr, nullptr, nullptr};
+    if (present[kUseReceived]) {
+      SmallVector<int64_t> pairs = getSourceTargetPairs(
+          mesh, manualAxesInDim,
+          [&](int64_t shard, int64_t) -> std::optional<int64_t> {
+            if (targetOf[shard] < 0) {
+              return std::nullopt;
+            }
+            return targetOf[shard];
+          });
+      candidates[kUseReceived] =
+          withLocalSharding(mayCollectivePermute(loc, local, pairs, state));
+    }
+    auto broadcastToSegment = [&](Value scalar, Type elemTy) {
+      return withLocalSharding(stablehlo::BroadcastInDimOp::create(
+          rewriter, loc, RankedTensorType::get(segmentType.getShape(), elemTy),
+          scalar, rewriter.getDenseI64ArrayAttr({})));
+    };
+    if (present[kUseLocal]) {
+      candidates[kUseLocal] = local;
+    }
+    if (present[kUsePadding]) {
+      SDY_CHECK(paddingValue);
+      candidates[kUsePadding] =
+          broadcastToSegment(paddingValue, segmentType.getElementType());
+    }
+
+    Value segment;
+    Value kind;
+    for (int64_t k : {kUsePadding, kUseLocal, kUseReceived}) {
+      if (!candidates[k]) {
+        continue;
+      }
+      if (!segment) {
+        // Base candidate also covers kUnused shards whose slice stops earlier.
+        segment = candidates[k];
+        continue;
+      }
+      if (!kind) {
+        kind = lookupByShard(loc, kinds, idInPartitionGroup, rewriter);
+      }
+      Value isKind = stablehlo::CompareOp::create(
+          rewriter, loc, kind,
+          createScalarIntConstant(loc, kind.getType(), k, rewriter),
+          stablehlo::ComparisonDirection::EQ);
+      Value broadcastIsKind = broadcastToSegment(isKind, rewriter.getI1Type());
+      segment = withLocalSharding(stablehlo::SelectOp::create(
+          rewriter, loc, segmentType, broadcastIsKind, candidates[k], segment));
+    }
+    SDY_CHECK(segment);
+    segments.push_back(segment);
+  }
+
+  Value buffer = segments[0];
+  if (segments.size() > 1) {
+    buffer = withLocalSharding(
+        stablehlo::ConcatenateOp::create(rewriter, loc, segments, dim));
+  }
+  if (llvm::all_equal(plan.offsets)) {
+    return buffer;
+  }
+  SmallVector<int64_t> offsetsInBuffer = llvm::map_to_vector(
+      plan.offsets, [&](int64_t offset) { return offset - minOffset; });
+  Value offset =
+      lookupByShard(loc, offsetsInBuffer, idInPartitionGroup, rewriter);
+  return dynamicSliceHaloExchangeBuffer(
+      loc, buffer, offset, createZeroConstant(loc, offset.getType(), rewriter),
+      dim, dimExchange.sFootprint, localSharding, state);
+}
+
 // Performs HALO data exchange for a single sharded dimension and slices the
 // HALO exchange buffer to retrieve the needed local segment.
 //
@@ -1177,6 +1348,11 @@ Value exchangeDimWithDynamicOffset(
     TensorShardingAttr localSharding, int64_t padLow, int64_t stride,
     int64_t sOut, int64_t baseDilation, bool dilatedHaloBuffer,
     ResolutionState& state) {
+  if (dimExchange.sourceRounds) {
+    return exchangeDimBySourceRounds(loc, operand, paddingValue, dim,
+                                     dimExchange, sharding, mesh, manualAxes,
+                                     localSharding, state);
+  }
   Value partitionId = createDeviceId(loc, state);
   DimensionShardingAttr activeDimShardedAttr =
       dimExchange.reshapeInfo ? dimExchange.reshapeInfo->getTargetDimSharding()
@@ -3163,6 +3339,58 @@ LogicalResult handleConvolutionOp(stablehlo::ConvolutionOp convolutionOp,
 // stablehlo.pad
 // -----------------------------------------------------------------------------
 
+// Plans source rounds for `[t * sOut - padLow, t * sOut - padLow + sOut)` per
+// shard `t`, returning std::nullopt if total rounds exceed `maxRounds` or two
+// shards collide on a remote source.
+std::optional<SourceRoundsPlan> getSourceRoundsPlan(
+    int64_t shardCount, int64_t sIn, int64_t validTotalSize, int64_t sOut,
+    int64_t padLow, int64_t maxRounds) {
+  if (sIn <= 0 || sOut <= 0) {
+    return std::nullopt;
+  }
+  SourceRoundsPlan plan;
+  SmallVector<int64_t> firstSources;
+  int64_t numRounds = 0;
+  for (int64_t t = 0; t < shardCount; ++t) {
+    int64_t start = t * sOut - padLow;
+    int64_t firstSource = llvm::divideFloorSigned(start, sIn);
+    int64_t offset = start - firstSource * sIn;
+    firstSources.push_back(firstSource);
+    plan.offsets.push_back(offset);
+    numRounds =
+        std::max<int64_t>(numRounds, llvm::divideCeil(offset + sOut, sIn));
+  }
+  if (numRounds > maxRounds) {
+    return std::nullopt;
+  }
+  for (int64_t round = 0; round < numRounds; ++round) {
+    SmallVector<int64_t>& sources = plan.sources.emplace_back();
+    llvm::SmallDenseSet<int64_t> sending;
+    for (int64_t t = 0; t < shardCount; ++t) {
+      int64_t source = firstSources[t] + round;
+      if (plan.offsets[t] + sOut <= round * sIn) {
+        sources.push_back(SourceRoundsPlan::kUnused);
+      } else if (source < 0 || source * sIn >= validTotalSize) {
+        sources.push_back(SourceRoundsPlan::kPadding);
+      } else if (source != t && !sending.insert(source).second) {
+        return std::nullopt;
+      } else {
+        sources.push_back(source);
+      }
+    }
+  }
+  return plan;
+}
+
+// Returns the number of rounds in which at least one shard reads remotely.
+int64_t getNumPermutes(const SourceRoundsPlan& plan) {
+  return llvm::count_if(plan.sources, [](ArrayRef<int64_t> sources) {
+    return llvm::any_of(llvm::enumerate(sources), [](const auto& it) {
+      return it.value() >= 0 && it.value() != static_cast<int64_t>(it.index());
+    });
+  });
+}
+
 // Returns a DataExchangeInfo to represent the needed data exchange for the
 // given pad op.
 DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
@@ -3181,6 +3409,15 @@ DataExchangeInfo getPadDataExchangeInfo(stablehlo::PadOp padOp,
                                /*stride=*/1, baseDilation,
                                inputType.getDimSize(dim),
                                /*dilatedFootprint=*/true);
+        if (baseDilation == 1 && !dimInfo.useSlicedHalo && dimInfo.canUseHalo) {
+          int64_t maxHops = dimInfo.leftHops + dimInfo.rightHops;
+          if (std::optional<SourceRoundsPlan> plan = getSourceRoundsPlan(
+                  shardCount, sIn, inputType.getDimSize(dim), sOut, pLow,
+                  /*maxRounds=*/maxHops);
+              plan && getNumPermutes(*plan) < maxHops) {
+            dimInfo.sourceRounds = std::move(plan);
+          }
+        }
         dimInfo.needsComm =
             !isCommunicationFreePadDim(dim, padOp, sharding, mesh);
         return dimInfo;
