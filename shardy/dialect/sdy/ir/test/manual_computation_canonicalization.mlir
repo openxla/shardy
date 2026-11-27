@@ -29,6 +29,18 @@ func.func @inline_no_inputs_outputs_and_no_manual_axes(%arg0: tensor<8xf32>) -> 
   return %arg0: tensor<8xf32>
 }
 
+// CHECK-LABEL: func @inline_same_global_local_shape_non_trivial_manual_axes
+func.func @inline_same_global_local_shape_non_trivial_manual_axes(%arg0: tensor<8xf32>) -> tensor<8xf32> {
+  // CHECK-NOT: sdy.manual_computation
+  // CHECK-NEXT: %[[ADD:.*]] = stablehlo.add %arg0, %arg0 : tensor<8xf32>
+  // CHECK-NEXT: return %[[ADD]] : tensor<8xf32>
+  %0 = sdy.manual_computation(%arg0) in_shardings=[<@mesh, [{}]>] out_shardings=[<@mesh, [{}]>] manual_axes={"a"} (%arg1: tensor<8xf32>) {
+    %1 = stablehlo.add %arg1, %arg1 : tensor<8xf32>
+    sdy.return %1 : tensor<8xf32>
+  } : (tensor<8xf32>) -> tensor<8xf32>
+  return %0 : tensor<8xf32>
+}
+
 // CHECK-LABEL: func @erase_no_inputs_outputs_and_empty_body
 func.func @erase_no_inputs_outputs_and_empty_body(%arg0: tensor<8xf32>) -> tensor<8xf32> {
   // CHECK-NEXT: return %arg0 : tensor<8xf32>
