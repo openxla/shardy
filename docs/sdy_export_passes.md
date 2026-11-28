@@ -192,13 +192,14 @@ of sub-axes does not introduce any non-divisible shardings.
 _Converts ReshardOp into various Shardy collective ops._
 
 Matches reshard ops and rewrites them into various Shardy collective
-ops. After this pass, no reshard ops remain in the module.
-
-Optionally if `keepRedundantReshards` is true, the only reshard ops that
-remain are the redundant ones. By default it assumes that explicit reshards
-have already been inserted (`sdy-insert-explicit-reshards`) and does not
-keep redundant reshards. It should keep redundant reshards if explicit
-reshards may have not been already inserted.
+ops. By default, remaining `sdy.reshard` ops are limited to single-device
+shardings and cross-mesh ops (fully replicated reshards without unreduced
+axes, or sharded reshards across incompatible meshes). If
+`keepRedundantReshards` is true, intra-mesh redundant reshards are also
+kept. By default it assumes that explicit reshards have already been
+inserted (`sdy-insert-explicit-reshards`) and does not keep redundant
+reshards. It should keep redundant reshards if explicit reshards may have
+not been already inserted.
 
 Example:
 
